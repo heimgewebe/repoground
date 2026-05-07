@@ -497,6 +497,28 @@ def test_api_federation_query_profile_preserves_federation_trace(fed_setup):
 
     # Verify federation_trace has the expected structure
     ft = data["federation_trace"]
-    assert "bundle_status" in ft or "queried_bundles_total" in ft, (
-        "federation_trace must carry runtime bundle execution fields"
+    # The API response carries the RUNTIME federation_trace (from execute_federated_query),
+    # which is structurally distinct from the CLI-written federation_trace.json artifact.
+    # The schema (federation-trace.v1.schema.json with additionalProperties:false) governs
+    # the FILE artifact (query/timestamp/total_results/bundles[]). The runtime form carries
+    # execution telemetry: queried_bundles_total, bundle_status, bundle_traces, etc.
+    # Schema validation is intentionally not applied here — the schema describes the file
+    # artifact, not this inline API form. Asserting the runtime contract instead:
+    assert isinstance(ft.get("queried_bundles_total"), int), (
+        "federation_trace.queried_bundles_total must be an integer"
     )
+    assert isinstance(ft.get("queried_bundles_effective"), int), (
+        "federation_trace.queried_bundles_effective must be an integer"
+    )
+    assert isinstance(ft.get("bundle_status"), dict), (
+        "federation_trace.bundle_status must be a dict"
+    )
+    assert ft["bundle_status"], "bundle_status must have at least one entry"
+    valid_statuses = frozenset({
+        "ok", "stale", "filtered_out", "index_missing",
+        "query_error", "bundle_path_unsupported", "missing", "error",
+    })
+    for repo_id, status in ft["bundle_status"].items():
+        assert status in valid_statuses, (
+            f"bundle_status[{repo_id!r}]={status!r} is not a valid status enum value"
+        )
