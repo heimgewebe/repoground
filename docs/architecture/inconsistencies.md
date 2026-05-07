@@ -33,7 +33,7 @@ Diese Liste dokumentiert systematisch die Lücken zwischen der visionären Ziela
 ## 3. Was fehlt komplett (Echte Inkonsistenzen / Nicht-Ziele)?
 *(Diese Aspekte sind in der Blaupause definiert, aber im Code nicht existent)*
 
-*   **Phase 5 (Cross-Repo-Knowledge-Layer):** Nicht mehr als vollständig nicht existent zu beschreiben. Aktueller Status ist **partial/minimal**: `federation_index` ist vorhanden, `cross_repo_links` hat Contract plus minimalen heuristischen Producer, `federation_conflicts` wird heuristisch/minimal emittiert; föderierte Query-Pfade sind teilweise vorhanden. Offen bleiben belastbare Identity-Engine, Conflict-Semantik, Cross-Bundle-Evidence, API-/Runtime-Integration sowie Tests/Hardening.
+*   **Phase 5 (Cross-Repo-Knowledge-Layer):** Nicht mehr als vollständig nicht existent zu beschreiben. Aktueller Status ist **partial/minimal**: `federation_index`-Schema/Grundlagen sind vorhanden, `cross_repo_links` hat Contract plus minimalen heuristischen Producer, `federation_conflicts` wird heuristisch/minimal emittiert; föderierte Query-Pfade sind teilweise vorhanden. Offen bleiben belastbare Identity-Engine, Conflict-Semantik, Cross-Bundle-Evidence, API-/Runtime-Integration sowie Tests/Hardening.
 *   **Phase 6 (Agent Control Surface - Session Trace):** Ein explizites `agent_query_session.json` (Session Trace) Artefakt wird noch nicht geschrieben, obwohl ein HTTP API-Endpoint existiert.
 
 ## 4. Architektonische Zusammenfassung
