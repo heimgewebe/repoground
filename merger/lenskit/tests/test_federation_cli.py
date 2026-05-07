@@ -609,3 +609,44 @@ def test_federation_trace_schema_rejects_bundle_item_extra_field():
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=invalid_trace, schema=schema)
 
+
+# ── Shape-Dissonanz-Grenztest ─────────────────────────────────────────────────
+# federation_trace existiert unter demselben Namen in zwei strukturell verschiedenen Formen:
+#   (1) CLI-Dateiartefakt federation_trace.json: query, timestamp, total_results, bundles[]
+#       → schema-validiert durch federation-trace.v1.schema.json
+#   (2) Runtime-Inline-Form in API/Projektionspfad: queried_bundles_total, bundle_status, ...
+#       → kein eigenes JSON-Schema; federation-trace.v1.schema.json gilt hier NICHT
+# Dieser Test schützt die Grenze: das Schema muss die Runtime-Form ablehnen.
+
+def test_federation_trace_schema_does_not_describe_runtime_form():
+    """federation-trace.v1.schema.json must reject the runtime inline federation_trace shape.
+
+    The runtime form (from execute_federated_query with trace=True, passed through
+    output_projection.py into the API wrapper) carries different fields than the
+    CLI file artifact validated by this schema. Applying the schema to the runtime
+    form must fail — this test guards against accidental shape unification.
+    """
+    try:
+        import jsonschema
+    except ImportError:
+        pytest.skip("jsonschema not installed")
+
+    schema_path = Path(__file__).parent.parent / "contracts" / "federation-trace.v1.schema.json"
+    assert schema_path.exists(), "federation-trace.v1.schema.json not found"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    # Canonical runtime form: produced by execute_federated_query(trace=True)
+    runtime_federation_trace = {
+        "queried_bundles_total": 2,
+        "queried_bundles_effective": 2,
+        "bundle_status": {"repo1": "ok", "repo2": "stale"},
+        "bundle_errors": {},
+        "bundle_traces": {},
+    }
+
+    # The runtime form must NOT validate against the CLI file artifact schema.
+    # It is missing required fields (query, timestamp, total_results, bundles) and
+    # carries additional fields that additionalProperties:false rejects.
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=runtime_federation_trace, schema=schema)
+
