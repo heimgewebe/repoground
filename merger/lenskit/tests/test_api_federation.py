@@ -464,3 +464,39 @@ def test_api_federation_query_profile_preserves_cross_repo_links(fed_setup_multi
 
     # Result count and ranking surface must remain coherent.
     assert len(hits) >= 2
+
+
+def test_api_federation_query_profile_preserves_federation_trace(fed_setup):
+    """output_profile='agent_minimal' + trace=True: federation_trace must survive projection.
+
+    This test specifically covers the API servicepath (not just project_output() unit level):
+    the /api/federation/query endpoint must return federation_trace inside the wrapper
+    when both output_profile and trace=True are set.
+    """
+    request_data = {
+        "federation_index": "federation.json",
+        "q": "hello r1",
+        "k": 1,
+        "trace": True,
+        "output_profile": "agent_minimal",
+    }
+
+    response = client.post(
+        "/api/federation/query",
+        json=request_data,
+        headers={"Authorization": "Bearer test_token"},
+    )
+    assert response.status_code == 200
+
+    data = response.json()
+    assert "context_bundle" in data, "expected wrapper form with context_bundle"
+    assert "federation_trace" in data, (
+        "federation_trace must not be lost through output_profile projection"
+    )
+    assert "hits" not in data, "hits must not appear at top level (must be inside context_bundle)"
+
+    # Verify federation_trace has the expected structure
+    ft = data["federation_trace"]
+    assert "bundle_status" in ft or "queried_bundles_total" in ft, (
+        "federation_trace must carry runtime bundle execution fields"
+    )
