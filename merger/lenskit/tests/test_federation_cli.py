@@ -551,6 +551,9 @@ def test_federation_query_without_trace_skips_federation_trace_json(tmp_path: Pa
     ret = main.main(["federation", "query", "--index", str(out_path), "-q", "hello"])
     assert ret == 0
 
+    trace_file = tmp_path / "federation_trace.json"
+    assert not trace_file.exists(), "federation_trace.json must not be created without --trace"
+
 
 
 # ── federation-trace.v1.schema.json negative schema tests ────────────────────
