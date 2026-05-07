@@ -6,6 +6,8 @@ Der Dump sagt verbindlich: `merge.md` ist kanonisch und vollständig; JSON ist n
 
 Das Manifest trennt bereits die Rollen: `canonical_md` ist `canonical_content`/`content_source`; `chunk_index_jsonl` ist `retrieval_index`/`derived`; `derived_manifest_json`, `dump_index_json` und `index_sidecar_json` sind Navigation/Index; SQLite ist `runtime_cache`/`cache`.
 
+`derived_manifest_json` ist die ArtifactRole; die zugehörige Datei heißt typischerweise `<base>.derived_index.json`.
+
 Das Two-Layer-Pattern formuliert die passende Architekturregel: Index zeigt, Content beweist, Diagnose warnt, Cache beschleunigt, Runtime beobachtet; kein Artefakt darf still als ein anderes auftreten.
 
 Der aktuelle `range-ref.v1` ist eine deterministische Referenz auf Byte-Ranges in Artefakten und verlangt `artifact_role`, `repo_id`, `file_path`, Byte-Range, Line-Range und `content_sha256`. Tests simulieren bereits `content_range_ref` mit `artifact_role: canonical_md`, Byte-/Line-Feldern und Hash.
@@ -27,7 +29,7 @@ Kernbefund: Die Architektur ist vorbereitet, aber semantisch nicht sauber genug 
 | Diagnose | `output_health` | Integritätsstatus | nein, Urteil über Zustand |
 | Cache | `sqlite_index` | schneller Zugriff / FTS | nein |
 | Legacy/View | `dump_index_json` | kompakter Einstieg | nein |
-| Legacy/View | `derived_index_json` | abgeleitete Artefakte / Cache-View | nein |
+| Legacy/View | `derived_manifest_json` | abgeleitete Artefakte / Cache-View | nein |
 | Semantik später | `evidence_use` | Aussageverwendung | nein, Bewertung |
 
 Kurzform:
@@ -58,20 +60,29 @@ Sondern ergänzen als:
 ```json
 {
   "role": "citation_map_jsonl",
-  "authority": "navigation_index",
-  "canonicality": "derived",
-  "regenerable": true,
-  "staleness_sensitive": true,
+  "path": "lenskit-max-260506-1935_merge.citation_map.jsonl",
+  "content_type": "application/x-ndjson",
+  "bytes": 0,
+  "sha256": "...",
   "contract": {
     "id": "citation-map",
     "version": "v1"
-  }
+  },
+  "interpretation": {
+    "mode": "contract"
+  },
+  "authority": "navigation_index",
+  "canonicality": "derived",
+  "regenerable": true,
+  "staleness_sensitive": true
 }
 ```
 
+`bytes` und `sha256` sind im Blueprint Platzhalter und werden vom Producer gesetzt.
+
 ### Entscheidung B — `bundle_manifest` wird zentrale Registry
 
-`bundle_manifest` ist künftig die einzige vollständige Artefakt-Registry. `dump_index_json` und `derived_index_json` dürfen nur Views sein.
+`bundle_manifest` ist künftig die einzige vollständige Artefakt-Registry. `dump_index_json` und `derived_manifest_json` dürfen nur Views sein.
 
 ### Entscheidung C — Range-Semantik wird gespalten
 
@@ -96,13 +107,13 @@ Sondern:
 citation_id = cit_ + sha256(
   "lenskit.citation-map.v1:" +
   canonical_md_sha256 + ":" +
-  canonical_byte_start + ":" +
-  canonical_byte_end + ":" +
+  start_byte + ":" +
+  end_byte + ":" +
   content_sha256
 )[0:16]
 ```
 
-Warum: Chunking kann sich ändern; der Beleg hängt am Inhalt, nicht am Messer. Die Namespace-Version verhindert spätere Mehrdeutigkeit, falls Citation-ID-Regeln in v2 geändert werden.
+Warum: Chunking kann sich ändern; der Beleg hängt am canonical content/range/hash, nicht am Messer und nicht an `chunk_id`. Die Namespace-Version verhindert spätere Mehrdeutigkeit, falls Citation-ID-Regeln in v2 geändert werden.
 
 ---
 
@@ -123,10 +134,10 @@ canonical_line_for_byte(md_bytes: bytes, byte_offset: int) -> int
 Blueprint-Semantik für Byte-/Line-Mapping, ohne Implementierungspflicht in diesem PR:
 
 - Byte offsets are UTF-8 byte offsets.
-- `byte_start` is inclusive.
-- `byte_end` is exclusive.
-- `line_start` is 1-based and denotes the line containing `byte_start`.
-- `line_end` is 1-based and denotes the line containing `byte_end - 1`.
+- `start_byte` is inclusive.
+- `end_byte` is exclusive.
+- `start_line` is 1-based and denotes the line containing `start_byte`.
+- `end_line` is 1-based and denotes the line containing `end_byte - 1`.
 - Empty ranges are invalid for `citation_map.v1`.
 
 ### 3.2 `chunk_index_jsonl`
@@ -137,11 +148,13 @@ Der Chunk-Index bleibt Retrieval-Artefakt. Er liefert:
 
 - `chunk_id`
 - `path`
-- `content`
 - `content_sha256`
+- optional/fallback-only `content`
 - source-local start/end
 - `content_range_ref`
 - semantic metadata
+
+`content` darf für Citation-Map-Erzeugung nicht vorausgesetzt werden. Real erzeugte/optimierte Chunk-Indizes können kein Inline-Content-Feld enthalten oder leere Inhalte tragen. Citation-Erzeugung muss sich auf `content_sha256`, `canonical_range`/`content_range_ref` und die Auflösung gegen `canonical_md` stützen.
 
 Aber seine Range-Semantik muss korrigiert werden. Tests zeigen aktuell, dass `content_range_ref` mit `artifact_role: canonical_md`, Byte-/Line-Feldern und Hash modelliert wird. Das ist als Konzept gut, aber als Architektur zu eng, weil Source- und Canonical-Positionen getrennt werden müssen.
 
@@ -151,19 +164,19 @@ Umbauziel v2.1/v3:
 {
   "canonical_range": {
     "artifact_role": "canonical_md",
-    "byte_start": 123,
-    "byte_end": 456,
-    "line_start": 10,
-    "line_end": 20,
+    "start_byte": 123,
+    "end_byte": 456,
+    "start_line": 10,
+    "end_line": 20,
     "content_sha256": "..."
   },
   "source_range": {
     "artifact_role": "source_file",
-    "path": "merger/lenskit/core/merge.py",
-    "byte_start": 0,
-    "byte_end": 333,
-    "line_start": 1,
-    "line_end": 12,
+    "file_path": "merger/lenskit/core/merge.py",
+    "start_byte": 0,
+    "end_byte": 333,
+    "start_line": 1,
+    "end_line": 12,
     "status": "declared"
   }
 }
@@ -259,25 +272,25 @@ Künftig:
 `bundle_manifest` = registry
 `dump_index_json` = compact entry/view
 
-### 3.7 `derived_index_json`
+### 3.7 `derived_manifest_json`
 
 Status: umbauen oder langfristig folden.
 
-Aktuell enthält `derived_index_json` im hochgeladenen Dump im Wesentlichen den SQLite-Index und Provenance-Felder.
+Aktuell enthält `derived_manifest_json` im hochgeladenen Dump im Wesentlichen den SQLite-Index und Provenance-Felder.
 
 Kurzfristig ideal:
 
-`derived_index_json` wird echte Derived-Artefakt-View:
+`derived_manifest_json` wird echte Derived-Artefakt-View:
 
 - `sqlite_index`
 - `citation_map_jsonl`
-- `output_health_json`
+- `output_health`
 - `retrieval_eval_json`
 - `graph_index_json`
 
 Langfristig prüfen:
 
-`derived_index_json` kann entfallen, wenn `bundle_manifest` + `artifact_lookup` alles abdeckt.
+`derived_manifest_json` kann entfallen, wenn `bundle_manifest` + `artifact_lookup` alles abdeckt.
 
 Nicht sofort löschen. Erst Konsumentenmatrix erstellen.
 
@@ -291,8 +304,8 @@ SQLite bleibt Cache. Später optional:
 CREATE TABLE citation_lookup (
   citation_id TEXT PRIMARY KEY,
   chunk_id TEXT,
-  canonical_byte_start INTEGER,
-  canonical_byte_end INTEGER,
+  start_byte INTEGER,
+  end_byte INTEGER,
   content_sha256 TEXT
 );
 ```
@@ -376,7 +389,7 @@ Muss belegen:
 - `chunk_index_jsonl` ist Retrieval-Index
 - `bundle_manifest` ist beste Registry-Basis
 - `dump_index_json` ist View
-- `derived_index_json` ist dünne Derived-View
+- `derived_manifest_json` ist dünne Derived-View
 - `output_health` kann Citation-Health aufnehmen
 - `content_range_ref` braucht Range-Semantik-Split
 
@@ -407,16 +420,18 @@ Minimaler Eintrag:
     "canonical_md_sha256": "..."
   },
   "canonical_range": {
-    "byte_start": 123,
-    "byte_end": 456,
-    "line_start": 10,
-    "line_end": 20,
+    "start_byte": 123,
+    "end_byte": 456,
+    "start_line": 10,
+    "end_line": 20,
     "content_sha256": "..."
   },
   "source_range": {
-    "path": "merger/lenskit/core/merge.py",
-    "line_start": 1,
-    "line_end": 12,
+    "file_path": "merger/lenskit/core/merge.py",
+    "start_byte": 0,
+    "end_byte": 333,
+    "start_line": 1,
+    "end_line": 12,
     "status": "declared"
   },
   "chunk_link": {
@@ -455,7 +470,7 @@ Regel:
 
 Entscheidung:
 
-`derived_index_json` bleibt, wird aber als generated derived-view dokumentiert.
+`derived_manifest_json` bleibt, wird aber als generated derived-view dokumentiert.
 
 Erweitern um:
 
@@ -464,7 +479,7 @@ Erweitern um:
   "artifacts": {
     "sqlite_index": {},
     "citation_map_jsonl": {},
-    "output_health_json": {}
+    "output_health": {}
   }
 }
 ```
@@ -520,7 +535,7 @@ Funktionen:
 ```python
 compute_line_offsets(md_bytes: bytes) -> list[int]
 line_for_byte(offsets: list[int], byte: int) -> int
-make_citation_id(canonical_md_sha, byte_start, byte_end, content_sha256) -> str
+make_citation_id(canonical_md_sha, start_byte, end_byte, content_sha256) -> str
 build_citation_map(manifest, canonical_md, chunk_index) -> Iterator[dict]
 validate_citation_entry(entry, canonical_md) -> ValidationResult
 ```
@@ -608,7 +623,7 @@ Regel:
 
 `bundle_manifest` = vollständige Registry
 `dump_index_json` = compact view
-`derived_index_json` = derived/cache view
+`derived_manifest_json` = derived/cache view
 
 #### PR 5.2 — Artifact Lookup Umbau
 
@@ -654,10 +669,10 @@ Nicht vorher.
 CREATE TABLE citations (
   citation_id TEXT PRIMARY KEY,
   chunk_id TEXT,
-  canonical_byte_start INTEGER,
-  canonical_byte_end INTEGER,
+  start_byte INTEGER,
+  end_byte INTEGER,
   content_sha256 TEXT,
-  source_path TEXT
+  source_file_path TEXT
 );
 ```
 
@@ -755,7 +770,7 @@ PR 6 real dump proof
 ### Danach sinnvoll
 
 PR 7 manifest-first registry docs + `artifact_lookup`
-PR 8 `derived_index_json` as derived-view
+PR 8 `derived_manifest_json` as derived-view
 PR 9 chunk-index v2.1/v3 migration
 PR 10 sqlite citation cache
 PR 11 query/context citation refs
@@ -767,14 +782,47 @@ PR 14 webui review surface
 
 ## 8. Harte Stop-Kriterien
 
-Kein Fortschritt zur nächsten Phase, wenn:
+### Globale Stop-Kriterien
 
-- `canonical_range hash mismatch > 0`
-- `citation_duplicate_id_count > 0`
-- `citation_map not in manifest`
-- `citation_map claims canonical_content`
-- `output_health lacks citation section`
+Diese gelten immer:
+
+- `citation_map_jsonl` darf nie `canonical_content` oder `content_source` behaupten.
+- SQLite darf nie Citation-Wahrheit tragen.
+- `canonical_md` bleibt einziger Content Source.
+- keine Implementierungsphase ohne dokumentierte Range-Zuständigkeit.
+
+### Ab `dual_range`
+
+Gilt erst, sobald `canonical_range`/`source_range` eingeführt werden:
+
 - `chunk_index has no clear canonical/source split`
+- `canonical_range` darf keine source-local lines als canonical lines ausgeben.
+- `source_range.status` muss gesetzt sein.
+
+### Ab `citation_ready`
+
+Gilt erst, sobald Citation Map erzeugt werden soll:
+
+- `citation_map not in manifest`
+- `citation_duplicate_id_count > 0`
+- `canonical_range hash mismatch > 0`
+
+missing `citation_map` when expected → hard fail only if:
+
+- `bundle_manifest` declares a `citation_map_jsonl` artifact, or
+- the run/profile explicitly enables evidence-address generation, or
+- `output_health` declares `citation_map.required = true`.
+
+Alte Bundles ohne Citation Map dürfen nicht rückwirkend fehlschlagen.
+
+### Ab `citation_validated`
+
+Gilt erst, sobald Output Health Citation Map prüft:
+
+- `output_health lacks citation section`
+- `hash_mismatch_count > 0`
+- `duplicate_id_count > 0`
+- `citation_entries != chunk_entries_with_content_range`, sofern evidence-address generation für diesen Lauf erwartet wird.
 
 Soft warnings:
 
@@ -815,7 +863,7 @@ Plausibel:
 `citation_map_jsonl` als abgeleitete Belegadresse reduziert lokale Ableitungsdrift zwischen Query, UI, Agent Pack und Review.
 
 Spekulativ:
-Ob `derived_index_json` langfristig entfallen sollte. Dafür fehlt eine Konsumentenmatrix.
+Ob `derived_manifest_json` langfristig entfallen sollte. Dafür fehlt eine Konsumentenmatrix.
 
 ---
 
@@ -825,7 +873,7 @@ Nutzen:
 Stabile Citations, weniger Line-Verwirrung, bessere LLM-Belege, robustere PR-Reviews, klare Artefaktrollen, weniger Drift zwischen Index und Inhalt.
 
 Risiko:
-Zu großer Umbau kann Backcompat brechen. Falsch migrierte Range-Semantik kann kaputte Citations konservieren. Manifest-first kann Konsumenten stören, wenn sie bisher direkt `dump_index_json` oder `derived_index_json` lesen.
+Zu großer Umbau kann Backcompat brechen. Falsch migrierte Range-Semantik kann kaputte Citations konservieren. Manifest-first kann Konsumenten stören, wenn sie bisher direkt `dump_index_json` oder `derived_manifest_json` lesen.
 
 Gegenmittel:
 Dual-Range-Phase, Legacy-Aliase, Real-Dump-Proof, Health-Gates, Konsumentenmatrix vor Entfernung alter Views.
@@ -860,18 +908,18 @@ Nebenwirkungen: mehr Contracts, mehr Tests, Übergangsphase mit Dual-Feldern.
 ## Unsicherheit / Interpolation
 
 Unsicherheitsgrad: 0.13
-Ursachen: Die zentralen Artefaktrollen, Reading Policy, Range-Ref-Contract und Health-Pfade sind belegt. Offen bleibt nur, welche externen oder internen Konsumenten direkt `dump_index_json` und `derived_index_json` lesen.
+Ursachen: Die zentralen Artefaktrollen, Reading Policy, Range-Ref-Contract und Health-Pfade sind belegt. Offen bleibt nur, welche externen oder internen Konsumenten direkt `dump_index_json` und `derived_manifest_json` lesen.
 
 Interpolationsgrad: 0.17
-Hauptannahmen: Die genaue PR-Reihenfolge und langfristige Herabstufung von `derived_index_json` sind Architekturvorschläge, nicht bereits im Repo beschlossen.
+Hauptannahmen: Die genaue PR-Reihenfolge und langfristige Herabstufung von `derived_manifest_json` sind Architekturvorschläge, nicht bereits im Repo beschlossen.
 
 Epistemische Leere:
-Eine Konsumentenmatrix fehlt: Wer liest aktuell `dump_index_json`, `derived_index_json`, `index_sidecar_json`, `bundle_manifest`, `sqlite_index` direkt? Nötig für die endgültige Entscheidung „View behalten“ vs. „View später entfernen“.
+Eine Konsumentenmatrix fehlt: Wer liest aktuell `dump_index_json`, `derived_manifest_json`, `index_sidecar_json`, `bundle_manifest`, `sqlite_index` direkt? Nötig für die endgültige Entscheidung „View behalten“ vs. „View später entfernen“.
 
 ---
 
 ## Essenz
 
 Hebel: Zuständigkeiten entflechten, nicht Artefakte blind ersetzen.
-Entscheidung: `citation_map_jsonl` neu; `chunk_index_jsonl` nutzen und semantisch spalten; `bundle_manifest` zur Registry stärken; `dump_index_json`/`derived_index_json` zu Views herabstufen; `output_health` sofort integrieren.
+Entscheidung: `citation_map_jsonl` neu; `chunk_index_jsonl` nutzen und semantisch spalten; `bundle_manifest` zur Registry stärken; `dump_index_json`/`derived_manifest_json` zu Views herabstufen; `output_health` sofort integrieren.
 Nächste Aktion: PR 0 erstellen: `docs/proofs/citation-map-artifact-fit.md` plus `docs/architecture/range-semantics.md` als Diagnose- und Entscheidungsbasis. Erst dann Contracts.
