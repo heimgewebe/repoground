@@ -30,7 +30,8 @@ Einordnung:
 - In diesem Branch ist dafür kein Datei-Nachweis unter `docs/blueprints/` vorhanden.
 Diagnosebefunde für Terminologie:
 - Historische Begriffe (`chunk_index_sqlite`, `derived_index_json`) sind noch in älteren Blaupausen sichtbar.
-- Kanonisch im Rollenmodell sind `sqlite_index`, `derived_manifest_json`, `output_health`.
+- Kanonisch im Rollenmodell sind `sqlite_index` und `derived_manifest_json`.
+- `output_health` ist in dieser Roadmap ein geplanter Health-/Diagnose-Track für spätere Citation-/Evidence-Prüfung, aber im aktuellen Branch nicht als vorhandene Bundle-Manifest-ArtifactRole zu behandeln.
 - Federation ist nicht null, sondern partial/minimal vorhanden; Hardening offen.
 
 ## Namensdisziplin / Artifact Roles
@@ -40,7 +41,7 @@ Diagnosebefunde für Terminologie:
 | `chunk_index_sqlite` | `sqlite_index` |
 | `derived_index_json` | `derived_manifest_json` |
 | `*.derived_index.json` | Dateiname zur Role `derived_manifest_json` |
-| `output_health_json` | `output_health` |
+| `output_health_json` / `output_health` | geplant: Health-/Diagnose-Track; im aktuellen Branch nicht als kanonische ArtifactRole belegt |
 | `citation_map_jsonl` | geplant; `derived`/`navigation_index`; noch nicht implementiert |
 Zusatz:
 Rollenamen folgen `bundle-manifest.v1.schema.json`, nicht älteren Blueprint-Begriffen oder Dateinamen.
@@ -72,7 +73,7 @@ Spätere PRs:
 - `citation-map.v1.schema.json` plus minimale Beispiele plus Schema-Test
 - Bundle-Manifest-Role `citation_map_jsonl`
 - `chunk_index` dual range mit `content_range_ref`, `canonical_range`, `source_range`
-- Citation-Map-Producer, `output_health` Citation Section, Real-Dump-Proof
+- Citation-Map-Producer, geplante Citation-/Evidence-Health-Prüfung in separater Folge-PR, Real-Dump-Proof
 Gate:
 - `citation_map_jsonl` nie `canonical_content` oder `content_source`
 - `canonical_range` und `source_range` getrennt
@@ -155,6 +156,7 @@ Begründung:
 - keine SQLite-Wahrheit
 - keine Löschung von `dump_index_json` oder `derived_manifest_json` ohne Konsumentenmatrix
 - keine semantische Reranking-Priorisierung vor Belegadressierung
+- keine Einführung von `output_health` als ArtifactRole ohne eigenen Contract-/Manifest-PR
 - keine Implementierung in diesem PR
 
 ## Nächste konkrete PRs
