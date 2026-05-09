@@ -27,7 +27,7 @@ def schema():
 
 def _minimal_entry():
     return {
-        "citation_id": "cit-0001",
+        "citation_id": "cit_0000000000000001",
         "repo_id": "lenskit",
         "canonical_range": {
             "file_path": "out.merge.md",
@@ -40,53 +40,45 @@ def _minimal_entry():
     }
 
 
-def test_minimal_entry_is_valid(schema):
+# ---------------------------------------------------------------------------
+# citation_id format
+# ---------------------------------------------------------------------------
+
+def test_valid_citation_id_accepted(schema):
     jsonschema.validate(instance=_minimal_entry(), schema=schema)
 
 
-def test_entry_with_source_range_and_chunk_id_is_valid(schema):
+def test_citation_id_empty_rejected(schema):
     entry = _minimal_entry()
-    entry["source_range"] = {
-        "file_path": "docs/architecture/range-semantics.md",
-        "start_byte": 0,
-        "end_byte": 86,
-        "start_line": 1,
-        "end_line": 4,
-        "content_sha256": SOURCE_SHA,
-        "status": "exact",
-    }
-    entry["chunk_id"] = "chunk-0007"
-    jsonschema.validate(instance=entry, schema=schema)
-
-
-def test_source_range_status_is_required_when_present(schema):
-    entry = _minimal_entry()
-    entry["source_range"] = {
-        "file_path": "docs/architecture/range-semantics.md"
-        # status missing
-    }
+    entry["citation_id"] = ""
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=entry, schema=schema)
 
 
-def test_source_range_unavailable_minimal_is_valid(schema):
+def test_citation_id_old_dash_format_rejected(schema):
     entry = _minimal_entry()
-    entry["source_range"] = {
-        "file_path": "docs/architecture/range-semantics.md",
-        "status": "unavailable",
-    }
-    jsonschema.validate(instance=entry, schema=schema)
-
-
-def test_source_range_status_unknown_value_rejected(schema):
-    entry = _minimal_entry()
-    entry["source_range"] = {
-        "file_path": "docs/architecture/range-semantics.md",
-        "status": "guessed",
-    }
+    entry["citation_id"] = "cit-0001"
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=entry, schema=schema)
 
+
+def test_citation_id_wrong_length_rejected(schema):
+    entry = _minimal_entry()
+    entry["citation_id"] = "cit_000000000000001"  # 15 hex chars, one short
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=entry, schema=schema)
+
+
+def test_citation_id_uppercase_hex_rejected(schema):
+    entry = _minimal_entry()
+    entry["citation_id"] = "cit_000000000000000A"  # uppercase A
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=entry, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# canonical_range
+# ---------------------------------------------------------------------------
 
 def test_canonical_range_required(schema):
     entry = _minimal_entry()
@@ -116,12 +108,104 @@ def test_additional_properties_rejected_in_canonical_range(schema):
         jsonschema.validate(instance=entry, schema=schema)
 
 
-def test_citation_id_must_be_non_empty(schema):
+# ---------------------------------------------------------------------------
+# source_range — status conditionals
+# ---------------------------------------------------------------------------
+
+def test_source_range_exact_with_range_fields_is_valid(schema):
     entry = _minimal_entry()
-    entry["citation_id"] = ""
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+        "start_byte": 0,
+        "end_byte": 86,
+        "start_line": 1,
+        "end_line": 4,
+        "content_sha256": SOURCE_SHA,
+        "status": "exact",
+    }
+    jsonschema.validate(instance=entry, schema=schema)
+
+
+def test_source_range_exact_without_range_fields_rejected(schema):
+    entry = _minimal_entry()
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+        "status": "exact",
+    }
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=entry, schema=schema)
 
+
+def test_source_range_declared_without_range_fields_rejected(schema):
+    entry = _minimal_entry()
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+        "status": "declared",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=entry, schema=schema)
+
+
+def test_source_range_derived_without_range_fields_rejected(schema):
+    entry = _minimal_entry()
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+        "status": "derived",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=entry, schema=schema)
+
+
+def test_source_range_unavailable_minimal_is_valid(schema):
+    entry = _minimal_entry()
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+        "status": "unavailable",
+    }
+    jsonschema.validate(instance=entry, schema=schema)
+
+
+def test_source_range_status_missing_rejected(schema):
+    entry = _minimal_entry()
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=entry, schema=schema)
+
+
+def test_source_range_status_unknown_value_rejected(schema):
+    entry = _minimal_entry()
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+        "status": "guessed",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=entry, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# full entry with source_range and chunk_id
+# ---------------------------------------------------------------------------
+
+def test_entry_with_source_range_and_chunk_id_is_valid(schema):
+    entry = _minimal_entry()
+    entry["source_range"] = {
+        "file_path": "docs/architecture/range-semantics.md",
+        "start_byte": 0,
+        "end_byte": 86,
+        "start_line": 1,
+        "end_line": 4,
+        "content_sha256": SOURCE_SHA,
+        "status": "exact",
+    }
+    entry["chunk_id"] = "chunk-0007"
+    jsonschema.validate(instance=entry, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# example file roundtrip
+# ---------------------------------------------------------------------------
 
 def test_example_jsonl_lines_all_validate(schema):
     with EXAMPLE_PATH.open("r", encoding="utf-8") as f:

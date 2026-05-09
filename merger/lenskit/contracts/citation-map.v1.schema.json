@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://heimgewebe.local/schema/citation-map.v1.schema.json",
   "title": "Citation Map Entry (citation-map v1.0)",
-  "description": "One JSONL entry of citation_map_jsonl. A citation address pointing at a canonical byte range, optionally linked to a source range and a retrieval chunk. Citation Map entries are derived navigation, never canonical content, runtime cache, or content source. See docs/proofs/citation-map-artifact-fit.md and docs/architecture/range-semantics.md.",
+  "description": "One JSONL entry of citation_map_jsonl. A citation address pointing at a canonical byte range, optionally linked to a source range and a retrieval chunk. Citation Map entries are derived navigation, never canonical content, runtime cache, or content source. The schema validates structure. Ordering constraints such as end_byte > start_byte and end_line >= start_line are semantic validation responsibilities of the future producer/validator. See docs/proofs/citation-map-artifact-fit.md and docs/architecture/range-semantics.md.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,8 +13,8 @@
   "properties": {
     "citation_id": {
       "type": "string",
-      "minLength": 1,
-      "description": "Stable identifier of this citation entry inside the bundle. Producers must keep it deterministic across regenerations of the same input."
+      "pattern": "^cit_[a-f0-9]{16}$",
+      "description": "Stable identifier: 'cit_' followed by exactly 16 lower-hex characters. Producers must keep it deterministic across regenerations of the same input. The actual hash derivation is a producer/validator responsibility, not enforced by this schema."
     },
     "repo_id": {
       "type": "string",
@@ -32,7 +32,7 @@
         "end_line",
         "content_sha256"
       ],
-      "description": "Position inside canonical_md. Authoritative locator for the citation. content_sha256 hashes the canonical byte slice.",
+      "description": "Position inside canonical_md. Authoritative locator for the citation. content_sha256 hashes the canonical byte slice. Ordering invariants (end_byte > start_byte, end_line >= start_line) are enforced by the producer, not this schema.",
       "properties": {
         "file_path": {
           "type": "string",
@@ -46,7 +46,7 @@
         "end_byte": {
           "type": "integer",
           "minimum": 1,
-          "description": "Exclusive end byte offset. Must be greater than start_byte."
+          "description": "Exclusive end byte offset."
         },
         "start_line": {
           "type": "integer",
@@ -70,7 +70,7 @@
         "file_path",
         "status"
       ],
-      "description": "Optional position inside the original source file. status is mandatory whenever source_range is present, per range-semantics.",
+      "description": "Optional position inside the original source file. status is mandatory whenever source_range is present. For status exact, declared, or derived the byte/line fields are required. For status unavailable they may be omitted.",
       "properties": {
         "file_path": {
           "type": "string"
@@ -105,6 +105,21 @@
           ],
           "description": "How trustworthy the source_range is. See range-semantics.md."
         }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "enum": ["declared", "exact", "derived"]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "start_byte",
+          "end_byte",
+          "start_line",
+          "end_line"
+        ]
       }
     },
     "chunk_id": {
