@@ -5151,12 +5151,12 @@ def write_reports_v2(
                             content_sha256=d["sha256"]
                         )
 
-                # Dual Range: canonical_range — only when content_range_ref is provable.
-                # Chunks outside canonical_md (split overflow) do not receive canonical_range.
-                if "content_range_ref" in d:
-                    crr = d["content_range_ref"]
+                # Dual Range: canonical_range — only when content_range_ref provably references canonical_md.
+                # Chunks outside canonical_md (split overflow) or with non-canonical range refs do not receive canonical_range.
+                crr = d.get("content_range_ref")
+                if crr and crr.get("artifact_role") == ArtifactRole.CANONICAL_MD.value:
                     d["canonical_range"] = {
-                        "artifact_role": crr["artifact_role"],
+                        "artifact_role": ArtifactRole.CANONICAL_MD.value,
                         "file_path": crr["file_path"],
                         "start_byte": crr["start_byte"],
                         "end_byte": crr["end_byte"],

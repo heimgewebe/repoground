@@ -136,6 +136,26 @@ def test_canonical_range_hash_roundtrip(tmp_path):
     )
 
 
+def test_source_range_hash_roundtrip(tmp_path):
+    """source_range.content_sha256 must match the bytes at [start_byte:end_byte] in the source file."""
+    content = "def hello():\n    pass\n"
+    _, chunks = _run_single_file_dual(tmp_path, content=content, fname="test.py")
+    assert len(chunks) == 1
+    chunk = chunks[0]
+
+    assert "source_range" in chunk
+    sr = chunk["source_range"]
+
+    # The source file content as originally read
+    source_bytes = content.encode("utf-8")
+    extracted = source_bytes[sr["start_byte"]:sr["end_byte"]]
+    actual_sha = hashlib.sha256(extracted).hexdigest()
+
+    assert actual_sha == sr["content_sha256"], (
+        f"source_range hash mismatch: expected {sr['content_sha256']}, got {actual_sha}"
+    )
+
+
 def test_split_mode_no_canonical_range_for_overflow_chunks(tmp_path):
     """Chunks in split overflow parts must not receive canonical_range."""
     hub_path = tmp_path / "hub"
