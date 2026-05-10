@@ -59,8 +59,8 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 6. **Authority/Canonicality-Felder (Phase 1 + 3.5):**
    Die Felder `authority`, `canonicality`, `regenerable` und `staleness_sensitive` sind in `bundle-manifest.v1.schema.json` optional. `authority` und `canonicality` sind pro Rolle wertbeschränkt (z.B. darf `sqlite_index` keine `canonical_content`-Autorität tragen, `architecture_summary` keinen `content_source`-Status). `regenerable` und `staleness_sensitive` werden vom Producer emittiert und bleiben typgeprüft. `staleness_sensitive` beschreibt Bundle-interne Drift, nicht Aktualität gegenüber dem Live-Repository.
 
-   **Vom Producer (`merger/lenskit/core/merge.py`, `AUTHORITY_REGISTRY`) aktiv emittiert (acht Rollen):**
-   `canonical_md`, `index_sidecar_json`, `dump_index_json`, `derived_manifest_json`, `chunk_index_jsonl`, `sqlite_index`, `retrieval_eval_json` (Phase 3.5), `graph_index_json` (Phase 3.5).
+   **Vom Producer (`merger/lenskit/core/merge.py`, `AUTHORITY_REGISTRY`) aktiv emittiert (neun Rollen):**
+   `canonical_md`, `index_sidecar_json`, `dump_index_json`, `derived_manifest_json`, `chunk_index_jsonl`, `sqlite_index`, `retrieval_eval_json` (Phase 3.5), `graph_index_json` (Phase 3.5), `output_health`.
 
    **Im Schema als erlaubte optionale Rolle registriert, kein Producer vorhanden:**
    - `citation_map_jsonl` — Belegadress-Artefakt für spätere Citation Map. Authority: `navigation_index`, Canonicality: `derived`. Ersetzt nicht `canonical_md` und nicht `chunk_index_jsonl`. Ist kein Runtime-Cache. Dieser PR schafft nur die Manifest-Zulässigkeit; kein Emit, kein Producer.

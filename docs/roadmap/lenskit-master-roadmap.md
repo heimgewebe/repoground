@@ -41,7 +41,7 @@ Diagnosebefunde für Terminologie:
 | `chunk_index_sqlite` | `sqlite_index` |
 | `derived_index_json` | `derived_manifest_json` |
 | `*.derived_index.json` | Dateiname zur Role `derived_manifest_json` |
-| `output_health_json` / `output_health` | geplant: Health-/Diagnose-Track; im aktuellen Branch nicht als kanonische ArtifactRole belegt |
+| `output_health_json` / `output_health` | `output_health` ist als Bundle-Manifest-ArtifactRole vorhanden und wird als Diagnoseartefakt emittiert; Citation-/Evidence-Health-Erweiterung bleibt geplant |
 | `citation_map_jsonl` | Manifest-Role registriert; `derived`/`navigation_index`; kein Producer vorhanden |
 Zusatz:
 Rollenamen folgen `bundle-manifest.v1.schema.json`, nicht älteren Blueprint-Begriffen oder Dateinamen.
