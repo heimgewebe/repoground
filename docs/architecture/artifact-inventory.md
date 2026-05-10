@@ -16,6 +16,7 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 | Artefaktname / Dateiname | Artefaktrolle / Dateiform | Authority | Canonicality | Erzeuger (Producer) | Verbraucher (Consumer) | Verbundenes Schema | Manifest Visibility | Runtime Usage |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `<stem>.canonical.md` | `canonical_md` | `canonical_content` | `content_source` | `core.merge` | Mensch, LLMs (direkt), Bundle Manifest | - | Ja | Indirekt (als Bundle-Fallback) |
+| `<stem>.citation_map.jsonl` | `citation_map_jsonl` | `navigation_index` | `derived` | _(kein Producer; geplant)_ | _(geplant: Query/Context/Agent Evidence Pack)_ | `citation-map.v1.schema.json` | Erlaubt/geplant, noch nicht emittiert | Belegadressierung (geplant) |
 | `<stem>.chunk_index.jsonl` | `chunk_index_jsonl` | `retrieval_index` | `derived` | `core.chunker` | `retrieval.index_db` | - | Ja | Index-Aufbau |
 | `<stem>.index.sqlite` | `sqlite_index` | `runtime_cache` | `cache` | `retrieval.index_db` | `retrieval.query_core`, `eval_core` | - | Ja (als `.index.sqlite`) | FTS5 Ranking, Chunk Retrieval |
 | `<stem>.dump_index.json` | `dump_index_json` | `navigation_index` | `index_only` | `core.merge` | `retrieval.index_db` | - | Ja | Initialer Index-Bau |
@@ -58,8 +59,11 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 6. **Authority/Canonicality-Felder (Phase 1 + 3.5):**
    Die Felder `authority`, `canonicality`, `regenerable` und `staleness_sensitive` sind in `bundle-manifest.v1.schema.json` optional. `authority` und `canonicality` sind pro Rolle wertbeschränkt (z.B. darf `sqlite_index` keine `canonical_content`-Autorität tragen, `architecture_summary` keinen `content_source`-Status). `regenerable` und `staleness_sensitive` werden vom Producer emittiert und bleiben typgeprüft. `staleness_sensitive` beschreibt Bundle-interne Drift, nicht Aktualität gegenüber dem Live-Repository.
 
-   **Vom Producer (`merger/lenskit/core/merge.py`, `AUTHORITY_REGISTRY`) aktiv emittiert (acht Rollen):**
-   `canonical_md`, `index_sidecar_json`, `dump_index_json`, `derived_manifest_json`, `chunk_index_jsonl`, `sqlite_index`, `retrieval_eval_json` (Phase 3.5), `graph_index_json` (Phase 3.5).
+   **Vom Producer (`merger/lenskit/core/merge.py`, `AUTHORITY_REGISTRY`) aktiv emittiert (neun Rollen):**
+   `canonical_md`, `index_sidecar_json`, `dump_index_json`, `derived_manifest_json`, `chunk_index_jsonl`, `sqlite_index`, `retrieval_eval_json` (Phase 3.5), `graph_index_json` (Phase 3.5), `output_health`.
+
+   **Im Schema als erlaubte optionale Rolle registriert, kein Producer vorhanden:**
+   - `citation_map_jsonl` — Belegadresse-Artefakt für spätere Citation Map. Authority: `navigation_index`, Canonicality: `derived`. Ersetzt nicht `canonical_md` und nicht `chunk_index_jsonl`. Ist kein Runtime-Cache. Dieser PR schafft nur die Manifest-Zulässigkeit; kein Emit, kein Producer.
 
    **Im Schema als Zukunftsform per-role-constrained, aber nicht vom `bundle-manifest.v1`-Producer emittiert:**
    - `architecture_summary` — wird von `write_reports_v2` *nicht* als Manifest-Artefakt aufgenommen; der `_write_architecture_summary`-Pfad schreibt die Datei, aber `_add_artifact` wird für diese Rolle nicht aufgerufen. Schema-Constraint (`diagnostic_signal` / `diagnostic`) bleibt als zulässige Zukunftsform.

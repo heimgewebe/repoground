@@ -24,6 +24,18 @@ das Inventar listet Artefakte, diese Matrix beschreibt die Übergänge.
 | `architecture_summary` | architecture graph / `graph_index` | Summary behauptet nicht belegte Kante | Graph Contract / Graph Index, Summary nur Diagnose | Graph-Struktur-Anker: `test_graph_eval.py`, `test_graph_index.py`; dedizierter Summary-vs-Graph-Guard fehlt | Summary regenerieren |
 | PR-Schau JSON | PR-Schau Markdown | JSON meldet vollständig, Markdown fehlt oder ist unvollständig | Markdown Content + Completeness Block | `pr_schau_verify` als Verifier-Pfad; dedizierter Completeness-Test fehlt. `test_pr_schau_consumer_gate.py` prüft nur Consumer-Zugriff | PR-Schau Bundle neu bauen |
 
+## citation_map_jsonl — geplante Driftkanten (kein Producer vorhanden)
+
+Die folgenden Driftkanten werden erst relevant, sobald ein `citation_map_jsonl`-Producer existiert.
+Dieser PR erzeugt noch keine Citation Map und definiert keinen Guard.
+Eingetragen als diagnostischer Vorgriff gemäß Rollout-Regel (Diagnose vor Blocking).
+
+| Quelle A | Quelle B | Konfliktfall | Autorität | Guard / Test / Coverage-Status | Regeneration |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `canonical_md` | `citation_map_jsonl` | Citation Map verweist auf fehlende oder verschobene Passage | `canonical_md` für Inhalt, `citation_map_jsonl` nur Navigation | _(kein Guard; Producer fehlt)_ | Citation Map regenerieren |
+| `chunk_index_jsonl` | `citation_map_jsonl` | Citation-Adressen basieren auf veraltetem Chunk-Index | `chunk_index_jsonl` | _(kein Guard; Producer fehlt)_ | Citation Map regenerieren |
+| Bundle Manifest (Artefakt, nicht Role) | `citation_map_jsonl` | Manifest listet `citation_map_jsonl`, Datei fehlt oder SHA stimmt nicht | Manifest + Artefaktinhalt konsistent | _(kein Guard; Producer fehlt)_ | Manifest regenerieren |
+
 ## Rollout-Regel
 
 Diese Matrix ist zunächst diagnostisch. Neue Blocking-Guards dürfen erst

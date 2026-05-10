@@ -18,3 +18,4 @@ class ArtifactRole(str, Enum):
     ARCHITECTURE_SUMMARY = "architecture_summary"
     SOURCE_FILE = "source_file"
     OUTPUT_HEALTH = "output_health"
+    CITATION_MAP_JSONL = "citation_map_jsonl"

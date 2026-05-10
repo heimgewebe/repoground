@@ -550,3 +550,300 @@ def test_delta_json_cannot_claim_canonical_content(schema):
     }
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# citation_map_jsonl: navigation_index / derived (Phase 1 — registry-only,
+# no producer yet). Old bundles without this role remain valid.
+# ---------------------------------------------------------------------------
+
+def test_citation_map_jsonl_valid_with_correct_authority(schema):
+    # All required and constrained fields present and correct.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_requires_authority(schema):
+    # Missing authority field.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_requires_canonicality(schema):
+    # Missing canonicality field.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_requires_contract(schema):
+    # Missing contract field.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "interpretation": {"mode": "role_only"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_requires_regenerable(schema):
+    # Missing regenerable field.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_requires_staleness_sensitive(schema):
+    # Missing staleness_sensitive field.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_wrong_contract_id_rejected(schema):
+    # Wrong contract id.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "wrong-contract", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_wrong_contract_version_rejected(schema):
+    # Wrong contract version.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v2"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_wrong_content_type_rejected(schema):
+    # Wrong content_type.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/json",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_regenerable_false_rejected(schema):
+    # regenerable must be true.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": False,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_staleness_sensitive_false_rejected(schema):
+    # staleness_sensitive must be true.
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": False
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_optional_old_bundle_remains_valid(schema):
+    # Existing bundle without citation_map_jsonl must stay valid.
+    artifact = {
+        "role": "canonical_md",
+        "path": "output.md",
+        "content_type": "text/markdown",
+        "bytes": 1024,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "interpretation": {"mode": "role_only"}
+    }
+    jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_cannot_claim_canonical_content(schema):
+    # Wrong authority value (must be navigation_index).
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "canonical_content",  # forbidden: navigation index, not content
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_cannot_claim_runtime_cache(schema):
+    # Wrong authority value (must be navigation_index).
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "runtime_cache",  # forbidden: derived navigation index, not cache
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_cannot_claim_content_source(schema):
+    # Wrong canonicality value (must be derived).
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "content_source",  # forbidden: citation map is derived, not content source
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_citation_map_jsonl_cannot_claim_cache(schema):
+    # Wrong canonicality value (must be derived).
+    artifact = {
+        "role": "citation_map_jsonl",
+        "path": "out.citation_map.jsonl",
+        "content_type": "application/x-ndjson",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "cache",  # forbidden: derived navigation artifact, not a cache
+        "regenerable": True,
+        "staleness_sensitive": True
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)

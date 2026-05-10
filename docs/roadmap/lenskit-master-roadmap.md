@@ -41,8 +41,8 @@ Diagnosebefunde für Terminologie:
 | `chunk_index_sqlite` | `sqlite_index` |
 | `derived_index_json` | `derived_manifest_json` |
 | `*.derived_index.json` | Dateiname zur Role `derived_manifest_json` |
-| `output_health_json` / `output_health` | geplant: Health-/Diagnose-Track; im aktuellen Branch nicht als kanonische ArtifactRole belegt |
-| `citation_map_jsonl` | geplant; `derived`/`navigation_index`; noch nicht implementiert |
+| `output_health_json` / `output_health` | `output_health` ist als Bundle-Manifest-ArtifactRole vorhanden und wird als Diagnoseartefakt emittiert; Citation-/Evidence-Health-Erweiterung bleibt geplant |
+| `citation_map_jsonl` | Manifest-Role registriert; `derived`/`navigation_index`; kein Producer vorhanden |
 Zusatz:
 Rollenamen folgen `bundle-manifest.v1.schema.json`, nicht älteren Blueprint-Begriffen oder Dateinamen.
 
@@ -71,7 +71,7 @@ Spätere PRs:
 - [x] `docs/architecture/range-semantics.md`
 - [x] `docs/proofs/citation-map-artifact-fit.md`
 - [x] `citation-map.v1.schema.json` plus minimale Beispiele plus Schema-Test
-- [ ] Bundle-Manifest-Role `citation_map_jsonl`
+- [x] Bundle-Manifest-Role `citation_map_jsonl`
 - [ ] `chunk_index` dual range mit `content_range_ref`, `canonical_range`, `source_range`
 - [ ] Citation-Map-Producer, geplante Citation-/Evidence-Health-Prüfung in separater Folge-PR, Real-Dump-Proof
 Gate:
@@ -170,8 +170,8 @@ PR 2:
 - [x] `citation-map.v1.schema.json` (`merger/lenskit/contracts/citation-map.v1.schema.json`)
 - [x] minimale Beispiele (`merger/lenskit/contracts/examples/citation_map_minimal.jsonl`)
 - [x] Schema-Test (`merger/lenskit/tests/test_citation_map_schema.py`)
-PR 3 (offen):
-- [ ] Bundle-Manifest-Role `citation_map_jsonl`
+PR 3 (teilweise erledigt):
+- [x] Bundle-Manifest-Role `citation_map_jsonl`
 - [ ] Chunk-Index dual range (`canonical_range`, `source_range` zusätzlich zu `content_range_ref`)
 - [ ] Citation-Map-Producer plus Real-Dump-Proof
 Diagnosehinweis für Priorisierung:
