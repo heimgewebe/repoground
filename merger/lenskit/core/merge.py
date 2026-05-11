@@ -5073,6 +5073,9 @@ def write_reports_v2(
         md_offsets = extract_file_offsets(md_paths, debug) if md_paths else {}
         can_md = resolve_canonical_md(md_paths) if md_paths else None
         canonical_md_name = can_md.name if can_md else None
+        # Read canonical_md bytes once for accurate line-number computation in canonical_range.
+        # canonical_md already exists on disk when generate_chunk_artifacts is called.
+        canonical_md_bytes: Optional[bytes] = can_md.read_bytes() if (can_md and can_md.exists()) else None
 
         all_chunks = []
 
@@ -5088,8 +5091,9 @@ def write_reports_v2(
             # Read content for chunking using the same limit as report to ensure coherence
             content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
 
+            file_was_redacted = False
             if redactor:
-                content, _ = redactor.redact(content)
+                content, file_was_redacted = redactor.redact(content)
 
             # Get Semantic Metadata
             sem_meta = get_semantic_metadata(fi.rel_path.as_posix(), content)
@@ -5151,31 +5155,41 @@ def write_reports_v2(
                             content_sha256=d["sha256"]
                         )
 
-                # Dual Range: canonical_range — only when content_range_ref provably references canonical_md.
-                # Chunks outside canonical_md (split overflow) or with non-canonical range refs do not receive canonical_range.
+                # Dual Range: canonical_range — only when content_range_ref provably references canonical_md
+                # AND canonical_md bytes are available to compute accurate line numbers.
+                # Line numbers are derived from canonical_md byte positions, NOT copied from source-local chunk lines.
                 crr = d.get("content_range_ref")
-                if crr and crr.get("artifact_role") == ArtifactRole.CANONICAL_MD.value:
+                if crr and crr.get("artifact_role") == ArtifactRole.CANONICAL_MD.value and canonical_md_bytes is not None:
+                    c_start = crr["start_byte"]
+                    c_end = crr["end_byte"]
                     d["canonical_range"] = {
                         "artifact_role": ArtifactRole.CANONICAL_MD.value,
                         "file_path": crr["file_path"],
-                        "start_byte": crr["start_byte"],
-                        "end_byte": crr["end_byte"],
-                        "start_line": crr["start_line"],
-                        "end_line": crr["end_line"],
+                        "start_byte": c_start,
+                        "end_byte": c_end,
+                        "start_line": canonical_md_bytes[:c_start].count(b"\n") + 1,
+                        "end_line": canonical_md_bytes[:max(c_start, c_end - 1)].count(b"\n") + 1,
                         "content_sha256": crr["content_sha256"]
                     }
 
                 # Dual Range: source_range — positions within the original source file as read.
-                # status="declared": positions are based on read content, not independently validated.
-                d["source_range"] = {
-                    "file_path": fi.rel_path.as_posix(),
-                    "start_byte": d["start_byte"],
-                    "end_byte": d["end_byte"],
-                    "start_line": d["start_line"],
-                    "end_line": d["end_line"],
-                    "content_sha256": d["sha256"],
-                    "status": "declared"
-                }
+                # When redaction modified the file content, we cannot claim the hash matches the original
+                # source bytes, so we emit status="unavailable" without byte positions or sha256.
+                if file_was_redacted:
+                    d["source_range"] = {
+                        "file_path": fi.rel_path.as_posix(),
+                        "status": "unavailable"
+                    }
+                else:
+                    d["source_range"] = {
+                        "file_path": fi.rel_path.as_posix(),
+                        "start_byte": d["start_byte"],
+                        "end_byte": d["end_byte"],
+                        "start_line": d["start_line"],
+                        "end_line": d["end_line"],
+                        "content_sha256": d["sha256"],
+                        "status": "declared"
+                    }
 
                 d["search_keys"] = {
                     "repo_id": fi.root_label,

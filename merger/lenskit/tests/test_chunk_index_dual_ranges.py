@@ -9,7 +9,12 @@ from pathlib import Path
 from merger.lenskit.core.merge import write_reports_v2, FileInfo
 
 
-def _run_single_file_dual(tmp_path, content="def hello():\n    pass\n", fname="test.py"):
+def _run_single_file_dual(
+    tmp_path,
+    content="def hello():\n    pass\n",
+    fname="test.py",
+    redact_secrets=False,
+):
     hub_path = tmp_path / "hub"
     hub_path.mkdir()
     merges_dir = tmp_path / "merges"
@@ -40,7 +45,8 @@ def _run_single_file_dual(tmp_path, content="def hello():\n    pass\n", fname="t
         mode="single",
         max_bytes=10000,
         plan_only=False,
-        output_mode="dual"
+        output_mode="dual",
+        redact_secrets=redact_secrets,
     )
 
     chunks = []
@@ -49,6 +55,10 @@ def _run_single_file_dual(tmp_path, content="def hello():\n    pass\n", fname="t
             chunks.append(json.loads(line))
 
     return res, chunks
+
+
+def _line_for_byte(data: bytes, byte_offset: int) -> int:
+    return data[:byte_offset].count(b"\n") + 1
 
 
 def test_content_range_ref_legacy_still_present(tmp_path):
@@ -66,7 +76,8 @@ def test_content_range_ref_legacy_still_present(tmp_path):
 
 
 def test_chunk_index_emits_canonical_range_from_content_range_ref(tmp_path):
-    """canonical_range must be present when content_range_ref references canonical_md."""
+    """canonical_range must be present when content_range_ref references canonical_md.
+    Byte positions match content_range_ref; line numbers are canonical_md-local (not source-local)."""
     _, chunks = _run_single_file_dual(tmp_path)
     assert len(chunks) == 1
     chunk = chunks[0]
@@ -79,11 +90,35 @@ def test_chunk_index_emits_canonical_range_from_content_range_ref(tmp_path):
     assert cr["file_path"] == crr["file_path"]
     assert cr["start_byte"] == crr["start_byte"]
     assert cr["end_byte"] == crr["end_byte"]
-    assert cr["start_line"] == crr["start_line"]
-    assert cr["end_line"] == crr["end_line"]
     assert cr["content_sha256"] == crr["content_sha256"]
     # canonical_range must not carry repo_id
     assert "repo_id" not in cr
+    # line numbers must be present and 1-based
+    assert isinstance(cr["start_line"], int) and cr["start_line"] >= 1
+    assert isinstance(cr["end_line"], int) and cr["end_line"] >= cr["start_line"]
+
+
+def test_canonical_range_lines_are_canonical_md_lines(tmp_path):
+    """canonical_range.start_line/end_line must be canonical_md-local, not source-local."""
+    res, chunks = _run_single_file_dual(tmp_path)
+    assert len(chunks) == 1
+    chunk = chunks[0]
+
+    assert "canonical_range" in chunk
+    cr = chunk["canonical_range"]
+
+    data = res.canonical_md.read_bytes()
+    expected_start = _line_for_byte(data, cr["start_byte"])
+    expected_end = _line_for_byte(data, max(cr["start_byte"], cr["end_byte"] - 1))
+
+    assert cr["start_line"] == expected_start, (
+        f"canonical_range.start_line={cr['start_line']} does not match "
+        f"canonical_md line {expected_start} for byte {cr['start_byte']}"
+    )
+    assert cr["end_line"] == expected_end, (
+        f"canonical_range.end_line={cr['end_line']} does not match "
+        f"canonical_md line {expected_end} for byte {cr['end_byte'] - 1}"
+    )
 
 
 def test_chunk_index_emits_source_range_declared_from_existing_source_fields(tmp_path):
@@ -123,7 +158,6 @@ def test_canonical_range_hash_roundtrip(tmp_path):
     assert "canonical_range" in chunk
     cr = chunk["canonical_range"]
 
-    # Locate the canonical_md file
     canonical_path = res.canonical_md
     assert canonical_path is not None and canonical_path.exists()
 
@@ -145,8 +179,8 @@ def test_source_range_hash_roundtrip(tmp_path):
 
     assert "source_range" in chunk
     sr = chunk["source_range"]
+    assert sr["status"] == "declared"
 
-    # The source file content as originally read
     source_bytes = content.encode("utf-8")
     extracted = source_bytes[sr["start_byte"]:sr["end_byte"]]
     actual_sha = hashlib.sha256(extracted).hexdigest()
@@ -154,6 +188,30 @@ def test_source_range_hash_roundtrip(tmp_path):
     assert actual_sha == sr["content_sha256"], (
         f"source_range hash mismatch: expected {sr['content_sha256']}, got {actual_sha}"
     )
+
+
+def test_source_range_does_not_claim_original_hash_when_redacted(tmp_path):
+    """When redaction modifies content, source_range must be unavailable, not a false original hash."""
+    # This content matches the Redactor's api_key/secret_key pattern
+    content = "API_KEY = 'sk-test-secret-abcdefghijklmnop'\n"
+    _, chunks = _run_single_file_dual(
+        tmp_path,
+        content=content,
+        fname="secret.py",
+        redact_secrets=True,
+    )
+    assert len(chunks) == 1
+    chunk = chunks[0]
+
+    assert "source_range" in chunk
+    sr = chunk["source_range"]
+    assert sr["status"] in {"unavailable", "derived"}, (
+        f"Redacted chunk must have status unavailable or derived, got {sr['status']!r}"
+    )
+    if sr["status"] == "unavailable":
+        assert "content_sha256" not in sr, (
+            "source_range must not carry content_sha256 when status=unavailable"
+        )
 
 
 def test_split_mode_no_canonical_range_for_overflow_chunks(tmp_path):
@@ -212,7 +270,6 @@ def test_split_mode_no_canonical_range_for_overflow_chunks(tmp_path):
         assert "canonical_range" not in chunk, (
             f"canonical_range must not be present on overflow chunk {chunk.get('chunk_id')}"
         )
-        # source_range must still be present even for overflow chunks
         assert "source_range" in chunk, (
             f"source_range must be present on all chunks, including overflow {chunk.get('chunk_id')}"
         )
