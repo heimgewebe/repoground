@@ -269,6 +269,16 @@ def resolve_canonical_md(md_parts: List[Path]) -> Optional[Path]:
     """
     return md_parts[0] if md_parts else None
 
+
+def _line_for_byte(data: bytes, byte_offset: int) -> int:
+    """Return the 1-based line number of the byte at byte_offset in data.
+
+    Counts the number of newlines in data before byte_offset and adds 1.
+    For an exclusive end_byte, pass max(start_byte, end_byte - 1) to get
+    the line of the last byte in the range without underflowing empty chunks.
+    """
+    return data.count(b"\n", 0, byte_offset) + 1
+
 def _validate_agent_json_dict(d: Dict[str, Any], allow_empty_primary: bool = False) -> None:
     """
     Minimal, dependency-free validation. Purpose: prevent "success but nothing usable".
@@ -5073,6 +5083,7 @@ def write_reports_v2(
         md_offsets = extract_file_offsets(md_paths, debug) if md_paths else {}
         can_md = resolve_canonical_md(md_paths) if md_paths else None
         canonical_md_name = can_md.name if can_md else None
+        canonical_md_bytes = can_md.read_bytes() if (can_md and can_md.exists()) else None
 
         all_chunks = []
 
@@ -5088,8 +5099,10 @@ def write_reports_v2(
             # Read content for chunking using the same limit as report to ensure coherence
             content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
 
+            was_redacted = False
             if redactor:
-                content, _ = redactor.redact(content)
+                content, _redacted_items = redactor.redact(content)
+                was_redacted = bool(_redacted_items)
 
             # Get Semantic Metadata
             sem_meta = get_semantic_metadata(fi.rel_path.as_posix(), content)
@@ -5140,16 +5153,64 @@ def write_reports_v2(
                 if md_paths and fid in md_offsets:
                     md_file_name, md_start_byte = md_offsets[fid]
                     if md_file_name == canonical_md_name:
+                        abs_start = md_start_byte + d["start_byte"]
+                        abs_end = md_start_byte + d["end_byte"]
+
+                        if canonical_md_bytes is not None:
+                            # Compute canonical-local values once; share across both fields.
+                            can_chunk = canonical_md_bytes[abs_start:abs_end]
+                            can_sha256 = hashlib.sha256(can_chunk).hexdigest()
+                            can_start_line = _line_for_byte(canonical_md_bytes, abs_start)
+                            can_end_line = _line_for_byte(canonical_md_bytes, max(abs_start, abs_end - 1))
+                        else:
+                            # Fall back to source-local values when canonical bytes unavailable.
+                            can_sha256 = d["sha256"]
+                            can_start_line = d["start_line"]
+                            can_end_line = d["end_line"]
+
                         d["content_range_ref"] = build_explicit_range_ref(
                             artifact_role=ArtifactRole.CANONICAL_MD.value,
                             repo_id=fi.root_label,
                             file_path=md_file_name,
-                            start_byte=md_start_byte + d["start_byte"],
-                            end_byte=md_start_byte + d["end_byte"],
-                            start_line=d["start_line"],
-                            end_line=d["end_line"],
-                            content_sha256=d["sha256"]
+                            start_byte=abs_start,
+                            end_byte=abs_end,
+                            start_line=can_start_line,
+                            end_line=can_end_line,
+                            content_sha256=can_sha256,
                         )
+
+                        if canonical_md_bytes is not None:
+                            d["canonical_range"] = {
+                                "artifact_role": ArtifactRole.CANONICAL_MD.value,
+                                "repo_id": fi.root_label,
+                                "file_path": md_file_name,
+                                "start_byte": abs_start,
+                                "end_byte": abs_end,
+                                "start_line": can_start_line,
+                                "end_line": can_end_line,
+                                "content_sha256": can_sha256,
+                            }
+
+                # source_range: always present, coordinates in source content space.
+                # Status taxonomy: "declared" (source coords claimed, not externally verified) | "unavailable" (redacted or truncated).
+                if was_redacted or truncated:
+                    d["source_range"] = {
+                        "file_path": fi.rel_path.as_posix(),
+                        "repo_id": fi.root_label,
+                        "status": "unavailable",
+                    }
+                else:
+                    d["source_range"] = {
+                        "file_path": fi.rel_path.as_posix(),
+                        "repo_id": fi.root_label,
+                        "start_byte": d["start_byte"],
+                        "end_byte": d["end_byte"],
+                        "start_line": d["start_line"],
+                        "end_line": d["end_line"],
+                        "content_sha256": d["sha256"],
+                        "status": "declared",
+                    }
+
                 d["search_keys"] = {
                     "repo_id": fi.root_label,
                     "path_norm": fi.rel_path.as_posix().lower(),
