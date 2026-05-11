@@ -2,12 +2,14 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from unittest.mock import patch
 
 import jsonschema
 import pytest
 
 from merger.lenskit.core.constants import ArtifactRole
 from merger.lenskit.core.merge import FileInfo, write_reports_v2
+from merger.lenskit.core.output_health import compute_output_health
 from merger.lenskit.tests._test_constants import make_generator_info
 
 
@@ -173,6 +175,72 @@ def test_output_health_verdict_pass_for_healthy_dual_bundle(tmp_path):
     assert health["checks"]["canonical_md_hash_ok"] is True
     assert health["checks"]["chunk_index_hash_ok"] is True
     assert health["checks"]["range_ref_resolution_ok"] is True
+
+
+def test_output_health_jsonschema_unavailable_is_warn_in_generated_bundle(tmp_path):
+    with patch(
+        "merger.lenskit.core.range_resolver.resolve_range_ref",
+        side_effect=RuntimeError(
+            "Schema validation requested but jsonschema is unavailable in this environment."
+        ),
+    ):
+        artifacts, _, _ = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    assert artifacts.output_health is not None
+    health = json.loads(artifacts.output_health.read_text(encoding="utf-8"))
+
+    assert "range_ref_resolution_status" in health["checks"]
+    assert health["checks"]["range_ref_resolution_ok"] is None
+    assert health["checks"]["range_ref_resolution_status"] == "environment_error"
+    assert health["verdict"] == "warn"
+    assert any("jsonschema" in w.lower() for w in health["warnings"])
+    assert not any("jsonschema" in e.lower() for e in health["errors"])
+    assert health["checks"]["canonical_md_hash_ok"] is True
+    assert health["checks"]["chunk_index_hash_ok"] is True
+    assert health["checks"]["chunk_count"] > 0
+
+
+def test_output_health_broken_range_ref_is_fail_in_repo_near_flow(tmp_path):
+    artifacts, _, _ = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    assert artifacts.chunk_index is not None
+    lines = artifacts.chunk_index.read_text(encoding="utf-8").splitlines()
+    assert lines, "chunk_index must contain at least one chunk"
+
+    first_chunk = json.loads(lines[0])
+    assert isinstance(first_chunk, dict)
+    assert isinstance(first_chunk.get("content_range_ref"), dict)
+    first_chunk["content_range_ref"]["file_path"] = "totally_missing_artifact.md"
+    first_chunk["content_range_ref"]["content_sha256"] = "0" * 64
+    lines[0] = json.dumps(first_chunk, ensure_ascii=False)
+    artifacts.chunk_index.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    assert artifacts.canonical_md is not None
+    assert artifacts.dump_index is not None
+    canonical_sha = _sha256_file(artifacts.canonical_md)
+    chunk_sha = _sha256_file(artifacts.chunk_index)
+
+    health = compute_output_health(
+        run_id="proof-range-ref-fail",
+        stem="proof",
+        primary_manifest_path=artifacts.dump_index,
+        canonical_md_path=artifacts.canonical_md,
+        chunk_index_path=artifacts.chunk_index,
+        dump_index_path=artifacts.dump_index,
+        sqlite_index_path=None,
+        sqlite_index_required=False,
+        redact_secrets=False,
+        expected_canonical_md_sha256=canonical_sha,
+        expected_chunk_index_sha256=chunk_sha,
+    )
+
+    assert health["checks"]["canonical_md_hash_ok"] is True
+    assert health["checks"]["chunk_index_hash_ok"] is True
+    assert health["checks"]["chunk_count"] > 0
+    assert health["checks"]["range_ref_resolution_ok"] is False
+    assert health["checks"]["range_ref_resolution_status"] == "fail"
+    assert health["verdict"] == "fail"
+    assert any("range_ref" in e.lower() for e in health["errors"])
 
 
 def test_output_health_archive_mode_does_not_require_chunk_index(tmp_path):
