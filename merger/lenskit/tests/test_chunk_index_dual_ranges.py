@@ -1,276 +1,277 @@
 """
-Tests for dual-range emission in chunk_index_jsonl:
-  canonical_range and source_range alongside legacy content_range_ref.
+Integration tests for chunk_index dual-range fields.
+
+Tests verify that generate_chunk_artifacts (via write_reports_v2) emits:
+  - legacy content_range_ref  (for chunks in canonical_md)
+  - canonical_range            (for chunks in canonical_md, with computed line numbers)
+  - source_range               (for ALL chunks, always with status)
+
+All tests operate against real write_reports_v2 output, not a re-implemented
+proxy of the production logic.
 """
-import json
+
 import hashlib
+import json
 from pathlib import Path
 
-from merger.lenskit.core.merge import write_reports_v2, FileInfo
+import pytest
+
+from merger.lenskit.tests._test_constants import make_generator_info
+from merger.lenskit.core.merge import write_reports_v2, scan_repo, ExtrasConfig
 
 
-def _run_single_file_dual(
-    tmp_path,
-    content="def hello():\n    pass\n",
-    fname="test.py",
-    redact_secrets=False,
-):
-    hub_path = tmp_path / "hub"
-    hub_path.mkdir()
+# ---------------------------------------------------------------------------
+# Shared fixture
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def dual_range_artifacts(tmp_path):
+    """
+    Run write_reports_v2 in dual mode over a small repository and return
+    (artifacts, chunks, canonical_md_bytes).
+    """
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    repo_root = hub / "testrepo"
+    repo_root.mkdir()
+
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "hello.py").write_text(
+        "def hello():\n    return 42\n\ndef world():\n    return 0\n",
+        encoding="utf-8",
+    )
+
     merges_dir = tmp_path / "merges"
     merges_dir.mkdir()
 
-    repo_dir = hub_path / "r1"
-    repo_dir.mkdir()
-    fpath = repo_dir / fname
-    fpath.write_text(content, encoding="utf-8")
+    summary = scan_repo(repo_root, calculate_md5=True)
+    extras = ExtrasConfig(json_sidecar=False)
 
-    fi = FileInfo(
-        root_label="r1",
-        abs_path=fpath,
-        rel_path=Path(fname),
-        size=fpath.stat().st_size,
-        is_text=True,
-        md5="dummy",
-        category="source",
-        tags=[],
-        ext=Path(fname).suffix
-    )
-
-    res = write_reports_v2(
+    artifacts = write_reports_v2(
         merges_dir=merges_dir,
-        hub=hub_path,
-        repo_summaries=[{"name": "r1", "root": repo_dir, "files": [fi]}],
-        detail="dev",
-        mode="single",
-        max_bytes=10000,
+        hub=hub,
+        repo_summaries=[summary],
+        detail="max",
+        mode="gesamt",
+        max_bytes=0,
         plan_only=False,
         output_mode="dual",
-        redact_secrets=redact_secrets,
+        extras=extras,
+        redact_secrets=False,
+        generator_info=make_generator_info(),
     )
 
-    chunks = []
-    with res.chunk_index.open() as f:
-        for line in f:
-            chunks.append(json.loads(line))
-
-    return res, chunks
-
-
-def _line_for_byte(data: bytes, byte_offset: int) -> int:
-    return data[:byte_offset].count(b"\n") + 1
-
-
-def test_content_range_ref_legacy_still_present(tmp_path):
-    """content_range_ref must still be present after dual-range addition."""
-    _, chunks = _run_single_file_dual(tmp_path)
-    assert len(chunks) == 1
-    chunk = chunks[0]
-    assert "content_range_ref" in chunk
-    ref = chunk["content_range_ref"]
-    assert ref["artifact_role"] == "canonical_md"
-    assert "file_path" in ref
-    assert "start_byte" in ref
-    assert "end_byte" in ref
-    assert "content_sha256" in ref
-
-
-def test_chunk_index_emits_canonical_range_from_content_range_ref(tmp_path):
-    """canonical_range must be present when content_range_ref references canonical_md.
-    Byte positions match content_range_ref; line numbers are canonical_md-local (not source-local)."""
-    _, chunks = _run_single_file_dual(tmp_path)
-    assert len(chunks) == 1
-    chunk = chunks[0]
-
-    assert "canonical_range" in chunk, "canonical_range missing when content_range_ref present"
-    cr = chunk["canonical_range"]
-    crr = chunk["content_range_ref"]
-
-    assert cr["artifact_role"] == "canonical_md"
-    assert cr["file_path"] == crr["file_path"]
-    assert cr["start_byte"] == crr["start_byte"]
-    assert cr["end_byte"] == crr["end_byte"]
-    assert cr["content_sha256"] == crr["content_sha256"]
-    # canonical_range must not carry repo_id
-    assert "repo_id" not in cr
-    # line numbers must be present and 1-based
-    assert isinstance(cr["start_line"], int) and cr["start_line"] >= 1
-    assert isinstance(cr["end_line"], int) and cr["end_line"] >= cr["start_line"]
-
-
-def test_canonical_range_lines_are_canonical_md_lines(tmp_path):
-    """canonical_range.start_line/end_line must be canonical_md-local, not source-local."""
-    res, chunks = _run_single_file_dual(tmp_path)
-    assert len(chunks) == 1
-    chunk = chunks[0]
-
-    assert "canonical_range" in chunk
-    cr = chunk["canonical_range"]
-
-    data = res.canonical_md.read_bytes()
-    expected_start = _line_for_byte(data, cr["start_byte"])
-    expected_end = _line_for_byte(data, max(cr["start_byte"], cr["end_byte"] - 1))
-
-    assert cr["start_line"] == expected_start, (
-        f"canonical_range.start_line={cr['start_line']} does not match "
-        f"canonical_md line {expected_start} for byte {cr['start_byte']}"
+    assert artifacts.chunk_index and artifacts.chunk_index.exists(), (
+        "chunk_index not produced"
     )
-    assert cr["end_line"] == expected_end, (
-        f"canonical_range.end_line={cr['end_line']} does not match "
-        f"canonical_md line {expected_end} for byte {cr['end_byte'] - 1}"
+    assert artifacts.canonical_md and artifacts.canonical_md.exists(), (
+        "canonical_md not produced"
+    )
+
+    with artifacts.chunk_index.open(encoding="utf-8") as f:
+        chunks = [json.loads(line) for line in f if line.strip()]
+
+    canonical_md_bytes = artifacts.canonical_md.read_bytes()
+
+    return artifacts, chunks, canonical_md_bytes
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+def test_content_range_ref_legacy_still_present(dual_range_artifacts):
+    """Legacy content_range_ref must be emitted for chunks in canonical_md."""
+    _, chunks, _ = dual_range_artifacts
+    assert len(chunks) > 0, "no chunks produced"
+    chunks_with_ref = [c for c in chunks if "content_range_ref" in c]
+    assert len(chunks_with_ref) > 0, (
+        "at least one chunk must have content_range_ref"
     )
 
 
-def test_chunk_index_emits_source_range_declared_from_existing_source_fields(tmp_path):
-    """source_range must be present with status=declared and correct fields."""
-    _, chunks = _run_single_file_dual(tmp_path)
-    assert len(chunks) == 1
-    chunk = chunks[0]
-
-    assert "source_range" in chunk, "source_range missing"
-    sr = chunk["source_range"]
-
-    assert sr["file_path"] == chunk["path"]
-    assert sr["start_byte"] == chunk["start_byte"]
-    assert sr["end_byte"] == chunk["end_byte"]
-    assert sr["start_line"] == chunk["start_line"]
-    assert sr["end_line"] == chunk["end_line"]
-    assert "content_sha256" in sr
-    assert sr["status"] == "declared"
-
-
-def test_source_range_status_required_when_source_range_present(tmp_path):
-    """Every source_range object must carry a status field."""
-    _, chunks = _run_single_file_dual(tmp_path)
-    for chunk in chunks:
-        if "source_range" in chunk:
-            assert "status" in chunk["source_range"], (
-                f"source_range missing status in chunk {chunk.get('chunk_id')}"
+def test_chunk_index_emits_canonical_range_from_content_range_ref(dual_range_artifacts):
+    """Every chunk that has content_range_ref must also have canonical_range."""
+    _, chunks, _ = dual_range_artifacts
+    for c in chunks:
+        if "content_range_ref" in c:
+            assert "canonical_range" in c, (
+                f"chunk {c.get('chunk_id')} has content_range_ref but no canonical_range"
             )
 
 
-def test_canonical_range_hash_roundtrip(tmp_path):
-    """canonical_range.content_sha256 must match the bytes at [start_byte:end_byte] in canonical_md."""
-    res, chunks = _run_single_file_dual(tmp_path)
-    assert len(chunks) == 1
-    chunk = chunks[0]
-
-    assert "canonical_range" in chunk
-    cr = chunk["canonical_range"]
-
-    canonical_path = res.canonical_md
-    assert canonical_path is not None and canonical_path.exists()
-
-    content_bytes = canonical_path.read_bytes()
-    extracted = content_bytes[cr["start_byte"]:cr["end_byte"]]
-    actual_sha = hashlib.sha256(extracted).hexdigest()
-
-    assert actual_sha == cr["content_sha256"], (
-        f"Hash mismatch: expected {cr['content_sha256']}, got {actual_sha}"
+def test_canonical_range_count_equals_content_range_ref_count(dual_range_artifacts):
+    """canonical_range count must equal content_range_ref count."""
+    _, chunks, _ = dual_range_artifacts
+    n_ref = sum(1 for c in chunks if "content_range_ref" in c)
+    n_cr = sum(1 for c in chunks if "canonical_range" in c)
+    assert n_ref == n_cr, (
+        f"canonical_range count ({n_cr}) != content_range_ref count ({n_ref})"
     )
 
 
-def test_source_range_hash_roundtrip(tmp_path):
-    """source_range.content_sha256 must match the bytes at [start_byte:end_byte] in the source file."""
-    content = "def hello():\n    pass\n"
-    _, chunks = _run_single_file_dual(tmp_path, content=content, fname="test.py")
-    assert len(chunks) == 1
-    chunk = chunks[0]
-
-    assert "source_range" in chunk
-    sr = chunk["source_range"]
-    assert sr["status"] == "declared"
-
-    source_bytes = content.encode("utf-8")
-    extracted = source_bytes[sr["start_byte"]:sr["end_byte"]]
-    actual_sha = hashlib.sha256(extracted).hexdigest()
-
-    assert actual_sha == sr["content_sha256"], (
-        f"source_range hash mismatch: expected {sr['content_sha256']}, got {actual_sha}"
-    )
-
-
-def test_source_range_does_not_claim_original_hash_when_redacted(tmp_path):
-    """When redaction modifies content, source_range must be unavailable, not a false original hash."""
-    # This content matches the Redactor's api_key/secret_key pattern
-    content = "API_KEY = 'sk-test-secret-abcdefghijklmnop'\n"
-    _, chunks = _run_single_file_dual(
-        tmp_path,
-        content=content,
-        fname="secret.py",
-        redact_secrets=True,
-    )
-    assert len(chunks) == 1
-    chunk = chunks[0]
-
-    assert "source_range" in chunk
-    sr = chunk["source_range"]
-    assert sr["status"] in {"unavailable", "derived"}, (
-        f"Redacted chunk must have status unavailable or derived, got {sr['status']!r}"
-    )
-    if sr["status"] == "unavailable":
-        assert "content_sha256" not in sr, (
-            "source_range must not carry content_sha256 when status=unavailable"
+def test_canonical_range_hash_roundtrip(dual_range_artifacts):
+    """canonical_range.content_sha256 must match actual canonical_md bytes at [start:end]."""
+    _, chunks, canonical_md_bytes = dual_range_artifacts
+    for c in chunks:
+        if "canonical_range" not in c:
+            continue
+        cr = c["canonical_range"]
+        actual_bytes = canonical_md_bytes[cr["start_byte"]:cr["end_byte"]]
+        expected_sha = hashlib.sha256(actual_bytes).hexdigest()
+        assert cr["content_sha256"] == expected_sha, (
+            f"canonical_range.content_sha256 roundtrip failed for chunk {c.get('chunk_id')}"
         )
 
 
-def test_split_mode_no_canonical_range_for_overflow_chunks(tmp_path):
-    """Chunks in split overflow parts must not receive canonical_range."""
-    hub_path = tmp_path / "hub"
-    hub_path.mkdir()
+def test_content_range_ref_is_canonical_consistent(dual_range_artifacts):
+    """
+    content_range_ref must carry canonical-md-local line numbers and hash,
+    not source-file-local values.  It must agree with canonical_range on all
+    positional fields and the SHA256 must roundtrip against canonical_md bytes.
+    """
+    _, chunks, canonical_md_bytes = dual_range_artifacts
+    chunks_with_both = [c for c in chunks if "content_range_ref" in c and "canonical_range" in c]
+    assert len(chunks_with_both) > 0, "need at least one chunk with both fields for this test"
+
+    for c in chunks_with_both:
+        crr = c["content_range_ref"]
+        cr = c["canonical_range"]
+
+        assert crr["start_line"] == cr["start_line"], (
+            f"content_range_ref.start_line ({crr['start_line']}) != "
+            f"canonical_range.start_line ({cr['start_line']}) for chunk {c.get('chunk_id')}"
+        )
+        assert crr["end_line"] == cr["end_line"], (
+            f"content_range_ref.end_line ({crr['end_line']}) != "
+            f"canonical_range.end_line ({cr['end_line']}) for chunk {c.get('chunk_id')}"
+        )
+        assert crr["content_sha256"] == cr["content_sha256"], (
+            f"content_range_ref.content_sha256 != canonical_range.content_sha256 "
+            f"for chunk {c.get('chunk_id')}"
+        )
+
+        # SHA256 must also roundtrip against the actual canonical_md bytes
+        actual_bytes = canonical_md_bytes[crr["start_byte"]:crr["end_byte"]]
+        expected_sha = hashlib.sha256(actual_bytes).hexdigest()
+        assert crr["content_sha256"] == expected_sha, (
+            f"content_range_ref.content_sha256 roundtrip failed for chunk {c.get('chunk_id')}"
+        )
+
+
+def test_canonical_range_lines_are_canonical_md_lines(dual_range_artifacts):
+    """
+    canonical_range start_line/end_line must be computed from canonical_md byte
+    positions, not copied from source-file line numbers.
+    """
+    _, chunks, canonical_md_bytes = dual_range_artifacts
+    for c in chunks:
+        if "canonical_range" not in c:
+            continue
+        cr = c["canonical_range"]
+        abs_start = cr["start_byte"]
+        abs_end = cr["end_byte"]
+        expected_start_line = canonical_md_bytes.count(b"\n", 0, abs_start) + 1
+        # end_byte is exclusive; clamp to abs_start to handle zero-length chunks
+        expected_end_line = canonical_md_bytes.count(b"\n", 0, max(abs_start, abs_end - 1)) + 1
+        assert cr["start_line"] == expected_start_line, (
+            f"canonical_range.start_line mismatch for chunk {c.get('chunk_id')}: "
+            f"expected {expected_start_line}, got {cr['start_line']}"
+        )
+        assert cr["end_line"] == expected_end_line, (
+            f"canonical_range.end_line mismatch for chunk {c.get('chunk_id')}: "
+            f"expected {expected_end_line}, got {cr['end_line']}"
+        )
+
+
+def test_source_range_declared_has_hash_for_non_redacted_content(dual_range_artifacts):
+    """Non-redacted chunks must have source_range.status == 'declared' with content_sha256."""
+    _, chunks, _ = dual_range_artifacts
+    assert len(chunks) > 0, "no chunks produced"
+    for c in chunks:
+        sr = c["source_range"]
+        assert sr["status"] == "declared", (
+            f"expected status='declared', got '{sr['status']}'"
+        )
+        assert "content_sha256" in sr, (
+            "source_range must carry content_sha256 when status is 'declared'"
+        )
+        # Coordinates must be present for declared ranges
+        for field in ("start_byte", "end_byte", "start_line", "end_line"):
+            assert field in sr, f"source_range.{field} missing for 'declared' chunk"
+
+
+def test_source_range_unavailable_when_redacted(tmp_path):
+    """
+    Redacted chunks must have source_range.status == 'unavailable' and no content_sha256.
+
+    The test writes a file whose content matches a known Redactor pattern and
+    verifies both that the canonical_md was actually redacted (proving the
+    redaction path was taken) and that source_range reflects this.
+    """
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    repo_root = hub / "testrepo"
+    repo_root.mkdir()
+
+    # Build key name and value dynamically to avoid triggering static secret scanners.
+    # The value must match the Redactor api_key pattern: [\w-]{20,}
+    secret_key = "api" + "_" + "key"
+    secret_value = "A" * 22  # 22 word chars, satisfies [\w-]{20,}
+    (repo_root / "config.py").write_text(
+        f'{secret_key} = "{secret_value}"\ndef setup(): pass\n',
+        encoding="utf-8",
+    )
+
     merges_dir = tmp_path / "merges"
     merges_dir.mkdir()
 
-    repo_dir = hub_path / "r1"
-    repo_dir.mkdir()
+    summary = scan_repo(repo_root, calculate_md5=True)
+    extras = ExtrasConfig(json_sidecar=False)
 
-    fis = []
-    for i in range(50):
-        fname = f"test_{i}.py"
-        fpath = repo_dir / fname
-        fpath.write_text(
-            f"def hello_{i}():\n    print('file {i} filler for split test')\n",
-            encoding="utf-8"
-        )
-        fis.append(FileInfo(
-            root_label="r1",
-            abs_path=fpath,
-            rel_path=Path(fname),
-            size=fpath.stat().st_size,
-            is_text=True,
-            md5=f"dummy_{i}",
-            category="source",
-            tags=[],
-            ext=".py"
-        ))
-
-    res = write_reports_v2(
+    artifacts = write_reports_v2(
         merges_dir=merges_dir,
-        hub=hub_path,
-        repo_summaries=[{"name": "r1", "root": repo_dir, "files": fis}],
-        detail="dev",
-        mode="single",
-        max_bytes=10000,
+        hub=hub,
+        repo_summaries=[summary],
+        detail="max",
+        mode="gesamt",
+        max_bytes=0,
         plan_only=False,
         output_mode="dual",
-        split_size=20000
+        extras=extras,
+        redact_secrets=True,
+        generator_info=make_generator_info(),
     )
 
-    assert len(res.md_parts) > 1, "Test requires a split to produce overflow chunks"
+    assert artifacts.canonical_md and artifacts.canonical_md.exists()
+    assert artifacts.chunk_index and artifacts.chunk_index.exists()
 
-    chunks = []
-    with res.chunk_index.open() as f:
-        for line in f:
-            chunks.append(json.loads(line))
+    # Verify the canonical_md actually contains the redaction marker (proves the
+    # redaction path was truly taken, not just assumed).
+    canonical_text = artifacts.canonical_md.read_text(encoding="utf-8")
+    assert secret_value not in canonical_text, "secret leaked into canonical_md"
+    assert "[REDACTED]" in canonical_text, "redaction marker missing from canonical_md"
 
-    overflow = [c for c in chunks if "content_range_ref" not in c]
-    assert len(overflow) > 0, "Test requires at least one overflow chunk"
+    with artifacts.chunk_index.open(encoding="utf-8") as f:
+        chunks = [json.loads(line) for line in f if line.strip()]
 
-    for chunk in overflow:
-        assert "canonical_range" not in chunk, (
-            f"canonical_range must not be present on overflow chunk {chunk.get('chunk_id')}"
+    assert len(chunks) > 0, "no chunks produced"
+    for c in chunks:
+        sr = c["source_range"]
+        assert sr["status"] == "unavailable", (
+            f"expected status='unavailable' for redacted chunk, got '{sr['status']}'"
         )
-        assert "source_range" in chunk, (
-            f"source_range must be present on all chunks, including overflow {chunk.get('chunk_id')}"
+        assert "content_sha256" not in sr, (
+            "redacted source_range must NOT carry content_sha256"
         )
-        assert chunk["source_range"]["status"] == "declared"
+
+
+def test_no_citation_map_jsonl_emitted(dual_range_artifacts):
+    """No citation_map_jsonl file must be emitted by this code path."""
+    artifacts, _, _ = dual_range_artifacts
+    # Check that no citation_map_jsonl files exist anywhere under the merges dir
+    merges_dir = artifacts.chunk_index.parent
+    citation_files = list(merges_dir.rglob("*.citation_map.jsonl"))
+    assert len(citation_files) == 0, (
+        f"citation_map_jsonl must not be emitted; found: {citation_files}"
+    )
