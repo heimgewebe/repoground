@@ -166,21 +166,46 @@ def _sqlite_checks(
     return result, errors
 
 
+_JSONSCHEMA_UNAVAILABLE_MARKERS = (
+    "jsonschema is unavailable",
+    "no module named 'jsonschema'",
+    "no module named jsonschema",
+)
+
+
+def _is_jsonschema_unavailable_error(exc: Exception) -> bool:
+    """Return True when exc signals that jsonschema is not installed, not a data error.
+
+    Covers three cases that all mean the same thing (dependency missing):
+    - RuntimeError raised by range_resolver._require_jsonschema()
+    - ImportError / ModuleNotFoundError if the import itself propagates out
+    """
+    msg = str(exc).lower()
+    if isinstance(exc, (ImportError, ModuleNotFoundError)):
+        return "jsonschema" in msg
+    return isinstance(exc, RuntimeError) and any(m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS)
+
+
 def _range_ref_check(
     dump_index_path: Optional[Path],
     chunk_index_path: Optional[Path],
-) -> Tuple[Optional[bool], List[str]]:
+) -> Tuple[Optional[bool], List[str], str]:
     """
     Find one chunk with content_range_ref and attempt resolution.
-    Returns (ok, errors).
-    ok=None if no chunk with content_range_ref found (treated as warning, not fail).
-    ok=True if at least one resolved successfully.
-    ok=False if resolution fails.
+
+    Returns (ok, messages, status) where:
+      ok=True,  status="ok"               — at least one ref resolved successfully
+      ok=False, status="fail"             — real semantic / structural failure
+      ok=None,  status="environment_error"— jsonschema not installed; check not executable
+      ok=None,  status="no_range_ref"     — no content_range_ref found (inline-only bundle)
+      ok=None,  status="unavailable"      — required input file missing
+
+    messages go to errors when ok=False, to warnings otherwise.
     """
     if not chunk_index_path or not chunk_index_path.exists():
-        return None, ["chunk_index not available for range_ref check"]
+        return None, ["chunk_index not available for range_ref check"], "unavailable"
     if not dump_index_path or not dump_index_path.exists():
-        return None, ["dump_index not available for range_ref check"]
+        return None, ["dump_index not available for range_ref check"], "unavailable"
 
     sample_ref = None
     try:
@@ -200,27 +225,31 @@ def _range_ref_check(
                         try:
                             raw_ref = json.loads(raw_ref)
                         except json.JSONDecodeError as e:
-                            return False, [f"invalid content_range_ref JSON string: {e}"]
+                            return False, [f"invalid content_range_ref JSON string: {e}"], "fail"
                     if not isinstance(raw_ref, dict):
                         return False, [
                             f"content_range_ref must be an object, got {type(raw_ref).__name__}"
-                        ]
+                        ], "fail"
                     sample_ref = raw_ref
                     break
     except (OSError, UnicodeError) as e:
-        return None, [f"Could not read chunk_index: {e}"]
+        return None, [f"Could not read chunk_index: {e}"], "unavailable"
 
     if sample_ref is None:
         # No range_ref present in any chunk; this is normal for inline-only bundles
         # but should be flagged as a non-blocking issue
-        return None, ["no content_range_ref found; range_ref check skipped"]
+        return None, ["no content_range_ref found; range_ref check skipped"], "no_range_ref"
 
     try:
         from .range_resolver import resolve_range_ref
         resolve_range_ref(dump_index_path, sample_ref)
-        return True, []
+        return True, [], "ok"
     except Exception as e:
-        return False, [f"range_ref resolution failed: {e}"]
+        if _is_jsonschema_unavailable_error(e):
+            # jsonschema is an optional runtime dependency; its absence means the check
+            # cannot be executed — this is epistemic emptiness, not proof of broken data.
+            return None, ["range_ref schema validation skipped: jsonschema unavailable"], "environment_error"
+        return False, [f"range_ref resolution failed: {e}"], "fail"
 
 
 def compute_output_health(
@@ -370,14 +399,17 @@ def compute_output_health(
 
     # ── range_ref_resolution_ok ─────────────────────────────────────────────
     if chunk_index_required:
-        rr_ok, rr_msgs = _range_ref_check(dump_index_path, chunk_index_path)
+        rr_ok, rr_msgs, rr_status = _range_ref_check(dump_index_path, chunk_index_path)
         checks["range_ref_resolution_ok"] = rr_ok
+        checks["range_ref_resolution_status"] = rr_status
         if rr_ok is False:
             errors.extend(rr_msgs)
-        elif rr_ok is None:
+        else:
+            # ok=None covers: no_range_ref, environment_error, unavailable — all non-blocking
             warnings.extend(rr_msgs)
     else:
         checks["range_ref_resolution_ok"] = None
+        checks["range_ref_resolution_status"] = "skipped"
 
     # ── non-blocking optional checks ────────────────────────────────────────
     checks["sample_query_content_hit"] = {

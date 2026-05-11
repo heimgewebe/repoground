@@ -796,3 +796,217 @@ def test_chunk_index_invalid_utf8_is_structured_fail_not_crash(tmp_path):
     assert result["verdict"] == "fail"
     assert result["checks"]["chunk_invalid_json_line_count"] >= 1
     assert any("invalid or non-object" in e for e in result["errors"])
+
+
+# ── range_ref_resolution_status tests ────────────────────────────────────────
+
+
+def _raise_jsonschema_unavailable(*args, **kwargs):
+    """Simulate a missing jsonschema installation from within resolve_range_ref."""
+    raise RuntimeError(
+        "Schema validation requested but jsonschema is unavailable in this environment."
+    )
+
+
+def _make_range_ref_chunks(tmp_path):
+    """Return (canonical_md_path, canonical_md_sha, chunk_index_path, chunk_sha, dump_index_path)
+    for a single chunk with a valid content_range_ref."""
+    canonical_md_path, canonical_md_sha = _make_canonical_md(tmp_path)
+    rr = _build_range_ref_for_canonical(canonical_md_path, 0, 8)
+    chunks = [{"id": "c1", "content": "hello", "path": "a.md", "content_range_ref": rr}]
+    chunk_index_path, chunk_sha = _make_chunk_jsonl(tmp_path, chunks)
+    dump_index_path = _make_dump_index(tmp_path, canonical_md_path.name, chunk_index_path.name)
+    return canonical_md_path, canonical_md_sha, chunk_index_path, chunk_sha, dump_index_path
+
+
+def test_range_ref_jsonschema_unavailable_is_warn_not_fail(tmp_path):
+    """jsonschema missing → environment_error, verdict warn, not fail."""
+    from unittest.mock import patch
+
+    canonical_md_path, canonical_md_sha, chunk_index_path, chunk_sha, dump_index_path = (
+        _make_range_ref_chunks(tmp_path)
+    )
+
+    with patch(
+        "merger.lenskit.core.range_resolver.resolve_range_ref",
+        side_effect=_raise_jsonschema_unavailable,
+    ):
+        result = compute_output_health(
+            run_id="run-jsonschema-missing",
+            stem="test",
+            primary_manifest_path=dump_index_path,
+            canonical_md_path=canonical_md_path,
+            chunk_index_path=chunk_index_path,
+            dump_index_path=dump_index_path,
+            sqlite_index_path=None,
+            sqlite_index_required=False,
+            redact_secrets=False,
+            expected_canonical_md_sha256=canonical_md_sha,
+            expected_chunk_index_sha256=chunk_sha,
+        )
+
+    assert result["verdict"] != "fail", (
+        "verdict must not be 'fail' when jsonschema is merely unavailable"
+    )
+    assert result["checks"]["range_ref_resolution_ok"] is None
+    assert result["checks"]["range_ref_resolution_status"] == "environment_error"
+    assert any("jsonschema" in w.lower() for w in result["warnings"])
+    assert not any("jsonschema" in e.lower() for e in result["errors"])
+
+
+def test_range_ref_jsonschema_unavailable_verdict_is_warn_not_pass(tmp_path):
+    """When jsonschema is unavailable, verdict is 'warn' (not 'pass'), diagnostic is visible."""
+    from unittest.mock import patch
+
+    canonical_md_path, canonical_md_sha, chunk_index_path, chunk_sha, dump_index_path = (
+        _make_range_ref_chunks(tmp_path)
+    )
+
+    with patch(
+        "merger.lenskit.core.range_resolver.resolve_range_ref",
+        side_effect=_raise_jsonschema_unavailable,
+    ):
+        result = compute_output_health(
+            run_id="run-jsonschema-warn",
+            stem="test",
+            primary_manifest_path=dump_index_path,
+            canonical_md_path=canonical_md_path,
+            chunk_index_path=chunk_index_path,
+            dump_index_path=dump_index_path,
+            sqlite_index_path=None,
+            sqlite_index_required=False,
+            redact_secrets=False,
+            expected_canonical_md_sha256=canonical_md_sha,
+            expected_chunk_index_sha256=chunk_sha,
+        )
+
+    assert result["verdict"] == "warn"
+    assert result["errors"] == []
+    assert any("skipped" in w.lower() and "jsonschema" in w.lower() for w in result["warnings"])
+
+
+def test_range_ref_status_ok_on_intact_path(tmp_path):
+    """Intact range-ref path reports status=ok."""
+    canonical_md_path, canonical_md_sha = _make_canonical_md(tmp_path)
+    rr = _build_range_ref_for_canonical(canonical_md_path, 0, 8)
+    chunks = [{"id": "c1", "content": "hello world", "path": "test/a.md", "content_range_ref": rr}]
+    chunk_index_path, chunk_sha = _make_chunk_jsonl(tmp_path, chunks)
+    dump_index_path = _make_dump_index(tmp_path, canonical_md_path.name, chunk_index_path.name)
+
+    result = compute_output_health(
+        run_id="run-range-ok",
+        stem="test",
+        primary_manifest_path=dump_index_path,
+        canonical_md_path=canonical_md_path,
+        chunk_index_path=chunk_index_path,
+        dump_index_path=dump_index_path,
+        sqlite_index_path=None,
+        sqlite_index_required=False,
+        redact_secrets=False,
+        expected_canonical_md_sha256=canonical_md_sha,
+        expected_chunk_index_sha256=chunk_sha,
+    )
+
+    assert result["checks"]["range_ref_resolution_ok"] is True
+    assert result["checks"]["range_ref_resolution_status"] == "ok"
+    assert result["verdict"] == "pass"
+
+
+def test_range_ref_status_fail_on_real_semantic_error(tmp_path):
+    """A genuine broken range-ref reports status=fail and verdict=fail."""
+    chunks = [
+        {
+            "id": "c1",
+            "content": "",
+            "path": "a.md",
+            "content_range_ref": {
+                "artifact_role": "canonical_md",
+                "repo_id": "repo-1",
+                "file_path": "totally_missing_artifact.md",
+                "start_byte": 0,
+                "end_byte": 10,
+                "start_line": 1,
+                "end_line": 1,
+                "content_sha256": "0" * 64,
+            },
+        }
+    ]
+    canonical_md_path, canonical_md_sha = _make_canonical_md(tmp_path)
+    chunk_index_path, chunk_sha = _make_chunk_jsonl(tmp_path, chunks)
+    dump_index_path = _make_dump_index(tmp_path, canonical_md_path.name, chunk_index_path.name)
+
+    result = compute_output_health(
+        run_id="run-range-fail",
+        stem="test",
+        primary_manifest_path=dump_index_path,
+        canonical_md_path=canonical_md_path,
+        chunk_index_path=chunk_index_path,
+        dump_index_path=dump_index_path,
+        sqlite_index_path=None,
+        sqlite_index_required=False,
+        redact_secrets=False,
+        expected_canonical_md_sha256=canonical_md_sha,
+        expected_chunk_index_sha256=chunk_sha,
+    )
+
+    assert result["checks"]["range_ref_resolution_ok"] is False
+    assert result["checks"]["range_ref_resolution_status"] == "fail"
+    assert result["verdict"] == "fail"
+    assert any("range_ref" in e.lower() for e in result["errors"])
+
+
+def test_regression_manifest_hash_checks_remain_hard_fail(tmp_path):
+    """Hash check failures are unaffected by the range_ref status changes."""
+    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    kwargs["expected_canonical_md_sha256"] = "0" * 64  # wrong hash
+
+    result = compute_output_health(**kwargs)
+
+    assert result["verdict"] == "fail"
+    assert result["checks"]["canonical_md_hash_ok"] is False
+    assert any("hash mismatch" in e for e in result["errors"])
+
+
+def test_regression_chunk_index_hash_check_remains_hard_fail(tmp_path):
+    """Chunk-index hash check failures are unaffected by the range_ref status changes."""
+    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    kwargs["expected_chunk_index_sha256"] = "0" * 64  # wrong hash
+
+    result = compute_output_health(**kwargs)
+
+    assert result["verdict"] == "fail"
+    assert result["checks"]["chunk_index_hash_ok"] is False
+    assert any("hash mismatch" in e for e in result["errors"])
+
+
+def test_range_ref_jsonschema_importerror_is_warn_not_fail(tmp_path):
+    """ModuleNotFoundError for jsonschema must also produce warn, not fail."""
+    from unittest.mock import patch
+
+    canonical_md_path, canonical_md_sha, chunk_index_path, chunk_sha, dump_index_path = (
+        _make_range_ref_chunks(tmp_path)
+    )
+
+    with patch(
+        "merger.lenskit.core.range_resolver.resolve_range_ref",
+        side_effect=ModuleNotFoundError("No module named 'jsonschema'"),
+    ):
+        result = compute_output_health(
+            run_id="run-jsonschema-importerror",
+            stem="test",
+            primary_manifest_path=dump_index_path,
+            canonical_md_path=canonical_md_path,
+            chunk_index_path=chunk_index_path,
+            dump_index_path=dump_index_path,
+            sqlite_index_path=None,
+            sqlite_index_required=False,
+            redact_secrets=False,
+            expected_canonical_md_sha256=canonical_md_sha,
+            expected_chunk_index_sha256=chunk_sha,
+        )
+
+    assert result["verdict"] == "warn"
+    assert result["checks"]["range_ref_resolution_ok"] is None
+    assert result["checks"]["range_ref_resolution_status"] == "environment_error"
+    assert any("jsonschema" in w.lower() for w in result["warnings"])
+    assert result["errors"] == []

@@ -114,7 +114,13 @@
           "minimum": 0
         },
         "range_ref_resolution_ok": {
-          "type": ["boolean", "null"]
+          "type": ["boolean", "null"],
+          "description": "True=resolved ok, False=semantic failure (hard fail), null=check not executed (see range_ref_resolution_status)."
+        },
+        "range_ref_resolution_status": {
+          "type": "string",
+          "enum": ["ok", "fail", "environment_error", "no_range_ref", "unavailable", "skipped"],
+          "description": "Fine-grained status for the range_ref check. 'environment_error' means jsonschema is unavailable — the check could not run, not that data is broken. 'fail' means a real semantic/structural error was detected."
         },
         "sample_query_content_hit": {
           "type": "object",
