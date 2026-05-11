@@ -168,12 +168,21 @@ def _sqlite_checks(
 
 _JSONSCHEMA_UNAVAILABLE_MARKERS = (
     "jsonschema is unavailable",
+    "no module named 'jsonschema'",
+    "no module named jsonschema",
 )
 
 
 def _is_jsonschema_unavailable_error(exc: Exception) -> bool:
-    """Return True when exc signals that jsonschema is not installed, not a data error."""
+    """Return True when exc signals that jsonschema is not installed, not a data error.
+
+    Covers three cases that all mean the same thing (dependency missing):
+    - RuntimeError raised by range_resolver._require_jsonschema()
+    - ImportError / ModuleNotFoundError if the import itself propagates out
+    """
     msg = str(exc).lower()
+    if isinstance(exc, (ImportError, ModuleNotFoundError)):
+        return "jsonschema" in msg
     return isinstance(exc, RuntimeError) and any(m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS)
 
 

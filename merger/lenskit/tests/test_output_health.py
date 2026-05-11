@@ -977,3 +977,36 @@ def test_regression_chunk_index_hash_check_remains_hard_fail(tmp_path):
     assert result["verdict"] == "fail"
     assert result["checks"]["chunk_index_hash_ok"] is False
     assert any("hash mismatch" in e for e in result["errors"])
+
+
+def test_range_ref_jsonschema_importerror_is_warn_not_fail(tmp_path):
+    """ModuleNotFoundError for jsonschema must also produce warn, not fail."""
+    from unittest.mock import patch
+
+    canonical_md_path, canonical_md_sha, chunk_index_path, chunk_sha, dump_index_path = (
+        _make_range_ref_chunks(tmp_path)
+    )
+
+    with patch(
+        "merger.lenskit.core.range_resolver.resolve_range_ref",
+        side_effect=ModuleNotFoundError("No module named 'jsonschema'"),
+    ):
+        result = compute_output_health(
+            run_id="run-jsonschema-importerror",
+            stem="test",
+            primary_manifest_path=dump_index_path,
+            canonical_md_path=canonical_md_path,
+            chunk_index_path=chunk_index_path,
+            dump_index_path=dump_index_path,
+            sqlite_index_path=None,
+            sqlite_index_required=False,
+            redact_secrets=False,
+            expected_canonical_md_sha256=canonical_md_sha,
+            expected_chunk_index_sha256=chunk_sha,
+        )
+
+    assert result["verdict"] == "warn"
+    assert result["checks"]["range_ref_resolution_ok"] is None
+    assert result["checks"]["range_ref_resolution_status"] == "environment_error"
+    assert any("jsonschema" in w.lower() for w in result["warnings"])
+    assert result["errors"] == []
