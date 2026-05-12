@@ -11,10 +11,107 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 from ..core.range_resolver import resolve_range_ref
+from ..core.constants import ArtifactRole
 
 logger = logging.getLogger(__name__)
 
 INDEX_SCHEMA_VERSION = "v1"
+
+_JSONSCHEMA_UNAVAILABLE_MARKERS = (
+    "jsonschema is unavailable",
+    "no module named 'jsonschema'",
+    "no module named jsonschema",
+)
+
+
+def _is_jsonschema_unavailable_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    if isinstance(exc, (ImportError, ModuleNotFoundError)):
+        return "jsonschema" in msg
+    return isinstance(exc, RuntimeError) and any(m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS)
+
+
+def _resolve_canonical_range_ref_without_schema(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Resolve a canonical_md range_ref without jsonschema dependency.
+    Used only as a fallback for retrieval hydration when jsonschema is unavailable.
+    """
+    role = ref.get("artifact_role")
+    if role != ArtifactRole.CANONICAL_MD.value:
+        raise ValueError(f"Fallback resolver only supports artifact_role='{ArtifactRole.CANONICAL_MD.value}', got: {role!r}")
+
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+
+    with manifest_path.open("r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    target_path_str = None
+    if manifest.get("contract") == "dump-index":
+        artifact = (manifest.get("artifacts") or {}).get(ArtifactRole.CANONICAL_MD.value)
+        if isinstance(artifact, dict):
+            target_path_str = artifact.get("path")
+    elif manifest.get("kind") == "repolens.bundle.manifest":
+        for artifact in manifest.get("artifacts", []):
+            if artifact.get("role") == ArtifactRole.CANONICAL_MD.value:
+                target_path_str = artifact.get("path")
+                break
+    else:
+        raise ValueError("Unsupported manifest format for fallback resolver")
+
+    if not target_path_str:
+        raise ValueError("Artifact with role 'canonical_md' not found in manifest")
+    if Path(target_path_str).is_absolute():
+        raise ValueError("Artifact path must be relative")
+
+    ref_file_path = ref.get("file_path")
+    if ref_file_path and ref_file_path != target_path_str:
+        raise ValueError(f"file_path mismatch: ref={ref_file_path} manifest={target_path_str}")
+
+    base_dir = manifest_path.parent.resolve()
+    target_path = (base_dir / target_path_str).resolve()
+    try:
+        target_path.relative_to(base_dir)
+    except ValueError:
+        raise ValueError(f"Artifact path '{target_path_str}' attempts to escape the manifest directory")
+    if not target_path.exists():
+        raise FileNotFoundError(f"Resolved artifact file not found: {target_path}")
+
+    start_byte = ref.get("start_byte")
+    end_byte = ref.get("end_byte")
+    expected_sha256 = ref.get("content_sha256")
+    if not isinstance(start_byte, int) or not isinstance(end_byte, int):
+        raise ValueError("range_ref must include integer start_byte/end_byte")
+    if not isinstance(expected_sha256, str) or len(expected_sha256) != 64:
+        raise ValueError("range_ref must include a 64-char content_sha256")
+
+    file_size = target_path.stat().st_size
+    if start_byte < 0 or end_byte > file_size or start_byte > end_byte:
+        raise ValueError(f"Range [{start_byte}:{end_byte}] is out of bounds for file size {file_size}")
+
+    with target_path.open("rb") as f:
+        f.seek(start_byte)
+        content_bytes = f.read(end_byte - start_byte)
+
+    actual_sha256 = hashlib.sha256(content_bytes).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise ValueError(f"Hash mismatch. Expected: {expected_sha256}, Actual: {actual_sha256}")
+
+    try:
+        text = content_bytes.decode("utf-8")
+    except UnicodeDecodeError as e:
+        raise ValueError(f"Extracted range could not be decoded as UTF-8: {e}")
+
+    return {
+        "text": text,
+        "sha256": actual_sha256,
+        "bytes": len(content_bytes),
+        "lines": [ref.get("start_line", -1), ref.get("end_line", -1)],
+        "provenance": {
+            "run_id": manifest.get("run_id"),
+            "artifact_role": ArtifactRole.CANONICAL_MD.value,
+        },
+    }
 
 def _compute_file_sha256(path: Path) -> str:
     """Compute SHA256 of a file."""
@@ -103,6 +200,7 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
             "missing_chunk_id_lines": 0,
             "ingested_chunks_count": 0,
             "fts_hydrated_from_range_ref": 0,
+            "fts_hydrated_without_jsonschema": 0,
         }
 
         # 2. Ingest Chunks
@@ -161,21 +259,19 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                                 f"FTS hydration failed for chunk '{cid}': content_range_ref must be an object"
                             )
                         try:
-                            resolved = resolve_range_ref(dump_path, raw_ref)
+                            try:
+                                resolved = resolve_range_ref(dump_path, raw_ref)
+                            except Exception as e:
+                                if _is_jsonschema_unavailable_error(e):
+                                    resolved = _resolve_canonical_range_ref_without_schema(dump_path, raw_ref)
+                                    stats["fts_hydrated_without_jsonschema"] += 1
+                                else:
+                                    raise
                             content_text = resolved["text"]
                             stats["fts_hydrated_from_range_ref"] += 1
-                        except ValueError as e:
-                            # Hash mismatch or schema violation — controlled fail, no unverified text in FTS
-                            raise RuntimeError(
-                                f"FTS hydration failed for chunk '{cid}': {e}"
-                            ) from e
-                        except FileNotFoundError as e:
-                            raise RuntimeError(
-                                f"FTS hydration failed for chunk '{cid}': {e}"
-                            ) from e
                         except Exception as e:
                             raise RuntimeError(
-                                f"FTS hydration failed for chunk '{cid}' (unexpected error): {e}"
+                                f"FTS hydration failed for chunk '{cid}': {e}"
                             ) from e
                     else:
                         logger.debug(

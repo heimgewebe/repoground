@@ -241,6 +241,23 @@ def test_output_health_retrieval_mode_does_not_require_canonical_md(tmp_path):
     assert health["checks"]["canonical_md_hash_ok"] is None
     assert not any("canonical_md hash check failed" in e for e in health["errors"])
 
+
+def test_output_health_dual_requires_sqlite_when_chunk_index_exists(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "merger.lenskit.core.merge.build_derived_artifacts",
+        lambda *args, **kwargs: [],
+    )
+    artifacts, _, _ = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    assert artifacts.output_health is not None
+    health = json.loads(artifacts.output_health.read_text(encoding="utf-8"))
+    assert health["checks"]["chunk_count"] > 0
+    assert health["checks"]["sqlite_checks_required"] is True
+    assert health["checks"]["sqlite_present"] is False
+    assert health["verdict"] == "fail"
+    assert "sqlite_index expected but file is missing" in health["errors"]
+
+
 def test_invalid_config_sha256_raises_error(tmp_path):
     src_dir = tmp_path / "src"
     src_dir.mkdir()

@@ -4769,6 +4769,11 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
                     eval_json_path.write_text(json.dumps(eval_res, indent=2), encoding="utf-8")
                     derived_paths.append(eval_json_path)
         except Exception as e:
+            if sqlite_index_path and sqlite_index_path.exists():
+                try:
+                    sqlite_index_path.unlink()
+                except OSError:
+                    pass
             if debug:
                 print(f"Error building derived index or evaluating: {e}", file=sys.stderr)
     except ImportError as e:
@@ -5963,7 +5968,7 @@ def write_reports_v2(
         # SQLite checks are required only when a sqlite artifact was materialized.
         # This health report does not claim sqlite generation was expected if
         # retrieval index creation was skipped by environment/runtime constraints.
-        sqlite_index_required=bool(sqlite_indices),
+        sqlite_index_required=bool(final_chunk_index) and output_mode in ("retrieval", "dual"),
         expected_canonical_md_sha256=_exp_md_sha,
         expected_chunk_index_sha256=_exp_chunk_sha,
         retrieval_eval_path=retrieval_evals[-1] if retrieval_evals else None,
