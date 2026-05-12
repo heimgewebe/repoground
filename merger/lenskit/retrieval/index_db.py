@@ -7,7 +7,6 @@ import json
 import hashlib
 import datetime
 import logging
-import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -18,18 +17,12 @@ logger = logging.getLogger(__name__)
 
 INDEX_SCHEMA_VERSION = "v1"
 
-_JSONSCHEMA_UNAVAILABLE_MARKERS = (
-    "jsonschema is unavailable",
-    "no module named 'jsonschema'",
-    "no module named jsonschema",
-)
-
 
 def _is_jsonschema_unavailable_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     if isinstance(exc, (ImportError, ModuleNotFoundError)):
         return "jsonschema" in msg
-    return isinstance(exc, RuntimeError) and any(m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS)
+    return isinstance(exc, RuntimeError) and "jsonschema" in msg and "unavailable" in msg
 
 
 def _resolve_canonical_range_ref_without_schema(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any]:
@@ -62,7 +55,7 @@ def _resolve_canonical_range_ref_without_schema(manifest_path: Path, ref: Dict[s
 
     if not target_path_str:
         raise ValueError("Artifact with role 'canonical_md' not found in manifest")
-    if os.path.isabs(target_path_str):
+    if Path(target_path_str).is_absolute():
         raise ValueError("Artifact path must be relative")
 
     ref_file_path = ref.get("file_path")
@@ -259,6 +252,7 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                             raise RuntimeError(
                                 f"FTS hydration failed for chunk '{cid}': content_range_ref must be an object"
                             )
+                        hydration_error = None
                         try:
                             resolved = resolve_range_ref(dump_path, raw_ref)
                         except Exception as e:
@@ -267,13 +261,14 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                                     resolved = _resolve_canonical_range_ref_without_schema(dump_path, raw_ref)
                                     stats["fts_hydrated_without_jsonschema"] += 1
                                 except Exception as fallback_e:
-                                    raise RuntimeError(
-                                        f"FTS hydration failed for chunk '{cid}': {fallback_e}"
-                                    ) from fallback_e
+                                    hydration_error = fallback_e
                             else:
-                                raise RuntimeError(
-                                    f"FTS hydration failed for chunk '{cid}': {e}"
-                                ) from e
+                                hydration_error = e
+
+                        if hydration_error is not None:
+                            raise RuntimeError(
+                                f"FTS hydration failed for chunk '{cid}': {hydration_error}"
+                            ) from hydration_error
 
                         content_text = resolved["text"]
                         stats["fts_hydrated_from_range_ref"] += 1
