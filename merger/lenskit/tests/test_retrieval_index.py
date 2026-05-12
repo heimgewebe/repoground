@@ -596,6 +596,54 @@ def test_fts_content_hydration_rejects_windows_drive_ref_file_path(tmp_path):
     assert not db_path.exists()
 
 
+def test_fts_content_hydration_rejects_unc_ref_file_path(tmp_path):
+    """Ref file_path with UNC-style absolute path must be rejected."""
+    import hashlib
+
+    canonical_md = tmp_path / "canonical.md"
+    content = b"safe content\n"
+    canonical_md.write_bytes(content)
+    sha = hashlib.sha256(content).hexdigest()
+
+    dump_path = tmp_path / "dump.json"
+    dump_path.write_text(json.dumps({
+        "contract": "dump-index",
+        "contract_version": "v1",
+        "run_id": "test-run",
+        "artifacts": {
+            "canonical_md": {
+                "role": "canonical_md",
+                "path": "canonical.md",
+            }
+        },
+    }))
+
+    ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "testrepo",
+        "file_path": r"\\server\share\canonical.md",
+        "start_byte": 0,
+        "end_byte": len(content),
+        "start_line": 1,
+        "end_line": 1,
+        "content_sha256": sha,
+    }
+
+    chunk_path = tmp_path / "chunks.jsonl"
+    chunk_path.write_text(json.dumps({
+        "chunk_id": "c_unc_ref_path",
+        "repo_id": "testrepo",
+        "path": "docs/section.md",
+        "layer": "core",
+        "canonical_range": ref,
+    }) + "\n")
+
+    db_path = tmp_path / "index.sqlite"
+    with pytest.raises(RuntimeError, match="must be a relative path"):
+        index_db.build_index(dump_path, chunk_path, db_path)
+    assert not db_path.exists()
+
+
 def test_fts_content_hydration_rejects_bool_byte_offsets(tmp_path):
     """Boolean byte offsets must be rejected even though bool is an int subclass in Python."""
     import hashlib

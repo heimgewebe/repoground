@@ -68,6 +68,8 @@ def _resolve_dump_artifact_path(
         if Path(value).is_absolute():
             raise RuntimeError(f"{field_name} must be a relative path, got: {value!r}")
         value_posix = value.replace("\\", "/")
+        if value_posix.startswith("//"):
+            raise RuntimeError(f"{field_name} must be a relative path, got: {value!r}")
         if re.match(r"^[A-Za-z]:/", value_posix):
             raise RuntimeError(f"{field_name} must not contain a Windows drive prefix: {value!r}")
         if value_posix.startswith("./"):
