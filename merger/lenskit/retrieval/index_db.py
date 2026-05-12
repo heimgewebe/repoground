@@ -83,7 +83,7 @@ def _resolve_dump_artifact_path(
             )
 
     base_dir = dump_path.parent.resolve()
-    target_path = (base_dir / target_path_str).resolve()
+    target_path = (base_dir / normalized_target_path).resolve()
     try:
         target_path.relative_to(base_dir)
     except ValueError as e:
@@ -158,7 +158,7 @@ def _hydrate_text_from_legacy_source_file_ref(
 ) -> str:
     """Hydrate via legacy range_resolver path for source_file refs only."""
     ref = _parse_range_like_ref(raw_ref, field_name=field_name, chunk_id=chunk_id)
-    from merger.lenskit.core.range_resolver import resolve_range_ref
+    from ..core.range_resolver import resolve_range_ref
 
     resolved = resolve_range_ref(dump_path, ref)
     text = resolved.get("text")
