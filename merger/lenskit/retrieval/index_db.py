@@ -111,7 +111,7 @@ def _hydrate_text_from_range_like_ref(
         )
 
     file_size = target_path.stat().st_size
-    if start_byte < 0 or end_byte > file_size or start_byte > end_byte:
+    if start_byte < 0 or end_byte > file_size or start_byte >= end_byte:
         raise RuntimeError(
             f"FTS hydration failed for chunk '{chunk_id}': range [{start_byte}:{end_byte}] is out of bounds for file size {file_size}"
         )
@@ -266,8 +266,10 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                 # FTS Content: prefer inline content, otherwise hydrate from canonical bundle ranges.
                 content_text = chunk.get("content") or ""
                 if not content_text:
-                    # canonical_range is the direct canonical_md pointer; content_range_ref remains
-                    # the backward-compatible fallback. First successful hydration wins.
+                    # canonical_range is authoritative when present: it is a hash-verified pointer
+                    # into canonical_md and will raise hard on any error.
+                    # content_range_ref is used only as a backward-compatible fallback when
+                    # canonical_range is absent — never as a silent alternative to a broken one.
                     for field_name, stat_key in (
                         ("canonical_range", "fts_hydrated_from_canonical_range"),
                         ("content_range_ref", "fts_hydrated_from_range_ref"),

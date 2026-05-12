@@ -392,3 +392,52 @@ def test_fts_content_hydration_supports_list_artifacts_and_normalized_file_path(
         assert row[0] == content.decode("utf-8")
     finally:
         conn.close()
+
+
+def test_fts_content_hydration_empty_range_raises(tmp_path):
+    """A range where start_byte == end_byte must be rejected as semantically empty."""
+    import hashlib
+
+    canonical_md = tmp_path / "canonical.md"
+    content = b"non-empty content line\n"
+    canonical_md.write_bytes(content)
+
+    # Construct a zero-length range (start == end)
+    empty_sha = hashlib.sha256(b"").hexdigest()
+    ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "testrepo",
+        "file_path": canonical_md.name,
+        "start_byte": 5,
+        "end_byte": 5,
+        "start_line": 1,
+        "end_line": 1,
+        "content_sha256": empty_sha,
+    }
+
+    dump_path = tmp_path / "dump.json"
+    dump_path.write_text(json.dumps({
+        "contract": "dump-index",
+        "contract_version": "v1",
+        "run_id": "test-run",
+        "artifacts": {
+            "canonical_md": {
+                "role": "canonical_md",
+                "path": canonical_md.name,
+            }
+        },
+    }))
+
+    chunk_path = tmp_path / "chunks.jsonl"
+    chunk_path.write_text(json.dumps({
+        "chunk_id": "c_empty_range",
+        "repo_id": "testrepo",
+        "path": "docs/section.md",
+        "layer": "core",
+        "canonical_range": ref,
+    }) + "\n")
+
+    db_path = tmp_path / "index.sqlite"
+    with pytest.raises(RuntimeError, match="out of bounds"):
+        index_db.build_index(dump_path, chunk_path, db_path)
+    assert not db_path.exists()
