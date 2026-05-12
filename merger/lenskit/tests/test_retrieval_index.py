@@ -631,7 +631,7 @@ def test_fts_content_hydration_rejects_unc_ref_file_path(tmp_path):
 
     chunk_path = tmp_path / "chunks.jsonl"
     chunk_path.write_text(json.dumps({
-        "chunk_id": "c_unc_ref_path",
+        "chunk_id": "c_unc_path_rejection",
         "repo_id": "testrepo",
         "path": "docs/section.md",
         "layer": "core",

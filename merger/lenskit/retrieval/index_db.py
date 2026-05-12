@@ -117,7 +117,12 @@ def _hydrate_text_from_range_like_ref(
     start_byte = ref.get("start_byte")
     end_byte = ref.get("end_byte")
     expected_sha256 = ref.get("content_sha256")
-    if type(start_byte) is not int or type(end_byte) is not int:
+    if (
+        not isinstance(start_byte, int)
+        or isinstance(start_byte, bool)
+        or not isinstance(end_byte, int)
+        or isinstance(end_byte, bool)
+    ):
         raise RuntimeError(
             f"FTS hydration failed for chunk '{chunk_id}': {field_name} must include integer start_byte/end_byte"
         )
