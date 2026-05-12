@@ -176,6 +176,7 @@ def test_output_health_verdict_pass_for_healthy_dual_bundle(tmp_path):
     assert health["checks"]["canonical_md_hash_ok"] is True
     assert health["checks"]["chunk_index_hash_ok"] is True
     assert health["checks"]["range_ref_resolution_ok"] is True
+    assert health["checks"]["range_ref_resolution_status"] == "ok"
 
 
 def test_output_health_jsonschema_unavailable_is_warn_in_generated_bundle(tmp_path):
