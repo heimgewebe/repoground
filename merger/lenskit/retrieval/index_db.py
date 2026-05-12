@@ -16,6 +16,7 @@ INDEX_SCHEMA_VERSION = "v1"
 
 
 def _parse_range_like_ref(raw_ref: Any, *, field_name: str, chunk_id: str) -> Dict[str, Any]:
+    """Normalize a canonical/content range payload into dict form for hydration."""
     if isinstance(raw_ref, str):
         try:
             raw_ref = json.loads(raw_ref)
@@ -35,6 +36,7 @@ def _resolve_dump_artifact_path(
     dump_manifest: Dict[str, Any],
     ref: Dict[str, Any],
 ) -> Path:
+    """Resolve a dump_index artifact path and enforce relative-path boundaries."""
     artifacts = dump_manifest.get("artifacts", {})
     role = ref.get("artifact_role")
     if not isinstance(role, str) or not role:
@@ -80,6 +82,7 @@ def _hydrate_text_from_range_like_ref(
     field_name: str,
     chunk_id: str,
 ) -> str:
+    """Extract UTF-8 text for a byte range and verify its declared SHA256."""
     ref = _parse_range_like_ref(raw_ref, field_name=field_name, chunk_id=chunk_id)
     target_path = _resolve_dump_artifact_path(dump_path, dump_manifest, ref)
     if not target_path.exists():
@@ -262,13 +265,18 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                         raw_ref = chunk.get(field_name)
                         if raw_ref is None:
                             continue
-                        content_text = _hydrate_text_from_range_like_ref(
-                            dump_path,
-                            dump_manifest,
-                            raw_ref,
-                            field_name=field_name,
-                            chunk_id=cid,
-                        )
+                        try:
+                            content_text = _hydrate_text_from_range_like_ref(
+                                dump_path,
+                                dump_manifest,
+                                raw_ref,
+                                field_name=field_name,
+                                chunk_id=cid,
+                            )
+                        except RuntimeError as e:
+                            raise RuntimeError(
+                                f"FTS hydration failed for chunk '{cid}' via {field_name}: {e}"
+                            ) from e
                         stats[stat_key] += 1
                         break
                     if not content_text:
