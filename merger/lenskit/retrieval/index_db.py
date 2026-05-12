@@ -75,11 +75,12 @@ def _resolve_dump_artifact_path(
 
     normalized_target_path = _norm_rel_path(target_path_str, field_name="manifest artifact path")
     ref_file_path = ref.get("file_path")
-    if ref_file_path is not None and _norm_rel_path(ref_file_path, field_name="ref file_path") != normalized_target_path:
-        raise RuntimeError(f"file_path mismatch: ref={ref_file_path} manifest={target_path_str}")
-
-    if Path(target_path_str).is_absolute():
-        raise RuntimeError(f"Artifact path must be relative, got: {target_path_str!r}")
+    if ref_file_path is not None:
+        normalized_ref_file_path = _norm_rel_path(ref_file_path, field_name="ref file_path")
+        if normalized_ref_file_path != normalized_target_path:
+            raise RuntimeError(
+                f"file_path mismatch: ref={normalized_ref_file_path} manifest={normalized_target_path}"
+            )
 
     base_dir = dump_path.parent.resolve()
     target_path = (base_dir / target_path_str).resolve()
