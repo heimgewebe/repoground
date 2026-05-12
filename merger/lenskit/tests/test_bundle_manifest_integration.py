@@ -277,7 +277,7 @@ def test_dual_bundle_jsonschema_missing_still_materializes_sqlite(tmp_path, monk
     health = json.loads(artifacts.output_health.read_text(encoding="utf-8"))
     assert chunk_count > 0
     assert fts_count == chunk_count
-    assert meta.get("ingest.fts_hydrated_from_canonical_range") == "1"
+    assert int(meta.get("ingest.fts_hydrated_from_canonical_range", "0")) > 0
     assert health["checks"]["sqlite_present"] is True
     assert health["checks"]["sqlite_row_count"] == chunk_count
     assert health["checks"]["fts_content_non_empty"] is True

@@ -336,3 +336,59 @@ def test_fts_content_hydration_missing_artifact_raises(tmp_path):
     with pytest.raises(RuntimeError, match="FTS hydration failed"):
         index_db.build_index(dump_path, chunk_path, db_path)
     assert not db_path.exists()
+
+
+def test_fts_content_hydration_supports_list_artifacts_and_normalized_file_path(tmp_path):
+    """Resolver accepts dump_index artifacts as list and tolerates ./ path differences."""
+    import hashlib
+
+    canonical_md = tmp_path / "canonical.md"
+    content = b"hydrateduniquetokenxq7z from list artifacts\n"
+    canonical_md.write_bytes(content)
+    sha = hashlib.sha256(content).hexdigest()
+
+    dump_path = tmp_path / "dump.json"
+    dump_path.write_text(json.dumps({
+        "contract": "dump-index",
+        "contract_version": "v1",
+        "run_id": "test-run",
+        "artifacts": [
+            {
+                "role": "canonical_md",
+                "path": "canonical.md",
+            }
+        ],
+    }))
+
+    ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "testrepo",
+        "file_path": "./canonical.md",
+        "start_byte": 0,
+        "end_byte": len(content),
+        "start_line": 1,
+        "end_line": 1,
+        "content_sha256": sha,
+    }
+
+    chunk_path = tmp_path / "chunks.jsonl"
+    chunk_path.write_text(json.dumps({
+        "chunk_id": "c_list_artifacts",
+        "repo_id": "testrepo",
+        "path": "docs/section.md",
+        "layer": "core",
+        "canonical_range": ref,
+    }) + "\n")
+
+    db_path = tmp_path / "index.sqlite"
+    index_db.build_index(dump_path, chunk_path, db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT content FROM chunks_fts WHERE chunk_id = 'c_list_artifacts'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == content.decode("utf-8")
+    finally:
+        conn.close()

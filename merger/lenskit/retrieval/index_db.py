@@ -52,12 +52,20 @@ def _resolve_dump_artifact_path(
                 if isinstance(artifact, dict) and artifact.get("role") == role:
                     target_path_str = artifact.get("path")
                     break
+    elif isinstance(artifacts, list):
+        for artifact in artifacts:
+            if isinstance(artifact, dict) and artifact.get("role") == role:
+                target_path_str = artifact.get("path")
+                break
 
     if not isinstance(target_path_str, str) or not target_path_str:
         raise RuntimeError(f"Artifact with role '{role}' not found in dump_index")
 
     ref_file_path = ref.get("file_path")
-    if ref_file_path and ref_file_path != target_path_str:
+    def _norm_rel_path(value: str) -> str:
+        return Path(value).as_posix().lstrip("./")
+
+    if ref_file_path and _norm_rel_path(ref_file_path) != _norm_rel_path(target_path_str):
         raise RuntimeError(f"file_path mismatch: ref={ref_file_path} manifest={target_path_str}")
 
     if Path(target_path_str).is_absolute():
