@@ -5948,6 +5948,11 @@ def write_reports_v2(
     _exp_eval_sha = next(
         (e["sha256"] for e in artifacts_list if e["role"] == ArtifactRole.RETRIEVAL_EVAL_JSON.value), None
     )
+    expected_sqlite_index_path = sqlite_indices[-1] if sqlite_indices else (
+        final_chunk_index.with_suffix(".index.sqlite")
+        if output_mode in ("retrieval", "dual") and final_chunk_index
+        else None
+    )
     write_output_health(
         output_health_path,
         run_id=run_id,
@@ -5956,14 +5961,11 @@ def write_reports_v2(
         canonical_md_path=final_canonical_md,
         chunk_index_path=final_chunk_index,
         dump_index_path=final_dump_index,
-        sqlite_index_path=sqlite_indices[-1] if sqlite_indices else None,
+        sqlite_index_path=expected_sqlite_index_path,
         redact_secrets=redact_secrets,
         canonical_md_required=(output_mode in ("archive", "dual") or _exp_md_sha is not None),
         chunk_index_required=(output_mode in ("retrieval", "dual") or _exp_chunk_sha is not None),
-        # SQLite checks are required only when a sqlite artifact was materialized.
-        # This health report does not claim sqlite generation was expected if
-        # retrieval index creation was skipped by environment/runtime constraints.
-        sqlite_index_required=bool(sqlite_indices),
+        sqlite_index_required=bool(output_mode in ("retrieval", "dual") and final_chunk_index),
         expected_canonical_md_sha256=_exp_md_sha,
         expected_chunk_index_sha256=_exp_chunk_sha,
         retrieval_eval_path=retrieval_evals[-1] if retrieval_evals else None,

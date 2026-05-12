@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+import sqlite3
 from pathlib import Path
 
 import jsonschema
@@ -240,6 +241,49 @@ def test_output_health_retrieval_mode_does_not_require_canonical_md(tmp_path):
     assert health["checks"]["canonical_md_required"] is False
     assert health["checks"]["canonical_md_hash_ok"] is None
     assert not any("canonical_md hash check failed" in e for e in health["errors"])
+
+
+def test_dual_bundle_without_sqlite_is_health_fail(tmp_path, monkeypatch):
+    monkeypatch.setattr("merger.lenskit.core.merge.build_derived_artifacts", lambda *args, **kwargs: [])
+
+    artifacts, manifest, _ = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    health = json.loads(artifacts.output_health.read_text(encoding="utf-8"))
+    roles = {artifact["role"] for artifact in manifest["artifacts"]}
+
+    assert ArtifactRole.SQLITE_INDEX.value not in roles
+    assert health["verdict"] == "fail"
+    assert health["checks"]["sqlite_checks_required"] is True
+    assert any("sqlite_index expected but file is missing" in e for e in health["errors"])
+
+
+def test_dual_bundle_jsonschema_missing_still_materializes_sqlite(tmp_path, monkeypatch):
+    monkeypatch.setattr("merger.lenskit.core.range_resolver.jsonschema", None)
+
+    artifacts, manifest, _ = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    roles = {artifact["role"] for artifact in manifest["artifacts"]}
+    assert ArtifactRole.SQLITE_INDEX.value in roles
+    assert artifacts.sqlite_index is not None
+
+    conn = sqlite3.connect(str(artifacts.sqlite_index))
+    try:
+        chunk_count = conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+        fts_count = conn.execute("SELECT count(*) FROM chunks_fts").fetchone()[0]
+        meta = dict(conn.execute("SELECT key, value FROM index_meta").fetchall())
+    finally:
+        conn.close()
+
+    health = json.loads(artifacts.output_health.read_text(encoding="utf-8"))
+    assert chunk_count > 0
+    assert fts_count == chunk_count
+    assert meta.get("ingest.fts_hydrated_from_canonical_range") == "1"
+    assert health["checks"]["sqlite_present"] is True
+    assert health["checks"]["sqlite_row_count"] == chunk_count
+    assert health["checks"]["fts_content_non_empty"] is True
+    assert health["checks"]["range_ref_resolution_status"] == "environment_error"
+    assert health["verdict"] == "warn"
+
 
 def test_invalid_config_sha256_raises_error(tmp_path):
     src_dir = tmp_path / "src"

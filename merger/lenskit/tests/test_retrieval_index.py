@@ -227,6 +227,41 @@ def test_fts_content_hydrated_from_range_ref(tmp_path):
         conn.close()
 
 
+def test_fts_content_hydrated_from_canonical_range_without_jsonschema(tmp_path, monkeypatch):
+    """canonical_range hydration must not depend on jsonschema at index-build time."""
+    dump_path, canonical_md, ref, expected_text = _make_range_ref_env(tmp_path)
+
+    chunk_path = tmp_path / "chunks.jsonl"
+    with chunk_path.open("w") as f:
+        f.write(json.dumps({
+            "chunk_id": "c_can",
+            "repo_id": "testrepo",
+            "path": "docs/section.md",
+            "layer": "core",
+            "canonical_range": ref,
+            "content_range_ref": ref,
+        }) + "\n")
+
+    monkeypatch.setattr("merger.lenskit.core.range_resolver.jsonschema", None)
+
+    db_path = tmp_path / "index.sqlite"
+    index_db.build_index(dump_path, chunk_path, db_path)
+
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT content FROM chunks_fts WHERE chunk_id = 'c_can'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] == expected_text
+
+        meta = dict(conn.execute("SELECT key, value FROM index_meta").fetchall())
+        assert meta.get("ingest.fts_hydrated_from_canonical_range") == "1"
+        assert meta.get("ingest.fts_hydrated_from_range_ref") == "0"
+    finally:
+        conn.close()
+
+
 def test_fts_content_hydration_hash_mismatch_raises(tmp_path):
     """A wrong content_sha256 in content_range_ref must cause a controlled failure."""
     dump_path, canonical_md, ref, _ = _make_range_ref_env(tmp_path)
@@ -248,6 +283,7 @@ def test_fts_content_hydration_hash_mismatch_raises(tmp_path):
     db_path = tmp_path / "index.sqlite"
     with pytest.raises(RuntimeError, match="FTS hydration failed"):
         index_db.build_index(dump_path, chunk_path, db_path)
+    assert not db_path.exists()
 
 
 def test_fts_content_hydration_invalid_json_ref_raises(tmp_path):
@@ -278,6 +314,7 @@ def test_fts_content_hydration_invalid_json_ref_raises(tmp_path):
     db_path = tmp_path / "index.sqlite"
     with pytest.raises(RuntimeError, match="invalid content_range_ref JSON"):
         index_db.build_index(dump_path, chunk_path, db_path)
+    assert not db_path.exists()
 
 
 def test_fts_content_hydration_missing_artifact_raises(tmp_path):
@@ -298,3 +335,4 @@ def test_fts_content_hydration_missing_artifact_raises(tmp_path):
     db_path = tmp_path / "index.sqlite"
     with pytest.raises(RuntimeError, match="FTS hydration failed"):
         index_db.build_index(dump_path, chunk_path, db_path)
+    assert not db_path.exists()

@@ -145,8 +145,8 @@ except RuntimeError as e:
 
 def test_build_index_jsonschema_degradation(tmp_path):
     """
-    build_index() must raise RuntimeError (not silently produce empty FTS)
-    when jsonschema is unavailable and a chunk requires content_range_ref hydration.
+    build_index() must still hydrate SQLite/FTS content when jsonschema is unavailable
+    and the chunk carries canonical bundle ranges.
     """
     import hashlib
     import json as _json
@@ -186,6 +186,7 @@ def test_build_index_jsonschema_degradation(tmp_path):
         "chunk_id": "c_schema_degraded",
         "repo_id": "testrepo",
         "path": "docs/section.md",
+        "canonical_range": ref,
         "layer": "core",
         "content_range_ref": ref,
     }) + "\n", encoding="utf-8")
@@ -195,19 +196,22 @@ def test_build_index_jsonschema_degradation(tmp_path):
     code = f"""
 import sys
 sys.modules['jsonschema'] = None
+import sqlite3
 import merger.lenskit.retrieval.index_db as idx
 from pathlib import Path
 
+idx.build_index(Path("{dump_path}"), Path("{chunk_path}"), Path("{db_path}"))
+conn = sqlite3.connect(Path("{db_path}"))
 try:
-    idx.build_index(Path("{dump_path}"), Path("{chunk_path}"), Path("{db_path}"))
+    row = conn.execute("SELECT content FROM chunks_fts WHERE chunk_id='c_schema_degraded'").fetchone()
+    meta = dict(conn.execute("SELECT key, value FROM index_meta").fetchall())
+finally:
+    conn.close()
+if row and row[0] == "hydrateduniquetokenxq7z is the search term.\\n" and meta.get("ingest.fts_hydrated_from_canonical_range") == "1":
+    print("Success")
+else:
+    print("Hydration failed")
     sys.exit(1)
-except RuntimeError as e:
-    msg = str(e)
-    if "FTS hydration failed" in msg and "Schema validation requested" in msg:
-        print("Success")
-    else:
-        print(f"Wrong error: {{msg}}")
-        sys.exit(1)
 """
     repo_root = get_repo_root()
     result = subprocess.run(
