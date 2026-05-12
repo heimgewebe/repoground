@@ -34,7 +34,13 @@ Diese Liste dokumentiert systematisch die Lücken zwischen der visionären Ziela
 *(Diese Aspekte sind in der Blaupause definiert, aber im Code nicht existent)*
 
 *   **Phase 5 (Cross-Repo-Knowledge-Layer):** Nicht mehr als vollständig nicht existent zu beschreiben. Aktueller Status ist **partial/minimal**: `federation_index`-Schema/Grundlagen sind vorhanden, `cross_repo_links` hat Contract plus minimalen heuristischen Producer, `federation_conflicts` wird heuristisch/minimal emittiert; föderierte Query-Pfade sind teilweise vorhanden. Offen bleiben belastbare Identity-Engine, Conflict-Semantik, Cross-Bundle-Evidence, API-/Runtime-Integration sowie Tests/Hardening.
-*   **Phase 6 (Agent Control Surface - Session Trace):** Ein explizites `agent_query_session.json` (Session Trace) Artefakt wird noch nicht geschrieben, obwohl ein HTTP API-Endpoint existiert.
+*   **Phase 6 (Agent Control Surface - Session Trace):** Altbefund ist **closed/resolved**. `agent_query_session` wird als Runtime-Artefakt gebaut (`build_agent_query_session_v2`), bei aktivem Store persistiert und via `/api/artifact_lookup` referenzierbar gemacht.
+
+### Befundstatus PR-0-Restcheck (belegter Altbefund)
+
+| Historischer Begriff / Altbefund | Kanonischer Begriff / Ist-Zustand | Betroffene Datei(en) | Aktueller Status | Folgeaktion |
+| :--- | :--- | :--- | :--- | :--- |
+| `agent_query_session.json` „wird noch nicht geschrieben“ | Runtime-Artefakt `agent_query_session` wird gebaut und (bei aktiviertem `QueryArtifactStore`) gespeichert; Lookup über `artifact_ids.agent_query_session` und `/api/artifact_lookup` | `merger/lenskit/retrieval/session.py`, `merger/lenskit/service/app.py`, `docs/architecture/runtime-matrix.md`, `docs/architecture/artifact-inventory.md` | resolved/closed | keine Folgeaktion für PR-0 |
 
 ## 4. Architektonische Zusammenfassung
 Die Grundlagen der Phase 1 bis 3 und wesentliche Strukturbausteine der Phase 4 sind für isolierte, lokale Bundles nachvollziehbar implementiert und reduzieren den Drift vor der Cross-Repo-Komplexität erheblich. Für die verbleibenden Gates der Phase 4 (insbesondere API/UI-Struktur und tatsächliche Agenten-Sicherheit) sind jedoch stärkere Integrationstests erforderlich. Die Föderation (Phase 5) ist im aktuellen Stand **partial/minimal** umgesetzt, aber als robuste Architekturphase noch offen; Hardening bleibt eine eigenständige Komplexitätsstufe.

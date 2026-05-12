@@ -60,7 +60,7 @@ Rollenamen folgen `bundle-manifest.v1.schema.json`, nicht älteren Blueprint-Beg
 ### Phase 0 - Roadmap-Konsolidierung
 Aktueller PR:
 - [x] `docs/roadmap/lenskit-master-roadmap.md`
-- [ ] optional kleine Korrektur in `docs/architecture/inconsistencies.md` bei belegtem Altbefund
+- [x] optionale kleine Korrektur in `docs/architecture/inconsistencies.md` bei belegtem Altbefund (Phase-6-Altbefund `agent_query_session` als resolved/closed dokumentiert)
 Gate:
 - keine widersprüchlichen Rollennamen
 - keine erfundenen Blueprint-Pfade
@@ -162,7 +162,7 @@ Begründung:
 ## Nächste konkrete PRs
 PR 0:
 - [x] `docs/roadmap/lenskit-master-roadmap.md`
-- [ ] optional `docs/architecture/inconsistencies.md`, nur bei belegtem Altbefund
+- [x] optionale kleine Korrektur in `docs/architecture/inconsistencies.md`, nur bei belegtem Altbefund (belegter Altbefund vorhanden und minimal eingeordnet)
 PR 1:
 - [x] `docs/architecture/range-semantics.md`
 - [x] `docs/proofs/citation-map-artifact-fit.md`
