@@ -30,18 +30,18 @@ Die Citation-Map-Producer-Komponente existiert nicht im Repo. Schema, Manifest-R
 | Wiring in merge.py | `_add_artifact(CITATION_MAP_JSONL, …)` fehlt in Zeilen 5919–5975 (alle anderen Rollen vorhanden). Kein Contract-/Authority-Default-Eintrag für `CITATION_MAP_JSONL` in Zeilen 5825–5882. |
 | Output-Health Integration | `merger/lenskit/core/output_health.py` erwähnt `citation_map` keinmal (wäre die Stelle für geplante Citation-Health-Checks). |
 | Konsument im Code | `merger/lenskit/retrieval/query_core.py`, `service/`, `cli/` referenzieren `citation_id` nirgends. Contracts-Matrix nennt Konsumenten nur als geplant (Query/Context/Agent Evidence Pack in Phase 2/5). |
-| Real-Dump | `data/` enthält nur `.gitkeep`. Kein erzeugter `*.bundle.manifest.json`, kein `*.merge.md` mit zugehörigem chunk_index. Real-Dump-Proof unmöglich. |
+| Real-Dump | `data/` enthält nur `.gitkeep`. Im Repo ist kein erzeugter `*.bundle.manifest.json`, kein `*.merge.md` mit zugehörigem chunk_index abgelegt. Real-Dump-Proof aus dem Repo-Stand heraus unmöglich. |
 | Fixture-Update | `merger/lenskit/tests/fixtures/retrieval/mini_chunk_index.jsonl` enthält keine dual ranges (`canonical_range`, `source_range`, `content_range_ref`); ein Producer würde an dieser Fixture leer laufen. |
 
 ## Epistemische Leeren
 
 Folgende Lücken verhindern einen stabilen Producer-PR:
 
-1. **Real-Dump fehlt, nötig für Real-Dump-Proof.** `data/` ist leer. Kein produzierter Lenskit-Bundle mit chunk_index dual ranges existiert im Repo oder erreichbar.
+1. **Real-Dump fehlt, nötig für Real-Dump-Proof.** `data/` ist leer. Kein produzierter Lenskit-Bundle mit chunk_index dual ranges ist im Repo als prüfbares Artefakt abgelegt.
    - Folge: Jedes Test-Fixture ist theoretisch falsch und kann nicht „Real-Dump-Proof" sein.
 
-2. **Konsument fehlt im Code, nötig für klaren Nutzen.** Kein Schema erweitert um `citation_id`, kein Validator liest citation_map_jsonl.
-   - Folge: Producer würde ein Artefakt erzeugen, das niemand im aktuellen Repo konsumiert.
+2. **Konsument fehlt im Code, nötig für klaren Nutzen.** Im Repo erweitert kein Schema `citation_id`, kein Validator liest citation_map_jsonl.
+   - Folge: Producer würde ein Artefakt erzeugen, das kein Code im Repo konsumiert.
 
 3. **Snapshot-Quelle für run_id/canonical_md_sha256 nicht zentral verdrahtet.** `merge.py` kennt diese Werte, aber nicht im Kontext eines Citation-Producers.
    - Folge: Deterministische Citation-Id-Ableitung hätte keine garantierte Quelle.
