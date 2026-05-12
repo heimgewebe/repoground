@@ -6,7 +6,7 @@
 
 Die Citation-Map-Producer-Komponente existiert nicht im Repo. Schema, Manifest-Role, ArtifactRole-Enum und Beispiele sind vorhanden — aber kein Producer, kein Wiring, kein Konsument.
 
-**Stop-Kriterium erfüllt:** Kein realer Dump verfügbar; kein In-Repo-Konsument; Real-Dump-Proof daher nicht möglich.
+**Stop-Kriterium erfüllt:** Im Repo ist kein realer Dump mit dual ranges als prüfbares Artefakt abgelegt; kein In-Repo-Konsument; Real-Dump-Proof ist daher aus dem Repo-Stand heraus nicht möglich.
 
 **Keine Implementierung in diesem Diagnose-Schritt.**
 
@@ -38,7 +38,7 @@ Die Citation-Map-Producer-Komponente existiert nicht im Repo. Schema, Manifest-R
 Folgende Lücken verhindern einen stabilen Producer-PR:
 
 1. **Real-Dump fehlt, nötig für Real-Dump-Proof.** `data/` ist leer. Kein produzierter Lenskit-Bundle mit chunk_index dual ranges ist im Repo als prüfbares Artefakt abgelegt.
-   - Folge: Jedes Test-Fixture ist theoretisch falsch und kann nicht „Real-Dump-Proof" sein.
+   - Folge: Ein Test-Fixture kann Producer-Logik prüfen, aber keinen Real-Dump-Proof ersetzen.
 
 2. **Konsument fehlt im Code, nötig für klaren Nutzen.** Im Repo erweitert kein Schema `citation_id`, kein Validator liest citation_map_jsonl.
    - Folge: Producer würde ein Artefakt erzeugen, das kein Code im Repo konsumiert.
@@ -55,7 +55,7 @@ Folgende Lücken verhindern einen stabilen Producer-PR:
 |---|---|---|
 | Citation-Map-Schema fehlt oder ist nicht eindeutig | **Nein** | Schema ist eindeutig, vollständig |
 | Manifest-Role fehlt oder Semantik unklar | **Nein** | Role ist scharf constraint-belegt |
-| **Kein realer Dump mit dual ranges verfügbar** | **Ja** | `data/` leer; keine Bundle-Manifest auf FS; Fixture hat keine dual ranges |
+| **Kein realer Dump mit dual ranges verfügbar** | **Ja** | `data/` leer; im Repo kein Bundle-Manifest abgelegt; Fixture hat keine dual ranges |
 | Producer-Status nicht eindeutig belegbar | **Nein** | H1 ist eindeutig belegt |
 | **Kein Konsument oder kein klarer Nutzen** | **Teilweise Ja** | Kein Konsument im Code; Nutzen (stable citation_id) ohne Konsument spekulativ |
 
