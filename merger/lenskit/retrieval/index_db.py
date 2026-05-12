@@ -7,6 +7,7 @@ import json
 import hashlib
 import datetime
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -61,7 +62,7 @@ def _resolve_canonical_range_ref_without_schema(manifest_path: Path, ref: Dict[s
 
     if not target_path_str:
         raise ValueError("Artifact with role 'canonical_md' not found in manifest")
-    if Path(target_path_str).is_absolute():
+    if os.path.isabs(target_path_str):
         raise ValueError("Artifact path must be relative")
 
     ref_file_path = ref.get("file_path")
@@ -259,20 +260,23 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
                                 f"FTS hydration failed for chunk '{cid}': content_range_ref must be an object"
                             )
                         try:
-                            try:
-                                resolved = resolve_range_ref(dump_path, raw_ref)
-                            except Exception as e:
-                                if _is_jsonschema_unavailable_error(e):
+                            resolved = resolve_range_ref(dump_path, raw_ref)
+                        except Exception as e:
+                            if _is_jsonschema_unavailable_error(e):
+                                try:
                                     resolved = _resolve_canonical_range_ref_without_schema(dump_path, raw_ref)
                                     stats["fts_hydrated_without_jsonschema"] += 1
-                                else:
-                                    raise
-                            content_text = resolved["text"]
-                            stats["fts_hydrated_from_range_ref"] += 1
-                        except Exception as e:
-                            raise RuntimeError(
-                                f"FTS hydration failed for chunk '{cid}': {e}"
-                            ) from e
+                                except Exception as fallback_e:
+                                    raise RuntimeError(
+                                        f"FTS hydration failed for chunk '{cid}': {fallback_e}"
+                                    ) from fallback_e
+                            else:
+                                raise RuntimeError(
+                                    f"FTS hydration failed for chunk '{cid}': {e}"
+                                ) from e
+
+                        content_text = resolved["text"]
+                        stats["fts_hydrated_from_range_ref"] += 1
                     else:
                         logger.debug(
                             "Chunk '%s' has no inline content and no content_range_ref; FTS content will be empty.",
