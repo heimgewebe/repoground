@@ -369,7 +369,7 @@ def build_index(dump_path: Path, chunk_path: Path, db_path: Path, config_payload
             try:
                 db_path.unlink()
             except OSError:
-                logger.warning("Could not remove partial DB after failed build: %s", db_path)
+                logger.warning("Could not remove partial DB after failed build: %s", db_path, exc_info=True)
 
     # Emit warning if issues found
     if stats["invalid_json_lines"] > 0 or stats["missing_chunk_id_lines"] > 0:
