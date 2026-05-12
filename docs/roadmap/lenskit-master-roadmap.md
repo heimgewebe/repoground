@@ -74,6 +74,7 @@ Spätere PRs:
 - [x] Bundle-Manifest-Role `citation_map_jsonl`
 - [x] `chunk_index` dual range mit `content_range_ref`, `canonical_range`, `source_range`
 - [ ] Citation-Map-Producer, geplante Citation-/Evidence-Health-Prüfung in separater Folge-PR, Real-Dump-Proof
+  - **Blocker (Diagnose 2026-05-12):** Real-Dump nicht verfügbar; Konsument nicht im Code definiert; Citation-Id-Regel nicht in Code fixiert. Siehe `docs/proofs/citation-map-producer-diagnosis.md`. Nächste Vorbedingungen: 1) Real-Dump mit dual ranges bereitstellen, 2) Konsument oder Validator benennen, 3) Citation-Id-Derivation als `core/citation_id.py` implementieren.
 Gate:
 - `citation_map_jsonl` nie `canonical_content` oder `content_source`
 - `canonical_range` und `source_range` getrennt
