@@ -13,6 +13,7 @@ Environment=RLENS_PORT=8787
 # RLENS_FS_TOKEN_SECRET is separate and optional for filesystem-token signing.
 # Missing file intentionally fails the unit for full-peer deployments.
 EnvironmentFile=%h/.config/rlens/env
+ExecStartPre=/bin/sh -c 'test -n "$RLENS_TOKEN" || { echo "RLENS_TOKEN is required" >&2; exit 1; }'
 WorkingDirectory=%h/repos/lenskit
 ExecStart=/usr/bin/python3 -m merger.lenskit.cli.rlens
 Restart=on-failure
