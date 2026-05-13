@@ -18,6 +18,10 @@ def main(args: Optional[List[str]] = None) -> int:
     )
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
+    # Citation command
+    from .cmd_citation import register_citation_commands
+    register_citation_commands(subparsers)
+
     # Federation command
     from .cmd_federation import register_federation_commands
     register_federation_commands(subparsers)
@@ -220,6 +224,13 @@ def main(args: Optional[List[str]] = None) -> int:
             return cmd_atlas.run_atlas_analyze(parsed_args)
         else:
             parser.parse_args(["atlas", "--help"])
+            return 0
+    elif parsed_args.command == "citation":
+        from .cmd_citation import run_citation_validate
+        if parsed_args.citation_cmd == "validate":
+            return run_citation_validate(parsed_args)
+        else:
+            parser.parse_args(["citation", "--help"])
             return 0
     elif parsed_args.command == "federation":
         from .cmd_federation import handle_federation_command
