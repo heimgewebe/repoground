@@ -85,12 +85,10 @@ Bevor ein echtes `merger/lenskit/core/citation_map.py` begonnen wird, müssen di
 - Option C: Roadmap-gültige Placeholder wie `merger/lenskit/retrieval/citation_lookup.py` mit stub consumer.
 - Warum: Producer ohne Konsument ist unmotiviert; die nächste Lenskit-Instanz weiß nicht, warum das Artefakt existiert.
 
-### 3. Citation-Id-Derivationsregel als Code-Helper fixieren
-- Neuer PR: `merger/lenskit/core/citation_id.py` mit:
-  - `make_citation_id(canonical_md_sha256: str, start_byte: int, end_byte: int, content_sha256: str) -> str`
-  - Implementiert: `"cit_" + sha256(f"lenskit.citation-map.v1:{canonical_md_sha256}:{start_byte}:{end_byte}:{content_sha256}")[:16]`
-  - Test: Determinismus-Check (same input → same output)
-- Warum: Die Regel ist derzeit nur Blueprint-Text; sie muss Code werden, damit der Producer sie nicht erraten muss.
+### 3. Citation-Id-Derivationsregel als Code-Helper fixieren ✓ erledigt (PR #652)
+- `merger/lenskit/core/citation_id.py` implementiert `make_citation_id(...)` mit Payload-Präfix `lenskit.citation-map.v1:`, Feldreihenfolge und 16-hex-Truncation.
+- 22 Tests (Determinismus, Sensitivität, Format, Input-Guards, Golden-Vector).
+- **Stop-Entscheidung bleibt bestehen:** Helper ist vorbereitet, aber Real-Dump und Konsument/Validator fehlen weiterhin.
 
 ## Roadmap-Implikation
 

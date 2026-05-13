@@ -144,6 +144,14 @@ def test_end_byte_less_than_start_rejected():
 
 
 # ---------------------------------------------------------------------------
+# Golden vector — freezes payload prefix, field order, and 16-hex truncation
+# ---------------------------------------------------------------------------
+
+def test_known_vector_freezes_payload_contract():
+    assert make_citation_id(SHA_A, 0, 100, SHA_B) == "cit_e9bf24db57165d03"
+
+
+# ---------------------------------------------------------------------------
 # Edge cases that should succeed
 # ---------------------------------------------------------------------------
 

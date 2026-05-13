@@ -11,11 +11,11 @@ def make_citation_id(
     content_sha256: str,
 ) -> str:
     """Derive a stable citation ID from a canonical range's identifying fields."""
-    if not isinstance(canonical_md_sha256, str) or not _SHA256_RE.match(canonical_md_sha256):
+    if not isinstance(canonical_md_sha256, str) or not _SHA256_RE.fullmatch(canonical_md_sha256):
         raise ValueError(
             "canonical_md_sha256 must be a 64-character lowercase hex string"
         )
-    if not isinstance(content_sha256, str) or not _SHA256_RE.match(content_sha256):
+    if not isinstance(content_sha256, str) or not _SHA256_RE.fullmatch(content_sha256):
         raise ValueError(
             "content_sha256 must be a 64-character lowercase hex string"
         )
