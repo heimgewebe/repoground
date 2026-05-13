@@ -187,6 +187,22 @@ def test_chunk_index_sha_mismatch_fails(tmp_path):
     assert any("chunk_index_jsonl SHA256 mismatch" in e for e in report["errors"])
 
 
+def test_missing_manifest_sha256_fails(tmp_path):
+    content = b"canonical content"
+    chunk = _make_chunk(content, "merge.md", 0, 9)
+    manifest_path = _make_bundle(tmp_path, content, [chunk])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"][0].pop("sha256", None)
+    manifest["artifacts"][1].pop("sha256", None)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = validate_bundle(str(manifest_path))
+
+    assert report["status"] == "fail"
+    assert any("canonical_md sha256 is missing" in e for e in report["errors"])
+    assert any("chunk_index_jsonl sha256 is missing" in e for e in report["errors"])
+
+
 def test_range_content_sha_mismatch_fails(tmp_path):
     content = b"Hello world range test"
     chunk = _make_chunk(content, "merge.md", 0, 10)
@@ -388,6 +404,16 @@ def test_absolute_canonical_md_path_fails(tmp_path):
     assert any("absolute" in e or "forbidden" in e for e in report["errors"])
 
 
+def test_canonical_range_file_path_with_dot_slash_is_accepted(tmp_path):
+    content = b"dot slash canonical path"
+    chunk = _make_chunk(content, "./merge.md", 0, 10)
+    manifest_path = _make_bundle(tmp_path, content, [chunk])
+
+    report = validate_bundle(str(manifest_path))
+
+    assert report["status"] == "ok"
+
+
 # ---------------------------------------------------------------------------
 # Missing manifest / artifact roles
 # ---------------------------------------------------------------------------
@@ -469,7 +495,8 @@ def test_report_has_all_required_keys(tmp_path):
     report = validate_bundle(str(manifest_path))
 
     required_keys = {
-        "status", "run_id", "chunk_count", "canonical_range_count",
+        "status", "bundle_manifest_path", "bundle_run_id", "validation_run_id",
+        "canonical_md_sha256", "chunk_index_sha256", "chunk_count", "canonical_range_count",
         "source_range_count", "content_range_ref_count", "citation_id_count",
         "citation_id_duplicate_count", "canonical_range_hash_ok_count",
         "errors", "warnings", "sample_citation_ids",
@@ -477,7 +504,7 @@ def test_report_has_all_required_keys(tmp_path):
     assert required_keys.issubset(report.keys())
 
 
-def test_run_id_is_unique_per_call(tmp_path):
+def test_report_separates_bundle_run_id_and_validation_run_id(tmp_path):
     content = b"unique run id test"
     chunk = _make_chunk(content, "merge.md", 0, 6)
     manifest_path = _make_bundle(tmp_path, content, [chunk])
@@ -485,4 +512,6 @@ def test_run_id_is_unique_per_call(tmp_path):
     r1 = validate_bundle(str(manifest_path))
     r2 = validate_bundle(str(manifest_path))
 
-    assert r1["run_id"] != r2["run_id"]
+    assert r1["bundle_run_id"] == "test-run-001"
+    assert r2["bundle_run_id"] == "test-run-001"
+    assert r1["validation_run_id"] != r2["validation_run_id"]

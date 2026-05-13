@@ -64,7 +64,8 @@ lenskit citation validate --json \
 Der Report muss enthalten:
 
 - `bundle_manifest_path`: verwendeter Pfad
-- `run_id`: eindeutige UUID des Validator-Laufs
+- `bundle_run_id`: `run_id` aus dem Manifest
+- `validation_run_id`: eindeutige UUID des Validator-Laufs
 - `canonical_md_sha256`: aus Manifest
 - `chunk_index_sha256`: aus Manifest
 - `chunk_count`: erwartet 585

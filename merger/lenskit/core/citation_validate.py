@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import uuid
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -10,11 +11,11 @@ from merger.lenskit.core.path_security import resolve_secure_path
 
 _CIT_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
-_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:[/\\]")
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 _UNC_RE = re.compile(r"^\\\\")
 
 
-def _reject_unsafe_path(raw: str, label: str) -> None:
+def _normalize_relative_path(raw: str, label: str) -> str:
     if not isinstance(raw, str):
         raise ValueError(f"{label}: path must be a string")
     if raw.startswith("/"):
@@ -26,6 +27,10 @@ def _reject_unsafe_path(raw: str, label: str) -> None:
     parts = raw.replace("\\", "/").split("/")
     if ".." in parts:
         raise ValueError(f"{label}: path traversal ('..') is forbidden")
+    normalized = os.path.normpath(raw.replace("\\", "/"))
+    if normalized in (".", ""):
+        raise ValueError(f"{label}: path must not be empty")
+    return normalized
 
 
 def _sha256_file(path: Path) -> str:
@@ -40,10 +45,22 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _fail_report(run_id: str, errors: List[str]) -> Dict[str, Any]:
+def _fail_report(
+    validation_run_id: str,
+    errors: List[str],
+    *,
+    bundle_manifest_path: str = "",
+    bundle_run_id: Any = None,
+    canonical_md_sha256: Any = None,
+    chunk_index_sha256: Any = None,
+) -> Dict[str, Any]:
     return {
         "status": "fail",
-        "run_id": run_id,
+        "bundle_manifest_path": bundle_manifest_path,
+        "bundle_run_id": bundle_run_id,
+        "validation_run_id": validation_run_id,
+        "canonical_md_sha256": canonical_md_sha256,
+        "chunk_index_sha256": chunk_index_sha256,
         "chunk_count": 0,
         "canonical_range_count": 0,
         "source_range_count": 0,
@@ -67,7 +84,7 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
 
     Returns a structured report dict.
     """
-    run_id = str(uuid.uuid4())
+    validation_run_id = str(uuid.uuid4())
     errors: List[str] = []
     warnings: List[str] = []
     sample_citation_ids: List[str] = []
@@ -86,11 +103,20 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
     if not manifest_path.is_absolute():
         manifest_path = Path.cwd() / manifest_path
     manifest_path = manifest_path.resolve()
+    bundle_manifest_path = str(manifest_path)
 
     if not manifest_path.exists():
-        return _fail_report(run_id, [f"Manifest not found: {manifest_path}"])
+        return _fail_report(
+            validation_run_id,
+            [f"Manifest not found: {manifest_path}"],
+            bundle_manifest_path=bundle_manifest_path,
+        )
     if not manifest_path.is_file():
-        return _fail_report(run_id, [f"Manifest path is not a file: {manifest_path}"])
+        return _fail_report(
+            validation_run_id,
+            [f"Manifest path is not a file: {manifest_path}"],
+            bundle_manifest_path=bundle_manifest_path,
+        )
 
     manifest_dir = manifest_path.parent
 
@@ -99,13 +125,28 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
         with manifest_path.open("r", encoding="utf-8") as f:
             manifest = json.load(f)
     except json.JSONDecodeError as e:
-        return _fail_report(run_id, [f"Manifest is not valid JSON: {e}"])
+        return _fail_report(
+            validation_run_id,
+            [f"Manifest is not valid JSON: {e}"],
+            bundle_manifest_path=bundle_manifest_path,
+        )
     except OSError as e:
-        return _fail_report(run_id, [f"Cannot read manifest: {e}"])
+        return _fail_report(
+            validation_run_id,
+            [f"Cannot read manifest: {e}"],
+            bundle_manifest_path=bundle_manifest_path,
+        )
+
+    bundle_run_id = manifest.get("run_id")
 
     artifacts = manifest.get("artifacts", [])
     if not isinstance(artifacts, list):
-        return _fail_report(run_id, ["Manifest 'artifacts' field is not a list"])
+        return _fail_report(
+            validation_run_id,
+            ["Manifest 'artifacts' field is not a list"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+        )
 
     canonical_md_artifact = None
     chunk_index_artifact = None
@@ -117,43 +158,98 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
             chunk_index_artifact = art
 
     if canonical_md_artifact is None:
-        return _fail_report(run_id, ["Manifest has no artifact with role 'canonical_md'"])
+        return _fail_report(
+            validation_run_id,
+            ["Manifest has no artifact with role 'canonical_md'"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+        )
     if chunk_index_artifact is None:
-        return _fail_report(run_id, ["Manifest has no artifact with role 'chunk_index_jsonl'"])
+        return _fail_report(
+            validation_run_id,
+            ["Manifest has no artifact with role 'chunk_index_jsonl'"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+        )
 
-    canonical_md_rel = canonical_md_artifact.get("path", "")
-    chunk_index_rel = chunk_index_artifact.get("path", "")
+    canonical_md_rel_raw = canonical_md_artifact.get("path", "")
+    chunk_index_rel_raw = chunk_index_artifact.get("path", "")
     canonical_md_manifest_sha = canonical_md_artifact.get("sha256", "")
     chunk_index_manifest_sha = chunk_index_artifact.get("sha256", "")
 
-    # --- path security ---
     try:
-        _reject_unsafe_path(canonical_md_rel, "canonical_md path")
+        canonical_md_rel = _normalize_relative_path(canonical_md_rel_raw, "canonical_md path")
         canonical_md_path = resolve_secure_path(manifest_dir, canonical_md_rel)
     except ValueError as e:
-        return _fail_report(run_id, [f"canonical_md path rejected: {e}"])
+        return _fail_report(
+            validation_run_id,
+            [f"canonical_md path rejected: {e}"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+            canonical_md_sha256=canonical_md_manifest_sha,
+            chunk_index_sha256=chunk_index_manifest_sha,
+        )
 
     try:
-        _reject_unsafe_path(chunk_index_rel, "chunk_index_jsonl path")
+        chunk_index_rel = _normalize_relative_path(
+            chunk_index_rel_raw, "chunk_index_jsonl path"
+        )
         chunk_index_path = resolve_secure_path(manifest_dir, chunk_index_rel)
     except ValueError as e:
-        return _fail_report(run_id, [f"chunk_index_jsonl path rejected: {e}"])
+        return _fail_report(
+            validation_run_id,
+            [f"chunk_index_jsonl path rejected: {e}"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+            canonical_md_sha256=canonical_md_manifest_sha,
+            chunk_index_sha256=chunk_index_manifest_sha,
+        )
 
     if not canonical_md_path.exists():
-        return _fail_report(run_id, [f"canonical_md file not found: {canonical_md_path}"])
+        return _fail_report(
+            validation_run_id,
+            [f"canonical_md file not found: {canonical_md_path}"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+            canonical_md_sha256=canonical_md_manifest_sha,
+            chunk_index_sha256=chunk_index_manifest_sha,
+        )
     if not chunk_index_path.exists():
-        return _fail_report(run_id, [f"chunk_index_jsonl file not found: {chunk_index_path}"])
+        return _fail_report(
+            validation_run_id,
+            [f"chunk_index_jsonl file not found: {chunk_index_path}"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+            canonical_md_sha256=canonical_md_manifest_sha,
+            chunk_index_sha256=chunk_index_manifest_sha,
+        )
 
     # --- verify manifest SHAs ---
     actual_canonical_sha = _sha256_file(canonical_md_path)
-    if canonical_md_manifest_sha and actual_canonical_sha != canonical_md_manifest_sha:
+    if not canonical_md_manifest_sha:
+        errors.append("canonical_md sha256 is missing in manifest")
+    elif not isinstance(canonical_md_manifest_sha, str) or not _SHA256_RE.fullmatch(
+        canonical_md_manifest_sha
+    ):
+        errors.append(
+            "canonical_md sha256 must be a 64-char lowercase hex string in manifest"
+        )
+    elif actual_canonical_sha != canonical_md_manifest_sha:
         errors.append(
             f"canonical_md SHA256 mismatch: manifest={canonical_md_manifest_sha!r} "
             f"actual={actual_canonical_sha!r}"
         )
 
     actual_chunk_sha = _sha256_file(chunk_index_path)
-    if chunk_index_manifest_sha and actual_chunk_sha != chunk_index_manifest_sha:
+    if not chunk_index_manifest_sha:
+        errors.append("chunk_index_jsonl sha256 is missing in manifest")
+    elif not isinstance(chunk_index_manifest_sha, str) or not _SHA256_RE.fullmatch(
+        chunk_index_manifest_sha
+    ):
+        errors.append(
+            "chunk_index_jsonl sha256 must be a 64-char lowercase hex string in manifest"
+        )
+    elif actual_chunk_sha != chunk_index_manifest_sha:
         errors.append(
             f"chunk_index_jsonl SHA256 mismatch: manifest={chunk_index_manifest_sha!r} "
             f"actual={actual_chunk_sha!r}"
@@ -166,7 +262,14 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
         with canonical_md_path.open("rb") as f:
             canonical_md_bytes = f.read()
     except OSError as e:
-        return _fail_report(run_id, [f"Cannot read canonical_md: {e}"])
+        return _fail_report(
+            validation_run_id,
+            [f"Cannot read canonical_md: {e}"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+            canonical_md_sha256=canonical_md_manifest_sha,
+            chunk_index_sha256=chunk_index_manifest_sha,
+        )
 
     canonical_md_file_size = len(canonical_md_bytes)
 
@@ -175,7 +278,14 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
         with chunk_index_path.open("r", encoding="utf-8") as f:
             lines = f.readlines()
     except OSError as e:
-        return _fail_report(run_id, [f"Cannot read chunk_index_jsonl: {e}"])
+        return _fail_report(
+            validation_run_id,
+            [f"Cannot read chunk_index_jsonl: {e}"],
+            bundle_manifest_path=bundle_manifest_path,
+            bundle_run_id=bundle_run_id,
+            canonical_md_sha256=canonical_md_manifest_sha,
+            chunk_index_sha256=chunk_index_manifest_sha,
+        )
 
     for lineno, raw_line in enumerate(lines, start=1):
         raw_line = raw_line.strip()
@@ -227,10 +337,18 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
                 f"got {art_role!r}"
             )
 
-        cr_file_path = cr.get("file_path", "")
+        cr_file_path_raw = cr.get("file_path", "")
+        try:
+            cr_file_path = _normalize_relative_path(
+                cr_file_path_raw, "canonical_range.file_path"
+            )
+        except ValueError as e:
+            errors.append(f"Line {lineno}: canonical_range.file_path rejected: {e}")
+            continue
+
         if cr_file_path != canonical_md_rel:
             errors.append(
-                f"Line {lineno}: canonical_range.file_path {cr_file_path!r} "
+                f"Line {lineno}: canonical_range.file_path {cr_file_path_raw!r} "
                 f"does not match manifest canonical_md path {canonical_md_rel!r}"
             )
 
@@ -327,7 +445,11 @@ def validate_bundle(manifest_path_str: str) -> Dict[str, Any]:
     status = "ok" if not errors else "fail"
     return {
         "status": status,
-        "run_id": run_id,
+        "bundle_manifest_path": bundle_manifest_path,
+        "bundle_run_id": bundle_run_id,
+        "validation_run_id": validation_run_id,
+        "canonical_md_sha256": canonical_md_manifest_sha,
+        "chunk_index_sha256": chunk_index_manifest_sha,
         "chunk_count": chunk_count,
         "canonical_range_count": canonical_range_count,
         "source_range_count": source_range_count,
