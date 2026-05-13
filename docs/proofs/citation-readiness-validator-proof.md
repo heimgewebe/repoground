@@ -1,81 +1,128 @@
-# Citation Readiness Validator — Proof / STOP-Bericht
+# Citation Readiness Validator — Real-Dump-Proof
 
-**Datum:** 2026-05-13
-**Branch:** `claude/build-validator-consumer-1Q7p0`
+**Datum:** 2026-05-13  
 **Validator-Rolle:** Konsument / Readiness-Gate. Kein Producer.
 
 ---
 
-## Status: STOP — Real-Dump lokal nicht verfügbar
+## Status: PASS — gegen echten aktuellen Dump verifiziert
 
-### Fehlende Dateien
+Der Proof wurde gegen einen real mit dem aktuellen Merger erzeugten Dump ausgeführt:
 
-Der Real-Dump `lenskit-max-260513-0642` ist auf dem aktuellen System **nicht** vorhanden.
+- Manifest: `/tmp/lenskit-hub/merges/lenskit-max-260513-1503_merge.bundle.manifest.json`
+- Canonical MD: `/tmp/lenskit-hub/merges/lenskit-max-260513-1503_merge.md`
+- Chunk Index: `/tmp/lenskit-hub/merges/lenskit-max-260513-1503_merge.chunk_index.jsonl`
 
-Erwartet (alle relativ zum Dump-Verzeichnis):
+Repo-belegte Korrektur gegenüber dem alten STOP-Bericht:
 
-| Datei | Wofür benötigt |
-|-------|----------------|
-| `lenskit-max-260513-0642_merge.bundle.manifest.json` | Einstiegspunkt für Validator; enthält Artifact-Rollen und SHA256-Hashes |
-| `lenskit-max-260513-0642_merge.md` | Canonical-MD-Quelle; Byte-Ranges werden daraus gelesen und SHA256-geprüft |
-| `lenskit-max-260513-0642_chunk_index.jsonl` | 585 erwartete Chunk-Zeilen mit `canonical_range`, `source_range`, `content_range_ref` |
-
-Ohne diese drei Dateien kann der Validator nicht ausgeführt werden.
-Die Implementierung ist vollständig; der Proof-Run steht aus.
+- Der reale Chunk-Index-Dateiname ist `lenskit-max-260513-1503_merge.chunk_index.jsonl`, **nicht** `..._chunk_index.jsonl`.
+- Die reale Chunk-Zahl ist **594**, **nicht 585**.
+- Der Validator funktioniert gegen die reale Bundle-Struktur **unverändert korrekt**.
 
 ---
 
-## Implementierungsstand (zum Zeitpunkt dieses Berichts)
+## Real-Dump-Iststand
 
-### Neue Dateien
+### Manifest-Identität
 
-| Datei | Rolle |
-|-------|-------|
-| `merger/lenskit/core/citation_validate.py` | Core-Validator-Logik |
-| `merger/lenskit/cli/cmd_citation.py` | CLI-Befehl `lenskit citation validate` |
-| `merger/lenskit/tests/test_citation_validate.py` | Unit-Tests mit synthetischen Fixtures |
-| `merger/lenskit/tests/test_cli_citation.py` | CLI-Tests mit synthetischen Fixtures |
+- `run_id`: `lenskit-full-max-260513-1503`
+- `created_at`: `2026-05-13T15:03:52Z`
 
-### Geänderte Dateien
+### Reale Artifact-Rollen im Bundle
 
-| Datei | Änderung |
-|-------|----------|
-| `merger/lenskit/cli/main.py` | `citation`-Subcommand registriert |
-| `docs/roadmap/lenskit-master-roadmap.md` | Validator-Status ergänzt |
+| Rolle | Pfad | SHA256 |
+|---|---|---|
+| `canonical_md` | `lenskit-max-260513-1503_merge.md` | `94503fb079ae26d263ef056959a10ba34557183a988ec4b7233e4e5cdf4bd8d4` |
+| `chunk_index_jsonl` | `lenskit-max-260513-1503_merge.chunk_index.jsonl` | `7071b6816612c7c7e4fe536a4f9acff5a82a1285c8f5872ce69b4caf8beb657a` |
+| `derived_manifest_json` | `lenskit-max-260513-1503_merge.derived_index.json` | `d880548822d9c235305c6dcdf7600a48bc61b4394e090a540684896a60cece32` |
+| `dump_index_json` | `lenskit-max-260513-1503_merge.dump_index.json` | `7bf1e04450b25d63b19527a24ed93ff50c6df206c4076ec33e57e2b253430fd4` |
+| `index_sidecar_json` | `lenskit-max-260513-1503_merge.json` | `178322965d5613b323cb5ce992ec9d864a79ddd3db70970f11a6b51a5f901e56` |
+| `output_health` | `lenskit-max-260513-1503_merge.output_health.json` | `0f127cf83af7db714c9b07790babfc1e8e9c3379cf3a8cb85b1af7ecef3d199e` |
+| `retrieval_eval_json` | `lenskit-max-260513-1503_merge.retrieval_eval.json` | `77b8a2b461669475f602077887ad3c7de5f104ee32eb9de90fa96306bba50bbf` |
+| `sqlite_index` | `lenskit-max-260513-1503_merge.chunk_index.index.sqlite` | `fe71c0e9d95eb1b8c38de09499732a48a48a9e83e0ae2d1a59707cc88474ed88` |
+
+Manifest- und Dateihashes stimmen für die vom Validator verwendeten Artefakte exakt überein:
+
+- `canonical_md`: Manifest = Actual = `94503fb079ae26d263ef056959a10ba34557183a988ec4b7233e4e5cdf4bd8d4`
+- `chunk_index_jsonl`: Manifest = Actual = `7071b6816612c7c7e4fe536a4f9acff5a82a1285c8f5872ce69b4caf8beb657a`
+
+### Reale Chunk-Struktur
+
+Gemessener Iststand des echten `chunk_index.jsonl`:
+
+- `chunk_count`: `594`
+- `canonical_range_count`: `594`
+- `source_range_count`: `594`
+- `content_range_ref_count`: `594`
+- `canonical_range.artifact_role`: in allen Chunks `canonical_md`
+- `content_range_ref.artifact_role`: in allen Chunks `canonical_md`
+
+Belegtes Strukturbeispiel:
+
+- `canonical_range`:
+  - `artifact_role`: `canonical_md`
+  - `file_path`: `lenskit-max-260513-1503_merge.md`
+  - `start_byte`: `130446`
+  - `end_byte`: `131587`
+  - `content_sha256`: `07d82137b0a8af1546a0c87ef8259c3a9da982b4e2a5d609aa790a63d6a10cb4`
+- `source_range`:
+  - `file_path`: `.ai-context.yml`
+  - `status`: `declared`
+  - `start_byte`: `0`
+  - `end_byte`: `1141`
+  - `content_sha256`: `07d82137b0a8af1546a0c87ef8259c3a9da982b4e2a5d609aa790a63d6a10cb4`
+- `content_range_ref`:
+  - `artifact_role`: `canonical_md`
+  - `file_path`: `lenskit-max-260513-1503_merge.md`
+  - `start_byte`: `130446`
+  - `end_byte`: `131587`
+  - `content_sha256`: `07d82137b0a8af1546a0c87ef8259c3a9da982b4e2a5d609aa790a63d6a10cb4`
 
 ---
 
-## Voraussetzungen für den Real-Dump-Proof
+## Validator-Run
 
-Sobald der Dump lokal verfügbar ist:
+Ausgeführt wurde derselbe CLI-Pfad über das Repo-Entrypoint-Modul:
 
-```
-lenskit citation validate \
-  /path/to/lenskit-max-260513-0642_merge.bundle.manifest.json
-```
-
-oder mit JSON-Report:
-
-```
-lenskit citation validate --json \
-  /path/to/lenskit-max-260513-0642_merge.bundle.manifest.json
+```bash
+python3 -m merger.lenskit.cli.main citation validate --json \
+  /tmp/lenskit-hub/merges/lenskit-max-260513-1503_merge.bundle.manifest.json
 ```
 
-Der Report muss enthalten:
+Ergebnis:
 
-- `bundle_manifest_path`: verwendeter Pfad
-- `error_kind`: `ok` | `validation_error` | `path_read_error`
-- `bundle_run_id`: `run_id` aus dem Manifest
-- `validation_run_id`: eindeutige UUID des Validator-Laufs
-- `canonical_md_sha256`: aus Manifest
-- `chunk_index_sha256`: aus Manifest
-- `chunk_count`: erwartet 585
-- `canonical_range_count`: erwartet 585
-- `citation_id_count`: erwartet 585 (bei duplikatefreien validen Ranges)
-- Falls `citation_id_count` kleiner als `chunk_count`/`canonical_range_count` ist, signalisiert das Fehler oder übersprungene Zeilen (kein valider Duplikatfall).
-- `citation_id_duplicate_count`: erwartet 0
-- `status`: `ok` oder `fail` mit Fehlerliste
-- Zusätzlich für Hash-Diagnosen: `canonical_md_actual_sha256` und `chunk_index_actual_sha256` (berechnet aus Dateien).
+- `status`: `ok`
+- `error_kind`: `ok`
+- `bundle_run_id`: `lenskit-full-max-260513-1503`
+- `chunk_count`: `594`
+- `canonical_range_count`: `594`
+- `citation_id_count`: `594`
+- `citation_id_duplicate_count`: `0`
+- `canonical_range_hash_ok_count`: `594`
+- `errors`: `[]`
+- `warnings`: `[]`
+
+Beispielhafte abgeleitete `citation_id`s:
+
+- `cit_d2f401c0588a4655`
+- `cit_f9202e15f45e2e24`
+- `cit_6e2c91283d8309db`
+- `cit_1c1274a83c8104bb`
+- `cit_23b4907ba9319cdb`
+
+---
+
+## Diagnose
+
+Es wurde **keine reale Abweichung** zwischen Implementierung und tatsächlicher Bundle-Struktur gefunden.
+
+Der einzige belegte Korrekturbedarf lag in der Dokumentation des alten STOP-Berichts:
+
+1. Real-Dump war inzwischen verfügbar bzw. reproduzierbar.
+2. Der dokumentierte Chunk-Index-Dateiname war veraltet/falsch.
+3. Die dokumentierte Erwartung `585` ist durch den real gemessenen Wert `594` ersetzt.
+
+Es gibt aus diesem Proof **keinen** belegten Anlass für einen Code-Patch am Validator.
 
 ---
 
