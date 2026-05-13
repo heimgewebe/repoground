@@ -126,6 +126,7 @@ def test_cli_exit_2_on_missing_manifest(tmp_path, capsys):
     )
     assert rc == 2
     captured = capsys.readouterr()
+    assert captured.out.strip()
     report = json.loads(captured.out)
     assert report["status"] == "fail"
     assert report["error_kind"] == "path_read_error"
