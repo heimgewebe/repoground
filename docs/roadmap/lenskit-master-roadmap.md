@@ -74,15 +74,15 @@ Spätere PRs:
 - [x] Bundle-Manifest-Role `citation_map_jsonl`
 - [x] `chunk_index` dual range mit `content_range_ref`, `canonical_range`, `source_range`
 - [ ] Citation-Map-Producer, geplante Citation-/Evidence-Health-Prüfung in separater Folge-PR, Real-Dump-Proof
-  - **Blocker (Diagnose 2026-05-12):**
+  - **Blocker (Diagnose 2026-05-12, aktualisiert 2026-05-13):**
     - Im Repo ist kein Real-Dump mit dual ranges abgelegt.
     - Konsument nicht im Code definiert.
-    - Citation-Id-Regel nicht in Code fixiert.
+    - Citation-Id-Regel als Helper in `merger/lenskit/core/citation_id.py` vorbereitet, aber noch nicht in Producer/Validator verdrahtet.
     - Diagnose: `docs/proofs/citation-map-producer-diagnosis.md`.
-    - Nächste Vorbedingungen:
+    - Offene Vorbedingungen:
       - Real-Dump mit dual ranges bereitstellen.
       - Konsument oder Validator benennen.
-      - Citation-Id-Derivation als `merger/lenskit/core/citation_id.py` implementieren.
+    - Erledigte Vorbereitung: `merger/lenskit/core/citation_id.py` (Citation-Id-Derivationsregel als Helper, PR #652).
 Gate:
 - `citation_map_jsonl` nie `canonical_content` oder `content_source`
 - `canonical_range` und `source_range` getrennt
