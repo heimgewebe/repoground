@@ -6,9 +6,10 @@
 
 ## Repo and Runtime Proof
 
-- HEAD short: `b7461e74`
-- HEAD commit: `b7461e74 devcontainer: enforce strict UID/GID guard for lifecycle hooks`
-- PR #660 merge commit present locally: `41071279 Merge pull request #660 from heimgewebe/fix/rlens-worktree-exclude-diagnosis`
+- Validated runtime commit: `41071279`
+- Validated runtime commit message: `41071279 Merge pull request #660 from heimgewebe/fix/rlens-worktree-exclude-diagnosis`
+- Reachability: `41071279` is a reachable commit and an ancestor of this proof commit.
+- Provenance note: this proof documents a dump produced by the runtime at `41071279`; the proof document itself was committed later.
 - Runtime guard symbol present in `merger/lenskit/core/merge.py`:
   - `def _is_runtime_worktree_path(rel_path: str) -> bool`
 - Functional guard checks:
