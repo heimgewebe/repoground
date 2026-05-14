@@ -73,22 +73,20 @@ Spätere PRs:
 - [x] `citation-map.v1.schema.json` plus minimale Beispiele plus Schema-Test
 - [x] Bundle-Manifest-Role `citation_map_jsonl`
 - [x] `chunk_index` dual range mit `content_range_ref`, `canonical_range`, `source_range`
-- [ ] Citation-Map-Producer, geplante Citation-/Evidence-Health-Prüfung in separater Folge-PR, Real-Dump-Proof
-  - **Blocker (Diagnose 2026-05-12, aktualisiert 2026-05-13):**
-    - Im Repo ist kein Real-Dump mit dual ranges abgelegt.
-    - Konsument nicht im Code definiert.
-    - Citation-Id-Regel als Helper in `merger/lenskit/core/citation_id.py` vorbereitet, aber noch nicht in Producer/Validator verdrahtet.
-    - Diagnose: `docs/proofs/citation-map-producer-diagnosis.md`.
-    - Offene Vorbedingungen:
-      - Real-Dump mit dual ranges bereitstellen.
-      - Konsument oder Validator benennen.
-    - Erledigte Vorbereitung: `merger/lenskit/core/citation_id.py` (Citation-Id-Derivationsregel als Helper, PR #652).
-  - **Citation-Readiness-Validator vorbereitet (Validator-PR):**
+- [x] Citation-Map-Producer, geplante Citation-/Evidence-Health-Prüfung in separater Folge-PR, Real-Dump-Proof
+  - **Producer implementiert (2026-05-14):**
+    - `merger/lenskit/core/citation_map.py` (pure Funktionen + IO-Adapter).
+    - CLI: `lenskit citation produce <bundle_manifest>` mit `--json`- und `--output`-Option.
+    - Normalisierung: bevorzugt `canonical_range`, fällt auf `content_range_ref` zurück (beide müssen `artifact_role == "canonical_md"` haben).
+    - `make_citation_id(canonical_md_sha256, start_byte, end_byte, content_sha256)` pro Chunk.
+    - CONTRACT_REGISTRY + AUTHORITY_REGISTRY in `merge.py` ergänzt.
+    - Tests: `test_citation_map_producer.py` (40 Tests, alle grün).
+    - Real-Dump-Proof PASS gegen Dump `lenskit-max-260514-0409_merge` (541 Chunks, 0 Fehler, 0 Duplikate, Schema-Validierung PASS); Beleg: `docs/proofs/citation-map-producer-proof.md`.
+  - **Citation-Readiness-Validator (Validator-PR):**
     - `merger/lenskit/core/citation_validate.py` implementiert (Konsument/Readiness-Gate, kein Producer).
     - CLI: `lenskit citation validate <bundle_manifest>` mit `--json`-Option.
     - Tests: `test_citation_validate.py`, `test_cli_citation.py` (synthetische Fixtures, kein Real-Dump erforderlich).
     - Real-Dump-Proof erbracht: aktueller echter Dump validiert (`594` Chunks, Status `ok`); Beleg: `docs/proofs/citation-readiness-validator-proof.md`.
-    - Producer (`citation_map_jsonl` erzeugen) bleibt als separates Folge-Thema offen; der Validator-Proof ist erbracht.
 Gate:
 - `citation_map_jsonl` nie `canonical_content` oder `content_source`
 - `canonical_range` und `source_range` getrennt
@@ -188,7 +186,7 @@ PR 2:
 PR 3 (teilweise erledigt):
 - [x] Bundle-Manifest-Role `citation_map_jsonl`
 - [x] Chunk-Index dual range (`canonical_range`, `source_range` zusätzlich zu `content_range_ref`)
-- [ ] Citation-Map-Producer plus eigener Producer-Real-Dump-Proof
+- [x] Citation-Map-Producer plus eigener Producer-Real-Dump-Proof
 - [x] Citation-Readiness-Validator (`merger/lenskit/core/citation_validate.py`, CLI `lenskit citation validate`, Testabdeckung in `merger/lenskit/tests/test_citation_validate.py` und `merger/lenskit/tests/test_cli_citation.py`; Real-Dump-Proof erbracht mit aktuellem Dump, 594 Chunks, Status `ok`)
 Diagnosehinweis für Priorisierung:
 - `merge.md` bleibt kanonische Vollquelle; JSON-Artefakte sind Einstieg/Index/Metadaten.

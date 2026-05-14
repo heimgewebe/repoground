@@ -5826,6 +5826,7 @@ def write_reports_v2(
         ArtifactRole.RETRIEVAL_EVAL_JSON: {"id": "retrieval-eval", "version": "v1"},
         ArtifactRole.GRAPH_INDEX_JSON: {"id": "architecture.graph_index", "version": "v1"},
         ArtifactRole.PR_DELTA_JSON: {"id": "pr-schau-delta", "version": "1.0"},
+        ArtifactRole.CITATION_MAP_JSONL: {"id": "citation-map", "version": "v1"},
     }
 
     # Authority/canonicality mapping (bundle-manifest.v1, optional fields).
@@ -5881,6 +5882,12 @@ def write_reports_v2(
         },
         ArtifactRole.GRAPH_INDEX_JSON: {
             "authority": "retrieval_index",
+            "canonicality": "derived",
+            "regenerable": True,
+            "staleness_sensitive": True,
+        },
+        ArtifactRole.CITATION_MAP_JSONL: {
+            "authority": "navigation_index",
             "canonicality": "derived",
             "regenerable": True,
             "staleness_sensitive": True,

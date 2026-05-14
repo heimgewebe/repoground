@@ -22,6 +22,49 @@ def register_citation_commands(subparsers) -> None:
         help="Emit machine-readable JSON report to stdout",
     )
 
+    produce_parser = citation_subparsers.add_parser(
+        "produce", help="Produce citation_map_jsonl from a bundle manifest"
+    )
+    produce_parser.add_argument(
+        "bundle_manifest", help="Path to bundle manifest JSON"
+    )
+    produce_parser.add_argument(
+        "--output",
+        dest="output_path",
+        default=None,
+        help="Output path for citation_map_jsonl (default: adjacent to manifest)",
+    )
+    produce_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="emit_json",
+        help="Emit machine-readable JSON report to stdout",
+    )
+
+
+def run_citation_produce(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.citation_map import produce_citation_map
+
+    manifest_path = args.bundle_manifest
+    output_path = getattr(args, "output_path", None)
+
+    try:
+        report = produce_citation_map(manifest_path, output_path)
+    except Exception as e:
+        print(f"Error: unexpected failure during production: {e}", file=sys.stderr)
+        return 2
+
+    if args.emit_json:
+        print(json.dumps(report, indent=2))
+    else:
+        _print_produce_report(report)
+
+    if report["status"] == "ok":
+        return 0
+    if report.get("error_kind") == "path_read_error":
+        return 2
+    return 1
+
 
 def run_citation_validate(args: argparse.Namespace) -> int:
     from merger.lenskit.core.citation_validate import validate_bundle
@@ -75,6 +118,36 @@ def _print_human_report(report: dict) -> None:
             print(f"  [warn] {w}")
 
     if report["errors"]:
+        print(f"\nErrors ({len(report['errors'])}):")
+        for e in report["errors"]:
+            print(f"  [error] {e}")
+
+
+def _print_produce_report(report: dict) -> None:
+    status = report["status"].upper()
+    print(f"Citation Map Production: {status}")
+    print(f"  bundle_manifest_path:    {report['bundle_manifest_path']}")
+    print(f"  bundle_run_id:           {report['bundle_run_id']}")
+    print(f"  production_run_id:       {report['production_run_id']}")
+    print(f"  canonical_md_sha256:     {report['canonical_md_sha256']}")
+    print(f"  chunk_index_sha256:      {report['chunk_index_sha256']}")
+    print(f"  output_path:             {report['output_path']}")
+    print(f"  output_sha256:           {report['output_sha256']}")
+    print(f"  output_bytes:            {report['output_bytes']}")
+    print(f"  chunk_count:             {report['chunk_count']}")
+    print(f"  valid_chunk_count:       {report['valid_chunk_count']}")
+    print(f"  citation_map_row_count:  {report['citation_map_row_count']}")
+    print(f"  citation_id_count:       {report['citation_id_count']}")
+    print(f"  duplicates:              {report['citation_id_duplicate_count']}")
+    print(f"  repo_id_source:          {report['repo_id_source']}")
+    print(f"  snapshot_source:         {report['snapshot_source']}")
+
+    if report.get("warnings"):
+        print(f"\nWarnings ({len(report['warnings'])}):")
+        for w in report["warnings"]:
+            print(f"  [warn] {w}")
+
+    if report.get("errors"):
         print(f"\nErrors ({len(report['errors'])}):")
         for e in report["errors"]:
             print(f"  [error] {e}")

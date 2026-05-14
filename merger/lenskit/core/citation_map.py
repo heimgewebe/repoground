@@ -1,0 +1,690 @@
+"""
+Citation Map Producer for citation_map_jsonl.
+
+Pure functions for loading manifests, normalising chunk-index ranges,
+deriving citation identifiers, verifying byte-range hashes, and
+writing NDJSON output.  IO is isolated to produce_citation_map().
+"""
+import hashlib
+import json
+import re
+import uuid
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+from merger.lenskit.core.citation_id import make_citation_id
+from merger.lenskit.core.path_security import resolve_secure_path
+
+
+_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
+_UNC_RE = re.compile(r"^\\\\")
+
+PRODUCED_BY = "citation_map_producer/v1"
+
+
+class CitationMapError(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Path helpers (mirror citation_validate.py conventions)
+# ---------------------------------------------------------------------------
+
+def _normalize_relative_path(raw: str, label: str) -> str:
+    if not isinstance(raw, str):
+        raise ValueError(f"{label}: path must be a string")
+    if raw.startswith("/"):
+        raise ValueError(f"{label}: absolute paths are forbidden")
+    if _UNC_RE.match(raw):
+        raise ValueError(f"{label}: UNC paths are forbidden")
+    if raw.startswith("\\"):
+        raise ValueError(f"{label}: Windows rooted paths are forbidden")
+    if _WINDOWS_DRIVE_RE.match(raw):
+        raise ValueError(f"{label}: Windows drive-prefixed paths are forbidden")
+    parts = raw.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise ValueError(f"{label}: path traversal ('..') is forbidden")
+    normalized = [p for p in parts if p not in ("", ".")]
+    if not normalized:
+        raise ValueError(f"{label}: path must not be empty")
+    return "/".join(normalized)
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for buf in iter(lambda: f.read(65536), b""):
+            h.update(buf)
+    return h.hexdigest()
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Manifest helpers
+# ---------------------------------------------------------------------------
+
+def load_manifest(manifest_path: Path) -> Dict[str, Any]:
+    """Load and parse a bundle manifest JSON file."""
+    with manifest_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def resolve_artifact_by_role(
+    manifest: Dict[str, Any],
+    role: str,
+    manifest_dir: Path,
+) -> Tuple[Dict[str, Any], str, Path]:
+    """
+    Find artifact by role in manifest and resolve its absolute path.
+
+    Returns (artifact_dict, normalized_rel_path, resolved_abs_path).
+    Raises CitationMapError if the role is absent or the path is unsafe.
+    """
+    artifacts = manifest.get("artifacts", [])
+    artifact = next(
+        (a for a in artifacts if isinstance(a, dict) and a.get("role") == role),
+        None,
+    )
+    if artifact is None:
+        raise CitationMapError(f"Manifest has no artifact with role '{role}'")
+
+    raw_path = artifact.get("path", "")
+    try:
+        rel_path = _normalize_relative_path(raw_path, f"{role}.path")
+    except ValueError as e:
+        raise CitationMapError(f"Artifact path rejected for role '{role}': {e}")
+
+    try:
+        abs_path = resolve_secure_path(manifest_dir, rel_path)
+    except ValueError as e:
+        raise CitationMapError(f"Cannot resolve artifact path for role '{role}': {e}")
+
+    if not abs_path.exists():
+        raise CitationMapError(
+            f"Artifact file not found for role '{role}': {abs_path}"
+        )
+
+    return artifact, rel_path, abs_path
+
+
+# ---------------------------------------------------------------------------
+# Range normalisation
+# ---------------------------------------------------------------------------
+
+def normalize_canonical_range(
+    chunk: Dict[str, Any],
+    lineno: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Return the canonical range dict for a chunk, normalising legacy input.
+
+    Priority:
+      1. chunk["canonical_range"]  if artifact_role == "canonical_md"
+      2. chunk["content_range_ref"] if artifact_role == "canonical_md"
+
+    Returns None when no usable range is found.
+    content_range_ref is legacy-input only; the output always calls the result
+    canonical_range.
+    """
+    cr = chunk.get("canonical_range")
+    if cr is not None:
+        if isinstance(cr, dict) and cr.get("artifact_role") == "canonical_md":
+            return cr
+        # canonical_range present but wrong role — do not silently fall back
+        return None
+
+    crr = chunk.get("content_range_ref")
+    if crr is not None and isinstance(crr, dict):
+        if crr.get("artifact_role") == "canonical_md":
+            return crr
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# repo_id resolution
+# ---------------------------------------------------------------------------
+
+def _first_nonempty_str(value: Any) -> Optional[str]:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def resolve_repo_id(
+    chunk: Dict[str, Any],
+    normalized_range: Dict[str, Any],
+    lineno: int,
+) -> Tuple[str, str]:
+    """
+    Resolve repo_id and return (repo_id, source_description).
+
+    Priority (first non-empty wins):
+      1. normalized_range["repo_id"]
+      2. chunk["repo"]
+      3. chunk["search_keys"]["repo_id"]
+
+    Raises CitationMapError when no source provides a value (hard error;
+    derivation from filenames is forbidden).
+    """
+    v = _first_nonempty_str(normalized_range.get("repo_id"))
+    if v:
+        return v, "range.repo_id"
+
+    v = _first_nonempty_str(chunk.get("repo"))
+    if v:
+        return v, "chunk.repo"
+
+    sk = chunk.get("search_keys")
+    if isinstance(sk, dict):
+        v = _first_nonempty_str(sk.get("repo_id"))
+        if v:
+            return v, "search_keys.repo_id"
+
+    raise CitationMapError(
+        f"Line {lineno}: no repo_id source found in chunk "
+        "(range.repo_id, chunk.repo, and search_keys.repo_id all absent or empty)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Byte-range verification
+# ---------------------------------------------------------------------------
+
+def verify_byte_range_hash(
+    canonical_md_bytes: bytes,
+    start_byte: int,
+    end_byte: int,
+    expected_sha256: str,
+    lineno: int,
+) -> str:
+    """
+    Verify the byte slice [start_byte, end_byte) against expected_sha256.
+
+    Returns the actual SHA256 on success.
+    Raises CitationMapError on bounds violation or hash mismatch.
+    """
+    file_size = len(canonical_md_bytes)
+    if start_byte < 0:
+        raise CitationMapError(
+            f"Line {lineno}: start_byte={start_byte} must be >= 0"
+        )
+    if end_byte <= start_byte:
+        raise CitationMapError(
+            f"Line {lineno}: end_byte={end_byte} must be > start_byte={start_byte}"
+        )
+    if end_byte > file_size:
+        raise CitationMapError(
+            f"Line {lineno}: end_byte={end_byte} exceeds file size={file_size}"
+        )
+    actual_sha = _sha256_bytes(canonical_md_bytes[start_byte:end_byte])
+    if actual_sha != expected_sha256:
+        raise CitationMapError(
+            f"Line {lineno}: byte-range SHA256 mismatch: "
+            f"expected={expected_sha256!r} actual={actual_sha!r}"
+        )
+    return actual_sha
+
+
+# ---------------------------------------------------------------------------
+# Row iterator (pure — yields structured results, never writes)
+# ---------------------------------------------------------------------------
+
+class _ChunkResult:
+    __slots__ = ("row", "error", "repo_id_source")
+
+    def __init__(
+        self,
+        row: Optional[Dict[str, Any]],
+        error: Optional[str],
+        repo_id_source: Optional[str],
+    ) -> None:
+        self.row = row
+        self.error = error
+        self.repo_id_source = repo_id_source
+
+
+def iter_chunk_results(
+    chunk_index_path: Path,
+    canonical_md_bytes: bytes,
+    canonical_md_rel: str,
+    canonical_md_sha256: str,
+    run_id: str,
+) -> Iterator[_ChunkResult]:
+    """
+    Yield one _ChunkResult per non-empty line of the chunk index.
+
+    On success: result.row is a schema-valid citation map entry dict.
+    On error:   result.row is None; result.error describes the problem.
+    """
+    snapshot = {
+        "run_id": run_id,
+        "canonical_md_path": canonical_md_rel,
+        "canonical_md_sha256": canonical_md_sha256,
+    }
+
+    with chunk_index_path.open("r", encoding="utf-8") as f:
+        for lineno, raw_line in enumerate(f, start=1):
+            raw_line = raw_line.strip()
+            if not raw_line:
+                continue
+
+            try:
+                chunk = json.loads(raw_line)
+            except json.JSONDecodeError as e:
+                yield _ChunkResult(None, f"Line {lineno}: invalid JSON: {e}", None)
+                continue
+
+            if not isinstance(chunk, dict):
+                yield _ChunkResult(
+                    None, f"Line {lineno}: chunk must be a JSON object", None
+                )
+                continue
+
+            # --- normalise range ---
+            norm_range = normalize_canonical_range(chunk, lineno)
+            if norm_range is None:
+                yield _ChunkResult(
+                    None,
+                    f"Line {lineno}: no valid canonical range found "
+                    "(need canonical_range or content_range_ref with artifact_role='canonical_md')",
+                    None,
+                )
+                continue
+
+            # --- resolve repo_id ---
+            try:
+                repo_id, repo_id_src = resolve_repo_id(chunk, norm_range, lineno)
+            except CitationMapError as e:
+                yield _ChunkResult(None, str(e), None)
+                continue
+
+            # --- validate range fields ---
+            raw_fp = norm_range.get("file_path", "")
+            try:
+                norm_fp = _normalize_relative_path(raw_fp, "range.file_path")
+            except ValueError as e:
+                yield _ChunkResult(
+                    None, f"Line {lineno}: range.file_path rejected: {e}", None
+                )
+                continue
+
+            if norm_fp != canonical_md_rel:
+                yield _ChunkResult(
+                    None,
+                    f"Line {lineno}: range.file_path {raw_fp!r} "
+                    f"(normalized {norm_fp!r}) does not match "
+                    f"manifest canonical_md path {canonical_md_rel!r}",
+                    None,
+                )
+                continue
+
+            start_byte = norm_range.get("start_byte")
+            end_byte = norm_range.get("end_byte")
+            start_line = norm_range.get("start_line")
+            end_line = norm_range.get("end_line")
+            content_sha256 = norm_range.get("content_sha256", "")
+
+            for name, val in (
+                ("start_byte", start_byte),
+                ("end_byte", end_byte),
+                ("start_line", start_line),
+                ("end_line", end_line),
+            ):
+                if isinstance(val, bool) or not isinstance(val, int):
+                    yield _ChunkResult(
+                        None,
+                        f"Line {lineno}: range.{name} must be an int",
+                        None,
+                    )
+                    break
+            else:
+                pass  # all int checks passed — fall through
+
+            # Re-check after the loop (Python does not break out of the enclosing
+            # for-loop so we use a sentinel).
+            if any(
+                isinstance(v, bool) or not isinstance(v, int)
+                for v in (start_byte, end_byte, start_line, end_line)
+            ):
+                continue
+
+            if (
+                not content_sha256
+                or not isinstance(content_sha256, str)
+                or not _SHA256_RE.fullmatch(content_sha256)
+            ):
+                yield _ChunkResult(
+                    None,
+                    f"Line {lineno}: range.content_sha256 is missing or invalid",
+                    None,
+                )
+                continue
+
+            # --- verify byte range hash ---
+            try:
+                actual_sha = verify_byte_range_hash(
+                    canonical_md_bytes,
+                    start_byte,
+                    end_byte,
+                    content_sha256,
+                    lineno,
+                )
+            except CitationMapError as e:
+                yield _ChunkResult(None, str(e), None)
+                continue
+
+            # --- derive citation_id ---
+            try:
+                citation_id = make_citation_id(
+                    canonical_md_sha256, start_byte, end_byte, actual_sha
+                )
+            except (ValueError, TypeError) as e:
+                yield _ChunkResult(
+                    None, f"Line {lineno}: make_citation_id failed: {e}", None
+                )
+                continue
+
+            row: Dict[str, Any] = {
+                "citation_id": citation_id,
+                "repo_id": repo_id,
+                "snapshot": snapshot,
+                "canonical_range": {
+                    "file_path": canonical_md_rel,
+                    "start_byte": start_byte,
+                    "end_byte": end_byte,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "content_sha256": actual_sha,
+                },
+                "produced_by": PRODUCED_BY,
+            }
+
+            chunk_id = chunk.get("chunk_id")
+            if chunk_id is not None:
+                row["chunk_id"] = str(chunk_id)
+
+            yield _ChunkResult(row, None, repo_id_src)
+
+
+# ---------------------------------------------------------------------------
+# IO adapter
+# ---------------------------------------------------------------------------
+
+def _default_output_path(manifest_path: Path) -> Path:
+    name = manifest_path.name.replace(
+        ".bundle.manifest.json", ".citation_map.jsonl"
+    )
+    return manifest_path.parent / name
+
+
+def _fail_report(
+    production_run_id: str,
+    manifest_path_str: str,
+    errors: List[str],
+    *,
+    bundle_run_id: Any = None,
+    error_kind: str = "production_error",
+) -> Dict[str, Any]:
+    return {
+        "status": "fail",
+        "error_kind": error_kind,
+        "bundle_manifest_path": manifest_path_str,
+        "bundle_run_id": bundle_run_id,
+        "production_run_id": production_run_id,
+        "canonical_md_sha256": None,
+        "chunk_index_sha256": None,
+        "output_path": None,
+        "output_sha256": None,
+        "output_bytes": None,
+        "chunk_count": 0,
+        "valid_chunk_count": 0,
+        "citation_map_row_count": 0,
+        "citation_id_count": 0,
+        "citation_id_duplicate_count": 0,
+        "repo_id_source": None,
+        "snapshot_source": "bundle_manifest",
+        "errors": errors,
+        "warnings": [],
+        "sample_rows": [],
+    }
+
+
+def produce_citation_map(
+    manifest_path_str: str,
+    output_path_str: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Produce a citation_map_jsonl from a bundle manifest and return a report dict.
+
+    The output NDJSON file is written adjacent to the manifest unless
+    output_path_str is given.  Each line is a schema-valid citation map entry.
+    """
+    production_run_id = str(uuid.uuid4())
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    chunk_count = 0
+    valid_chunk_count = 0
+    citation_id_duplicate_count = 0
+    seen_citation_ids: Dict[str, int] = {}
+    sample_rows: List[Dict[str, Any]] = []
+    repo_id_source: Optional[str] = None
+
+    # --- resolve manifest path ---
+    manifest_path = Path(manifest_path_str)
+    if not manifest_path.is_absolute():
+        manifest_path = Path.cwd() / manifest_path
+    manifest_path = manifest_path.resolve()
+    bundle_manifest_path_str = str(manifest_path)
+
+    if not manifest_path.exists() or not manifest_path.is_file():
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [f"Manifest not found or not a file: {manifest_path}"],
+            error_kind="path_read_error",
+        )
+
+    manifest_dir = manifest_path.parent
+
+    # --- load manifest ---
+    try:
+        manifest = load_manifest(manifest_path)
+    except (json.JSONDecodeError, OSError) as e:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [f"Cannot load manifest: {e}"],
+            error_kind="path_read_error",
+        )
+
+    bundle_run_id = manifest.get("run_id")
+
+    # --- resolve canonical_md ---
+    try:
+        canonical_md_art, canonical_md_rel, canonical_md_path = (
+            resolve_artifact_by_role(manifest, "canonical_md", manifest_dir)
+        )
+    except CitationMapError as e:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [str(e)],
+            bundle_run_id=bundle_run_id,
+            error_kind="path_read_error",
+        )
+
+    canonical_md_manifest_sha = canonical_md_art.get("sha256", "")
+
+    # --- resolve chunk_index_jsonl ---
+    try:
+        chunk_index_art, chunk_index_rel, chunk_index_path = (
+            resolve_artifact_by_role(manifest, "chunk_index_jsonl", manifest_dir)
+        )
+    except CitationMapError as e:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [str(e)],
+            bundle_run_id=bundle_run_id,
+            error_kind="path_read_error",
+        )
+
+    chunk_index_manifest_sha = chunk_index_art.get("sha256", "")
+
+    # --- verify SHAs ---
+    try:
+        actual_canonical_sha = _sha256_file(canonical_md_path)
+    except OSError as e:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [f"Cannot read canonical_md: {e}"],
+            bundle_run_id=bundle_run_id,
+            error_kind="path_read_error",
+        )
+
+    if actual_canonical_sha != canonical_md_manifest_sha:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [
+                f"canonical_md SHA256 mismatch: "
+                f"manifest={canonical_md_manifest_sha!r} actual={actual_canonical_sha!r}"
+            ],
+            bundle_run_id=bundle_run_id,
+        )
+
+    try:
+        actual_chunk_sha = _sha256_file(chunk_index_path)
+    except OSError as e:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [f"Cannot read chunk_index_jsonl: {e}"],
+            bundle_run_id=bundle_run_id,
+            error_kind="path_read_error",
+        )
+
+    if actual_chunk_sha != chunk_index_manifest_sha:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [
+                f"chunk_index_jsonl SHA256 mismatch: "
+                f"manifest={chunk_index_manifest_sha!r} actual={actual_chunk_sha!r}"
+            ],
+            bundle_run_id=bundle_run_id,
+        )
+
+    # --- read canonical_md bytes ---
+    try:
+        canonical_md_bytes = canonical_md_path.read_bytes()
+    except OSError as e:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [f"Cannot read canonical_md bytes: {e}"],
+            bundle_run_id=bundle_run_id,
+            error_kind="path_read_error",
+        )
+
+    # --- determine output path ---
+    if output_path_str:
+        output_path = Path(output_path_str)
+        if not output_path.is_absolute():
+            output_path = Path.cwd() / output_path
+    else:
+        output_path = _default_output_path(manifest_path)
+
+    # --- iterate rows and collect ---
+    output_lines: List[str] = []
+
+    for result in iter_chunk_results(
+        chunk_index_path,
+        canonical_md_bytes,
+        canonical_md_rel,
+        actual_canonical_sha,
+        bundle_run_id or "",
+    ):
+        chunk_count += 1
+
+        if result.error is not None:
+            errors.append(result.error)
+            continue
+
+        row = result.row
+
+        # Track repo_id_source from first valid chunk
+        if repo_id_source is None and result.repo_id_source is not None:
+            repo_id_source = result.repo_id_source
+
+        citation_id = row["citation_id"]
+
+        if citation_id in seen_citation_ids:
+            citation_id_duplicate_count += 1
+            errors.append(
+                f"duplicate citation_id {citation_id!r} "
+                f"(first at row {seen_citation_ids[citation_id]})"
+            )
+            continue
+
+        seen_citation_ids[citation_id] = valid_chunk_count + 1
+        valid_chunk_count += 1
+
+        if len(sample_rows) < 3:
+            sample_rows.append(row)
+
+        output_lines.append(json.dumps(row, ensure_ascii=False))
+
+    citation_id_count = len(seen_citation_ids)
+
+    # --- write output ---
+    output_sha256: Optional[str] = None
+    output_bytes_count: Optional[int] = None
+
+    if output_lines:
+        ndjson_content = "\n".join(output_lines) + "\n"
+        ndjson_bytes = ndjson_content.encode("utf-8")
+        try:
+            output_path.write_bytes(ndjson_bytes)
+        except OSError as e:
+            return _fail_report(
+                production_run_id,
+                bundle_manifest_path_str,
+                errors + [f"Cannot write output: {e}"],
+                bundle_run_id=bundle_run_id,
+                error_kind="path_read_error",
+            )
+        output_sha256 = _sha256_bytes(ndjson_bytes)
+        output_bytes_count = len(ndjson_bytes)
+
+    status = "ok" if not errors else "fail"
+
+    return {
+        "status": status,
+        "error_kind": "ok" if status == "ok" else "production_error",
+        "bundle_manifest_path": bundle_manifest_path_str,
+        "bundle_run_id": bundle_run_id,
+        "production_run_id": production_run_id,
+        "canonical_md_sha256": actual_canonical_sha,
+        "chunk_index_sha256": actual_chunk_sha,
+        "output_path": str(output_path),
+        "output_sha256": output_sha256,
+        "output_bytes": output_bytes_count,
+        "chunk_count": chunk_count,
+        "valid_chunk_count": valid_chunk_count,
+        "citation_map_row_count": len(output_lines),
+        "citation_id_count": citation_id_count,
+        "citation_id_duplicate_count": citation_id_duplicate_count,
+        "repo_id_source": repo_id_source,
+        "snapshot_source": "bundle_manifest",
+        "errors": errors,
+        "warnings": warnings,
+        "sample_rows": sample_rows,
+    }

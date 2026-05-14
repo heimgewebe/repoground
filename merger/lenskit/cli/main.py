@@ -226,9 +226,11 @@ def main(args: Optional[List[str]] = None) -> int:
             parser.parse_args(["atlas", "--help"])
             return 0
     elif parsed_args.command == "citation":
-        from .cmd_citation import run_citation_validate
+        from .cmd_citation import run_citation_produce, run_citation_validate
         if parsed_args.citation_cmd == "validate":
             return run_citation_validate(parsed_args)
+        elif parsed_args.citation_cmd == "produce":
+            return run_citation_produce(parsed_args)
         else:
             parser.parse_args(["citation", "--help"])
             return 0
