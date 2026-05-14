@@ -207,14 +207,14 @@ class TestNormalizeCanonicalRange:
 # ---------------------------------------------------------------------------
 
 class TestResolveRepoId:
-    def test_prefers_range_repo_id(self):
-        norm_range = {"repo_id": "from_range", "file_path": "x"}
-        chunk = {"repo": "from_chunk"}
+    def test_single_source_range_repo_id(self):
+        norm_range = {"repo_id": "only_source", "file_path": "x"}
+        chunk = {}
         repo_id, src = resolve_repo_id(chunk, norm_range, lineno=1)
-        assert repo_id == "from_range"
+        assert repo_id == "only_source"
         assert src == "range.repo_id"
 
-    def test_falls_back_to_chunk_repo(self):
+    def test_falls_back_to_chunk_repo_when_range_absent(self):
         norm_range = {"file_path": "x"}
         chunk = {"repo": "from_chunk"}
         repo_id, src = resolve_repo_id(chunk, norm_range, lineno=1)
@@ -234,15 +234,21 @@ class TestResolveRepoId:
         with pytest.raises(CitationMapError, match="no repo_id source"):
             resolve_repo_id(chunk, norm_range, lineno=1)
 
-    def test_range_repo_id_beats_chunk_repo_without_error(self):
-        # Different values across priority levels — the higher-priority one wins silently
+    def test_raises_on_conflicting_values(self):
+        # Different values in different sources → hard error (H4)
         norm_range = {"repo_id": "repo_a"}
         chunk = {"repo": "repo_b"}
-        repo_id, src = resolve_repo_id(chunk, norm_range, lineno=5)
-        assert repo_id == "repo_a"
-        assert src == "range.repo_id"
+        with pytest.raises(CitationMapError, match="ambiguous repo_id"):
+            resolve_repo_id(chunk, norm_range, lineno=5)
 
-    def test_no_ambiguity_when_values_agree(self):
+    def test_raises_on_conflict_range_vs_search_keys(self):
+        norm_range = {"repo_id": "repo_x"}
+        chunk = {"search_keys": {"repo_id": "repo_y"}}
+        with pytest.raises(CitationMapError, match="ambiguous repo_id"):
+            resolve_repo_id(chunk, norm_range, lineno=3)
+
+    def test_no_error_when_all_sources_agree(self):
+        # All present sources have the same value → ok, return highest-priority
         norm_range = {"repo_id": "lenskit"}
         chunk = {"repo": "lenskit", "search_keys": {"repo_id": "lenskit"}}
         repo_id, src = resolve_repo_id(chunk, norm_range, lineno=1)
@@ -254,6 +260,13 @@ class TestResolveRepoId:
         chunk = {"repo": "lenskit"}
         repo_id, src = resolve_repo_id(chunk, norm_range, lineno=1)
         assert repo_id == "lenskit"
+        assert src == "chunk.repo"
+
+    def test_two_sources_same_value_no_conflict(self):
+        norm_range = {"file_path": "x"}
+        chunk = {"repo": "myrepo", "search_keys": {"repo_id": "myrepo"}}
+        repo_id, src = resolve_repo_id(chunk, norm_range, lineno=1)
+        assert repo_id == "myrepo"
         assert src == "chunk.repo"
 
 
@@ -542,35 +555,36 @@ class TestProduceCitationMap:
 
 
 # ---------------------------------------------------------------------------
-# Integration: manifest wiring (CONTRACT_REGISTRY / AUTHORITY_REGISTRY)
+# Integration: manifest wiring (MODULE-LEVEL registries, not inspect.getsource)
 # ---------------------------------------------------------------------------
 
 class TestManifestWiring:
     def test_citation_map_role_exists_in_constants(self):
         assert ArtifactRole.CITATION_MAP_JSONL.value == "citation_map_jsonl"
 
-    def test_contract_registry_has_citation_map(self):
-        from merger.lenskit.core.merge import write_reports_v2
-        import inspect, textwrap
-        src = inspect.getsource(write_reports_v2)
-        assert "citation-map" in src
-        assert '"v1"' in src or "'v1'" in src
+    def test_contract_registry_has_citation_map_entry(self):
+        from merger.lenskit.core.merge import ARTIFACT_CONTRACT_REGISTRY
+        entry = ARTIFACT_CONTRACT_REGISTRY[ArtifactRole.CITATION_MAP_JSONL]
+        assert entry["id"] == "citation-map"
+        assert entry["version"] == "v1"
 
-    def test_authority_registry_has_citation_map(self):
-        from merger.lenskit.core.merge import write_reports_v2
-        import inspect
-        src = inspect.getsource(write_reports_v2)
-        assert "navigation_index" in src
-        # Must have both the canonical_md entry (canonical_content) and
-        # the citation_map entry (navigation_index / derived) — just
-        # check the citation_map values appear after the CITATION_MAP_JSONL key
-        assert "CITATION_MAP_JSONL" in src
+    def test_authority_registry_has_citation_map_entry(self):
+        from merger.lenskit.core.merge import ARTIFACT_AUTHORITY_REGISTRY
+        entry = ARTIFACT_AUTHORITY_REGISTRY[ArtifactRole.CITATION_MAP_JSONL]
+        assert entry["authority"] == "navigation_index"
+        assert entry["canonicality"] == "derived"
+        assert entry["regenerable"] is True
+        assert entry["staleness_sensitive"] is True
 
-    def test_citation_map_artifact_written_to_manifest(self, tmp_path):
-        """Produce a citation map file, then verify _add_artifact logic produces
-        the correct manifest entry when invoked with the CITATION_MAP_JSONL role."""
+    def test_citation_map_not_canonical_content(self):
+        from merger.lenskit.core.merge import ARTIFACT_AUTHORITY_REGISTRY
+        entry = ARTIFACT_AUTHORITY_REGISTRY[ArtifactRole.CITATION_MAP_JSONL]
+        assert entry["authority"] != "canonical_content"
+        assert entry["canonicality"] != "content_source"
+
+    def test_citation_map_artifact_file_sha_and_bytes(self, tmp_path):
+        """Produce a citation map and verify sha256 / bytes match the file on disk."""
         import hashlib
-        from merger.lenskit.core.constants import ArtifactRole
 
         content = b"Manifest wiring test content"
         chunk = _canonical_range_chunk(content, 0, 7, "test_merge.md")
@@ -581,33 +595,184 @@ class TestManifestWiring:
         output_path = Path(report["output_path"])
         assert output_path.exists()
 
-        # Simulate what _add_artifact would write by checking the produced file
         output_bytes = output_path.read_bytes()
         actual_sha = hashlib.sha256(output_bytes).hexdigest()
 
         assert actual_sha == report["output_sha256"]
         assert report["output_bytes"] == len(output_bytes)
 
-        # Verify the produced entry would satisfy bundle-manifest.v1 role constraints
-        expected_entry = {
-            "role": ArtifactRole.CITATION_MAP_JSONL.value,
-            "path": output_path.name,
-            "content_type": "application/x-ndjson",
-            "bytes": len(output_bytes),
-            "sha256": actual_sha,
-            "contract": {"id": "citation-map", "version": "v1"},
-            "interpretation": {"mode": "contract"},
-            "authority": "navigation_index",
-            "canonicality": "derived",
-            "regenerable": True,
-            "staleness_sensitive": True,
+
+# ---------------------------------------------------------------------------
+# Hardening: H1 — no partial output on errors
+# ---------------------------------------------------------------------------
+
+class TestNoPartialOutputOnErrors:
+    def test_no_output_file_when_chunk_errors_exist(self, tmp_path):
+        content = b"Valid and invalid chunks"
+        valid_chunk = _canonical_range_chunk(content, 0, 5, "test_merge.md", chunk_id="c1")
+        bad_sha = "b" * 64
+        invalid_chunk = {
+            "chunk_id": "c2",
+            "repo": "testrepo",
+            "canonical_range": {
+                "artifact_role": "canonical_md",
+                "file_path": "test_merge.md",
+                "start_byte": 6,
+                "end_byte": 11,
+                "start_line": 1,
+                "end_line": 1,
+                "content_sha256": bad_sha,  # wrong hash → error
+            },
         }
-        assert expected_entry["role"] == "citation_map_jsonl"
-        assert expected_entry["content_type"] == "application/x-ndjson"
-        assert expected_entry["contract"] == {"id": "citation-map", "version": "v1"}
-        assert expected_entry["authority"] == "navigation_index"
-        assert expected_entry["canonicality"] == "derived"
-        assert expected_entry["regenerable"] is True
-        assert expected_entry["staleness_sensitive"] is True
-        assert expected_entry["sha256"] == actual_sha
-        assert expected_entry["bytes"] == len(output_bytes)
+        manifest_path = _make_bundle(tmp_path, content, [valid_chunk, invalid_chunk])
+        expected_output = tmp_path / "test_merge.citation_map.jsonl"
+
+        report = produce_citation_map(str(manifest_path))
+
+        assert report["status"] == "fail"
+        assert not expected_output.exists(), "Partial output must not be written on failure"
+        assert report["output_path"] is None
+        assert report["output_sha256"] is None
+
+    def test_no_output_on_duplicate_citation_id(self, tmp_path):
+        content = b"Duplicate test content XYZ"
+        # Two chunks with identical byte ranges → same citation_id → duplicate
+        chunk_a = _canonical_range_chunk(content, 0, 5, "test_merge.md", chunk_id="c1")
+        chunk_b = _canonical_range_chunk(content, 0, 5, "test_merge.md", chunk_id="c2")
+        manifest_path = _make_bundle(tmp_path, content, [chunk_a, chunk_b])
+        expected_output = tmp_path / "test_merge.citation_map.jsonl"
+
+        report = produce_citation_map(str(manifest_path))
+
+        assert report["status"] == "fail"
+        assert any("duplicate" in e for e in report["errors"])
+        assert not expected_output.exists()
+
+    def test_output_path_is_none_on_fail(self, tmp_path):
+        content = b"test"
+        invalid_chunk = {"chunk_id": "c1", "repo": "r"}  # no range
+        manifest_path = _make_bundle(tmp_path, content, [invalid_chunk])
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "fail"
+        assert report["output_path"] is None
+
+
+# ---------------------------------------------------------------------------
+# Hardening: H2 — default output path safety
+# ---------------------------------------------------------------------------
+
+class TestDefaultOutputPathSafety:
+    def test_standard_manifest_name_produces_correct_path(self, tmp_path):
+        content = b"path safety test"
+        chunk = _canonical_range_chunk(content, 0, 4, "test_merge.md")
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "ok", report["errors"]
+        assert report["output_path"] == str(tmp_path / "test_merge.citation_map.jsonl")
+
+    def test_non_standard_manifest_name_fails_safely(self, tmp_path):
+        # Manifest doesn't end with .bundle.manifest.json → cannot derive safe output path
+        content = b"path safety test"
+        chunk = _canonical_range_chunk(content, 0, 4, "test_merge.md")
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+
+        # Rename manifest to a non-standard name
+        bad_manifest = tmp_path / "manifest.json"
+        manifest_path.rename(bad_manifest)
+
+        # Also fix the manifest content to not reference the standard name
+        # (re-write with all paths intact — the manifest content itself doesn't need to change
+        # because _default_output_path checks the manifest file's own name)
+        report = produce_citation_map(str(bad_manifest))
+        assert report["status"] == "fail"
+        assert any("cannot derive safe output path" in e.lower() or
+                   "bundle.manifest.json" in e for e in report["errors"])
+        # Must not create a file named "manifest.json" (collision)
+        assert not (tmp_path / "manifest.json.citation_map.jsonl").exists()
+
+    def test_output_does_not_collide_with_manifest(self, tmp_path):
+        content = b"collision test"
+        chunk = _canonical_range_chunk(content, 0, 4, "test_merge.md")
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+        # Explicitly pass manifest path as output → must fail
+        report = produce_citation_map(str(manifest_path), str(manifest_path))
+        assert report["status"] == "fail"
+        assert any("collides" in e for e in report["errors"])
+
+    def test_output_does_not_collide_with_canonical_md(self, tmp_path):
+        content = b"collision test 2"
+        chunk = _canonical_range_chunk(content, 0, 4, "test_merge.md")
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+        canonical_md = tmp_path / "test_merge.md"
+        report = produce_citation_map(str(manifest_path), str(canonical_md))
+        assert report["status"] == "fail"
+        assert any("collides" in e for e in report["errors"])
+
+
+# ---------------------------------------------------------------------------
+# Hardening: H3 — run_id must be non-empty
+# ---------------------------------------------------------------------------
+
+class TestRunIdValidation:
+    def _make_bundle_no_run_id(self, tmp_path, canonical_content, chunks, run_id_value):
+        from pathlib import Path as P
+        canonical_md_path = tmp_path / "test_merge.md"
+        canonical_md_path.write_bytes(canonical_content)
+        chunk_lines = "\n".join(json.dumps(c) for c in chunks) + "\n"
+        chunk_index_bytes = chunk_lines.encode("utf-8")
+        chunk_index_path = tmp_path / "test_merge.chunk_index.jsonl"
+        chunk_index_path.write_bytes(chunk_index_bytes)
+        manifest = {
+            "kind": "repolens.bundle.manifest",
+            "version": "1.0",
+            "created_at": "2026-05-14T00:00:00Z",
+            "generator": {"name": "test", "version": "0.0.1", "config_sha256": "a" * 64},
+            "artifacts": [
+                {
+                    "role": "canonical_md",
+                    "path": "test_merge.md",
+                    "content_type": "text/markdown",
+                    "bytes": len(canonical_content),
+                    "sha256": _sha256(canonical_content),
+                    "interpretation": {"mode": "role_only"},
+                },
+                {
+                    "role": "chunk_index_jsonl",
+                    "path": "test_merge.chunk_index.jsonl",
+                    "content_type": "application/x-ndjson",
+                    "bytes": len(chunk_index_bytes),
+                    "sha256": _sha256(chunk_index_bytes),
+                    "interpretation": {"mode": "role_only"},
+                },
+            ],
+            "links": {},
+            "capabilities": {},
+        }
+        if run_id_value is not None:
+            manifest["run_id"] = run_id_value
+        manifest_path = tmp_path / "test_merge.bundle.manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        return manifest_path
+
+    def test_missing_run_id_fails(self, tmp_path):
+        content = b"run_id test"
+        chunk = _canonical_range_chunk(content, 0, 5, "test_merge.md")
+        manifest_path = self._make_bundle_no_run_id(tmp_path, content, [chunk], None)
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "fail"
+        assert any("run_id" in e for e in report["errors"])
+
+    def test_empty_run_id_fails(self, tmp_path):
+        content = b"run_id test"
+        chunk = _canonical_range_chunk(content, 0, 5, "test_merge.md")
+        manifest_path = self._make_bundle_no_run_id(tmp_path, content, [chunk], "")
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "fail"
+        assert any("run_id" in e for e in report["errors"])
+
+    def test_valid_run_id_succeeds(self, tmp_path):
+        content = b"run_id valid test"
+        chunk = _canonical_range_chunk(content, 0, 5, "test_merge.md")
+        manifest_path = self._make_bundle_no_run_id(tmp_path, content, [chunk], "valid-run-123")
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "ok", report["errors"]

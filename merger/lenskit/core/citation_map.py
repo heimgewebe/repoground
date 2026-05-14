@@ -163,32 +163,46 @@ def resolve_repo_id(
     """
     Resolve repo_id and return (repo_id, source_description).
 
-    Priority (first non-empty wins):
+    Collects all non-empty sources in priority order:
       1. normalized_range["repo_id"]
       2. chunk["repo"]
       3. chunk["search_keys"]["repo_id"]
 
-    Raises CitationMapError when no source provides a value (hard error;
+    If all present sources agree on the same value, returns the highest-priority one.
+    If any two sources disagree, raises CitationMapError (ambiguity is a hard error;
     derivation from filenames is forbidden).
+    If no source has a value, raises CitationMapError.
     """
+    candidates: List[Tuple[str, str]] = []  # (source_label, value)
+
     v = _first_nonempty_str(normalized_range.get("repo_id"))
     if v:
-        return v, "range.repo_id"
+        candidates.append(("range.repo_id", v))
 
     v = _first_nonempty_str(chunk.get("repo"))
     if v:
-        return v, "chunk.repo"
+        candidates.append(("chunk.repo", v))
 
     sk = chunk.get("search_keys")
     if isinstance(sk, dict):
         v = _first_nonempty_str(sk.get("repo_id"))
         if v:
-            return v, "search_keys.repo_id"
+            candidates.append(("search_keys.repo_id", v))
 
-    raise CitationMapError(
-        f"Line {lineno}: no repo_id source found in chunk "
-        "(range.repo_id, chunk.repo, and search_keys.repo_id all absent or empty)"
-    )
+    if not candidates:
+        raise CitationMapError(
+            f"Line {lineno}: no repo_id source found in chunk "
+            "(range.repo_id, chunk.repo, and search_keys.repo_id all absent or empty)"
+        )
+
+    unique_values = {val for _, val in candidates}
+    if len(unique_values) > 1:
+        raise CitationMapError(
+            f"Line {lineno}: ambiguous repo_id — sources disagree: "
+            + ", ".join(f"{src}={val!r}" for src, val in candidates)
+        )
+
+    return candidates[0][1], candidates[0][0]
 
 
 # ---------------------------------------------------------------------------
@@ -415,11 +429,27 @@ def iter_chunk_results(
 # IO adapter
 # ---------------------------------------------------------------------------
 
+_MANIFEST_SUFFIX = ".bundle.manifest.json"
+_OUTPUT_SUFFIX = ".citation_map.jsonl"
+
+
 def _default_output_path(manifest_path: Path) -> Path:
-    name = manifest_path.name.replace(
-        ".bundle.manifest.json", ".citation_map.jsonl"
-    )
-    return manifest_path.parent / name
+    """
+    Derive citation map output path from manifest path.
+
+    Requires the manifest to end with '.bundle.manifest.json'.
+    Raises CitationMapError if the suffix is missing (would silently produce
+    the same filename and overwrite the manifest).
+    """
+    name = manifest_path.name
+    if not name.endswith(_MANIFEST_SUFFIX):
+        raise CitationMapError(
+            f"Cannot derive safe output path: manifest filename {name!r} "
+            f"does not end with '{_MANIFEST_SUFFIX}'. "
+            "Pass --output explicitly."
+        )
+    stem = name[: -len(_MANIFEST_SUFFIX)]
+    return manifest_path.parent / (stem + _OUTPUT_SUFFIX)
 
 
 def _fail_report(
@@ -504,6 +534,18 @@ def produce_citation_map(
         )
 
     bundle_run_id = manifest.get("run_id")
+
+    # H3: run_id must be a non-empty string — an empty snapshot.run_id is invalid.
+    if not isinstance(bundle_run_id, str) or not bundle_run_id:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [
+                f"Manifest 'run_id' is missing or empty: {bundle_run_id!r}. "
+                "A non-empty run_id is required for snapshot identity."
+            ],
+            bundle_run_id=bundle_run_id,
+        )
 
     # --- resolve canonical_md ---
     try:
@@ -600,7 +642,34 @@ def produce_citation_map(
         if not output_path.is_absolute():
             output_path = Path.cwd() / output_path
     else:
-        output_path = _default_output_path(manifest_path)
+        try:
+            output_path = _default_output_path(manifest_path)
+        except CitationMapError as e:
+            return _fail_report(
+                production_run_id,
+                bundle_manifest_path_str,
+                [str(e)],
+                bundle_run_id=bundle_run_id,
+            )
+
+    # H2: output path must not collide with any input artifact.
+    protected_paths = {
+        manifest_path.resolve(),
+        canonical_md_path.resolve(),
+        chunk_index_path.resolve(),
+    }
+    output_path_resolved = output_path.resolve()
+    if output_path_resolved in protected_paths:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [
+                f"Output path {str(output_path)!r} collides with an input artifact "
+                "(manifest, canonical_md, or chunk_index_jsonl). "
+                "Pass --output to specify a safe destination."
+            ],
+            bundle_run_id=bundle_run_id,
+        )
 
     # --- iterate rows and collect ---
     output_lines: List[str] = []
@@ -644,27 +713,32 @@ def produce_citation_map(
 
     citation_id_count = len(seen_citation_ids)
 
-    # --- write output ---
+    # --- write output only when there are no errors (H1) ---
+    # A partial output on a failed run would be silently mistaken for a valid one.
     output_sha256: Optional[str] = None
     output_bytes_count: Optional[int] = None
+    written_output_path: Optional[str] = None
 
-    if output_lines:
-        ndjson_content = "\n".join(output_lines) + "\n"
-        ndjson_bytes = ndjson_content.encode("utf-8")
-        try:
-            output_path.write_bytes(ndjson_bytes)
-        except OSError as e:
-            return _fail_report(
-                production_run_id,
-                bundle_manifest_path_str,
-                errors + [f"Cannot write output: {e}"],
-                bundle_run_id=bundle_run_id,
-                error_kind="path_read_error",
-            )
-        output_sha256 = _sha256_bytes(ndjson_bytes)
-        output_bytes_count = len(ndjson_bytes)
-
-    status = "ok" if not errors else "fail"
+    if errors:
+        status = "fail"
+    else:
+        status = "ok"
+        if output_lines:
+            ndjson_content = "\n".join(output_lines) + "\n"
+            ndjson_bytes = ndjson_content.encode("utf-8")
+            try:
+                output_path.write_bytes(ndjson_bytes)
+            except OSError as e:
+                return _fail_report(
+                    production_run_id,
+                    bundle_manifest_path_str,
+                    [f"Cannot write output: {e}"],
+                    bundle_run_id=bundle_run_id,
+                    error_kind="path_read_error",
+                )
+            output_sha256 = _sha256_bytes(ndjson_bytes)
+            output_bytes_count = len(ndjson_bytes)
+            written_output_path = str(output_path)
 
     return {
         "status": status,
@@ -674,7 +748,7 @@ def produce_citation_map(
         "production_run_id": production_run_id,
         "canonical_md_sha256": actual_canonical_sha,
         "chunk_index_sha256": actual_chunk_sha,
-        "output_path": str(output_path),
+        "output_path": written_output_path,
         "output_sha256": output_sha256,
         "output_bytes": output_bytes_count,
         "chunk_count": chunk_count,

@@ -1,6 +1,6 @@
 # Citation Map Producer — Real-Dump-Proof
 
-**Datum:** 2026-05-14  
+**Datum:** 2026-05-14 (Hardening-Patch 2026-05-14)  
 **Status: PASS**
 
 ---
@@ -195,6 +195,37 @@ Dieser Dump enthält `content_range_ref` statt `canonical_range`. Die Producer-N
 - Duplikate werden als Fehler behandelt (Zeile wird übersprungen).
 
 ---
+
+## Hardening-Patches (2026-05-14)
+
+Folgende Punkte wurden nach dem initialen Proof gepatcht:
+
+| Punkt | Patch |
+|---|---|
+| H1: Kein partieller Output bei Fehlern | Output wird nur geschrieben, wenn `errors == []`. `output_path=None` bei `status=fail`. |
+| H2: Default-Output-Pfad sicher | `_default_output_path()` prüft `.bundle.manifest.json`-Suffix; Manifest-/Artefakt-Kollision → `status=fail`. |
+| H3: `run_id` leer → Fehler | Manifest-`run_id` wird vor Nutzung als nicht-leerer String validiert. |
+| H4: `repo_id`-Konflikte → Fehler | `resolve_repo_id()` sammelt alle Quellen; unterschiedliche Werte → `CitationMapError`. |
+| H5: `start_line`/`end_line`-Semantik | Keine Code-Änderung. Dokumentation unten. |
+| H6: Registry-Tests ohne `inspect.getsource()` | `ARTIFACT_CONTRACT_REGISTRY` und `ARTIFACT_AUTHORITY_REGISTRY` auf Modulebene in `merge.py` hochgezogen; Tests importieren sie direkt. |
+
+Der Output-SHA nach Hardening ist identisch mit dem Initialwert (`304a4d22...`), da kein Chunk im echten Dump Fehler enthält.
+
+## `start_line`/`end_line`-Semantik (H5)
+
+Befund aus dem realen Dump: fünf aufeinanderfolgende Chunks mit unterschiedlichen Byte-Offsets haben alle `start_line=1`. Diese Zeilen stammen aus dem Generator-seitigen `content_range_ref`, das quell-lokale Zeilennummern innerhalb der Quelldatei enthält, nicht globale Positionen in `canonical_md`.
+
+Das Schema (`canonical_range.description`) sagt: „Position inside canonical_md" — es legt aber nicht fest, ob Zeilennummern global (canonical_md-weit) oder lokal (quellдатei-lokal) sind. Das Schema setzt `minimum: 1` und keine weiteren Constraints.
+
+**Entscheidung:** Der Producer übernimmt `start_line`/`end_line` unverändert aus dem Input-Range-Feld. Die autoritative Zitierachse sind `start_byte`, `end_byte` und `content_sha256`, deren Korrektheit gegen `canonical_md` geprüft wird. Globale Zeilennummerberechnung bleibt eigenständiges Hardening, wenn der Contract es explizit fordert.
+
+## Manifest-Wiring (H6): Registry vorbereitet — Pipeline-Integration offen
+
+`ARTIFACT_CONTRACT_REGISTRY[ArtifactRole.CITATION_MAP_JSONL]` und `ARTIFACT_AUTHORITY_REGISTRY[ArtifactRole.CITATION_MAP_JSONL]` sind in `merger/lenskit/core/merge.py` auf Modulebene definiert und werden von `write_reports_v2` referenziert.
+
+`_add_artifact(citation_map_path, ArtifactRole.CITATION_MAP_JSONL, …)` wird in der Pipeline (Merger-Lauf) **noch nicht** automatisch aufgerufen — der Producer läuft separat via CLI. Die Registries sind vorbereitet, damit ein späterer Pipeline-Integrationsschritt die korrekten Manifest-Felder erhält.
+
+Beim CLI-Lauf erzeugt der Producer die Datei, berechnet SHA256 und Bytes korrekt. Ein separater Schritt muss diese Werte ins Bundle-Manifest schreiben; das ist Phase-2-Arbeit.
 
 ## Abgrenzung zu vorherigen Proofs
 

@@ -184,6 +184,79 @@ DEBUG_CONFIG = DebugConfig.defaults()
 AGENT_CONTRACT_NAME = "repolens-agent"
 AGENT_CONTRACT_VERSION = "v2"
 
+# Module-level registries so tests can import them without calling write_reports_v2.
+# write_reports_v2 references these via local aliases (CONTRACT_REGISTRY / AUTHORITY_REGISTRY).
+ARTIFACT_CONTRACT_REGISTRY = {
+    ArtifactRole.INDEX_SIDECAR_JSON: {"id": AGENT_CONTRACT_NAME, "version": AGENT_CONTRACT_VERSION},
+    ArtifactRole.RETRIEVAL_EVAL_JSON: {"id": "retrieval-eval", "version": "v1"},
+    ArtifactRole.GRAPH_INDEX_JSON: {"id": "architecture.graph_index", "version": "v1"},
+    ArtifactRole.PR_DELTA_JSON: {"id": "pr-schau-delta", "version": "1.0"},
+    ArtifactRole.CITATION_MAP_JSONL: {"id": "citation-map", "version": "v1"},
+}
+
+ARTIFACT_AUTHORITY_REGISTRY = {
+    ArtifactRole.CANONICAL_MD: {
+        "authority": "canonical_content",
+        "canonicality": "content_source",
+        "regenerable": True,
+        "staleness_sensitive": False,
+    },
+    ArtifactRole.INDEX_SIDECAR_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "index_only",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.DUMP_INDEX_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "index_only",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.DERIVED_MANIFEST_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.CHUNK_INDEX_JSONL: {
+        "authority": "retrieval_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.SQLITE_INDEX: {
+        "authority": "runtime_cache",
+        "canonicality": "cache",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.RETRIEVAL_EVAL_JSON: {
+        "authority": "diagnostic_signal",
+        "canonicality": "diagnostic",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.OUTPUT_HEALTH: {
+        "authority": "diagnostic_signal",
+        "canonicality": "diagnostic",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.GRAPH_INDEX_JSON: {
+        "authority": "retrieval_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.CITATION_MAP_JSONL: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+}
+
 # Delta Report configuration
 MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
 
@@ -5820,79 +5893,9 @@ def write_reports_v2(
         meta_none=meta_none,
         ).with_suffix(".bundle.manifest.json")
 
-    # Contract mappings for structured roles to support deterministic downstream interpretation.
-    CONTRACT_REGISTRY = {
-        ArtifactRole.INDEX_SIDECAR_JSON: {"id": AGENT_CONTRACT_NAME, "version": AGENT_CONTRACT_VERSION},
-        ArtifactRole.RETRIEVAL_EVAL_JSON: {"id": "retrieval-eval", "version": "v1"},
-        ArtifactRole.GRAPH_INDEX_JSON: {"id": "architecture.graph_index", "version": "v1"},
-        ArtifactRole.PR_DELTA_JSON: {"id": "pr-schau-delta", "version": "1.0"},
-        ArtifactRole.CITATION_MAP_JSONL: {"id": "citation-map", "version": "v1"},
-    }
-
-    # Authority/canonicality mapping (bundle-manifest.v1, optional fields).
-    # Roles not present here remain unannotated for now (Phase 1 scope).
-    AUTHORITY_REGISTRY = {
-        ArtifactRole.CANONICAL_MD: {
-            "authority": "canonical_content",
-            "canonicality": "content_source",
-            "regenerable": True,
-            "staleness_sensitive": False,
-        },
-        ArtifactRole.INDEX_SIDECAR_JSON: {
-            "authority": "navigation_index",
-            "canonicality": "index_only",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.DUMP_INDEX_JSON: {
-            "authority": "navigation_index",
-            "canonicality": "index_only",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.DERIVED_MANIFEST_JSON: {
-            "authority": "navigation_index",
-            "canonicality": "derived",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.CHUNK_INDEX_JSONL: {
-            "authority": "retrieval_index",
-            "canonicality": "derived",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.SQLITE_INDEX: {
-            "authority": "runtime_cache",
-            "canonicality": "cache",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.RETRIEVAL_EVAL_JSON: {
-            "authority": "diagnostic_signal",
-            "canonicality": "diagnostic",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.OUTPUT_HEALTH: {
-            "authority": "diagnostic_signal",
-            "canonicality": "diagnostic",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.GRAPH_INDEX_JSON: {
-            "authority": "retrieval_index",
-            "canonicality": "derived",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-        ArtifactRole.CITATION_MAP_JSONL: {
-            "authority": "navigation_index",
-            "canonicality": "derived",
-            "regenerable": True,
-            "staleness_sensitive": True,
-        },
-    }
+    # Aliases into module-level registries (ARTIFACT_CONTRACT_REGISTRY / ARTIFACT_AUTHORITY_REGISTRY).
+    CONTRACT_REGISTRY = ARTIFACT_CONTRACT_REGISTRY
+    AUTHORITY_REGISTRY = ARTIFACT_AUTHORITY_REGISTRY
 
     artifacts_list = []
     def _add_artifact(p: Optional[Path], role: ArtifactRole, content_type: str):
