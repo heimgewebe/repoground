@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/devcontainers/base:ubuntu
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC
+
+# --- Ensure expected devcontainer user exists (the CLI assumes "vscode") ---
+# Idempotent: nur anlegen, wenn er fehlt (manche Base-Images liefern ihn nicht).
+#
+# Hard invariant: if the requested UID is already owned by a different user, fail
+# fast instead of renaming the foreign user. The devcontainer CLI is responsible
+# for synchronizing the runtime UID/GID when updateRemoteUserUID is enabled.
+ARG USERNAME=vscode
+ARG USER_UID=1000
+ARG USER_GID=${USER_UID}
+RUN set -eux; \
+   requested_uid="${USER_UID}"; \
+   requested_gid="${USER_GID}"; \
+   uid_owner="$(getent passwd "${requested_uid}" | cut -d: -f1 || true)"; \
+   if getent passwd "${USERNAME}" >/dev/null 2>&1; then \
+     current_uid="$(id -u "${USERNAME}")"; \
+     if [ "${current_uid}" != "${requested_uid}" ]; then \
+       if [ -n "${uid_owner}" ] && [ "${uid_owner}" != "${USERNAME}" ]; then \
+         echo "ERROR: requested UID ${requested_uid} is already used by ${uid_owner}; refusing UID drift for ${USERNAME}" >&2; \
+         exit 42; \
+       fi; \
+       usermod --uid "${requested_uid}" "${USERNAME}"; \
+     fi; \
+   else \
+     if [ -n "${uid_owner}" ] && [ "${uid_owner}" != "${USERNAME}" ]; then \
+       echo "ERROR: requested UID ${requested_uid} is already used by ${uid_owner}; refusing to create ${USERNAME}" >&2; \
+       exit 42; \
+     else \
+       if getent group "${requested_gid}" >/dev/null 2>&1; then \
+         target_group="$(getent group "${requested_gid}" | cut -d: -f1)"; \
+       else \
+         groupadd --gid "${requested_gid}" "${USERNAME}"; \
+         target_group="${USERNAME}"; \
+       fi; \
+       useradd --uid "${requested_uid}" --gid "${target_group}" -m -s /bin/bash "${USERNAME}"; \
+     fi; \
+   fi; \
+   if getent group "${requested_gid}" >/dev/null 2>&1; then \
+     target_group="$(getent group "${requested_gid}" | cut -d: -f1)"; \
+     usermod --gid "${target_group}" "${USERNAME}" || true; \
+   fi; \
+   mkdir -p /home/"${USERNAME}"/.ssh; \
+   chown -R "${USERNAME}:$(id -gn "${USERNAME}")" /home/"${USERNAME}"
+
+# Optional: Standard-Tools/Qualität der Life-in-Container-Experience
+# + sudo installieren und passwortlosen sudo für die Gruppe sudo erlauben,
+# damit lokale Entwicklungsaufgaben (apt, tooling) konsistent laufen.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends sudo ca-certificates curl git \
+    && rm -rf /var/lib/apt/lists/* \
+    && echo "%sudo ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/99-sudo-nopasswd \
+    && chmod 0440 /etc/sudoers.d/99-sudo-nopasswd
