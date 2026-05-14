@@ -245,7 +245,7 @@ class AtlasScanner:
             # Minimal excludes for strict inventory: only git and venv
             default_excludes = ["**/.git", "**/.venv"]
         else:
-            default_excludes = ["**/.git", "**/node_modules", "**/.venv", "**/__pycache__", "**/.cache", "atlas/**", "**/.pytest_cache"]
+            default_excludes = ["**/.git", "**/node_modules", "**/.venv", "**/__pycache__", "**/.cache", "atlas/**", "**/.pytest_cache", "**/.claude/worktrees/**"]
 
         self.exclude_globs = list(exclude_globs) if exclude_globs is not None else list(default_excludes)
         if not no_default_excludes:

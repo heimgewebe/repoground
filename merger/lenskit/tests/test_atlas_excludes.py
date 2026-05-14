@@ -35,3 +35,34 @@ def test_atlas_excludes_match_top_level_and_nested(tmp_path: Path) -> None:
 
     assert scanner._is_excluded(tmp_path / "git" / "config") is False
     assert scanner._is_excluded(tmp_path / "repo" / "git" / "config") is False
+
+
+def test_atlas_excludes_claude_worktrees(tmp_path: Path) -> None:
+    # Verify .claude/worktrees is excluded by default (agent runtime artefacts, not repo content).
+    scanner = AtlasScanner(tmp_path, "dummy_snap", no_default_excludes=True, exclude_globs=["**/.claude/worktrees/**"])
+
+    # Worktree paths must be excluded
+    assert scanner._is_excluded(".claude/worktrees/citation-map-producer/.ai-context.yml") is True
+    assert scanner._is_excluded(".claude/worktrees/ipad-dump-proof/merger/lenskit/core/merge.py") is True
+    assert scanner._is_excluded(".claude/worktrees/citation-map-producer/.github/workflows/test.yml") is True
+    assert scanner._is_excluded(".claude/worktrees") is True
+    assert scanner._is_excluded(".claude/worktrees/citation-map-producer") is True
+
+    # Legitimate .claude files must NOT be excluded
+    assert scanner._is_excluded(".claude/settings.local.json") is False
+    assert scanner._is_excluded(".claude/settings.json") is False
+
+    # Normal repo files must NOT be excluded
+    assert scanner._is_excluded("merger/lenskit/core/citation_map.py") is False
+    assert scanner._is_excluded("merger/lenskit/adapters/atlas.py") is False
+    assert scanner._is_excluded("docs/proofs/citation-map-producer-proof.md") is False
+
+
+def test_atlas_default_excludes_include_claude_worktrees(tmp_path: Path) -> None:
+    # Default (non-strict) scanner must exclude .claude/worktrees without explicit config.
+    scanner = AtlasScanner(tmp_path, "dummy_snap", no_default_excludes=True)
+    # Inject only default_excludes by re-using the class behaviour: pass exclude_globs=None
+    scanner2 = AtlasScanner(tmp_path, "dummy_snap")  # uses non-strict defaults
+
+    assert scanner2._is_excluded(".claude/worktrees/some-branch/file.py") is True
+    assert scanner2._is_excluded(".claude/settings.json") is False
