@@ -59,6 +59,8 @@ Important distinction:
 
 - Raw text occurrences of `.claude/worktrees` in code/tests/docs/proof text are expected and not contamination evidence.
 - Only structured path-field contamination is a failure condition.
+- Therefore raw Markdown/string hits are classified as diagnostic/code content,
+  not as repository-file inclusion.
 
 ## Chunk Index and Range Proof
 
