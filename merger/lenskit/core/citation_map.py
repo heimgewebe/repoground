@@ -11,7 +11,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from merger.lenskit.core.citation_id import make_citation_id
 from merger.lenskit.core.path_security import resolve_secure_path
@@ -455,6 +455,32 @@ def _default_output_path(manifest_path: Path) -> Path:
     return manifest_path.parent / (stem + _OUTPUT_SUFFIX)
 
 
+def _remove_stale_output(
+    output_path: Optional[Path],
+    protected_paths: Set[Path],
+) -> Optional[str]:
+    """
+    Remove a stale citation_map_jsonl left by a prior run, if it exists and is
+    not a protected input (manifest, canonical_md, chunk_index_jsonl).
+
+    Returns None when there is nothing to do or removal succeeds.
+    Returns an error string if removal fails — the caller includes it in errors[].
+    """
+    if output_path is None:
+        return None
+    try:
+        resolved = output_path.resolve()
+    except OSError:
+        return None
+    if resolved in protected_paths:
+        return None
+    try:
+        output_path.unlink(missing_ok=True)
+        return None
+    except OSError as e:
+        return f"Could not remove stale output {str(output_path)!r}: {e}"
+
+
 def _fail_report(
     production_run_id: str,
     manifest_path_str: str,
@@ -517,11 +543,27 @@ def produce_citation_map(
     manifest_path = manifest_path.resolve()
     bundle_manifest_path_str = str(manifest_path)
 
+    # --- determine output path as early as possible ---
+    # This allows stale-output cleanup even for pre-iteration failures (SHA mismatch,
+    # bad run_id, etc.).  output_path stays None only when the manifest suffix check
+    # fails; that error is surfaced at the normal location below.
+    output_path: Optional[Path] = None
+    if output_path_str:
+        p = Path(output_path_str)
+        output_path = p if p.is_absolute() else Path.cwd() / p
+    elif manifest_path.name.endswith(_MANIFEST_SUFFIX):
+        stem = manifest_path.name[: -len(_MANIFEST_SUFFIX)]
+        output_path = manifest_path.parent / (stem + _OUTPUT_SUFFIX)
+
+    # protected_paths grows as artifacts are resolved; at minimum contains the manifest.
+    protected_paths: Set[Path] = {manifest_path.resolve()}
+
     if not manifest_path.exists() or not manifest_path.is_file():
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
-            [f"Manifest not found or not a file: {manifest_path}"],
+            [f"Manifest not found or not a file: {manifest_path}"] + ([_s] if _s else []),
             error_kind="path_read_error",
         )
 
@@ -531,10 +573,11 @@ def produce_citation_map(
     try:
         manifest = load_manifest(manifest_path)
     except (json.JSONDecodeError, OSError) as e:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
-            [f"Cannot load manifest: {e}"],
+            [f"Cannot load manifest: {e}"] + ([_s] if _s else []),
             error_kind="path_read_error",
         )
 
@@ -542,13 +585,14 @@ def produce_citation_map(
 
     # H3: run_id must be a non-empty string — an empty snapshot.run_id is invalid.
     if not isinstance(bundle_run_id, str) or not bundle_run_id:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
             [
                 f"Manifest 'run_id' is missing or empty: {bundle_run_id!r}. "
                 "A non-empty run_id is required for snapshot identity."
-            ],
+            ] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
         )
 
@@ -558,15 +602,17 @@ def produce_citation_map(
             resolve_artifact_by_role(manifest, "canonical_md", manifest_dir)
         )
     except CitationMapError as e:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
-            [str(e)],
+            [str(e)] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
             error_kind="path_read_error",
         )
 
     canonical_md_manifest_sha = canonical_md_art.get("sha256", "")
+    protected_paths.add(canonical_md_path.resolve())
 
     # --- resolve chunk_index_jsonl ---
     try:
@@ -574,58 +620,64 @@ def produce_citation_map(
             resolve_artifact_by_role(manifest, "chunk_index_jsonl", manifest_dir)
         )
     except CitationMapError as e:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
-            [str(e)],
+            [str(e)] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
             error_kind="path_read_error",
         )
 
     chunk_index_manifest_sha = chunk_index_art.get("sha256", "")
+    protected_paths.add(chunk_index_path.resolve())
 
     # --- verify SHAs ---
     try:
         actual_canonical_sha = _sha256_file(canonical_md_path)
     except OSError as e:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
-            [f"Cannot read canonical_md: {e}"],
+            [f"Cannot read canonical_md: {e}"] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
             error_kind="path_read_error",
         )
 
     if actual_canonical_sha != canonical_md_manifest_sha:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
             [
                 f"canonical_md SHA256 mismatch: "
                 f"manifest={canonical_md_manifest_sha!r} actual={actual_canonical_sha!r}"
-            ],
+            ] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
         )
 
     try:
         actual_chunk_sha = _sha256_file(chunk_index_path)
     except OSError as e:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
-            [f"Cannot read chunk_index_jsonl: {e}"],
+            [f"Cannot read chunk_index_jsonl: {e}"] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
             error_kind="path_read_error",
         )
 
     if actual_chunk_sha != chunk_index_manifest_sha:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
             [
                 f"chunk_index_jsonl SHA256 mismatch: "
                 f"manifest={chunk_index_manifest_sha!r} actual={actual_chunk_sha!r}"
-            ],
+            ] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
         )
 
@@ -633,36 +685,28 @@ def produce_citation_map(
     try:
         canonical_md_bytes = canonical_md_path.read_bytes()
     except OSError as e:
+        _s = _remove_stale_output(output_path, protected_paths)
         return _fail_report(
             production_run_id,
             bundle_manifest_path_str,
-            [f"Cannot read canonical_md bytes: {e}"],
+            [f"Cannot read canonical_md bytes: {e}"] + ([_s] if _s else []),
             bundle_run_id=bundle_run_id,
             error_kind="path_read_error",
         )
 
-    # --- determine output path ---
-    if output_path_str:
-        output_path = Path(output_path_str)
-        if not output_path.is_absolute():
-            output_path = Path.cwd() / output_path
-    else:
-        try:
-            output_path = _default_output_path(manifest_path)
-        except CitationMapError as e:
-            return _fail_report(
-                production_run_id,
-                bundle_manifest_path_str,
-                [str(e)],
-                bundle_run_id=bundle_run_id,
-            )
+    # If output_path is still None, the manifest filename lacks the required suffix.
+    if output_path is None:
+        return _fail_report(
+            production_run_id,
+            bundle_manifest_path_str,
+            [
+                f"Cannot derive safe output path: manifest filename {manifest_path.name!r} "
+                f"does not end with '{_MANIFEST_SUFFIX}'. Pass --output explicitly."
+            ],
+            bundle_run_id=bundle_run_id,
+        )
 
     # H2: output path must not collide with any input artifact.
-    protected_paths = {
-        manifest_path.resolve(),
-        canonical_md_path.resolve(),
-        chunk_index_path.resolve(),
-    }
     output_path_resolved = output_path.resolve()
     if output_path_resolved in protected_paths:
         return _fail_report(
@@ -725,13 +769,11 @@ def produce_citation_map(
 
     if errors:
         status = "fail"
-        # B: Remove any stale output from a prior successful run at the same path.
+        # Remove any stale output from a prior successful run at the same path.
         # output_path is safe (collision check above ensures it is not a protected input).
-        if output_path.exists():
-            try:
-                output_path.unlink()
-            except OSError:
-                pass  # best-effort; caller sees status=fail regardless
+        _s = _remove_stale_output(output_path, protected_paths)
+        if _s:
+            errors.append(_s)
     else:
         status = "ok"
         # A: Always write, even when there are no rows (empty chunk index → empty file).

@@ -82,7 +82,7 @@ Spätere PRs:
     - `start_line`/`end_line` werden aus `canonical_md`-Bytes berechnet (`byte_range_to_line_range()`); Input-Werte werden ignoriert. Semantik: `canonical_range` ist Position in `canonical_md` laut Contract.
     - H1–H4/H6-Hardening: kein partieller Output, sicherer Default-Pfad, `run_id`-Gate, `repo_id`-Konfliktprüfung, Module-Level-Registry.
     - `ARTIFACT_CONTRACT_REGISTRY` und `ARTIFACT_AUTHORITY_REGISTRY` auf Modulebene in `merge.py`.
-    - Tests: `test_citation_map_producer.py` (69 Tests, alle grün).
+    - Tests: `test_citation_map_producer.py` (72 Tests, alle grün).
     - Real-Dump-Proof PASS gegen Dump `lenskit-max-260514-0409_merge` (541 Chunks, 0 Fehler, 0 Duplikate, Schema-Validierung PASS); Beleg: `docs/proofs/citation-map-producer-proof.md`.
 - [x] Citation-Readiness-Validator plus Real-Dump-Proof
   - `merger/lenskit/core/citation_validate.py` implementiert (Konsument/Readiness-Gate, kein Producer).

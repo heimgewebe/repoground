@@ -830,6 +830,76 @@ class TestStaleOutputCleanup:
 
 
 # ---------------------------------------------------------------------------
+# B (extended): Stale cleanup on early failures (SHA mismatch, bad run_id)
+# ---------------------------------------------------------------------------
+
+class TestEarlyFailStaleCleanup:
+    def test_canonical_md_sha_mismatch_removes_stale_output(self, tmp_path):
+        content = b"First run content\nWith two lines\n"
+        chunk = _canonical_range_chunk(content, 0, 5, "test_merge.md")
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+
+        # First run succeeds and writes output.
+        report1 = produce_citation_map(str(manifest_path))
+        assert report1["status"] == "ok", report1["errors"]
+        stale_path = Path(report1["output_path"])
+        assert stale_path.exists()
+
+        # Tamper canonical_md bytes so its SHA no longer matches the manifest.
+        (tmp_path / "test_merge.md").write_bytes(b"tampered")
+
+        # Second run: SHA mismatch → fail; stale output must be removed.
+        report2 = produce_citation_map(str(manifest_path))
+        assert report2["status"] == "fail"
+        assert any("SHA256 mismatch" in e for e in report2["errors"])
+        assert report2["output_path"] is None
+        assert not stale_path.exists(), "Stale output must be removed on canonical_md SHA mismatch"
+
+    def test_chunk_index_sha_mismatch_removes_stale_output(self, tmp_path):
+        content = b"Content for chunk index SHA test\n"
+        chunk = _canonical_range_chunk(content, 0, 7, "test_merge.md")
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+
+        # First run succeeds.
+        report1 = produce_citation_map(str(manifest_path))
+        assert report1["status"] == "ok", report1["errors"]
+        stale_path = Path(report1["output_path"])
+        assert stale_path.exists()
+
+        # Tamper chunk_index so its SHA no longer matches the manifest.
+        (tmp_path / "test_merge.chunk_index.jsonl").write_bytes(b"tampered chunk index\n")
+
+        # Second run: chunk_index SHA mismatch → fail; stale output must be removed.
+        report2 = produce_citation_map(str(manifest_path))
+        assert report2["status"] == "fail"
+        assert any("SHA256 mismatch" in e for e in report2["errors"])
+        assert report2["output_path"] is None
+        assert not stale_path.exists(), "Stale output must be removed on chunk_index SHA mismatch"
+
+    def test_cleanup_failure_reported_in_errors(self, tmp_path):
+        from unittest.mock import patch as mock_patch
+
+        content = b"Content for cleanup failure test\n"
+        chunk = _canonical_range_chunk(content, 0, 7, "test_merge.md")
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+
+        # First run succeeds.
+        report1 = produce_citation_map(str(manifest_path))
+        assert report1["status"] == "ok", report1["errors"]
+
+        # Tamper canonical_md to trigger SHA mismatch on second run.
+        (tmp_path / "test_merge.md").write_bytes(b"tampered")
+
+        # Simulate unlink permission failure.
+        with mock_patch.object(Path, "unlink", side_effect=OSError("Permission denied (mocked)")):
+            report2 = produce_citation_map(str(manifest_path))
+
+        assert report2["status"] == "fail"
+        assert report2["output_path"] is None
+        assert any("Could not remove stale output" in e for e in report2["errors"])
+
+
+# ---------------------------------------------------------------------------
 # D: snapshot_source precision
 # ---------------------------------------------------------------------------
 
