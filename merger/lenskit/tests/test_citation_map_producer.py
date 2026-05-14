@@ -15,6 +15,7 @@ from merger.lenskit.core.citation_id import make_citation_id
 from merger.lenskit.core.citation_map import (
     CitationMapError,
     PRODUCED_BY,
+    byte_range_to_line_range,
     iter_chunk_results,
     normalize_canonical_range,
     produce_citation_map,
@@ -301,6 +302,138 @@ class TestVerifyByteRangeHash:
         content = b"abc"
         with pytest.raises(CitationMapError, match="start_byte"):
             verify_byte_range_hash(content, -1, 2, "a" * 64, lineno=1)
+
+
+# ---------------------------------------------------------------------------
+# byte_range_to_line_range
+# ---------------------------------------------------------------------------
+
+class TestByteRangeToLineRange:
+    def test_range_in_line_1(self):
+        content = b"hello world"
+        assert byte_range_to_line_range(content, 0, 5) == (1, 1)
+
+    def test_range_in_line_2(self):
+        content = b"line1\nhello world"
+        # range starts at byte 6 ('h'), ends at byte 11 (exclusive)
+        assert byte_range_to_line_range(content, 6, 11) == (2, 2)
+
+    def test_range_spans_lines_2_and_3(self):
+        content = b"line1\nline2\nline3"
+        # range [6, 13): bytes 6-12 = "line2\nli"
+        # start_byte=6 → line 2; last byte=12 ('i' in line3) → line 3
+        assert byte_range_to_line_range(content, 6, 13) == (2, 3)
+
+    def test_range_ends_on_newline_byte(self):
+        # The '\n' byte terminates the line it belongs to; end_line is that line
+        content = b"line1\nline2\n"
+        # range [0, 6): last included byte = index 5 = '\n'
+        # '\n' at 5 belongs to line 1
+        assert byte_range_to_line_range(content, 0, 6) == (1, 1)
+
+    def test_range_starts_after_newline_ends_on_next_newline(self):
+        content = b"line1\nline2\nline3\n"
+        # range [6, 12): bytes 6-11 = "line2\n", last byte 11 = '\n' → line 2
+        assert byte_range_to_line_range(content, 6, 12) == (2, 2)
+
+    def test_single_byte_range(self):
+        content = b"x"
+        assert byte_range_to_line_range(content, 0, 1) == (1, 1)
+
+    def test_first_byte_of_second_line(self):
+        content = b"\nfoo"
+        # byte 0 = '\n' (line 1 terminator), byte 1 = 'f' (start of line 2)
+        assert byte_range_to_line_range(content, 1, 2) == (2, 2)
+
+    def test_whole_file_range(self):
+        content = b"a\nb\nc"
+        assert byte_range_to_line_range(content, 0, len(content)) == (1, 3)
+
+
+# ---------------------------------------------------------------------------
+# H5: input start_line/end_line are ignored; output is computed from bytes
+# ---------------------------------------------------------------------------
+
+class TestInputLineRangeIgnored:
+    def test_missing_input_start_end_line_does_not_prevent_production(self, tmp_path):
+        """Chunk with no start_line/end_line in range still produces a row."""
+        content = b"Line one\nLine two\n"
+        content_sha = _sha256(content[0:8])
+        chunk = {
+            "chunk_id": "c1",
+            "repo": "testrepo",
+            "canonical_range": {
+                "artifact_role": "canonical_md",
+                "repo_id": "testrepo",
+                "file_path": "test_merge.md",
+                "start_byte": 0,
+                "end_byte": 8,
+                "content_sha256": content_sha,
+                # deliberately no start_line / end_line
+            },
+        }
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "ok", report["errors"]
+        assert report["citation_map_row_count"] == 1
+        row = report["sample_rows"][0]
+        assert row["canonical_range"]["start_line"] == 1
+        assert row["canonical_range"]["end_line"] == 1
+
+    def test_wrong_input_line_numbers_are_not_passed_through(self, tmp_path):
+        """Input start_line=99/end_line=99 must NOT appear in output."""
+        content = b"Line one\nLine two\n"
+        content_sha = _sha256(content[0:8])
+        chunk = {
+            "chunk_id": "c1",
+            "repo": "testrepo",
+            "canonical_range": {
+                "artifact_role": "canonical_md",
+                "repo_id": "testrepo",
+                "file_path": "test_merge.md",
+                "start_byte": 0,
+                "end_byte": 8,
+                "start_line": 99,  # wrong — must be ignored
+                "end_line": 99,    # wrong — must be ignored
+                "content_sha256": content_sha,
+            },
+        }
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "ok", report["errors"]
+        row = report["sample_rows"][0]
+        assert row["canonical_range"]["start_line"] != 99
+        assert row["canonical_range"]["end_line"] != 99
+        assert row["canonical_range"]["start_line"] == 1
+        assert row["canonical_range"]["end_line"] == 1
+
+    def test_output_line_numbers_match_byte_range_function(self, tmp_path):
+        """Output start_line/end_line must equal byte_range_to_line_range result."""
+        content = b"first\nsecond\nthird\n"
+        # range in second line: bytes 6-11 = "second"
+        start_byte, end_byte = 6, 12
+        content_sha = _sha256(content[start_byte:end_byte])
+        chunk = {
+            "chunk_id": "c1",
+            "repo": "testrepo",
+            "canonical_range": {
+                "artifact_role": "canonical_md",
+                "repo_id": "testrepo",
+                "file_path": "test_merge.md",
+                "start_byte": start_byte,
+                "end_byte": end_byte,
+                "start_line": 1,   # wrong input — source-local
+                "end_line": 1,     # wrong input — source-local
+                "content_sha256": content_sha,
+            },
+        }
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "ok", report["errors"]
+        row = report["sample_rows"][0]
+        expected_start, expected_end = byte_range_to_line_range(content, start_byte, end_byte)
+        assert row["canonical_range"]["start_line"] == expected_start
+        assert row["canonical_range"]["end_line"] == expected_end
 
 
 # ---------------------------------------------------------------------------

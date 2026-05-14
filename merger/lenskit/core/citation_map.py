@@ -209,6 +209,26 @@ def resolve_repo_id(
 # Byte-range verification
 # ---------------------------------------------------------------------------
 
+def byte_range_to_line_range(
+    canonical_md_bytes: bytes,
+    start_byte: int,
+    end_byte: int,
+) -> Tuple[int, int]:
+    """
+    Compute 1-based global line numbers for [start_byte, end_byte) within canonical_md.
+
+    Counts b'\\n' bytes directly without decoding; does not allocate slices.
+    Assumes 0 <= start_byte < end_byte <= len(canonical_md_bytes).
+
+    start_line: line containing the byte at start_byte.
+    end_line:   line containing the last included byte (end_byte - 1).
+    A b'\\n' byte belongs to the line it terminates.
+    """
+    start_line = 1 + canonical_md_bytes.count(b"\n", 0, start_byte)
+    end_line = 1 + canonical_md_bytes.count(b"\n", 0, end_byte - 1)
+    return start_line, end_line
+
+
 def verify_byte_range_hash(
     canonical_md_bytes: bytes,
     start_byte: int,
@@ -339,15 +359,11 @@ def iter_chunk_results(
 
             start_byte = norm_range.get("start_byte")
             end_byte = norm_range.get("end_byte")
-            start_line = norm_range.get("start_line")
-            end_line = norm_range.get("end_line")
             content_sha256 = norm_range.get("content_sha256", "")
 
             for name, val in (
                 ("start_byte", start_byte),
                 ("end_byte", end_byte),
-                ("start_line", start_line),
-                ("end_line", end_line),
             ):
                 if isinstance(val, bool) or not isinstance(val, int):
                     yield _ChunkResult(
@@ -359,11 +375,9 @@ def iter_chunk_results(
             else:
                 pass  # all int checks passed — fall through
 
-            # Re-check after the loop (Python does not break out of the enclosing
-            # for-loop so we use a sentinel).
             if any(
                 isinstance(v, bool) or not isinstance(v, int)
-                for v in (start_byte, end_byte, start_line, end_line)
+                for v in (start_byte, end_byte)
             ):
                 continue
 
@@ -391,6 +405,13 @@ def iter_chunk_results(
             except CitationMapError as e:
                 yield _ChunkResult(None, str(e), None)
                 continue
+
+            # --- compute canonical_md-global line numbers (H5) ---
+            # Input start_line/end_line are ignored: they are source-file-local
+            # from the generator. Output line numbers are always canonical_md-global.
+            start_line, end_line = byte_range_to_line_range(
+                canonical_md_bytes, start_byte, end_byte
+            )
 
             # --- derive citation_id ---
             try:

@@ -37,7 +37,7 @@ Alle 7 Manifest-Artefakte existieren. Kein Artefakt fehlt.
 |---|---|---|---|
 | `canonical_md` | `05e38a5aadf4becaac1952eca86246429f9dd6cf57b7593f4810155525cf95df` | `05e38a5aadf4becaac1952eca86246429f9dd6cf57b7593f4810155525cf95df` | **✓** |
 | `chunk_index_jsonl` | `b1849a0649c82a99e44e9235c018e8acb8f08c2f86014d434f594805e93e3086` | `b1849a0649c82a99e44e9235c018e8acb8f08c2f86014d434f594805e93e3086` | **✓** |
-| `citation_map_jsonl` (Output) | _nicht im Manifest_ | `304a4d229217e9926d1b5b3f544720a17195932ea175af44d084364b9259ad08` | N/A (neu erzeugt) |
+| `citation_map_jsonl` (Output) | _nicht im Manifest_ | `f7a7e62b01042149dfe59734e006d5ddbb876adb3d3d2cce0f42cc9d169b9c69` | N/A (neu erzeugt) |
 
 ---
 
@@ -79,8 +79,8 @@ python3 -m merger.lenskit.cli.main citation produce --json \
 | `citation_id_duplicate_count` | `0` |
 | `repo_id_source` | `range.repo_id` |
 | `snapshot_source` | `bundle_manifest` |
-| `output_bytes` | `313222` |
-| `output_sha256` | `304a4d229217e9926d1b5b3f544720a17195932ea175af44d084364b9259ad08` |
+| `output_bytes` | `316003` |
+| `output_sha256` | `f7a7e62b01042149dfe59734e006d5ddbb876adb3d3d2cce0f42cc9d169b9c69` |
 
 ---
 
@@ -120,8 +120,8 @@ Alle 541 Zeilen der erzeugten `citation_map_jsonl` wurden gegen
     "file_path": "lenskit-max-260514-0409_merge.md",
     "start_byte": 123372,
     "end_byte": 124513,
-    "start_line": 1,
-    "end_line": 57,
+    "start_line": 1445,
+    "end_line": 1501,
     "content_sha256": "07d82137b0a8af1546a0c87ef8259c3a9da982b4e2a5d609aa790a63d6a10cb4"
   },
   "produced_by": "citation_map_producer/v1",
@@ -142,8 +142,8 @@ Alle 541 Zeilen der erzeugten `citation_map_jsonl` wurden gegen
     "file_path": "lenskit-max-260514-0409_merge.md",
     "start_byte": 125550,
     "end_byte": 127566,
-    "start_line": 1,
-    "end_line": 65,
+    "start_line": 1534,
+    "end_line": 1598,
     "content_sha256": "770dc60e8f9a04b5596f068d6813927c573f9351ce7f08e784211b5f61d74e99"
   },
   "produced_by": "citation_map_producer/v1",
@@ -164,8 +164,8 @@ Alle 541 Zeilen der erzeugten `citation_map_jsonl` wurden gegen
     "file_path": "lenskit-max-260514-0409_merge.md",
     "start_byte": 128607,
     "end_byte": 135091,
-    "start_line": 1,
-    "end_line": 190,
+    "start_line": 1630,
+    "end_line": 1819,
     "content_sha256": "2e2237dc13ee8ac56edb1425ad278a9671de0cd77faed1d61c151d85c19c5687"
   },
   "produced_by": "citation_map_producer/v1",
@@ -206,18 +206,33 @@ Folgende Punkte wurden nach dem initialen Proof gepatcht:
 | H2: Default-Output-Pfad sicher | `_default_output_path()` prüft `.bundle.manifest.json`-Suffix; Manifest-/Artefakt-Kollision → `status=fail`. |
 | H3: `run_id` leer → Fehler | Manifest-`run_id` wird vor Nutzung als nicht-leerer String validiert. |
 | H4: `repo_id`-Konflikte → Fehler | `resolve_repo_id()` sammelt alle Quellen; unterschiedliche Werte → `CitationMapError`. |
-| H5: `start_line`/`end_line`-Semantik | Keine Code-Änderung. Dokumentation unten. |
+| H5: `start_line`/`end_line`-Semantik | `byte_range_to_line_range()` implementiert; Producer berechnet globale Zeilen aus `canonical_md`-Bytes. Input-Werte werden ignoriert. |
 | H6: Registry-Tests ohne `inspect.getsource()` | `ARTIFACT_CONTRACT_REGISTRY` und `ARTIFACT_AUTHORITY_REGISTRY` auf Modulebene in `merge.py` hochgezogen; Tests importieren sie direkt. |
 
-Der Output-SHA nach Hardening ist identisch mit dem Initialwert (`304a4d22...`), da kein Chunk im echten Dump Fehler enthält.
+Der Output-SHA nach H1–H4/H6-Hardening war identisch mit dem Initialwert. Nach H5-Patch ändert sich der Output-SHA, da `start_line`/`end_line` jetzt canonical_md-global sind (statt quell-lokal).
 
-## `start_line`/`end_line`-Semantik (H5)
+## `start_line`/`end_line`-Semantik (H5 — Code-Patch)
 
-Befund aus dem realen Dump: fünf aufeinanderfolgende Chunks mit unterschiedlichen Byte-Offsets haben alle `start_line=1`. Diese Zeilen stammen aus dem Generator-seitigen `content_range_ref`, das quell-lokale Zeilennummern innerhalb der Quelldatei enthält, nicht globale Positionen in `canonical_md`.
+**Contract-Entscheidung:** `canonical_range.description` im Schema lautet explizit „Position inside canonical_md. Authoritative locator for the citation." Damit sind `start_line`/`end_line` canonical_md-globale Positionen, keine quell-lokalen Werte.
 
-Das Schema (`canonical_range.description`) sagt: „Position inside canonical_md" — es legt aber nicht fest, ob Zeilennummern global (canonical_md-weit) oder lokal (quellдатei-lokal) sind. Das Schema setzt `minimum: 1` und keine weiteren Constraints.
+**Implementierung:** `byte_range_to_line_range(canonical_md_bytes, start_byte, end_byte) -> (int, int)`
 
-**Entscheidung:** Der Producer übernimmt `start_line`/`end_line` unverändert aus dem Input-Range-Feld. Die autoritative Zitierachse sind `start_byte`, `end_byte` und `content_sha256`, deren Korrektheit gegen `canonical_md` geprüft wird. Globale Zeilennummerberechnung bleibt eigenständiges Hardening, wenn der Contract es explizit fordert.
+- Zählt `b"\n"`-Bytes direkt, ohne Dekodierung.
+- `start_line = 1 + canonical_md_bytes.count(b"\n", 0, start_byte)`
+- `end_line = 1 + canonical_md_bytes.count(b"\n", 0, end_byte - 1)`
+- Ein `\n`-Byte gehört zur Zeile, die es terminiert.
+- Input-`start_line`/`end_line` werden vollständig ignoriert; Produktion schlägt auch dann nicht fehl, wenn sie fehlen.
+
+**Auswirkung auf den Real-Dump:** Der Dump `max-260514-0409` enthielt nur `content_range_ref` mit `start_line=1` bei allen 541 Chunks (quell-lokale Werte). Nach dem Patch liefern dieselben Byte-Ranges ihre kanonischen Positionen in `canonical_md`:
+
+| Beispiel | start_byte | end_byte | alt (quell-lokal) | neu (canonical_md-global) |
+|---|---|---|---|---|
+| Zeile 1 | 123372 | 124513 | `1`–`57` | `1445`–`1501` |
+| Zeile 2 | 125550 | 127566 | `1`–`65` | `1534`–`1598` |
+| Zeile 3 | 128607 | 135091 | `1`–`190` | `1630`–`1819` |
+
+Die `citation_id`-Werte sind identisch (sie hängen nicht von `start_line`/`end_line` ab).
+Output-SHA änderte sich von `304a4d22...` auf `f7a7e62b...` — ausschließlich wegen korrigierter Zeilennummern.
 
 ## Manifest-Wiring (H6): Registry vorbereitet — Pipeline-Integration offen
 
