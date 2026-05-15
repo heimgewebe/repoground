@@ -540,6 +540,114 @@ def _fail_report(
     }
 
 
+def is_manifest_coherent_for_citation_map(manifest_path: Path) -> bool:
+    """
+    Guard: Check if a bundle manifest's canonical_md and chunk_index_jsonl
+    reference the same canonical file path (coherent pair).
+
+    For pro-repo/multi-repo scenarios with output_mode='dual', the provisional
+    manifest may have an incoherent pair:
+      - canonical_md from repoA
+      - chunk_index_jsonl from repoB (or later repo)
+
+    In such cases, produce_citation_map would fail with a range.file_path mismatch.
+    This guard catches that early and allows the caller to skip citation generation
+    without failing the entire write_reports_v2 operation.
+
+    Returns True if:
+      - Manifest has canonical_md and chunk_index_jsonl artifacts
+      - Both exist and are readable
+      - All chunks reference the same file_path as the canonical_md artifact
+      - Or chunk_index_jsonl is empty (valid case)
+
+    Returns False if:
+      - Either artifact is missing or unreadable (silently skip)
+      - At least one chunk references a different file_path than canonical_md
+      - Any JSON parsing error (silently skip)
+
+    Raises nothing; failures are silent (returns False) to avoid hard errors
+    in pro-repo scenarios where skipping citation generation is acceptable.
+    """
+    try:
+        manifest_dir = manifest_path.parent
+
+        # Load manifest
+        try:
+            manifest = load_manifest(manifest_path)
+        except Exception:
+            return False
+
+        # Find canonical_md artifact
+        canonical_md_artifact = next(
+            (a for a in manifest.get("artifacts", [])
+             if isinstance(a, dict) and a.get("role") == "canonical_md"),
+            None,
+        )
+        if canonical_md_artifact is None:
+            return False
+
+        canonical_md_path = canonical_md_artifact.get("path")
+        if not canonical_md_path:
+            return False
+
+        # Find chunk_index_jsonl artifact
+        chunk_index_artifact = next(
+            (a for a in manifest.get("artifacts", [])
+             if isinstance(a, dict) and a.get("role") == "chunk_index_jsonl"),
+            None,
+        )
+        if chunk_index_artifact is None:
+            return False
+
+        # Resolve and check chunk_index file exists
+        try:
+            chunk_index_abs = resolve_secure_path(manifest_dir, chunk_index_artifact.get("path", ""))
+        except Exception:
+            return False
+
+        if not chunk_index_abs.exists():
+            return False
+
+        # Load chunk_index (NDJSON)
+        try:
+            with chunk_index_abs.open("r", encoding="utf-8") as f:
+                chunk_lines = f.readlines()
+        except Exception:
+            return False
+
+        # If chunk_index is empty, it's coherent (no chunks to mismatch)
+        if not chunk_lines:
+            return True
+
+        # Parse and check canonical_range.file_path consistency
+        for line in chunk_lines:
+            if not line.strip():
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                # Malformed line: treat as incoherent (safer to skip)
+                return False
+
+            # Extract canonical_range.file_path
+            normalized_range = normalize_canonical_range(chunk)
+            if normalized_range is None:
+                # No canonical_range or wrong role: treat as incoherent
+                return False
+
+            chunk_file_path = normalized_range.get("file_path")
+            if chunk_file_path != canonical_md_path:
+                # Mismatch: this is the incoherent case we're guarding against
+                return False
+
+        # All chunks are coherent with canonical_md
+        return True
+
+    except Exception:
+        # Any unexpected error: silently return False (skip citation generation)
+        return False
+
+
 def produce_citation_map(
     manifest_path_str: str,
     output_path_str: Optional[str] = None,

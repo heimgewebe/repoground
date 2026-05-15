@@ -6053,27 +6053,32 @@ def write_reports_v2(
     out_paths.append(bundle_manifest_path)
 
     if final_canonical_md and final_chunk_index:
-        from .citation_map import produce_citation_map
+        from .citation_map import produce_citation_map, is_manifest_coherent_for_citation_map
 
-        citation_map_report = produce_citation_map(str(bundle_manifest_path))
-        if citation_map_report.get("status") != "ok":
-            raise RuntimeError(
-                "Failed to produce citation_map_jsonl: "
-                + "; ".join(citation_map_report.get("errors", []) or ["unknown error"])
+        # Guard: Only emit citation_map if the manifest has a coherent canonical_md/chunk_index pair.
+        # In pro-repo/multi-repo scenarios with output_mode='dual', the provisional manifest may
+        # pair canonical_md from repoA with chunk_index from repoB (late repo), causing producer to fail
+        # with a "range.file_path does not match" error. Skip silently in that case.
+        if is_manifest_coherent_for_citation_map(bundle_manifest_path):
+            citation_map_report = produce_citation_map(str(bundle_manifest_path))
+            if citation_map_report.get("status") != "ok":
+                raise RuntimeError(
+                    "Failed to produce citation_map_jsonl: "
+                    + "; ".join(citation_map_report.get("errors", []) or ["unknown error"])
+                )
+
+            citation_map_path = Path(citation_map_report["output_path"])
+            out_paths.append(citation_map_path)
+            if citation_map_path not in other_paths:
+                other_paths.append(citation_map_path)
+            _add_artifact(
+                citation_map_path,
+                ArtifactRole.CITATION_MAP_JSONL,
+                "application/x-ndjson",
             )
-
-        citation_map_path = Path(citation_map_report["output_path"])
-        out_paths.append(citation_map_path)
-        if citation_map_path not in other_paths:
-            other_paths.append(citation_map_path)
-        _add_artifact(
-            citation_map_path,
-            ArtifactRole.CITATION_MAP_JSONL,
-            "application/x-ndjson",
-        )
-        artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
-        bundle_manifest["artifacts"] = artifacts_list
-        _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
+            artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
+            bundle_manifest["artifacts"] = artifacts_list
+            _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
 
     if extras and extras.json_sidecar:
         # JSON is primary when json_sidecar is enabled

@@ -47,6 +47,31 @@ Failure-Semantik:
 - Ein eventuell bereits geschriebenes provisorisches Manifest gilt nicht als erfolgreicher finaler Bundle-Claim.
 - Die Service-/Job-Schicht darf Artefakte erst nach erfolgreichem write_reports_v2-Return als erfolgreich registrieren.
 
+## Kohärenz-Guard für pro-repo/multi-repo Szenarien (Codex-P1)
+
+**Problem (Codex-P1):** In `mode='pro-repo'` mit `output_mode='dual'` kann das provisorische Manifest ein inkohärentes Paar enthalten:
+- `final_canonical_md` = erstes Markdown aus `verified_md` (repoA)
+- `final_chunk_index` = letzter chunk_index (repoB oder später)
+
+Das Manifest paart dann repoA-Markdown mit repoB-Chunks, und der Producer schlägt mit "range.file_path does not match manifest canonical_md path" fehl.
+
+**Lösung:** Kohärenz-Guard vor Producer-Aufruf
+
+Die neue Funktion `is_manifest_coherent_for_citation_map()` in `merger/lenskit/core/citation_map.py` prüft:
+1. Manifest hat canonical_md und chunk_index_jsonl Artefakte
+2. Alle Chunks referenzieren denselben `canonical_range.file_path` wie das `canonical_md.path` Artefakt
+3. Wenn chunk_index_jsonl leer ist, gilt das als kohärent (keine Chunks zum Matchen)
+
+**Verhalten:**
+- **Kohärent:** produce_citation_map() wird ausgeführt, citation_map_jsonl wird in Manifest eingetragen
+- **Inkohärent:** produce_citation_map() wird ÜBERSPRUNGEN, write_reports_v2 schlägt nicht fehl, Manifest enthält kein citation_map_jsonl
+- **Producer-Fehler bei kohärentem Manifest:** Bleibt harter Fehler (nicht pauschal verschluckt)
+
+Dies ermöglicht es:
+- Gesamt/Dual Bundles können weiterhin automatisch citation_map_jsonl erzeugen
+- Pro-repo Szenarien mit inkohärentem Manifest schlagen nicht fehl
+- Per-repo Citation Maps sind ein Folgepunkt, nicht Teil dieses PRs
+
 ## Count-Konsistenz
 
 - citation_map_row_count: 613
