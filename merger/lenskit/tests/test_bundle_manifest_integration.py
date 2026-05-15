@@ -20,6 +20,7 @@ _BUNDLE_MANIFEST_SCHEMA_PATH = (
 _OUTPUT_HEALTH_SCHEMA_PATH = (
     _CONTRACTS_DIR / "output-health.v1.schema.json"
 )
+_CITATION_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "citation-map.v1.schema.json"
 _SHA256_HEX_LENGTH = 64
 
 
@@ -124,6 +125,17 @@ def test_generate_bundle_manifest_integration(tmp_path):
     chunk_entry = roles_map.get(ArtifactRole.CHUNK_INDEX_JSONL.value)
     assert chunk_entry and "contract" not in chunk_entry
     assert chunk_entry["interpretation"]["mode"] == "role_only"
+
+    citation_entry = roles_map.get(ArtifactRole.CITATION_MAP_JSONL.value)
+    assert citation_entry and "contract" in citation_entry
+    assert citation_entry["contract"]["id"] == "citation-map"
+    assert citation_entry["contract"]["version"] == "v1"
+    assert citation_entry["interpretation"]["mode"] == "contract"
+    assert citation_entry["authority"] == "navigation_index"
+    assert citation_entry["canonicality"] == "derived"
+    assert citation_entry["regenerable"] is True
+    assert citation_entry["staleness_sensitive"] is True
+    assert citation_entry["path"].endswith(".citation_map.jsonl")
 
     output_health_entry = roles_map.get(ArtifactRole.OUTPUT_HEALTH.value)
     assert output_health_entry and "contract" not in output_health_entry
@@ -618,6 +630,48 @@ def test_bundle_manifest_artifact_hashes_match_files(tmp_path):
         assert _sha256_file(p) == entry["sha256"], (
             f"sha256 mismatch for {entry['path']}"
         )
+
+
+def test_citation_map_artifact_integrity_and_schema(tmp_path):
+    artifacts, data, manifest_dir = _make_minimal_bundle(tmp_path)
+
+    manifest_schema = json.loads(_BUNDLE_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    citation_schema = json.loads(_CITATION_MAP_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    jsonschema.validate(instance=data, schema=manifest_schema)
+
+    roles_map = {item["role"]: item for item in data["artifacts"]}
+    citation_entry = roles_map[ArtifactRole.CITATION_MAP_JSONL.value]
+    chunk_entry = roles_map[ArtifactRole.CHUNK_INDEX_JSONL.value]
+    canonical_entry = roles_map[ArtifactRole.CANONICAL_MD.value]
+
+    citation_path = manifest_dir / citation_entry["path"]
+    chunk_path = manifest_dir / chunk_entry["path"]
+
+    assert citation_path.exists()
+    assert citation_entry["bytes"] == citation_path.stat().st_size
+    assert citation_entry["sha256"] == _sha256_file(citation_path)
+
+    with citation_path.open(encoding="utf-8") as f:
+        citation_rows = [json.loads(line) for line in f if line.strip()]
+    with chunk_path.open(encoding="utf-8") as f:
+        chunk_rows = [json.loads(line) for line in f if line.strip()]
+
+    assert len(citation_rows) == len(chunk_rows)
+    assert len(citation_rows) > 0
+    assert citation_entry["bytes"] == citation_path.stat().st_size
+    assert canonical_entry["sha256"] == citation_rows[0]["snapshot"]["canonical_md_sha256"]
+
+    citation_ids = set()
+    chunk_ids = {row.get("chunk_id") for row in chunk_rows if row.get("chunk_id") is not None}
+    for row in citation_rows:
+        jsonschema.validate(instance=row, schema=citation_schema)
+        assert row["citation_id"] not in citation_ids
+        citation_ids.add(row["citation_id"])
+        if "chunk_id" in row:
+            assert row["chunk_id"] in chunk_ids
+
+    assert len(citation_ids) == len(citation_rows)
 
 
 def test_bundle_manifest_canonical_dump_index_sha_matches_dump_index_artifact(tmp_path):

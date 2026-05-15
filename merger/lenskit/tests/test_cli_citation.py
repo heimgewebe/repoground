@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 
 from merger.lenskit.cli.main import main
+from merger.lenskit.core.merge import FileInfo, write_reports_v2
+from merger.lenskit.tests._test_constants import make_generator_info
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +73,56 @@ def _make_chunk(canonical_content: bytes, start: int, end: int) -> dict:
     }
 
 
+def _make_generated_bundle(tmp_path: Path) -> Path:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    source_file = src_dir / "file1.txt"
+    source_file.write_text("Hello World", encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    file_info = FileInfo(
+        root_label="test-repo",
+        abs_path=source_file,
+        rel_path=Path("file1.txt"),
+        size=11,
+        is_text=True,
+        md5="test",
+        category="docs",
+        tags=[],
+        ext=".txt",
+        skipped=False,
+    )
+
+    repo_summary = {
+        "name": "test-repo",
+        "path": str(src_dir),
+        "root": src_dir,
+        "files": [file_info],
+        "source_files": [file_info],
+    }
+
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[repo_summary],
+        detail="test",
+        mode="gesamt",
+        max_bytes=1000,
+        plan_only=False,
+        code_only=False,
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+
+    assert artifacts.bundle_manifest is not None
+    assert artifacts.bundle_manifest.exists()
+    return artifacts.bundle_manifest
+
+
 # ---------------------------------------------------------------------------
 # CLI: --json output and exit code 0 on valid fixture
 # ---------------------------------------------------------------------------
@@ -93,6 +145,20 @@ def test_cli_json_output_exit_0_on_valid_bundle(tmp_path, capsys):
     assert report["chunk_index_actual_sha256"] == report["chunk_index_sha256"]
     assert isinstance(report["errors"], list)
     assert len(report["errors"]) == 0
+
+
+def test_cli_json_output_exit_0_on_generated_bundle(tmp_path, capsys):
+    manifest_path = _make_generated_bundle(tmp_path)
+
+    rc = main(["citation", "validate", "--json", str(manifest_path)])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    report = json.loads(captured.out)
+    assert report["status"] == "ok"
+    assert report["citation_id_count"] > 0
+    assert report["canonical_md_actual_sha256"] == report["canonical_md_sha256"]
+    assert report["chunk_index_actual_sha256"] == report["chunk_index_sha256"]
 
 
 # ---------------------------------------------------------------------------

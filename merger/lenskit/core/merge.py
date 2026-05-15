@@ -12,6 +12,7 @@ import json
 import hashlib
 import datetime
 import re
+import tempfile
 import unicodedata
 import concurrent.futures
 from pathlib import Path
@@ -35,6 +36,31 @@ except Exception:  # pragma: no cover
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 EPISTEMIC_HUMILITY_WARNING = "⚠️ **Hinweis:** Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein von Dateien im Repository. Fehlende Einträge bedeuten lediglich „nicht im Ausschnitt enthalten“."
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            delete=False,
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as tmp_file:
+            tmp_file.write(text)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+            tmp_path = Path(tmp_file.name)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 def _slug_token(s: str) -> str:
     """Deterministic ASCII token suitable for heading ids across renderers."""
@@ -6023,8 +6049,28 @@ def write_reports_v2(
             "redaction": redact_secrets
         }
     }
-    bundle_manifest_path.write_text(json.dumps(bundle_manifest, indent=2), encoding="utf-8")
+    _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
     out_paths.append(bundle_manifest_path)
+
+    if final_canonical_md and final_chunk_index:
+        from .citation_map import produce_citation_map
+
+        citation_map_report = produce_citation_map(str(bundle_manifest_path))
+        if citation_map_report.get("status") != "ok":
+            raise RuntimeError(
+                "Failed to produce citation_map_jsonl: "
+                + "; ".join(citation_map_report.get("errors", []) or ["unknown error"])
+            )
+
+        citation_map_path = Path(citation_map_report["output_path"])
+        _add_artifact(
+            citation_map_path,
+            ArtifactRole.CITATION_MAP_JSONL,
+            "application/x-ndjson",
+        )
+        artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
+        bundle_manifest["artifacts"] = artifacts_list
+        _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
 
     if extras and extras.json_sidecar:
         # JSON is primary when json_sidecar is enabled

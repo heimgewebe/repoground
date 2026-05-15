@@ -266,12 +266,17 @@ def test_source_range_unavailable_when_redacted(tmp_path):
         )
 
 
-def test_no_citation_map_jsonl_emitted(dual_range_artifacts):
-    """No citation_map_jsonl file must be emitted by this code path."""
+def test_citation_map_jsonl_emitted(dual_range_artifacts):
+    """Dual-range bundle runs must emit citation_map_jsonl alongside the manifest."""
     artifacts, _, _ = dual_range_artifacts
-    # Check that no citation_map_jsonl files exist anywhere under the merges dir
+    assert artifacts.bundle_manifest is not None
+    manifest = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    roles = {artifact["role"] for artifact in manifest["artifacts"]}
+    assert "citation_map_jsonl" in roles
+
     merges_dir = artifacts.chunk_index.parent
     citation_files = list(merges_dir.rglob("*.citation_map.jsonl"))
-    assert len(citation_files) == 0, (
-        f"citation_map_jsonl must not be emitted; found: {citation_files}"
+    assert len(citation_files) == 1, (
+        f"citation_map_jsonl must be emitted exactly once; found: {citation_files}"
     )
+    assert citation_files[0].exists()

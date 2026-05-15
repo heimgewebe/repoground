@@ -7,8 +7,10 @@ writing NDJSON output.  IO is isolated to produce_citation_map().
 """
 import hashlib
 import json
+import os
 import re
 import uuid
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
@@ -62,6 +64,30 @@ def _sha256_file(path: Path) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            delete=False,
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as tmp_file:
+            tmp_file.write(data)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+            tmp_path = Path(tmp_file.name)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -786,7 +812,7 @@ def produce_citation_map(
             ("\n".join(output_lines) + "\n").encode("utf-8") if output_lines else b""
         )
         try:
-            output_path.write_bytes(ndjson_bytes)
+            _write_bytes_atomic(output_path, ndjson_bytes)
         except OSError as e:
             return _fail_report(
                 production_run_id,
