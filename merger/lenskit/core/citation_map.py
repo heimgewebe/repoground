@@ -7,8 +7,10 @@ writing NDJSON output.  IO is isolated to produce_citation_map().
 """
 import hashlib
 import json
+import os
 import re
 import uuid
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
@@ -62,6 +64,30 @@ def _sha256_file(path: Path) -> str:
 
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Optional[Path] = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            delete=False,
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as tmp_file:
+            tmp_file.write(data)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+            tmp_path = Path(tmp_file.name)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +540,123 @@ def _fail_report(
     }
 
 
+@dataclass(frozen=True, slots=True)
+class CitationMapCoherence:
+    coherent: bool
+    skip_allowed: bool
+    reason: str
+
+
+def check_manifest_coherence_for_citation_map(manifest_path: Path) -> CitationMapCoherence:
+    """
+    Validate whether manifest pairing is suitable for citation-map emission.
+
+    Structured semantics:
+      - coherent=True: run producer (hard failures still surface)
+      - coherent=False + skip_allowed=True: known benign mismatch case
+      - coherent=False + skip_allowed=False: hard defect, caller should fail
+
+    In pro-repo/multi-repo aggregation, a provisional manifest may pair
+    canonical_md from repoA with chunk_index_jsonl from repoB. This must be a
+    deliberate skip, not a failure. Other defects (invalid JSON, unsafe paths,
+    missing artifacts) are hard errors and must not be silently downgraded.
+    """
+    manifest_dir = manifest_path.parent
+
+    try:
+        manifest = load_manifest(manifest_path)
+    except (json.JSONDecodeError, OSError):
+        return CitationMapCoherence(False, False, "invalid_manifest")
+
+    canonical_md_artifact = next(
+        (
+            a
+            for a in manifest.get("artifacts", [])
+            if isinstance(a, dict) and a.get("role") == "canonical_md"
+        ),
+        None,
+    )
+    if canonical_md_artifact is None:
+        return CitationMapCoherence(False, False, "missing_canonical_md_artifact")
+
+    chunk_index_artifact = next(
+        (
+            a
+            for a in manifest.get("artifacts", [])
+            if isinstance(a, dict) and a.get("role") == "chunk_index_jsonl"
+        ),
+        None,
+    )
+    if chunk_index_artifact is None:
+        return CitationMapCoherence(False, False, "missing_chunk_index_artifact")
+
+    canonical_md_raw = canonical_md_artifact.get("path")
+    if not isinstance(canonical_md_raw, str) or not canonical_md_raw:
+        return CitationMapCoherence(False, False, "invalid_canonical_md_path")
+
+    try:
+        canonical_md_rel = _normalize_relative_path(canonical_md_raw, "canonical_md.path")
+    except ValueError:
+        return CitationMapCoherence(False, False, "unsafe_canonical_md_path")
+
+    chunk_index_raw = chunk_index_artifact.get("path", "")
+    if not isinstance(chunk_index_raw, str) or not chunk_index_raw:
+        return CitationMapCoherence(False, False, "invalid_chunk_index_path")
+
+    try:
+        chunk_index_rel = _normalize_relative_path(chunk_index_raw, "chunk_index_jsonl.path")
+    except ValueError:
+        return CitationMapCoherence(False, False, "unsafe_chunk_index_path")
+
+    try:
+        chunk_index_abs = resolve_secure_path(manifest_dir, chunk_index_rel)
+    except ValueError:
+        return CitationMapCoherence(False, False, "unsafe_chunk_index_path")
+
+    if not chunk_index_abs.exists() or not chunk_index_abs.is_file():
+        return CitationMapCoherence(False, False, "missing_chunk_index_file")
+
+    saw_nonempty_line = False
+    try:
+        with chunk_index_abs.open("r", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, start=1):
+                if not line.strip():
+                    continue
+                saw_nonempty_line = True
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    return CitationMapCoherence(False, False, "invalid_chunk_index_json")
+
+                normalized_range = normalize_canonical_range(chunk)
+                if normalized_range is None:
+                    return CitationMapCoherence(False, False, "missing_or_invalid_canonical_range")
+
+                chunk_file_raw = normalized_range.get("file_path")
+                if not isinstance(chunk_file_raw, str) or not chunk_file_raw:
+                    return CitationMapCoherence(False, False, "missing_range_file_path")
+
+                try:
+                    chunk_file_rel = _normalize_relative_path(chunk_file_raw, f"range.file_path line {lineno}")
+                except ValueError:
+                    return CitationMapCoherence(False, False, "unsafe_range_file_path")
+
+                if chunk_file_rel != canonical_md_rel:
+                    return CitationMapCoherence(False, True, "range_file_path_mismatch")
+    except OSError:
+        return CitationMapCoherence(False, False, "unreadable_chunk_index")
+
+    if not saw_nonempty_line:
+        return CitationMapCoherence(True, False, "coherent_empty_chunk_index")
+
+    return CitationMapCoherence(True, False, "coherent")
+
+
+def is_manifest_coherent_for_citation_map(manifest_path: Path) -> bool:
+    """Compatibility wrapper around check_manifest_coherence_for_citation_map."""
+    return check_manifest_coherence_for_citation_map(manifest_path).coherent
+
+
 def produce_citation_map(
     manifest_path_str: str,
     output_path_str: Optional[str] = None,
@@ -786,7 +929,7 @@ def produce_citation_map(
             ("\n".join(output_lines) + "\n").encode("utf-8") if output_lines else b""
         )
         try:
-            output_path.write_bytes(ndjson_bytes)
+            _write_bytes_atomic(output_path, ndjson_bytes)
         except OSError as e:
             return _fail_report(
                 production_run_id,

@@ -20,6 +20,7 @@ _BUNDLE_MANIFEST_SCHEMA_PATH = (
 _OUTPUT_HEALTH_SCHEMA_PATH = (
     _CONTRACTS_DIR / "output-health.v1.schema.json"
 )
+_CITATION_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "citation-map.v1.schema.json"
 _SHA256_HEX_LENGTH = 64
 
 
@@ -124,6 +125,17 @@ def test_generate_bundle_manifest_integration(tmp_path):
     chunk_entry = roles_map.get(ArtifactRole.CHUNK_INDEX_JSONL.value)
     assert chunk_entry and "contract" not in chunk_entry
     assert chunk_entry["interpretation"]["mode"] == "role_only"
+
+    citation_entry = roles_map.get(ArtifactRole.CITATION_MAP_JSONL.value)
+    assert citation_entry and "contract" in citation_entry
+    assert citation_entry["contract"]["id"] == "citation-map"
+    assert citation_entry["contract"]["version"] == "v1"
+    assert citation_entry["interpretation"]["mode"] == "contract"
+    assert citation_entry["authority"] == "navigation_index"
+    assert citation_entry["canonicality"] == "derived"
+    assert citation_entry["regenerable"] is True
+    assert citation_entry["staleness_sensitive"] is True
+    assert citation_entry["path"].endswith(".citation_map.jsonl")
 
     output_health_entry = roles_map.get(ArtifactRole.OUTPUT_HEALTH.value)
     assert output_health_entry and "contract" not in output_health_entry
@@ -620,6 +632,48 @@ def test_bundle_manifest_artifact_hashes_match_files(tmp_path):
         )
 
 
+def test_citation_map_artifact_integrity_and_schema(tmp_path):
+    artifacts, data, manifest_dir = _make_minimal_bundle(tmp_path)
+
+    manifest_schema = json.loads(_BUNDLE_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    citation_schema = json.loads(_CITATION_MAP_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    jsonschema.validate(instance=data, schema=manifest_schema)
+
+    roles_map = {item["role"]: item for item in data["artifacts"]}
+    citation_entry = roles_map[ArtifactRole.CITATION_MAP_JSONL.value]
+    chunk_entry = roles_map[ArtifactRole.CHUNK_INDEX_JSONL.value]
+    canonical_entry = roles_map[ArtifactRole.CANONICAL_MD.value]
+
+    citation_path = manifest_dir / citation_entry["path"]
+    chunk_path = manifest_dir / chunk_entry["path"]
+
+    assert citation_path.exists()
+    assert citation_entry["bytes"] == citation_path.stat().st_size
+    assert citation_entry["sha256"] == _sha256_file(citation_path)
+
+    with citation_path.open(encoding="utf-8") as f:
+        citation_rows = [json.loads(line) for line in f if line.strip()]
+    with chunk_path.open(encoding="utf-8") as f:
+        chunk_rows = [json.loads(line) for line in f if line.strip()]
+
+    assert len(citation_rows) == len(chunk_rows)
+    assert len(citation_rows) > 0
+    assert citation_entry["bytes"] == citation_path.stat().st_size
+    assert canonical_entry["sha256"] == citation_rows[0]["snapshot"]["canonical_md_sha256"]
+
+    citation_ids = set()
+    chunk_ids = {row.get("chunk_id") for row in chunk_rows if row.get("chunk_id") is not None}
+    for row in citation_rows:
+        jsonschema.validate(instance=row, schema=citation_schema)
+        assert row["citation_id"] not in citation_ids
+        citation_ids.add(row["citation_id"])
+        if "chunk_id" in row:
+            assert row["chunk_id"] in chunk_ids
+
+    assert len(citation_ids) == len(citation_rows)
+
+
 def test_bundle_manifest_canonical_dump_index_sha_matches_dump_index_artifact(tmp_path):
     """links.canonical_dump_index_sha256 must equal the dump_index_json artifact sha256."""
     _, data, manifest_dir = _make_minimal_bundle(tmp_path)
@@ -668,3 +722,121 @@ def test_bundle_manifest_hash_recompute_detects_artifact_drift(tmp_path):
     assert _sha256_file(target_path) != recorded_sha, (
         "recomputed hash must differ from manifest after artifact mutation"
     )
+
+
+def test_manifest_coherence_check_accepts_coherent_manifest(tmp_path):
+    from merger.lenskit.core.citation_map import check_manifest_coherence_for_citation_map
+
+    artifacts, manifest_data, _ = _make_minimal_bundle(tmp_path)
+    manifest_path = artifacts.bundle_manifest
+    assert manifest_path is not None and manifest_path.exists()
+
+    assert any(a["role"] == "canonical_md" for a in manifest_data["artifacts"])
+    assert any(a["role"] == "chunk_index_jsonl" for a in manifest_data["artifacts"])
+
+    coherence = check_manifest_coherence_for_citation_map(manifest_path)
+    assert coherence.coherent is True
+    assert coherence.skip_allowed is False
+    assert coherence.reason in ("coherent", "coherent_empty_chunk_index")
+
+
+def test_manifest_coherence_check_marks_path_mismatch_as_skippable(tmp_path):
+    from merger.lenskit.core.citation_map import check_manifest_coherence_for_citation_map
+
+    artifacts, manifest_data, manifest_dir = _make_minimal_bundle(tmp_path)
+    manifest_path = artifacts.bundle_manifest
+    assert manifest_path is not None and manifest_path.exists()
+
+    chunk_index_entry = next(
+        (a for a in manifest_data["artifacts"] if a["role"] == "chunk_index_jsonl"), None
+    )
+    assert chunk_index_entry is not None
+
+    chunk_index_path = manifest_dir / chunk_index_entry["path"]
+    rows = []
+    with chunk_index_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+    assert rows
+    rows[0]["canonical_range"]["file_path"] = "wrong_file.md"
+    with chunk_index_path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+
+    coherence = check_manifest_coherence_for_citation_map(manifest_path)
+    assert coherence.coherent is False
+    assert coherence.skip_allowed is True
+    assert coherence.reason == "range_file_path_mismatch"
+
+
+def test_manifest_coherence_check_marks_invalid_json_as_hard_error(tmp_path):
+    from merger.lenskit.core.citation_map import check_manifest_coherence_for_citation_map
+
+    artifacts, manifest_data, manifest_dir = _make_minimal_bundle(tmp_path)
+    manifest_path = artifacts.bundle_manifest
+    assert manifest_path is not None and manifest_path.exists()
+
+    chunk_index_entry = next(
+        (a for a in manifest_data["artifacts"] if a["role"] == "chunk_index_jsonl"), None
+    )
+    assert chunk_index_entry is not None
+
+    chunk_index_path = manifest_dir / chunk_index_entry["path"]
+    chunk_index_path.write_text("{not-json}\n", encoding="utf-8")
+
+    coherence = check_manifest_coherence_for_citation_map(manifest_path)
+    assert coherence.coherent is False
+    assert coherence.skip_allowed is False
+    assert coherence.reason == "invalid_chunk_index_json"
+
+
+def test_manifest_coherence_check_accepts_empty_chunk_index(tmp_path):
+    from merger.lenskit.core.citation_map import check_manifest_coherence_for_citation_map
+
+    artifacts, manifest_data, manifest_dir = _make_minimal_bundle(tmp_path)
+    manifest_path = artifacts.bundle_manifest
+    assert manifest_path is not None and manifest_path.exists()
+
+    chunk_index_entry = next(
+        (a for a in manifest_data["artifacts"] if a["role"] == "chunk_index_jsonl"), None
+    )
+    assert chunk_index_entry is not None
+
+    chunk_index_path = manifest_dir / chunk_index_entry["path"]
+    chunk_index_path.write_text("", encoding="utf-8")
+
+    coherence = check_manifest_coherence_for_citation_map(manifest_path)
+    assert coherence.coherent is True
+    assert coherence.skip_allowed is False
+    assert coherence.reason == "coherent_empty_chunk_index"
+
+
+def test_manifest_coherence_check_marks_unsafe_path_as_hard_error(tmp_path):
+    from merger.lenskit.core.citation_map import check_manifest_coherence_for_citation_map
+
+    artifacts, manifest_data, manifest_dir = _make_minimal_bundle(tmp_path)
+    manifest_path = artifacts.bundle_manifest
+    assert manifest_path is not None and manifest_path.exists()
+
+    chunk_index_entry = next(
+        (a for a in manifest_data["artifacts"] if a["role"] == "chunk_index_jsonl"), None
+    )
+    assert chunk_index_entry is not None
+
+    chunk_index_path = manifest_dir / chunk_index_entry["path"]
+    rows = []
+    with chunk_index_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+    assert rows
+    rows[0]["canonical_range"]["file_path"] = "../escape.md"
+    with chunk_index_path.open("w", encoding="utf-8") as f:
+        for row in rows:
+            f.write(json.dumps(row) + "\n")
+
+    coherence = check_manifest_coherence_for_citation_map(manifest_path)
+    assert coherence.coherent is False
+    assert coherence.skip_allowed is False
+    assert coherence.reason == "unsafe_range_file_path"

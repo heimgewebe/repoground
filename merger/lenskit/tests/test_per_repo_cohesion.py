@@ -11,6 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.
 
 from merger.lenskit.tests._test_constants import make_generator_info
 from merger.lenskit.core.merge import write_reports_v2, ExtrasConfig, scan_repo
+from merger.lenskit.core.citation_map import check_manifest_coherence_for_citation_map
 
 # Bundle-level diagnostic/index artifacts produced alongside per-repo sidecars.
 # Extend this tuple whenever a new bundle-scoped artifact suffix is introduced.
@@ -146,6 +147,43 @@ class TestPerRepoCohesion(unittest.TestCase):
         # Hardened check: Ensure no cross-contamination in the entire artifacts object
         artifacts_dump_B = json.dumps(sidecarB["artifacts"])
         self.assertNotIn("repoA", artifacts_dump_B)
+
+    def test_pro_repo_multi_repo_skips_citation_map_for_incoherent_manifest(self):
+        """Real Codex-P1 regression: pro-repo multi-repo aggregate must not crash and must skip citation map."""
+        summaryA = scan_repo(self.repoA)
+        summaryB = scan_repo(self.repoB)
+
+        artifacts = write_reports_v2(
+            generator_info=make_generator_info(),
+            merges_dir=self.merges_dir,
+            hub=self.hub,
+            repo_summaries=[summaryA, summaryB],
+            detail="max",
+            mode="pro-repo",
+            max_bytes=1000,
+            plan_only=False,
+            output_mode="dual",
+            extras=ExtrasConfig(json_sidecar=True),
+        )
+
+        self.assertIsNotNone(artifacts.bundle_manifest)
+        self.assertTrue(artifacts.bundle_manifest.exists())
+
+        coherence = check_manifest_coherence_for_citation_map(artifacts.bundle_manifest)
+        self.assertFalse(coherence.coherent)
+        self.assertTrue(coherence.skip_allowed)
+        self.assertEqual(coherence.reason, "range_file_path_mismatch")
+
+        manifest = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+        roles = [a.get("role") for a in manifest.get("artifacts", []) if isinstance(a, dict)]
+        self.assertNotIn("citation_map_jsonl", roles)
+
+        aggregate_citation_path = artifacts.bundle_manifest.with_name(
+            artifacts.bundle_manifest.name.replace(
+                ".bundle.manifest.json", ".citation_map.jsonl"
+            )
+        )
+        self.assertFalse(aggregate_citation_path.exists())
 
 if __name__ == '__main__':
     unittest.main()
