@@ -90,6 +90,8 @@ else:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+ACTIVE_JOB_STATUSES = {"queued", "running", "canceling"}
+
 
 def _parse_iso_utc(value: Any) -> Optional[datetime]:
     if not isinstance(value, str):
@@ -105,6 +107,31 @@ def _parse_iso_utc(value: Any) -> Optional[datetime]:
     if parsed.tzinfo is None:
         return None
     return parsed.astimezone(timezone.utc)
+
+
+def _mark_persisted_active_jobs_terminal(job_store: JobStore) -> int:
+    now = datetime.now(timezone.utc).isoformat()
+    interrupted_error = "interrupted by service restart; job was not resumed"
+    system_log_line = (
+        "[system] Job marked failed on service startup because rLens does not "
+        "resume persisted active jobs."
+    )
+
+    reconciled = 0
+    for job in job_store.get_all_jobs():
+        if job.status not in ACTIVE_JOB_STATUSES:
+            continue
+
+        job.status = "failed"
+        job.error = interrupted_error
+        job.finished_at = now
+
+        # Preserve a useful trace in the job log before saving the terminal state.
+        job_store.append_log_line(job.id, system_log_line)
+        job_store.update_job(job)
+        reconciled += 1
+
+    return reconciled
 
 app = FastAPI(title="rLens", version=SERVER_VERSION)
 
@@ -174,6 +201,9 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     state.hub = hub_path
     state.merges_dir = merges_dir
     state.job_store = JobStore(hub_path)
+    reconciled_jobs = _mark_persisted_active_jobs_terminal(state.job_store)
+    if reconciled_jobs:
+        logger.info("Reconciled %s persisted active job(s) on startup.", reconciled_jobs)
     # Co-locate QueryArtifactStore with the effective merges dir so query artifacts
     # land alongside the outputs they reference.  JobStore uses hub_path/merges
     # unconditionally; QueryArtifactStore follows state.merges_dir when set.
@@ -488,7 +518,10 @@ def health():
         "hub": str(state.hub),
         "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),
-        "running_jobs": len(state.runner.futures) if state.runner else 0
+        "running_jobs": sum(
+            1 for j in state.job_store.get_all_jobs()
+            if j.status in ACTIVE_JOB_STATUSES
+        ) if state.job_store else 0
     }
 
 @app.get("/api/repos", dependencies=[Depends(verify_token)])

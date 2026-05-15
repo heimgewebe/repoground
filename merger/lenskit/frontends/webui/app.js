@@ -1189,22 +1189,31 @@ function streamLogs(jobId) {
     const es = new EventSource(url);
     activeEventSource = es;
 
+    let streamClosed = false;
+
+    function closeStream(reason) {
+        if (streamClosed) return;
+        streamClosed = true;
+        es.close();
+        activeEventSource = null;
+        pre.innerText += `\n${reason}\n`;
+        pre.scrollTop = pre.scrollHeight;
+    }
+
+    // Named SSE event "end" — sent by backend as "event: end\ndata: end\n\n"
+    // onmessage does NOT receive named events; addEventListener is required.
+    es.addEventListener("end", () => {
+        closeStream("[Job Finished]");
+        loadArtifacts();
+    });
+
     es.onmessage = (event) => {
-        if (event.data === 'end') {
-            es.close();
-            activeEventSource = null;
-            pre.innerText += "\n[Job Finished]\n";
-            loadArtifacts(); // Refresh artifacts
-            return;
-        }
         pre.innerText += event.data + "\n";
         pre.scrollTop = pre.scrollHeight;
     };
 
     es.onerror = () => {
-        pre.innerText += "\n[Connection Lost]\n";
-        es.close();
-        activeEventSource = null;
+        closeStream("[Connection Lost]");
     };
 }
 
