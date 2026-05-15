@@ -488,7 +488,10 @@ def health():
         "hub": str(state.hub),
         "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),
-        "running_jobs": len(state.runner.futures) if state.runner else 0
+        "running_jobs": sum(
+            1 for j in state.job_store.get_all_jobs()
+            if j.status in ("queued", "running", "canceling")
+        ) if state.job_store else 0
     }
 
 @app.get("/api/repos", dependencies=[Depends(verify_token)])
