@@ -481,6 +481,8 @@ def api_version():
 
 @app.get("/api/health")
 def health():
+    ACTIVE_JOB_STATUSES = {"queued", "running", "canceling"}
+
     return {
         "status": "ok",
         "version": SPEC_VERSION,
@@ -490,7 +492,7 @@ def health():
         "auth_enabled": bool(get_security_config().token),
         "running_jobs": sum(
             1 for j in state.job_store.get_all_jobs()
-            if j.status in ("queued", "running", "canceling")
+            if j.status in ACTIVE_JOB_STATUSES
         ) if state.job_store else 0
     }
 
