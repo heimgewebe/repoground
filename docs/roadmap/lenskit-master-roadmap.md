@@ -219,10 +219,14 @@ PR 3 (teilweise erledigt):
 - [x] Citation-Readiness-Validator (`merger/lenskit/core/citation_validate.py`, CLI `lenskit citation validate`, Testabdeckung in `merger/lenskit/tests/test_citation_validate.py` und `merger/lenskit/tests/test_cli_citation.py`; Real-Dump-Proof erbracht mit aktuellem Dump, 594 Chunks, Status `ok`)
 PR 4 (teilweise erledigt):
 - [x] `merger/lenskit/core/parity_gates.py` — Produktionsmodul mit `evaluate_parity_gates` und `ParityGateResult`. Gate-Semantik ist jetzt kanonisch und wiederverwendbar (nicht mehr nur Test-Helper).
+- [x] PR 4b Basis: Real-Dump-Parser + CLI-Compare-Pfad
+  - `merger/lenskit/core/parity_state.py` erzeugt ein kanonisches State-Dict aus zwei realen Bundle-Manifests fuer `evaluate_parity_gates`.
+  - CLI: `lenskit parity compare LEFT_MANIFEST RIGHT_MANIFEST --json` mit standardisierten Exit-Codes (0/1/2).
+  - Bundle-Manifest bleibt Registry-Wahrheit; Diagnoseartefakte werden nicht als stray files akzeptiert.
 - [ ] repolens diagnostic parity hardening (offen)
   - Ziel: repolens erreicht optional nicht nur Content-Paritaet, sondern auch Diagnostic-Paritaet zu rlens.
   - Falls iOS/Pythonista-Grenzen einzelne Diagnoseartefakte nicht zulassen, muss das explizit als Profilgrenze dokumentiert werden.
-- [ ] CLI-Erzwingung und CI-Gate (offen) — echter Dump-Diff-Parser und CI-Integration folgen in separatem PR.
+- [ ] CLI-Erzwingung und CI-Gate (offen) — globale CI-Blockierung und policy-basierte Erzwingung folgen in separatem PR nach der Parser/CLI-Basis.
 Diagnosehinweis für Priorisierung:
 - `merge.md` bleibt kanonische Vollquelle; JSON-Artefakte sind Einstieg/Index/Metadaten.
 - Ein schwacher Retrieval-Eval-Stand priorisiert Evidence-/Retrieval-Grundlagen vor Semantic/Reranking.

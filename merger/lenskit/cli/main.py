@@ -26,6 +26,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_federation import register_federation_commands
     register_federation_commands(subparsers)
 
+    # Parity command
+    from .cmd_parity import register_parity_commands
+    register_parity_commands(subparsers)
+
     # Index command
     index_parser = subparsers.add_parser("index", help="Build or verify retrieval index")
     index_parser.add_argument("--dump", required=True, help="Path to dump_index.json")
@@ -237,6 +241,13 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "federation":
         from .cmd_federation import handle_federation_command
         return handle_federation_command(parsed_args)
+    elif parsed_args.command == "parity":
+        from .cmd_parity import run_parity_compare
+        if parsed_args.parity_cmd == "compare":
+            return run_parity_compare(parsed_args)
+        raise RuntimeError(
+            f"Unexpected parity command dispatch: {parsed_args.parity_cmd!r}"
+        )
     elif parsed_args.command == "artifact":
         from . import cmd_artifact
         return cmd_artifact.run_artifact_lookup(parsed_args)
