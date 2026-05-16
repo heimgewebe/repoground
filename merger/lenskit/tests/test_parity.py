@@ -2,42 +2,7 @@ from merger.lenskit.tests._test_constants import TEST_CONFIG_SHA256
 import pytest
 import json
 from merger.lenskit.core.merge import scan_repo, write_reports_v2, ExtrasConfig, parse_human_size
-
-
-def _evaluate_parity_gates(state):
-    """Evaluate separated parity gates for content vs diagnostics.
-
-    content_parity_pass: equality/coverage conditions only.
-      fts_non_empty is deliberately excluded — two frontends producing
-      identically empty FTS (e.g. binary-only or source-excluded repos)
-      still satisfy content parity.  FTS non-emptiness is a diagnostic
-      / retrieval-capability condition, not a content-equality condition.
-    """
-    content_parity_pass = all(
-        [
-            state["source_file_count_equal"],
-            state["missing_source_paths_count"] == 0,
-            state["source_sha256_equal"],
-            state["source_chunk_coverage_equal"],
-            state["fts_logically_equal"],
-        ]
-    )
-
-    diagnostic_parity_pass = content_parity_pass and all(
-        [
-            state["output_health_verdict_pass"],
-            state["range_ref_resolution_status_ok"],
-            state["retrieval_eval_json_manifested"],
-            state["health_warnings_errors_empty"],
-            state["manifest_hash_bytes_consistent"],
-            state["citation_map_requirement_satisfied"],
-        ]
-    )
-
-    return {
-        "content_parity_pass": content_parity_pass,
-        "diagnostic_parity_pass": diagnostic_parity_pass,
-    }
+from merger.lenskit.core.parity_gates import evaluate_parity_gates
 
 @pytest.fixture
 def golden_fixture(tmp_path):
@@ -302,24 +267,23 @@ def test_tool_parity_contract_invariants(golden_fixture, tmp_path):
 
 def test_content_parity_gate_can_pass_without_retrieval_eval_json():
     state = {
-        "source_file_count_equal": True,
-        "missing_source_paths_count": 0,
+        "source_paths_equal": True,
         "source_sha256_equal": True,
         "source_chunk_coverage_equal": True,
         "fts_logically_equal": True,
-        "fts_non_empty": True,  # present but not evaluated for content_parity_pass
+        "fts_non_empty": True,  # tracked but not evaluated for content_parity_pass
         "output_health_verdict_pass": False,
-        "range_ref_resolution_status_ok": False,
-        "retrieval_eval_json_manifested": False,
-        "health_warnings_errors_empty": False,
+        "range_ref_resolution_ok": False,
+        "no_health_errors": False,
+        "no_health_warnings": False,
         "manifest_hash_bytes_consistent": True,
-        "citation_map_requirement_satisfied": True,
+        # retrieval_eval_json_expected absent → not required for diagnostic
     }
 
-    gates = _evaluate_parity_gates(state)
+    gates = evaluate_parity_gates(state)
 
-    assert gates["content_parity_pass"] is True
-    assert gates["diagnostic_parity_pass"] is False
+    assert gates.content_parity_pass is True
+    assert gates.diagnostic_parity_pass is False
 
 
 def test_content_parity_allows_equal_empty_fts():
@@ -327,47 +291,226 @@ def test_content_parity_allows_equal_empty_fts():
     FTS non-emptiness is a diagnostic/retrieval-capability condition, not equality.
     """
     state = {
-        "source_file_count_equal": True,
-        "missing_source_paths_count": 0,
+        "source_paths_equal": True,
         "source_sha256_equal": True,
         "source_chunk_coverage_equal": True,
         "fts_logically_equal": True,
         "fts_non_empty": False,
+        "fts_non_empty_expected": False,  # not required → content parity unaffected
         "output_health_verdict_pass": False,
-        "range_ref_resolution_status_ok": False,
-        "retrieval_eval_json_manifested": False,
-        "health_warnings_errors_empty": False,
+        "range_ref_resolution_ok": False,
+        "no_health_errors": False,
+        "no_health_warnings": False,
         "manifest_hash_bytes_consistent": True,
-        "citation_map_requirement_satisfied": True,
     }
 
-    gates = _evaluate_parity_gates(state)
+    gates = evaluate_parity_gates(state)
 
-    assert gates["content_parity_pass"] is True
-    assert gates["diagnostic_parity_pass"] is False
+    assert gates.content_parity_pass is True
+    assert gates.diagnostic_parity_pass is False
 
 
 def test_diagnostic_parity_gate_requires_diagnostic_artifacts_and_status():
     state = {
-        "source_file_count_equal": True,
-        "missing_source_paths_count": 0,
+        "source_paths_equal": True,
         "source_sha256_equal": True,
         "source_chunk_coverage_equal": True,
         "fts_logically_equal": True,
-        "fts_non_empty": True,  # in state for caller tracking; not evaluated in content gate
+        "fts_non_empty": True,  # tracked by caller; not evaluated in content gate
         "output_health_verdict_pass": True,
-        "range_ref_resolution_status_ok": True,
-        "retrieval_eval_json_manifested": True,
-        "health_warnings_errors_empty": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
         "manifest_hash_bytes_consistent": True,
-        "citation_map_requirement_satisfied": True,
+        "retrieval_eval_json_expected": True,
+        "retrieval_eval_json_manifested": True,
+        "citation_map_jsonl_expected": True,
+        "citation_map_jsonl_valid": True,
     }
 
-    gates = _evaluate_parity_gates(state)
+    gates = evaluate_parity_gates(state)
 
-    assert gates["content_parity_pass"] is True
-    assert gates["diagnostic_parity_pass"] is True
+    assert gates.content_parity_pass is True
+    assert gates.diagnostic_parity_pass is True
 
     state["retrieval_eval_json_manifested"] = False
-    gates_missing_eval = _evaluate_parity_gates(state)
-    assert gates_missing_eval["diagnostic_parity_pass"] is False
+    gates_missing_eval = evaluate_parity_gates(state)
+    assert gates_missing_eval.diagnostic_parity_pass is False
+
+
+def test_diagnostic_parity_fails_when_content_fails():
+    state = {
+        "source_paths_equal": False,  # content fails
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
+        "manifest_hash_bytes_consistent": True,
+    }
+
+    gates = evaluate_parity_gates(state)
+
+    assert gates.content_parity_pass is False
+    assert gates.diagnostic_parity_pass is False
+    assert any("content_parity_pass" in r for r in gates.diagnostic_reasons)
+
+
+def test_diagnostic_parity_conditional_not_required_when_not_expected():
+    """Diagnostic parity passes when conditional artifacts are absent but not expected."""
+    state = {
+        "source_paths_equal": True,
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
+        "manifest_hash_bytes_consistent": True,
+        # retrieval_eval_json_expected absent → not required
+        # citation_map_jsonl_expected absent → not required
+        # fts_non_empty_expected absent → not required
+    }
+
+    gates = evaluate_parity_gates(state)
+
+    assert gates.content_parity_pass is True
+    assert gates.diagnostic_parity_pass is True
+
+
+def test_diagnostic_parity_fails_when_fts_non_empty_expected_but_absent():
+    state = {
+        "source_paths_equal": True,
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
+        "manifest_hash_bytes_consistent": True,
+        "fts_non_empty_expected": True,
+        "fts_non_empty": False,
+    }
+
+    gates = evaluate_parity_gates(state)
+
+    assert gates.content_parity_pass is True
+    assert gates.diagnostic_parity_pass is False
+    assert any("fts_non_empty" in r for r in gates.diagnostic_reasons)
+
+
+def test_diagnostic_parity_fails_when_retrieval_eval_expected_but_not_manifested():
+    """A stray retrieval_eval_json file that is not in the bundle manifest
+    must not satisfy the diagnostic gate.  Only manifested=True counts.
+    """
+    state = {
+        "source_paths_equal": True,
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
+        "manifest_hash_bytes_consistent": True,
+        "retrieval_eval_json_expected": True,
+        "retrieval_eval_json_present": True,   # stray file exists ...
+        "retrieval_eval_json_manifested": False,  # ... but not in bundle manifest
+    }
+
+    gates = evaluate_parity_gates(state)
+
+    assert gates.content_parity_pass is True
+    assert gates.diagnostic_parity_pass is False
+    assert any("retrieval_eval_json_manifested" in r for r in gates.diagnostic_reasons)
+
+
+def test_diagnostic_parity_fails_when_citation_map_expected_but_invalid():
+    state = {
+        "source_paths_equal": True,
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
+        "manifest_hash_bytes_consistent": True,
+        "citation_map_jsonl_expected": True,
+        "citation_map_jsonl_valid": False,
+    }
+
+    gates = evaluate_parity_gates(state)
+
+    assert gates.content_parity_pass is True
+    assert gates.diagnostic_parity_pass is False
+    assert any("citation_map_jsonl_valid" in r for r in gates.diagnostic_reasons)
+
+
+def test_expected_flags_must_be_bool():
+    """A non-bool *_expected flag is a configuration error and must fail
+    the diagnostic gate (fail-closed), not silently skip the check.
+    """
+    _base = {
+        "source_paths_equal": True,
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
+        "manifest_hash_bytes_consistent": True,
+    }
+
+    # String "true" for retrieval_eval_json_expected
+    state = {**_base, "retrieval_eval_json_expected": "true", "retrieval_eval_json_manifested": False}
+    gates = evaluate_parity_gates(state)
+    assert gates.diagnostic_parity_pass is False
+    assert any("retrieval_eval_json_expected" in r for r in gates.diagnostic_reasons)
+
+    # Integer 1 for citation_map_jsonl_expected
+    state2 = {**_base, "citation_map_jsonl_expected": 1, "citation_map_jsonl_valid": False}
+    gates2 = evaluate_parity_gates(state2)
+    assert gates2.diagnostic_parity_pass is False
+    assert any("citation_map_jsonl_expected" in r for r in gates2.diagnostic_reasons)
+
+    # String "false" for fts_non_empty_expected
+    state3 = {**_base, "fts_non_empty_expected": "false", "fts_non_empty": False}
+    gates3 = evaluate_parity_gates(state3)
+    assert gates3.diagnostic_parity_pass is False
+    assert any("fts_non_empty_expected" in r for r in gates3.diagnostic_reasons)
+
+
+def test_parity_gates_require_strict_boolean_true():
+    """Truthy non-bool values like "true" or 1 must not satisfy a gate field.
+
+    _is_true() uses ``is True`` so strings, integers and other truthy objects
+    are rejected.  This prevents silent failures when state dicts come from
+    JSON deserialisation or CLI argument parsing.
+    """
+    state = {
+        "source_paths_equal": "true",  # truthy string — must not count
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_ok": True,
+        "no_health_errors": True,
+        "no_health_warnings": True,
+        "manifest_hash_bytes_consistent": True,
+    }
+
+    gates = evaluate_parity_gates(state)
+
+    assert gates.content_parity_pass is False
+    assert any("source_paths_equal" in r for r in gates.content_reasons)
+
+    # Integer 1 is also truthy but not bool True
+    state["source_paths_equal"] = 1
+    gates_int = evaluate_parity_gates(state)
+    assert gates_int.content_parity_pass is False
