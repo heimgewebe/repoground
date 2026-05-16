@@ -14,6 +14,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from merger.lenskit.core.path_security import resolve_secure_path
+
+try:
+    import jsonschema
+except ImportError:  # pragma: no cover
+    jsonschema = None
+
 
 class ParityInputError(ValueError):
     """Raised when parity input paths or required artifacts are invalid."""
@@ -48,6 +55,30 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ParityInputError(f"expected JSON object in {path}")
     return data
+
+
+def _normalize_relative_path(raw: str, label: str) -> str:
+    if not isinstance(raw, str):
+        raise ParityInputError(f"{label}: path must be a string")
+    if raw.startswith("/"):
+        raise ParityInputError(f"{label}: absolute paths are forbidden")
+    if raw.startswith("\\"):
+        raise ParityInputError(f"{label}: rooted Windows/UNC paths are forbidden")
+    parts = raw.replace("\\", "/").split("/")
+    if ".." in parts:
+        raise ParityInputError(f"{label}: path traversal ('..') is forbidden")
+    normalized = [p for p in parts if p not in ("", ".")]
+    if not normalized:
+        raise ParityInputError(f"{label}: path must not be empty")
+    return "/".join(normalized)
+
+
+def _resolve_manifest_artifact_path(manifest_path: Path, role: str, rel_raw: Any) -> Path:
+    rel = _normalize_relative_path(rel_raw, f"{role}.path")
+    try:
+        return resolve_secure_path(manifest_path.parent, rel)
+    except ValueError as e:
+        raise ParityInputError(f"{role}.path rejected: {e}") from e
 
 
 def _resolve_manifest_path(path_like: str | Path) -> Path:
@@ -85,8 +116,8 @@ def _artifact_path(manifest_path: Path, artifacts: Mapping[str, dict[str, Any]],
         return None
     rel = entry.get("path")
     if not isinstance(rel, str) or not rel.strip():
-        return None
-    return manifest_path.parent / rel
+        raise ParityInputError(f"{role}.path is missing or invalid")
+    return _resolve_manifest_artifact_path(manifest_path, role, rel)
 
 
 def _verify_manifest_hash_bytes(
@@ -104,9 +135,11 @@ def _verify_manifest_hash_bytes(
         rel = entry.get("path")
         sha = entry.get("sha256")
         expected_bytes = entry.get("bytes")
+        role = entry.get("role")
         if not isinstance(rel, str) or not isinstance(sha, str) or not isinstance(expected_bytes, int):
             return False
-        p = manifest_path.parent / rel
+        role_label = role if isinstance(role, str) else "artifact"
+        p = _resolve_manifest_artifact_path(manifest_path, role_label, rel)
         if not p.exists() or not p.is_file():
             return False
         if p.stat().st_size != expected_bytes:
@@ -221,6 +254,75 @@ def _jsonl_valid(path: Path) -> bool:
         return False
 
 
+def _validate_citation_map(
+    manifest_path: Path,
+    manifest_json: Mapping[str, Any],
+    artifacts: Mapping[str, dict[str, Any]],
+) -> bool:
+    from merger.lenskit.core.citation_validate import validate_bundle
+
+    citation_path = _artifact_path(manifest_path, artifacts, "citation_map_jsonl")
+    if citation_path is None or not citation_path.exists():
+        return False
+
+    # Reuse existing canonical citation validator for bundle consistency first.
+    bundle_report = validate_bundle(str(manifest_path))
+    if bundle_report.get("status") != "ok":
+        return False
+
+    if jsonschema is None:
+        return False
+
+    schema_path = Path(__file__).parent.parent / "contracts" / "citation-map.v1.schema.json"
+    schema = _read_json(schema_path)
+
+    canonical_artifact = artifacts.get("canonical_md")
+    if not isinstance(canonical_artifact, dict):
+        return False
+    canonical_rel_raw = canonical_artifact.get("path")
+    canonical_sha = canonical_artifact.get("sha256")
+    if not isinstance(canonical_rel_raw, str) or not isinstance(canonical_sha, str):
+        return False
+    canonical_rel = _normalize_relative_path(canonical_rel_raw, "canonical_md.path")
+
+    seen_ids: set[str] = set()
+    try:
+        with citation_path.open("r", encoding="utf-8") as f:
+            has_row = False
+            for raw in f:
+                line = raw.strip()
+                if not line:
+                    continue
+                has_row = True
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    return False
+                jsonschema.validate(instance=row, schema=schema)
+
+                citation_id = row.get("citation_id")
+                if not isinstance(citation_id, str):
+                    return False
+                if citation_id in seen_ids:
+                    return False
+                seen_ids.add(citation_id)
+
+                snapshot = row.get("snapshot")
+                canonical_range = row.get("canonical_range")
+                if not isinstance(snapshot, dict) or not isinstance(canonical_range, dict):
+                    return False
+
+                if snapshot.get("canonical_md_path") != canonical_rel:
+                    return False
+                if snapshot.get("canonical_md_sha256") != canonical_sha:
+                    return False
+                if canonical_range.get("file_path") != canonical_rel:
+                    return False
+
+            return has_row
+    except (OSError, UnicodeError, json.JSONDecodeError, jsonschema.ValidationError):
+        return False
+
+
 def _stem(manifest_path: Path, health: Mapping[str, Any] | None) -> str:
     if health:
         stem = health.get("stem")
@@ -324,10 +426,10 @@ def build_parity_state(left_manifest: str | Path, right_manifest: str | Path) ->
 
     citation_map_jsonl_valid = False
     if left_citation_manifested and right_citation_manifested:
-        left_citation = _artifact_path(left_manifest_path, left_artifacts, "citation_map_jsonl")
-        right_citation = _artifact_path(right_manifest_path, right_artifacts, "citation_map_jsonl")
-        if left_citation and right_citation and left_citation.exists() and right_citation.exists():
-            citation_map_jsonl_valid = _jsonl_valid(left_citation) and _jsonl_valid(right_citation)
+        citation_map_jsonl_valid = (
+            _validate_citation_map(left_manifest_path, left_manifest_json, left_artifacts)
+            and _validate_citation_map(right_manifest_path, right_manifest_json, right_artifacts)
+        )
 
     left_sqlite_required = _health_check_bool(left_health, "sqlite_checks_required")
     right_sqlite_required = _health_check_bool(right_health, "sqlite_checks_required")

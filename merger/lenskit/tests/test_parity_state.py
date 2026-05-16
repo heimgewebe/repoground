@@ -63,12 +63,49 @@ def _make_bundle(
         },
     ]
 
+    c1_end = 6
+    c2_start = c1_end
+    c2_end = len(canonical_md)
+    chunk_index_rows = [
+        {
+            "chunk_id": "c1",
+            "canonical_range": {
+                "artifact_role": "canonical_md",
+                "file_path": "merge.md",
+                "start_byte": 0,
+                "end_byte": c1_end,
+                "content_sha256": _sha256_bytes(canonical_md[0:c1_end]),
+            },
+        },
+        {
+            "chunk_id": "c2",
+            "canonical_range": {
+                "artifact_role": "canonical_md",
+                "file_path": "merge.md",
+                "start_byte": c2_start,
+                "end_byte": c2_end,
+                "content_sha256": _sha256_bytes(canonical_md[c2_start:c2_end]),
+            },
+        },
+    ]
+
     chunk_index_path = root / "chunk_index.jsonl"
-    chunk_payload = "\n".join(json.dumps({"chunk_id": r["chunk_id"]}) for r in chunk_rows) + "\n"
+    chunk_payload = "\n".join(json.dumps(row) for row in chunk_index_rows) + "\n"
     chunk_index_path.write_text(chunk_payload, encoding="utf-8")
 
     sidecar = {
+        "reading_policy": {
+            "canonical_content_artifact": "merge_md",
+            "navigation_artifacts": ["dump_index", "chunk_index", "sidecar_json"],
+            "do_not_assume_json_contains_full_content": True,
+            "preferred_retrieval": ["chunk_index(byte_ranges)", "merge_md(byte_ranges)"],
+        },
         "meta": {"contract": "repolens-agent", "contract_version": "v2"},
+        "artifacts": {
+            "index_json": "index.sidecar.json",
+            "canonical_md": "merge.md",
+            "md_parts": ["merge.md"],
+        },
         "coverage": {
             "included_text_files": 2,
             "total_text_files": 2,
@@ -104,10 +141,45 @@ def _make_bundle(
 
     citation_path = root / "bundle.citation_map.jsonl"
     if citation_manifested:
+        base_row = {
+            "citation_id": "cit_aaaaaaaaaaaaaaaa",
+            "repo_id": "lenskit",
+            "snapshot": {
+                "run_id": "run-1",
+                "canonical_md_path": "merge.md",
+                "canonical_md_sha256": _sha256_bytes(canonical_md),
+            },
+            "canonical_range": {
+                "file_path": "merge.md",
+                "start_byte": 0,
+                "end_byte": c1_end,
+                "start_line": 1,
+                "end_line": 1,
+                "content_sha256": _sha256_bytes(canonical_md[0:c1_end]),
+            },
+            "chunk_id": "c1",
+        }
         if citation_valid:
-            citation_path.write_text(json.dumps({"citation_id": "x"}) + "\n", encoding="utf-8")
+            second = {
+                **base_row,
+                "citation_id": "cit_bbbbbbbbbbbbbbbb",
+                "canonical_range": {
+                    "file_path": "merge.md",
+                    "start_byte": c2_start,
+                    "end_byte": c2_end,
+                    "start_line": 1,
+                    "end_line": 3,
+                    "content_sha256": _sha256_bytes(canonical_md[c2_start:c2_end]),
+                },
+                "chunk_id": "c2",
+            }
+            citation_path.write_text(
+                json.dumps(base_row) + "\n" + json.dumps(second) + "\n",
+                encoding="utf-8",
+            )
         else:
-            citation_path.write_text("{bad-json\n", encoding="utf-8")
+            # Syntactically valid JSON object but schema-invalid citation map entry.
+            citation_path.write_text(json.dumps({"foo": "bar"}) + "\n", encoding="utf-8")
 
     output_health = {
         "kind": "lenskit.output_health",
@@ -333,3 +405,37 @@ def test_content_parity_passes_with_equal_empty_fts_when_not_expected(tmp_path):
     assert built.state["fts_non_empty_expected"] is False
     assert built.state["fts_non_empty"] is False
     assert gates.content_parity_pass is True
+
+
+def test_stray_citation_file_not_manifested_is_not_counted(tmp_path):
+    left = _make_bundle(
+        tmp_path / "left",
+        retrieval_manifested=False,
+        citation_manifested=False,
+        citation_valid=False,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+    )
+    right = _make_bundle(
+        tmp_path / "right",
+        retrieval_manifested=False,
+        citation_manifested=False,
+        citation_valid=False,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+    )
+
+    # Stray files exist but are not manifest roles.
+    (left.parent / "stray.citation_map.jsonl").write_text(
+        json.dumps({"citation_id": "cit_0000000000000001"}) + "\n",
+        encoding="utf-8",
+    )
+    (right.parent / "stray.citation_map.jsonl").write_text(
+        json.dumps({"citation_id": "cit_0000000000000001"}) + "\n",
+        encoding="utf-8",
+    )
+
+    built = build_parity_state(left, right)
+    assert built.state["citation_map_jsonl_expected"] is False

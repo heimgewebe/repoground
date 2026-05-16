@@ -154,3 +154,22 @@ def test_cli_parity_compare_exit_2_on_missing_manifest(tmp_path, capsys):
     payload = json.loads(captured.out)
     assert payload["status"] == "fail"
     assert payload["error_kind"] == "path_read_error"
+
+
+def test_cli_parity_compare_exit_2_on_path_traversal_artifact(tmp_path, capsys):
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    for artifact in left_manifest["artifacts"]:
+        if artifact.get("role") == "canonical_md":
+            artifact["path"] = "../escape.md"
+            break
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    rc = main(["parity", "compare", str(left), str(right), "--json"])
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "fail"
+    assert payload["error_kind"] == "path_read_error"
