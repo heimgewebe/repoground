@@ -167,6 +167,26 @@ Begründung:
 - Historische `[x]`-Listen bleiben lesbar.
 - Die Master-Roadmap trennt Implementation, Tests, Hardening explizit.
 
+## Paritaetsgates (repolens vs rlens)
+
+Zwei getrennte Gates sind verpflichtend, um Content-Paritaet nicht mit Diagnose-Paritaet zu verwechseln.
+
+- `content_parity_pass`
+  - Bedeutet: gleiche Repo-Dateien, gleiche Source-Hashes, gleiche source-basierte Chunk-Abdeckung, logisch gleiche FTS-Inhalte.
+  - Beweist nicht: gleiche Pipeline-/Diagnose-/Runtime-Artefakte.
+- `diagnostic_parity_pass`
+  - Bedeutet zusaetzlich:
+    - `output_health.verdict == pass`
+    - `range_ref_resolution_status == ok`
+    - `retrieval_eval_json` vorhanden und im Manifest enthalten
+    - keine Health-Warnings/-Errors
+    - relevante Bundle-Artefakte mit konsistenten Hash-/Bytes-Werten
+    - `citation_map_jsonl` manifestiert und validierbar, falls im Profil erwartet
+
+Arbeitsregel:
+- Erst diagnostizieren, dann aendern.
+- Keine Heuristik-Patches ohne Target-Proof.
+
 ## Nicht jetzt
 - keine UI vor Citation-/Query-Grundlagen
 - keine Federation-Härtung vor lokaler Evidence Address
@@ -193,6 +213,10 @@ PR 3 (teilweise erledigt):
 - [x] Chunk-Index dual range (`canonical_range`, `source_range` zusätzlich zu `content_range_ref`)
 - [x] Citation-Map-Producer plus eigener Producer-Real-Dump-Proof
 - [x] Citation-Readiness-Validator (`merger/lenskit/core/citation_validate.py`, CLI `lenskit citation validate`, Testabdeckung in `merger/lenskit/tests/test_citation_validate.py` und `merger/lenskit/tests/test_cli_citation.py`; Real-Dump-Proof erbracht mit aktuellem Dump, 594 Chunks, Status `ok`)
+PR 4 (offen):
+- [ ] repolens diagnostic parity hardening
+  - Ziel: repolens erreicht optional nicht nur Content-Paritaet, sondern auch Diagnostic-Paritaet zu rlens.
+  - Falls iOS/Pythonista-Grenzen einzelne Diagnoseartefakte nicht zulassen, muss das explizit als Profilgrenze dokumentiert werden.
 Diagnosehinweis für Priorisierung:
 - `merge.md` bleibt kanonische Vollquelle; JSON-Artefakte sind Einstieg/Index/Metadaten.
 - Ein schwacher Retrieval-Eval-Stand priorisiert Evidence-/Retrieval-Grundlagen vor Semantic/Reranking.

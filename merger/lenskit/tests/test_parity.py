@@ -3,6 +3,36 @@ import pytest
 import json
 from merger.lenskit.core.merge import scan_repo, write_reports_v2, ExtrasConfig, parse_human_size
 
+
+def _evaluate_parity_gates(state):
+    """Evaluate separated parity gates for content vs diagnostics."""
+    content_parity_pass = all(
+        [
+            state["source_file_count_equal"],
+            state["missing_source_paths_count"] == 0,
+            state["source_sha256_equal"],
+            state["source_chunk_coverage_equal"],
+            state["fts_logically_equal"],
+            state["fts_non_empty"],
+        ]
+    )
+
+    diagnostic_parity_pass = content_parity_pass and all(
+        [
+            state["output_health_verdict_pass"],
+            state["range_ref_resolution_status_ok"],
+            state["retrieval_eval_json_manifested"],
+            state["health_warnings_errors_empty"],
+            state["manifest_hash_bytes_consistent"],
+            state["citation_map_requirement_satisfied"],
+        ]
+    )
+
+    return {
+        "content_parity_pass": content_parity_pass,
+        "diagnostic_parity_pass": diagnostic_parity_pass,
+    }
+
 @pytest.fixture
 def golden_fixture(tmp_path):
     repo = tmp_path / "golden_repo"
@@ -262,3 +292,51 @@ def test_tool_parity_contract_invariants(golden_fixture, tmp_path):
     assert "TEST_COVERAGE_MAP" in r_arch_content
 
     assert "# Lenskit Architecture Snapshot" in r_arch_content
+
+
+def test_content_parity_gate_can_pass_without_retrieval_eval_json():
+    state = {
+        "source_file_count_equal": True,
+        "missing_source_paths_count": 0,
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "fts_non_empty": True,
+        "output_health_verdict_pass": False,
+        "range_ref_resolution_status_ok": False,
+        "retrieval_eval_json_manifested": False,
+        "health_warnings_errors_empty": False,
+        "manifest_hash_bytes_consistent": True,
+        "citation_map_requirement_satisfied": True,
+    }
+
+    gates = _evaluate_parity_gates(state)
+
+    assert gates["content_parity_pass"] is True
+    assert gates["diagnostic_parity_pass"] is False
+
+
+def test_diagnostic_parity_gate_requires_diagnostic_artifacts_and_status():
+    state = {
+        "source_file_count_equal": True,
+        "missing_source_paths_count": 0,
+        "source_sha256_equal": True,
+        "source_chunk_coverage_equal": True,
+        "fts_logically_equal": True,
+        "fts_non_empty": True,
+        "output_health_verdict_pass": True,
+        "range_ref_resolution_status_ok": True,
+        "retrieval_eval_json_manifested": True,
+        "health_warnings_errors_empty": True,
+        "manifest_hash_bytes_consistent": True,
+        "citation_map_requirement_satisfied": True,
+    }
+
+    gates = _evaluate_parity_gates(state)
+
+    assert gates["content_parity_pass"] is True
+    assert gates["diagnostic_parity_pass"] is True
+
+    state["retrieval_eval_json_manifested"] = False
+    gates_missing_eval = _evaluate_parity_gates(state)
+    assert gates_missing_eval["diagnostic_parity_pass"] is False
