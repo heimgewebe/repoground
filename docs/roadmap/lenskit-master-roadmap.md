@@ -178,10 +178,14 @@ Zwei getrennte Gates sind verpflichtend, um Content-Paritaet nicht mit Diagnose-
   - Bedeutet zusaetzlich:
     - `output_health.verdict == pass`
     - `range_ref_resolution_status == ok`
-    - `retrieval_eval_json` vorhanden und im Manifest enthalten
     - keine Health-Warnings/-Errors
     - relevante Bundle-Artefakte mit konsistenten Hash-/Bytes-Werten
-    - `citation_map_jsonl` manifestiert und validierbar, falls im Profil erwartet
+    - Profilabhaengige Diagnoseartefakte werden nur verlangt, wenn das jeweilige `*_expected`-Flag gesetzt ist. Dann gilt fail-closed:
+      - `retrieval_eval_json` muss vorhanden **und** im Bundle-Manifest enthalten sein (`retrieval_eval_json_manifested=True`), wenn `retrieval_eval_json_expected=True`.
+      - `citation_map_jsonl` muss validierbar sein, wenn `citation_map_jsonl_expected=True`.
+      - `fts_non_empty` muss True sein, wenn `fts_non_empty_expected=True`.
+    - Fehlt ein `*_expected`-Flag oder ist es `False`, wird das Artefakt nicht verlangt.
+    - Ein nicht-bool `*_expected`-Wert ist ein Konfigurationsfehler und laesst `diagnostic_parity_pass` scheitern (fail-closed, keine stille Normalisierung).
 
 Arbeitsregel:
 - Erst diagnostizieren, dann aendern.
@@ -213,10 +217,12 @@ PR 3 (teilweise erledigt):
 - [x] Chunk-Index dual range (`canonical_range`, `source_range` zusätzlich zu `content_range_ref`)
 - [x] Citation-Map-Producer plus eigener Producer-Real-Dump-Proof
 - [x] Citation-Readiness-Validator (`merger/lenskit/core/citation_validate.py`, CLI `lenskit citation validate`, Testabdeckung in `merger/lenskit/tests/test_citation_validate.py` und `merger/lenskit/tests/test_cli_citation.py`; Real-Dump-Proof erbracht mit aktuellem Dump, 594 Chunks, Status `ok`)
-PR 4 (offen):
-- [ ] repolens diagnostic parity hardening
+PR 4 (teilweise erledigt):
+- [x] `merger/lenskit/core/parity_gates.py` — Produktionsmodul mit `evaluate_parity_gates` und `ParityGateResult`. Gate-Semantik ist jetzt kanonisch und wiederverwendbar (nicht mehr nur Test-Helper).
+- [ ] repolens diagnostic parity hardening (offen)
   - Ziel: repolens erreicht optional nicht nur Content-Paritaet, sondern auch Diagnostic-Paritaet zu rlens.
   - Falls iOS/Pythonista-Grenzen einzelne Diagnoseartefakte nicht zulassen, muss das explizit als Profilgrenze dokumentiert werden.
+- [ ] CLI-Erzwingung und CI-Gate (offen) — echter Dump-Diff-Parser und CI-Integration folgen in separatem PR.
 Diagnosehinweis für Priorisierung:
 - `merge.md` bleibt kanonische Vollquelle; JSON-Artefakte sind Einstieg/Index/Metadaten.
 - Ein schwacher Retrieval-Eval-Stand priorisiert Evidence-/Retrieval-Grundlagen vor Semantic/Reranking.
