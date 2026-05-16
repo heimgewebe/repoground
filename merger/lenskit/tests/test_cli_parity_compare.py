@@ -128,6 +128,21 @@ def test_cli_parity_compare_json_exit_0_on_green(tmp_path, capsys):
     assert payload["content_parity_pass"] is True
     assert payload["diagnostic_parity_pass"] is True
     assert isinstance(payload["compared_artifacts"], list)
+    assert "left_only_artifacts" in payload
+    assert "right_only_artifacts" in payload
+    assert "state" not in payload
+
+
+def test_cli_include_state_flag(tmp_path, capsys):
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    rc = main(["parity", "compare", str(left), str(right), "--json", "--include-state"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "state" in payload
+    assert isinstance(payload["state"], dict)
 
 
 def test_cli_parity_compare_exit_1_on_diagnostic_fail(tmp_path, capsys):
@@ -194,7 +209,7 @@ def test_cli_parity_compare_exit_2_on_duplicate_artifact_role(tmp_path, capsys):
     assert rc == 2
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "fail"
-    assert payload["error_kind"] == "path_read_error"
+    assert payload["error_kind"] == "manifest_structure_error"
 
 
 def test_cli_parity_compare_exit_2_on_windows_drive_artifact_path(tmp_path, capsys):
@@ -214,3 +229,60 @@ def test_cli_parity_compare_exit_2_on_windows_drive_artifact_path(tmp_path, caps
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "fail"
     assert payload["error_kind"] == "path_read_error"
+
+
+def test_empty_artifacts_manifest_is_input_error(tmp_path, capsys):
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    left_manifest["artifacts"] = []
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    rc = main(["parity", "compare", str(left), str(right), "--json"])
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "fail"
+    assert payload["error_kind"] == "manifest_structure_error"
+
+
+def test_artifact_entry_without_string_role_is_input_error(tmp_path, capsys):
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    left_manifest["artifacts"][0]["role"] = 123
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    rc = main(["parity", "compare", str(left), str(right), "--json"])
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "fail"
+    assert payload["error_kind"] == "manifest_structure_error"
+
+
+def test_cli_payload_reports_left_right_only_artifacts(tmp_path, capsys):
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    retrieval_bytes = b'{"ok": true}'
+    extra = {
+        "role": "retrieval_eval_json",
+        "path": "bundle.retrieval_eval.json",
+        "content_type": "application/json",
+        "bytes": len(retrieval_bytes),
+        "sha256": _sha256_bytes(retrieval_bytes),
+    }
+    (left.parent / "bundle.retrieval_eval.json").write_bytes(retrieval_bytes)
+    left_manifest["artifacts"].append(extra)
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    rc = main(["parity", "compare", str(left), str(right), "--json"])
+
+    assert rc in (0, 1)
+    payload = json.loads(capsys.readouterr().out)
+    assert "retrieval_eval_json" in payload["left_only_artifacts"]
+    assert "retrieval_eval_json" not in payload["right_only_artifacts"]

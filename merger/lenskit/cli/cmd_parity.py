@@ -20,6 +20,12 @@ def register_parity_commands(subparsers) -> None:
         dest="emit_json",
         help="Emit machine-readable JSON report",
     )
+    compare_parser.add_argument(
+        "--include-state",
+        action="store_true",
+        dest="include_state",
+        help="Include internal parity state mapping in JSON output",
+    )
 
 
 def run_parity_compare(args: argparse.Namespace) -> int:
@@ -31,7 +37,7 @@ def run_parity_compare(args: argparse.Namespace) -> int:
     except ParityInputError as e:
         payload = {
             "status": "fail",
-            "error_kind": "path_read_error",
+            "error_kind": getattr(e, "error_kind", "validation_error"),
             "message": str(e),
         }
         if args.emit_json:
@@ -48,10 +54,13 @@ def run_parity_compare(args: argparse.Namespace) -> int:
         "content_reasons": gates.content_reasons,
         "diagnostic_reasons": gates.diagnostic_reasons,
         "compared_artifacts": built.compared_artifacts,
+        "left_only_artifacts": built.left_only_artifacts,
+        "right_only_artifacts": built.right_only_artifacts,
         "left_stem": built.left_stem,
         "right_stem": built.right_stem,
-        "state": built.state,
     }
+    if args.include_state:
+        payload["state"] = built.state
 
     if args.emit_json:
         print(json.dumps(payload, indent=2))
@@ -70,6 +79,8 @@ def _print_human(payload: dict) -> None:
     print(f"  content_parity_pass:     {payload['content_parity_pass']}")
     print(f"  diagnostic_parity_pass:  {payload['diagnostic_parity_pass']}")
     print(f"  compared_artifacts:      {', '.join(payload['compared_artifacts'])}")
+    print(f"  left_only_artifacts:     {', '.join(payload['left_only_artifacts'])}")
+    print(f"  right_only_artifacts:    {', '.join(payload['right_only_artifacts'])}")
 
     if payload["content_reasons"]:
         print("\nContent reasons:")

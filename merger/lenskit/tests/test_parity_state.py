@@ -3,6 +3,7 @@ import json
 import sqlite3
 from pathlib import Path
 
+from merger.lenskit.core.citation_id import make_citation_id
 from merger.lenskit.core.parity_gates import evaluate_parity_gates
 from merger.lenskit.core.parity_state import build_parity_state
 
@@ -41,6 +42,7 @@ def _make_bundle(
     sqlite_present: bool,
     fts_non_empty: bool,
     health_warning: bool,
+    empty_sidecar_files: bool = False,
 ) -> Path:
     root.mkdir(parents=True, exist_ok=True)
 
@@ -93,6 +95,11 @@ def _make_bundle(
     chunk_payload = "\n".join(json.dumps(row) for row in chunk_index_rows) + "\n"
     chunk_index_path.write_text(chunk_payload, encoding="utf-8")
 
+    sidecar_files = [] if empty_sidecar_files else [
+        {"path": r["path"], "included": True, "sha256": r["sha256"]}
+        for r in chunk_rows
+    ]
+
     sidecar = {
         "reading_policy": {
             "canonical_content_artifact": "merge_md",
@@ -111,10 +118,7 @@ def _make_bundle(
             "total_text_files": 2,
             "coverage_pct": 100.0,
         },
-        "files": [
-            {"path": r["path"], "included": True, "sha256": r["sha256"]}
-            for r in chunk_rows
-        ],
+        "files": sidecar_files,
     }
     sidecar_path = root / "index.sidecar.json"
     _write_json(sidecar_path, sidecar)
@@ -141,13 +145,16 @@ def _make_bundle(
 
     citation_path = root / "bundle.citation_map.jsonl"
     if citation_manifested:
+        c1_sha = _sha256_bytes(canonical_md[0:c1_end])
+        c2_sha = _sha256_bytes(canonical_md[c2_start:c2_end])
+        canonical_sha = _sha256_bytes(canonical_md)
         base_row = {
-            "citation_id": "cit_aaaaaaaaaaaaaaaa",
+            "citation_id": make_citation_id(canonical_sha, 0, c1_end, c1_sha),
             "repo_id": "lenskit",
             "snapshot": {
                 "run_id": "run-1",
                 "canonical_md_path": "merge.md",
-                "canonical_md_sha256": _sha256_bytes(canonical_md),
+                "canonical_md_sha256": canonical_sha,
             },
             "canonical_range": {
                 "file_path": "merge.md",
@@ -155,21 +162,21 @@ def _make_bundle(
                 "end_byte": c1_end,
                 "start_line": 1,
                 "end_line": 1,
-                "content_sha256": _sha256_bytes(canonical_md[0:c1_end]),
+                "content_sha256": c1_sha,
             },
             "chunk_id": "c1",
         }
         if citation_valid:
             second = {
                 **base_row,
-                "citation_id": "cit_bbbbbbbbbbbbbbbb",
+                "citation_id": make_citation_id(canonical_sha, c2_start, c2_end, c2_sha),
                 "canonical_range": {
                     "file_path": "merge.md",
                     "start_byte": c2_start,
                     "end_byte": c2_end,
                     "start_line": 1,
                     "end_line": 3,
-                    "content_sha256": _sha256_bytes(canonical_md[c2_start:c2_end]),
+                    "content_sha256": c2_sha,
                 },
                 "chunk_id": "c2",
             }
@@ -439,3 +446,110 @@ def test_stray_citation_file_not_manifested_is_not_counted(tmp_path):
 
     built = build_parity_state(left, right)
     assert built.state["citation_map_jsonl_expected"] is False
+
+
+def test_citation_map_invalid_when_canonical_range_hash_wrong(tmp_path):
+    left = _make_bundle(
+        tmp_path / "left",
+        retrieval_manifested=False,
+        citation_manifested=True,
+        citation_valid=True,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+    )
+    right = _make_bundle(
+        tmp_path / "right",
+        retrieval_manifested=False,
+        citation_manifested=True,
+        citation_valid=True,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+    )
+
+    bad_path = left.parent / "bundle.citation_map.jsonl"
+    rows = [json.loads(line) for line in bad_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows[0]["canonical_range"]["content_sha256"] = "0" * 64
+    bad_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    for art in left_manifest["artifacts"]:
+        if art.get("role") == "citation_map_jsonl":
+            raw = bad_path.read_bytes()
+            art["bytes"] = len(raw)
+            art["sha256"] = _sha256_bytes(raw)
+            break
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    built = build_parity_state(left, right)
+    gates = evaluate_parity_gates(built.state)
+    assert built.state["citation_map_jsonl_valid"] is False
+    assert gates.diagnostic_parity_pass is False
+
+
+def test_citation_map_invalid_when_citation_id_wrong(tmp_path):
+    left = _make_bundle(
+        tmp_path / "left",
+        retrieval_manifested=False,
+        citation_manifested=True,
+        citation_valid=True,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+    )
+    right = _make_bundle(
+        tmp_path / "right",
+        retrieval_manifested=False,
+        citation_manifested=True,
+        citation_valid=True,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+    )
+
+    bad_path = left.parent / "bundle.citation_map.jsonl"
+    rows = [json.loads(line) for line in bad_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rows[0]["citation_id"] = "cit_0000000000000000"
+    bad_path.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    for art in left_manifest["artifacts"]:
+        if art.get("role") == "citation_map_jsonl":
+            raw = bad_path.read_bytes()
+            art["bytes"] = len(raw)
+            art["sha256"] = _sha256_bytes(raw)
+            break
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    built = build_parity_state(left, right)
+    gates = evaluate_parity_gates(built.state)
+    assert built.state["citation_map_jsonl_valid"] is False
+    assert gates.diagnostic_parity_pass is False
+
+
+def test_empty_source_file_list_fails_content_parity(tmp_path):
+    left = _make_bundle(
+        tmp_path / "left",
+        retrieval_manifested=False,
+        citation_manifested=False,
+        citation_valid=False,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+        empty_sidecar_files=True,
+    )
+    right = _make_bundle(
+        tmp_path / "right",
+        retrieval_manifested=False,
+        citation_manifested=False,
+        citation_valid=False,
+        sqlite_present=True,
+        fts_non_empty=True,
+        health_warning=False,
+        empty_sidecar_files=True,
+    )
+
+    built = build_parity_state(left, right)
+    gates = evaluate_parity_gates(built.state)
+    assert gates.content_parity_pass is False

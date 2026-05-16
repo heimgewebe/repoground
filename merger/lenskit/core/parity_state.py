@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping
 
+from merger.lenskit.core.citation_id import make_citation_id
 from merger.lenskit.core.path_security import resolve_secure_path
 
 try:
@@ -22,14 +23,20 @@ except ImportError:  # pragma: no cover
     jsonschema = None
 
 
-class ParityInputError(ValueError):
+class ParityInputError(Exception):
     """Raised when parity input paths or required artifacts are invalid."""
+
+    def __init__(self, message: str, error_kind: str = "validation_error") -> None:
+        super().__init__(message)
+        self.error_kind = error_kind
 
 
 @dataclass(frozen=True)
 class ParityStateBuild:
     state: dict[str, object]
     compared_artifacts: list[str]
+    left_only_artifacts: list[str]
+    right_only_artifacts: list[str]
     left_stem: str
     right_stem: str
 
@@ -46,32 +53,40 @@ def _read_json(path: Path) -> dict[str, Any]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as e:
-        raise ParityInputError(f"missing file: {path}") from e
+        raise ParityInputError(f"missing file: {path}", error_kind="path_read_error") from e
     except json.JSONDecodeError as e:
-        raise ParityInputError(f"invalid json in {path}: {e}") from e
+        raise ParityInputError(
+            f"invalid json in {path}: {e}", error_kind="validation_error"
+        ) from e
     except OSError as e:
-        raise ParityInputError(f"cannot read {path}: {e}") from e
+        raise ParityInputError(f"cannot read {path}: {e}", error_kind="path_read_error") from e
 
     if not isinstance(data, dict):
-        raise ParityInputError(f"expected JSON object in {path}")
+        raise ParityInputError(
+            f"expected JSON object in {path}", error_kind="validation_error"
+        )
     return data
 
 
 def _normalize_relative_path(raw: str, label: str) -> str:
     if not isinstance(raw, str):
-        raise ParityInputError(f"{label}: path must be a string")
+        raise ParityInputError(
+            f"{label}: path must be a string", error_kind="manifest_structure_error"
+        )
     if raw.startswith("/"):
-        raise ParityInputError(f"{label}: absolute paths are forbidden")
+        raise ParityInputError(f"{label}: absolute paths are forbidden", error_kind="path_read_error")
     if raw.startswith("\\"):
-        raise ParityInputError(f"{label}: rooted Windows/UNC paths are forbidden")
+        raise ParityInputError(
+            f"{label}: rooted Windows/UNC paths are forbidden", error_kind="path_read_error"
+        )
     if PureWindowsPath(raw).drive:
-        raise ParityInputError(f"{label}: Windows drive paths are forbidden")
+        raise ParityInputError(f"{label}: Windows drive paths are forbidden", error_kind="path_read_error")
     parts = raw.replace("\\", "/").split("/")
     if ".." in parts:
-        raise ParityInputError(f"{label}: path traversal ('..') is forbidden")
+        raise ParityInputError(f"{label}: path traversal ('..') is forbidden", error_kind="path_read_error")
     normalized = [p for p in parts if p not in ("", ".")]
     if not normalized:
-        raise ParityInputError(f"{label}: path must not be empty")
+        raise ParityInputError(f"{label}: path must not be empty", error_kind="manifest_structure_error")
     return "/".join(normalized)
 
 
@@ -80,7 +95,7 @@ def _resolve_manifest_artifact_path(manifest_path: Path, role: str, rel_raw: Any
     try:
         return resolve_secure_path(manifest_path.parent, rel)
     except ValueError as e:
-        raise ParityInputError(f"{role}.path rejected: {e}") from e
+        raise ParityInputError(f"{role}.path rejected: {e}", error_kind="path_read_error") from e
 
 
 def _resolve_manifest_path(path_like: str | Path) -> Path:
@@ -89,30 +104,58 @@ def _resolve_manifest_path(path_like: str | Path) -> Path:
         candidates = sorted(p.glob("*.bundle.manifest.json"))
         if len(candidates) != 1:
             raise ParityInputError(
-                f"expected exactly one *.bundle.manifest.json in {p}, found {len(candidates)}"
+                f"expected exactly one *.bundle.manifest.json in {p}, found {len(candidates)}",
+                error_kind="path_read_error",
             )
         return candidates[0]
     if not p.exists():
-        raise ParityInputError(f"manifest path does not exist: {p}")
+        raise ParityInputError(f"manifest path does not exist: {p}", error_kind="path_read_error")
     return p
 
 
 def _artifact_map(manifest: Mapping[str, Any], manifest_path: Path) -> dict[str, dict[str, Any]]:
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list):
-        raise ParityInputError(f"manifest artifacts must be a list: {manifest_path}")
+        raise ParityInputError(
+            f"manifest artifacts must be a list: {manifest_path}",
+            error_kind="manifest_structure_error",
+        )
+    if len(artifacts) == 0:
+        raise ParityInputError(
+            f"manifest artifacts must not be empty: {manifest_path}",
+            error_kind="manifest_structure_error",
+        )
 
     out: dict[str, dict[str, Any]] = {}
-    for entry in artifacts:
+    for idx, entry in enumerate(artifacts):
         if not isinstance(entry, dict):
-            continue
+            raise ParityInputError(
+                f"manifest artifact at index {idx} is not an object",
+                error_kind="manifest_structure_error",
+            )
         role = entry.get("role")
-        if isinstance(role, str):
-            if role in out:
-                raise ParityInputError(
-                    f"duplicate artifact role in manifest {manifest_path}: {role}"
-                )
-            out[role] = entry
+        if not isinstance(role, str) or not role.strip():
+            raise ParityInputError(
+                f"manifest artifact at index {idx} has missing/invalid role",
+                error_kind="manifest_structure_error",
+            )
+        if role in out:
+            raise ParityInputError(
+                f"duplicate artifact role in manifest {manifest_path}: {role}",
+                error_kind="manifest_structure_error",
+            )
+        out[role] = entry
+
+    if "canonical_md" not in out or "chunk_index_jsonl" not in out:
+        raise ParityInputError(
+            f"manifest missing required roles canonical_md/chunk_index_jsonl: {manifest_path}",
+            error_kind="manifest_structure_error",
+        )
+    if "dump_index_json" not in out and "index_sidecar_json" not in out:
+        raise ParityInputError(
+            f"manifest requires at least one of dump_index_json/index_sidecar_json: {manifest_path}",
+            error_kind="manifest_structure_error",
+        )
     return out
 
 
@@ -132,7 +175,7 @@ def _verify_manifest_hash_bytes(
     artifacts: Mapping[str, dict[str, Any]],
 ) -> bool:
     entries = manifest.get("artifacts")
-    if not isinstance(entries, list):
+    if not isinstance(entries, list) or len(entries) == 0:
         return False
 
     for entry in entries:
@@ -178,7 +221,7 @@ def _source_paths_and_hashes(sidecar: Mapping[str, Any] | None) -> tuple[set[str
     if not sidecar:
         return None, None
     files = sidecar.get("files")
-    if not isinstance(files, list):
+    if not isinstance(files, list) or len(files) == 0:
         return None, None
 
     paths: set[str] = set()
@@ -195,6 +238,8 @@ def _source_paths_and_hashes(sidecar: Mapping[str, Any] | None) -> tuple[set[str
         sha = item.get("sha256")
         if isinstance(sha, str):
             hashes[path] = sha
+    if len(paths) == 0:
+        return None, None
     return paths, hashes
 
 
@@ -243,23 +288,6 @@ def _fts_signature(sqlite_path: Path) -> tuple[int, str]:
     return count, h.hexdigest()
 
 
-def _jsonl_valid(path: Path) -> bool:
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            has_line = False
-            for raw in f:
-                line = raw.strip()
-                if not line:
-                    continue
-                has_line = True
-                obj = json.loads(line)
-                if not isinstance(obj, dict):
-                    return False
-            return has_line
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return False
-
-
 def _validate_citation_map(
     manifest_path: Path,
     manifest_json: Mapping[str, Any],
@@ -277,7 +305,10 @@ def _validate_citation_map(
         return False
 
     if jsonschema is None:
-        return False
+        raise ParityInputError(
+            "jsonschema is required for citation-map schema validation but is not installed",
+            error_kind="environment_error",
+        )
 
     schema_path = Path(__file__).parent.parent / "contracts" / "citation-map.v1.schema.json"
     schema = _read_json(schema_path)
@@ -290,6 +321,18 @@ def _validate_citation_map(
     if not isinstance(canonical_rel_raw, str) or not isinstance(canonical_sha, str):
         return False
     canonical_rel = _normalize_relative_path(canonical_rel_raw, "canonical_md.path")
+    canonical_path = _artifact_path(manifest_path, artifacts, "canonical_md")
+    if canonical_path is None or not canonical_path.exists():
+        return False
+    try:
+        canonical_bytes = canonical_path.read_bytes()
+    except OSError as e:
+        raise ParityInputError(
+            f"cannot read canonical_md for citation validation: {e}",
+            error_kind="path_read_error",
+        ) from e
+    canonical_size = len(canonical_bytes)
+    manifest_run_id = manifest_json.get("run_id")
 
     seen_ids: set[str] = set()
     try:
@@ -321,7 +364,28 @@ def _validate_citation_map(
                     return False
                 if snapshot.get("canonical_md_sha256") != canonical_sha:
                     return False
+                if manifest_run_id is not None and snapshot.get("run_id") != manifest_run_id:
+                    return False
                 if canonical_range.get("file_path") != canonical_rel:
+                    return False
+
+                start_byte = canonical_range.get("start_byte")
+                end_byte = canonical_range.get("end_byte")
+                expected_sha = canonical_range.get("content_sha256")
+                if (
+                    isinstance(start_byte, bool)
+                    or isinstance(end_byte, bool)
+                    or not isinstance(start_byte, int)
+                    or not isinstance(end_byte, int)
+                ):
+                    return False
+                if start_byte < 0 or end_byte <= start_byte or end_byte > canonical_size:
+                    return False
+                actual_sha = hashlib.sha256(canonical_bytes[start_byte:end_byte]).hexdigest()
+                if expected_sha != actual_sha:
+                    return False
+                expected_citation_id = make_citation_id(canonical_sha, start_byte, end_byte, actual_sha)
+                if citation_id != expected_citation_id:
                     return False
 
             return has_row
@@ -463,10 +527,16 @@ def build_parity_state(left_manifest: str | Path, right_manifest: str | Path) ->
         "fts_non_empty": fts_non_empty,
     }
 
-    compared_artifacts = sorted(set(left_artifacts.keys()) & set(right_artifacts.keys()))
+    left_keys = set(left_artifacts.keys())
+    right_keys = set(right_artifacts.keys())
+    compared_artifacts = sorted(left_keys & right_keys)
+    left_only_artifacts = sorted(left_keys - right_keys)
+    right_only_artifacts = sorted(right_keys - left_keys)
     return ParityStateBuild(
         state=state,
         compared_artifacts=compared_artifacts,
+        left_only_artifacts=left_only_artifacts,
+        right_only_artifacts=right_only_artifacts,
         left_stem=_stem(left_manifest_path, left_health),
         right_stem=_stem(right_manifest_path, right_health),
     )

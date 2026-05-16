@@ -245,8 +245,9 @@ def main(args: Optional[List[str]] = None) -> int:
         from .cmd_parity import run_parity_compare
         if parsed_args.parity_cmd == "compare":
             return run_parity_compare(parsed_args)
-        parser.parse_args(["parity", "--help"])
-        return 0
+        raise RuntimeError(
+            f"Unexpected parity command dispatch: {parsed_args.parity_cmd!r}"
+        )
     elif parsed_args.command == "artifact":
         from . import cmd_artifact
         return cmd_artifact.run_artifact_lookup(parsed_args)
