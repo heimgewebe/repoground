@@ -11,7 +11,7 @@ import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Mapping
 
 from merger.lenskit.core.path_security import resolve_secure_path
@@ -64,6 +64,8 @@ def _normalize_relative_path(raw: str, label: str) -> str:
         raise ParityInputError(f"{label}: absolute paths are forbidden")
     if raw.startswith("\\"):
         raise ParityInputError(f"{label}: rooted Windows/UNC paths are forbidden")
+    if PureWindowsPath(raw).drive:
+        raise ParityInputError(f"{label}: Windows drive paths are forbidden")
     parts = raw.replace("\\", "/").split("/")
     if ".." in parts:
         raise ParityInputError(f"{label}: path traversal ('..') is forbidden")
@@ -105,7 +107,11 @@ def _artifact_map(manifest: Mapping[str, Any], manifest_path: Path) -> dict[str,
         if not isinstance(entry, dict):
             continue
         role = entry.get("role")
-        if isinstance(role, str) and role not in out:
+        if isinstance(role, str):
+            if role in out:
+                raise ParityInputError(
+                    f"duplicate artifact role in manifest {manifest_path}: {role}"
+                )
             out[role] = entry
     return out
 

@@ -173,3 +173,44 @@ def test_cli_parity_compare_exit_2_on_path_traversal_artifact(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "fail"
     assert payload["error_kind"] == "path_read_error"
+
+
+def test_cli_parity_compare_exit_2_on_duplicate_artifact_role(tmp_path, capsys):
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    duplicate = None
+    for artifact in left_manifest["artifacts"]:
+        if artifact.get("role") == "canonical_md":
+            duplicate = dict(artifact)
+            break
+    assert duplicate is not None
+    left_manifest["artifacts"].append(duplicate)
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    rc = main(["parity", "compare", str(left), str(right), "--json"])
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "fail"
+    assert payload["error_kind"] == "path_read_error"
+
+
+def test_cli_parity_compare_exit_2_on_windows_drive_artifact_path(tmp_path, capsys):
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    left_manifest = json.loads(left.read_text(encoding="utf-8"))
+    for artifact in left_manifest["artifacts"]:
+        if artifact.get("role") == "canonical_md":
+            artifact["path"] = "C:/escape.md"
+            break
+    left.write_text(json.dumps(left_manifest, indent=2), encoding="utf-8")
+
+    rc = main(["parity", "compare", str(left), str(right), "--json"])
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "fail"
+    assert payload["error_kind"] == "path_read_error"
