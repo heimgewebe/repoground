@@ -109,11 +109,11 @@ Optionale spätere Profile:
 
 | Kommando | Route | Ausgabe | JSON | Status |
 | --- | --- | --- | --- | --- |
-| `lenskit rlens-client health` | `GET /api/health` | Status, Version, Hub, Auth | ja | MVP |
-| `lenskit rlens-client artifacts` | `GET /api/artifacts` | Artefaktliste | ja | MVP |
-| `lenskit rlens-client latest` | `GET /api/artifacts/latest` | neuestes Artefakt | ja | MVP |
-| `lenskit rlens-client jobs` | noch zu prüfen | Jobliste | ja | MVP, falls API vorhanden |
-| `lenskit rlens-client job JOB_ID` | noch zu prüfen | Jobdetails | ja | MVP, falls API vorhanden |
+| `lenskit rlens-client health` | `GET /api/health` | Status, Version, Hub, Auth | ja | **umgesetzt (PR B)** |
+| `lenskit rlens-client artifacts` | `GET /api/artifacts` | Artefaktliste | ja | **umgesetzt (PR B)** |
+| `lenskit rlens-client latest --repo REPO` | `GET /api/artifacts/latest` | neuestes Artefakt | ja | **umgesetzt (PR B)** |
+| `lenskit rlens-client jobs` | noch zu prüfen | Jobliste | ja | offen (nicht PR B) |
+| `lenskit rlens-client job JOB_ID` | noch zu prüfen | Jobdetails | ja | offen (nicht PR B) |
 | `lenskit rlens-client logs JOB_ID` | `GET /api/jobs/{job_id}/logs` | SSE-Logs bis `event: end` | optional | später (PR C) |
 
 ## Namensentscheidung
@@ -185,12 +185,24 @@ RLENS_BASE_URL=http://heim-pc:8787 lenskit rlens-client health --json
 - AGENTS-Hinweis
 - kein Code
 
-### PR B: Read-only Client-Basis
+### PR B: Read-only Client-Basis — teilweise umgesetzt
 
-- HTTP-Client ohne neue Dependency
-- `health`, `artifacts`, `latest`
-- Token-Redaction-Test
-- Base-URL-Resolution-Test
+Umgesetzt:
+
+- `merger/lenskit/cli/cmd_rlens_client.py` — HTTP-Client ohne neue Dependency
+- Commands: `health`, `artifacts`, `latest --repo REPO`
+- Base-URL-Priorität: `--base-url` > `RLENS_BASE_URL` > `http://127.0.0.1:8787`
+- Bearer-Token-Auth: `--token` > `RLENS_TOKEN`; Token nie als Query-Parameter
+- Token-Redaction in allen Fehlerausgaben
+- Tests: `merger/lenskit/tests/test_cli_rlens_client.py` (14 Tests, kein echter Server)
+
+Offen (folgende PRs):
+
+- `jobs`, `job JOB_ID`
+- `logs JOB_ID` / SSE (PR C)
+- `run`, `cancel` (PR E)
+- Host-Profile (PR D)
+- Heim-PC/Heimserver-Betriebsentscheidung (Remote-Erreichbarkeit ist nicht behauptet)
 
 ### PR C: SSE Logs
 

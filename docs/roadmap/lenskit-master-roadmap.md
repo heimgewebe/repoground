@@ -234,21 +234,25 @@ Diagnosehinweis für Priorisierung:
 PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
 
 - [x] Blueprint anlegen: `docs/blueprints/rlens-cli-client-blueprint.md`
-- [ ] Read-only rLens CLI Client implementieren
-  - `health`
-  - `artifacts`
-  - `latest`
-  - später `logs JOB_ID`
+- [x] Read-only rLens CLI Client Basis implementiert (PR B)
+  - [x] `health` — `GET /api/health`
+  - [x] `artifacts` — `GET /api/artifacts`
+  - [x] `latest --repo REPO` — `GET /api/artifacts/latest`
+  - [ ] später `logs JOB_ID` (PR C)
+  - [ ] `jobs`, `job JOB_ID` (offen)
+  - [ ] `run`, `cancel` (PR E)
+  - [ ] Host-Profile (PR D)
 - [ ] Heim-PC/Heimserver-Betriebsmodell entscheiden
   - lokaler Service je Host
   - Remote-Client via LAN/Tailscale/SSH-Tunnel
-- [ ] Sicherheitsmodell durch Tests absichern
-  - Bearer Token bevorzugt
-  - Token-Redaction
-  - kein Port-Forwarding
-  - Default loopback
+- [x] Sicherheitsmodell durch Tests abgesichert
+  - Bearer Token (`--token` / `RLENS_TOKEN`)
+  - Token-Redaction in Fehlerausgaben
+  - Token nie als Query-Parameter
+  - Default loopback `http://127.0.0.1:8787`
 
 Status:
-- Dieser PR ist docs-only.
-- Die Implementierung folgt separat.
-- `merger/lenskit/cli/rlens.py` bleibt Service-Launcher und wird in diesem PR nicht umgedeutet.
+- Blueprint: docs-only (PR A, abgeschlossen).
+- Read-only Client-Basis: teilweise umgesetzt (PR B) — `health`, `artifacts`, `latest --repo`.
+- Logs/SSE, Jobs, Run/Cancel, Host-Profile: offen.
+- `merger/lenskit/cli/rlens.py` bleibt Service-Launcher und wird nicht umgedeutet.

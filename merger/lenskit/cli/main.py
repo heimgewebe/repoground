@@ -30,6 +30,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_parity import register_parity_commands
     register_parity_commands(subparsers)
 
+    # rLens client command
+    from .cmd_rlens_client import register_rlens_client_commands
+    register_rlens_client_commands(subparsers)
+
     # Index command
     index_parser = subparsers.add_parser("index", help="Build or verify retrieval index")
     index_parser.add_argument("--dump", required=True, help="Path to dump_index.json")
@@ -251,6 +255,9 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "artifact":
         from . import cmd_artifact
         return cmd_artifact.run_artifact_lookup(parsed_args)
+    elif parsed_args.command == "rlens-client":
+        from .cmd_rlens_client import run_rlens_client
+        return run_rlens_client(parsed_args)
 
     return 0
 
