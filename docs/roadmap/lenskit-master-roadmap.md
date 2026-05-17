@@ -230,3 +230,25 @@ PR 4 (teilweise erledigt):
 Diagnosehinweis für Priorisierung:
 - `merge.md` bleibt kanonische Vollquelle; JSON-Artefakte sind Einstieg/Index/Metadaten.
 - Ein schwacher Retrieval-Eval-Stand priorisiert Evidence-/Retrieval-Grundlagen vor Semantic/Reranking.
+
+PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
+
+- [x] Blueprint anlegen: `docs/blueprints/rlens-cli-client-blueprint.md`
+- [ ] Read-only rLens CLI Client implementieren
+  - `health`
+  - `artifacts`
+  - `latest`
+  - später `logs JOB_ID`
+- [ ] Heim-PC/Heimserver-Betriebsmodell entscheiden
+  - lokaler Service je Host
+  - Remote-Client via LAN/Tailscale/SSH-Tunnel
+- [ ] Sicherheitsmodell durch Tests absichern
+  - Bearer Token bevorzugt
+  - Token-Redaction
+  - kein Port-Forwarding
+  - Default loopback
+
+Status:
+- Dieser PR ist docs-only.
+- Die Implementierung folgt separat.
+- `merger/lenskit/cli/rlens.py` bleibt Service-Launcher und wird in diesem PR nicht umgedeutet.

@@ -34,3 +34,9 @@ The parity-gate terms `content_parity_pass` and `diagnostic_parity_pass` are cur
 Do not describe them as an enforced runtime or service gate unless a production module or CLI integration exists.
 
 Do not modify generated docs (`docs/_generated/*`) or commit local runtime artifacts.
+
+## rLens CLI Client vs Service Launcher
+
+`merger/lenskit/cli/rlens.py` is the rLens service entry point / launcher.
+
+A planned rLens CLI client must be treated separately and is described in `docs/blueprints/rlens-cli-client-blueprint.md`. Agents must not silently reinterpret the launcher as an HTTP client. Before implementing CLI functionality, read the roadmap and blueprint.
