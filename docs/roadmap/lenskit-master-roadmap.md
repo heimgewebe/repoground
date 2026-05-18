@@ -238,8 +238,10 @@ PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
   - [x] `health` — `GET /api/health`
   - [x] `artifacts` — `GET /api/artifacts`
   - [x] `latest --repo REPO` — `GET /api/artifacts/latest`
-  - [ ] später `logs JOB_ID` (PR C)
-  - [ ] `jobs`, `job JOB_ID` (offen)
+- [x] Read-only Jobs/Logs (PR C)
+  - [x] `jobs` — `GET /api/jobs` (optional `--status`, `--limit`)
+  - [x] `job JOB_ID` — `GET /api/jobs/{job_id}`
+  - [x] `logs JOB_ID` — `GET /api/jobs/{job_id}/logs` (SSE bis `event: end`, optional `--last-id`, `--timeout`)
   - [ ] `run`, `cancel` (PR E)
   - [ ] Host-Profile (PR D)
 - [ ] Heim-PC/Heimserver-Betriebsmodell entscheiden
@@ -253,6 +255,7 @@ PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
 
 Status:
 - Blueprint: docs-only (PR A, abgeschlossen).
-- Read-only Client-Basis: teilweise umgesetzt (PR B) — `health`, `artifacts`, `latest --repo`.
-- Logs/SSE, Jobs, Run/Cancel, Host-Profile: offen.
+- Read-only Client-Basis: umgesetzt (PR B) — `health`, `artifacts`, `latest --repo`.
+- Jobs/Job/Logs (SSE): umgesetzt (PR C) — `jobs`, `job JOB_ID`, `logs JOB_ID`.
+- Run/Cancel, Host-Profile: offen.
 - `merger/lenskit/cli/rlens.py` bleibt Service-Launcher und wird nicht umgedeutet.

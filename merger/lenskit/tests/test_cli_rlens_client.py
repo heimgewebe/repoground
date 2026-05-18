@@ -483,3 +483,426 @@ def test_redact_masks_bearer_token_even_without_explicit_token() -> None:
     redacted = _mod._redact(msg, None)
     assert "abc123.xyz" not in redacted
     assert "Bearer [REDACTED]" in redacted
+
+
+# ---------------------------------------------------------------------------
+# jobs / job / logs (PR C scope)
+# ---------------------------------------------------------------------------
+
+
+class _FakeSSEResponse:
+    """Iterable response stub for SSE streaming tests."""
+
+    def __init__(self, lines: list) -> None:
+        # Each entry should be a complete line ending in "\n" (bytes or str).
+        self._lines = list(lines)
+        self.closed = False
+
+    def __iter__(self):
+        return iter(self._lines)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _make_sse_opener(lines: list):
+    captured: dict = {}
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> _FakeSSEResponse:
+        captured["req"] = req
+        captured["timeout"] = timeout
+        resp = _FakeSSEResponse(lines)
+        captured["resp"] = resp
+        return resp
+
+    return captured, _urlopen
+
+
+def test_rlens_client_jobs_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    fake_data = [
+        {"id": "j1", "status": "running", "created_at": "2026-01-01T00:00:00Z"},
+        {"id": "j2", "status": "succeeded", "created_at": "2026-01-02T00:00:00Z"},
+    ]
+    captured, opener = _make_opener(fake_data)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "jobs", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    parsed = json.loads(out)
+    assert isinstance(parsed, list)
+    assert parsed[0]["id"] == "j1"
+    assert captured["req"].full_url.endswith("/api/jobs")
+
+
+def test_rlens_client_jobs_text(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    fake_data = [
+        {"id": "job-abc", "status": "running", "created_at": "2026-01-01"},
+    ]
+    _, opener = _make_opener(fake_data)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "jobs"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "job-abc" in out
+    assert "running" in out
+
+
+def test_rlens_client_jobs_empty(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _, opener = _make_opener([])
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "jobs"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "No jobs" in out
+
+
+def test_rlens_client_jobs_status_and_limit(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener([])
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "jobs", "--status", "running", "--limit", "3", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    url = captured["req"].full_url
+    assert "/api/jobs" in url
+    assert "status=running" in url
+    assert "limit=3" in url
+
+
+def test_rlens_client_job_by_id_json(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    fake_data = {
+        "id": "job-xyz",
+        "status": "succeeded",
+        "created_at": "2026-01-01",
+        "artifact_ids": ["art-1", "art-2"],
+    }
+    captured, opener = _make_opener(fake_data)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "job", "job-xyz", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    parsed = json.loads(out)
+    assert parsed["id"] == "job-xyz"
+    assert captured["req"].full_url.endswith("/api/jobs/job-xyz")
+
+
+def test_rlens_client_job_by_id_text(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    fake_data = {
+        "id": "job-xyz",
+        "status": "failed",
+        "created_at": "2026-01-01",
+        "started_at": "2026-01-01T00:01:00Z",
+        "finished_at": "2026-01-01T00:02:00Z",
+        "hub_resolved": "/some/hub",
+        "artifact_ids": ["art-1"],
+        "error": "boom",
+        "warnings": ["w1", "w2"],
+    }
+    _, opener = _make_opener(fake_data)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "job", "job-xyz"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "job-xyz" in out
+    assert "failed" in out
+    assert "art-1" in out
+    assert "boom" in out
+    assert "w1" in out
+    assert "w2" in out
+
+
+def test_rlens_client_job_id_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured, opener = _make_opener({"id": "x"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "job", "job id/with weird", "--json"])
+
+    assert rc == 0
+    # Path segment must not contain raw spaces or slashes.
+    url = captured["req"].full_url
+    assert " " not in url.split("?")[0]
+    assert "/api/jobs/" in url
+    assert url.split("/api/jobs/", 1)[1].rstrip("?&").count("/") == 0
+
+
+def test_rlens_client_job_missing_id_is_cli_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called when job_id is missing")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["rlens-client", "job"])
+    assert exc_info.value.code == 2
+
+
+def test_rlens_client_job_http_404_no_token_leak(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "shhh-secret")
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise urllib.error.HTTPError(
+            url=None, code=404, msg="Not Found", hdrs=None, fp=None
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "job", "missing-id", "--json"])
+    out, err = capsys.readouterr()
+
+    assert rc == 1
+    parsed = json.loads(out)
+    assert parsed["status"] == "error"
+    assert "shhh-secret" not in out
+    assert "shhh-secret" not in err
+
+
+def test_rlens_client_logs_text_streams_data_lines(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    lines = [
+        b"id: 1\n",
+        b"data: hello\n",
+        b"\n",
+        b"id: 2\n",
+        b"data: world\n",
+        b"\n",
+        b"event: end\n",
+        b"data: end\n",
+        b"\n",
+    ]
+    captured, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "hello" in out
+    assert "world" in out
+    # "end" SSE marker must not leak into text output.
+    assert "event: end" not in out
+    assert captured["req"].get_header("Accept") == "text/event-stream"
+    assert captured["resp"].closed is True
+
+
+def test_rlens_client_logs_json_emits_one_object_per_event(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    lines = [
+        b"id: 1\n",
+        b"data: line-a\n",
+        b"\n",
+        b"id: 2\n",
+        b"data: line-b\n",
+        b"\n",
+        b"event: end\n",
+        b"data: end\n",
+        b"\n",
+    ]
+    _, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    objs = [json.loads(line) for line in out.strip().splitlines() if line.strip()]
+    assert len(objs) == 2
+    assert objs[0]["data"] == "line-a"
+    assert objs[0]["id"] == "1"
+    assert objs[1]["data"] == "line-b"
+
+
+def test_rlens_client_logs_stops_on_event_end(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    # Anything after event: end must not appear in output.
+    lines = [
+        b"id: 1\n",
+        b"data: keep\n",
+        b"\n",
+        b"event: end\n",
+        b"data: end\n",
+        b"\n",
+        b"id: 2\n",
+        b"data: should-not-appear\n",
+        b"\n",
+    ]
+    _, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "keep" in out
+    assert "should-not-appear" not in out
+
+
+def test_rlens_client_logs_passes_last_id(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    lines = [b"event: end\n", b"data: end\n", b"\n"]
+    captured, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1", "--last-id", "7"])
+    capsys.readouterr()
+
+    assert rc == 0
+    url = captured["req"].full_url
+    assert "last_id=7" in url
+
+
+def test_rlens_client_logs_multiline_data(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    # Per SSE spec, multiple data: lines in a single event concatenate with newline.
+    lines = [
+        b"id: 1\n",
+        b"data: first\n",
+        b"data: second\n",
+        b"\n",
+        b"event: end\n",
+        b"data: end\n",
+        b"\n",
+    ]
+    _, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "first\nsecond" in out
+
+
+def test_rlens_client_logs_ignores_comment_lines(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    lines = [
+        b":heartbeat\n",
+        b"id: 1\n",
+        b"data: alive\n",
+        b"\n",
+        b"event: end\n",
+        b"data: end\n",
+        b"\n",
+    ]
+    _, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "heartbeat" not in out
+    assert "alive" in out
+
+
+def test_rlens_client_logs_handles_http_error(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "stream-secret")
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise urllib.error.HTTPError(
+            url=None, code=400, msg="Bad Request", hdrs=None, fp=None
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "logs", "job-1", "--json"])
+    out, err = capsys.readouterr()
+
+    assert rc == 1
+    parsed = json.loads(out)
+    assert parsed["status"] == "error"
+    assert parsed["error_kind"] == "remote_error"
+    assert "stream-secret" not in out
+    assert "stream-secret" not in err
+
+
+def test_rlens_client_logs_token_redacted_in_data(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "log-secret")
+    lines = [
+        b"id: 1\n",
+        b"data: echoing log-secret in line\n",
+        b"\n",
+        b"event: end\n",
+        b"data: end\n",
+        b"\n",
+    ]
+    _, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "log-secret" not in out
+    assert "[REDACTED]" in out
+
+
+def test_rlens_client_logs_sets_bearer_header_and_no_query_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "bearer-token")
+    lines = [b"event: end\n", b"data: end\n", b"\n"]
+    captured, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1"])
+
+    assert rc == 0
+    assert captured["req"].get_header("Authorization") == "Bearer bearer-token"
+    assert "bearer-token" not in captured["req"].full_url
+
+
+def test_rlens_client_logs_stream_without_end_event_still_succeeds(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    # Server may close the stream without an explicit event: end.
+    # MVP: that's not an error.
+    lines = [
+        b"id: 1\n",
+        b"data: only\n",
+        b"\n",
+    ]
+    _, opener = _make_sse_opener(lines)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "logs", "job-1"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "only" in out

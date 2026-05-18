@@ -11,6 +11,7 @@ from typing import Any, Optional, Tuple
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8787"
 DEFAULT_TIMEOUT_SECONDS = 10
+DEFAULT_SSE_TIMEOUT_SECONDS = 300
 
 
 def _resolve_base_url(args: argparse.Namespace) -> str:
@@ -149,6 +150,39 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
     latest_parser.add_argument("--level", default="max", help="Level (default: max)")
     latest_parser.add_argument("--mode", default="gesamt", help="Mode (default: gesamt)")
 
+    jobs_parser = client_subparsers.add_parser("jobs", help="List jobs")
+    _add_common_options(jobs_parser, suppress_defaults=True, dest_prefix="leaf_")
+    jobs_parser.add_argument("--status", default=None, help="Filter by job status")
+    jobs_parser.add_argument(
+        "--limit", type=int, default=None, help="Maximum number of jobs to return"
+    )
+
+    job_parser = client_subparsers.add_parser("job", help="Get job details by id")
+    _add_common_options(job_parser, suppress_defaults=True, dest_prefix="leaf_")
+    job_parser.add_argument("job_id", help="Job ID")
+
+    logs_parser = client_subparsers.add_parser(
+        "logs", help="Stream job logs via SSE until event: end"
+    )
+    _add_common_options(logs_parser, suppress_defaults=True, dest_prefix="leaf_")
+    logs_parser.add_argument("job_id", help="Job ID")
+    logs_parser.add_argument(
+        "--last-id",
+        type=int,
+        default=None,
+        dest="last_id",
+        help="Resume from this SSE event id (server clamps negatives to 0)",
+    )
+    logs_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=(
+            "Per-read timeout in seconds for the SSE stream "
+            f"(default: {DEFAULT_SSE_TIMEOUT_SECONDS})"
+        ),
+    )
+
 
 def _cmd_health(args: argparse.Namespace) -> int:
     token = _resolve_token(args)
@@ -242,10 +276,195 @@ def _cmd_latest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_jobs(args: argparse.Namespace) -> int:
+    token = _resolve_token(args)
+    try:
+        base_url = _resolve_base_url(args)
+    except ValueError as e:
+        return _exit_config_error(args, str(e), token)
+
+    params: dict = {}
+    if args.status:
+        params["status"] = args.status
+    if args.limit is not None:
+        params["limit"] = args.limit
+
+    url = f"{base_url}/api/jobs"
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+
+    data, error_code = _fetch_json_with_errors(args, url, token)
+    if error_code is not None:
+        return error_code
+
+    if _is_json_output(args):
+        print(json.dumps(data, indent=2))
+        return 0
+
+    items = data if isinstance(data, list) else []
+    if not items:
+        print("No jobs found.")
+        return 0
+    for item in items:
+        job_id = item.get("id", "?")
+        status = item.get("status", "?")
+        created_at = item.get("created_at", "?")
+        line = f"  {job_id}  status={status}  created={created_at}"
+        print(line)
+    return 0
+
+
+def _cmd_job(args: argparse.Namespace) -> int:
+    token = _resolve_token(args)
+    try:
+        base_url = _resolve_base_url(args)
+    except ValueError as e:
+        return _exit_config_error(args, str(e), token)
+
+    url = f"{base_url}/api/jobs/{urllib.parse.quote(args.job_id, safe='')}"
+    data, error_code = _fetch_json_with_errors(args, url, token)
+    if error_code is not None:
+        return error_code
+
+    if _is_json_output(args):
+        print(json.dumps(data, indent=2))
+        return 0
+
+    print(f"id: {data.get('id', '?')}")
+    print(f"status: {data.get('status', '?')}")
+    print(f"created_at: {data.get('created_at', '?')}")
+    if data.get("started_at"):
+        print(f"started_at: {data['started_at']}")
+    if data.get("finished_at"):
+        print(f"finished_at: {data['finished_at']}")
+    if data.get("hub_resolved"):
+        print(f"hub: {data['hub_resolved']}")
+    artifact_ids = data.get("artifact_ids") or []
+    if artifact_ids:
+        print(f"artifacts: {', '.join(artifact_ids)}")
+    if data.get("error"):
+        print(f"error: {data['error']}")
+    for warning in data.get("warnings") or []:
+        print(f"warning: {warning}")
+    return 0
+
+
+def _strip_sse_value(value: str) -> str:
+    # Per SSE spec, a single optional leading space after the colon is stripped.
+    if value.startswith(" "):
+        return value[1:]
+    return value
+
+
+def _dispatch_sse_event(
+    event: dict, json_output: bool, token: Optional[str]
+) -> Optional[int]:
+    event_type = event.get("event")
+    if event_type == "end":
+        return 0
+
+    data = event.get("data", "")
+    if json_output:
+        payload: dict = {"data": data}
+        if "id" in event:
+            payload["id"] = event["id"]
+        if event_type:
+            payload["event"] = event_type
+        print(json.dumps(payload), flush=True)
+    else:
+        safe = _redact(data, token)
+        print(safe, flush=True)
+    return None
+
+
+def _cmd_logs(args: argparse.Namespace) -> int:
+    token = _resolve_token(args)
+    try:
+        base_url = _resolve_base_url(args)
+    except ValueError as e:
+        return _exit_config_error(args, str(e), token)
+
+    params: dict = {}
+    if args.last_id is not None:
+        params["last_id"] = args.last_id
+
+    url = f"{base_url}/api/jobs/{urllib.parse.quote(args.job_id, safe='')}/logs"
+    if params:
+        url = f"{url}?{urllib.parse.urlencode(params)}"
+
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", "text/event-stream")
+
+    timeout = args.timeout if args.timeout is not None else DEFAULT_SSE_TIMEOUT_SECONDS
+
+    try:
+        response = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        return _exit_error(args, "remote_error", f"HTTP {e.code}: {e.reason}", token)
+    except urllib.error.URLError as e:
+        return _exit_error(args, "remote_error", f"Connection error: {e.reason}", token)
+    except (ValueError, TimeoutError, OSError) as e:
+        return _exit_error(args, "remote_error", f"Request failed: {e}", token)
+
+    json_output = _is_json_output(args)
+
+    try:
+        current_event: dict = {}
+        for raw_line in response:
+            if isinstance(raw_line, bytes):
+                line = raw_line.decode("utf-8", errors="replace")
+            else:
+                line = raw_line
+            line = line.rstrip("\r\n")
+
+            if line == "":
+                if current_event:
+                    rc = _dispatch_sse_event(current_event, json_output, token)
+                    current_event = {}
+                    if rc is not None:
+                        return rc
+                continue
+
+            if line.startswith(":"):
+                continue
+
+            field, sep, value = line.partition(":")
+            if not sep:
+                continue
+            value = _strip_sse_value(value)
+
+            if field == "data":
+                if "data" in current_event:
+                    current_event["data"] += "\n" + value
+                else:
+                    current_event["data"] = value
+            elif field in ("id", "event"):
+                current_event[field] = value
+            # Other field names are ignored per SSE spec.
+
+        if current_event:
+            rc = _dispatch_sse_event(current_event, json_output, token)
+            if rc is not None:
+                return rc
+        return 0
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        return _exit_error(args, "remote_error", f"Stream error: {e}", token)
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+
+
 def run_rlens_client(args: argparse.Namespace) -> int:
     if not hasattr(args, "rlens_cmd") or args.rlens_cmd is None:
         print("Usage: lenskit rlens-client <subcommand>", file=sys.stderr)
-        print("Subcommands: health, artifacts, latest", file=sys.stderr)
+        print(
+            "Subcommands: health, artifacts, latest, jobs, job, logs",
+            file=sys.stderr,
+        )
         return 2
     if args.rlens_cmd == "health":
         return _cmd_health(args)
@@ -253,5 +472,11 @@ def run_rlens_client(args: argparse.Namespace) -> int:
         return _cmd_artifacts(args)
     if args.rlens_cmd == "latest":
         return _cmd_latest(args)
+    if args.rlens_cmd == "jobs":
+        return _cmd_jobs(args)
+    if args.rlens_cmd == "job":
+        return _cmd_job(args)
+    if args.rlens_cmd == "logs":
+        return _cmd_logs(args)
     print(f"Unknown rlens-client subcommand: {args.rlens_cmd!r}", file=sys.stderr)
     return 2

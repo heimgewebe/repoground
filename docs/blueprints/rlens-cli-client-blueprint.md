@@ -112,9 +112,9 @@ Optionale spätere Profile:
 | `lenskit rlens-client health` | `GET /api/health` | Status, Version, Hub, Auth | ja | **umgesetzt (PR B)** |
 | `lenskit rlens-client artifacts` | `GET /api/artifacts` | Artefaktliste | ja | **umgesetzt (PR B)** |
 | `lenskit rlens-client latest --repo REPO` | `GET /api/artifacts/latest` | neuestes Artefakt | ja | **umgesetzt (PR B)** |
-| `lenskit rlens-client jobs` | noch zu prüfen | Jobliste | ja | offen (nicht PR B) |
-| `lenskit rlens-client job JOB_ID` | noch zu prüfen | Jobdetails | ja | offen (nicht PR B) |
-| `lenskit rlens-client logs JOB_ID` | `GET /api/jobs/{job_id}/logs` | SSE-Logs bis `event: end` | optional | später (PR C) |
+| `lenskit rlens-client jobs` | `GET /api/jobs` | Jobliste | ja | **umgesetzt (PR C)** |
+| `lenskit rlens-client job JOB_ID` | `GET /api/jobs/{job_id}` | Jobdetails | ja | **umgesetzt (PR C)** |
+| `lenskit rlens-client logs JOB_ID` | `GET /api/jobs/{job_id}/logs` | SSE-Logs bis `event: end` | optional | **umgesetzt (PR C)** |
 
 ## Namensentscheidung
 
@@ -198,17 +198,34 @@ Umgesetzt:
 
 Offen (folgende PRs):
 
-- `jobs`, `job JOB_ID`
-- `logs JOB_ID` / SSE (PR C)
 - `run`, `cancel` (PR E)
 - Host-Profile (PR D)
 - Heim-PC/Heimserver-Betriebsentscheidung (Remote-Erreichbarkeit ist nicht behauptet)
+- Automatischer SSE-Reconnect (optional)
 
-### PR C: SSE Logs
+### PR C: Jobs / Job / SSE Logs — umgesetzt
 
-- `logs JOB_ID`
-- korrektes Ende bei `event: end`
-- Reconnect optional später
+Umgesetzt:
+
+- `jobs` (`GET /api/jobs`, optional `--status`, `--limit`)
+- `job JOB_ID` (`GET /api/jobs/{job_id}`, `job_id` URL-encoded im Pfadsegment)
+- `logs JOB_ID` (`GET /api/jobs/{job_id}/logs`, SSE-Stream)
+  - korrektes Ende bei `event: end`
+  - optional `--last-id` als Query-Parameter (`last_id=…`)
+  - optional `--timeout` (Per-Read-Timeout, Default 300 s)
+  - SSE-Parser unterstützt `id:`/`event:`/`data:` (Multiline-Data) und ignoriert Kommentar-Zeilen `:…`
+  - Token-Redaktion auch in Stream-Daten
+
+Sicherheitsinvarianten (durch Tests abgesichert):
+
+- Token nie als Query-Parameter (auch nicht bei Logs/SSE)
+- Token-Redaktion bei HTTP-Fehlern und in Stream-Ausgaben
+- `Accept: text/event-stream` für Logs gesetzt
+- `job_id` wird URL-encodiert; Pfadtraversal-Versuche fallen auf Server-Validierung
+
+Offen (Reconnect):
+
+- Automatischer Resume nach Stream-Abbruch ist nicht im MVP. Manueller Resume via `--last-id`.
 
 ### PR D: Host-Profile
 
