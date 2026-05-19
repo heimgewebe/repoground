@@ -6,6 +6,7 @@ import json
 import pathlib
 import ast
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -50,6 +51,19 @@ def _make_bad_json_opener():
         return fake
 
     return _urlopen
+
+
+def _assert_request_url(
+    req: urllib.request.Request,
+    *,
+    scheme: str,
+    netloc: str,
+    path: str,
+) -> None:
+    parsed = urllib.parse.urlparse(req.full_url)
+    assert parsed.scheme == scheme
+    assert parsed.netloc == netloc
+    assert parsed.path == path
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +139,7 @@ def test_rlens_client_base_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
     rc = main(["rlens-client", "health", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://heimserver:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +155,7 @@ def test_rlens_client_base_url_flag_overrides_env(monkeypatch: pytest.MonkeyPatc
     rc = main(["rlens-client", "health", "--base-url", "http://heim-pc:8787", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://heim-pc:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
     assert "wrong" not in captured["req"].full_url
 
 
@@ -234,7 +248,7 @@ def test_rlens_client_leaf_base_url_overrides_parent_base_url(monkeypatch: pytes
     )
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://leaf:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="leaf:8787", path="/api/health")
 
 
 # ---------------------------------------------------------------------------
@@ -1024,7 +1038,7 @@ def test_rlens_client_profile_provides_base_url(
     rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://heim-pc:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
 
 
 def test_rlens_client_profile_via_env(
@@ -1044,7 +1058,7 @@ def test_rlens_client_profile_via_env(
     rc = main(["rlens-client", "health", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://lab.example:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="lab.example:8787", path="/api/health")
 
 
 def test_rlens_client_default_profile_used_when_no_selection(
@@ -1065,7 +1079,7 @@ def test_rlens_client_default_profile_used_when_no_selection(
     rc = main(["rlens-client", "health", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://heimserver:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
 
 
 def test_rlens_client_base_url_flag_beats_profile(
@@ -1087,7 +1101,7 @@ def test_rlens_client_base_url_flag_beats_profile(
     ])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://override:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="override:8787", path="/api/health")
 
 
 def test_rlens_client_env_base_url_beats_profile(
@@ -1105,7 +1119,7 @@ def test_rlens_client_env_base_url_beats_profile(
     rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://env-wins:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="env-wins:8787", path="/api/health")
 
 
 def test_rlens_client_profile_token_env(
@@ -1273,7 +1287,7 @@ def test_rlens_client_no_config_no_profile_uses_default(
     rc = main(["rlens-client", "health", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://127.0.0.1:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="127.0.0.1:8787", path="/api/health")
 
 
 def test_rlens_client_invalid_profile_config_without_profile_is_config_error(
@@ -1549,4 +1563,4 @@ def test_rlens_client_profile_xdg_config_home_used(
     rc = main(["rlens-client", "health", "--profile", "x", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://x:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="x:8787", path="/api/health")
