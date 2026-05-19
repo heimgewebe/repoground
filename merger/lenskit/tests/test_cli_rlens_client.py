@@ -6,6 +6,7 @@ import json
 import pathlib
 import ast
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import pytest
@@ -50,6 +51,19 @@ def _make_bad_json_opener():
         return fake
 
     return _urlopen
+
+
+def _assert_request_url(
+    req: urllib.request.Request,
+    *,
+    scheme: str,
+    netloc: str,
+    path: str,
+) -> None:
+    parsed = urllib.parse.urlparse(req.full_url)
+    assert parsed.scheme == scheme
+    assert parsed.netloc == netloc
+    assert parsed.path == path
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +139,7 @@ def test_rlens_client_base_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
     rc = main(["rlens-client", "health", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://heimserver:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +155,7 @@ def test_rlens_client_base_url_flag_overrides_env(monkeypatch: pytest.MonkeyPatc
     rc = main(["rlens-client", "health", "--base-url", "http://heim-pc:8787", "--json"])
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://heim-pc:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
     assert "wrong" not in captured["req"].full_url
 
 
@@ -234,7 +248,7 @@ def test_rlens_client_leaf_base_url_overrides_parent_base_url(monkeypatch: pytes
     )
 
     assert rc == 0
-    assert captured["req"].full_url.startswith("http://leaf:8787")
+    _assert_request_url(captured["req"], scheme="http", netloc="leaf:8787", path="/api/health")
 
 
 # ---------------------------------------------------------------------------
@@ -988,3 +1002,663 @@ def test_rlens_client_logs_last_id_negative_is_passed_through(
 
     assert rc == 0
     assert "last_id=-5" in captured["req"].full_url
+
+
+# ---------------------------------------------------------------------------
+# Host profiles (PR D scope)
+# ---------------------------------------------------------------------------
+
+
+def _write_profiles(tmp_path: pathlib.Path, payload: object) -> pathlib.Path:
+    config = tmp_path / "rlens-profiles.json"
+    config.write_text(json.dumps(payload), encoding="utf-8")
+    return config
+
+
+def _isolate_profile_env(monkeypatch: pytest.MonkeyPatch, config: pathlib.Path) -> None:
+    monkeypatch.setenv("LENSKIT_RLENS_PROFILES", str(config))
+    monkeypatch.delenv("RLENS_BASE_URL", raising=False)
+    monkeypatch.delenv("RLENS_TOKEN", raising=False)
+    monkeypatch.delenv("RLENS_PROFILE", raising=False)
+
+
+def test_rlens_client_profile_provides_base_url(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {
+            "heim-pc": {"base_url": "http://heim-pc:8787"},
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+
+    assert rc == 0
+    _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
+
+
+def test_rlens_client_profile_via_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {
+            "lab": {"base_url": "http://lab.example:8787"},
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+    monkeypatch.setenv("RLENS_PROFILE", "lab")
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "health", "--json"])
+
+    assert rc == 0
+    _assert_request_url(captured["req"], scheme="http", netloc="lab.example:8787", path="/api/health")
+
+
+def test_rlens_client_default_profile_used_when_no_selection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "default_profile": "heimserver",
+        "profiles": {
+            "heimserver": {"base_url": "http://heimserver:8787"},
+            "other": {"base_url": "http://other:8787"},
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "health", "--json"])
+
+    assert rc == 0
+    _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
+
+
+def test_rlens_client_base_url_flag_beats_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"heim-pc": {"base_url": "http://heim-pc:8787"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main([
+        "rlens-client", "health",
+        "--profile", "heim-pc",
+        "--base-url", "http://override:8787",
+        "--json",
+    ])
+
+    assert rc == 0
+    _assert_request_url(captured["req"], scheme="http", netloc="override:8787", path="/api/health")
+
+
+def test_rlens_client_env_base_url_beats_profile(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"heim-pc": {"base_url": "http://heim-pc:8787"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+    monkeypatch.setenv("RLENS_BASE_URL", "http://env-wins:8787")
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+
+    assert rc == 0
+    _assert_request_url(captured["req"], scheme="http", netloc="env-wins:8787", path="/api/health")
+
+
+def test_rlens_client_profile_token_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {
+            "heim-pc": {
+                "base_url": "http://heim-pc:8787",
+                "token_env": "RLENS_TOKEN_HEIM_PC",
+            },
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+    monkeypatch.setenv("RLENS_TOKEN_HEIM_PC", "profile-token-value")
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+
+    assert rc == 0
+    auth = captured["req"].get_header("Authorization")
+    assert auth == "Bearer profile-token-value"
+    assert "profile-token-value" not in captured["req"].full_url
+
+
+def test_rlens_client_token_flag_beats_profile_token_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {
+            "heim-pc": {
+                "base_url": "http://heim-pc:8787",
+                "token_env": "RLENS_TOKEN_HEIM_PC",
+            },
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+    monkeypatch.setenv("RLENS_TOKEN_HEIM_PC", "profile-token-value")
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main([
+        "rlens-client", "health",
+        "--profile", "heim-pc",
+        "--token", "cli-token",
+        "--json",
+    ])
+
+    assert rc == 0
+    assert captured["req"].get_header("Authorization") == "Bearer cli-token"
+
+
+def test_rlens_client_unknown_profile_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"local": {"base_url": "http://127.0.0.1:8787"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for unknown profile")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--profile", "nope", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "nope" in parsed["message"]
+
+
+def test_rlens_client_profile_unknown_even_with_base_url_override_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"local": {"base_url": "http://127.0.0.1:8787"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for unknown profile")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main([
+        "rlens-client", "health",
+        "--base-url", "http://override:8787",
+        "--profile", "nope",
+        "--json",
+    ])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "nope" in parsed["message"]
+
+
+def test_rlens_client_profile_requested_but_no_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    missing = tmp_path / "missing-profiles.json"
+    _isolate_profile_env(monkeypatch, missing)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called when explicit profile is missing")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+
+
+def test_rlens_client_profile_default_profile_non_string_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "default_profile": 42,
+        "profiles": {"x": {"base_url": "http://x:8787"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for invalid config")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "default_profile" in parsed["message"]
+
+
+def test_rlens_client_no_config_no_profile_uses_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    # If no profile is requested and no config exists, fall back to default URL.
+    missing = tmp_path / "missing-profiles.json"
+    _isolate_profile_env(monkeypatch, missing)
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "health", "--json"])
+
+    assert rc == 0
+    _assert_request_url(captured["req"], scheme="http", netloc="127.0.0.1:8787", path="/api/health")
+
+
+def test_rlens_client_invalid_profile_config_without_profile_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"naughty": {"base_url": "http://x:8787", "garbage": "x"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for invalid config")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "garbage" in parsed["message"]
+
+
+def test_rlens_client_invalid_profile_config_with_token_override_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"bad": {"base_url": "http://x:8787", "token": "super-secret"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for invalid profile config")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--token", "cli-token", "--json"])
+    out, err = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "super-secret" not in out
+    assert "super-secret" not in err
+
+
+def test_rlens_client_invalid_profile_config_with_env_token_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"bad": {"base_url": "http://x:8787", "garbage": "x"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+    monkeypatch.setenv("RLENS_TOKEN", "env-token")
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for invalid profile config")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "garbage" in parsed["message"]
+
+
+def test_rlens_client_invalid_profile_config_with_base_url_override_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"bad": {"base_url": "http://x:8787", "garbage": "x"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for invalid profile config")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--base-url", "http://override:8787", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "garbage" in parsed["message"]
+
+
+def test_rlens_client_profile_with_token_field_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    # Hard security invariant: profile files must NEVER contain raw secrets.
+    config = _write_profiles(tmp_path, {
+        "profiles": {
+            "bad": {
+                "base_url": "http://x:8787",
+                "token": "secret-in-config",
+            },
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called when profile is invalid")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--profile", "bad", "--json"])
+    out, err = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "secret-in-config" not in out
+    assert "secret-in-config" not in err
+
+
+def test_rlens_client_profile_forbidden_key_even_with_base_url_override_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {
+            "bad": {
+                "base_url": "http://x:8787",
+                "token": "secret-in-config",
+            },
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called when profile is invalid")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main([
+        "rlens-client", "health",
+        "--profile", "bad",
+        "--base-url", "http://override:8787",
+        "--json",
+    ])
+    out, err = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "secret-in-config" not in out
+    assert "secret-in-config" not in err
+
+
+def test_rlens_client_profile_unknown_key_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"x": {"base_url": "http://x:8787", "garbage": "yes"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    rc = main(["rlens-client", "health", "--profile", "x", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "garbage" in parsed["message"]
+
+
+def test_rlens_client_profile_invalid_base_url_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"bad": {"base_url": "ftp://nope"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for invalid base url")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--profile", "bad", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+
+
+def test_rlens_client_profile_malformed_json_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = tmp_path / "rlens-profiles.json"
+    config.write_text("this is not json {", encoding="utf-8")
+    _isolate_profile_env(monkeypatch, config)
+
+    rc = main(["rlens-client", "health", "--profile", "x", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+
+
+def test_rlens_client_profiles_subcommand_lists_profiles(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "default_profile": "local",
+        "profiles": {
+            "local": {"base_url": "http://127.0.0.1:8787"},
+            "heim-pc": {
+                "base_url": "http://heim-pc:8787",
+                "token_env": "RLENS_TOKEN_HEIM_PC",
+            },
+        },
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    rc = main(["rlens-client", "profiles", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    parsed = json.loads(out)
+    assert parsed["exists"] is True
+    assert parsed["default_profile"] == "local"
+    assert parsed["profiles"]["heim-pc"]["base_url"] == "http://heim-pc:8787"
+    assert parsed["profiles"]["heim-pc"]["token_env"] == "RLENS_TOKEN_HEIM_PC"
+
+
+def test_rlens_client_profiles_subcommand_no_secret_leak(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {
+            "naughty": {
+                "base_url": "http://x:8787",
+                "token_env": "RLENS_TOKEN_X",
+            }
+        }
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    rc = main(["rlens-client", "profiles", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "RLENS_TOKEN_X" in out
+    assert "secret" not in out
+
+
+def test_rlens_client_profiles_subcommand_unknown_key_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"naughty": {"base_url": "http://x:8787", "garbage": "x"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    rc = main(["rlens-client", "profiles", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "garbage" in parsed["message"]
+
+
+def test_rlens_client_profiles_subcommand_forbidden_key_is_config_error_no_secret_leak(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"naughty": {"base_url": "http://x:8787", "token": "super-secret"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    rc = main(["rlens-client", "profiles", "--json"])
+    out, err = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "super-secret" not in out
+    assert "super-secret" not in err
+
+
+def test_rlens_client_profile_base_url_invalid_scheme_rejected_by_profiles_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"naughty": {"base_url": "ftp://nope"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    rc = main(["rlens-client", "profiles", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+
+
+def test_rlens_client_profiles_subcommand_no_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
+) -> None:
+    missing = tmp_path / "missing.json"
+    _isolate_profile_env(monkeypatch, missing)
+
+    rc = main(["rlens-client", "profiles", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    parsed = json.loads(out)
+    assert parsed["exists"] is False
+    assert parsed["profiles"] == {}
+
+
+def test_rlens_client_profile_xdg_config_home_used(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    # When LENSKIT_RLENS_PROFILES is not set, XDG_CONFIG_HOME is honored.
+    monkeypatch.delenv("LENSKIT_RLENS_PROFILES", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("RLENS_BASE_URL", raising=False)
+    monkeypatch.delenv("RLENS_TOKEN", raising=False)
+    monkeypatch.delenv("RLENS_PROFILE", raising=False)
+
+    profile_dir = tmp_path / "lenskit"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "rlens-profiles.json").write_text(
+        json.dumps({"profiles": {"x": {"base_url": "http://x:8787"}}}),
+        encoding="utf-8",
+    )
+
+    captured, opener = _make_opener({"status": "ok"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "health", "--profile", "x", "--json"])
+
+    assert rc == 0
+    _assert_request_url(captured["req"], scheme="http", netloc="x:8787", path="/api/health")
+
+
+def test_rlens_client_profile_config_path_expands_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LENSKIT_RLENS_PROFILES", "~/rlens-profiles.json")
+    path = _mod._profile_config_path()
+    assert str(path).startswith(str(pathlib.Path.home()))

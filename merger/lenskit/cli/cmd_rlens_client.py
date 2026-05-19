@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import pathlib
 import re
 import sys
 import urllib.error
@@ -13,14 +14,136 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8787"
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_SSE_TIMEOUT_SECONDS = 300
 
+# Profile config keys allowed at the profile level. Tokens or secrets are
+# deliberately not part of this set — secrets must come from env (RLENS_TOKEN
+# or a profile-named token_env) or from --token, never from a repo-tracked or
+# config file.
+_PROFILE_ALLOWED_KEYS = frozenset({"base_url", "token_env"})
+_PROFILE_FORBIDDEN_KEYS = frozenset({"token", "rlens_token", "secret"})
+
+
+def _validate_profile_config(data: Any, path: pathlib.Path) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError(f"Profile config root must be a JSON object ({path})")
+    profiles = data.get("profiles")
+    if profiles is not None and not isinstance(profiles, dict):
+        raise ValueError(f"Profile config 'profiles' must be a JSON object ({path})")
+    default_profile = data.get("default_profile")
+    if default_profile is not None and not isinstance(default_profile, str):
+        raise ValueError(f"Profile config 'default_profile' must be a string ({path})")
+
+    for name, profile in (profiles or {}).items():
+        if not isinstance(profile, dict):
+            raise ValueError(f"Profile {name!r} must be a JSON object")
+        forbidden = _PROFILE_FORBIDDEN_KEYS.intersection(profile.keys())
+        if forbidden:
+            raise ValueError(
+                f"Profile {name!r} contains forbidden key(s) {sorted(forbidden)}; "
+                "secrets must come from env (token_env) or --token, never from config"
+            )
+        unknown = set(profile.keys()) - _PROFILE_ALLOWED_KEYS
+        if unknown:
+            raise ValueError(
+                f"Profile {name!r} has unknown key(s) {sorted(unknown)}; "
+                f"allowed: {sorted(_PROFILE_ALLOWED_KEYS)}"
+            )
+        base_url = profile.get("base_url")
+        if base_url is not None and not isinstance(base_url, str):
+            raise ValueError(f"Profile {name!r} 'base_url' must be a string")
+        if isinstance(base_url, str):
+            parsed = urllib.parse.urlparse(base_url)
+            scheme = parsed.scheme.lower()
+            if scheme not in ("http", "https") or not parsed.netloc:
+                raise ValueError(
+                    f"Profile {name!r} 'base_url' must be an absolute "
+                    "http:// or https:// URL"
+                )
+        token_env = profile.get("token_env")
+        if token_env is not None and not isinstance(token_env, str):
+            raise ValueError(f"Profile {name!r} 'token_env' must be a string")
+    return data
+
+
+def _profile_config_path() -> pathlib.Path:
+    explicit = os.environ.get("LENSKIT_RLENS_PROFILES")
+    if explicit:
+        return pathlib.Path(explicit).expanduser()
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    base = pathlib.Path(xdg).expanduser() if xdg else pathlib.Path.home() / ".config"
+    return base / "lenskit" / "rlens-profiles.json"
+
+
+def _load_profile_config(path: pathlib.Path) -> dict:
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        raise
+    except (OSError, json.JSONDecodeError) as e:
+        raise ValueError(f"Profile config unreadable ({path}): {e}") from None
+    return _validate_profile_config(data, path)
+
+
+def _is_profile_explicitly_requested(args: argparse.Namespace) -> bool:
+    name = getattr(args, "leaf_profile", None) or getattr(args, "profile", None)
+    env_name = os.environ.get("RLENS_PROFILE") or None
+    return bool(name or env_name)
+
+
+def _ensure_profile_config_valid_if_present(args: argparse.Namespace) -> None:
+    _ = args
+    path = _profile_config_path()
+    if path.exists():
+        _load_profile_config(path)
+
+
+def _select_profile(args: argparse.Namespace) -> Optional[Tuple[str, dict]]:
+    """Return (name, profile_dict) or None if no profile selected.
+
+    Raises ValueError for explicit-but-broken selections so callers can map to
+    config_error exit code.
+    """
+    name = getattr(args, "leaf_profile", None) or getattr(args, "profile", None)
+    env_name = os.environ.get("RLENS_PROFILE") or None
+    explicit_request = bool(name or env_name)
+    if not name:
+        name = env_name
+
+    path = _profile_config_path()
+    if not path.exists():
+        if explicit_request:
+            raise ValueError(
+                f"Profile {name!r} requested but config not found at {path}"
+            )
+        return None
+
+    data = _load_profile_config(path)
+    profiles = data.get("profiles") or {}
+    if not name:
+        default_name = data.get("default_profile")
+        if not default_name:
+            return None
+        name = default_name
+
+    if name not in profiles:
+        raise ValueError(f"Profile {name!r} not found in {path}")
+    profile = profiles[name]
+    return name, profile
+
 
 def _resolve_base_url(args: argparse.Namespace) -> str:
     base_url = getattr(args, "leaf_base_url", None) or getattr(args, "base_url", None)
-    if base_url:
-        base = base_url
-    else:
-        env = os.environ.get("RLENS_BASE_URL")
-        base = env if env else DEFAULT_BASE_URL
+    profile: Optional[Tuple[str, dict]] = None
+    if _is_profile_explicitly_requested(args):
+        profile = _select_profile(args)
+    if not base_url:
+        base_url = os.environ.get("RLENS_BASE_URL")
+    if not base_url:
+        if profile is None:
+            profile = _select_profile(args)
+        if profile is not None:
+            base_url = profile[1].get("base_url")
+    base = base_url if base_url else DEFAULT_BASE_URL
     parsed = urllib.parse.urlparse(base)
     scheme = parsed.scheme.lower()
     if scheme not in ("http", "https") or not parsed.netloc:
@@ -32,7 +155,15 @@ def _resolve_token(args: argparse.Namespace) -> Optional[str]:
     token = getattr(args, "leaf_token", None) or getattr(args, "token", None)
     if token:
         return token
-    return os.environ.get("RLENS_TOKEN") or None
+    env_token = os.environ.get("RLENS_TOKEN")
+    if env_token:
+        return env_token
+    profile = _select_profile(args)
+    if profile is not None:
+        token_env = profile[1].get("token_env")
+        if token_env:
+            return os.environ.get(token_env) or None
+    return None
 
 
 def _is_json_output(args: argparse.Namespace) -> bool:
@@ -118,6 +249,15 @@ def _add_common_options(
         help="Bearer token (overrides RLENS_TOKEN env var)",
     )
     parser.add_argument(
+        "--profile",
+        dest=f"{dest_prefix}profile",
+        default=scalar_default,
+        help=(
+            "Host profile name from rlens-profiles.json "
+            "(overrides RLENS_PROFILE; --base-url/RLENS_BASE_URL take precedence)"
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest=f"{dest_prefix}json",
@@ -183,13 +323,19 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
         ),
     )
 
+    profiles_parser = client_subparsers.add_parser(
+        "profiles", help="List configured host profiles"
+    )
+    _add_common_options(profiles_parser, suppress_defaults=True, dest_prefix="leaf_")
+
 
 def _cmd_health(args: argparse.Namespace) -> int:
-    token = _resolve_token(args)
     try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
         base_url = _resolve_base_url(args)
     except ValueError as e:
-        return _exit_config_error(args, str(e), token)
+        return _exit_config_error(args, str(e))
     url = f"{base_url}/api/health"
     data, error_code = _fetch_json_with_errors(args, url, token)
     if error_code is not None:
@@ -214,11 +360,12 @@ def _cmd_health(args: argparse.Namespace) -> int:
 
 
 def _cmd_artifacts(args: argparse.Namespace) -> int:
-    token = _resolve_token(args)
     try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
         base_url = _resolve_base_url(args)
     except ValueError as e:
-        return _exit_config_error(args, str(e), token)
+        return _exit_config_error(args, str(e))
     url = f"{base_url}/api/artifacts"
     if args.repo:
         url = f"{url}?{urllib.parse.urlencode({'repo': args.repo})}"
@@ -250,11 +397,12 @@ def _cmd_artifacts(args: argparse.Namespace) -> int:
 
 
 def _cmd_latest(args: argparse.Namespace) -> int:
-    token = _resolve_token(args)
     try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
         base_url = _resolve_base_url(args)
     except ValueError as e:
-        return _exit_config_error(args, str(e), token)
+        return _exit_config_error(args, str(e))
     params = urllib.parse.urlencode({"repo": args.repo, "level": args.level, "mode": args.mode})
     url = f"{base_url}/api/artifacts/latest?{params}"
     data, error_code = _fetch_json_with_errors(args, url, token)
@@ -277,11 +425,12 @@ def _cmd_latest(args: argparse.Namespace) -> int:
 
 
 def _cmd_jobs(args: argparse.Namespace) -> int:
-    token = _resolve_token(args)
     try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
         base_url = _resolve_base_url(args)
     except ValueError as e:
-        return _exit_config_error(args, str(e), token)
+        return _exit_config_error(args, str(e))
 
     if args.limit is not None and args.limit < 1:
         return _exit_config_error(args, "--limit must be a positive integer", token)
@@ -318,11 +467,12 @@ def _cmd_jobs(args: argparse.Namespace) -> int:
 
 
 def _cmd_job(args: argparse.Namespace) -> int:
-    token = _resolve_token(args)
     try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
         base_url = _resolve_base_url(args)
     except ValueError as e:
-        return _exit_config_error(args, str(e), token)
+        return _exit_config_error(args, str(e))
 
     url = f"{base_url}/api/jobs/{urllib.parse.quote(args.job_id, safe='')}"
     data, error_code = _fetch_json_with_errors(args, url, token)
@@ -380,11 +530,12 @@ def _dispatch_sse_event(
 
 
 def _cmd_logs(args: argparse.Namespace) -> int:
-    token = _resolve_token(args)
     try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
         base_url = _resolve_base_url(args)
     except ValueError as e:
-        return _exit_config_error(args, str(e), token)
+        return _exit_config_error(args, str(e))
 
     params: dict = {}
     if args.last_id is not None:
@@ -462,11 +613,72 @@ def _cmd_logs(args: argparse.Namespace) -> int:
             pass
 
 
+def _cmd_profiles(args: argparse.Namespace) -> int:
+    path = _profile_config_path()
+    json_output = _is_json_output(args)
+
+    if not path.exists():
+        if json_output:
+            print(json.dumps({
+                "config_path": str(path),
+                "exists": False,
+                "default_profile": None,
+                "profiles": {},
+            }, indent=2))
+        else:
+            print(f"No profile config at {path}")
+        return 0
+
+    try:
+        data = _load_profile_config(path)
+    except ValueError as e:
+        return _exit_config_error(args, str(e))
+
+    profiles_raw = data.get("profiles") or {}
+    default_profile = data.get("default_profile")
+
+    # Build a redacted view: only base_url and token_env name (never token values).
+    safe_profiles: dict = {}
+    for name, profile in profiles_raw.items():
+        if not isinstance(profile, dict):
+            continue
+        entry: dict = {}
+        if isinstance(profile.get("base_url"), str):
+            entry["base_url"] = profile["base_url"]
+        if isinstance(profile.get("token_env"), str):
+            entry["token_env"] = profile["token_env"]
+        safe_profiles[name] = entry
+
+    if json_output:
+        print(json.dumps({
+            "config_path": str(path),
+            "exists": True,
+            "default_profile": default_profile if isinstance(default_profile, str) else None,
+            "profiles": safe_profiles,
+        }, indent=2))
+        return 0
+
+    print(f"config: {path}")
+    if default_profile:
+        print(f"default: {default_profile}")
+    if not safe_profiles:
+        print("No profiles defined.")
+        return 0
+    for name, entry in safe_profiles.items():
+        marker = " (default)" if name == default_profile else ""
+        base = entry.get("base_url", "?")
+        line = f"  {name}{marker}  base_url={base}"
+        if "token_env" in entry:
+            line += f"  token_env={entry['token_env']}"
+        print(line)
+    return 0
+
+
 def run_rlens_client(args: argparse.Namespace) -> int:
     if not hasattr(args, "rlens_cmd") or args.rlens_cmd is None:
         print("Usage: lenskit rlens-client <subcommand>", file=sys.stderr)
         print(
-            "Subcommands: health, artifacts, latest, jobs, job, logs",
+            "Subcommands: health, artifacts, latest, jobs, job, logs, profiles",
             file=sys.stderr,
         )
         return 2
@@ -482,5 +694,7 @@ def run_rlens_client(args: argparse.Namespace) -> int:
         return _cmd_job(args)
     if args.rlens_cmd == "logs":
         return _cmd_logs(args)
+    if args.rlens_cmd == "profiles":
+        return _cmd_profiles(args)
     print(f"Unknown rlens-client subcommand: {args.rlens_cmd!r}", file=sys.stderr)
     return 2
