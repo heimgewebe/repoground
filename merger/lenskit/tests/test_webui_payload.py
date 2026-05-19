@@ -1,11 +1,13 @@
-from playwright.sync_api import expect
 import pytest
 from playwright.sync_api import Page, Route
+from playwright.sync_api import expect
 import json
 import os
 import time
 
 UI_DIR = os.path.abspath("merger/lenskit/frontends/webui")
+
+pytestmark = pytest.mark.browser
 
 @pytest.fixture
 def page_with_static(page: Page):
