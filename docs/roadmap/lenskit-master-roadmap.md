@@ -252,6 +252,7 @@ PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
   - [x] Priorität Token: `--token` > `RLENS_TOKEN` > Profil-`token_env` (Env-Lookup)
   - [x] `lenskit rlens-client profiles [--json]` listet Profile (redigiert; nur `base_url` und `token_env`-Name) und validiert Config strikt
   - [x] Sicherheits-Hardening: `token`/`secret`-Felder im Profil verboten (`config_error`, Exit 2); unbekannte Schlüssel abgelehnt
+  - [x] Sobald Profil-Config vorhanden ist, wird sie auch ohne Profilselektion strikt validiert
   - [x] Explizit angeforderte Profile werden nie still ignoriert (auch nicht bei Base-URL-Override)
 - [ ] Heim-PC/Heimserver-Betriebsmodell entscheiden
   - lokaler Service je Host

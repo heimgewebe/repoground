@@ -1276,6 +1276,30 @@ def test_rlens_client_no_config_no_profile_uses_default(
     assert captured["req"].full_url.startswith("http://127.0.0.1:8787")
 
 
+def test_rlens_client_invalid_profile_config_without_profile_is_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: pathlib.Path,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    config = _write_profiles(tmp_path, {
+        "profiles": {"naughty": {"base_url": "http://x:8787", "garbage": "x"}},
+    })
+    _isolate_profile_env(monkeypatch, config)
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for invalid config")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "health", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["error_kind"] == "config_error"
+    assert "garbage" in parsed["message"]
+
+
 def test_rlens_client_profile_with_token_field_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
