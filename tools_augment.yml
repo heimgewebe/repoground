@@ -1,62 +1,63 @@
-# Augment Sidecar for tools repository
+# Augment Sidecar for lenskit repository
 # Version: 1.0
 # Purpose: Provide additional context and recommendations for AI agents
 
 augment:
   version: 1
-  
+
   # Hotspots: Areas requiring special attention
   hotspots:
-    - path: merger/wc-merger/merge_core.py
-      reason: "Complex branching logic with multiple profile modes"
+    - path: merger/lenskit/core/merge.py
+      reason: "Large merge pipeline (>6000 LOC) with branching profile logic"
       severity: "medium"
-      lines: [1000, 1100]
-    
-    - path: merger/wc-merger/wc-merger.py
-      reason: "UI state management and Pythonista-specific code"
+
+    - path: merger/lenskit/service/app.py
+      reason: "Service entrypoint; auth, SSE streaming and security policies"
+      severity: "medium"
+
+    - path: merger/lenskit/cli/cmd_atlas.py
+      reason: "Atlas CLI dispatch with many subcommands and policies"
       severity: "low"
-      lines: [200, 400]
-  
+
   # Suggestions: Architectural recommendations
   suggestions:
-    - "Consider extracting profile logic into strategy pattern classes"
-    - "Add comprehensive unit tests for health and organism layers"
-    - "Document the relationship between merge_core and wc-extractor"
-    - "Consider splitting merge_core.py into smaller modules"
-  
+    - "Continue splitting core/merge.py into focused modules where seams exist"
+    - "Keep frontends (Pythonista CLI, WebUI) in parity per AGENTS.md"
+    - "Prefer absolute imports in frontends/pythonista (see test_pythonista_import_policy)"
+
   # Risks: Known issues or concerns
   risks:
-    - "Large merges may exhaust Pythonista memory on iOS"
-    - "Multi-part merges need proper header normalization"
-    - "Delta reports depend on wc-extractor being available"
-  
+    - "Large merges may exhaust memory on Pythonista/iOS"
+    - "Citation map coherence requires matching canonical_md/chunk_index pairs"
+    - "Split-mode contract: only canonical part carries content_range_ref"
+
   # Dependencies: Key external dependencies
   dependencies:
-    - name: "Pythonista"
-      required: false
-      purpose: "iOS UI support"
-    
-    - name: "wc-extractor"
-      required: false
-      purpose: "ZIP import and delta generation"
-  
+    - name: "fastapi"
+      required: true
+      purpose: "rLens HTTP service"
+    - name: "pydantic"
+      required: true
+      purpose: "JobRequest model & validation"
+    - name: "pytest-asyncio"
+      required: true
+      purpose: "SSE lifecycle and async service tests"
+
   # Priorities: Focus areas for development
   priorities:
     - priority: 1
-      task: "Complete all 5 stages of super-merger roadmap"
-      status: "in-progress"
-    
+      task: "Maintain frontend parity (parity_guard.py)"
+      status: "ongoing"
     - priority: 2
-      task: "Add contract validation for all extras"
-      status: "pending"
-    
+      task: "rLens CLI client maturation (see docs/blueprints/rlens-cli-client-blueprint.md)"
+      status: "in-progress"
     - priority: 3
-      task: "Improve test coverage"
+      task: "Improve test coverage for core/merge.py split-mode contracts"
       status: "pending"
-  
+
   # Context: Additional information for AI understanding
   context:
-    coding_style: "Python 3.7+, type hints, dataclasses"
-    architecture: "Generator-based report building for memory efficiency"
-    testing: "Manual testing via Pythonista and CLI"
-    deployment: "Runs on iOS (Pythonista) and Linux/macOS (CLI)"
+    coding_style: "Python 3.11+, type hints, dataclasses"
+    architecture: "Pipeline: scan → chunk → emit (markdown + JSON sidecars); service wraps as jobs"
+    testing: "pytest under merger/lenskit/tests/ and tests/"
+    deployment: "CLI + FastAPI service; Pythonista iOS frontend (flat layout)"
