@@ -1,0 +1,36 @@
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "ruff>=0.6"
+
+      # F401: unused imports. F811: redefined-while-unused.
+      # Test fixtures are excluded because they intentionally hold
+      # invalid/unused-import code used by the linter/graph tests.
+      - name: Check unused/redefined imports
+        run: ruff check --select=F401,F811 --exclude='**/fixtures/**' .
