@@ -1,8 +1,7 @@
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 import sys
-import ast
 from pathlib import Path
 
 # Import the module to test

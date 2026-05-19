@@ -18,8 +18,8 @@ class MockBaseModel:
 def setup_mocks():
     # Only mock if dependencies are missing (e.g. in minimal CI)
     try:
-        import fastapi
-        import pydantic
+        import fastapi  # noqa: F401  # presence check
+        import pydantic  # noqa: F401  # presence check
     except ImportError:
         m_fastapi = MagicMock()
         sys.modules["fastapi"] = m_fastapi

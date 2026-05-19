@@ -75,7 +75,6 @@ def test_analyze_duplicates_differentiates_groups(duplicate_snapshot_setup, caps
     registry_path, snap_id = duplicate_snapshot_setup
 
     # We need to run the inner function and capture stdout
-    import merger.lenskit.cli.cmd_atlas
 
     # Monkeypatch the module-level registry path resolution instead of the global Path class
     # cmd_atlas relies on Path("atlas/registry/atlas_registry.sqlite").resolve()

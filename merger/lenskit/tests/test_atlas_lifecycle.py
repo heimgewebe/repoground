@@ -1,11 +1,9 @@
 import pytest
 from pathlib import Path
 import json
-import time
 from fastapi.testclient import TestClient
 
 from merger.lenskit.service.app import app, init_service, verify_token
-from merger.lenskit.service.models import AtlasArtifact
 
 @pytest.fixture
 def lifecycle_client(tmp_path: Path):

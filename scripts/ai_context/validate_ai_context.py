@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 
 try:
     import yaml
-except Exception as e:
+except Exception:
     print("ERROR: PyYAML missing. Install with: pip install pyyaml", file=sys.stderr)
     raise
 

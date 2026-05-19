@@ -15,7 +15,6 @@ import sys
 import re
 import ast
 from pathlib import Path
-from typing import List, Dict, Set
 
 # Configuration
 # Map Feature Name (JobRequest field) to expected representations

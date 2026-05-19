@@ -2250,8 +2250,6 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     ext_hist: Dict[str, int] = {}
 
     root_str = str(repo_root)
-    # Guardrail: Ensure root ends with separator for safe prefix checking
-    root_guard = root_str if root_str.endswith(os.sep) else root_str + os.sep
     root_len = len(root_str)
 
     # Files awaiting MD5 calculation: list of (FileInfo, abs_path, effective_limit)
@@ -5901,7 +5899,6 @@ def write_reports_v2(
     # Fix: In pro-repo mode, we generate multiple sidecars and indices.
     # Avoid returning an arbitrary last index in the global summary object.
     # The authoritative references are in the per-repo JSON sidecars.
-    is_gesamt = (mode == "gesamt")
     # However, for single-repo usage (common in tests), we populate fields to allow assertions.
     final_chunk_index = last_chunk_index_path
     final_index_json = (verified_json[0] if verified_json else None)

@@ -677,7 +677,7 @@ def _expand_context(db_conn: sqlite3.Connection, chunk_id: str, file_path: str, 
             # Which is handled upstream during chunking.
             return None
 
-    except sqlite3.OperationalError as e:
+    except sqlite3.OperationalError:
         # Silently degrade if context expansion fails
         pass
 

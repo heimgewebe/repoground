@@ -13,7 +13,7 @@ Resolver Boundaries (S1 MVP):
 import ast
 import os
 import logging
-from typing import TypedDict, List, Dict, Optional, Literal, Set
+from typing import TypedDict, List, Dict, Literal
 from pathlib import Path
 from datetime import datetime, timezone
 

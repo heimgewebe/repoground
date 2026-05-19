@@ -66,7 +66,7 @@ def parse_who_text(lines: Iterable[str]) -> Dict[Code, Description]:
     buffer: List[str] = []
 
     def flush() -> None:
-        nonlocal buffer, current_code
+        nonlocal buffer
         if current_code is None or not buffer:
             return
         text = " ".join(part.strip() for part in buffer if part.strip())

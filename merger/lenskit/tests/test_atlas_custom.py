@@ -2,7 +2,6 @@ import json
 import pytest
 from pathlib import Path
 from merger.lenskit.adapters.atlas import AtlasScanner
-from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
 def test_atlas_scan_root_allowed(service_client):

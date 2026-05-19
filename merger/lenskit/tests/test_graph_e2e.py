@@ -1,6 +1,4 @@
 import json
-from pathlib import Path
-import pytest
 from merger.lenskit.architecture.graph_index import compile_graph_index
 from merger.lenskit.retrieval import query_core
 from merger.lenskit.retrieval import index_db

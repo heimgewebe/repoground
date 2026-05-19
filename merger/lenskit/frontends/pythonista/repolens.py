@@ -3095,8 +3095,6 @@ class MergerUI(object):
             # Standard batch processing (all selected together)
             execution_list.append(selected_repos)
 
-        total_batches = len(execution_list)
-
         for b_idx, batch_repos in enumerate(execution_list, start=1):
             summaries = []
 

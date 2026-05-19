@@ -1,5 +1,4 @@
 import sqlite3
-import pytest
 from merger.lenskit.retrieval import query_core
 
 def test_query_ignores_missing_source_file_column(tmp_path):

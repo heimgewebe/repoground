@@ -62,7 +62,6 @@ def orphan_snapshot_setup(tmp_path, monkeypatch):
 def test_analyze_orphans_differentiates_groups(orphan_snapshot_setup, capsys, monkeypatch):
     registry_path, snap_id = orphan_snapshot_setup
 
-    import merger.lenskit.cli.cmd_atlas
 
     original_resolve = Path.resolve
     def mock_resolve(self, *args, **kwargs):

@@ -16,10 +16,8 @@ from merger.lenskit.core.citation_map import (
     CitationMapError,
     PRODUCED_BY,
     byte_range_to_line_range,
-    iter_chunk_results,
     normalize_canonical_range,
     produce_citation_map,
-    resolve_artifact_by_role,
     resolve_repo_id,
     verify_byte_range_hash,
 )
@@ -1032,7 +1030,6 @@ class TestDefaultOutputPathSafety:
 
 class TestRunIdValidation:
     def _make_bundle_no_run_id(self, tmp_path, canonical_content, chunks, run_id_value):
-        from pathlib import Path as P
         canonical_md_path = tmp_path / "test_merge.md"
         canonical_md_path.write_bytes(canonical_content)
         chunk_lines = "\n".join(json.dumps(c) for c in chunks) + "\n"

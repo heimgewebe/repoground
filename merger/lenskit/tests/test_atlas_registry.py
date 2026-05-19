@@ -1,7 +1,5 @@
 import pytest
 import sqlite3
-import json
-from pathlib import Path
 from merger.lenskit.atlas.registry import AtlasRegistry
 
 @pytest.fixture

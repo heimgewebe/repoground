@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 import pytest
 from merger.lenskit.cli import cmd_eval
 from merger.lenskit.retrieval import index_db

@@ -118,7 +118,7 @@ class AtlasSearch:
                                     continue
                                 try:
                                     mtime_dt = parse_iso_datetime(mtime)
-                                except Exception as e:
+                                except Exception:
                                     print(f"[atlas-search] warning: invalid timestamp format '{mtime}' in {inv_path}:{line_idx}", file=sys.stderr)
                                     continue
 
@@ -210,7 +210,7 @@ class AtlasSearch:
 
                                     if snippet:
                                         item['content_snippet'] = snippet
-                                except Exception as e:
+                                except Exception:
                                     # Ignore files we cannot read for content search
                                     continue
 

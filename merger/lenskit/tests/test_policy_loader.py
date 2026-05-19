@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 import pytest
 from merger.lenskit.cli.policy_loader import load_and_validate_embedding_policy, EmbeddingPolicyError
 

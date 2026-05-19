@@ -1,6 +1,5 @@
 import json
 import jsonschema
-import pytest
 from merger.lenskit.retrieval import query_core
 from merger.lenskit.retrieval import index_db
 

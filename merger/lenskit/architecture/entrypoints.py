@@ -1,7 +1,7 @@
 import ast
 import os
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 
 def extract_entrypoints(repo_root: Path) -> List[Dict[str, Any]]:
     """

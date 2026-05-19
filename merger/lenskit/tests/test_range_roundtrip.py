@@ -1,6 +1,4 @@
 import json
-from pathlib import Path
-import pytest
 import hashlib
 from merger.lenskit.retrieval import index_db, query_core
 from merger.lenskit.core.range_resolver import resolve_range_ref

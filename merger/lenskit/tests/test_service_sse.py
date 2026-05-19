@@ -121,11 +121,6 @@ def test_sse_edge_cases(service_client, monkeypatch):
             return job
         return None
 
-    def fake_get_job(jid):
-        if jid == job_id:
-            return job
-        return None
-
     monkeypatch.setattr(ctx.store, "get_job", fake_get_job)
 
     # Inject MockLogProvider

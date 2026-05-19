@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from ..service.query_artifact_store import QueryArtifactStore, VALID_ARTIFACT_TYPES
+from ..service.query_artifact_store import QueryArtifactStore
 
 
 def _resolve_storage_dir(hub: Optional[str]) -> Optional[Path]:

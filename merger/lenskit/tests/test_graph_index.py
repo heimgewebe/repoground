@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from merger.lenskit.architecture.graph_index import compile_graph_index
 
 def test_compile_graph_index(tmp_path):

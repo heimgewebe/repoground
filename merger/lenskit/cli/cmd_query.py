@@ -2,7 +2,6 @@ import argparse
 import sys
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
 
 from ..retrieval.query_core import execute_query
 from ..retrieval.session import build_agent_query_session

@@ -1,16 +1,14 @@
 import unittest
 import tempfile
 import shutil
-import os
 import yaml
 import json
 from pathlib import Path
-import sys
 
 # Legacy path setup removed - handled by pytest.ini pythonpath=.
 # sys.path.append(os.path.abspath("merger/repoLens"))
 
-from merger.lenskit.adapters.metarepo import sync_from_metarepo, assert_report_shape, sync_repo
+from merger.lenskit.adapters.metarepo import sync_from_metarepo
 from merger.lenskit.core.merge import HealthCollector
 
 class TestMetarepoSync(unittest.TestCase):

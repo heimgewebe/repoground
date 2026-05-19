@@ -37,7 +37,7 @@ This module captures that shared guarantee as ``run_scan_lifecycle``.
 """
 
 import logging
-from typing import Callable, Optional
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 

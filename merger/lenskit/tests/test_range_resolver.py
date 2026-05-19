@@ -1,9 +1,7 @@
 import json
 import hashlib
-from pathlib import Path
 import pytest
 from merger.lenskit.core.range_resolver import resolve_range_ref
-from merger.lenskit.core.constants import ArtifactRole
 
 @pytest.fixture
 def manifest_env(tmp_path):
@@ -245,7 +243,6 @@ def _make_dump_index_env(tmp_path, artifact_path_in_manifest: str):
     Build a dump-index manifest that lists canonical_md with the given path.
     Returns (manifest_path, ref_dict).
     """
-    import hashlib
     dummy_sha = "a" * 64  # Will not pass hash check, but path guard fires first.
     manifest_path = tmp_path / "dump.json"
     manifest_path.write_text(json.dumps({
