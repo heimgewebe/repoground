@@ -115,6 +115,7 @@ Optionale spätere Profile:
 | `lenskit rlens-client jobs` | `GET /api/jobs` | Jobliste | ja | **umgesetzt (PR C)** |
 | `lenskit rlens-client job JOB_ID` | `GET /api/jobs/{job_id}` | Jobdetails | ja | **umgesetzt (PR C)** |
 | `lenskit rlens-client logs JOB_ID` | `GET /api/jobs/{job_id}/logs` | SSE-Logs bis `event: end` | optional | **umgesetzt (PR C)** |
+| `lenskit rlens-client profiles` | — (lokal) | konfigurierte Host-Profile | ja | **umgesetzt (PR D)** |
 
 ## Namensentscheidung
 
@@ -198,8 +199,7 @@ Umgesetzt:
 
 Offen (folgende PRs):
 
-- `run`, `cancel` (PR E)
-- Host-Profile (PR D)
+- `run`, `cancel` (PR E) — nach API-/Sicherheitsreview
 - Heim-PC/Heimserver-Betriebsentscheidung (Remote-Erreichbarkeit ist nicht behauptet)
 - Automatischer SSE-Reconnect (optional)
 
@@ -227,11 +227,30 @@ Offen (Reconnect):
 
 - Automatischer Resume nach Stream-Abbruch ist nicht im MVP. Manueller Resume via `--last-id`.
 
-### PR D: Host-Profile
+### PR D: Host-Profile — umgesetzt
 
-- optionale Profil-Config
-- Heim-PC/Heimserver-Beispiele
-- kein Secret im Repo
+Umgesetzt:
+
+- `--profile NAME` für alle `rlens-client`-Subkommandos
+- `RLENS_PROFILE`-Env-Variable als Selektor
+- Profil-Config: `$LENSKIT_RLENS_PROFILES` > `$XDG_CONFIG_HOME/lenskit/rlens-profiles.json` > `~/.config/lenskit/rlens-profiles.json`
+- Schema:
+  - `default_profile`: optionaler Profilname (string)
+  - `profiles[NAME].base_url`: HTTP/HTTPS-URL (string)
+  - `profiles[NAME].token_env`: Name einer Env-Variable, deren Wert als Bearer Token verwendet wird (string)
+- Priorität Base-URL: `--base-url` > `RLENS_BASE_URL` > Profil-`base_url` (selektiert via `--profile` > `RLENS_PROFILE` > `default_profile`) > Default `http://127.0.0.1:8787`
+- Priorität Token: `--token` > `RLENS_TOKEN` > Wert der Env-Variable aus Profil-`token_env`
+- `lenskit rlens-client profiles [--json]`: listet Profile (redigiert; nur `base_url` und `token_env`-Name)
+- Sicherheitsinvarianten (durch Tests abgesichert):
+  - `token`/`rlens_token`/`secret`-Felder im Profil sind verboten -> `config_error` (Exit 2)
+  - unbekannte Profil-Schlüssel -> `config_error`
+  - Unbekanntes Profil -> `config_error`
+  - Explizit angefordertes Profil ohne Config -> `config_error`
+  - Kein Profil/keine Config -> stiller Fallback auf Default
+  - Profile-Listing gibt nur `base_url` und `token_env`-Name zurück, niemals Werte
+- Tests: `merger/lenskit/tests/test_cli_rlens_client.py` (63 Tests, davon 18 für PR D)
+
+Heim-PC/Heimserver-Betriebsentscheidung bleibt offen — der Profile-Mechanismus erleichtert nur die Konfiguration, behauptet keine Erreichbarkeit.
 
 ### PR E: Mutierende Kommandos
 

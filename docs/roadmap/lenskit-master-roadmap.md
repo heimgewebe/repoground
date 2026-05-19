@@ -242,8 +242,16 @@ PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
   - [x] `jobs` — `GET /api/jobs` (optional `--status`, `--limit`)
   - [x] `job JOB_ID` — `GET /api/jobs/{job_id}`
   - [x] `logs JOB_ID` — `GET /api/jobs/{job_id}/logs` (SSE bis `event: end`, optional `--last-id`, `--timeout`)
-  - [ ] `run`, `cancel` (PR E)
-  - [ ] Host-Profile (PR D)
+  - [ ] `run`, `cancel` (PR E) — nach API-/Sicherheitsreview
+- [x] Host-Profile (PR D)
+  - [x] `--profile NAME` an allen Subkommandos
+  - [x] `RLENS_PROFILE`-Env-Variable
+  - [x] Config-Pfad: `$LENSKIT_RLENS_PROFILES` > `$XDG_CONFIG_HOME/lenskit/rlens-profiles.json` > `~/.config/lenskit/rlens-profiles.json`
+  - [x] Schema: `default_profile`, `profiles[NAME].base_url`, `profiles[NAME].token_env`
+  - [x] Priorität Base-URL: `--base-url` > `RLENS_BASE_URL` > Profil-`base_url` > Default
+  - [x] Priorität Token: `--token` > `RLENS_TOKEN` > Profil-`token_env` (Env-Lookup)
+  - [x] `lenskit rlens-client profiles [--json]` listet Profile (redigiert; nur `base_url` und `token_env`-Name)
+  - [x] Sicherheits-Hardening: `token`/`secret`-Felder im Profil verboten (`config_error`, Exit 2); unbekannte Schlüssel abgelehnt
 - [ ] Heim-PC/Heimserver-Betriebsmodell entscheiden
   - lokaler Service je Host
   - Remote-Client via LAN/Tailscale/SSH-Tunnel
@@ -252,10 +260,12 @@ PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
   - Token-Redaction in Fehlerausgaben
   - Token nie als Query-Parameter
   - Default loopback `http://127.0.0.1:8787`
+  - Profile-Config trägt keine Secrets (nur Env-Var-Namen via `token_env`)
 
 Status:
 - Blueprint: docs-only (PR A, abgeschlossen).
 - Read-only Client-Basis: umgesetzt (PR B) — `health`, `artifacts`, `latest --repo`.
 - Jobs/Job/Logs (SSE): umgesetzt (PR C) — `jobs`, `job JOB_ID`, `logs JOB_ID`.
-- Run/Cancel, Host-Profile: offen.
+- Host-Profile: umgesetzt (PR D) — `--profile`, `RLENS_PROFILE`, `profiles`-Subkommando.
+- Run/Cancel: offen (nach API-/Sicherheitsreview).
 - `merger/lenskit/cli/rlens.py` bleibt Service-Launcher und wird nicht umgedeutet.
