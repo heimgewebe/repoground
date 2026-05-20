@@ -338,9 +338,10 @@ def _should_skip_scan_entry(
     else:
         if name in SKIP_FILES:
             return True
-        if name.startswith(".env") and name not in (".env.example", ".env.template", ".env.sample"):
-            return True
-        if not include_hidden and name.startswith("."):
+        if name.startswith(".env"):
+            if name not in (".env.example", ".env.template", ".env.sample"):
+                return True
+        elif not include_hidden and name.startswith("."):
             return True
 
     if _is_runtime_worktree_path(rel_path):
