@@ -423,5 +423,108 @@ class TestPrescanRepoWorktreeExclusion(unittest.TestCase):
         self.assertEqual(worktree_hits, [], msg=f"prescan_repo must not include worktrees: {worktree_hits}")
 
 
+class TestScanRepoCacheExclusion(unittest.TestCase):
+    """Verify that local cache/tooling artifacts are excluded from scan output."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        # Normal repo content
+        (self.root / "src").mkdir()
+        (self.root / "src" / "app.py").write_text("# application code")
+
+        # Cache directories that should be excluded
+        (self.root / ".ruff_cache" / "0.15.13").mkdir(parents=True)
+        (self.root / ".ruff_cache" / "0.15.13" / "cachefile").write_text("# ruff cache")
+        (self.root / ".pytest_cache" / "v").mkdir(parents=True)
+        (self.root / ".pytest_cache" / "v" / ".gitkeep").write_text("")
+        (self.root / ".mypy_cache" / "3.11").mkdir(parents=True)
+        (self.root / ".mypy_cache" / "3.11" / ".gitkeep").write_text("")
+        (self.root / "__pycache__").mkdir()
+        (self.root / "__pycache__" / "app.cpython-311.pyc").write_text("# python bytecode")
+
+    def tearDown(self):
+        shutil.rmtree(self.root)
+
+    def _collected_relpaths(self, **kwargs):
+        from lenskit.core.merge import scan_repo
+        result = scan_repo(self.root, extensions=[".py", ".txt"], **kwargs)
+        return {str(f.rel_path).replace("\\", "/") for f in result["files"]}
+
+    def test_scan_repo_excludes_ruff_cache(self):
+        """scan_repo should exclude .ruff_cache directory."""
+        paths = self._collected_relpaths()
+        self.assertIn("src/app.py", paths, "Normal source files must be included")
+        
+        ruff_hits = [p for p in paths if ".ruff_cache" in p]
+        self.assertEqual(ruff_hits, [], msg=f"scan_repo must exclude .ruff_cache: {ruff_hits}")
+
+    def test_scan_repo_excludes_pytest_cache(self):
+        """scan_repo should exclude .pytest_cache directory."""
+        paths = self._collected_relpaths()
+        pytest_hits = [p for p in paths if ".pytest_cache" in p]
+        self.assertEqual(pytest_hits, [], msg=f"scan_repo must exclude .pytest_cache: {pytest_hits}")
+
+    def test_scan_repo_excludes_mypy_cache(self):
+        """scan_repo should exclude .mypy_cache directory."""
+        paths = self._collected_relpaths()
+        mypy_hits = [p for p in paths if ".mypy_cache" in p]
+        self.assertEqual(mypy_hits, [], msg=f"scan_repo must exclude .mypy_cache: {mypy_hits}")
+
+    def test_scan_repo_excludes_pycache(self):
+        """scan_repo should exclude __pycache__ directory."""
+        paths = self._collected_relpaths()
+        pycache_hits = [p for p in paths if "__pycache__" in p]
+        self.assertEqual(pycache_hits, [], msg=f"scan_repo must exclude __pycache__: {pycache_hits}")
+
+
+class TestPrescanRepoCacheExclusion(unittest.TestCase):
+    """Verify that prescan_repo excludes local cache/tooling artifacts."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        # Normal repo content
+        (self.root / "src").mkdir()
+        (self.root / "src" / "app.py").write_text("# application code")
+
+        # Cache directories that should be excluded
+        (self.root / ".ruff_cache" / "0.15.13").mkdir(parents=True)
+        (self.root / ".ruff_cache" / "0.15.13" / "cachefile").write_text("# ruff cache")
+        (self.root / ".pytest_cache" / "v").mkdir(parents=True)
+        (self.root / ".pytest_cache" / "v" / ".gitkeep").write_text("")
+        (self.root / ".mypy_cache" / "3.11").mkdir(parents=True)
+        (self.root / ".mypy_cache" / "3.11" / ".gitkeep").write_text("")
+        (self.root / "__pycache__").mkdir()
+        (self.root / "__pycache__" / "app.cpython-311.pyc").write_text("# python bytecode")
+
+    def tearDown(self):
+        shutil.rmtree(self.root)
+
+    def _tree_paths(self):
+        from lenskit.core.merge import prescan_repo
+        result = prescan_repo(self.root)
+        paths = set()
+        def _collect(node):
+            for child in node.get("children", []):
+                paths.add(child["path"])
+                _collect(child)
+        _collect(result["tree"])
+        return paths
+
+    def test_prescan_repo_excludes_cache_dirs(self):
+        """prescan_repo should exclude all cache directories."""
+        paths = self._tree_paths()
+
+        # Ensure traversal is not vacuous
+        self.assertIn("src", paths, "Expected 'src' in prescan tree")
+        self.assertIn("src/app.py", paths, "Expected 'src/app.py' in prescan tree")
+
+        # Cache directories must be absent
+        cache_names = [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]
+        for cache_dir in cache_names:
+            cache_hits = [p for p in paths if cache_dir in p or p.startswith(cache_dir)]
+            self.assertEqual(cache_hits, [],
+                           msg=f"prescan_repo must exclude {cache_dir}: {cache_hits}")
+
+
 if __name__ == '__main__':
     unittest.main()
