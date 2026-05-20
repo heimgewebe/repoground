@@ -483,19 +483,28 @@ def test_runner_full_snapshot_path_excludes_cache_dirs(temp_hub):
 
     md_text = md_path.read_text(encoding="utf-8")
     sidecar = json.loads(json_path.read_text(encoding="utf-8"))
-    chunk_text = chunk_path.read_text(encoding="utf-8")
-
-    assert ".github/workflows/ci.yml" in md_text
-    assert ".wgx/profile.yml" in md_text
+    chunk_rows = [json.loads(line) for line in chunk_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    md_paths = [
+        line.split('path="', 1)[1].split('"', 1)[0]
+        for line in md_text.splitlines()
+        if "<!-- FILE_START path=" in line
+    ]
 
     sidecar_paths = [entry.get("path", "") for entry in sidecar.get("files", [])]
     sidecar_lens_paths = [entry.get("path", "") for entry in sidecar.get("reading_lenses", {}).get("file_index", [])]
     combined_sidecar_paths = sidecar_paths + sidecar_lens_paths
+    chunk_paths = [row.get("source_range", {}).get("file_path", "") for row in chunk_rows]
+    expected_paths = ["src/app.py", ".github/workflows/ci.yml", ".wgx/profile.yml"]
+
+    for expected in expected_paths:
+        assert expected in md_paths
+        assert expected in combined_sidecar_paths
+        assert expected in chunk_paths
 
     forbidden_dirs = [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]
     for forbidden in forbidden_dirs:
-        assert forbidden not in md_text
-        assert forbidden not in chunk_text
+        assert not any(forbidden in p for p in md_paths)
+        assert not any(forbidden in p for p in chunk_paths)
         assert not any(forbidden in p for p in combined_sidecar_paths)
 
     conn = sqlite3.connect(sqlite_path)
@@ -503,5 +512,7 @@ def test_runner_full_snapshot_path_excludes_cache_dirs(temp_hub):
         sqlite_paths = [row[0] for row in conn.execute("SELECT path FROM chunks")]
     finally:
         conn.close()
+    for expected in expected_paths:
+        assert expected in sqlite_paths
     for forbidden in forbidden_dirs:
         assert not any(forbidden in p for p in sqlite_paths)

@@ -623,29 +623,50 @@ class TestFullSnapshotCacheExclusionParity(unittest.TestCase):
 
         md_text = artifacts.canonical_md.read_text(encoding="utf-8")
         sidecar = json.loads(artifacts.index_json.read_text(encoding="utf-8"))
-        chunk_text = artifacts.chunk_index.read_text(encoding="utf-8")
+        chunk_rows = [
+            json.loads(line)
+            for line in artifacts.chunk_index.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        md_paths = [
+            line.split('path="', 1)[1].split('"', 1)[0]
+            for line in md_text.splitlines()
+            if "<!-- FILE_START path=" in line
+        ]
 
         sidecar_paths = [entry.get("path", "") for entry in sidecar.get("files", [])]
         sidecar_lens_paths = [entry.get("path", "") for entry in sidecar.get("reading_lenses", {}).get("file_index", [])]
         combined_sidecar_paths = sidecar_paths + sidecar_lens_paths
+        chunk_paths = [row.get("source_range", {}).get("file_path", "") for row in chunk_rows]
+        expected_paths = ["src/app.py", ".github/workflows/ci.yml", ".wgx/profile.yml"]
 
-        self.assertIn("src/app.py", md_text)
-        self.assertIn(".github/workflows/ci.yml", md_text)
-        self.assertIn(".wgx/profile.yml", md_text)
+        for expected in expected_paths:
+            self.assertIn(expected, md_paths)
+            self.assertIn(expected, combined_sidecar_paths)
+            self.assertIn(expected, chunk_paths)
 
         for forbidden in [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]:
-            self.assertNotIn(forbidden, md_text)
+            self.assertFalse(
+                any(forbidden in p for p in md_paths),
+                msg=f"markdown file markers must exclude {forbidden}: {md_paths}",
+            )
             self.assertFalse(
                 any(forbidden in p for p in combined_sidecar_paths),
                 msg=f"sidecar paths must exclude {forbidden}: {combined_sidecar_paths}",
             )
-            self.assertNotIn(forbidden, chunk_text)
+            self.assertFalse(
+                any(forbidden in p for p in chunk_paths),
+                msg=f"chunk source paths must exclude {forbidden}: {chunk_paths}",
+            )
 
         conn = sqlite3.connect(artifacts.sqlite_index)
         try:
             rows = [r[0] for r in conn.execute("SELECT path FROM chunks")]
         finally:
             conn.close()
+
+        for expected in expected_paths:
+            self.assertIn(expected, rows)
 
         for forbidden in [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]:
             self.assertFalse(
