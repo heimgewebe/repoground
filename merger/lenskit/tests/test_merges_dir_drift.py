@@ -8,6 +8,8 @@ from merger.lenskit.adapters import security
 from merger.lenskit.adapters.security import SecurityConfig
 from pathlib import Path
 import tempfile
+import json
+import sqlite3
 
 @pytest.fixture
 def temp_hub():
@@ -423,3 +425,83 @@ def test_runner_logs_output_paths(temp_hub):
             break
 
     assert found_msg, f"Log message about generated files not found. Logs: {logs}"
+
+
+def test_runner_full_snapshot_path_excludes_cache_dirs(temp_hub):
+    """
+    Exercise the actual service runner path and verify generated artifacts
+    exclude tooling cache directories while keeping legitimate hidden config.
+    """
+    repo = temp_hub / "repoA"
+    (repo / "src").mkdir(exist_ok=True)
+    (repo / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    (repo / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+    (repo / ".wgx").mkdir(exist_ok=True)
+    (repo / ".wgx" / "profile.yml").write_text("profile: default\n", encoding="utf-8")
+
+    (repo / ".ruff_cache" / "0.15.13").mkdir(parents=True)
+    (repo / ".ruff_cache" / ".gitignore").write_text("*\n", encoding="utf-8")
+    (repo / ".ruff_cache" / "0.15.13" / "cache.py").write_text("# ruff cache\n", encoding="utf-8")
+    (repo / ".pytest_cache" / "v").mkdir(parents=True)
+    (repo / ".pytest_cache" / "v" / "cache.txt").write_text("pytest cache\n", encoding="utf-8")
+    (repo / ".mypy_cache" / "3.11").mkdir(parents=True)
+    (repo / ".mypy_cache" / "3.11" / "cache.py").write_text("# mypy cache\n", encoding="utf-8")
+    (repo / "__pycache__").mkdir(exist_ok=True)
+    (repo / "__pycache__" / "cache.py").write_text("# pycache\n", encoding="utf-8")
+
+    store = JobStore(temp_hub)
+    runner = JobRunner(store)
+
+    req = JobRequest(
+        hub=str(temp_hub),
+        repos=["repoA"],
+        level="max",
+        mode="gesamt",
+        max_bytes="0",
+        output_mode="dual",
+        include_hidden=True,
+    )
+    job = Job.create(req)
+    job.hub_resolved = str(temp_hub)
+    store.add_job(job)
+
+    runner._run_job(job.id)
+
+    updated_job = store.get_job(job.id)
+    assert updated_job.status == "succeeded", f"runner failed: {updated_job.error}"
+    assert updated_job.artifact_ids
+
+    artifact = store.get_artifact(updated_job.artifact_ids[0])
+    assert artifact is not None
+    merges_dir = Path(artifact.merges_dir)
+
+    md_path = merges_dir / artifact.paths["md"]
+    json_path = merges_dir / artifact.paths["json"]
+    chunk_path = merges_dir / artifact.paths["chunk_index"]
+    sqlite_path = merges_dir / artifact.paths["sqlite_index"]
+
+    md_text = md_path.read_text(encoding="utf-8")
+    sidecar = json.loads(json_path.read_text(encoding="utf-8"))
+    chunk_text = chunk_path.read_text(encoding="utf-8")
+
+    assert ".github/workflows/ci.yml" in md_text
+    assert ".wgx/profile.yml" in md_text
+
+    sidecar_paths = [entry.get("path", "") for entry in sidecar.get("files", [])]
+    sidecar_lens_paths = [entry.get("path", "") for entry in sidecar.get("reading_lenses", {}).get("file_index", [])]
+    combined_sidecar_paths = sidecar_paths + sidecar_lens_paths
+
+    forbidden_dirs = [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]
+    for forbidden in forbidden_dirs:
+        assert forbidden not in md_text
+        assert forbidden not in chunk_text
+        assert not any(forbidden in p for p in combined_sidecar_paths)
+
+    conn = sqlite3.connect(sqlite_path)
+    try:
+        sqlite_paths = [row[0] for row in conn.execute("SELECT path FROM chunks")]
+    finally:
+        conn.close()
+    for forbidden in forbidden_dirs:
+        assert not any(forbidden in p for p in sqlite_paths)
