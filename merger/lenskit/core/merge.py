@@ -282,6 +282,12 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "regenerable": True,
         "staleness_sensitive": True,
     },
+    ArtifactRole.AGENT_READING_PACK: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
 }
 
 # Delta Report configuration
@@ -522,6 +528,7 @@ class MergeArtifacts:
     derived_manifest: Optional[Path] = None
     bundle_manifest: Optional[Path] = None
     output_health: Optional[Path] = None
+    agent_reading_pack: Optional[Path] = None
     other: List[Path] = None
 
     def __post_init__(self):
@@ -553,6 +560,8 @@ class MergeArtifacts:
             paths.append(self.retrieval_eval)
         if self.output_health:
             paths.append(self.output_health)
+        if self.agent_reading_pack and self.agent_reading_pack not in paths:
+            paths.append(self.agent_reading_pack)
         if self.bundle_manifest:
             paths.append(self.bundle_manifest)
 
@@ -6086,6 +6095,33 @@ def write_reports_v2(
                 f"{coherence.reason}"
             )
 
+    # Agent reading pack: compact navigation entry-point for LLM agents.
+    # Produced LAST, from the finalized manifest, so it can reflect every other
+    # artifact (including citation_map and output_health). Like output_health it
+    # is emitted for every bundle; the producer adapts to whichever artifacts
+    # are present.
+    agent_reading_pack_path = None
+    from .agent_reading_pack import produce_agent_reading_pack
+
+    pack_report = produce_agent_reading_pack(str(bundle_manifest_path))
+    if pack_report.get("status") != "ok":
+        raise RuntimeError(
+            "Failed to produce agent_reading_pack: "
+            + "; ".join(pack_report.get("errors", []) or ["unknown error"])
+        )
+    agent_reading_pack_path = Path(pack_report["output_path"])
+    out_paths.append(agent_reading_pack_path)
+    if agent_reading_pack_path not in other_paths:
+        other_paths.append(agent_reading_pack_path)
+    _add_artifact(
+        agent_reading_pack_path,
+        ArtifactRole.AGENT_READING_PACK,
+        "text/markdown",
+    )
+    artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
+    bundle_manifest["artifacts"] = artifacts_list
+    _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
+
     if extras and extras.json_sidecar:
         # JSON is primary when json_sidecar is enabled
         return MergeArtifacts(
@@ -6099,6 +6135,7 @@ def write_reports_v2(
             derived_manifest=derived_manifests[-1] if derived_manifests else None,
             bundle_manifest=bundle_manifest_path,
             output_health=output_health_path,
+            agent_reading_pack=agent_reading_pack_path,
             other=other_paths
         )
     else:
@@ -6114,5 +6151,6 @@ def write_reports_v2(
             derived_manifest=derived_manifests[-1] if derived_manifests else None,
             bundle_manifest=bundle_manifest_path,
             output_health=output_health_path,
+            agent_reading_pack=agent_reading_pack_path,
             other=other_paths
         )

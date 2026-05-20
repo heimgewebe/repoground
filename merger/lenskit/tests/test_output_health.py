@@ -525,6 +525,61 @@ def test_schema_conformance(tmp_path):
     jsonschema.validate(instance=result, schema=schema)
 
 
+def test_agent_pack_present_skipped_when_path_not_provided(tmp_path):
+    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    result = compute_output_health(**kwargs)
+    check = result["checks"]["agent_pack_present"]
+    assert check["status"] == "skipped"
+    assert check["required"] is False
+
+
+def test_agent_pack_present_pass_when_file_exists(tmp_path):
+    pack = tmp_path / "test.agent_reading_pack.md"
+    pack.write_text("# pack\n", encoding="utf-8")
+    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    result = compute_output_health(
+        **kwargs, agent_reading_pack_path=pack, agent_reading_pack_expected=True
+    )
+    check = result["checks"]["agent_pack_present"]
+    assert check["status"] == "pass"
+    assert check["required"] is True
+
+
+def test_agent_pack_expected_but_missing_is_warning_not_fail(tmp_path):
+    pack = tmp_path / "absent.agent_reading_pack.md"
+    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    result = compute_output_health(
+        **kwargs, agent_reading_pack_path=pack, agent_reading_pack_expected=True
+    )
+    check = result["checks"]["agent_pack_present"]
+    assert check["status"] == "warning"
+    # Non-blocking in v1: a missing-but-expected pack must not fail the verdict.
+    assert result["verdict"] != "fail"
+    assert any("agent_reading_pack expected but file is missing" in w for w in result["warnings"])
+
+
+def test_agent_pack_missing_and_not_expected_is_skipped(tmp_path):
+    pack = tmp_path / "absent.agent_reading_pack.md"
+    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    result = compute_output_health(
+        **kwargs, agent_reading_pack_path=pack, agent_reading_pack_expected=False
+    )
+    check = result["checks"]["agent_pack_present"]
+    assert check["status"] == "skipped"
+    assert check["required"] is False
+
+
+def test_agent_pack_check_schema_conformance(tmp_path):
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    pack = tmp_path / "test.agent_reading_pack.md"
+    pack.write_text("# pack\n", encoding="utf-8")
+    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    result = compute_output_health(
+        **kwargs, agent_reading_pack_path=pack, agent_reading_pack_expected=True
+    )
+    jsonschema.validate(instance=result, schema=schema)
+
+
 def test_write_output_health_writes_file(tmp_path):
     kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
     out_path = tmp_path / "test.output_health.json"

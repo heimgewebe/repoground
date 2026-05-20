@@ -21,6 +21,27 @@ python3 -m merger.lenskit.cli.rlens . --level max --split-size 20MB --meta-densi
 
 Siehe [merger/lenskit/repoLens-spec.md](merger/lenskit/repoLens-spec.md) für Details.
 
+### Agent Reading Pack (Einstieg für LLM-Agents)
+
+Jedes Bundle enthält `<stem>.agent_reading_pack.md` — ein kompaktes, deterministisches
+Markdown-Dokument, das ein LLM-Agent **zuerst** lesen sollte. Es ist
+**Navigation, nicht Wahrheit** (`authority=navigation_index`, `canonicality=derived`);
+die einzige Wahrheitsquelle bleibt `canonical_md`.
+
+Der Pack fasst zusammen:
+- **Reading Policy** + Artefaktrollen (welches Artefakt was aussagen darf),
+- **HOW_TO_SEARCH**: konkrete CLI-Befehle für Volltextsuche, Range-Auflösung und Citations,
+- **OUTPUT_HEALTH_SUMMARY**: Selbsttest-Verdict des Bundles,
+- **TOP_FILES**: die wichtigsten Quelldateien mit ihren canonical Byte-/Zeilenspannen
+  (für präzises Zitieren direkt in `canonical_md`),
+- **EPISTEMIC_EMPTINESS**: was im Bundle fehlt.
+
+Standalone erzeugen oder regenerieren:
+
+```bash
+python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.json --json
+```
+
 ### ATLAS MODE
 
 Atlas is a filesystem exploration tool capable of scanning entire systems, distinct from the repository inspection pipeline.

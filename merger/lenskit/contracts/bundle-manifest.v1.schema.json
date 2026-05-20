@@ -81,7 +81,8 @@
               "graph_index_json",
               "architecture_summary",
               "output_health",
-              "citation_map_jsonl"
+              "citation_map_jsonl",
+              "agent_reading_pack"
             ],
             "description": "Machine-readable enum role for this artifact."
           },
@@ -545,6 +546,36 @@
                 },
                 "staleness_sensitive": {
                   "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "agent_reading_pack"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "authority",
+                "canonicality"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "text/markdown"
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
                 }
               }
             }

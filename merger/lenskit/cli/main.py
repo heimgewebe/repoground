@@ -22,6 +22,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_citation import register_citation_commands
     register_citation_commands(subparsers)
 
+    # Agent reading pack command
+    from .cmd_agent_pack import register_agent_pack_commands
+    register_agent_pack_commands(subparsers)
+
     # Federation command
     from .cmd_federation import register_federation_commands
     register_federation_commands(subparsers)
@@ -241,6 +245,13 @@ def main(args: Optional[List[str]] = None) -> int:
             return run_citation_produce(parsed_args)
         else:
             parser.parse_args(["citation", "--help"])
+            return 0
+    elif parsed_args.command == "agent-pack":
+        from .cmd_agent_pack import run_agent_pack_produce
+        if parsed_args.agent_pack_cmd == "produce":
+            return run_agent_pack_produce(parsed_args)
+        else:
+            parser.parse_args(["agent-pack", "--help"])
             return 0
     elif parsed_args.command == "federation":
         from .cmd_federation import handle_federation_command

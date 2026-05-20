@@ -1,0 +1,79 @@
+# Agent Reading Pack Producer Proof
+
+- Datum: 2026-05-20
+- Repo HEAD (Basis): b59cf653d8b06012789ec2d14cbe31c8a978d709
+- Arbeitspaket: D (PR 4) aus `docs/blueprints/lenskit-output-optimierung-v1.md`
+- Artefaktrolle: `agent_reading_pack` (`authority=navigation_index`, `canonicality=derived`, `role_only`, `text/markdown`)
+
+## Zweck
+
+Belegt, dass der Agent Reading Pack als deterministisches, schema-valides und
+hash-konsistentes Navigations-Einstiegsdokument in das Bundle-Manifest emittiert
+wird. Der Pack ist **Navigation, nicht Wahrheit**: kanonische Quelle bleibt
+`canonical_md`.
+
+## Reproduktion
+
+`write_reports_v2(..., output_mode="dual")` über ein kleines Repo (3 Quelldateien)
+erzeugt ein vollständiges Bundle. Anschließend wird der Pack standalone über das
+finalisierte Manifest re-produziert.
+
+```bash
+python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.json --json
+```
+
+## Befund (frischer Lauf, dump stem `proofrepo-max-…_merge`)
+
+### Manifest-Integration
+- `manifest_schema_valid` (gegen `bundle-manifest.v1.schema.json`): **PASS**
+- `role == agent_reading_pack` im Manifest: **true**
+- `content_type`: `text/markdown`
+- `authority` / `canonicality` / `interpretation.mode`: `navigation_index` / `derived` / `role_only`
+- `regenerable` / `staleness_sensitive`: `true` / `true`
+- `bytes` (Manifest) == Dateigröße: **true** (3990 == 3990)
+- `sha256` (Manifest) == `sha256(Datei)`: **true**
+
+### Determinismus / Idempotenz
+- Zwei aufeinanderfolgende Produktionen über dasselbe Manifest: gleiches `output_sha256` → **PASS**
+- Standalone-Re-Run reproduziert den Pipeline-Pack **byte-identisch** (`standalone_reproduces_pipeline=true`).
+  Beweisrelevant: der Producer überspringt die eigene Rolle (`agent_reading_pack`), daher ändert ein
+  bereits im Manifest eingetragener Pack die Ausgabe nicht.
+- `| agent_reading_pack |` erscheint nie als Tabellenzeile im Pack (`self_role_not_listed=true`).
+
+### Inhaltliche Kernsektionen (v1)
+- Sentinel: `<!-- ARTIFACT:agent_reading_pack VERSION:v1 AUTHORITY:navigation_index CANONICALITY:derived -->`
+- Banner: `NAVIGATION, NOT TRUTH`
+- `## BUNDLE_IDENTITY`, `## READING_POLICY`, `## ARTIFACT_ROLES`, `## OUTPUT_HEALTH_SUMMARY`,
+  `## HOW_TO_SEARCH`, `## TOP_FILES`, `## EPISTEMIC_EMPTINESS`
+- `health_verdict`: `pass`
+- `top_file_count`: 3 (canonical Byte-/Zeilenspannen je Quelldatei)
+- `artifact_role_count`: 8
+
+### Integritätshärtung
+- SHA256-Mismatch von `canonical_md` oder `chunk_index_jsonl` gegenüber dem Manifest ⇒ harter Fehler,
+  **kein** Pack wird geschrieben (Test `test_canonical_md_sha_mismatch_fails_hard`).
+- `output_health` / `citation_map_jsonl` Mismatch ⇒ Warnung, Pack wird trotzdem erzeugt
+  (diagnostisch/abgeleitet; Test `test_output_health_sha_mismatch_warns_not_fails`).
+- Output-Pfad-Kollision mit einem Input-Artefakt ⇒ harter Fehler (Test `test_output_collision_with_input_is_rejected`).
+
+### CLI
+- `agent-pack produce … --json` Exit-Code: **0**, `status=ok`.
+- Fehlendes Manifest: Exit-Code **2**, `error_kind=path_read_error`.
+
+## Tests
+
+- `merger/lenskit/tests/test_agent_reading_pack.py` — 16 Tests (Producer, Determinismus, Härtung, pure Funktionen).
+- `merger/lenskit/tests/test_cli_agent_pack.py` — CLI-Smoke.
+- `merger/lenskit/tests/test_bundle_manifest_integration.py::test_agent_reading_pack_emitted_schema_valid_and_hashed` — Pipeline-Emission + Schema + Hash.
+- `merger/lenskit/tests/test_output_health.py` — `agent_pack_present` Parametrisierung (skipped/pass/warning).
+- `merger/lenskit/tests/test_role_completeness.py` — Enum/Schema-Synchronität inkl. neuer Rolle.
+
+Gesamte (nicht-Browser) Suite: **1274 passed, 1 skipped**. `tools/parity_guard.py`: **PASS**.
+
+## Abgrenzung / offene Punkte (v2)
+
+Im Pack als `EPISTEMIC_EMPTINESS` ausgewiesen, noch nicht eingebettet:
+Top-Level-Architektur, Entry-Points, dedizierter Contracts-Abschnitt,
+Artifact-Lookup/Trace/Context-Lookup-Fluss, Driftpunkte, Claim-Evidence-Map
+(letztere hängt an Arbeitspaket F). Die blockierende Erzwingung von
+`agent_pack_present` ist Arbeitspaket H (Post-hoc-Validator) vorbehalten.

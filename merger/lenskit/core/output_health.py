@@ -271,6 +271,9 @@ def compute_output_health(
     # Optional diagnostics
     retrieval_eval_path: Optional[Path] = None,
     retrieval_eval_sha256: Optional[str] = None,
+    # Agent reading pack (navigation entry-point). Non-blocking in v1.
+    agent_reading_pack_path: Optional[Path] = None,
+    agent_reading_pack_expected: bool = False,
 ) -> Dict[str, Any]:
     """
     Compute the output health report.  Does NOT write to disk.
@@ -418,11 +421,37 @@ def compute_output_health(
         "reason": "stable sample query is introduced in a later work package",
     }
 
-    checks["agent_pack_present"] = {
-        "status": "skipped",
-        "required": False,
-        "reason": "agent_reading_pack is introduced in a later work package",
-    }
+    # agent_reading_pack is a navigation entry-point produced after this health
+    # report in the pipeline, so the in-pipeline call leaves the path unset
+    # (status "skipped"). A post-hoc validator that owns the full bundle can pass
+    # the path to assert presence. Non-blocking in v1 (warn-only when expected),
+    # per output-optimierung Arbeitspaket C/D.
+    if agent_reading_pack_path is not None:
+        if agent_reading_pack_path.exists():
+            checks["agent_pack_present"] = {
+                "status": "pass",
+                "required": bool(agent_reading_pack_expected),
+                "reason": f"agent_reading_pack present: {agent_reading_pack_path.name}",
+            }
+        elif agent_reading_pack_expected:
+            checks["agent_pack_present"] = {
+                "status": "warning",
+                "required": True,
+                "reason": "agent_reading_pack expected but file is missing",
+            }
+            warnings.append("agent_reading_pack expected but file is missing")
+        else:
+            checks["agent_pack_present"] = {
+                "status": "skipped",
+                "required": False,
+                "reason": "agent_reading_pack absent (not expected)",
+            }
+    else:
+        checks["agent_pack_present"] = {
+            "status": "skipped",
+            "required": False,
+            "reason": "agent_reading_pack path not provided to health check",
+        }
 
     checks["redaction_status_explicit"] = True
     checks["redact_secrets_enabled"] = bool(redact_secrets)

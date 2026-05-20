@@ -19,3 +19,4 @@ class ArtifactRole(str, Enum):
     SOURCE_FILE = "source_file"
     OUTPUT_HEALTH = "output_health"
     CITATION_MAP_JSONL = "citation_map_jsonl"
+    AGENT_READING_PACK = "agent_reading_pack"

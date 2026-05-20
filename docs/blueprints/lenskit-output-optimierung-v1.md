@@ -67,7 +67,7 @@
 - [x] **P1:** SQLite-FTS mit echtem Inhalt füllen (Status: abgeschlossen und durch Target-Proof bestätigt, 2026-05-03).
 - [ ] **P2:** Range-Refs semantisch entwirren.
 - [ ] **P3:** Output-Health erzwingen.
-- [ ] **P4:** Agent Reading Pack erzeugen.
+- [x] **P4:** Agent Reading Pack erzeugen (v1 abgeschlossen; siehe Arbeitspaket D).
 - [ ] **P5:** Redaction/Profile trennen.
 - [ ] **P6:** Architektur-Summary vertiefen.
 
@@ -169,7 +169,7 @@
 - [ ] `fts_content_non_empty`
 - [ ] `range_ref_resolution_ok`
 - [ ] `sample_query_content_hit`
-- [ ] `agent_pack_present` — zunächst warnend, solange Arbeitspaket D nicht umgesetzt ist; blockierend erst nach Einführung von `<stem>.agent_reading_pack.md`.
+- [x] `agent_pack_present` — verdrahtet (`compute_output_health(agent_reading_pack_path=…, agent_reading_pack_expected=…)`); in v1 warnend (nicht blockierend). Blockierende Erzwingung folgt mit dem Post-hoc-Validator aus Arbeitspaket H.
 - [ ] `redaction_status_explicit`
 - [ ] `verdict: pass/fail`
 
@@ -184,24 +184,36 @@
 ## Arbeitspaket D — Agent Reading Pack (Optimierungsgrad 0.73)
 
 ### Ziel
-- [ ] `<stem>.agent_reading_pack.md` erzeugen (50–120 KB, zitierfähig, kompakt).
+- [x] `<stem>.agent_reading_pack.md` erzeugen (kompakt, deterministisch, zitierfähig). Größe skaliert mit Repo; Top-Files sind auf 30 begrenzt, damit der Pack auch für große Repos im Zielkorridor bleibt.
 
-### Inhalt
-- [ ] Reading Policy
-- [ ] Artefaktrollen
-- [ ] Top-Level-Architektur
+### Inhalt (v1 umgesetzt)
+- [x] Reading Policy (mit Authority-Rangordnung)
+- [x] Artefaktrollen (maschinenlesbare Tabelle aus dem Bundle-Manifest)
+- [x] Query-/Retrieval-Fluss (`HOW_TO_SEARCH` mit konkreten CLI-Befehlen: FTS-Query, `range get`, Citation-Map)
+- [x] Output-Health-Summary (Verdict + Kernchecks aus `output_health.json`)
+- [x] Top-30-Dateien mit Range-Refs (`TOP_FILES`: canonical Byte-/Zeilenspannen je Quelldatei)
+- [x] Epistemische Leere: fehlende/erwartete Artefakte werden explizit ausgewiesen
+
+### Inhalt (für v2 offen, im Pack als epistemische Leere markiert)
+- [ ] Top-Level-Architektur (Embed/Verdichtung von `architecture_summary`)
 - [ ] wichtigste Entry-Points
-- [ ] wichtigste Contracts
-- [ ] Query-/Retrieval-Fluss
+- [ ] wichtigste Contracts (dedizierter Abschnitt; Rollen→Contract-Mapping)
 - [ ] Artifact-Lookup/Trace/Context-Lookup-Fluss
 - [ ] Driftpunkte
-- [ ] Output-Health-Summary
-- [ ] Claim-Evidence-Map
-- [ ] Top-30-Dateien mit Range-Refs
+- [ ] Claim-Evidence-Map (hängt an Arbeitspaket F)
 
 ### Governance
-- [ ] Klar markieren: Navigation, nicht Wahrheit.
-- [ ] Manifest-Rolle: `agent_reading_pack`, Authority: `navigation_index`, Canonicality: `derived`.
+- [x] Klar markieren: Navigation, nicht Wahrheit (Sentinel-Kommentar + Banner).
+- [x] Manifest-Rolle: `agent_reading_pack`, Authority: `navigation_index`, Canonicality: `derived` (role_only, `text/markdown`).
+
+### Umsetzung (v1)
+- [x] Producer: `merger/lenskit/core/agent_reading_pack.py` (pure Funktionen + IO-Adapter, atomic write, SHA-Verifikation der Wahrheitsanker `canonical_md`/`chunk_index`).
+- [x] Rolle: `ArtifactRole.AGENT_READING_PACK` in `core/constants.py`; Schema-Enum + per-role `if/then` in `bundle-manifest.v1.schema.json`; `AUTHORITY_REGISTRY` in `merge.py`.
+- [x] Pipeline-Emission: am Ende von `write_reports_v2` aus dem finalen Manifest; `MergeArtifacts.agent_reading_pack`.
+- [x] CLI: `lenskit agent-pack produce <bundle_manifest> [--output] [--json]` (`cli/cmd_agent_pack.py`).
+- [x] `output_health.agent_pack_present` ist verdrahtet (Parameter `agent_reading_pack_path`/`agent_reading_pack_expected`), in v1 nicht blockierend (warnend), für einen späteren Post-hoc-Validator (Arbeitspaket H).
+- [x] Tests: `test_agent_reading_pack.py`, `test_cli_agent_pack.py`, Integration in `test_bundle_manifest_integration.py`, Health-Param in `test_output_health.py`.
+- [x] Determinismus-Beleg: Standalone-Re-Run reproduziert den Pipeline-Pack byte-identisch (Self-Role wird übersprungen). Beleg: `docs/proofs/agent-reading-pack-producer-proof.md`.
 
 ---
 
@@ -298,7 +310,7 @@ Hinweis: `query --index/--q`, `range get --manifest/--ref` und `artifact --id/--
   - [ ] Hash-Verifikation erfolgreich
 - [ ] **PR 2 — Output Health Artefakt**
 - [ ] **PR 3 — Range-Ref v2**
-- [ ] **PR 4 — Agent Reading Pack**
+- [x] **PR 4 — Agent Reading Pack** (v1: Kern-Pack — Reading Policy, Artefaktrollen, Output-Health-Summary, HOW_TO_SEARCH, Top-30 Range-Refs, epistemische Leere; Architektur-/Contracts-/Trace-Embeds offen für v2)
 - [ ] **PR 5 — Safe Output Profiles**
 
 ---
@@ -420,4 +432,5 @@ Patch für PR 1 ist nur zulässig, wenn bestätigt:
 
 - [x] Hebel: SQLite-FTS aus `content_range_ref` hydratisieren.
 - [x] Entscheidung: Erst Output-Beweisfähigkeit, dann neue Features.
-- [ ] Nächste Aktion: PR 2 vorbereiten: Range-Ref v2 (semantic boundary split, docs-first).
+- [x] Agent Reading Pack (PR 4) v1 umgesetzt: deterministisches Navigations-Einstiegsdokument für Agents.
+- [ ] Nächste Aktion: Range-Ref v2 (Arbeitspaket B, docs-first) oder Agent-Pack v2 (Architektur-/Contracts-/Trace-Embeds).

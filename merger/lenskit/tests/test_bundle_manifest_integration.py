@@ -674,6 +674,44 @@ def test_citation_map_artifact_integrity_and_schema(tmp_path):
     assert len(citation_ids) == len(citation_rows)
 
 
+def test_agent_reading_pack_emitted_schema_valid_and_hashed(tmp_path):
+    artifacts, data, manifest_dir = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    manifest_schema = json.loads(_BUNDLE_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=data, schema=manifest_schema)
+
+    pack_entry = _artifact_by_role(data, ArtifactRole.AGENT_READING_PACK.value)
+    assert pack_entry is not None, "agent_reading_pack must be emitted into the bundle manifest"
+
+    # Governance contract: navigation aid, derived, role_only, markdown.
+    assert pack_entry["content_type"] == "text/markdown"
+    assert pack_entry["authority"] == "navigation_index"
+    assert pack_entry["canonicality"] == "derived"
+    assert pack_entry["regenerable"] is True
+    assert pack_entry["staleness_sensitive"] is True
+    assert "contract" not in pack_entry
+    assert pack_entry["interpretation"]["mode"] == "role_only"
+    assert pack_entry["path"].endswith(".agent_reading_pack.md")
+
+    # MergeArtifacts exposes the pack and the file is hash-consistent with the manifest.
+    assert artifacts.agent_reading_pack is not None
+    assert artifacts.agent_reading_pack.exists()
+    pack_path = manifest_dir / pack_entry["path"]
+    assert pack_path == artifacts.agent_reading_pack
+    assert pack_entry["bytes"] == pack_path.stat().st_size
+    assert pack_entry["sha256"] == _sha256_file(pack_path)
+
+    body = pack_path.read_text(encoding="utf-8")
+    assert body.startswith("<!-- ARTIFACT:agent_reading_pack VERSION:v1")
+    assert "NAVIGATION, NOT TRUTH" in body
+    assert data["run_id"] in body
+    # The pack must never list its own role as bundle content.
+    assert "| agent_reading_pack |" not in body
+    # It should reference the bundle's truth anchor and health verdict.
+    assert "## OUTPUT_HEALTH_SUMMARY" in body
+    assert "## TOP_FILES" in body
+
+
 def test_bundle_manifest_canonical_dump_index_sha_matches_dump_index_artifact(tmp_path):
     """links.canonical_dump_index_sha256 must equal the dump_index_json artifact sha256."""
     _, data, manifest_dir = _make_minimal_bundle(tmp_path)
