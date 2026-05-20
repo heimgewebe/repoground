@@ -52,9 +52,20 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
 ### Integritätshärtung
 - SHA256-Mismatch von `canonical_md` oder `chunk_index_jsonl` gegenüber dem Manifest ⇒ harter Fehler,
   **kein** Pack wird geschrieben (Test `test_canonical_md_sha_mismatch_fails_hard`).
-- `output_health` / `citation_map_jsonl` Mismatch ⇒ Warnung, Pack wird trotzdem erzeugt
-  (diagnostisch/abgeleitet; Test `test_output_health_sha_mismatch_warns_not_fails`).
+- **Fehlender oder ungültiger** `sha256` eines Wahrheitsankers ⇒ harter Fehler (kein neutraler Zustand;
+  Tests `test_canonical_md_missing_sha_fails_hard`, `test_chunk_index_invalid_sha_fails_hard`).
+- `output_health` / `citation_map_jsonl` Mismatch/fehlender Hash ⇒ Warnung, Pack wird trotzdem erzeugt,
+  das Artefakt wird aber nicht verwendet (diagnostisch/abgeleitet; Test `test_output_health_sha_mismatch_warns_not_fails`).
 - Output-Pfad-Kollision mit einem Input-Artefakt ⇒ harter Fehler (Test `test_output_collision_with_input_is_rejected`).
+- Pre-Load-Eingabefehler (Manifest fehlt/JSON kaputt) ⇒ **keine** Mutation bestehender Outputs
+  (Test `test_stale_output_preserved_on_missing_manifest`).
+
+### Range-Auflösung zeigt auf das Bundle-Manifest
+- `HOW_TO_SEARCH` rendert `range get --manifest "<…>.bundle.manifest.json"` (nicht `dump_index`/`canonical_md`),
+  da der Pack aus dem Bundle-Manifest erzeugt wird und dieses die natürliche Auflösungsbasis ist
+  (Test `test_how_to_search_resolves_range_against_bundle_manifest`).
+- `OUTPUT_HEALTH_SUMMARY` weist transparent aus, dass `agent_pack_present` in v1 `skipped` sein kann
+  (Health läuft vor der Pack-Emission).
 
 ### CLI
 - `agent-pack produce … --json` Exit-Code: **0**, `status=ok`.

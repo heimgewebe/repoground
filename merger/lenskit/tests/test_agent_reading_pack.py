@@ -250,6 +250,51 @@ def test_canonical_md_sha_mismatch_fails_hard(tmp_path):
     assert not (tmp_path / "demo.agent_reading_pack.md").exists()
 
 
+def test_canonical_md_missing_sha_fails_hard(tmp_path):
+    """A truth anchor without a verifiable expected hash must fail (missing check)."""
+    manifest = _make_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    for a in data["artifacts"]:
+        if a["role"] == "canonical_md":
+            del a["sha256"]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    report = produce_agent_reading_pack(str(manifest))
+    assert report["status"] == "fail"
+    assert any("canonical_md" in e and "sha256" in e for e in report["errors"])
+    assert not (tmp_path / "demo.agent_reading_pack.md").exists()
+
+
+def test_chunk_index_invalid_sha_fails_hard(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    for a in data["artifacts"]:
+        if a["role"] == "chunk_index_jsonl":
+            a["sha256"] = "not-a-valid-hash"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    report = produce_agent_reading_pack(str(manifest))
+    assert report["status"] == "fail"
+    assert any("chunk_index" in e and "sha256" in e for e in report["errors"])
+
+
+def test_how_to_search_resolves_range_against_bundle_manifest(tmp_path):
+    """range get --manifest must point at the bundle manifest, never canonical_md."""
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    assert f'range get --manifest "{manifest.name}"' in body
+    # canonical_md is not a manifest and must not be used as the range target.
+    assert 'range get --manifest "demo.md"' not in body
+
+
+def test_stale_output_preserved_on_missing_manifest(tmp_path):
+    """A pre-load input error must not delete an existing default output."""
+    stale = tmp_path / "ghost.agent_reading_pack.md"
+    stale.write_text("stale pack\n", encoding="utf-8")
+    report = produce_agent_reading_pack(str(tmp_path / "ghost.bundle.manifest.json"))
+    assert report["status"] == "fail"
+    assert report["error_kind"] == "path_read_error"
+    assert stale.exists(), "missing-manifest input error must not delete existing output"
+
+
 def test_missing_manifest_is_path_read_error(tmp_path):
     report = produce_agent_reading_pack(str(tmp_path / "nope.bundle.manifest.json"))
     assert report["status"] == "fail"
@@ -356,6 +401,7 @@ def test_render_is_pure_from_model():
         top_files=(),
         indexed_chunk_count=0,
         repo_ids=(),
+        bundle_manifest_path="demo.bundle.manifest.json",
         canonical_md_path=None,
         chunk_index_path=None,
         dump_index_path=None,

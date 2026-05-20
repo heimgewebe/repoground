@@ -186,6 +186,7 @@ class PackModel:
     top_files: Tuple[TopFile, ...]
     indexed_chunk_count: int
     repo_ids: Tuple[str, ...]
+    bundle_manifest_path: str
     canonical_md_path: Optional[str]
     chunk_index_path: Optional[str]
     dump_index_path: Optional[str]
@@ -427,6 +428,10 @@ def render_agent_reading_pack(model: PackModel) -> str:
         lines.append(f"- fts_content_non_empty: {_yn(h.fts_content_non_empty)}")
         lines.append(f"- range_ref_resolution_status: {h.range_ref_resolution_status or 'unknown'}")
         lines.append(f"- errors: {h.error_count}, warnings: {h.warning_count}")
+        lines.append(
+            "- note: `agent_pack_present` in `output_health` may read `skipped` — "
+            "health is computed before this pack is emitted (v1)."
+        )
     else:
         lines.append("- _No `output_health` artifact present; bundle is self-unverified._")
     lines.append("")
@@ -443,15 +448,13 @@ def render_agent_reading_pack(model: PackModel) -> str:
         lines.append("```")
     else:
         lines.append("- No `sqlite_index` present: full-text search is unavailable for this bundle.")
-    range_target = model.dump_index_path or model.canonical_md_path
-    if range_target:
-        lines.append("Resolve a byte/line range to exact text:")
-        lines.append("```bash")
-        lines.append(
-            "python3 -m merger.lenskit.cli.main range get "
-            f'--manifest "{range_target}" --ref <range_ref.json> --format json'
-        )
-        lines.append("```")
+    lines.append("Resolve a byte/line range to exact text (against this bundle manifest):")
+    lines.append("```bash")
+    lines.append(
+        "python3 -m merger.lenskit.cli.main range get "
+        f'--manifest "{model.bundle_manifest_path}" --ref <range_ref.json> --format json'
+    )
+    lines.append("```")
     if model.citation_map_path:
         lines.append(
             f"Stable citations: each line of `{model.citation_map_path}` maps a "
@@ -584,8 +587,13 @@ def _verify_referenced_artifact(
     except OSError as e:
         sink.append(f"{label}: cannot read file: {e}")
         return None
-    manifest_sha = entry.get("sha256", "")
-    if isinstance(manifest_sha, str) and _SHA256_RE.fullmatch(manifest_sha) and actual != manifest_sha:
+    manifest_sha = entry.get("sha256")
+    if not isinstance(manifest_sha, str) or not _SHA256_RE.fullmatch(manifest_sha):
+        # A truth anchor without a verifiable expected hash is a missing check,
+        # not a neutral state. Hard roles fail; soft roles warn and are skipped.
+        sink.append(f"{label}: missing or invalid sha256 in manifest")
+        return None
+    if actual != manifest_sha:
         sink.append(
             f"{label}: sha256 mismatch (manifest={manifest_sha[:12]} actual={actual[:12]})"
         )
@@ -627,11 +635,11 @@ def produce_agent_reading_pack(
     protected: set[Path] = {manifest_path}
 
     if not manifest_path.exists() or not manifest_path.is_file():
-        _s = _remove_stale_output(output_path, protected) if not output_is_explicit else None
+        # Input error before any manifest load: never mutate existing outputs.
         return _fail_report(
             production_run_id,
             manifest_path_str,
-            [f"Manifest not found or not a file: {manifest_path}"] + ([_s] if _s else []),
+            [f"Manifest not found or not a file: {manifest_path}"],
             error_kind="path_read_error",
         )
 
@@ -639,11 +647,11 @@ def produce_agent_reading_pack(
     try:
         manifest = load_manifest(manifest_path)
     except (json.JSONDecodeError, OSError) as e:
-        _s = _remove_stale_output(output_path, protected) if not output_is_explicit else None
+        # Input error before any manifest load: never mutate existing outputs.
         return _fail_report(
             production_run_id,
             manifest_path_str,
-            [f"Cannot load manifest: {e}"] + ([_s] if _s else []),
+            [f"Cannot load manifest: {e}"],
             error_kind="path_read_error",
         )
 
@@ -797,6 +805,7 @@ def produce_agent_reading_pack(
         top_files=tuple(top_files),
         indexed_chunk_count=indexed_chunk_count,
         repo_ids=tuple(repo_ids),
+        bundle_manifest_path=manifest_path.name,
         canonical_md_path=str(by_role[_CANONICAL_MD].get("path")) if _CANONICAL_MD in by_role else None,
         chunk_index_path=str(by_role[_CHUNK_INDEX].get("path")) if _CHUNK_INDEX in by_role else None,
         dump_index_path=str(by_role[_DUMP_INDEX].get("path")) if _DUMP_INDEX in by_role else None,
