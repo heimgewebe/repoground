@@ -692,7 +692,15 @@ class TestSplitModeCoherence:
         chunk = {
             "chunk_id": "split_only",
             "repo": "testrepo",
+            "path": "src.txt",
             "source_status": "full",
+            "content_artifact": "merge_md",
+            "content_range": {
+                "start_byte": 0,
+                "end_byte": 10,
+                "start_line": 1,
+                "end_line": 1,
+            },
             "source_range": {
                 "file_path": "src.txt",
                 "repo_id": "testrepo",
@@ -732,7 +740,15 @@ class TestSplitModeCoherence:
         split_chunk = {
             "chunk_id": "split_only",
             "repo": "testrepo",
+            "path": "src.txt",
             "source_status": "full",
+            "content_artifact": "merge_md",
+            "content_range": {
+                "start_byte": 0,
+                "end_byte": 4,
+                "start_line": 1,
+                "end_line": 1,
+            },
             "source_range": {
                 "file_path": "src.txt",
                 "repo_id": "testrepo",
@@ -779,6 +795,38 @@ class TestSplitModeCoherence:
         coherence = check_manifest_coherence_for_citation_map(manifest_path)
         assert coherence.coherent is False
         assert coherence.reason == "missing_or_invalid_canonical_range"
+
+    def test_canonical_looking_chunk_without_canonical_ranges_still_fails(self, tmp_path):
+        content = b"canonical-looking content\n"
+        chunk = {
+            "chunk_id": "canonical_like_missing_ranges",
+            "repo": "testrepo",
+            "path": "src.txt",
+            "source_status": "full",
+            "content_artifact": "canonical_md",
+            "content_range": {
+                "start_byte": 0,
+                "end_byte": 10,
+                "start_line": 1,
+                "end_line": 1,
+            },
+            "source_range": {
+                "file_path": "src.txt",
+                "repo_id": "testrepo",
+                "start_byte": 0,
+                "end_byte": 10,
+                "status": "declared",
+            },
+        }
+        manifest_path = _make_bundle(tmp_path, content, [chunk])
+
+        coherence = check_manifest_coherence_for_citation_map(manifest_path)
+        assert coherence.coherent is False
+        assert coherence.reason == "missing_or_invalid_canonical_range"
+
+        report = produce_citation_map(str(manifest_path))
+        assert report["status"] == "fail"
+        assert any("no valid canonical range" in e for e in report["errors"])
 
 
 # ---------------------------------------------------------------------------

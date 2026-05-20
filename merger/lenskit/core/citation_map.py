@@ -172,29 +172,52 @@ def normalize_canonical_range(
 
 
 def _is_split_mode_noncanonical_chunk(chunk: Dict[str, Any]) -> bool:
-        """
-        Return True only for split-mode non-canonical chunks that are intentionally
-        excluded from citation-map coherence and production.
+    """
+    Return True only for split-mode non-canonical chunks that are intentionally
+    excluded from citation-map coherence and production.
 
-        Required conditions:
-            - source_range is present (dict)
-            - source_status == "full"
-            - canonical_range is absent
-            - content_range_ref is absent
-        """
-        source_range = chunk.get("source_range")
-        source_status = chunk.get("source_status")
+    Required conditions:
+      - source_range is present (dict)
+      - source_status == "full"
+      - canonical_range is absent
+      - content_range_ref is absent
 
-        has_source_range = isinstance(source_range, dict)
-        has_canonical_range = chunk.get("canonical_range") is not None
-        has_content_range_ref = chunk.get("content_range_ref") is not None
+    Conservative positive split-shape signals:
+      - content_artifact == "merge_md"
+      - content_range is present (dict)
+      - chunk.path matches source_range.file_path
+      - source_range.status == "declared"
+    """
+    source_range = chunk.get("source_range")
+    source_status = chunk.get("source_status")
 
-        return (
-                has_source_range
-                and source_status == "full"
-                and not has_canonical_range
-                and not has_content_range_ref
-        )
+    if not isinstance(source_range, dict):
+        return False
+    if source_status != "full":
+        return False
+    if chunk.get("canonical_range") is not None:
+        return False
+    if chunk.get("content_range_ref") is not None:
+        return False
+
+    if chunk.get("content_artifact") != "merge_md":
+        return False
+    if not isinstance(chunk.get("content_range"), dict):
+        return False
+
+    chunk_path = chunk.get("path")
+    source_file_path = source_range.get("file_path")
+    if not isinstance(chunk_path, str) or not chunk_path:
+        return False
+    if not isinstance(source_file_path, str) or not source_file_path:
+        return False
+    if chunk_path != source_file_path:
+        return False
+
+    if source_range.get("status") != "declared":
+        return False
+
+    return True
 
 
 # ---------------------------------------------------------------------------
