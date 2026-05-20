@@ -440,15 +440,22 @@ def test_runner_full_snapshot_path_excludes_cache_dirs(temp_hub):
     (repo / ".wgx").mkdir(exist_ok=True)
     (repo / ".wgx" / "profile.yml").write_text("profile: default\n", encoding="utf-8")
 
+    cache_payloads = {
+        ".ruff_cache": "LENSKIT_TEST_SENTINEL_RUFF_CACHE_SHOULD_NOT_APPEAR\n",
+        ".pytest_cache": "LENSKIT_TEST_SENTINEL_PYTEST_CACHE_SHOULD_NOT_APPEAR\n",
+        ".mypy_cache": "LENSKIT_TEST_SENTINEL_MYPY_CACHE_SHOULD_NOT_APPEAR\n",
+        "__pycache__": "LENSKIT_TEST_SENTINEL_PYCACHE_SHOULD_NOT_APPEAR\n",
+    }
+
     (repo / ".ruff_cache" / "0.15.13").mkdir(parents=True)
     (repo / ".ruff_cache" / ".gitignore").write_text("*\n", encoding="utf-8")
-    (repo / ".ruff_cache" / "0.15.13" / "cache.py").write_text("# ruff cache\n", encoding="utf-8")
+    (repo / ".ruff_cache" / "0.15.13" / "cache.py").write_text(cache_payloads[".ruff_cache"], encoding="utf-8")
     (repo / ".pytest_cache" / "v").mkdir(parents=True)
-    (repo / ".pytest_cache" / "v" / "cache.txt").write_text("pytest cache\n", encoding="utf-8")
+    (repo / ".pytest_cache" / "v" / "cache.txt").write_text(cache_payloads[".pytest_cache"], encoding="utf-8")
     (repo / ".mypy_cache" / "3.11").mkdir(parents=True)
-    (repo / ".mypy_cache" / "3.11" / "cache.py").write_text("# mypy cache\n", encoding="utf-8")
+    (repo / ".mypy_cache" / "3.11" / "cache.py").write_text(cache_payloads[".mypy_cache"], encoding="utf-8")
     (repo / "__pycache__").mkdir(exist_ok=True)
-    (repo / "__pycache__" / "cache.py").write_text("# pycache\n", encoding="utf-8")
+    (repo / "__pycache__" / "cache.py").write_text(cache_payloads["__pycache__"], encoding="utf-8")
 
     store = JobStore(temp_hub)
     runner = JobRunner(store)
@@ -482,8 +489,9 @@ def test_runner_full_snapshot_path_excludes_cache_dirs(temp_hub):
     sqlite_path = merges_dir / artifact.paths["sqlite_index"]
 
     md_text = md_path.read_text(encoding="utf-8")
+    chunk_text = chunk_path.read_text(encoding="utf-8")
     sidecar = json.loads(json_path.read_text(encoding="utf-8"))
-    chunk_rows = [json.loads(line) for line in chunk_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    chunk_rows = [json.loads(line) for line in chunk_text.splitlines() if line.strip()]
     md_paths = [
         line.split('path="', 1)[1].split('"', 1)[0]
         for line in md_text.splitlines()
@@ -501,11 +509,19 @@ def test_runner_full_snapshot_path_excludes_cache_dirs(temp_hub):
         assert expected in combined_sidecar_paths
         assert expected in chunk_paths
 
-    forbidden_dirs = [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]
-    for forbidden in forbidden_dirs:
-        assert not any(forbidden in p for p in md_paths)
-        assert not any(forbidden in p for p in chunk_paths)
-        assert not any(forbidden in p for p in combined_sidecar_paths)
+    for sentinel in cache_payloads.values():
+        assert sentinel.strip() not in md_text, \
+            f"cache file content must not appear in markdown: {sentinel.strip()!r}"
+        assert sentinel.strip() not in chunk_text, \
+            f"cache file content must not appear in chunk index: {sentinel.strip()!r}"
+
+    for forbidden in cache_payloads:
+        assert not any(forbidden in p for p in md_paths), \
+            f"markdown file markers must exclude {forbidden}: {md_paths}"
+        assert not any(forbidden in p for p in chunk_paths), \
+            f"chunk source paths must exclude {forbidden}: {chunk_paths}"
+        assert not any(forbidden in p for p in combined_sidecar_paths), \
+            f"sidecar paths must exclude {forbidden}: {combined_sidecar_paths}"
 
     conn = sqlite3.connect(sqlite_path)
     try:
@@ -514,5 +530,6 @@ def test_runner_full_snapshot_path_excludes_cache_dirs(temp_hub):
         conn.close()
     for expected in expected_paths:
         assert expected in sqlite_paths
-    for forbidden in forbidden_dirs:
-        assert not any(forbidden in p for p in sqlite_paths)
+    for forbidden in cache_payloads:
+        assert not any(forbidden in p for p in sqlite_paths), \
+            f"sqlite chunk paths must exclude {forbidden}: {sqlite_paths}"

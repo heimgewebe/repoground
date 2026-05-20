@@ -589,18 +589,25 @@ class TestFullSnapshotCacheExclusionParity(unittest.TestCase):
         (self.repo / ".wgx").mkdir()
         (self.repo / ".wgx" / "profile.yml").write_text("profile: default\n", encoding="utf-8")
 
+        self.cache_payloads = {
+            ".ruff_cache": "LENSKIT_TEST_SENTINEL_RUFF_CACHE_SHOULD_NOT_APPEAR\n",
+            ".pytest_cache": "LENSKIT_TEST_SENTINEL_PYTEST_CACHE_SHOULD_NOT_APPEAR\n",
+            ".mypy_cache": "LENSKIT_TEST_SENTINEL_MYPY_CACHE_SHOULD_NOT_APPEAR\n",
+            "__pycache__": "LENSKIT_TEST_SENTINEL_PYCACHE_SHOULD_NOT_APPEAR\n",
+        }
+
         (self.repo / ".ruff_cache" / "0.15.13").mkdir(parents=True)
         (self.repo / ".ruff_cache" / ".gitignore").write_text("*\n", encoding="utf-8")
-        (self.repo / ".ruff_cache" / "0.15.13" / "cache.py").write_text("# ruff cache\n", encoding="utf-8")
+        (self.repo / ".ruff_cache" / "0.15.13" / "cache.py").write_text(self.cache_payloads[".ruff_cache"], encoding="utf-8")
 
         (self.repo / ".pytest_cache" / "v").mkdir(parents=True)
-        (self.repo / ".pytest_cache" / "v" / "cache.txt").write_text("pytest cache\n", encoding="utf-8")
+        (self.repo / ".pytest_cache" / "v" / "cache.txt").write_text(self.cache_payloads[".pytest_cache"], encoding="utf-8")
 
         (self.repo / ".mypy_cache" / "3.11").mkdir(parents=True)
-        (self.repo / ".mypy_cache" / "3.11" / "cache.py").write_text("# mypy cache\n", encoding="utf-8")
+        (self.repo / ".mypy_cache" / "3.11" / "cache.py").write_text(self.cache_payloads[".mypy_cache"], encoding="utf-8")
 
         (self.repo / "__pycache__").mkdir()
-        (self.repo / "__pycache__" / "cache.py").write_text("# pycache\n", encoding="utf-8")
+        (self.repo / "__pycache__" / "cache.py").write_text(self.cache_payloads["__pycache__"], encoding="utf-8")
 
     def tearDown(self):
         shutil.rmtree(self.root)
@@ -622,6 +629,7 @@ class TestFullSnapshotCacheExclusionParity(unittest.TestCase):
         )
 
         md_text = artifacts.canonical_md.read_text(encoding="utf-8")
+        chunk_text = artifacts.chunk_index.read_text(encoding="utf-8")
         sidecar = json.loads(artifacts.index_json.read_text(encoding="utf-8"))
         chunk_rows = [
             json.loads(line)
@@ -645,7 +653,17 @@ class TestFullSnapshotCacheExclusionParity(unittest.TestCase):
             self.assertIn(expected, combined_sidecar_paths)
             self.assertIn(expected, chunk_paths)
 
-        for forbidden in [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]:
+        for sentinel in self.cache_payloads.values():
+            self.assertNotIn(
+                sentinel.strip(), md_text,
+                msg=f"cache file content must not appear in markdown: {sentinel.strip()!r}",
+            )
+            self.assertNotIn(
+                sentinel.strip(), chunk_text,
+                msg=f"cache file content must not appear in chunk index: {sentinel.strip()!r}",
+            )
+
+        for forbidden in self.cache_payloads:
             self.assertFalse(
                 any(forbidden in p for p in md_paths),
                 msg=f"markdown file markers must exclude {forbidden}: {md_paths}",
@@ -668,7 +686,7 @@ class TestFullSnapshotCacheExclusionParity(unittest.TestCase):
         for expected in expected_paths:
             self.assertIn(expected, rows)
 
-        for forbidden in [".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"]:
+        for forbidden in self.cache_payloads:
             self.assertFalse(
                 any(forbidden in p for p in rows),
                 msg=f"sqlite chunk paths must exclude {forbidden}: {rows}",
