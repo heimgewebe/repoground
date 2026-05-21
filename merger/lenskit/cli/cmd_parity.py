@@ -125,6 +125,8 @@ def run_parity_enforce(args: argparse.Namespace) -> int:
     from merger.lenskit.core.parity_state import ParityInputError, build_parity_state
 
     require_level = getattr(args, "require_level", "diagnostic")
+    emit_json = getattr(args, "emit_json", False)
+    include_state = getattr(args, "include_state", False)
 
     if require_level not in _REQUIRE_LEVELS:
         payload = {
@@ -137,7 +139,7 @@ def run_parity_enforce(args: argparse.Namespace) -> int:
             "required_level": require_level,
             "allowed": list(_REQUIRE_LEVELS),
         }
-        if args.emit_json:
+        if emit_json:
             print(json.dumps(payload, indent=2))
         else:
             print(payload["message"], file=sys.stderr)
@@ -148,7 +150,7 @@ def run_parity_enforce(args: argparse.Namespace) -> int:
     except ParityInputError as e:
         payload = _input_error_payload(e)
         payload["required_level"] = require_level
-        if args.emit_json:
+        if emit_json:
             print(json.dumps(payload, indent=2))
         else:
             print(f"Parity enforce failed: {e}", file=sys.stderr)
@@ -170,7 +172,7 @@ def run_parity_enforce(args: argparse.Namespace) -> int:
             "required_level": require_level,
             "allowed": list(_REQUIRE_LEVELS),
         }
-        if args.emit_json:
+        if emit_json:
             print(json.dumps(payload, indent=2))
         else:
             print(payload["message"], file=sys.stderr)
@@ -189,10 +191,10 @@ def run_parity_enforce(args: argparse.Namespace) -> int:
         "left_stem": built.left_stem,
         "right_stem": built.right_stem,
     }
-    if args.include_state:
+    if include_state:
         payload["state"] = built.state
 
-    if args.emit_json:
+    if emit_json:
         print(json.dumps(payload, indent=2))
     else:
         _print_human_enforce(payload)
