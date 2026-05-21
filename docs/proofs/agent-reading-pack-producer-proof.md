@@ -69,8 +69,12 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
 - `HOW_TO_SEARCH` rendert `range get --manifest "<…>.bundle.manifest.json"` (nicht `dump_index`/`canonical_md`),
   da der Pack aus dem Bundle-Manifest erzeugt wird und dieses die natürliche Auflösungsbasis ist
   (Test `test_how_to_search_resolves_range_against_bundle_manifest`).
-- `OUTPUT_HEALTH_SUMMARY` weist transparent aus, dass `agent_pack_present` in v1 `skipped` sein kann
-  (Health läuft vor der Pack-Emission).
+- `OUTPUT_HEALTH_SUMMARY` weist transparent aus, dass `agent_pack_present` in v1 `skipped` sein kann.
+  Grund: In der Pipeline wird `output_health` **vor** der Pack-Emission berechnet — der In-Pipeline-Health-Report
+  kann das Artefakt, das er zeitlich vorausläuft, strukturell **nicht** belegen (kein Hellsehen über noch nicht
+  geschriebene Dateien). `pass`/`warning`/`fail` für `agent_pack_present` kann nur ein **Post-hoc-Lauf** liefern:
+  ein eigenständiger `compute_output_health(..., agent_reading_pack_path=…, agent_reading_pack_expected=True)`
+  oder der dedizierte Post-hoc-Validator aus Arbeitspaket H.
 
 ### CLI
 - `agent-pack produce … --json` Exit-Code: **0**, `status=ok`.
