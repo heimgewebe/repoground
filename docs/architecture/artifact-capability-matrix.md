@@ -19,4 +19,4 @@ Zweck: Sichtbar machen, welche Laufzeit welche Prüffähigkeit besitzt und welch
 
 ## Regel
 
-Ein Profil kann angefordert werden; `output_health`/post-health bestimmt, ob es vollständig erfüllt oder degradiert erreicht wurde.
+Ein Profil kann angefordert werden; bestehendes `output_health` (während der Migration: Legacy-Pre-Health) und später `post_emit_health` bestimmen, ob es vollständig erfüllt oder degradiert erreicht wurde.

@@ -105,9 +105,9 @@ Verboten:
 
 Ein einzelner Health-Lauf ist nicht ausreichend, wenn Artefakte erst nach ihm erzeugt werden.
 
-Pflicht:
-- `pre_emit_health`
-- `post_emit_health`
+Pflicht ist die Unterstützung eines zweistufigen Health-Modells. Die konkrete Requiredness ist profil- und runtimeabhängig:
+- `pre_emit_health` ist Baseline für alle Profile; während der Migration entspricht bestehendes `output_health` diesem Zustand.
+- `post_emit_health` ist required für agentische, lokale Such- und Debug-Profile, aber nicht zwingend für minimale Lean-Archive.
 
 `pre_emit_health` prüft:
 - canonical hash
@@ -139,7 +139,8 @@ Aktueller Befund:
 |---|---|---|---|---|---|
 | canonical_md | canonical_content | content_source | immer | Inhalt | ja |
 | bundle_manifest | navigation/control | registry | immer | Rollen, Hashes, Pfade | nur Artefaktwahrheit |
-| pre_emit_health | diagnostic_signal | diagnostic | immer | Produktionsdiagnose | nein |
+| output_health | diagnostic_signal | diagnostic | migration/current | aktuelles Health-Artefakt; vorläufig Legacy-Pre-Health | nein |
+| pre_emit_health | diagnostic_signal | diagnostic | target/immer | Produktionsdiagnose nach Health-Split | nein |
 | post_emit_health | diagnostic_signal | diagnostic | agent+ | finale Bundle-Diagnose | nein |
 | agent_reading_pack | navigation_index | derived | agent+ | Agenteneinstieg | nein |
 | chunk_index_jsonl | retrieval_index | derived | agent+ | Suche/Range-Navigation | nein |
@@ -247,7 +248,7 @@ UI zeigt primär Profile, nicht Einzeldateien; Status muss echten Health- und Ev
 
 ## 10. CLI-Modell
 
-Neue Option:
+Ziel-Interface (geplant; nicht aktueller CLI-Stand):
 
 ```bash
 python3 -m merger.lenskit.cli.main merge --profile max --artifact-profile agent-portable
@@ -273,8 +274,12 @@ Transitional Naming (Kompatibilität):
 - `post_emit_health` wird additiv eingeführt (kein harter Rename in Phase A).
 - Consumers dürfen bis zur Umstellung weiter `output_health` lesen.
 
-- Pre-Health: `<stem>.output_health.pre.json`
-- Post-Health: `<stem>.bundle_health.post.json`
+Naming-Mapping:
+
+| Phase | Rolle | Dateiname | Status |
+|---|---|---|---|
+| current / migration | `output_health` als Legacy-Pre-Health | `<stem>.output_health.json` | bestehend, kompatibel |
+| future split | `post_emit_health` | `<stem>.bundle_health.post.json` | geplant/additiv |
 
 Verdicts:
 - `pass`: alle required checks erfüllt
