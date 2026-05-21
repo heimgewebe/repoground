@@ -808,8 +808,12 @@ def produce_agent_reading_pack(
         absent_notes.append(
             "`citation_map_jsonl` is present but failed verification; citation guidance suppressed."
         )
-    if not health.present:
+    if _OUTPUT_HEALTH not in by_role:
         absent_notes.append("`output_health` is absent: bundle integrity is self-unverified.")
+    elif not health.present:
+        absent_notes.append(
+            "`output_health` is present but failed verification or parsing; health summary suppressed."
+        )
     absent_notes.append(
         "`claim_evidence_map` is not yet produced (planned: output-optimierung Arbeitspaket F)."
     )

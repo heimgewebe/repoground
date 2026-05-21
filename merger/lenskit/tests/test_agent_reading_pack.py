@@ -389,6 +389,10 @@ def test_output_health_sha_mismatch_warns_not_fails(tmp_path):
     report = produce_agent_reading_pack(str(manifest))
     assert report["status"] == "ok"
     assert any("output_health" in w and "sha256 mismatch" in w for w in report["warnings"])
+    body = Path(report["output_path"]).read_text(encoding="utf-8")
+    assert "`output_health` is present but failed verification or parsing" in body
+    assert "health summary suppressed" in body
+    assert "`output_health` is absent" not in body
 
 
 def _inject_artifact(manifest: Path, role: str, filename: str, content: bytes, *, bad_sha: bool = False) -> None:
