@@ -218,6 +218,7 @@ PR 3 (teilweise erledigt):
 - [x] Citation-Map-Producer plus eigener Producer-Real-Dump-Proof
 - [x] Citation-Readiness-Validator (`merger/lenskit/core/citation_validate.py`, CLI `lenskit citation validate`, Testabdeckung in `merger/lenskit/tests/test_citation_validate.py` und `merger/lenskit/tests/test_cli_citation.py`; Real-Dump-Proof erbracht mit aktuellem Dump, 594 Chunks, Status `ok`)
 PR 4 (teilweise erledigt):
+
 - [x] `merger/lenskit/core/parity_gates.py` — Produktionsmodul mit `evaluate_parity_gates` und `ParityGateResult`. Gate-Semantik ist jetzt kanonisch und wiederverwendbar (nicht mehr nur Test-Helper).
 - [x] PR 4b Basis: Real-Dump-Parser + CLI-Compare-Pfad
   - `merger/lenskit/core/parity_state.py` erzeugt ein kanonisches State-Dict aus zwei realen Bundle-Manifests fuer `evaluate_parity_gates`.
@@ -271,3 +272,12 @@ Status:
 - Host-Profile: umgesetzt (PR D) — `--profile`, `RLENS_PROFILE`, `profiles`-Subkommando.
 - Run/Cancel: offen (nach API-/Sicherheitsreview).
 - `merger/lenskit/cli/rlens.py` bleibt Service-Launcher und wird nicht umgedeutet.
+
+
+PR 6 (Artifact Output Control Plane, docs-first):
+- [x] `docs/blueprints/lenskit-artifact-output-control-plane.md`
+- [x] `docs/architecture/artifact-consumer-matrix.md`
+- [x] `docs/architecture/artifact-capability-matrix.md`
+- [x] `docs/architecture/artifact-evidence-levels.md`
+- Ziel: Profile als Presets dokumentieren, Evidence-Level von Profilnamen trennen und Pre-/Post-Health als zweistufiges Modell festlegen.
+- Hinweis: `content_parity_pass`/`diagnostic_parity_pass` bleiben dokumentierte Testsemantik und werden hier nicht als bereits erzwungenes Runtime-Gate umdefiniert.
