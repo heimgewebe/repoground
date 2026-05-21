@@ -81,6 +81,18 @@ verbindlich, Diagnostic-Artefakte degradieren gemaess
 `lenskit parity enforce --require {content,diagnostic}` durchgesetzt:
 eingeschraenkte Profile fordern `content`, vollwertige Profile `diagnostic`.
 
+## Grenze des Belegs
+
+Dieser Beleg ist ein **Pipeline-/Host-Beleg auf vollwertigem Host** mit
+`jsonschema` und `sqlite`/`fts5` verfuegbar. Er belegt nicht, dass ein echter
+iOS/Pythonista-Host ohne `jsonschema` oder ohne FTS5-Capability dieselbe
+Diagnostic-Paritaet erreicht. Fuer solche Hosts mit degradierten Capabilities
+bleibt die explizite Profilgrenze aus
+`docs/architecture/artifact-capability-matrix.md` (Abschnitt
+"Diagnostic-Paritaet als Profilgrenze") gueltig: Diagnostic-Parität ist
+capability-abhängig, nicht frontend-abhängig; repolens auf solchen Hosts muss
+nur Content-Paritaet garantieren.
+
 ## Einordnung
 
 - Erfuellt das Roadmap-Item "repolens diagnostic parity hardening" (PR 4) mit

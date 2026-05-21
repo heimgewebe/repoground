@@ -1,8 +1,9 @@
 name: Parity Gate (Content vs Diagnostic)
 
-# Global blocking gate for the content/diagnostic parity runtime
-# (merger/lenskit/core/parity_gates.py + parity_state.py + the
-# `lenskit parity compare|enforce` CLI).  This is distinct from the
+# Path-scoped blocking gate for parity-relevant changes in the content/diagnostic
+# parity runtime (merger/lenskit/core/parity_gates.py + parity_state.py + the
+# `lenskit parity compare|enforce` CLI). Runs only when changes touch parity code,
+# tests, contracts, or the merge pipeline. This is distinct from the
 # Frontend Parity Guard (parity_check.yml), which checks frontend feature
 # parity (CLI args / HTML IDs / JS payload keys), not artifact parity.
 

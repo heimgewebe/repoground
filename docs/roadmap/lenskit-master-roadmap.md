@@ -228,9 +228,9 @@ PR 4 (erledigt):
   - Ziel erreicht: repolens und rlens teilen dieselbe Pipeline und erreichen auf vollwertigen Hosts nicht nur Content-, sondern Diagnostic-Paritaet.
   - E2E-Beleg gegen echte Bundle-Manifests via `build_parity_state`+`evaluate_parity_gates`: `merger/lenskit/tests/test_parity.py::test_e2e_repolens_rlens_reach_diagnostic_parity` (alle 15 State-Flags True, 10 Artefakte verglichen, kein left/right-only). Beleg: `docs/proofs/repolens-rlens-diagnostic-parity-proof.md`.
   - Profilgrenze explizit dokumentiert: capability-degradierte iOS/Pythonista-Hosts (kein `jsonschema`/`fts5`) fordern nur Content-Paritaet; siehe `docs/architecture/artifact-capability-matrix.md` (Abschnitt "Diagnostic-Paritaet als Profilgrenze").
-- [x] CLI-Erzwingung und CI-Gate
+- [x] CLI-Erzwingung und parity-relevantes CI-Gate
   - CLI-Erzwingung: `lenskit parity enforce LEFT RIGHT --require {content,diagnostic}` (Default `diagnostic`) in `merger/lenskit/cli/cmd_parity.py`, Exit-Codes 0/1/2, `--json`/`--include-state`. Policy ist profilabhaengig (content fuer degradierte Profile, diagnostic fuer vollwertige Hosts).
-  - CI-Gate: blockierender Workflow `.github/workflows/parity-gate.yml` ("Parity Gate") faehrt die Gate-Suite (`test_parity.py`, `test_parity_state.py`, `test_cli_parity_compare.py`) inkl. `jsonschema`-Runtime-Dependency. Abgegrenzt vom Frontend-Feature-Guard (`parity_check.yml`).
+  - CI-Gate: path-scoped blockierender Workflow `.github/workflows/parity-gate.yml` ("Parity Gate") faehrt die Gate-Suite (`test_parity.py`, `test_parity_state.py`, `test_cli_parity_compare.py`) bei Aenderungen an parity-relevantem Code/Tests/Contracts; inkl. `jsonschema`-Runtime-Dependency. Abgegrenzt vom Frontend-Feature-Guard (`parity_check.yml`).
   - Tests: `merger/lenskit/tests/test_cli_parity_compare.py` (enforce Policy-/Exit-Code-Faelle), `test_parity.py::test_e2e_parity_enforce_cli_on_real_bundles`.
 Diagnosehinweis für Priorisierung:
 - `merge.md` bleibt kanonische Vollquelle; JSON-Artefakte sind Einstieg/Index/Metadaten.
