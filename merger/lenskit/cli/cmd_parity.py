@@ -126,6 +126,23 @@ def run_parity_enforce(args: argparse.Namespace) -> int:
 
     require_level = getattr(args, "require_level", "diagnostic")
 
+    if require_level not in _REQUIRE_LEVELS:
+        payload = {
+            "status": "fail",
+            "error_kind": "invalid_require_level",
+            "message": (
+                f"Invalid --require value: {require_level!r}. "
+                f"Allowed: {', '.join(_REQUIRE_LEVELS)}"
+            ),
+            "required_level": require_level,
+            "allowed": list(_REQUIRE_LEVELS),
+        }
+        if args.emit_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["message"], file=sys.stderr)
+        return 2
+
     try:
         built = build_parity_state(args.left_manifest, args.right_manifest)
     except ParityInputError as e:
@@ -141,8 +158,23 @@ def run_parity_enforce(args: argparse.Namespace) -> int:
 
     if require_level == "content":
         enforced_pass = gates.content_parity_pass
-    else:
+    elif require_level == "diagnostic":
         enforced_pass = gates.content_parity_pass and gates.diagnostic_parity_pass
+    else:
+        # Defensive guard: validated above; unreachable unless _REQUIRE_LEVELS
+        # is extended without adding the corresponding enforce semantics here.
+        payload = {
+            "status": "fail",
+            "error_kind": "unsupported_require_level",
+            "message": f"Unsupported --require value: {require_level!r}",
+            "required_level": require_level,
+            "allowed": list(_REQUIRE_LEVELS),
+        }
+        if args.emit_json:
+            print(json.dumps(payload, indent=2))
+        else:
+            print(payload["message"], file=sys.stderr)
+        return 2
 
     payload = {
         "required_level": require_level,

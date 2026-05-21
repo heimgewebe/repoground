@@ -374,6 +374,34 @@ def test_cli_parity_enforce_exit_2_on_missing_manifest(tmp_path, capsys):
     assert payload["required_level"] == "diagnostic"
 
 
+def test_cli_parity_enforce_rejects_invalid_require_level(tmp_path, capsys):
+    """Unknown require_level values must return exit 2 and a structured error,
+    not silently fall through to the diagnostic branch."""
+    import argparse
+    from merger.lenskit.cli.cmd_parity import run_parity_enforce
+
+    left = _make_bundle(tmp_path / "left")
+    right = _make_bundle(tmp_path / "right")
+
+    args = argparse.Namespace(
+        left_manifest=str(left),
+        right_manifest=str(right),
+        require_level="diagnotic",  # intentional typo
+        emit_json=True,
+        include_state=False,
+    )
+
+    rc = run_parity_enforce(args)
+
+    assert rc == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "fail"
+    assert payload["error_kind"] == "invalid_require_level"
+    assert payload["required_level"] == "diagnotic"
+    assert "content" in payload["allowed"]
+    assert "diagnostic" in payload["allowed"]
+
+
 def test_cli_parity_enforce_include_state(tmp_path, capsys):
     left = _make_bundle(tmp_path / "left")
     right = _make_bundle(tmp_path / "right")
