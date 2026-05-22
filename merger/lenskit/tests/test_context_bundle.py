@@ -318,3 +318,81 @@ def test_cli_rejects_window_lines_without_window_mode(mini_index, capsys):
     assert ret == 1
     captured = capsys.readouterr()
     assert "--context-window-lines requires --context-mode window" in captured.err
+
+
+# --- PR B3: surface-local context_risk hardening ---
+
+_EXPECTED_CONTEXT_RISK = {
+    "retrieval_based_subset": True,
+    "missing_relevant_context_possible": True,
+    "may_answer_from_this_directly": False,
+    "claims_resolve_to": {
+        "content": "canonical_md",
+        "metadata": "bundle_manifest",
+        "schema": "schema",
+        "runtime": "query_trace",
+    },
+    "does_not_prove": [
+        "Absence of a hit does not prove absence in the repository.",
+        "These retrieved snippets do not prove complete or sufficient context.",
+        "Ranking does not prove semantic importance.",
+        "This bundle is an agent context projection, not canonical repository content.",
+    ],
+}
+
+
+def test_context_bundle_declares_context_risk(mini_index):
+    # The producer emits a surface-local context_risk block, and the resulting
+    # bundle still validates against the (additively extended) bundle schema.
+    res = query_core.execute_query(
+        mini_index, query_text="hello", k=5, build_context=True, context_mode="exact"
+    )
+    bundle = res["context_bundle"]
+
+    assert bundle["context_risk"] == _EXPECTED_CONTEXT_RISK
+    # The safety-critical semantics specifically:
+    assert bundle["context_risk"]["may_answer_from_this_directly"] is False
+    assert bundle["context_risk"]["claims_resolve_to"]["content"] == "canonical_md"
+
+    bundle_schema_path = (
+        Path(__file__).parent.parent / "contracts" / "query-context-bundle.v1.schema.json"
+    )
+    bundle_schema = json.loads(bundle_schema_path.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=bundle, schema=bundle_schema)
+
+
+def test_context_bundle_v1_backwards_compatible():
+    # A legacy bundle WITHOUT context_risk must still validate: the field is optional,
+    # so adding it is a non-breaking, additive change for existing consumers/bundles.
+    bundle_schema_path = (
+        Path(__file__).parent.parent / "contracts" / "query-context-bundle.v1.schema.json"
+    )
+    bundle_schema = json.loads(bundle_schema_path.read_text(encoding="utf-8"))
+
+    legacy_bundle = {"query": "hello", "hits": []}
+    jsonschema.validate(instance=legacy_bundle, schema=bundle_schema)
+
+
+def test_context_risk_block_is_deterministic(mini_index):
+    # The block is a constant: two independent runs produce an identical context_risk.
+    res_a = query_core.execute_query(mini_index, query_text="hello", k=5, build_context=True)
+    res_b = query_core.execute_query(mini_index, query_text="hello", k=5, build_context=True)
+    assert res_a["context_bundle"]["context_risk"] == res_b["context_bundle"]["context_risk"]
+
+
+def test_context_risk_survives_agent_minimal_projection(mini_index):
+    # The concrete harm B3 closes: agent_minimal returns the bare bundle, dropping the
+    # query-result-level claim_boundaries. The bundle-level context_risk must survive
+    # the projection so the agent still sees the projection/resolve boundary.
+    from merger.lenskit.retrieval.output_projection import project_output
+
+    res = query_core.execute_query(mini_index, query_text="hello", k=5, build_context=True)
+    projected = project_output(res, "agent_minimal")
+
+    # project_output returns either the bare bundle (direct form) or a wrapper.
+    bundle = projected["context_bundle"] if "context_bundle" in projected else projected
+
+    assert "context_risk" in bundle
+    assert bundle["context_risk"] == _EXPECTED_CONTEXT_RISK
+    # agent_minimal still strips per-hit explain (sanity: we projected the right profile).
+    assert all("explain" not in hit for hit in bundle["hits"])
