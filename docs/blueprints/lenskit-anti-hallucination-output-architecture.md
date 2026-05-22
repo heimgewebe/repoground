@@ -67,32 +67,17 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 - **Nicht-Ziele:** Keine Code-/Schema-Änderung.
 - **Akzeptanz:** Jede Folge-PR referenziert eine Audit-Zeile.
 
-#### PR A1 — Agent Reading Pack Begriffshärtung  (härtet AP D)
+#### PR A1 — Agent Reading Pack Begriffshärtung  (härtet AP D) — **UMGESETZT**
 - **Ziel:** Navigationsbegriffe entschärfen; Importance-Implikation entfernen.
-- **Repo-Befund:** `merger/lenskit/core/agent_reading_pack.py:489` (`## TOP_FILES`); `README.md:35`
-  ("wichtigsten Quelldateien"); `docs/blueprints/lenskit-output-optimierung-v1.md:199-200`
-  ("wichtigste Entry-Points/Contracts" als v2-offene Punkte).
-- **Änderung:**
-  - Heading `## TOP_FILES` → `## TOP_CHUNK_SPANS` (Producer + Tests + Proof-Doku).
-    Untertitel: "größte aggregierte canonical spans nach Chunk-Coverage; **keine**
-    Wichtigkeitsaussage".
-  - Maschinenlesbarer Governance-Block im Pack (HTML-Kommentar/JSON-Fence):
-    `risk_class: navigation`, `may_cite: false`, `must_resolve_to:
-    role_specific_authority`, `does_not_prove: [semantic_importance,
-    architecture_truth, complete_context]` — wiederverwendet das Vokabular aus
-    `merger/lenskit/contracts/agent-query-session.v2.schema.json:91-110`.
-  - README-Beschreibung von TOP_FILES neutral fassen (in dieser Doku-PR vorgezogen).
-- **Nicht-Ziele:** Kein `TOP_LEVEL_ARCHITECTURE`, keine Entry-Point-/Modulzweck-Prosa,
-  keine Claim-Bewertung im Pack.
-- **Akzeptanz:** Pack enthält `TOP_CHUNK_SPANS`, kein `TOP_FILES`; kein Wort
-  "important/wichtigste" in generierten Feldern; `does_not_prove`-Block vorhanden;
-  Determinismus erhalten (byte-identischer Re-Run).
-- **Tests:** `test_agent_pack_uses_top_chunk_spans`,
-  `test_agent_pack_no_important_language`, `test_agent_pack_declares_does_not_prove`,
-  `test_agent_pack_has_no_top_level_architecture`; bestehende
-  `test_agent_reading_pack.py`/`test_cli_agent_pack.py` anpassen.
-- **Risiko:** Snapshot-Erwartungen brechen (gezielt, gewollt). v1-Leser, die nach
-  `## TOP_FILES` grep'en — Migrationsnotiz in `docs/blueprints/lenskit-output-optimierung-v1.md`.
+- **Ergebnis (PR A1 umgesetzt: Producer/Tests/Doku migriert `TOP_FILES → TOP_CHUNK_SPANS`):**
+  - Heading `## TOP_FILES` → `## TOP_CHUNK_SPANS` in Producer + Tests + Proof-Doku.
+  - Maschinenlesbarer Governance-JSON-Block im Pack:
+    `risk_class: navigation`, `may_cite: false`, `must_resolve_to: role_specific_authority`,
+    `does_not_prove: [semantic_importance, architecture_truth, complete_context]`.
+  - README-Beschreibung auf `TOP_CHUNK_SPANS` ohne Wichtigkeitsanspruch.
+  - Neue Negativtests: `test_agent_pack_no_top_files_heading`,
+    `test_agent_pack_no_important_language`, `test_agent_pack_declares_does_not_prove`,
+    `test_agent_pack_governance_block_fields`, `test_agent_pack_has_no_top_level_architecture`.
 
 #### PR A2 — Output Noise Hygiene härten  (härtet #681–#683)
 - **Ziel:** Hard-Exclusion absichern + sichtbar machen; Listendrift beseitigen.

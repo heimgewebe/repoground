@@ -30,8 +30,8 @@ Entscheidung: `reuse` · `harden` · `defer` · `resolve` · `delete`.
 |---|---|---|---|---|---|---|
 | 1 | Reading Policy: `canonical_md` = Wahrheit, JSON = Navigation | DONE | `merger/lenskit/core/agent_reading_pack.py:13-16,411-416`; `docs/blueprints/lenskit-artifact-output-control-plane.md` §2.1; `docs/architecture/artifact-inventory.md` | niedrig | reuse | — |
 | 2 | Agent Reading Pack, `authority=navigation_index`/`derived` | DONE | `merger/lenskit/core/agent_reading_pack.py:381-394`; `merger/lenskit/core/constants.py:22`; `docs/blueprints/lenskit-output-optimierung-v1.md` AP D | niedrig | reuse | — |
-| 3 | `TOP_FILES`-Heading vorhanden | DONE | `merger/lenskit/core/agent_reading_pack.py:489` | mittel (Begriff "TOP" impliziert Wichtigkeit) | harden | A1 |
-| 4 | `TOP_FILES` als "wichtig" beschrieben | DRIFT | **README.md:35** "die wichtigsten Quelldateien"; Pack selbst sagt "by chunk coverage" (`merger/lenskit/core/agent_reading_pack.py:489-494`) | mittel | resolve (README jetzt; Heading-Rename A1) | A1 |
+| 3 | `TOP_FILES`-Heading → `TOP_CHUNK_SPANS` | **DONE (PR A1)** | `merger/lenskit/core/agent_reading_pack.py:488-489`; `merger/lenskit/tests/test_agent_reading_pack.py` (neue Negativtests) | niedrig | — | — |
+| 4 | `TOP_CHUNK_SPANS` + `does_not_prove`-Governance | **DONE (PR A1)** | Governance-JSON-Block in Producer; `README.md:35`; `docs/proofs/agent-reading-pack-producer-proof.md` | niedrig | — | — |
 | 5 | Cache/Tooling-Dirs in canonical/chunk/sqlite | DONE (exkludiert) | `merger/lenskit/core/merge.py:297-314` (`SKIP_DIRS`), Walk-Filter `merger/lenskit/core/merge.py:2277` (#681–#683) | **Plan-Beleg STALE** | reuse + harden | A2 |
 | 6 | Reading Lenses markieren Cache als `core` | PARTIAL (latent) | `merger/lenskit/core/lenses.py:87` (Ultimate-Fallback `core`, keine Exclusion) — Caches erreichen Lens aber nicht (Upstream-Skip) | niedrig-latent | harden (Guard-Test) | A2 |
 | 7 | `output_health=pass` trotz `redact_secrets=false` / `agent_pack=skipped` | DONE (bestätigt) | `merger/lenskit/core/output_health.py:468-469` (Redaction nur protokolliert), `:461-466` (skip = keine Warnung), `:486-491` (Verdict nur aus errors/warnings) | **hoch** (Schein-Agentensicherheit) | harden via separates Gate, **nicht** Health umbiegen | A4/A5 |
@@ -66,13 +66,13 @@ Entscheidung: `reuse` · `harden` · `defer` · `resolve` · `delete`.
 Modulzweck-Behauptungen — er hat keinen `TOP_LEVEL_ARCHITECTURE`-Abschnitt.
 → Diese Substanz muss **gehärtet**, nicht neu gebaut werden.
 
-### 2.2 Bestätigt: `TOP_FILES` ist Begriffsrisiko, vor allem in der README
-Der Pack-Producer beschreibt die Tabelle korrekt als "top N **by chunk coverage**"
-(`:489`) und als "Canonical spans … to read or cite a file's content precisely"
-(`:491-494`) — **keine** Wichtigkeitsaussage. Risiko ist der Heading-Begriff "TOP"
-plus die **README**, die explizit "die **wichtigsten** Quelldateien" sagt
-(`README.md:35`). Das ist die einzige aktive, repo-belegte Importance-Behauptung.
-→ README jetzt korrigieren; Heading-Rename `TOP_FILES → TOP_CHUNK_SPANS` als A1.
+### 2.2 Erledigt (PR A1): `TOP_FILES → TOP_CHUNK_SPANS` + `does_not_prove`-Governance
+`## TOP_FILES` in Producer und Tests zu `## TOP_CHUNK_SPANS` migriert. README
+beschreibt die Sektion jetzt ohne Wichtigkeitsanspruch. Producer enthält
+maschinenlesbaren Governance-Block mit `risk_class: navigation`, `may_cite: false`,
+`does_not_prove: [semantic_importance, architecture_truth, complete_context]`.
+Neue Negativtests: `test_agent_pack_no_top_files_heading`,
+`test_agent_pack_no_important_language`, `test_agent_pack_declares_does_not_prove`.
 
 ### 2.3 STALE: `.ruff_cache` im Output ist bereits behoben
 Der Plan-Beleg (".ruff_cache landet in canonical/chunk/sqlite", "Lenses als core")

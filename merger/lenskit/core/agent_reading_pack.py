@@ -485,12 +485,30 @@ def render_agent_reading_pack(model: PackModel) -> str:
         )
     lines.append("")
 
-    # ── TOP_FILES ────────────────────────────────────────────────────────
-    lines.append(f"## TOP_FILES (top {TOP_FILE_LIMIT} by chunk coverage)")
+    # ── TOP_CHUNK_SPANS ──────────────────────────────────────────────────
+    lines.append(f"## TOP_CHUNK_SPANS (top {TOP_FILE_LIMIT} by chunk coverage)")
+    lines.append(
+        "```json\n"
+        "{\n"
+        '  "artifact": "agent_reading_pack",\n'
+        '  "authority": "navigation_index",\n'
+        '  "canonicality": "derived",\n'
+        '  "risk_class": "navigation",\n'
+        '  "may_cite": false,\n'
+        '  "must_resolve_to": "role_specific_authority",\n'
+        '  "does_not_prove": [\n'
+        '    "semantic_importance",\n'
+        '    "architecture_truth",\n'
+        '    "complete_context"\n'
+        "  ]\n"
+        "}\n"
+        "```"
+    )
     if model.top_files:
         lines.append(
-            "Canonical spans point into `canonical_md`; use them to read or cite a "
-            "file's content precisely. `bytes` is `[start_byte, end_byte)`."
+            "Largest aggregated canonical spans by chunk coverage. Navigation aid only; "
+            "not an importance ranking. Canonical spans point into `canonical_md`; use "
+            "them to read or cite a file's content precisely. `bytes` is `[start_byte, end_byte)`."
         )
         lines.append("| file | repo | chunks | bytes | lines |")
         lines.append("| --- | --- | ---: | --- | --- |")
