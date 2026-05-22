@@ -303,6 +303,53 @@ claim_assessments_supported_unsupported: 0
 kein zweites Profilschema; kein `supported/unsupported`; keine globale Verstehensampel;
 kein Parallelartefakt zu `architecture_summary`; keine Agentenintegration vor C2/A4/A5.
 
+## Agent-facing Output Safety: Vibe-Lab Transfer Boundary
+
+Reconciliation-Notiz (docs-only). Belegbasis:
+`docs/proofs/vibe-lab-transfer-falsification.md`,
+`docs/proofs/anti-hallucination-capability-audit.md`. Diese Notiz baut nichts; sie
+grenzt ab und verweist auf bereits vorhandene Schutzflächen.
+
+### These / Antithese / Synthese
+- **These:** Vibe-Lab liefert nützliche Fehlerklassen für Agentenarbeit.
+- **Antithese:** Vibe-Lab-Strukturen dürfen nicht als Module nach Lenskit wandern.
+- **Synthese:** Lenskit übernimmt nur epistemische Disziplin und Fehlerklassen, keine
+  Vibe-Lab-Governance. Vibe-Lab bleibt Kontrastfolie, nicht Modulquelle.
+
+### Verbindliche Abgrenzung
+Nicht übernommen (kein neues Agent-Operability-Subsystem):
+1. kein `write_change`,
+2. kein `validate_change`,
+3. keine Agent-Command-Chain,
+4. kein generisches Handoff-System,
+5. kein neues Generated-Artifacts-Register,
+6. keine Promotion-Readiness-Control-Plane,
+7. keine automatische Claim-Bewertung (`supported/unsupported`).
+
+### Bestehende Lenskit-Schutzflächen (referenziert, nicht dupliziert)
+- Agent Reading Pack — Navigation, nicht Wahrheit (PR A1; `TOP_CHUNK_SPANS`, `does_not_prove`).
+- Bundle Manifest — Rollen, Authority, Hashes.
+- Citation Map — Belegadressen.
+- Query Result — Claim Boundaries / Evidence-Kontext
+  (`merger/lenskit/contracts/query-result.v1.schema.json` `claim_boundaries`).
+- Agent Query Session — `session_authority = agent_context_projection`
+  (`merger/lenskit/contracts/agent-query-session.v2.schema.json`).
+- Runtime Lookup Artefakte — Beobachtung/Projektion, nicht kanonischer Content.
+- Output Health — Integritätsdiagnostik, **kein** automatisches `agent-safe`.
+
+### Offene Härtung (spätere, nicht-blockierende Themen)
+- Context Bundle kann später `context_risk`/stärkere Claim-Boundaries bekommen (PR B3).
+- `claim_evidence_map` darf, falls nötig, nur `claim → evidence_refs` modellieren —
+  **kein** Wahrheitsverdikt (konsistent mit PR F3 / Audit §2.6).
+- Runtime Boundary Fields bleiben außerhalb dieser Notiz
+  (`docs/proofs/runtime-artifact-metadata-gap-audit.md`).
+
+### Falsifikationskriterien
+Dieser Abschnitt ist falsch, sobald er: neue Artefakte/Schemas/Roadmaps fordert,
+Vibe-Lab-Strukturen kopiert, `claim_evidence_map` als Sofortimplementierung empfiehlt,
+`output_health=pass` als `agent-safe` deutet, oder bestehende Contracts dupliziert statt
+referenziert.
+
 ## 7. Nächster PR
 
 **PR A1 (Agent Reading Pack Begriffshärtung).** Kleinste sinnvolle Code-Einheit mit
