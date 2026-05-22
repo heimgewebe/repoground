@@ -2,9 +2,11 @@
 
 Status: Diagnose-/Design-Notiz (diagnose-first, docs-first).
 Scope: Phase-B-Härtung — Context Risk & Agent-facing Output Safety.
-Diese Notiz **baut nichts**. Sie belegt den Ist-Zustand, isoliert die **eine** reale,
-repo-belegte Lücke und beschreibt die **minimale additive** Härtung, bevor Code
-geändert wird.
+Revision: rev2 — Scope nach Review präzisiert auf **strikte Surface-Lokalität** (kein
+globaler Epistemik-Layer, keine Cross-Artifact-Normalisierung, kein Shared-`$ref`/-
+Registry, kein agent-safe-Verdikt, kein Scoring). Siehe §6a.
+Diese Notiz beschreibt die **minimale additive** Härtung; die Phase-2-Umsetzung folgt
+als kleiner PR B3 entlang dieser Notiz.
 
 Beziehung zu bestehenden Docs (ersetzt nichts):
 - Reihenfolge/Gates: `docs/roadmap/lenskit-master-roadmap.md`
@@ -211,6 +213,13 @@ ergänzen (zu `properties`, **nicht** zu `required`):
 `properties` validieren **sowohl** neue Bundles (mit Feld) **als auch** alte Bundles
 (ohne Feld). Kein Pflichtfeld-Bruch.
 
+Der `context_risk`-Block wird **inline** in genau diesem Contract definiert — **kein**
+`$ref` auf ein geteiltes Definitions-Dokument, **keine** wiederverwendbare
+`definitions/context_risk`-Abstraktion, die andere Contracts importieren könnten (siehe
+§6a). `context_risk` ist die **lokale Risk-Hint-Fläche des Context-Bundles**:
+Retrieval-/Projektions-/Incompleteness-Hinweise plus surface-lokale Resolve-Pointer und
+surface-lokale `does_not_prove`-Aussagen — **kein** generalisierter Epistemik-Container.
+
 ### 5.2 Producer (deterministische Konstante)
 
 In `build_context_bundle()` (`query_core.py:691-779`) am Bundle-Top-Level einen
@@ -236,8 +245,11 @@ bundle["context_risk"] = {
 }
 ```
 
-Die `does_not_prove`-Strings spiegeln die bestehenden Boundaries aus
-`query_core.py:564-576` / `session.py:139-149` — ein Vokabular, keine zweite Sprache.
+**Surface-Lokalität (verbindlich, siehe §6a):** Die `does_not_prove`-Strings werden
+**lokal in `build_context_bundle` inline** definiert. Sie dürfen Formulierungen aus
+`query_core.py:564-576` / `session.py:139-149` **wörtlich wiederholen**, aber es entsteht
+**keine** geteilte Konstante, **kein** exportiertes Modul-Symbol und **kein** Shared-`$ref`.
+Eigentum bleibt bei dieser Surface. Gleiche Phrase ≠ geteiltes Vokabular.
 
 ### 5.3 Determinismus + Migration
 
@@ -273,6 +285,78 @@ Changes ohne Migrationspfad".
 - Die bestehende Pre/Post-Health-Trennung, die Parity-Gate-Semantik und die
   Authority-Registry bleiben unangetastet.
 
+## 6a. Surface-Lokalität — keine globale Epistemik-Schicht
+
+Verbindliche Leitplanke (Review-Vorgabe): `context_risk`/`does_not_prove` bleiben
+**artefakt-lokal, contract-lokal, additiv, nicht-autoritativ, nicht-aggregiert,
+nicht-scorend**. Sie werden **nicht** zu einem globalen Epistemik-Layer, einer
+Truth-Engine oder einer normierten Risk-Ontologie ausgebaut.
+
+### 6a.1 `does_not_prove` je Surface — Eigentum bleibt lokal
+
+Jede Surface besitzt ihre **eigene, inline definierte** Boundary. Es gibt **keine**
+geteilte Definition, die mehrere Contracts importieren.
+
+| Surface | Boundary-Feld (lokal definiert) | Eigentümer-Contract |
+|---|---|---|
+| Query Result | `claim_boundaries` (proves/does_not_prove/evidence_basis/requires_live_check) | `query-result.v1` |
+| Agent Query Session | `session_authority` + `claim_boundaries` (Projektions-Semantik) | `agent-query-session.v2` |
+| **Context Bundle** | **`context_risk` (Retrieval/Projektion/Incompleteness + Resolve-Pointer + lokale `does_not_prove`)** | **`query-context-bundle.v1`** ← diese Härtung |
+| Runtime Lookup (artifact/context/trace) | `authority`/`canonicality`/`artifact_shape` + lokales `claim_boundaries.does_not_prove` | `artifact-/context-/trace-lookup.v1` |
+| Output Health | lokale Integritäts-/Diagnose-Limits (verdict, checks) | `output-health.v1` |
+
+### 6a.2 Warum `does_not_prove` surface-owned bleibt
+
+Beweisgrenzen sind **kontextabhängig**: Was ein Query-Result nicht beweist, ist nicht
+deckungsgleich mit dem, was ein Context-Bundle (gefiltertes Top-k-Subset) oder ein
+Runtime-Trace (Beobachtung) nicht beweist. Eine generische, geteilte Liste würde diese
+Unterschiede verwischen und müsste zwangsläufig in eine **Ontologie erlaubter Aussagen**
+wachsen — genau der zu vermeidende Drift. Lokale Eigentümerschaft hält jede Aussage
+**präzise an ihrer Surface** und vermeidet eine zweite Buchhaltung.
+
+### 6a.3 Warum `context_risk` **kein** generalisiertes Register ist
+
+`context_risk` ist die lokale Risk-Hint-Fläche **nur** des Context-Bundles. Es ist
+**kein** Container für allgemeine Epistemik-Semantik, der nach und nach von einem
+„Risk-Hint-Surface" zu einer versteckten globalen Interpretationsschicht aufstiege.
+Konkrete technische Selbstbindung:
+- **kein** `$ref` / keine `definitions/*`, die andere Contracts referenzieren;
+- **keine** exportierte Producer-Konstante, die mehrere Producer teilen;
+- **kein** Enum/Vokabular „erlaubter" `does_not_prove`-Strings;
+- **keine** Aggregation über Artefakte; **keine** numerischen Scores.
+
+Gleiche **Phrase** darf mehrfach auftauchen (z. B. „Absence of a hit does not prove
+absence in the repository."); geteilt wird die **Phrase**, nie die **Definition** oder
+die **Autorität**.
+
+### 6a.4 Warum Symmetrie bewusst **partiell** bleibt
+
+Es wird **kein** normiertes Top-Level-`claim_boundaries` nur um der Symmetrie willen
+über alle Artefakte gezogen. Jede Surface formuliert ihre Grenzen in **ihrer eigenen
+Form** (Query-Result: `claim_boundaries`; Session: `session_authority`+`claim_boundaries`;
+Bundle: `context_risk`; Lookups: `claim_boundaries.does_not_prove`; Health: Integritäts-
+Limits). Diese gewollte **Asymmetrie** ist die Schutzmaßnahme gegen „eine Ontologie für
+alle epistemischen Grenzen".
+
+### 6a.5 Migrations-/Kompatibilitätswirkung
+
+- **Schema:** additiv, optional → alte Bundles **ohne** `context_risk` bleiben gültig;
+  neue Bundles validieren ebenso (§5.1, §5.3). Kein Bruch von `additionalProperties:
+  false`.
+- **Andere Contracts:** **unverändert.** `context-lookup.v1` akzeptiert das Bundle bereits
+  via `additionalProperties: true` (§5.3); query-result/session/lookups/health werden
+  **nicht** angefasst.
+- **Consumer:** lesen „Feld fehlt" als Legacy/unbekannt, nicht als „kein Risk". Per-Hit-
+  `epistemics` bleiben unverändert.
+- **Determinismus:** konstanter Block (§5.3) → keine Golden-/Byte-Identitäts-Regression.
+
+### 6a.6 Expliziter Nicht-Ziel: keine agent-safe-Verdikt-Schicht
+
+`context_risk` liefert **Hinweise**, **kein Urteil**. Es entsteht **kein**
+`agent_safe`/`safe`/`unsafe`-Feld, kein `output_health=pass ⇒ agent-safe`-Schluss und
+keine Verdikt-Aggregation. Agent-Safe bleibt ausschließlich Sache des separaten Gates
+(A4/A5 `post_emit_health`), nicht dieser Surface.
+
 ## 7. Harte Nicht-Ziele (repo-spezifisch bekräftigt)
 
 Nicht gebaut wird: automatische Claim-Wahrheitsbewertung; `supported/unsupported/true/
@@ -281,6 +365,11 @@ false/proven`; Truth-/Confidence-Score; globale Verstehens-/Risk-Ampel; numerisc
 Promotion-Readiness-Control-Plane; Agent-Command-Chain; `write_change`/`validate_change`;
 generisches Handoff-System; Vibe-Lab-Replik. (Konsistent mit
 `vibe-lab-transfer-falsification.md` und Anti-Hallucination-Blueprint §6.)
+
+Zusätzlich (Review-rev2, siehe §6a): **kein** Cross-Artifact-Normalisierungs-Layer;
+**kein** geteilter `$ref`/`definitions`-Block für `context_risk`/`does_not_prove`;
+**kein** universelles Epistemik-Metadatenmodell; **keine** Cross-Artifact-Authority;
+**keine** Aggregation; **keine** agent-safe-Verdikt-Schicht.
 
 ## 8. Blast Radius (unter Abbruchschwelle ~10 Dateien)
 
@@ -315,15 +404,20 @@ generisches Handoff-System; Vibe-Lab-Replik. (Konsistent mit
 
 - **Hauptrisiko:** Scope-Drift zur „Universal-Risk-Engine". Gegenmittel: §7-Nicht-Ziele,
   ein konstanter Block, ein Contract.
-- **Designoffene Kleinentscheidung (für Review):** `does_not_prove` **innerhalb**
-  `context_risk` (eine neue Top-Level-Eigenschaft, Empfehlung) **vs.** separate
-  Bundle-`claim_boundaries` (zweite neue Eigenschaft, mehr Symmetrie zu
-  query-result/session). Empfehlung: in `context_risk` halten → minimalste Fläche.
+- **Entschieden (rev2, Review):** `does_not_prove` lebt **surface-lokal** im
+  `context_risk`-Block des Bundles, **inline** definiert, **nicht** als geteiltes/
+  normiertes `claim_boundaries`. Keine Cross-Artifact-Symmetrie erzwungen (§6a.4).
+- **Zu prüfender Einzelpunkt (rev2):** Die `claims_resolve_to`-Map ist ein
+  **surface-lokaler Resolve-/Navigations-Pointer**, der die bestehende Reading-Policy
+  (Invariante 10) wiederholt — **kein** neues Authority-Modell, **nicht** geteilt. Falls
+  der Review selbst das als zu nah an einem Authority-Modell bewertet, ist es trivial
+  entfernbar (die drei Booleans + lokales `does_not_prove` tragen den Kern allein).
 - **Unsicherheit ~0,2:** Ob ein Consumer außerhalb des gelesenen Surfaces das Bundle
   strikt re-validiert; mitigiert durch Optional-Feld + Backcompat-Test.
 
 ## 11. Nächster Schritt
 
-Diese Diagnose-/Design-Notiz **zuerst reviewen** (Phase-1-Stop-Kriterium: max. eine kleine
-neue Proof-Datei, keine Roadmap-Neuerfindung — erfüllt). Erst nach Review die additive
-Phase-2-Implementierung (§5, §8) angehen — als kleiner, gezielter PR B3.
+rev1 wurde reviewt; Scope auf strikte Surface-Lokalität präzisiert (rev2, §6a). Die
+additive Phase-2-Umsetzung (§5, §8) erfolgt als kleiner, gezielter PR B3 entlang dieser
+Notiz: optionales `context_risk` im Bundle-Schema + konstanter, inline definierter Block
+im Producer + die vier benannten Tests (§9). Keine anderen Contracts werden angefasst.

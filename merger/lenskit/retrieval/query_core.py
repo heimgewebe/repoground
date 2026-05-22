@@ -776,4 +776,27 @@ def build_context_bundle(query_text: str, results: List[Dict[str, Any]], raw_con
 
         bundle["hits"].append(hit_ctx)
 
+    # Surface-local context risk hints (query-context-bundle.v1 context_risk).
+    # Deterministic constant: this bundle is always a retrieval-selected projection,
+    # never complete repository context. Defined inline here on purpose — these strings
+    # may echo other surfaces' boundaries but are owned by this surface only (no shared
+    # constant, no shared $ref). This is a navigation/projection hint, not a truth verdict.
+    bundle["context_risk"] = {
+        "retrieval_based_subset": True,
+        "missing_relevant_context_possible": True,
+        "may_answer_from_this_directly": False,
+        "claims_resolve_to": {
+            "content": "canonical_md",
+            "metadata": "bundle_manifest",
+            "schema": "schema",
+            "runtime": "query_trace",
+        },
+        "does_not_prove": [
+            "Absence of a hit does not prove absence in the repository.",
+            "These retrieved snippets do not prove complete or sufficient context.",
+            "Ranking does not prove semantic importance.",
+            "This bundle is an agent context projection, not canonical repository content.",
+        ],
+    }
+
     return bundle

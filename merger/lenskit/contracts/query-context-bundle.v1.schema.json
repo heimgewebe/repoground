@@ -140,6 +140,49 @@
           }
         }
       }
+    },
+    "context_risk": {
+      "type": "object",
+      "description": "Surface-local risk hints for this context bundle. Retrieval/projection/incompleteness signals only — not a truth verdict, not a score, not an aggregated or shared epistemic layer. Optional for backwards compatibility; emitted by build_context_bundle for all new bundles.",
+      "additionalProperties": false,
+      "required": [
+        "retrieval_based_subset",
+        "missing_relevant_context_possible",
+        "may_answer_from_this_directly",
+        "claims_resolve_to",
+        "does_not_prove"
+      ],
+      "properties": {
+        "retrieval_based_subset": {
+          "type": "boolean",
+          "description": "True: these hits are a retrieval-selected top-k subset, not the complete repository context."
+        },
+        "missing_relevant_context_possible": {
+          "type": "boolean",
+          "description": "True: relevant context may exist outside this bundle and is not guaranteed to be present."
+        },
+        "may_answer_from_this_directly": {
+          "type": "boolean",
+          "description": "False: this bundle is a navigation/projection surface; answers must be resolved against the authoritative surfaces in claims_resolve_to."
+        },
+        "claims_resolve_to": {
+          "type": "object",
+          "description": "Surface-local resolve pointers restating the existing reading policy (where each claim kind is authoritative). Not a new authority model and not shared across contracts.",
+          "additionalProperties": false,
+          "required": ["content", "metadata", "schema", "runtime"],
+          "properties": {
+            "content": { "const": "canonical_md" },
+            "metadata": { "const": "bundle_manifest" },
+            "schema": { "const": "schema" },
+            "runtime": { "const": "query_trace" }
+          }
+        },
+        "does_not_prove": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Surface-local statements this bundle does not prove. Owned by this contract; phrases may echo other surfaces but are not a shared vocabulary."
+        }
+      }
     }
   }
 }
