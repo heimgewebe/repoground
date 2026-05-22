@@ -491,6 +491,7 @@ def render_agent_reading_pack(model: PackModel) -> str:
         "```json\n"
         "{\n"
         '  "artifact": "agent_reading_pack",\n'
+        '  "applies_to": "TOP_CHUNK_SPANS",\n'
         '  "authority": "navigation_index",\n'
         '  "canonicality": "derived",\n'
         '  "risk_class": "navigation",\n'

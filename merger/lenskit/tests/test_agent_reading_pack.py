@@ -7,6 +7,7 @@ test_bundle_manifest_integration.py.
 """
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from merger.lenskit.core.agent_reading_pack import (
@@ -616,3 +617,23 @@ def test_agent_pack_has_no_top_level_architecture(tmp_path):
     manifest = _make_bundle(tmp_path)
     body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
     assert "top-level architecture" not in body.lower()
+
+
+def test_agent_pack_governance_block_is_valid_json(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    match = re.search(r"```json\n(\{.*?\})\n```", body, re.DOTALL)
+    assert match, "missing governance JSON block"
+    data = json.loads(match.group(1))
+    assert data["artifact"] == "agent_reading_pack"
+    assert data["applies_to"] == "TOP_CHUNK_SPANS"
+    assert data["authority"] == "navigation_index"
+    assert data["canonicality"] == "derived"
+    assert data["risk_class"] == "navigation"
+    assert data["may_cite"] is False
+    assert data["must_resolve_to"] == "role_specific_authority"
+    assert data["does_not_prove"] == [
+        "semantic_importance",
+        "architecture_truth",
+        "complete_context",
+    ]
