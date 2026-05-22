@@ -47,3 +47,17 @@ Dieser Abschnitt dokumentiert ehemalige Inkonsistenzbefunde, die durch aktuellen
 
 ## 5. Architektonische Zusammenfassung
 Die Grundlagen der Phase 1 bis 3 und wesentliche Strukturbausteine der Phase 4 sind für isolierte, lokale Bundles nachvollziehbar implementiert und reduzieren den Drift vor der Cross-Repo-Komplexität erheblich. Für die verbleibenden Gates der Phase 4 (insbesondere API/UI-Struktur und tatsächliche Agenten-Sicherheit) sind jedoch stärkere Integrationstests erforderlich. Die Föderation (Phase 5) ist im aktuellen Stand **partial/minimal** umgesetzt, aber als robuste Architekturphase noch offen; Hardening bleibt eine eigenständige Komplexitätsstufe.
+
+## 6. Anti-Hallucination Output Audit (2026-05-21)
+
+Vollbefund: `docs/proofs/anti-hallucination-capability-audit.md`. Neu sichtbar gemachte
+Drifts/Widersprüche (nicht Phase-0-Altbefunde):
+
+| Befund | Beleg | Status | Folge |
+| :--- | :--- | :--- | :--- |
+| README beschreibt `TOP_FILES` als "wichtigste Quelldateien" (Importance-Claim), Pack-Producer dagegen "by chunk coverage" | `README.md:35` (korrigiert) vs `merger/lenskit/core/agent_reading_pack.py:489-494` | resolved (README) / offen (Heading-Rename PR A1) | `TOP_FILES → TOP_CHUNK_SPANS` |
+| `output_health.verdict=pass` möglich trotz `redact_secrets=false` und `agent_pack=skipped` | `merger/lenskit/core/output_health.py:461-491` | offen (by design der Health-Schicht) | separates Gate `post_emit_health`/agent-safe (PR A4/A5), Health nicht umbiegen |
+| Auto-Claim-Bewertung: AP F verlangt `supported/unsupported` | `docs/blueprints/lenskit-output-optimierung-v1.md` AP F (korrigiert) | resolved | nur `claim → evidence_refs` + `does_not_establish`, kein Verdikt |
+| Zwei Profilnamensschemata | AP E vs `docs/blueprints/lenskit-artifact-output-control-plane.md` §7 | resolved (Mapping) | control-plane-Namen kanonisch |
+| `is_noise_file.noisy_dirs` inkonsistent mit `SKIP_DIRS` | `merger/lenskit/core/merge.py:1772-1780` vs `merger/lenskit/core/merge.py:297-314` | offen | reconcile (PR A2) |
+| `.ruff_cache` im Output (Plan-Beleg) | Plan-extern, Snapshot `lenskit-max-260502-*` | **stale/closed** | bereits behoben durch `SKIP_DIRS` (#681–#683) |

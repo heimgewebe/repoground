@@ -1,5 +1,11 @@
 # Lenskit Output- und Repo-Härtung v1 (Abhakbare Blaupause)
 
+> **Reconciliation (2026-05-21):** Die Anti-Hallucination-Erweiterung dieser Roadmap
+> ist reconciled in `docs/blueprints/lenskit-anti-hallucination-output-architecture.md`,
+> der Befund/Falsifikation in `docs/proofs/anti-hallucination-capability-audit.md`.
+> Dort sind die Arbeitspakete A–H auf die Anti-Hallucination-PRs (A1–A5, B1–B3, C1–C2,
+> D, E, F1–F3, G) abgebildet, inkl. der epistemischen Korrektur an Arbeitspaket F.
+
 ## These / Antithese / Synthese
 
 ### These
@@ -192,12 +198,20 @@
 - [x] Query-/Retrieval-Fluss (`HOW_TO_SEARCH` mit konkreten CLI-Befehlen: FTS-Query, `range get`, Citation-Map)
 - [x] Output-Health-Summary (Verdict + Kernchecks aus `output_health.json`)
 - [x] Top-30-Dateien mit Range-Refs (`TOP_FILES`: canonical Byte-/Zeilenspannen je Quelldatei)
+  - **Migrationsnotiz (2026-05-21):** Heading `TOP_FILES → TOP_CHUNK_SPANS` (PR A1),
+    da "TOP" Wichtigkeit impliziert; gemeint ist Chunk-Coverage, keine Wichtigkeit.
+    Bis dahin gilt `TOP_FILES` als deprecated-aber-lesbar. Siehe
+    `docs/blueprints/lenskit-anti-hallucination-output-architecture.md`.
 - [x] Epistemische Leere: fehlende/erwartete Artefakte werden explizit ausgewiesen
 
 ### Inhalt (für v2 offen, im Pack als epistemische Leere markiert)
-- [ ] Top-Level-Architektur (Embed/Verdichtung von `architecture_summary`)
-- [ ] wichtigste Entry-Points
-- [ ] wichtigste Contracts (dedizierter Abschnitt; Rollen→Contract-Mapping)
+> **Guardrail:** Diese Punkte dürfen **keine** unqualifizierten Importance-/Purpose-/
+> Architektur-Behauptungen erzeugen. Erlaubt sind nur heuristische Kandidaten
+> (`selection_basis`, `confidence`, `not_evidence:true`) oder repo-deklarierte
+> Aussagen aus `.lenskit/`. Keine freie Architektur-Prosa.
+- [ ] Top-Level-Architektur (nur als Embed/Verdichtung von `architecture_summary`, diagnostisch)
+- [ ] Entry-Point-**Kandidaten** (heuristisch, `not_evidence:true`)
+- [ ] Contracts-Abschnitt (Rollen→Contract-Mapping; mechanisch, keine Wichtigkeitsaussage)
 - [ ] Artifact-Lookup/Trace/Context-Lookup-Fluss
 - [ ] Driftpunkte
 - [ ] Claim-Evidence-Map (hängt an Arbeitspaket F)
@@ -219,14 +233,20 @@
 
 ## Arbeitspaket E — Output-Profile trennen (Optimierungsgrad 0.70)
 
-### Ziel
-- [ ] Profile nach Verwendungszweck trennen.
+> **Namens-Reconciliation (2026-05-21):** Es existieren zwei Profilnamensschemata
+> (hier vs. `docs/blueprints/lenskit-artifact-output-control-plane.md` §7). **Kanonisch
+> sind die control-plane-Namen** (`lean-readable`, `lean-evidence`, `agent-portable`,
+> `local-search`, `debug-full`, `forensic-strict`). Die folgenden Namen bleiben als
+> Verwendungsabsicht/Alias bestehen und mappen wie folgt:
 
-### Profile
-- [ ] `max-private`: include_hidden=true, redact_secrets=false, full content.
-- [ ] `agent-safe`: include_hidden=true, redact_secrets=true, output_health required.
-- [ ] `public-review`: include_hidden=false, redact_secrets=true, keine privaten Pfade.
-- [ ] `ci-diagnostic`: metadata+ranges, kein full content.
+### Ziel
+- [ ] Profile nach Verwendungszweck trennen (kanonische Namen aus control-plane §7).
+
+### Profile (Intent → kanonisches Profil)
+- [ ] `max-private` → intern (`debug-full`/lokal), `agent_export=false`, redact_secrets=false.
+- [ ] `agent-safe` → `agent-portable` **+ `redact_secrets=true` + `post_emit_health` required**.
+- [ ] `public-review` → `lean-evidence`/`agent-portable`, `include_hidden=false`, redact_secrets=true.
+- [ ] `ci-diagnostic` → `debug-full` (metadata+ranges-Fokus), agent_export=false.
 
 ### Tests
 - [ ] `test_profile_agent_safe_redacts.py`
@@ -237,13 +257,22 @@
 
 ## Arbeitspaket F — Claim-Evidence-Map (Optimierungsgrad 0.76)
 
+> **Epistemische Korrektur (2026-05-21):** Die ursprüngliche Formulierung
+> ("supported / unsupported" pro Claim) ist zurückgezogen. Lenskit darf Belege
+> **adressieren**, nicht **bewerten** — `supported/unsupported/true/false/proven`
+> ist eine LLM-/Review-Aufgabe, kein Lenskit-Output. Auflösung des Widerspruchs siehe
+> `docs/proofs/anti-hallucination-capability-audit.md` §2.6 und
+> `docs/blueprints/lenskit-anti-hallucination-output-architecture.md` (PR F1–F3).
+
 ### Ziel
-- [ ] `<stem>.claim_evidence_map.json` einführen.
+- [ ] `<stem>.claim_evidence_map.json` einführen — **nur Referenz, kein Verdikt**.
 - [ ] Pro Claim maschinenlesbar ausweisen:
-  - [ ] supported / unsupported
-  - [ ] evidenztragende Artefakte + Range-Refs
-  - [ ] does_not_prove
-  - [ ] requires_live_check
+  - [ ] `claim → evidence_refs` (evidenztragende Artefakte + Range-Refs)
+  - [ ] `relation: citation_attached`
+  - [ ] `does_not_establish` (`truth`, `sufficiency`, `causality`, `completeness`)
+  - [ ] `requires_live_check`
+- [ ] **Verboten:** `supported`, `unsupported`, `true`, `false`, `proven`,
+  `auto_extracted`.
 
 ---
 

@@ -285,3 +285,11 @@ PR 6 (Artifact Output Control Plane, docs-first):
 - [x] `docs/architecture/artifact-evidence-levels.md`
 - Ziel: Profile als Presets dokumentieren, Evidence-Level von Profilnamen trennen und Pre-/Post-Health als zweistufiges Modell festlegen.
 - Hinweis: `content_parity_pass`/`diagnostic_parity_pass` bleiben dokumentierte Testsemantik und werden hier nicht als bereits erzwungenes Runtime-Gate umdefiniert.
+
+PR 7 (Anti-Hallucination Output Architecture, docs-first):
+- [x] `docs/proofs/anti-hallucination-capability-audit.md` (Befund/Falsifikation Plan vs. Repo)
+- [x] `docs/blueprints/lenskit-anti-hallucination-output-architecture.md` (reconciled Roadmap)
+- Ziel: Output-/Beleg-Härtung risiko-getaktet vor neue Agentenintegrationen stellen; bestehende Arbeitspakete A–H härten statt duplizieren.
+- Epistemische Korrektur: keine Auto-Claim-Bewertung (`supported/unsupported`); Lenskit adressiert Belege, bewertet sie nicht (`docs/blueprints/lenskit-output-optimierung-v1.md` AP F angepasst).
+- Gate: keine neuen gated Integrationen (MCP/Task Pack/Dashboard) vor Anti-Hallucination-Lint + agent-safe Gate + `context_risk`-Pflicht.
+- Nächster Umsetzungs-PR: A1 (`TOP_FILES → TOP_CHUNK_SPANS` + `does_not_prove`-Block im Agent Reading Pack).
