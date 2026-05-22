@@ -709,7 +709,7 @@ def test_agent_reading_pack_emitted_schema_valid_and_hashed(tmp_path):
     assert "| agent_reading_pack |" not in body
     # It should reference the bundle's truth anchor and health verdict.
     assert "## OUTPUT_HEALTH_SUMMARY" in body
-    assert "## TOP_FILES" in body
+    assert "## TOP_CHUNK_SPANS" in body
 
 
 def test_bundle_manifest_canonical_dump_index_sha_matches_dump_index_artifact(tmp_path):

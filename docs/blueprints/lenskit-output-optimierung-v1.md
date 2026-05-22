@@ -197,11 +197,9 @@
 - [x] Artefaktrollen (maschinenlesbare Tabelle aus dem Bundle-Manifest)
 - [x] Query-/Retrieval-Fluss (`HOW_TO_SEARCH` mit konkreten CLI-Befehlen: FTS-Query, `range get`, Citation-Map)
 - [x] Output-Health-Summary (Verdict + Kernchecks aus `output_health.json`)
-- [x] Top-30-Dateien mit Range-Refs (`TOP_FILES`: canonical Byte-/Zeilenspannen je Quelldatei)
-  - **Migrationsnotiz (2026-05-21):** Heading `TOP_FILES → TOP_CHUNK_SPANS` (PR A1),
-    da "TOP" Wichtigkeit impliziert; gemeint ist Chunk-Coverage, keine Wichtigkeit.
-    Bis dahin gilt `TOP_FILES` als deprecated-aber-lesbar. Siehe
-    `docs/blueprints/lenskit-anti-hallucination-output-architecture.md`.
+- [x] Top-30 nach Chunk-Coverage: `TOP_CHUNK_SPANS` (canonical Byte-/Zeilenspannen je Quelldatei)
+  - Navigationshilfe; keine Wichtigkeitsaussage. Governance-Block mit `does_not_prove` im Pack.
+  - (Früher `TOP_FILES`; migriert PR A1, 2026-05-22.)
 - [x] Epistemische Leere: fehlende/erwartete Artefakte werden explizit ausgewiesen
 
 ### Inhalt (für v2 offen, im Pack als epistemische Leere markiert)

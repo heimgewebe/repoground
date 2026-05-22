@@ -7,6 +7,7 @@ test_bundle_manifest_integration.py.
 """
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from merger.lenskit.core.agent_reading_pack import (
@@ -178,7 +179,7 @@ def test_pack_has_governance_and_sentinel(tmp_path):
         "## ARTIFACT_ROLES",
         "## OUTPUT_HEALTH_SUMMARY",
         "## HOW_TO_SEARCH",
-        "## TOP_FILES",
+        "## TOP_CHUNK_SPANS",
         "## EPISTEMIC_EMPTINESS",
     ):
         assert section in body, f"missing section {section}"
@@ -570,3 +571,69 @@ def test_compute_top_files_conflicting_fallback_repo_ids_are_omitted(tmp_path):
     # Both candidates are still tracked in the global repos set.
     assert "search-repo" in repos
     assert "chunk-repo" in repos
+
+
+# ---------------------------------------------------------------------------
+# A1 Begriffshärtung: TOP_FILES → TOP_CHUNK_SPANS + does_not_prove governance
+# ---------------------------------------------------------------------------
+
+def test_agent_pack_uses_top_chunk_spans(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    assert "## TOP_CHUNK_SPANS" in body
+
+
+def test_agent_pack_no_top_files_heading(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    assert "## TOP_FILES" not in body
+
+
+def test_agent_pack_declares_does_not_prove(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    assert "does_not_prove" in body
+    assert "semantic_importance" in body
+    assert "architecture_truth" in body
+    assert "complete_context" in body
+
+
+def test_agent_pack_governance_block_fields(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    assert '"risk_class": "navigation"' in body
+    assert '"may_cite": false' in body
+    assert '"must_resolve_to": "role_specific_authority"' in body
+
+
+def test_agent_pack_no_important_language(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    for forbidden in ["most important", "wichtigste", "top-level architecture"]:
+        assert forbidden not in body.lower(), f"forbidden phrase in pack: {forbidden!r}"
+
+
+def test_agent_pack_has_no_top_level_architecture(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    assert "top-level architecture" not in body.lower()
+
+
+def test_agent_pack_governance_block_is_valid_json(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    match = re.search(r"```json\n(\{.*?\})\n```", body, re.DOTALL)
+    assert match, "missing governance JSON block"
+    data = json.loads(match.group(1))
+    assert data["artifact"] == "agent_reading_pack"
+    assert data["applies_to"] == "TOP_CHUNK_SPANS"
+    assert data["authority"] == "navigation_index"
+    assert data["canonicality"] == "derived"
+    assert data["risk_class"] == "navigation"
+    assert data["may_cite"] is False
+    assert data["must_resolve_to"] == "role_specific_authority"
+    assert data["does_not_prove"] == [
+        "semantic_importance",
+        "architecture_truth",
+        "complete_context",
+    ]

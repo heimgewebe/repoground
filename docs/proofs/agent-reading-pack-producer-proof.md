@@ -44,7 +44,13 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
 - Sentinel: `<!-- ARTIFACT:agent_reading_pack VERSION:v1 AUTHORITY:navigation_index CANONICALITY:derived -->`
 - Banner: `NAVIGATION, NOT TRUTH`
 - `## BUNDLE_IDENTITY`, `## READING_POLICY`, `## ARTIFACT_ROLES`, `## OUTPUT_HEALTH_SUMMARY`,
-  `## HOW_TO_SEARCH`, `## TOP_FILES`, `## EPISTEMIC_EMPTINESS`
+  `## HOW_TO_SEARCH`, `## TOP_CHUNK_SPANS`, `## EPISTEMIC_EMPTINESS`
+- Governance-Block in `## TOP_CHUNK_SPANS`: maschinenlesbares JSON mit `applies_to: TOP_CHUNK_SPANS`,
+  `risk_class: navigation`, `may_cite: false`, `must_resolve_to: role_specific_authority`,
+  `does_not_prove: [semantic_importance, architecture_truth, complete_context]`
+- (Migriert aus `## TOP_FILES`, PR A1; interne Konstante `TOP_FILE_LIMIT → TOP_CHUNK_SPAN_LIMIT`)
+- Follow-up (post-A1): interne Legacy-Namen `top_files`, `compute_top_files`, `top_file_count`
+  bleiben in A1 unverändert (öffentliches Output-Feld / Test-API); separater Cleanup geplant.
 - `health_verdict`: `pass`
 - `top_file_count`: 3 (canonical Byte-/Zeilenspannen je Quelldatei)
 - `artifact_role_count`: 8

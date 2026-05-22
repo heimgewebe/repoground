@@ -32,10 +32,9 @@ Der Pack fasst zusammen:
 - **Reading Policy** + Artefaktrollen (welches Artefakt was aussagen darf),
 - **HOW_TO_SEARCH**: konkrete CLI-Befehle für Volltextsuche, Range-Auflösung und Citations,
 - **OUTPUT_HEALTH_SUMMARY**: Selbsttest-Verdict des Bundles,
-- **TOP_FILES**: die nach Chunk-Coverage größten aggregierten canonical Spans je
+- **TOP_CHUNK_SPANS**: die nach Chunk-Coverage größten aggregierten canonical Spans je
   Quelldatei (Navigationshilfe für präzises Zitieren in `canonical_md`) — **keine**
-  Wichtigkeitsaussage; Begriff wird zu `TOP_CHUNK_SPANS` migriert (siehe
-  `docs/blueprints/lenskit-anti-hallucination-output-architecture.md`, PR A1).
+  Wichtigkeitsaussage. (Früher: `TOP_FILES`.)
 - **EPISTEMIC_EMPTINESS**: was im Bundle fehlt.
 
 Standalone erzeugen oder regenerieren:
