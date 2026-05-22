@@ -45,8 +45,8 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
 - Banner: `NAVIGATION, NOT TRUTH`
 - `## BUNDLE_IDENTITY`, `## READING_POLICY`, `## ARTIFACT_ROLES`, `## OUTPUT_HEALTH_SUMMARY`,
   `## HOW_TO_SEARCH`, `## TOP_CHUNK_SPANS`, `## EPISTEMIC_EMPTINESS`
-- Governance-Block in `## TOP_CHUNK_SPANS`: maschinenlesbares JSON mit `risk_class: navigation`,
-  `may_cite: false`, `must_resolve_to: role_specific_authority`,
+- Governance-Block in `## TOP_CHUNK_SPANS`: maschinenlesbares JSON mit `applies_to: TOP_CHUNK_SPANS`,
+  `risk_class: navigation`, `may_cite: false`, `must_resolve_to: role_specific_authority`,
   `does_not_prove: [semantic_importance, architecture_truth, complete_context]`
 - (Migriert aus `## TOP_FILES`, PR A1)
 - `health_verdict`: `pass`

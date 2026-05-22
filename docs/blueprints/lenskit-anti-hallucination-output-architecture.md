@@ -72,12 +72,14 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 - **Ergebnis (PR A1 umgesetzt: Producer/Tests/Doku migriert `TOP_FILES → TOP_CHUNK_SPANS`):**
   - Heading `## TOP_FILES` → `## TOP_CHUNK_SPANS` in Producer + Tests + Proof-Doku.
   - Maschinenlesbarer Governance-JSON-Block im Pack:
-    `risk_class: navigation`, `may_cite: false`, `must_resolve_to: role_specific_authority`,
+    `applies_to: TOP_CHUNK_SPANS`, `risk_class: navigation`, `may_cite: false`,
+    `must_resolve_to: role_specific_authority`,
     `does_not_prove: [semantic_importance, architecture_truth, complete_context]`.
   - README-Beschreibung auf `TOP_CHUNK_SPANS` ohne Wichtigkeitsanspruch.
   - Neue Negativtests: `test_agent_pack_no_top_files_heading`,
     `test_agent_pack_no_important_language`, `test_agent_pack_declares_does_not_prove`,
-    `test_agent_pack_governance_block_fields`, `test_agent_pack_has_no_top_level_architecture`.
+    `test_agent_pack_governance_block_fields`, `test_agent_pack_has_no_top_level_architecture`,
+    `test_agent_pack_governance_block_is_valid_json` (JSON parsen, nicht nur strings).
 
 #### PR A2 — Output Noise Hygiene härten  (härtet #681–#683)
 - **Ziel:** Hard-Exclusion absichern + sichtbar machen; Listendrift beseitigen.

@@ -69,10 +69,12 @@ Modulzweck-Behauptungen — er hat keinen `TOP_LEVEL_ARCHITECTURE`-Abschnitt.
 ### 2.2 Erledigt (PR A1): `TOP_FILES → TOP_CHUNK_SPANS` + `does_not_prove`-Governance
 `## TOP_FILES` in Producer und Tests zu `## TOP_CHUNK_SPANS` migriert. README
 beschreibt die Sektion jetzt ohne Wichtigkeitsanspruch. Producer enthält
-maschinenlesbaren Governance-Block mit `risk_class: navigation`, `may_cite: false`,
+maschinenlesbaren Governance-Block mit `applies_to: TOP_CHUNK_SPANS`,
+`risk_class: navigation`, `may_cite: false`,
 `does_not_prove: [semantic_importance, architecture_truth, complete_context]`.
 Neue Negativtests: `test_agent_pack_no_top_files_heading`,
-`test_agent_pack_no_important_language`, `test_agent_pack_declares_does_not_prove`.
+`test_agent_pack_no_important_language`, `test_agent_pack_declares_does_not_prove`,
+`test_agent_pack_governance_block_is_valid_json` (JSON via json.loads geparst).
 
 ### 2.3 STALE: `.ruff_cache` im Output ist bereits behoben
 Der Plan-Beleg (".ruff_cache landet in canonical/chunk/sqlite", "Lenses als core")
