@@ -97,7 +97,7 @@ Ensures that only actual parent-directory names trigger noise classification.
 - Consolidated skip/noise definition via `_BUILD_AND_CACHE_DIRS`
 - Added `.cache` and `coverage` to `_BUILD_AND_CACHE_DIRS` / `SKIP_DIRS` (were missing)
 - Updated `is_noise_file()` to use `_BUILD_AND_CACHE_DIRS` via exact parent-directory component matching, preventing substring false positives (e.g., `src/mycoverage/` does not match `coverage`)
-- Added 5 regression tests proving real output surface exclusion and false-positive prevention
+- Added regression tests covering noise classification, traversal exclusion, hidden-path preservation, manifest annotation, single-source validation, and substring false-positive prevention
 - `excluded_noise` output_health diagnostic: **not implemented in this PR** — traversal does not yet surface skipped-dir counts (see Deferred section)
 
 ### What Did NOT Change
