@@ -1,0 +1,291 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/context-quality.v1.schema.json",
+  "title": "Context Quality Signals (context-quality v1.0)",
+  "description": "A machine-readable diagnostic PROJECTION of existing bundle, health, retrieval, and export-gate signals. It makes context conditions visible. It is not a truth source, not an understanding verdict, not a retrieval-completeness proof, not an answer-safety gate, not a global score, and not a claim judgment. authority is always diagnostic_signal and risk_class is always diagnostic.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "checked_at",
+    "bundle_manifest_path",
+    "bundle_run_id",
+    "projection_status",
+    "authority",
+    "risk_class",
+    "signals",
+    "agent_use_constraints",
+    "does_not_mean",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.context_quality"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique id for this projection run (not the bundle run)."
+    },
+    "checked_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp of the projection."
+    },
+    "bundle_manifest_path": {
+      "type": "string",
+      "description": "Absolute path to the projected bundle manifest."
+    },
+    "bundle_run_id": {
+      "type": ["string", "null"],
+      "description": "run_id of the projected bundle manifest, when available."
+    },
+    "projection_status": {
+      "type": "string",
+      "enum": ["complete", "degraded", "blocked"],
+      "description": "Projection completeness only; NOT context quality, NOT repository understanding, NOT answer safety. complete = manifest readable and every projected signal source was available without warnings. degraded = manifest readable but one or more optional signal sources were unavailable or produced a warning. blocked = the manifest could not be read or is not a repolens.bundle.manifest, so no projection could be made."
+    },
+    "authority": {
+      "type": "string",
+      "const": "diagnostic_signal",
+      "description": "This artifact warns; it does not prove."
+    },
+    "risk_class": {
+      "type": "string",
+      "const": "diagnostic"
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "manifest",
+        "output_health",
+        "post_emit_health",
+        "retrieval_eval",
+        "agent_export_gate",
+        "evidence"
+      ],
+      "properties": {
+        "manifest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "kind": { "type": ["string", "null"] },
+            "version": { "type": ["string", "null"] },
+            "run_id": { "type": ["string", "null"] },
+            "roles_present": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "key_roles": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "canonical_md",
+                "agent_reading_pack",
+                "chunk_index_jsonl",
+                "citation_map_jsonl",
+                "output_health",
+                "retrieval_eval_json",
+                "sqlite_index"
+              ],
+              "properties": {
+                "canonical_md": { "type": "boolean" },
+                "agent_reading_pack": { "type": "boolean" },
+                "chunk_index_jsonl": { "type": "boolean" },
+                "citation_map_jsonl": { "type": "boolean" },
+                "output_health": { "type": "boolean" },
+                "retrieval_eval_json": { "type": "boolean" },
+                "sqlite_index": { "type": "boolean" }
+              }
+            }
+          }
+        },
+        "output_health": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "source": { "type": ["string", "null"] },
+            "reason": { "type": "string" },
+            "verdict_observed": {
+              "type": ["string", "null"],
+              "description": "Observed output_health.verdict (observation only; never inferred, never a context-quality verdict)."
+            },
+            "checks": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "canonical_md_hash_ok": { "type": ["boolean", "null"] },
+                "chunk_index_hash_ok": { "type": ["boolean", "null"] },
+                "sqlite_row_count_matches_chunk_count": { "type": ["boolean", "null"] },
+                "fts_content_non_empty": { "type": ["boolean", "null"] },
+                "range_ref_resolution_status": { "type": ["string", "null"] },
+                "redaction_status_explicit": { "type": ["boolean", "null"] },
+                "redact_secrets_enabled": { "type": ["boolean", "null"] }
+              }
+            }
+          }
+        },
+        "post_emit_health": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "source": { "type": ["string", "null"] },
+            "reason": { "type": "string" },
+            "status_observed": {
+              "type": ["string", "null"],
+              "description": "Observed post_emit_health.status (projection only; never re-derived; never an answer-safety statement)."
+            },
+            "evidence_level": { "type": ["string", "null"] },
+            "evidence_levels_reached": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "does_not_mean": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "retrieval_eval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "source": { "type": ["string", "null"] },
+            "reason": { "type": "string" },
+            "metrics": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "description": "Mechanical retrieval metrics projected as-is. Not a completeness proof.",
+              "properties": {
+                "recall@10": { "type": ["number", "null"] },
+                "MRR": { "type": ["number", "null"] },
+                "total_queries": { "type": ["integer", "null"] },
+                "hits": { "type": ["integer", "null"] },
+                "zero_hit_ratio": { "type": ["number", "null"] },
+                "stale_flag": { "type": ["boolean", "null"] }
+              }
+            },
+            "categories": {
+              "type": ["array", "null"],
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["category"],
+                "properties": {
+                  "category": { "type": "string" },
+                  "total_queries": { "type": ["integer", "null"] },
+                  "hits": { "type": ["integer", "null"] },
+                  "MRR": { "type": ["number", "null"] },
+                  "recall@10": { "type": ["number", "null"] }
+                }
+              }
+            }
+          }
+        },
+        "agent_export_gate": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "source": { "type": ["string", "null"] },
+            "reason": { "type": "string" },
+            "status_observed": {
+              "type": ["string", "null"],
+              "description": "Observed export-gate result (observation only; never reinterpreted as claim truth or answer safety)."
+            },
+            "profile_observed": { "type": ["string", "null"] },
+            "agent_facing_observed": { "type": ["boolean", "null"] }
+          }
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["available"],
+          "properties": {
+            "available": { "type": "boolean" },
+            "source": { "type": ["string", "null"] },
+            "evidence_level": {
+              "type": ["string", "null"],
+              "enum": [
+                "readable",
+                "navigable",
+                "citable",
+                "range_strict",
+                "searchable",
+                "diagnostic_full",
+                "forensic_strict",
+                null
+              ],
+              "description": "Reuses the existing evidence-level vocabulary (docs/architecture/artifact-evidence-levels.md). No new levels are invented."
+            },
+            "evidence_levels_reached": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "readable",
+                  "navigable",
+                  "citable",
+                  "range_strict",
+                  "searchable",
+                  "diagnostic_full",
+                  "forensic_strict"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "agent_use_constraints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 5,
+      "description": "How an agent must treat this projection. These are usage constraints, not verdicts.",
+      "allOf": [
+        { "contains": { "const": "verify_content_against_canonical_md" } },
+        { "contains": { "const": "cite_canonical_ranges_for_claims" } },
+        { "contains": { "const": "do_not_treat_context_quality_as_repo_understanding" } },
+        { "contains": { "const": "do_not_treat_retrieval_metrics_as_completeness_proof" } },
+        { "contains": { "const": "do_not_treat_export_gate_as_claim_truth" } }
+      ]
+    },
+    "does_not_mean": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 4,
+      "description": "Disclaimers of what this projection deliberately does NOT establish. These are NOT claim verdicts.",
+      "allOf": [
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "retrieval_complete" } },
+        { "contains": { "const": "answer_safe_without_citations" } },
+        { "contains": { "const": "claims_true" } }
+      ]
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

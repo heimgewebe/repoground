@@ -30,6 +30,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_bundle_health import register_bundle_health_commands
     register_bundle_health_commands(subparsers)
 
+    # Context quality command (diagnostic projection)
+    from .cmd_context_quality import register_context_quality_commands
+    register_context_quality_commands(subparsers)
+
     # Federation command
     from .cmd_federation import register_federation_commands
     register_federation_commands(subparsers)
@@ -265,6 +269,13 @@ def main(args: Optional[List[str]] = None) -> int:
             return run_bundle_health_export_gate(parsed_args)
         else:
             parser.parse_args(["bundle-health", "--help"])
+            return 0
+    elif parsed_args.command == "context-quality":
+        from .cmd_context_quality import run_context_quality_inspect
+        if parsed_args.context_quality_cmd == "inspect":
+            return run_context_quality_inspect(parsed_args)
+        else:
+            parser.parse_args(["context-quality", "--help"])
             return 0
     elif parsed_args.command == "federation":
         from .cmd_federation import handle_federation_command

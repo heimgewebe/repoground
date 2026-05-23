@@ -155,18 +155,33 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 
 ### Milestone B — Kontextqualität und Retrieval-Realismus
 
-#### PR B1 — Context Quality Signals  (scope: Projektion, kein neuer Wahrheitslayer)
+#### PR B1 — Context Quality Signals  (scope: Projektion, kein neuer Wahrheitslayer) — **UMGESETZT**
 - **Ziel:** Kontextbedingungen transparent machen — **keine** globale Verstehensampel.
-- **Repo-Befund:** überlappt `docs/architecture/artifact-evidence-levels.md`; kein `context_quality.json`.
-- **Änderung:** `<stem>.context_quality.json` als **Projektion** vorhandener Signale
-  (Health-Checks + erreichter Evidence-Level + Retrieval-Diagnose), `authority:
-  diagnostic_signal`, `risk_class: diagnostic`, mit `agent_use_constraints` und
-  `does_not_mean: [repo_understood, retrieval_complete, …]`. **Kein**
-  `understanding_health`, **kein** Gesamt-Score.
-- **Nicht-Ziele:** Keine neue Bewertung; keine Aggregation zu einer Ampel.
-- **Akzeptanz:** Lint (C2) findet keinen globalen Verstehens-Verdict.
-- **Tests:** `test_context_quality_has_no_global_understanding_verdict`,
-  `test_context_quality_is_projection_of_existing_signals`.
+- **Repo-Befund (Stand nach B1):** `context_quality` ist umgesetzt; `<stem>.context_quality.json`
+  überlappt bewusst nicht `docs/architecture/artifact-evidence-levels.md`, sondern **projiziert**
+  den dort definierten erreichten Evidence-Level (aus `post_emit_health`) zusammen mit weiteren
+  vorhandenen Signalen. (Frühere Annahme „kein `context_quality.json`" ist überholt.)
+- **Ergebnis (PR B1 umgesetzt: Schema/Core/CLI/Tests/Proof additiv):**
+  - `merger/lenskit/contracts/context-quality.v1.schema.json` (neuer lokaler Contract).
+  - `merger/lenskit/core/context_quality.py` — `compute_context_quality` (rein) +
+    `write_context_quality` (optional persistierend, **keine** Manifest-Mutation/-Registrierung).
+  - `<stem>.context_quality.json` als **Projektion** vorhandener Signale (Manifest-Rollen +
+    `output_health`-Checks + `post_emit_health`-Status/Evidence-Level + `retrieval_eval`-Metriken
+    + optional `agent_export_gate`), `authority: diagnostic_signal`, `risk_class: diagnostic`, mit
+    `agent_use_constraints` und `does_not_mean: [repo_understood, retrieval_complete,
+    answer_safe_without_citations, claims_true]`. **Kein** `understanding_health`, **kein**
+    Gesamt-Score. Kopf-Feld ist `projection_status` (`complete|degraded|blocked`), **kein**
+    globaler Verdict.
+  - CLI `lenskit context-quality inspect <manifest> [--json] [--emit-artifact] [--output PATH]`.
+  - Tests: `merger/lenskit/tests/test_context_quality.py`,
+    `merger/lenskit/tests/test_cli_context_quality.py` (inkl. der benannten Invarianten
+    „has_no_global_understanding_verdict" und „is_projection_of_existing_signals" in
+    `test_named_blueprint_invariants`, plus Forbidden-Vocabulary-Walk).
+  - Beleg: `docs/proofs/context-quality-signals-proof.md`.
+- **Nicht-Ziele (eingehalten):** Keine neue Bewertung; keine Aggregation zu einer Ampel; keine
+  Claim-Wahrheit; **keine** B2 Miss-Klassifikation (bleibt separat).
+- **Akzeptanz:** Kein globaler Verstehens-Verdict im Artefakt (Negativtest grün); C2-Lint kann
+  später dieselbe Invariante erzwingen.
 - **Risiko:** Doppelung mit Evidence-Level — daher strikt als Projektion definiert.
 
 #### PR B2 — Retrieval Miss Taxonomy  (neu, über AP-Eval)

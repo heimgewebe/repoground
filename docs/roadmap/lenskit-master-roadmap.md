@@ -292,4 +292,37 @@ PR 7 (Anti-Hallucination Output Architecture, docs-first):
 - Ziel: Output-/Beleg-Härtung risiko-getaktet vor neue Agentenintegrationen stellen; bestehende Arbeitspakete A–H härten statt duplizieren.
 - Epistemische Korrektur: keine Auto-Claim-Bewertung (`supported/unsupported`); Lenskit adressiert Belege, bewertet sie nicht (`docs/blueprints/lenskit-output-optimierung-v1.md` AP F angepasst).
 - Gate: keine neuen gated Integrationen (MCP/Task Pack/Dashboard) vor Anti-Hallucination-Lint + agent-safe Gate + `context_risk`-Pflicht.
-- Nächster Umsetzungs-PR: A1 (`TOP_FILES → TOP_CHUNK_SPANS` + `does_not_prove`-Block im Agent Reading Pack).
+- Umsetzungsstand Milestones A/B (Beleg: git log + Blueprint-Markierungen + Proofs):
+  A1 (Agent Reading Pack Begriffshärtung), A3 (Range-Ref v2), A4 (Post-emit Bundle Health),
+  A5 (Agent Export Gate / Redaction Enforcement) sind **UMGESETZT**. B1 (Context Quality
+  Signals) ist mit dieser PR **UMGESETZT** (Details unter PR 8). Nächster offener
+  Umsetzungs-PR: **B2 (Retrieval Miss Taxonomy)** — separat, nicht in B1 enthalten.
+
+PR 8 (Milestone B1 — Context Quality Signals): **UMGESETZT**
+- Scope: minimale, additive **diagnostische Projektion** vorhandener Signale; **kein** neuer
+  Wahrheitslayer. Beleg: `docs/proofs/context-quality-signals-proof.md`,
+  Blueprint `lenskit-anti-hallucination-output-architecture.md` §3 (B1).
+- Neue Dateien:
+  - `merger/lenskit/core/context_quality.py`
+  - `merger/lenskit/contracts/context-quality.v1.schema.json`
+  - `merger/lenskit/cli/cmd_context_quality.py` (Dispatch in `merger/lenskit/cli/main.py`)
+  - `merger/lenskit/tests/test_context_quality.py`
+  - `merger/lenskit/tests/test_cli_context_quality.py`
+  - `docs/proofs/context-quality-signals-proof.md`
+- Artefakt: `<stem>.context_quality.json` (`authority: diagnostic_signal`, `risk_class:
+  diagnostic`); Kopf-Feld `projection_status` (`complete|degraded|blocked`) = nur
+  Projektions-Vollständigkeit, **kein** globaler Verdict.
+- CLI: `lenskit context-quality inspect <manifest> [--json] [--emit-artifact] [--output PATH]`.
+- Nicht-Ziele (weiterhin aufrecht, bewusst aufgeschoben):
+  - **kein** globaler Verstehens-Verdict (kein `understanding_health`),
+  - **kein** aggregierter Score,
+  - **keine** Claim-Wahrheitsbewertung,
+  - **kein** Retrieval-Vollständigkeitsbeweis,
+  - **kein** Antwort-Sicherheits-Gate,
+  - **keine** Manifest-Mutation/-Registrierung (Artefakt bleibt unregistriert),
+  - **keine** B2 Retrieval Miss Taxonomy in dieser PR.
+- Validierung:
+  - `ruff check --select=F401,F811 --exclude='**/fixtures/**' .` (passed)
+  - `python3.11 -m pytest merger/lenskit/tests/test_context_quality.py merger/lenskit/tests/test_cli_context_quality.py` (24 passed)
+  - `python3.11 -m pytest merger/lenskit/tests/test_output_health.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py merger/lenskit/tests/test_bundle_manifest_integration.py` (93 passed, keine Regression)
+- B2 bleibt **separates, zukünftiges** Arbeitspaket (Retrieval Miss Taxonomy; siehe Blueprint §3 B2).

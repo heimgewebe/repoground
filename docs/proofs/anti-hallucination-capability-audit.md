@@ -47,7 +47,7 @@ Entscheidung: `reuse` · `harden` · `defer` · `resolve` · `delete`.
 | 17 | Anti-Hallucination Lint | MISSING (neu) | kein `anti_hallucination`/Lint-Producer im Repo | — (Schutzfehlen) | build (Kernhebel) | C2 |
 | 18 | `.lenskit/` repo-declared context | MISSING (neu) | kein `.lenskit/`-Verzeichnis | — | defer hinter A–C | D1–D3 |
 | 19 | Structural `repo_map.v1` | MISSING (neu) | `architecture_summary` existiert (Prosa/Diagnose), kein mechanischer `repo_map` | niedrig | defer | E1 |
-| 20 | Context Quality Signals (Artefakt) | MISSING (überlappt) | überlappt `docs/architecture/artifact-evidence-levels.md`; kein `context_quality.json` | mittel (globale "Verstehens"-Ampel wäre gefährlich) | defer + scope (Projektion, keine neue Wahrheit) | B1 |
+| 20 | Context Quality Signals (Artefakt) | DONE (war MISSING) | B1 umgesetzt: `merger/lenskit/core/context_quality.py` + `merger/lenskit/contracts/context-quality.v1.schema.json` erzeugen `<stem>.context_quality.json` als **Projektion** (kein neuer Wahrheitslayer). Beleg: `docs/proofs/context-quality-signals-proof.md` | mittel (globale "Verstehens"-Ampel wäre gefährlich) | umgesetzt als Projektion (kein `understanding_health`, kein Gesamt-Score) | B1 |
 | 21 | Retrieval Miss Taxonomy | MISSING (neu) | `merger/lenskit/retrieval/eval_core.py` + `merger/lenskit/contracts/retrieval-eval.v1.schema.json`; keine Miss-Taxonomie | mittel | build über bestehendem Eval | B2 |
 | 22 | Structural Architecture Signals | PARTIAL (überlappt) | `docs/blueprints/lenskit-output-optimierung-v1.md` AP G; `architecture_summary` | niedrig | in AP G falten, kein Parallelartefakt | E3 |
 | 23 | `excluded_noise` als Diagnose | MISSING | Exclusion ist heute **stumm** (`SKIP_DIRS`) | niedrig | optionales Diagnose-Artefakt | A2 |
