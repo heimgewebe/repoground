@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from merger.lenskit.cli.main import main
 
 
@@ -54,6 +56,30 @@ def _make_bundle(tmp_path: Path, *, include_pack: bool = True) -> Path:
     manifest_path = tmp_path / "demo.bundle.manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest_path
+
+
+def _write_post_health(tmp_path: Path, status: str = "pass") -> Path:
+    report = {
+        "kind": "lenskit.post_emit_health",
+        "version": "1.0",
+        "run_id": "post-run",
+        "bundle_run_id": "cli-bh-run",
+        "checked_at": "2026-05-23T00:00:00Z",
+        "bundle_manifest_path": str(tmp_path / "demo.bundle.manifest.json"),
+        "status": status,
+        "checks": [],
+        "errors": [],
+        "warnings": [],
+        "does_not_mean": ["repo_understood", "answer_safe_without_citations"],
+        "independence_note": "output_health.verdict=pass does not imply post_emit_health.status=pass",
+        "artifact_count_checked": 0,
+        "hash_mismatch_count": 0,
+        "missing_artifact_count": 0,
+        "output_health_verdict": "pass",
+    }
+    out = tmp_path / "demo.bundle_health.post.json"
+    out.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return out
 
 
 def test_bundle_health_post_cli_json(tmp_path, capsys):
@@ -129,3 +155,63 @@ def test_bundle_health_post_cli_fail_hash_mismatch(tmp_path, capsys):
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "fail"
     assert report["hash_mismatch_count"] >= 1
+
+
+def test_bundle_health_export_gate_cli_json(tmp_path, capsys):
+    manifest = _make_bundle(tmp_path)
+    _write_post_health(tmp_path, status="pass")
+
+    # Flip manifest capability redaction to true so strict agent gate can pass.
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["capabilities"]["redaction"] = True
+    manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    rc = main(
+        [
+            "bundle-health",
+            "export-gate",
+            str(manifest),
+            "--profile",
+            "agent_minimal",
+            "--json",
+        ]
+    )
+    assert rc == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["kind"] == "lenskit.agent_export_gate"
+    assert report["status"] == "pass"
+    assert report["agent_facing"] is True
+
+
+def test_bundle_health_export_gate_cli_human_states_observation_only(tmp_path, capsys):
+    manifest = _make_bundle(tmp_path)
+
+    rc = main(
+        [
+            "bundle-health",
+            "export-gate",
+            str(manifest),
+            "--profile",
+            "agent_minimal",
+        ]
+    )
+    out = capsys.readouterr().out
+    assert rc in (1, 2)
+    assert "Agent Export Gate:" in out
+    assert "output_health_verdict:" in out
+    assert "(observation only)" in out
+
+
+def test_bundle_health_export_gate_cli_has_no_redaction_bypass_flag(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "bundle-health",
+                "export-gate",
+                str(manifest),
+                "--profile",
+                "agent_minimal",
+                "--no-require-redaction",
+            ]
+        )

@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/agent-export-gate.v1.schema.json",
+  "title": "Agent Export Gate (agent-export-gate v1.0)",
+  "description": "Machine-readable export gate for profile-scoped bundle export. This gate does not define truth semantics and treats output_health as observation only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "profile",
+    "agent_facing",
+    "checked_at",
+    "bundle_manifest_path",
+    "post_emit_health_status",
+    "output_health_verdict_observed",
+    "redaction_required",
+    "redaction_enabled",
+    "errors",
+    "warnings",
+    "does_not_mean"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.agent_export_gate"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "fail", "blocked"]
+    },
+    "profile": {
+      "type": ["string", "null"]
+    },
+    "agent_facing": {
+      "type": "boolean"
+    },
+    "checked_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp."
+    },
+    "bundle_manifest_path": {
+      "type": "string"
+    },
+    "post_emit_health_status": {
+      "type": ["string", "null"],
+      "enum": ["pass", "warn", "fail", "blocked", null]
+    },
+    "output_health_verdict_observed": {
+      "type": ["string", "null"]
+    },
+    "redaction_required": {
+      "type": "boolean"
+    },
+    "redaction_enabled": {
+      "type": ["boolean", "null"]
+    },
+    "errors": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "does_not_mean": {
+      "type": "array",
+      "items": {"type": "string"},
+      "allOf": [
+        {"contains": {"const": "repo_understood"}},
+        {"contains": {"const": "answer_safe_without_citations"}},
+        {"contains": {"const": "claims_true"}}
+      ]
+    }
+  }
+}

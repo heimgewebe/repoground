@@ -43,6 +43,32 @@ def register_bundle_health_commands(subparsers) -> None:
         help="Do not treat a missing agent_reading_pack as a blocking absence",
     )
 
+    export_gate_parser = bh_subparsers.add_parser(
+        "export-gate",
+        help="Evaluate export gate for a requested profile",
+    )
+    export_gate_parser.add_argument(
+        "manifest", help="Path to the bundle manifest JSON"
+    )
+    export_gate_parser.add_argument(
+        "--profile",
+        required=False,
+        default=None,
+        help="Requested export profile (agent-facing profiles enforce hard gating)",
+    )
+    export_gate_parser.add_argument(
+        "--post-health",
+        dest="post_health_path",
+        default=None,
+        help="Optional explicit path to post_emit_health JSON report",
+    )
+    export_gate_parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="emit_json",
+        help="Emit the machine-readable JSON report to stdout",
+    )
+
 
 _EXIT_CODES = {"pass": 0, "warn": 0, "fail": 1, "blocked": 2}
 
@@ -111,6 +137,53 @@ def _print_human_report(report: dict, written_path=None) -> None:
     if written_path is not None:
         print(f"  written_artifact:        {written_path}")
         print("  NOTE: written artifact is unregistered; manifest not mutated.")
+
+    if report.get("warnings"):
+        print(f"\nWarnings ({len(report['warnings'])}):")
+        for w in report["warnings"]:
+            print(f"  [warn] {w}")
+
+    if report.get("errors"):
+        print(f"\nErrors ({len(report['errors'])}):")
+        for e in report["errors"]:
+            print(f"  [error] {e}")
+
+
+def run_bundle_health_export_gate(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.agent_export_gate import evaluate_agent_export_gate
+
+    try:
+        report = evaluate_agent_export_gate(
+            manifest_path=args.manifest,
+            post_health_path=getattr(args, "post_health_path", None),
+            profile=getattr(args, "profile", None),
+            require_redaction=True,
+        )
+    except Exception as e:  # noqa: BLE001 - surface unexpected failures cleanly
+        print(f"Error: unexpected failure during export gate evaluation: {e}", file=sys.stderr)
+        return 2
+
+    if args.emit_json:
+        print(json.dumps(report, indent=2))
+    else:
+        _print_export_gate_human(report)
+
+    return _EXIT_CODES.get(report["status"], 1)
+
+
+def _print_export_gate_human(report: dict) -> None:
+    print(f"Agent Export Gate: {report['status'].upper()}")
+    print(f"  profile:                     {report.get('profile')}")
+    print(f"  agent_facing:                {report.get('agent_facing')}")
+    print(f"  bundle_manifest_path:        {report.get('bundle_manifest_path')}")
+    print(f"  post_emit_health_status:     {report.get('post_emit_health_status')}")
+    print(f"  redaction_required:          {report.get('redaction_required')}")
+    print(f"  redaction_enabled:           {report.get('redaction_enabled')}")
+    print(
+        "  output_health_verdict:        "
+        f"{report.get('output_health_verdict_observed')} (observation only)"
+    )
+    print(f"  does_not_mean:               {', '.join(report.get('does_not_mean') or [])}")
 
     if report.get("warnings"):
         print(f"\nWarnings ({len(report['warnings'])}):")
