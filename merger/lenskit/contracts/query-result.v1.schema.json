@@ -247,7 +247,20 @@
       ],
       "properties": {
         "artifact_role": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "canonical_md",
+            "index_sidecar_json",
+            "chunk_index_jsonl",
+            "dump_index_json",
+            "sqlite_index",
+            "retrieval_eval_json",
+            "derived_manifest_json",
+            "architecture_summary",
+            "delta_json",
+            "graph_index_json",
+            "source_file"
+          ]
         },
         "repo_id": {
           "type": "string"
@@ -299,7 +312,20 @@
           "const": "2"
         },
         "artifact_role": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "canonical_md",
+            "index_sidecar_json",
+            "chunk_index_jsonl",
+            "dump_index_json",
+            "sqlite_index",
+            "retrieval_eval_json",
+            "derived_manifest_json",
+            "architecture_summary",
+            "delta_json",
+            "graph_index_json",
+            "source_file"
+          ]
         },
         "repo_id": {
           "type": [
@@ -363,6 +389,9 @@
         "end_line": {
           "type": "integer",
           "minimum": 1
+        },
+        "chunk_id": {
+          "type": "string"
         }
       }
     }

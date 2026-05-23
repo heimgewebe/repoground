@@ -5282,6 +5282,7 @@ def write_reports_v2(
 
                         if canonical_md_bytes is not None:
                             # Compute canonical-local values once; share across both fields.
+                            # can_sha256 is the exact range hash for canonical_md_bytes[abs_start:abs_end].
                             can_chunk = canonical_md_bytes[abs_start:abs_end]
                             can_sha256 = hashlib.sha256(can_chunk).hexdigest()
                             can_start_line = _line_for_byte(canonical_md_bytes, abs_start)
