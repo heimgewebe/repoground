@@ -155,20 +155,18 @@ def _validate_post_health_binding(
         return f"post_emit_health has invalid status: {status!r}"
 
     manifest_path_value = post_doc.get("bundle_manifest_path")
-    if isinstance(manifest_path_value, str) and manifest_path_value:
-        resolved_post_manifest = _resolve_path(manifest_path_value)
-        if resolved_post_manifest != resolved_manifest:
-            return "post_emit_health bundle_manifest_path does not match the evaluated manifest"
+    if not isinstance(manifest_path_value, str) or not manifest_path_value.strip():
+        return "post_emit_health bundle_manifest_path is missing or empty"
 
+    resolved_post_manifest = _resolve_path(manifest_path_value.strip())
+    if resolved_post_manifest != resolved_manifest:
+        return "post_emit_health bundle_manifest_path does not match the evaluated manifest"
+
+    status = post_doc.get("status")
     post_bundle_run_id = post_doc.get("bundle_run_id")
-    if (
-        isinstance(manifest_run_id, str)
-        and manifest_run_id
-        and isinstance(post_bundle_run_id, str)
-        and post_bundle_run_id
-        and post_bundle_run_id != manifest_run_id
-    ):
-        return "post_emit_health bundle_run_id does not match manifest run_id"
+    if status == "pass" and isinstance(manifest_run_id, str) and manifest_run_id:
+        if post_bundle_run_id != manifest_run_id:
+            return "post_emit_health bundle_run_id does not match manifest run_id"
 
     schema_error = _validate_post_health_schema(post_doc)
     if schema_error is not None:

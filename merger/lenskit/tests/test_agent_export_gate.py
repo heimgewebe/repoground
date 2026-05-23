@@ -123,6 +123,20 @@ def test_agent_facing_pass_when_post_emit_pass_and_redaction_true(tmp_path):
     assert report["redaction_enabled"] is True
 
 
+def test_agent_facing_post_emit_pass_bound_manifest_and_run_id_passes(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert report["post_emit_health_status"] == "pass"
+
+
 def test_missing_profile_is_blocked(tmp_path):
     manifest = _write_manifest(tmp_path, redaction=True)
     _write_post_health(tmp_path, "pass")
@@ -221,6 +235,70 @@ def test_agent_facing_invalid_post_emit_schema_is_blocked(tmp_path):
     post = _write_post_health(tmp_path, "pass")
     doc = json.loads(post.read_text(encoding="utf-8"))
     doc["does_not_mean"] = ["repo_understood"]
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
+def test_agent_facing_post_emit_pass_empty_bundle_manifest_path_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc["bundle_manifest_path"] = ""
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
+def test_agent_facing_post_emit_pass_missing_bundle_run_id_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc.pop("bundle_run_id", None)
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
+def test_agent_facing_post_emit_pass_null_bundle_run_id_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc["bundle_run_id"] = None
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
+def test_agent_facing_post_emit_pass_empty_bundle_run_id_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc["bundle_run_id"] = ""
     post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
     report = evaluate_agent_export_gate(
