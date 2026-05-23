@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from merger.lenskit.core import merge
-from merger.lenskit.core.merge import FileInfo, NOISE_DIR_SEGMENTS, SKIP_DIRS
+from merger.lenskit.core.merge import FileInfo, NOISE_DIR_SEGMENTS, SKIP_DIRS, _BUILD_AND_CACHE_DIRS
 
 
 def create_file_info(rel_path: str, category: str = "other", tags=None, content: str = "content") -> FileInfo:
@@ -197,21 +197,22 @@ def test_is_noise_file_returns_false_for_intentional_hidden_paths(rel_path):
     assert not merge.is_noise_file(fi), f"Expected is_noise_file=False for {rel_path}"
 
 
-def test_noise_dir_segments_aligned_with_skip_dirs():
-    """NOISE_DIR_SEGMENTS must cover all cache/tool dirs in SKIP_DIRS."""
-    # Strip trailing slash from NOISE_DIR_SEGMENTS for comparison
-    noise_set = {seg.rstrip("/") for seg in NOISE_DIR_SEGMENTS}
-    cache_dirs_in_skip = {
-        d for d in SKIP_DIRS
-        if d in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache", "coverage",
-                 "node_modules", "dist", "build", "target", "venv", ".venv"}
-    }
-    missing = cache_dirs_in_skip - noise_set
-    assert not missing, f"SKIP_DIRS cache entries missing from NOISE_DIR_SEGMENTS: {missing}"
+def test_noise_dir_segments_derived_from_build_and_cache_dirs():
+    """NOISE_DIR_SEGMENTS is derived from _BUILD_AND_CACHE_DIRS, so they cannot drift."""
+    # NOISE_DIR_SEGMENTS is built as tuple(d + "/" for d in sorted(_BUILD_AND_CACHE_DIRS))
+    expected = tuple(d + "/" for d in sorted(_BUILD_AND_CACHE_DIRS))
+    assert set(NOISE_DIR_SEGMENTS) == set(expected)
+    # SKIP_DIRS must be a superset (adds .git, .idea, .DS_Store)
+    assert _BUILD_AND_CACHE_DIRS <= SKIP_DIRS
 
 
-def test_noise_manifest_label_contains_noise_annotation():
-    """Files under noise paths should get (noise) label in manifest output."""
+def test_manifest_annotates_noise_files_that_bypass_traversal():
+    """
+    is_noise_file() annotates files as (noise) in the manifest.
+    Primary protection is SKIP_DIRS at scan_repo() traversal time; this test covers
+    belt-and-suspenders manifest annotation for files that are explicitly passed
+    to iter_report_blocks() (e.g. in plan-only or test contexts).
+    """
     files = [
         create_file_info(".pytest_cache/v/cache/lastfailed", content="{}"),
         create_file_info("src/main.py", content="# code"),
@@ -227,3 +228,63 @@ def test_noise_manifest_label_contains_noise_annotation():
         )
     )
     assert "(noise)" in report, "Expected (noise) annotation for cache file in manifest"
+
+
+def test_scan_repo_excludes_cache_dirs(tmp_path):
+    """
+    scan_repo() must not return files from any cache/tool directory.
+    This proves the real output surface (canonical_md, chunk_index) is clean:
+    those surfaces are built from scan_repo() results, so if cache dirs are
+    excluded here they cannot appear in any generated content.
+    """
+    # Create real directory structure with noise and signal files
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def main(): pass")
+    (tmp_path / ".pytest_cache" / "v" / "cache").mkdir(parents=True)
+    (tmp_path / ".pytest_cache" / "v" / "cache" / "lastfailed").write_text("{}")
+    (tmp_path / ".mypy_cache" / "3.11").mkdir(parents=True)
+    (tmp_path / ".mypy_cache" / "3.11" / "builtins.json").write_text("{}")
+    (tmp_path / ".ruff_cache").mkdir()
+    (tmp_path / ".ruff_cache" / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "main.cpython-311.pyc").write_bytes(b"\x00")
+    (tmp_path / ".cache").mkdir()
+    (tmp_path / ".cache" / "pip_wheels").write_text("dummy")
+    (tmp_path / "coverage").mkdir()
+    (tmp_path / "coverage" / "lcov.info").write_text("TN:")
+
+    result = merge.scan_repo(tmp_path, include_hidden=True)
+    found_paths = {str(fi.rel_path).replace("\\", "/") for fi in result["files"]}
+
+    assert "src/main.py" in found_paths, "Real source file must be present"
+    for noise_path in (
+        ".pytest_cache/v/cache/lastfailed",
+        ".mypy_cache/3.11/builtins.json",
+        ".ruff_cache/CACHEDIR.TAG",
+        "__pycache__/main.cpython-311.pyc",
+        ".cache/pip_wheels",
+        "coverage/lcov.info",
+    ):
+        assert noise_path not in found_paths, f"Cache path must not appear in scan result: {noise_path}"
+
+
+def test_scan_repo_preserves_intentional_hidden_paths(tmp_path):
+    """
+    scan_repo() with include_hidden=True must include .github/, .wgx/, and
+    .ai-context.yml — these carry real CI/repo context and must not be
+    broadly filtered by noise logic.
+    """
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "ci.yml").write_text("on: push")
+    (tmp_path / ".wgx").mkdir()
+    (tmp_path / ".wgx" / "config.yml").write_text("agent: true")
+    (tmp_path / ".ai-context.yml").write_text("role: repo")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def main(): pass")
+
+    result = merge.scan_repo(tmp_path, include_hidden=True)
+    found_paths = {str(fi.rel_path).replace("\\", "/") for fi in result["files"]}
+
+    assert ".github/workflows/ci.yml" in found_paths
+    assert ".wgx/config.yml" in found_paths
+    assert ".ai-context.yml" in found_paths

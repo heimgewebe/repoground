@@ -293,10 +293,17 @@ ARTIFACT_AUTHORITY_REGISTRY = {
 # Delta Report configuration
 MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
 
-# Directories to ignore
-SKIP_DIRS = {
-    ".git",
-    ".idea",
+# Canonical set of build-artefact and tool-cache directory names.
+# These are both skipped during traversal (SKIP_DIRS) and classified as noise
+# in is_noise_file() (NOISE_DIR_SEGMENTS).  A single source of truth means
+# adding/removing one entry propagates to both uses automatically.
+#
+# Not included here: VCS/IDE dirs (.git, .idea) and system junk (.DS_Store)
+# which are traversal-skip only and have no meaningful is_noise_file semantic.
+#
+# Intentionally preserved (not noise): .github/, .wgx/, .ai-context.yml and
+# other repo config/CI paths that carry real project context.
+_BUILD_AND_CACHE_DIRS: frozenset[str] = frozenset({
     "node_modules",
     ".svelte-kit",
     ".next",
@@ -307,29 +314,18 @@ SKIP_DIRS = {
     "venv",
     "__pycache__",
     ".pytest_cache",
-    ".DS_Store",
     ".mypy_cache",
     ".ruff_cache",
     ".cache",
     "coverage",
-}
+})
 
-# Canonical noise/cache directory segments used by is_noise_file().
-# Must stay in sync with SKIP_DIRS cache entries above.
-NOISE_DIR_SEGMENTS: tuple[str, ...] = (
-    "node_modules/",
-    "dist/",
-    "build/",
-    "target/",
-    "venv/",
-    ".venv/",
-    "__pycache__/",
-    ".pytest_cache/",
-    ".mypy_cache/",
-    ".ruff_cache/",
-    ".cache/",
-    "coverage/",
-)
+# Traversal skip set: build/cache dirs plus VCS and system noise.
+SKIP_DIRS: frozenset[str] = _BUILD_AND_CACHE_DIRS | frozenset({".git", ".idea", ".DS_Store"})
+
+# Path-segment form used by is_noise_file() for substring matching.
+# Derived from _BUILD_AND_CACHE_DIRS, so it cannot drift from SKIP_DIRS.
+NOISE_DIR_SEGMENTS: tuple[str, ...] = tuple(d + "/" for d in sorted(_BUILD_AND_CACHE_DIRS))
 
 # Top-level roots to skip in auto-discovery
 SKIP_ROOTS = {
