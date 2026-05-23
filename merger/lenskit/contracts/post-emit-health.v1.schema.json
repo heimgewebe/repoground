@@ -1,0 +1,187 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/post-emit-health.v1.schema.json",
+  "title": "Post-emit Bundle Health (post-emit-health v1.0)",
+  "description": "Machine-readable validation of the final emitted Lenskit bundle surface, produced after all derived artifacts (including agent_reading_pack) are present. Independent of output_health: a green pre-emit health never implies a post-emit pass. Reports redaction status without enforcing it, and reports an achieved evidence level using the existing control-plane vocabulary (it is not a global understanding verdict).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "checked_at",
+    "bundle_manifest_path",
+    "status",
+    "checks",
+    "errors",
+    "warnings",
+    "does_not_mean",
+    "independence_note",
+    "artifact_count_checked",
+    "hash_mismatch_count",
+    "missing_artifact_count"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.post_emit_health"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique id for this post-emit validation run (not the bundle run)."
+    },
+    "bundle_run_id": {
+      "type": ["string", "null"],
+      "description": "run_id of the validated bundle manifest, when available."
+    },
+    "checked_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp of validation."
+    },
+    "bundle_manifest_path": {
+      "type": "string",
+      "description": "Absolute path to the validated bundle manifest."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "warn", "fail", "blocked"],
+      "description": "blocked = certification could not complete (required surface absent). fail = certification completed but found defects. warn = usable but degraded. pass = all required checks satisfied."
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail", "blocked", "skipped"]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "does_not_mean": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 2,
+      "description": "Disclaimers of what a post-emit pass deliberately does NOT establish. Always includes 'repo_understood' and 'answer_safe_without_citations'. These are NOT claim verdicts.",
+      "allOf": [
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "answer_safe_without_citations" } }
+      ]
+    },
+    "independence_note": {
+      "type": "string",
+      "description": "Explicit statement that output_health.verdict=pass does not imply post_emit_health.status=pass."
+    },
+    "evidence_level": {
+      "type": ["string", "null"],
+      "enum": [
+        "readable",
+        "navigable",
+        "citable",
+        "range_strict",
+        "searchable",
+        "diagnostic_full",
+        "forensic_strict",
+        null
+      ],
+      "description": "Headline achieved evidence level on the core readable->navigable->citable->range_strict ladder, using existing vocabulary. Null when not even 'readable'."
+    },
+    "evidence_levels_reached": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "readable",
+          "navigable",
+          "citable",
+          "range_strict",
+          "searchable",
+          "diagnostic_full",
+          "forensic_strict"
+        ]
+      },
+      "description": "Full honest set of evidence levels reached (searchable/diagnostic_full may hold without the full core ladder)."
+    },
+    "output_health_verdict": {
+      "type": ["string", "null"],
+      "description": "Observed output_health verdict (input/observation only; never gates post-emit status)."
+    },
+    "redaction_status": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "available": { "type": "boolean" },
+        "redact_secrets_enabled": { "type": ["boolean", "null"] },
+        "enforced": {
+          "type": "boolean",
+          "description": "Always false in v1: post_emit_health reports redaction, it does not enforce it (enforcement is roadmap PR A5)."
+        }
+      }
+    },
+    "noise_hygiene": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "available": { "type": "boolean" },
+        "excluded_noise_count": { "type": ["integer", "null"], "minimum": 0 },
+        "source": { "type": ["string", "null"] }
+      }
+    },
+    "artifact_count_checked": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hash_mismatch_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "missing_artifact_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "range_ref_resolution_status": {
+      "type": ["string", "null"],
+      "enum": ["ok", "fail", "environment_error", "no_range_ref", "unavailable", null]
+    },
+    "agent_pack": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "present": { "type": "boolean" },
+        "required": { "type": "boolean" },
+        "hash_ok": { "type": ["boolean", "null"] },
+        "authority_declared": { "type": ["string", "null"] },
+        "canonicality_declared": { "type": ["string", "null"] },
+        "self_role_ok": { "type": ["boolean", "null"] }
+      }
+    }
+  }
+}

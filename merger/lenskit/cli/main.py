@@ -26,6 +26,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_agent_pack import register_agent_pack_commands
     register_agent_pack_commands(subparsers)
 
+    # Bundle health command (post-emit validator)
+    from .cmd_bundle_health import register_bundle_health_commands
+    register_bundle_health_commands(subparsers)
+
     # Federation command
     from .cmd_federation import register_federation_commands
     register_federation_commands(subparsers)
@@ -252,6 +256,13 @@ def main(args: Optional[List[str]] = None) -> int:
             return run_agent_pack_produce(parsed_args)
         else:
             parser.parse_args(["agent-pack", "--help"])
+            return 0
+    elif parsed_args.command == "bundle-health":
+        from .cmd_bundle_health import run_bundle_health_post
+        if parsed_args.bundle_health_cmd == "post":
+            return run_bundle_health_post(parsed_args)
+        else:
+            parser.parse_args(["bundle-health", "--help"])
             return 0
     elif parsed_args.command == "federation":
         from .cmd_federation import handle_federation_command
