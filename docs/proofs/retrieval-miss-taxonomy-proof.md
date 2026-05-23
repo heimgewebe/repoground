@@ -120,10 +120,12 @@ out = {
 | `test_classify_miss_expected_not_in_top_k` | ✅ PASS | Unit test for expected_not_in_top_k |
 | `test_classify_miss_hit_case` | ✅ PASS | Hit case (not a miss) |
 | `test_classify_miss_missing_metadata` | ✅ PASS | Missing metadata handling |
+| `test_classify_miss_found_expected_pattern_in_results_but_not_relevant` | ✅ PASS | Non-empty fallback (`unknown`) when expected pattern appears but case is still non-relevant |
 | `test_miss_taxonomy_schema_validation_stale_eval` | ✅ PASS | Stale eval stays schema-valid |
 | `test_miss_taxonomy_expected_not_in_top_k_integration` | ✅ PASS | `do_eval()` integration for expected_not_in_top_k |
 | `test_miss_taxonomy_query_execution_error_not_counted_as_zero_results` | ✅ PASS | Error-path classification hygiene |
 | `test_retrieval_eval_schema_backward_compatibility_without_miss_taxonomy` | ✅ PASS | Legacy output still schema-valid |
+| `test_miss_taxonomy_schema_rejects_missing_required_does_not_prove_entry` | ✅ PASS | Required does_not_prove set enforced by schema |
 | `test_miss_taxonomy_schema_rejects_missing_required_by_type_key` | ✅ PASS | Stable by_type contract shape |
 
 **Test Execution Results:**
@@ -221,10 +223,9 @@ The following terms do NOT appear in miss taxonomy output:
 ### Code Quality
 
 ```bash
-$ ruff check --select=F401,F811 --exclude='**/fixtures/**' merger/lenskit/retrieval/eval_core.py
-$ ruff check --select=F401,F811 --exclude='**/fixtures/**' merger/lenskit/tests/test_retrieval_eval.py
+$ ruff check --select=F401,F811 --exclude='**/fixtures/**' .
 
-✅ No unused imports or redefinitions
+✅ All checks passed
 ```
 
 ### Test Suite
@@ -259,11 +260,16 @@ PASSED: test_miss_taxonomy_schema_validation_stale_eval
 PASSED: test_miss_taxonomy_does_not_prove_entries
 PASSED: test_miss_taxonomy_zero_results_classification
 PASSED: test_classify_miss_zero_results
+PASSED: test_classify_miss_query_execution_error
 PASSED: test_classify_miss_expected_not_in_top_k
 PASSED: test_classify_miss_hit_case
 PASSED: test_classify_miss_missing_metadata
+PASSED: test_classify_miss_found_expected_pattern_in_results_but_not_relevant
 PASSED: test_miss_taxonomy_expected_not_in_top_k_integration
+PASSED: test_miss_taxonomy_query_execution_error_not_counted_as_zero_results
 PASSED: test_retrieval_eval_schema_backward_compatibility_without_miss_taxonomy
+PASSED: test_miss_taxonomy_schema_rejects_missing_required_does_not_prove_entry
+PASSED: test_miss_taxonomy_schema_rejects_missing_required_by_type_key
 ```
 
 ### Integration with Context Quality (B1)
@@ -291,7 +297,7 @@ PASSED: test_retrieval_eval_schema_backward_compatibility_without_miss_taxonomy
 |------|--------|
 | `merger/lenskit/contracts/retrieval-eval.v1.schema.json` | Added `miss_taxonomy` field (optional) |
 | `merger/lenskit/retrieval/eval_core.py` | Added `classify_miss()`, `build_miss_taxonomy()`, integrated into `do_eval()` |
-| `merger/lenskit/tests/test_retrieval_eval.py` | Added 11 B2-specific tests; full retrieval_eval suite passes |
+| `merger/lenskit/tests/test_retrieval_eval.py` | Added/updated B2-specific tests (including query-execution-error and schema-shape guards); full retrieval_eval suite passes |
 | `docs/proofs/retrieval-miss-taxonomy-proof.md` | Added and updated proof evidence |
 
 ## Proof Conclusion
