@@ -535,3 +535,152 @@ def test_run_eval_explain_always_present_on_error(mini_index_for_eval, tmp_path,
     assert detail["error"] == "Mock DB Crash"
     assert "explain" in detail
     assert detail["explain"]["why_fail"] == eval_core.WHY_FAIL_QUERY_EXECUTION
+
+
+# B2 — Retrieval Miss Taxonomy Tests
+
+def test_miss_taxonomy_present_in_output(mini_index_for_eval, tmp_path):
+    """Test that miss_taxonomy is always present in retrieval_eval output."""
+    queries_json = tmp_path / "eval_queries.json"
+    queries_json.write_text(json.dumps([
+        {"query": "login", "expected_patterns": ["login.py"]},
+        {"query": "missing", "expected_patterns": ["nonexistent.py"]}
+    ]), encoding="utf-8")
+
+    out = eval_core.do_eval(
+        index_path=Path(mini_index_for_eval),
+        queries_path=queries_json,
+        k=5,
+        is_json_mode=True,
+        is_stale=False
+    )
+
+    assert "miss_taxonomy" in out
+    taxonomy = out["miss_taxonomy"]
+    assert taxonomy["version"] == "1.0"
+    assert taxonomy["authority"] == "diagnostic_signal"
+    assert taxonomy["risk_class"] == "diagnostic"
+
+
+def test_miss_taxonomy_schema_validation(mini_index_for_eval, tmp_path):
+    """Test that miss_taxonomy passes JSON schema validation."""
+    import jsonschema
+
+    queries_json = tmp_path / "eval_queries.json"
+    queries_json.write_text(json.dumps([
+        {"query": "login", "expected_patterns": ["login.py"]}
+    ]), encoding="utf-8")
+
+    out = eval_core.do_eval(
+        index_path=Path(mini_index_for_eval),
+        queries_path=queries_json,
+        k=5,
+        is_json_mode=True,
+        is_stale=False
+    )
+
+    schema = _load_retrieval_eval_schema()
+    jsonschema.validate(instance=out, schema=schema)
+
+
+def test_miss_taxonomy_does_not_prove_entries(mini_index_for_eval, tmp_path):
+    """Test that does_not_prove entries are present and correct."""
+    queries_json = tmp_path / "eval_queries.json"
+    queries_json.write_text(json.dumps([
+        {"query": "missing", "expected_patterns": ["nonexistent.py"]}
+    ]), encoding="utf-8")
+
+    out = eval_core.do_eval(
+        index_path=Path(mini_index_for_eval),
+        queries_path=queries_json,
+        k=5,
+        is_json_mode=True,
+        is_stale=False
+    )
+
+    taxonomy = out["miss_taxonomy"]
+    does_not_prove = taxonomy["does_not_prove"]
+    
+    # Check that required does_not_prove entries are present
+    assert "absence_of_retrieval_hit_does_not_prove_absence_in_repository" in does_not_prove
+    assert "miss_type_does_not_prove_claim_truth_or_falsehood" in does_not_prove
+    assert "ranking_position_does_not_prove_semantic_importance" in does_not_prove
+    assert "retrieval_eval_does_not_prove_retrieval_completeness" in does_not_prove
+    assert "taxonomy_is_diagnostic_not_authoritative" in does_not_prove
+
+
+def test_miss_taxonomy_zero_results_classification(mini_index_for_eval, tmp_path):
+    """Test that zero_results miss type is correctly classified."""
+    queries_json = tmp_path / "eval_queries.json"
+    queries_json.write_text(json.dumps([
+        {"query": "xyzabc9999", "expected_patterns": ["nowhere.py"]}
+    ]), encoding="utf-8")
+
+    out = eval_core.do_eval(
+        index_path=Path(mini_index_for_eval),
+        queries_path=queries_json,
+        k=5,
+        is_json_mode=True,
+        is_stale=False
+    )
+
+    taxonomy = out["miss_taxonomy"]
+    aggregate = taxonomy["aggregate"]
+    
+    # Should have one miss classified as zero_results
+    assert aggregate["total_misses"] >= 1
+    assert aggregate["by_type"]["zero_results"] >= 1
+
+
+def test_classify_miss_zero_results():
+    """Test the classify_miss function directly for zero_results case."""
+    case = {"query": "test"}
+    miss_types, primary = eval_core.classify_miss(
+        case,
+        expected_paths=["foo.py"],
+        is_relevant=False,
+        found_count=0,
+        top_results=[]
+    )
+    assert "zero_results" in miss_types
+    assert primary == "zero_results"
+
+
+def test_classify_miss_expected_not_in_top_k():
+    """Test the classify_miss function for expected_not_in_top_k case."""
+    case = {"query": "test"}
+    miss_types, primary = eval_core.classify_miss(
+        case,
+        expected_paths=["expected.py"],
+        is_relevant=False,
+        found_count=2,
+        top_results=["other1.py", "other2.py"]
+    )
+    assert "expected_not_in_top_k" in miss_types
+    assert primary == "expected_not_in_top_k"
+
+
+def test_classify_miss_hit_case():
+    """Test that hit cases are not classified as misses."""
+    case = {"query": "test"}
+    miss_types, primary = eval_core.classify_miss(
+        case,
+        expected_paths=["foo.py"],
+        is_relevant=True,
+        found_count=1,
+        top_results=["foo.py"]
+    )
+    assert len(miss_types) == 0 or primary == "hit"
+
+
+def test_classify_miss_missing_metadata():
+    """Test classification when expected metadata is missing."""
+    case = {"query": "test"}
+    miss_types, primary = eval_core.classify_miss(
+        case,
+        expected_paths=[],  # No expected paths
+        is_relevant=False,
+        found_count=1,
+        top_results=["something.py"]
+    )
+    assert "path_or_symbol_metadata_missing" in miss_types or primary == "path_or_symbol_metadata_missing"

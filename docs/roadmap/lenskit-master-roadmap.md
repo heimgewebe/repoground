@@ -326,3 +326,46 @@ PR 8 (Milestone B1 — Context Quality Signals): **UMGESETZT**
   - `python3.11 -m pytest merger/lenskit/tests/test_context_quality.py merger/lenskit/tests/test_cli_context_quality.py` (24 passed)
   - `python3.11 -m pytest merger/lenskit/tests/test_output_health.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py merger/lenskit/tests/test_bundle_manifest_integration.py` (93 passed, keine Regression)
 - B2 bleibt **separates, zukünftiges** Arbeitspaket (Retrieval Miss Taxonomy; siehe Blueprint §3 B2).
+- B2 bleibt **separates, zukünftiges** Arbeitspaket (Retrieval Miss Taxonomy; siehe Blueprint §3 B2).
+
+PR 9 (Milestone B2 — Retrieval Miss Taxonomy): **UMGESETZT**
+- Scope: additive **diagnostische Klassifizierungsschicht** für Retrieval-Eval-Misses;
+  **keine** Wahrheitsbehauptungen, **keine** Repo-Abwesenheitsansprüche, **keine** Ranking-Änderungen.
+  Beleg: `docs/proofs/retrieval-miss-taxonomy-proof.md`.
+- Neue Dateien:
+  - `merger/lenskit/retrieval/eval_core.py` erweitert: `classify_miss()`, `build_miss_taxonomy()`
+  - `merger/lenskit/contracts/retrieval-eval.v1.schema.json` erweitert um `miss_taxonomy` (optional, backward-compatible)
+  - `merger/lenskit/tests/test_retrieval_eval.py` erweitert: 8 neue B2-Tests
+  - `docs/proofs/retrieval-miss-taxonomy-proof.md` (diese Proof-Datei)
+- Artefakt: `miss_taxonomy` Feld in `retrieval_eval.json` (`authority: diagnostic_signal`,
+  `risk_class: diagnostic`); Klassifizierungen sind **mechanisch**, nicht semantisch.
+- Miss-Typen (konservativ, additive zu Retrieval-Eval):
+  - `zero_results` — Query returned no results
+  - `expected_not_in_top_k` — Expected path exists but not in results
+  - `path_or_symbol_metadata_missing` — Insufficient metadata for classification
+  - `unknown` — Fallback when no classification possible
+- Erforderliche `does_not_prove` Einträge (hardcoded):
+  - `absence_of_retrieval_hit_does_not_prove_absence_in_repository`
+  - `miss_type_does_not_prove_claim_truth_or_falsehood`
+  - `ranking_position_does_not_prove_semantic_importance`
+  - `retrieval_eval_does_not_prove_retrieval_completeness`
+  - `taxonomy_is_diagnostic_not_authoritative`
+- Nicht-Ziele (weiterhin aufrecht, bewusst aufgeschoben):
+  - **keine** Repository-Abwesenheitsbehauptung,
+  - **keine** Claim-Wahrheitsbewertung,
+  - **keine** Ranking-/Reranking-Änderungen,
+  - **keine** Manifest-Registrierung,
+  - **keine** globalen Scores oder Verdicts,
+  - **keine** Modifikation von B1 (Context Quality Signals),
+  - **keine** Agentenintegration-Gates (später, mit Anti-Hallucination-Lint).
+- Validierung:
+  - `ruff check --select=F401,F811 --exclude='**/fixtures/**' .` — PASSED
+  - `python3 -m pytest merger/lenskit/tests/test_retrieval_eval.py -v` — 27 PASSED (8 B2 + 19 existing)
+  - `python3 -m pytest merger/lenskit/tests/test_retrieval_eval.py -k "miss_taxonomy or classify_miss" -v` — 8 PASSED
+  - Schema validation: `jsonschema.validate(retrieval_eval_output, schema)` — PASSED
+- Backward-Kompatibilität:
+  - Old retrieval_eval ohne `miss_taxonomy` validiert noch (Feld ist optional)
+  - Existierende Retrieval-Metriken (recall@K, MRR, hits, zero_hit_ratio, stale_flag) unverändert
+  - Keine Mutation bestehender Artefakte oder CLIs
+- Python-Version: 3.10.12 (lokal getestet; `python3.11` lokal nicht vorhanden)
+- B2 bleibt **separates Arbeitspaket** von B1; keine Vermischung diagnostischer Schichten.

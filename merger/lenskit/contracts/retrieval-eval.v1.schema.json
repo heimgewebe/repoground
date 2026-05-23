@@ -297,6 +297,167 @@
           "type": "boolean"
         }
       }
+    },
+    "miss_taxonomy": {
+      "type": "object",
+      "description": "Diagnostic classification of retrieval misses. Conservative, mechanical categorization of why expected targets were not retrieved. Does NOT prove repository absence.",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "Version of the miss taxonomy schema.",
+          "const": "1.0"
+        },
+        "authority": {
+          "type": "string",
+          "description": "Authority level of this diagnostic.",
+          "const": "diagnostic_signal"
+        },
+        "risk_class": {
+          "type": "string",
+          "description": "Risk classification.",
+          "const": "diagnostic"
+        },
+        "classification_basis": {
+          "type": "array",
+          "description": "List of information sources used for miss classification.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "retrieval_eval_expectations",
+              "returned_hit_paths",
+              "chunk_index_paths",
+              "query_metadata",
+              "filter_configuration"
+            ]
+          },
+          "minItems": 1
+        },
+        "does_not_prove": {
+          "type": "array",
+          "description": "Explicit statements of what this taxonomy does NOT prove.",
+          "items": {"type": "string"},
+          "minItems": 1
+        },
+        "aggregate": {
+          "type": "object",
+          "description": "Aggregate statistics for missed queries.",
+          "additionalProperties": false,
+          "properties": {
+            "total_cases_classified": {
+              "type": "integer",
+              "description": "Total number of queries classified.",
+              "minimum": 0
+            },
+            "total_misses": {
+              "type": "integer",
+              "description": "Total number of missed queries.",
+              "minimum": 0
+            },
+            "by_type": {
+              "type": "object",
+              "description": "Count of each miss type.",
+              "additionalProperties": false,
+              "properties": {
+                "zero_results": {"type": "integer", "minimum": 0},
+                "expected_not_in_top_k": {"type": "integer", "minimum": 0},
+                "expected_rank_below_k": {"type": "integer", "minimum": 0},
+                "expected_path_not_indexed": {"type": "integer", "minimum": 0},
+                "expected_symbol_not_indexed": {"type": "integer", "minimum": 0},
+                "path_or_symbol_metadata_missing": {"type": "integer", "minimum": 0},
+                "possible_query_vocabulary_gap": {"type": "integer", "minimum": 0},
+                "possible_filter_scope_gap": {"type": "integer", "minimum": 0},
+                "noise_or_fixture_hit": {"type": "integer", "minimum": 0},
+                "stale_eval_input": {"type": "integer", "minimum": 0},
+                "unknown": {"type": "integer", "minimum": 0}
+              }
+            }
+          },
+          "required": ["total_cases_classified", "total_misses", "by_type"]
+        },
+        "cases": {
+          "type": "array",
+          "description": "Detailed miss classification per query case.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "query_index": {
+                "type": "integer",
+                "description": "Index of the query in the details array."
+              },
+              "query": {
+                "type": "string",
+                "description": "Query text reference."
+              },
+              "expected": {
+                "type": "array",
+                "description": "Expected target patterns.",
+                "items": {"type": "string"}
+              },
+              "is_relevant": {
+                "type": "boolean",
+                "description": "Whether this query had a hit (not a miss)."
+              },
+              "observed_top_k_count": {
+                "type": "integer",
+                "description": "Number of results returned.",
+                "minimum": 0
+              },
+              "miss_types": {
+                "type": "array",
+                "description": "Primary and secondary miss classifications.",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "zero_results",
+                    "expected_not_in_top_k",
+                    "expected_rank_below_k",
+                    "expected_path_not_indexed",
+                    "expected_symbol_not_indexed",
+                    "path_or_symbol_metadata_missing",
+                    "possible_query_vocabulary_gap",
+                    "possible_filter_scope_gap",
+                    "noise_or_fixture_hit",
+                    "stale_eval_input",
+                    "unknown"
+                  ]
+                },
+                "minItems": 1
+              },
+              "primary_miss_type": {
+                "type": "string",
+                "description": "Most specific/mechanically-backed miss type.",
+                "enum": [
+                  "zero_results",
+                  "expected_not_in_top_k",
+                  "expected_rank_below_k",
+                  "expected_path_not_indexed",
+                  "expected_symbol_not_indexed",
+                  "path_or_symbol_metadata_missing",
+                  "possible_query_vocabulary_gap",
+                  "possible_filter_scope_gap",
+                  "noise_or_fixture_hit",
+                  "stale_eval_input",
+                  "unknown"
+                ]
+              },
+              "classification_basis": {
+                "type": "array",
+                "description": "Which sources justified this classification.",
+                "items": {"type": "string"}
+              },
+              "notes": {
+                "type": "array",
+                "description": "Optional human-readable notes on the classification.",
+                "items": {"type": "string"}
+              }
+            },
+            "required": ["query_index", "is_relevant", "miss_types", "primary_miss_type"]
+          }
+        }
+      },
+      "required": ["version", "authority", "risk_class", "classification_basis", "does_not_prove", "aggregate"]
     }
   },
   "required": [

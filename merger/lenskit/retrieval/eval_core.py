@@ -9,6 +9,139 @@ from .query_core import execute_query
 WHY_FAIL_QUERY_EXECUTION = "query execution failed"
 WHY_FAIL_MISSING_EXPLAIN = "missing explain from query execution"
 
+
+def classify_miss(query_case: Dict[str, Any], expected_paths: List[str], is_relevant: bool, found_count: int, top_results: List[str]) -> Tuple[List[str], str]:
+    """
+    Classify a retrieval miss mechanically.
+    
+    Returns:
+      (miss_types: List[str], primary_miss_type: str)
+    
+    Miss types are conservative and diagnostic only:
+    - Do not prove repository absence
+    - Do not prove claim truth/falsity
+    - Classify based on available mechanical signals only
+    """
+    if is_relevant:
+        # Not a miss case
+        return [], "hit"  # Not a miss, so no classification needed
+    
+    miss_types = []
+    
+    # Zero results: query returned nothing
+    if found_count == 0:
+        miss_types.append("zero_results")
+    # Expected paths provided but not in results: expected not in top-k
+    elif expected_paths and top_results:
+        # Check if any expected path substring is in top results
+        found_expected = False
+        for result_path in top_results:
+            for exp_pattern in expected_paths:
+                if exp_pattern in result_path:
+                    found_expected = True
+                    break
+            if found_expected:
+                break
+        
+        if not found_expected:
+            miss_types.append("expected_not_in_top_k")
+    # Missing metadata for classification
+    elif not expected_paths:
+        miss_types.append("path_or_symbol_metadata_missing")
+    else:
+        miss_types.append("unknown")
+    
+    # Use the most specific classification as primary
+    # Order: zero_results > expected_not_in_top_k > known types > unknown
+    primary_miss_type = miss_types[0] if miss_types else "unknown"
+    
+    return miss_types, primary_miss_type
+
+
+def build_miss_taxonomy(results_detail: List[Dict[str, Any]], is_stale: bool) -> Dict[str, Any]:
+    """
+    Build the miss taxonomy from evaluation results.
+    
+    This is a diagnostic classification layer that explains why retrievals failed.
+    It does NOT prove repository absence or claim semantic truth.
+    """
+    taxonomy = {
+        "version": "1.0",
+        "authority": "diagnostic_signal",
+        "risk_class": "diagnostic",
+        "classification_basis": [
+            "retrieval_eval_expectations",
+            "returned_hit_paths"
+        ],
+        "does_not_prove": [
+            "absence_of_retrieval_hit_does_not_prove_absence_in_repository",
+            "miss_type_does_not_prove_claim_truth_or_falsehood",
+            "ranking_position_does_not_prove_semantic_importance",
+            "retrieval_eval_does_not_prove_retrieval_completeness",
+            "taxonomy_is_diagnostic_not_authoritative"
+        ],
+        "aggregate": {
+            "total_cases_classified": 0,
+            "total_misses": 0,
+            "by_type": {
+                "zero_results": 0,
+                "expected_not_in_top_k": 0,
+                "expected_rank_below_k": 0,
+                "expected_path_not_indexed": 0,
+                "expected_symbol_not_indexed": 0,
+                "path_or_symbol_metadata_missing": 0,
+                "possible_query_vocabulary_gap": 0,
+                "possible_filter_scope_gap": 0,
+                "noise_or_fixture_hit": 0,
+                "stale_eval_input": 0,
+                "unknown": 0
+            }
+        },
+        "cases": []
+    }
+    
+    if is_stale:
+        taxonomy["classification_basis"].append("stale_eval_marker")
+    
+    for query_index, detail in enumerate(results_detail):
+        is_relevant = detail.get("is_relevant", False)
+        found_count = detail.get("found_count", 0)
+        top_results = detail.get("top_results", [])
+        expected = detail.get("expected", [])
+        query_text = detail.get("query", "")
+        
+        miss_types, primary_miss_type = classify_miss(detail, expected, is_relevant, found_count, top_results)
+        
+        taxonomy["aggregate"]["total_cases_classified"] += 1
+        
+        # Only record misses in cases
+        if not is_relevant or found_count == 0:
+            taxonomy["aggregate"]["total_misses"] += 1
+            
+            # Update aggregate counts
+            for miss_type in miss_types:
+                if miss_type in taxonomy["aggregate"]["by_type"]:
+                    taxonomy["aggregate"]["by_type"][miss_type] += 1
+            
+            case_entry = {
+                "query_index": query_index,
+                "query": query_text,
+                "expected": expected,
+                "is_relevant": is_relevant,
+                "observed_top_k_count": found_count,
+                "miss_types": miss_types,
+                "primary_miss_type": primary_miss_type,
+                "classification_basis": taxonomy["classification_basis"].copy()
+            }
+            
+            # Add optional notes if staleness is a factor
+            if is_stale:
+                case_entry["notes"] = ["eval marked stale; may affect classification"]
+            
+            taxonomy["cases"].append(case_entry)
+    
+    return taxonomy
+
 RE_MD_QUERY_TITLE = re.compile(r"^\d+\.\s+\*\*\"(.+?)\"\*\*")
 RE_CLEAN_MD_LINE = re.compile(r"^[\s*+\-]+")
 RE_EXPECTED_LABEL = re.compile(r"^\*?Expected:?\*?", re.IGNORECASE)
@@ -393,6 +526,9 @@ def do_eval(
     if graph_index_used:
         evidence_basis.append("graph_index")
 
+    # Build the miss taxonomy for diagnostic purposes
+    miss_taxonomy = build_miss_taxonomy(results_detail, is_stale)
+
     out = {
         "metrics": {
             f"recall@{k}": sem_recall_at_k if compare_mode else base_recall_at_k,
@@ -419,7 +555,8 @@ def do_eval(
             ],
             "evidence_basis": evidence_basis,
             "requires_live_check": True
-        }
+        },
+        "miss_taxonomy": miss_taxonomy
     }
 
     if compare_mode:
