@@ -51,9 +51,11 @@ def classify_miss(query_case: Dict[str, Any], expected_paths: List[str], is_rele
     else:
         miss_types.append("unknown")
     
-    # Use the most specific classification as primary
-    # Order: zero_results > expected_not_in_top_k > known types > unknown
-    primary_miss_type = miss_types[0] if miss_types else "unknown"
+    # Fallback: ensure at least one miss type is always returned for miss cases
+    if not miss_types:
+        miss_types.append("unknown")
+    
+    primary_miss_type = miss_types[0]
     
     return miss_types, primary_miss_type
 

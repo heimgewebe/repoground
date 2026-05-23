@@ -341,8 +341,9 @@ PR 9 (Milestone B2 — Retrieval Miss Taxonomy, separat): **UMGESETZT**
   `risk_class: diagnostic`); Klassifizierungen sind **mechanisch**, nicht semantisch.
 - Miss-Typen (konservativ, additive zu Retrieval-Eval):
   - `zero_results` — Query returned no results
-  - `expected_not_in_top_k` — Expected path exists but not in results
+  - `expected_not_in_top_k` — Eval-declared expected pattern was not observed in returned top-k paths
   - `path_or_symbol_metadata_missing` — Insufficient metadata for classification
+  - `stale_eval_input` — Eval run/artifacts were marked stale; diagnostic annotation only
   - `unknown` — Fallback when no classification possible
 - Erforderliche `does_not_prove` Einträge (hardcoded):
   - `absence_of_retrieval_hit_does_not_prove_absence_in_repository`

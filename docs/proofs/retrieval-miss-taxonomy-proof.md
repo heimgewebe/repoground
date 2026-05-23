@@ -49,7 +49,7 @@ Other taxonomy enum values exist in schema as forward-compatible vocabulary and 
 Mechanical classification of retrieval misses:
 
 - **zero_results:** Query returned no results (found_count == 0)
-- **expected_not_in_top_k:** Expected path substring not found in top-k results
+- **expected_not_in_top_k:** Eval-declared expected pattern not observed in current returned top-k paths
 - **path_or_symbol_metadata_missing:** No expected paths available for classification
 - **unknown:** Fallback when no conservative classification possible
 

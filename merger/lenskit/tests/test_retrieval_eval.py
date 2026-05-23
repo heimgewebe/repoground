@@ -713,6 +713,26 @@ def test_classify_miss_missing_metadata():
     assert "path_or_symbol_metadata_missing" in miss_types or primary == "path_or_symbol_metadata_missing"
 
 
+def test_classify_miss_found_expected_pattern_in_results_but_not_relevant():
+    """Regression: is_relevant=False but expected pattern IS found in top results.
+
+    This edge case previously returned ([], "unknown"), violating schema minItems: 1
+    on miss_taxonomy.cases[].miss_types. The fix ensures at least ["unknown"] is returned.
+    """
+    case = {"query": "test"}
+    miss_types, primary = eval_core.classify_miss(
+        case,
+        expected_paths=["expected.py"],
+        is_relevant=False,
+        found_count=1,
+        top_results=["src/expected.py"],  # pattern IS found in results
+    )
+    # Must always return at least one miss type (schema minItems: 1)
+    assert len(miss_types) >= 1
+    assert primary == "unknown"
+    assert miss_types == ["unknown"]
+
+
 def test_miss_taxonomy_expected_not_in_top_k_integration(mini_index_for_eval, tmp_path):
     """Integration-level check: do_eval emits expected_not_in_top_k on a real miss with returned results."""
     queries_json = tmp_path / "eval_queries.json"
