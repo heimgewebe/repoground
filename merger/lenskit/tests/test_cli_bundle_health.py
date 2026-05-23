@@ -100,6 +100,27 @@ def test_bundle_health_post_cli_blocked_missing_pack(tmp_path, capsys):
     assert report["status"] == "blocked"
 
 
+def test_bundle_health_post_cli_no_require_pack_note(tmp_path, capsys):
+    manifest = _make_bundle(tmp_path, include_pack=False)
+    rc = main(["bundle-health", "post", str(manifest), "--no-require-agent-pack"])
+    out = capsys.readouterr().out
+    assert "agent_pack.required:     False" in out
+    assert "agent_reading_pack not required for this run; this is not an agent-surface certification" in out
+    assert rc == 0
+
+
+def test_bundle_health_post_cli_emit_artifact_unregistered_note(tmp_path, capsys):
+    manifest = _make_bundle(tmp_path)
+    manifest_before = manifest.read_text(encoding="utf-8")
+    rc = main(["bundle-health", "post", str(manifest), "--emit-artifact"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    out_file = tmp_path / "demo.bundle_health.post.json"
+    assert out_file.exists()
+    assert manifest.read_text(encoding="utf-8") == manifest_before
+    assert "written artifact is unregistered; manifest not mutated" in out
+
+
 def test_bundle_health_post_cli_fail_hash_mismatch(tmp_path, capsys):
     manifest = _make_bundle(tmp_path)
     (tmp_path / "demo.md").write_bytes(_CANONICAL + b"DRIFT\n")

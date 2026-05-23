@@ -98,6 +98,9 @@ def _print_human_report(report: dict, written_path=None) -> None:
     agent_pack = report.get("agent_pack") or {}
     print(f"  agent_pack.present:      {agent_pack.get('present')}")
     print(f"  agent_pack.self_role_ok: {agent_pack.get('self_role_ok')}")
+    print(f"  agent_pack.required:     {agent_pack.get('required')}")
+    if agent_pack.get("required") is False:
+        print("  NOTE: agent_reading_pack not required for this run; this is not an agent-surface certification.")
 
     redaction = report.get("redaction_status") or {}
     print(f"  redaction (reported):    {redaction.get('redact_secrets_enabled')} (enforced={redaction.get('enforced')})")
@@ -107,6 +110,7 @@ def _print_human_report(report: dict, written_path=None) -> None:
 
     if written_path is not None:
         print(f"  written_artifact:        {written_path}")
+        print("  NOTE: written artifact is unregistered; manifest not mutated.")
 
     if report.get("warnings"):
         print(f"\nWarnings ({len(report['warnings'])}):")

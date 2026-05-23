@@ -260,6 +260,22 @@ def test_post_emit_health_no_require_agent_pack_relaxes_block(tmp_path):
     assert report["agent_pack"]["present"] is False
 
 
+def test_post_emit_health_blocked_precedes_fail(tmp_path):
+    """blocked takes precedence over fail: even when an inspectable defect exists,
+    the absence of agent_reading_pack from the manifest makes the status blocked."""
+    # Build without pack; also corrupt canonical so a hash defect is detectable.
+    manifest = _make_bundle(tmp_path, include_pack=False)
+    (tmp_path / "demo.md").write_bytes(_CANONICAL + b"CORRUPTION\n")
+
+    report = compute_post_emit_health(str(manifest))
+
+    # The hash defect is inspectable but the required certification surface is absent.
+    assert report["status"] == "blocked"
+    # The hash mismatch should still be captured in errors for transparency.
+    assert report["hash_mismatch_count"] >= 1
+    assert len(report["errors"]) >= 1
+
+
 def test_write_post_emit_health_persists_unregistered_artifact(tmp_path):
     manifest = _make_bundle(tmp_path)
     manifest_before = manifest.read_text(encoding="utf-8")
