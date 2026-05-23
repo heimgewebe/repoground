@@ -282,7 +282,6 @@
       "required": [
         "range_ref_version",
         "artifact_role",
-        "repo_id",
         "artifact_path",
         "artifact_byte_start",
         "artifact_byte_end",
@@ -292,12 +291,7 @@
         "source_line_start",
         "source_line_end",
         "content_sha256",
-        "range_content_sha256",
-        "file_path",
-        "start_byte",
-        "end_byte",
-        "start_line",
-        "end_line"
+        "range_content_sha256"
       ],
       "properties": {
         "range_ref_version": {
@@ -308,7 +302,10 @@
           "type": "string"
         },
         "repo_id": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "artifact_path": {
           "type": "string"
@@ -341,10 +338,12 @@
           "minimum": 1
         },
         "content_sha256": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         },
         "range_content_sha256": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
         },
         "file_path": {
           "type": "string"

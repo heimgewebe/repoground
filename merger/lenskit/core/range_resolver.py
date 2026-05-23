@@ -127,6 +127,15 @@ def build_derived_range_ref_v2(
     content_sha256: str,
     range_content_sha256: str,
 ) -> Dict[str, Any]:
+    """
+    Builds a v2 derived, source-backed range reference.
+
+    Caller contract:
+    - content_sha256 must be the SHA-256 of the full artifact/source file bytes.
+    - range_content_sha256 must be the SHA-256 of the extracted byte range.
+    - Do not pass the same chunk hash to both fields unless the full artifact bytes
+      exactly equal the extracted range bytes.
+    """
     return {
         "range_ref_version": "2",
         "artifact_role": ArtifactRole.SOURCE_FILE.value,
