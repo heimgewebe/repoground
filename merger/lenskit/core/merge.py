@@ -293,10 +293,20 @@ ARTIFACT_AUTHORITY_REGISTRY = {
 # Delta Report configuration
 MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
 
-# Directories to ignore
-SKIP_DIRS = {
-    ".git",
-    ".idea",
+# Canonical set of build-artefact and tool-cache entry names.
+# These are used for:
+#   - SKIP_DIRS: name-level ignore list applied by both prescan_repo (files and
+#     directories) and scan_repo (directory traversal only).
+#   - is_noise_file(): path-component matching to annotate files for manifest display.
+# A single source of truth here means adding/removing one entry propagates to
+# both uses automatically and cannot drift.
+#
+# Not included: VCS/IDE dirs (.git, .idea) and system junk (.DS_Store).
+# Those are traversal-skip only and have no meaningful is_noise_file semantic.
+#
+# Intentionally preserved (not noise): .github/, .wgx/, .ai-context.yml and
+# other repo config/CI paths that carry real project context.
+_BUILD_AND_CACHE_DIRS: frozenset[str] = frozenset({
     "node_modules",
     ".svelte-kit",
     ".next",
@@ -307,11 +317,14 @@ SKIP_DIRS = {
     "venv",
     "__pycache__",
     ".pytest_cache",
-    ".DS_Store",
     ".mypy_cache",
     ".ruff_cache",
+    ".cache",
     "coverage",
-}
+})
+
+# Traversal skip set: build/cache dirs plus VCS and system noise.
+SKIP_DIRS: frozenset[str] = _BUILD_AND_CACHE_DIRS | frozenset({".git", ".idea", ".DS_Store"})
 
 # Top-level roots to skip in auto-discovery
 SKIP_ROOTS = {
@@ -1761,6 +1774,10 @@ def is_noise_file(fi: "FileInfo") -> bool:
     - offensichtliche Lockfiles / Paketmanager-Artefakte
     - typische Build-/Vendor-Verzeichnisse
     ohne das Manifest-Schema zu verändern – nur das Included-Label wird erweitert.
+    
+    Path-component matching (not substring): a path like src/mycoverage/report.md
+    is NOT considered noise even though "coverage" is in _BUILD_AND_CACHE_DIRS,
+    because "coverage" is not an actual directory component (only "src" and "mycoverage" are).
     """
     try:
         path_str = str(fi.rel_path).replace("\\", "/").lower()
@@ -1769,16 +1786,10 @@ def is_noise_file(fi: "FileInfo") -> bool:
         sys.stderr.write(f"Warning: is_noise_file failed for {fi.rel_path}: {e}\n")
         return False
 
-    noisy_dirs = (
-        "node_modules/",
-        "dist/",
-        "build/",
-        "target/",
-        "venv/",
-        ".venv/",
-        "__pycache__/",
-    )
-    if any(seg in path_str for seg in noisy_dirs):
+    # Check if any parent directory is in _BUILD_AND_CACHE_DIRS (exact component matching, not substring).
+    path_parts = path_str.split("/")
+    parent_dirs = set(path_parts[:-1])  # Exclude the file name itself
+    if parent_dirs & _BUILD_AND_CACHE_DIRS:
         return True
 
     lock_names = {

@@ -1,7 +1,10 @@
+import json
 from pathlib import Path
 
+import pytest
+
 from merger.lenskit.core import merge
-from merger.lenskit.core.merge import FileInfo
+from merger.lenskit.core.merge import FileInfo, SKIP_DIRS, _BUILD_AND_CACHE_DIRS
 
 
 def create_file_info(rel_path: str, category: str = "other", tags=None, content: str = "content") -> FileInfo:
@@ -163,3 +166,277 @@ def test_auto_warning_only_on_actual_auto_downgrade():
         )
     )
     assert "⚠️ **Auto-Drosselung:**" not in report3
+
+
+# ── A2: Output Noise Hygiene tests ───────────────────────────────────────────
+
+@pytest.mark.parametrize("rel_path", [
+    ".pytest_cache/v/cache/lastfailed",
+    ".mypy_cache/3.11/builtins.json",
+    ".ruff_cache/0.1.0/CACHEDIR.TAG",
+    ".cache/pip/wheels/something.whl",
+    "__pycache__/module.cpython-311.pyc",
+    "coverage/html/index.html",
+    "node_modules/lodash/index.js",
+])
+def test_is_noise_file_returns_true_for_cache_paths(rel_path):
+    fi = create_file_info(rel_path)
+    assert merge.is_noise_file(fi), f"Expected is_noise_file=True for {rel_path}"
+
+
+@pytest.mark.parametrize("rel_path", [
+    ".github/workflows/ci.yml",
+    ".github/CODEOWNERS",
+    ".wgx/config.yml",
+    ".wgx/agents/main.py",
+    ".ai-context.yml",
+    "src/main.py",
+    "README.md",
+])
+def test_is_noise_file_returns_false_for_intentional_hidden_paths(rel_path):
+    fi = create_file_info(rel_path)
+    assert not merge.is_noise_file(fi), f"Expected is_noise_file=False for {rel_path}"
+
+
+def test_is_noise_file_does_not_match_false_positives_with_substring_names():
+    """
+    Verify that is_noise_file() uses path-component matching, not substring matching.
+    Paths like src/mycoverage/file.md should NOT be noise even though "coverage" is
+    in _BUILD_AND_CACHE_DIRS, because "coverage" is not an actual directory component.
+    """
+    false_positives = [
+        "src/mycoverage/report.md",  # contains "coverage" as substring but not as component
+        "src/rebuild/tool.py",  # contains "build" as substring but not as component
+        "src/distributions/file.txt",  # contains "dist" as substring but not as component
+    ]
+    for rel_path in false_positives:
+        fi = create_file_info(rel_path)
+        assert not merge.is_noise_file(fi), (
+            f"Path {rel_path} should NOT be noise: "
+            f"'coverage'/'build'/'dist' are substrings, not actual directory components"
+        )
+
+
+def test_build_and_cache_dirs_are_single_source_of_truth():
+    """_BUILD_AND_CACHE_DIRS is the canonical set; SKIP_DIRS is derived from it."""
+    assert _BUILD_AND_CACHE_DIRS <= SKIP_DIRS
+    # SKIP_DIRS adds .git, .idea, .DS_Store (traversal-skip only, no is_noise_file semantic)
+
+
+def test_manifest_annotates_noise_files_that_bypass_traversal():
+    """
+    is_noise_file() annotates files as (noise) in the manifest.
+    Primary protection is SKIP_DIRS at scan_repo() traversal time; this test covers
+    belt-and-suspenders manifest annotation for files that are explicitly passed
+    to iter_report_blocks() (e.g. in plan-only or test contexts).
+    """
+    files = [
+        create_file_info(".pytest_cache/v/cache/lastfailed", content="{}"),
+        create_file_info("src/main.py", content="# code"),
+    ]
+    report = "".join(
+        merge.iter_report_blocks(
+            files=files,
+            level="max",
+            max_file_bytes=100_000,
+            sources=[Path("/tmp/test-repo")],
+            plan_only=False,
+            meta_density="standard",
+        )
+    )
+    assert "(noise)" in report, "Expected (noise) annotation for cache file in manifest"
+
+
+def test_scan_repo_excludes_cache_dirs(tmp_path):
+    """
+    scan_repo() must not return files from any cache/tool directory.
+    This proves the real output surface (canonical_md, chunk_index) is clean:
+    those surfaces are built from scan_repo() results, so if cache dirs are
+    excluded here they cannot appear in any generated content.
+    """
+    # Create real directory structure with noise and signal files
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def main(): pass")
+    (tmp_path / ".pytest_cache" / "v" / "cache").mkdir(parents=True)
+    (tmp_path / ".pytest_cache" / "v" / "cache" / "lastfailed").write_text("{}")
+    (tmp_path / ".mypy_cache" / "3.11").mkdir(parents=True)
+    (tmp_path / ".mypy_cache" / "3.11" / "builtins.json").write_text("{}")
+    (tmp_path / ".ruff_cache").mkdir()
+    (tmp_path / ".ruff_cache" / "CACHEDIR.TAG").write_text("Signature: 8a477f597d28d172789f06886806bc55")
+    (tmp_path / "__pycache__").mkdir()
+    (tmp_path / "__pycache__" / "main.cpython-311.pyc").write_bytes(b"\x00")
+    (tmp_path / ".cache").mkdir()
+    (tmp_path / ".cache" / "pip_wheels").write_text("dummy")
+    (tmp_path / "coverage").mkdir()
+    (tmp_path / "coverage" / "lcov.info").write_text("TN:")
+
+    result = merge.scan_repo(tmp_path, include_hidden=True)
+    found_paths = {str(fi.rel_path).replace("\\", "/") for fi in result["files"]}
+
+    assert "src/main.py" in found_paths, "Real source file must be present"
+    for noise_path in (
+        ".pytest_cache/v/cache/lastfailed",
+        ".mypy_cache/3.11/builtins.json",
+        ".ruff_cache/CACHEDIR.TAG",
+        "__pycache__/main.cpython-311.pyc",
+        ".cache/pip_wheels",
+        "coverage/lcov.info",
+    ):
+        assert noise_path not in found_paths, f"Cache path must not appear in scan result: {noise_path}"
+
+
+def test_scan_repo_preserves_intentional_hidden_paths(tmp_path):
+    """
+    scan_repo() with include_hidden=True must include .github/, .wgx/, and
+    .ai-context.yml — these carry real CI/repo context and must not be
+    broadly filtered by noise logic.
+    """
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "ci.yml").write_text("on: push")
+    (tmp_path / ".wgx").mkdir()
+    (tmp_path / ".wgx" / "config.yml").write_text("agent: true")
+    (tmp_path / ".ai-context.yml").write_text("role: repo")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def main(): pass")
+
+    result = merge.scan_repo(tmp_path, include_hidden=True)
+    found_paths = {str(fi.rel_path).replace("\\", "/") for fi in result["files"]}
+
+    assert ".github/workflows/ci.yml" in found_paths
+    assert ".wgx/config.yml" in found_paths
+    assert ".ai-context.yml" in found_paths
+
+
+def test_noise_dirs_absent_from_generated_bundle_surfaces(tmp_path):
+    """
+    Integration test: bundle surfaces (canonical_md, chunk_index) generated via
+    write_reports_v2() must not contain content from cache/noise dirs.
+
+    This closes the A2 proof gap: not just 'scan_repo() is clean' but
+    'the generated canonical markdown and chunk index are also clean'.
+
+    Focuses on the two directories newly added by A2 (.cache, coverage),
+    plus the existing ones.
+
+    Direct assertions:
+    - canonical_md: no noise dir content, no noise file paths (excepting source /coverage as user file)
+    - chunk_index JSONL: no noise dir content, no noise dir names in file_path fields
+    - Both surfaces: required source file and hidden context files present
+
+    Hidden-context preservation (.github, .wgx, .ai-context.yml) is also proven
+    here (not delegated to test_scan_repo_preserves_intentional_hidden_paths).
+    """
+    from merger.lenskit.core.merge import write_reports_v2, ExtrasConfig
+
+    repo = tmp_path / "repo"
+    out_dir = tmp_path / "out"
+    repo.mkdir()
+    out_dir.mkdir()
+
+    # Real source file
+    (repo / "src").mkdir()
+    (repo / "src" / "main.py").write_text("def main(): pass\n", encoding="utf-8")
+
+    # Intentional hidden context (must survive to output)
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+    (repo / ".wgx").mkdir()
+    (repo / ".wgx" / "config.yml").write_text("agent: true\n", encoding="utf-8")
+    (repo / ".ai-context.yml").write_text("role: repo\n", encoding="utf-8")
+
+    # Noise dirs — A2-new entries get distinct sentinels for precise assertions
+    sentinels = {
+        ".cache": "LENSKIT_TEST_SENTINEL_DOTCACHE_SHOULD_NOT_APPEAR\n",
+        "coverage": "LENSKIT_TEST_SENTINEL_COVERAGE_SHOULD_NOT_APPEAR\n",
+    }
+    (repo / ".cache").mkdir()
+    (repo / ".cache" / "pip_wheels.txt").write_text(sentinels[".cache"], encoding="utf-8")
+    (repo / "coverage").mkdir()
+    (repo / "coverage" / "lcov.info").write_text(sentinels["coverage"], encoding="utf-8")
+
+    summary = merge.scan_repo(repo, include_hidden=True, calculate_md5=True)
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=tmp_path,
+        repo_summaries=[summary],
+        detail="max",
+        mode="gesamt",
+        max_bytes=0,
+        plan_only=False,
+        output_mode="dual",
+        extras=ExtrasConfig(json_sidecar=True, augment_sidecar=False),
+    )
+
+    md_text = artifacts.canonical_md.read_text(encoding="utf-8")
+    chunk_text = artifacts.chunk_index.read_text(encoding="utf-8")
+
+    # Extract paths from both surfaces
+    md_file_paths = [
+        line.split('path="', 1)[1].split('"', 1)[0]
+        for line in md_text.splitlines()
+        if "<!-- FILE_START path=" in line
+    ]
+    chunk_rows = [
+        json.loads(line)
+        for line in chunk_text.splitlines()
+        if line.strip()
+    ]
+    chunk_file_paths = [
+        row.get("source_range", {}).get("file_path", "")
+        for row in chunk_rows
+    ]
+
+    # Assertion 1: Sentinel content absent from both surfaces (already proven by upstream scan_repo test)
+    for dir_name, sentinel in sentinels.items():
+        assert sentinel.strip() not in md_text, (
+            f"A2 new noise dir '{dir_name}' content must not appear in canonical_md"
+        )
+        assert sentinel.strip() not in chunk_text, (
+            f"A2 new noise dir '{dir_name}' content must not appear in chunk_index"
+        )
+
+    # Assertion 2: Noise dir names must not appear as actual path components (symmetric to is_noise_file logic)
+    for dir_name in sentinels:
+        # Check canonical_md: noise dirs must not be parent-directory components
+        for p in md_file_paths:
+            path_parts = p.split("/")
+            parent_dirs = set(path_parts[:-1])  # all components except filename
+            assert dir_name not in parent_dirs, (
+                f"A2 new noise dir '{dir_name}' must not appear as actual component in canonical_md path: {p}"
+            )
+        # Check chunk_index: noise dirs must not be parent-directory components
+        for p in chunk_file_paths:
+            if p:  # skip empty strings
+                path_parts = p.split("/")
+                parent_dirs = set(path_parts[:-1])
+                assert dir_name not in parent_dirs, (
+                    f"A2 new noise dir '{dir_name}' must not appear as actual component in chunk_index path: {p}"
+                )
+
+    # Assertion 3: Noise filenames must not appear in paths
+    noise_filenames = ["pip_wheels.txt", "lcov.info"]
+    for filename in noise_filenames:
+        assert not any(filename in p for p in md_file_paths), (
+            f"Noise file '{filename}' must not appear in canonical_md paths: {md_file_paths}"
+        )
+        assert not any(filename in p for p in chunk_file_paths), (
+            f"Noise file '{filename}' must not appear in chunk_index JSONL paths: {chunk_file_paths}"
+        )
+
+    # Assertion 4: Source file must be present
+    assert any("src/main.py" in p for p in md_file_paths), (
+        f"src/main.py must appear in canonical_md file paths: {md_file_paths}"
+    )
+    assert any("src/main.py" in p for p in chunk_file_paths), (
+        f"src/main.py must appear in chunk_index JSONL paths: {chunk_file_paths}"
+    )
+
+    # Assertion 5: Hidden context must be present (direct proof, not deferred to scan_repo test)
+    expected_hidden = [".github/workflows/ci.yml", ".wgx/config.yml", ".ai-context.yml"]
+    for hidden_path in expected_hidden:
+        assert any(hidden_path in p for p in md_file_paths), (
+            f"Hidden context '{hidden_path}' must appear in canonical_md: {md_file_paths}"
+        )
+        assert any(hidden_path in p for p in chunk_file_paths), (
+            f"Hidden context '{hidden_path}' must appear in chunk_index: {chunk_file_paths}"
+        )
