@@ -583,6 +583,32 @@ def test_miss_taxonomy_schema_validation(mini_index_for_eval, tmp_path):
     jsonschema.validate(instance=out, schema=schema)
 
 
+def test_miss_taxonomy_schema_validation_stale_eval(mini_index_for_eval, tmp_path):
+    """Stale eval output must still validate against retrieval-eval schema."""
+    import jsonschema
+
+    queries_json = tmp_path / "eval_queries.json"
+    queries_json.write_text(json.dumps([
+        {"query": "login", "expected_patterns": ["login.py"]},
+        {"query": "missing", "expected_patterns": ["nope.py"]}
+    ]), encoding="utf-8")
+
+    out = eval_core.do_eval(
+        index_path=Path(mini_index_for_eval),
+        queries_path=queries_json,
+        k=5,
+        is_json_mode=True,
+        is_stale=True
+    )
+
+    schema = _load_retrieval_eval_schema()
+    jsonschema.validate(instance=out, schema=schema)
+
+    taxonomy = out["miss_taxonomy"]
+    assert "stale_eval_input" in taxonomy["aggregate"]["by_type"]
+    assert "stale_eval_marker" not in taxonomy["classification_basis"]
+
+
 def test_miss_taxonomy_does_not_prove_entries(mini_index_for_eval, tmp_path):
     """Test that does_not_prove entries are present and correct."""
     queries_json = tmp_path / "eval_queries.json"
@@ -670,7 +696,8 @@ def test_classify_miss_hit_case():
         found_count=1,
         top_results=["foo.py"]
     )
-    assert len(miss_types) == 0 or primary == "hit"
+    assert miss_types == []
+    assert primary is None
 
 
 def test_classify_miss_missing_metadata():
@@ -684,3 +711,47 @@ def test_classify_miss_missing_metadata():
         top_results=["something.py"]
     )
     assert "path_or_symbol_metadata_missing" in miss_types or primary == "path_or_symbol_metadata_missing"
+
+
+def test_miss_taxonomy_expected_not_in_top_k_integration(mini_index_for_eval, tmp_path):
+    """Integration-level check: do_eval emits expected_not_in_top_k on a real miss with returned results."""
+    queries_json = tmp_path / "eval_queries.json"
+    queries_json.write_text(json.dumps([
+        {"query": "def", "expected_patterns": ["never_there.py"]}
+    ]), encoding="utf-8")
+
+    out = eval_core.do_eval(
+        index_path=Path(mini_index_for_eval),
+        queries_path=queries_json,
+        k=5,
+        is_json_mode=True,
+        is_stale=False
+    )
+
+    detail = out["details"][0]
+    assert detail["is_relevant"] is False
+    assert detail["found_count"] > 0
+
+    cases = out["miss_taxonomy"]["cases"]
+    assert len(cases) >= 1
+    assert "expected_not_in_top_k" in cases[0]["miss_types"]
+    assert cases[0]["primary_miss_type"] == "expected_not_in_top_k"
+
+
+def test_retrieval_eval_schema_backward_compatibility_without_miss_taxonomy():
+    """Schema remains backward compatible when miss_taxonomy is omitted."""
+    import jsonschema
+
+    schema = _load_retrieval_eval_schema()
+    legacy_output = {
+        "metrics": {"total_queries": 1, "hits": 0, "stale_flag": False},
+        "details": [],
+        "claim_boundaries": {
+            "proves": ["x"],
+            "does_not_prove": ["y"],
+            "evidence_basis": ["eval_queries"],
+            "requires_live_check": True
+        }
+    }
+
+    jsonschema.validate(instance=legacy_output, schema=schema)

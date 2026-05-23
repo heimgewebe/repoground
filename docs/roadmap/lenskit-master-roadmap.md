@@ -325,10 +325,10 @@ PR 8 (Milestone B1 — Context Quality Signals): **UMGESETZT**
   - `ruff check --select=F401,F811 --exclude='**/fixtures/**' .` (passed)
   - `python3.11 -m pytest merger/lenskit/tests/test_context_quality.py merger/lenskit/tests/test_cli_context_quality.py` (24 passed)
   - `python3.11 -m pytest merger/lenskit/tests/test_output_health.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py merger/lenskit/tests/test_bundle_manifest_integration.py` (93 passed, keine Regression)
-- B2 bleibt **separates, zukünftiges** Arbeitspaket (Retrieval Miss Taxonomy; siehe Blueprint §3 B2).
-- B2 bleibt **separates, zukünftiges** Arbeitspaket (Retrieval Miss Taxonomy; siehe Blueprint §3 B2).
+- B2 wurde mit PR 9 als **separates Arbeitspaket** umgesetzt; spätere Ranking-/Reranking-
+  und Retrieval-Verbesserungsarbeit bleibt als eigenes Folgepaket offen.
 
-PR 9 (Milestone B2 — Retrieval Miss Taxonomy): **UMGESETZT**
+PR 9 (Milestone B2 — Retrieval Miss Taxonomy, separat): **UMGESETZT**
 - Scope: additive **diagnostische Klassifizierungsschicht** für Retrieval-Eval-Misses;
   **keine** Wahrheitsbehauptungen, **keine** Repo-Abwesenheitsansprüche, **keine** Ranking-Änderungen.
   Beleg: `docs/proofs/retrieval-miss-taxonomy-proof.md`.

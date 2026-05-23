@@ -10,12 +10,12 @@ WHY_FAIL_QUERY_EXECUTION = "query execution failed"
 WHY_FAIL_MISSING_EXPLAIN = "missing explain from query execution"
 
 
-def classify_miss(query_case: Dict[str, Any], expected_paths: List[str], is_relevant: bool, found_count: int, top_results: List[str]) -> Tuple[List[str], str]:
+def classify_miss(query_case: Dict[str, Any], expected_paths: List[str], is_relevant: bool, found_count: int, top_results: List[str]) -> Tuple[List[str], Optional[str]]:
     """
     Classify a retrieval miss mechanically.
     
-    Returns:
-      (miss_types: List[str], primary_miss_type: str)
+        Returns:
+            (miss_types: List[str], primary_miss_type: Optional[str])
     
     Miss types are conservative and diagnostic only:
     - Do not prove repository absence
@@ -24,7 +24,7 @@ def classify_miss(query_case: Dict[str, Any], expected_paths: List[str], is_rele
     """
     if is_relevant:
         # Not a miss case
-        return [], "hit"  # Not a miss, so no classification needed
+        return [], None
     
     miss_types = []
     
@@ -100,9 +100,6 @@ def build_miss_taxonomy(results_detail: List[Dict[str, Any]], is_stale: bool) ->
         "cases": []
     }
     
-    if is_stale:
-        taxonomy["classification_basis"].append("stale_eval_marker")
-    
     for query_index, detail in enumerate(results_detail):
         is_relevant = detail.get("is_relevant", False)
         found_count = detail.get("found_count", 0)
@@ -117,6 +114,11 @@ def build_miss_taxonomy(results_detail: List[Dict[str, Any]], is_stale: bool) ->
         # Only record misses in cases
         if not is_relevant or found_count == 0:
             taxonomy["aggregate"]["total_misses"] += 1
+
+            if is_stale and "stale_eval_input" not in miss_types:
+                miss_types.append("stale_eval_input")
+                if primary_miss_type is None:
+                    primary_miss_type = "stale_eval_input"
             
             # Update aggregate counts
             for miss_type in miss_types:
@@ -130,7 +132,7 @@ def build_miss_taxonomy(results_detail: List[Dict[str, Any]], is_stale: bool) ->
                 "is_relevant": is_relevant,
                 "observed_top_k_count": found_count,
                 "miss_types": miss_types,
-                "primary_miss_type": primary_miss_type,
+                "primary_miss_type": primary_miss_type or "unknown",
                 "classification_basis": taxonomy["classification_basis"].copy()
             }
             
