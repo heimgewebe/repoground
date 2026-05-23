@@ -29,8 +29,8 @@ _BUILD_AND_CACHE_DIRS: frozenset[str] = frozenset({
 Both downstream uses are now **derived**, not duplicated:
 - `SKIP_DIRS: frozenset[str] = _BUILD_AND_CACHE_DIRS | frozenset({".git", ".idea", ".DS_Store"})`  
   (adds VCS/IDE/system noise dirs that are skip-only, not noise-classified)
-- `NOISE_DIR_SEGMENTS: tuple[str, ...] = tuple(d + "/" for d in sorted(_BUILD_AND_CACHE_DIRS))`  
-  (path-segment form for `is_noise_file()` substring matching)
+- `is_noise_file()` uses `_BUILD_AND_CACHE_DIRS` directly via exact parent-directory component matching  
+  (prevents substring false positives like `src/mycoverage/` matching `coverage`)
 
 Drift is now structurally **impossible**: changing `_BUILD_AND_CACHE_DIRS` automatically propagates to both uses.
 
@@ -80,13 +80,24 @@ Test: `test_manifest_annotates_noise_files_that_bypass_traversal`
 Documents that belt-and-suspenders `(noise)` annotation in manifest applies only to files explicitly passed to `iter_report_blocks()` (e.g., in plan-only or test contexts).  
 Primary protection is SKIP_DIRS at traversal level.
 
+### False-Positive Prevention
+
+Test: `test_is_noise_file_does_not_match_false_positives_with_substring_names`
+
+Verifies that path-component matching (not substring) prevents misclassification:
+- `src/mycoverage/report.md` → NOT noise (even though "coverage" is in `_BUILD_AND_CACHE_DIRS`)
+- `src/rebuild/tool.py` → NOT noise (even though "build" is in `_BUILD_AND_CACHE_DIRS`)
+- `src/distributions/file.txt` → NOT noise (even though "dist" is in `_BUILD_AND_CACHE_DIRS`)
+
+Ensures that only actual parent-directory names trigger noise classification.
+
 ## Scope
 
 ### What Changed
 - Consolidated skip/noise definition via `_BUILD_AND_CACHE_DIRS`
 - Added `.cache` and `coverage` to `_BUILD_AND_CACHE_DIRS` / `SKIP_DIRS` (were missing)
-- Updated `is_noise_file()` to use the shared `NOISE_DIR_SEGMENTS` definition
-- Added 4 regression tests proving real output surface exclusion
+- Updated `is_noise_file()` to use `_BUILD_AND_CACHE_DIRS` via exact parent-directory component matching, preventing substring false positives (e.g., `src/mycoverage/` does not match `coverage`)
+- Added 5 regression tests proving real output surface exclusion and false-positive prevention
 - `excluded_noise` output_health diagnostic: **not implemented in this PR** — traversal does not yet surface skipped-dir counts (see Deferred section)
 
 ### What Did NOT Change
@@ -109,7 +120,7 @@ This is out of scope for A2 (hygiene consolidation only); will be added when tra
 ## Tests Run
 
 ```
-pytest merger/lenskit/tests/test_merge_filtering.py       # 22 passed
+pytest merger/lenskit/tests/test_merge_filtering.py       # 23 passed
 pytest merger/lenskit/tests/test_output_health.py         # 45 passed
 pytest merger/lenskit/tests/test_agent_reading_pack.py    # 8 passed
 pytest merger/lenskit/tests/test_retrieval_index.py       # 3 passed
@@ -117,7 +128,9 @@ pytest merger/lenskit/tests/test_bundle_manifest_integration.py  # 28 passed
 pytest merger/lenskit/tests/test_post_emit_health.py      # 32 passed
 ```
 
-**Total: 138 tests, all pass.**
+**Total: 167 tests, all pass.**
+
+(Includes new tests for false-positive prevention and single-source-of-truth validation.)
 
 ---
 
