@@ -21,16 +21,28 @@ from typing import Any, Dict, Optional, Tuple
 from .clock import now_utc
 from .post_emit_health import derive_post_health_path
 
+try:
+    import jsonschema
+except ImportError:  # optional runtime dependency
+    jsonschema = None
+
 KIND = "lenskit.agent_export_gate"
 VERSION = "1.0"
 
 _BUNDLE_KIND = "repolens.bundle.manifest"
+_POST_HEALTH_KIND = "lenskit.post_emit_health"
+_POST_HEALTH_VERSION = "1.0"
 _POST_STATUSES = {"pass", "warn", "fail", "blocked"}
-_AGENT_FACING_PROFILES = {
-    "agent_minimal",
-    "agent_facing",
-    "agent",
+# A5-local profile policy derived from repository output_profile vocabulary.
+_AGENT_FACING_PROFILES = {"agent_minimal"}
+_NON_AGENT_PROFILES = {
+    "human_review",
+    "ui_navigation",
+    "lookup_minimal",
+    "review_context",
+    "local",
 }
+_KNOWN_PROFILES = _AGENT_FACING_PROFILES | _NON_AGENT_PROFILES
 
 _DOES_NOT_MEAN = [
     "repo_understood",
@@ -102,6 +114,69 @@ def _find_output_health_verdict(manifest: Dict[str, Any], manifest_dir: Path) ->
     return None
 
 
+def _validate_post_health_schema(post_doc: Dict[str, Any]) -> Optional[str]:
+    if jsonschema is None:
+        return None
+
+    schema_path = Path(__file__).parent.parent / "contracts" / "post-emit-health.v1.schema.json"
+    if not schema_path.exists():
+        return f"post_emit_health schema not found: {schema_path.name}"
+
+    try:
+        with schema_path.open("r", encoding="utf-8") as f:
+            schema = json.load(f)
+        jsonschema.validate(instance=post_doc, schema=schema)
+    except jsonschema.ValidationError as e:  # type: ignore[union-attr]
+        return f"post_emit_health schema validation failed: {e.message}"
+    except (OSError, json.JSONDecodeError) as e:
+        return f"could not load post_emit_health schema: {e}"
+    return None
+
+
+def _validate_post_health_binding(
+    post_doc: Dict[str, Any],
+    *,
+    resolved_manifest: Path,
+    manifest_run_id: Optional[str],
+) -> Optional[str]:
+    kind = post_doc.get("kind")
+    if kind != _POST_HEALTH_KIND:
+        return f"post_emit_health kind mismatch: expected {_POST_HEALTH_KIND!r} got {kind!r}"
+
+    version = post_doc.get("version")
+    if version != _POST_HEALTH_VERSION:
+        return (
+            "post_emit_health version mismatch: "
+            f"expected {_POST_HEALTH_VERSION!r} got {version!r}"
+        )
+
+    status = post_doc.get("status")
+    if not isinstance(status, str) or status not in _POST_STATUSES:
+        return f"post_emit_health has invalid status: {status!r}"
+
+    manifest_path_value = post_doc.get("bundle_manifest_path")
+    if isinstance(manifest_path_value, str) and manifest_path_value:
+        resolved_post_manifest = _resolve_path(manifest_path_value)
+        if resolved_post_manifest != resolved_manifest:
+            return "post_emit_health bundle_manifest_path does not match the evaluated manifest"
+
+    post_bundle_run_id = post_doc.get("bundle_run_id")
+    if (
+        isinstance(manifest_run_id, str)
+        and manifest_run_id
+        and isinstance(post_bundle_run_id, str)
+        and post_bundle_run_id
+        and post_bundle_run_id != manifest_run_id
+    ):
+        return "post_emit_health bundle_run_id does not match manifest run_id"
+
+    schema_error = _validate_post_health_schema(post_doc)
+    if schema_error is not None:
+        return schema_error
+
+    return None
+
+
 def evaluate_agent_export_gate(
     manifest_path: str,
     post_health_path: Optional[str] = None,
@@ -156,8 +231,12 @@ def evaluate_agent_export_gate(
         }
 
     manifest_dir = resolved_manifest.parent
+    manifest_run_id = manifest.get("run_id") if isinstance(manifest.get("run_id"), str) else None
+
+    profile_missing = profile is None
+    profile_unknown = isinstance(profile, str) and profile not in _KNOWN_PROFILES
     agent_facing = _is_agent_facing(profile)
-    redaction_required = bool(require_redaction and agent_facing)
+    redaction_required = True if agent_facing else False
 
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     redaction_value = capabilities.get("redaction")
@@ -172,25 +251,40 @@ def evaluate_agent_export_gate(
 
     post_doc, post_err = _load_json(resolved_post_health)
     post_emit_health_status: Optional[str] = None
+    post_health_valid = False
     if isinstance(post_doc, dict):
-        raw_status = post_doc.get("status")
-        if isinstance(raw_status, str) and raw_status in _POST_STATUSES:
-            post_emit_health_status = raw_status
+        binding_error = _validate_post_health_binding(
+            post_doc,
+            resolved_manifest=resolved_manifest,
+            manifest_run_id=manifest_run_id,
+        )
+        if binding_error is not None:
+            warnings.append(binding_error)
         else:
-            warnings.append("post_emit_health report has no recognized status")
-        observed = post_doc.get("output_health_verdict")
-        if isinstance(observed, str):
-            output_health_verdict_observed = observed
+            post_health_valid = True
+            raw_status = post_doc.get("status")
+            if isinstance(raw_status, str):
+                post_emit_health_status = raw_status
+            observed = post_doc.get("output_health_verdict")
+            if isinstance(observed, str):
+                output_health_verdict_observed = observed
     else:
         if post_err is not None:
             warnings.append(f"post_emit_health unavailable: {post_err}")
 
     status = "pass"
 
+    if profile_missing:
+        status = "blocked"
+        errors.append("export gate requires an explicit profile")
+    elif profile_unknown:
+        status = "blocked"
+        errors.append(f"unknown export profile: {profile!r}")
+
     if agent_facing:
-        if post_doc is None:
+        if not post_health_valid:
             status = "blocked"
-            errors.append("agent-facing export requires readable post_emit_health")
+            errors.append("agent-facing export requires valid post_emit_health")
         elif post_emit_health_status == "blocked":
             status = "blocked"
             errors.append("post_emit_health status is blocked")
@@ -205,17 +299,6 @@ def evaluate_agent_export_gate(
             status = "fail" if status != "blocked" else status
             errors.append("agent-facing export requires capabilities.redaction=true")
     else:
-        if profile is None:
-            warnings.append("no profile provided; treated as non-agent-facing")
-        elif profile not in _AGENT_FACING_PROFILES and profile not in {
-            "human_review",
-            "ui_navigation",
-            "lookup_minimal",
-            "review_context",
-            "local",
-        }:
-            warnings.append(f"unknown profile '{profile}' treated as non-agent-facing")
-
         warnings.append(
             "non-agent-facing profile result does not certify agent-surface export"
         )

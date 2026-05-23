@@ -5,6 +5,8 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
+
 from merger.lenskit.cli.main import main
 
 
@@ -198,3 +200,18 @@ def test_bundle_health_export_gate_cli_human_states_observation_only(tmp_path, c
     assert "Agent Export Gate:" in out
     assert "output_health_verdict:" in out
     assert "(observation only)" in out
+
+
+def test_bundle_health_export_gate_cli_has_no_redaction_bypass_flag(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "bundle-health",
+                "export-gate",
+                str(manifest),
+                "--profile",
+                "agent_minimal",
+                "--no-require-redaction",
+            ]
+        )

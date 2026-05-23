@@ -63,12 +63,6 @@ def register_bundle_health_commands(subparsers) -> None:
         help="Optional explicit path to post_emit_health JSON report",
     )
     export_gate_parser.add_argument(
-        "--no-require-redaction",
-        action="store_false",
-        dest="require_redaction",
-        help="Do not enforce redaction requirement even for agent-facing profiles",
-    )
-    export_gate_parser.add_argument(
         "--json",
         action="store_true",
         dest="emit_json",
@@ -163,7 +157,7 @@ def run_bundle_health_export_gate(args: argparse.Namespace) -> int:
             manifest_path=args.manifest,
             post_health_path=getattr(args, "post_health_path", None),
             profile=getattr(args, "profile", None),
-            require_redaction=getattr(args, "require_redaction", True),
+            require_redaction=True,
         )
     except Exception as e:  # noqa: BLE001 - surface unexpected failures cleanly
         print(f"Error: unexpected failure during export gate evaluation: {e}", file=sys.stderr)

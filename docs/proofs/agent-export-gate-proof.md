@@ -11,6 +11,15 @@
 
 Agent-facing export requires a readable `post_emit_health` report with `status=pass`. Missing or unreadable post-emit health blocks agent-facing export.
 
+The gate additionally requires `post_emit_health` shape/binding validity before trust:
+- `kind == lenskit.post_emit_health`
+- `version == 1.0`
+- valid status enum
+- schema-valid when `jsonschema` is available
+- `bundle_run_id` and `bundle_manifest_path` must match the evaluated bundle when present
+
+Invalid or mismatched post-emit reports block agent-facing export.
+
 ## Why redaction false blocks agent-facing export
 
 For agent-facing profiles with required redaction, `capabilities.redaction` must be `true`. If not, gate result is fail.
@@ -23,6 +32,11 @@ A gate pass does not mean:
 - `claims_true`
 
 The gate is export eligibility logic, not a truth verdict.
+
+Profile policy is fail-closed:
+- missing profile => blocked
+- unknown profile => blocked
+- only known non-agent profiles are treated as non-agent-facing
 
 ## Manifest mutation
 

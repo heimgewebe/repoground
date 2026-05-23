@@ -73,7 +73,8 @@
       "items": {"type": "string"},
       "allOf": [
         {"contains": {"const": "repo_understood"}},
-        {"contains": {"const": "answer_safe_without_citations"}}
+        {"contains": {"const": "answer_safe_without_citations"}},
+        {"contains": {"const": "claims_true"}}
       ]
     }
   }

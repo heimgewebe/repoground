@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import jsonschema
+import pytest
 
 from merger.lenskit.core.agent_export_gate import evaluate_agent_export_gate
 
@@ -122,6 +123,34 @@ def test_agent_facing_pass_when_post_emit_pass_and_redaction_true(tmp_path):
     assert report["redaction_enabled"] is True
 
 
+def test_missing_profile_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile=None,
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+    assert any("explicit profile" in e for e in report["errors"])
+
+
+def test_unknown_profile_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_portable",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+    assert any("unknown export profile" in e for e in report["errors"])
+
+
 def test_agent_facing_output_health_pass_but_missing_post_emit_not_pass(tmp_path):
     manifest = _write_manifest(
         tmp_path,
@@ -155,6 +184,70 @@ def test_agent_facing_fails_when_post_emit_fail(tmp_path):
     assert report["post_emit_health_status"] == "fail"
 
 
+def test_agent_facing_invalid_post_emit_kind_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc["kind"] = "lenskit.output_health"
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
+def test_agent_facing_invalid_post_emit_version_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc["version"] = "2.0"
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
+def test_agent_facing_invalid_post_emit_schema_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc["does_not_mean"] = ["repo_understood"]
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
+def test_agent_facing_post_emit_bundle_run_id_mismatch_is_blocked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    post = _write_post_health(tmp_path, "pass")
+    doc = json.loads(post.read_text(encoding="utf-8"))
+    doc["bundle_run_id"] = "different-run"
+    post.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "blocked"
+
+
 def test_agent_facing_fails_when_redaction_required_but_disabled(tmp_path):
     manifest = _write_manifest(tmp_path, redaction=False)
     _write_post_health(tmp_path, "pass")
@@ -185,6 +278,16 @@ def test_non_agent_local_profile_does_not_claim_agent_certification(tmp_path):
     assert any("does not certify agent-surface export" in w for w in report["warnings"])
 
 
+def test_non_agent_local_profile_stays_pass_when_require_redaction_false(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=False)
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="local",
+        require_redaction=False,
+    )
+    assert report["status"] == "pass"
+
+
 def test_agent_export_gate_validates_against_schema(tmp_path):
     manifest = _write_manifest(tmp_path, redaction=True)
     _write_post_health(tmp_path, "pass")
@@ -197,6 +300,22 @@ def test_agent_export_gate_validates_against_schema(tmp_path):
 
     schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.validate(instance=report, schema=schema)
+
+
+def test_schema_rejects_does_not_mean_without_claims_true(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    bad = dict(report)
+    bad["does_not_mean"] = ["repo_understood", "answer_safe_without_citations"]
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=bad, schema=schema)
 
 
 def test_agent_export_gate_does_not_mutate_manifest(tmp_path):
