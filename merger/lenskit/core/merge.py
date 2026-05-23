@@ -294,10 +294,10 @@ ARTIFACT_AUTHORITY_REGISTRY = {
 MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
 
 # Canonical set of build-artefact and tool-cache entry names.
-# These are used in two ways:
+# These are used for:
 #   - SKIP_DIRS: name-level ignore list applied by both prescan_repo (files and
 #     directories) and scan_repo (directory traversal only).
-#   - NOISE_DIR_SEGMENTS: path-segment form for is_noise_file() classification.
+#   - is_noise_file(): path-component matching to annotate files for manifest display.
 # A single source of truth here means adding/removing one entry propagates to
 # both uses automatically and cannot drift.
 #
@@ -325,10 +325,6 @@ _BUILD_AND_CACHE_DIRS: frozenset[str] = frozenset({
 
 # Traversal skip set: build/cache dirs plus VCS and system noise.
 SKIP_DIRS: frozenset[str] = _BUILD_AND_CACHE_DIRS | frozenset({".git", ".idea", ".DS_Store"})
-
-# Path-segment form used by is_noise_file() for substring matching.
-# Derived from _BUILD_AND_CACHE_DIRS, so it cannot drift from SKIP_DIRS.
-NOISE_DIR_SEGMENTS: tuple[str, ...] = tuple(d + "/" for d in sorted(_BUILD_AND_CACHE_DIRS))
 
 # Top-level roots to skip in auto-discovery
 SKIP_ROOTS = {
@@ -1778,6 +1774,10 @@ def is_noise_file(fi: "FileInfo") -> bool:
     - offensichtliche Lockfiles / Paketmanager-Artefakte
     - typische Build-/Vendor-Verzeichnisse
     ohne das Manifest-Schema zu verändern – nur das Included-Label wird erweitert.
+    
+    Path-component matching (not substring): a path like src/mycoverage/report.md
+    is NOT considered noise even though "coverage" is in _BUILD_AND_CACHE_DIRS,
+    because "coverage" is not an actual directory component (only "src" and "mycoverage" are).
     """
     try:
         path_str = str(fi.rel_path).replace("\\", "/").lower()
@@ -1786,7 +1786,10 @@ def is_noise_file(fi: "FileInfo") -> bool:
         sys.stderr.write(f"Warning: is_noise_file failed for {fi.rel_path}: {e}\n")
         return False
 
-    if any(seg in path_str for seg in NOISE_DIR_SEGMENTS):
+    # Check if any parent directory is in _BUILD_AND_CACHE_DIRS (exact component matching, not substring).
+    path_parts = path_str.split("/")
+    parent_dirs = set(path_parts[:-1])  # Exclude the file name itself
+    if parent_dirs & _BUILD_AND_CACHE_DIRS:
         return True
 
     lock_names = {

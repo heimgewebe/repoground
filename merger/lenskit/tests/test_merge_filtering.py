@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from merger.lenskit.core import merge
-from merger.lenskit.core.merge import FileInfo, NOISE_DIR_SEGMENTS, SKIP_DIRS, _BUILD_AND_CACHE_DIRS
+from merger.lenskit.core.merge import FileInfo, SKIP_DIRS, _BUILD_AND_CACHE_DIRS
 
 
 def create_file_info(rel_path: str, category: str = "other", tags=None, content: str = "content") -> FileInfo:
@@ -197,13 +197,29 @@ def test_is_noise_file_returns_false_for_intentional_hidden_paths(rel_path):
     assert not merge.is_noise_file(fi), f"Expected is_noise_file=False for {rel_path}"
 
 
-def test_noise_dir_segments_derived_from_build_and_cache_dirs():
-    """NOISE_DIR_SEGMENTS is derived from _BUILD_AND_CACHE_DIRS, so they cannot drift."""
-    # NOISE_DIR_SEGMENTS is built as tuple(d + "/" for d in sorted(_BUILD_AND_CACHE_DIRS))
-    expected = tuple(d + "/" for d in sorted(_BUILD_AND_CACHE_DIRS))
-    assert set(NOISE_DIR_SEGMENTS) == set(expected)
-    # SKIP_DIRS must be a superset (adds .git, .idea, .DS_Store)
+def test_is_noise_file_does_not_match_false_positives_with_substring_names():
+    """
+    Verify that is_noise_file() uses path-component matching, not substring matching.
+    Paths like src/mycoverage/file.md should NOT be noise even though "coverage" is
+    in _BUILD_AND_CACHE_DIRS, because "coverage" is not an actual directory component.
+    """
+    false_positives = [
+        "src/mycoverage/report.md",  # contains "coverage" as substring but not as component
+        "src/rebuild/tool.py",  # contains "build" as substring but not as component
+        "src/distributions/file.txt",  # contains "dist" as substring but not as component
+    ]
+    for rel_path in false_positives:
+        fi = create_file_info(rel_path)
+        assert not merge.is_noise_file(fi), (
+            f"Path {rel_path} should NOT be noise: "
+            f"'coverage'/'build'/'dist' are substrings, not actual directory components"
+        )
+
+
+def test_build_and_cache_dirs_are_single_source_of_truth():
+    """_BUILD_AND_CACHE_DIRS is the canonical set; SKIP_DIRS is derived from it."""
     assert _BUILD_AND_CACHE_DIRS <= SKIP_DIRS
+    # SKIP_DIRS adds .git, .idea, .DS_Store (traversal-skip only, no is_noise_file semantic)
 
 
 def test_manifest_annotates_noise_files_that_bypass_traversal():
