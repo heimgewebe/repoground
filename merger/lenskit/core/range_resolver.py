@@ -1,7 +1,7 @@
 import json
 import hashlib
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 try:
     import jsonschema
@@ -10,11 +10,24 @@ except ImportError:
 
 from .constants import ArtifactRole
 
+
+_CONTRACTS_DIR = Path(__file__).parent.parent / "contracts"
+_RANGE_REF_V1_SCHEMA_PATH = _CONTRACTS_DIR / "range-ref.v1.schema.json"
+_RANGE_REF_V2_SCHEMA_PATH = _CONTRACTS_DIR / "range-ref.v2.schema.json"
+
 def _require_jsonschema() -> None:
     if jsonschema is None:
         raise RuntimeError(
             "Schema validation requested but jsonschema is unavailable in this environment."
         )
+
+
+def _load_schema(schema_path: Path) -> Dict[str, Any]:
+    if not schema_path.exists():
+        raise RuntimeError(f"Schema file not found: {schema_path}")
+
+    with schema_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
 
 def build_explicit_range_ref(
     artifact_role: str,
@@ -38,6 +51,42 @@ def build_explicit_range_ref(
         "start_line": start_line,
         "end_line": end_line,
         "content_sha256": content_sha256
+    }
+
+
+def build_explicit_range_ref_v2(
+    artifact_role: str,
+    artifact_path: str,
+    artifact_byte_start: int,
+    artifact_byte_end: int,
+    artifact_line_start: int,
+    artifact_line_end: int,
+    source_file_path: str,
+    source_line_start: int,
+    source_line_end: int,
+    content_sha256: str,
+    range_content_sha256: str,
+    repo_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    return {
+        "range_ref_version": "2",
+        "artifact_role": artifact_role,
+        "repo_id": repo_id,
+        "artifact_path": artifact_path,
+        "artifact_byte_start": artifact_byte_start,
+        "artifact_byte_end": artifact_byte_end,
+        "artifact_line_start": artifact_line_start,
+        "artifact_line_end": artifact_line_end,
+        "source_file_path": source_file_path,
+        "source_line_start": source_line_start,
+        "source_line_end": source_line_end,
+        "content_sha256": content_sha256,
+        "range_content_sha256": range_content_sha256,
+        "file_path": artifact_path,
+        "start_byte": artifact_byte_start,
+        "end_byte": artifact_byte_end,
+        "start_line": artifact_line_start,
+        "end_line": artifact_line_end,
     }
 
 
@@ -65,6 +114,41 @@ def build_derived_range_ref(
     }
 
 
+def build_derived_range_ref_v2(
+    repo_id: str,
+    artifact_path: str,
+    artifact_byte_start: int,
+    artifact_byte_end: int,
+    artifact_line_start: int,
+    artifact_line_end: int,
+    source_file_path: str,
+    source_line_start: int,
+    source_line_end: int,
+    content_sha256: str,
+    range_content_sha256: str,
+) -> Dict[str, Any]:
+    return {
+        "range_ref_version": "2",
+        "artifact_role": ArtifactRole.SOURCE_FILE.value,
+        "repo_id": repo_id,
+        "artifact_path": artifact_path,
+        "artifact_byte_start": artifact_byte_start,
+        "artifact_byte_end": artifact_byte_end,
+        "artifact_line_start": artifact_line_start,
+        "artifact_line_end": artifact_line_end,
+        "source_file_path": source_file_path,
+        "source_line_start": source_line_start,
+        "source_line_end": source_line_end,
+        "content_sha256": content_sha256,
+        "range_content_sha256": range_content_sha256,
+        "file_path": artifact_path,
+        "start_byte": artifact_byte_start,
+        "end_byte": artifact_byte_end,
+        "start_line": artifact_line_start,
+        "end_line": artifact_line_end,
+    }
+
+
 def resolve_range_ref(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any]:
     """
     Resolves a range_ref against a bundle.manifest.json or dump_index.json to extract
@@ -76,13 +160,9 @@ def resolve_range_ref(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any
     with manifest_path.open("r", encoding="utf-8") as f:
         manifest = json.load(f)
 
-    # Validate ref against schema
-    schema_path = Path(__file__).parent.parent / "contracts" / "range-ref.v1.schema.json"
-    if not schema_path.exists():
-        raise RuntimeError(f"Schema file not found: {schema_path}")
-
-    with schema_path.open("r", encoding="utf-8") as f:
-        schema = json.load(f)
+    is_v2 = ref.get("range_ref_version") == "2"
+    schema_path = _RANGE_REF_V2_SCHEMA_PATH if is_v2 else _RANGE_REF_V1_SCHEMA_PATH
+    schema = _load_schema(schema_path)
 
     _require_jsonschema()
 
@@ -99,6 +179,135 @@ def resolve_range_ref(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any
         raise ValueError(f"Unknown artifact_role: {role_str}")
 
     target_path_str = None
+
+    if is_v2:
+        artifact_path = ref.get("artifact_path")
+        if not artifact_path:
+            raise ValueError("artifact_path is required when resolving a range_ref v2")
+
+        def _ensure_legacy_alias(legacy_key: str, expected_value: Any) -> None:
+            legacy_value = ref.get(legacy_key)
+            if legacy_value is not None and legacy_value != expected_value:
+                raise ValueError(f"{legacy_key} mismatch: ref={legacy_value} v2={expected_value}")
+
+        _ensure_legacy_alias("file_path", artifact_path)
+        _ensure_legacy_alias("start_byte", ref.get("artifact_byte_start"))
+        _ensure_legacy_alias("end_byte", ref.get("artifact_byte_end"))
+        _ensure_legacy_alias("start_line", ref.get("artifact_line_start"))
+        _ensure_legacy_alias("end_line", ref.get("artifact_line_end"))
+
+        if role == ArtifactRole.SOURCE_FILE:
+            # Resolve directly against the hub workspace (assuming manifest is in hub/merges/run_id/)
+            hub_path = manifest_path.parent.parent.parent
+            repo_id = ref.get("repo_id")
+            if not repo_id:
+                raise ValueError("repo_id is required when resolving a source_file range_ref v2")
+
+            source_file_path = ref.get("source_file_path") or artifact_path
+            if not source_file_path:
+                raise ValueError("source_file_path is required when resolving a source_file range_ref v2")
+            if artifact_path != source_file_path:
+                raise ValueError(f"artifact_path mismatch: ref={artifact_path} source={source_file_path}")
+
+            if Path(source_file_path).is_absolute():
+                raise ValueError("source_file_path must be a relative path")
+
+            base_repo_path = (hub_path / repo_id).resolve()
+            target_path = (base_repo_path / source_file_path).resolve()
+
+            try:
+                target_path.relative_to(base_repo_path)
+            except ValueError:
+                raise ValueError(
+                    f"source_file_path '{source_file_path}' attempts to escape the repository directory"
+                )
+        else:
+            if manifest.get("kind") == "repolens.bundle.manifest":
+                for artifact in manifest.get("artifacts", []):
+                    if artifact.get("role") == role.value:
+                        target_path_str = artifact.get("path")
+                        break
+            elif manifest.get("contract") == "dump-index":
+                artifacts = manifest.get("artifacts", {})
+                if role.value in artifacts and isinstance(artifacts[role.value], dict):
+                    target_path_str = artifacts[role.value].get("path")
+                else:
+                    for _, artifact in artifacts.items():
+                        if isinstance(artifact, dict) and artifact.get("role") == role.value:
+                            target_path_str = artifact.get("path")
+                            break
+            else:
+                raise ValueError("Unsupported manifest format (must be bundle.manifest or dump_index)")
+
+            if not target_path_str:
+                raise ValueError(f"Artifact with role '{role_str}' not found in manifest")
+            if artifact_path != target_path_str:
+                raise ValueError(f"artifact_path mismatch: ref={artifact_path} manifest={target_path_str}")
+
+            if Path(target_path_str).is_absolute():
+                raise ValueError(
+                    f"Artifact path must be a relative path, got: {target_path_str!r}"
+                )
+
+            base_dir = manifest_path.parent.resolve()
+            target_path = (base_dir / target_path_str).resolve()
+
+            try:
+                target_path.relative_to(base_dir)
+            except ValueError:
+                raise ValueError(
+                    f"Artifact path '{target_path_str}' attempts to escape the manifest directory"
+                )
+
+        if not target_path.exists():
+            raise FileNotFoundError(f"Resolved artifact file not found: {target_path}")
+
+        artifact_byte_start = ref.get("artifact_byte_start")
+        artifact_byte_end = ref.get("artifact_byte_end")
+        content_sha256 = ref.get("content_sha256")
+        range_content_sha256 = ref.get("range_content_sha256")
+
+        if artifact_byte_start is None or artifact_byte_end is None:
+            raise ValueError("range_ref v2 must include 'artifact_byte_start' and 'artifact_byte_end'")
+        if not content_sha256:
+            raise ValueError("range_ref v2 must include a valid 'content_sha256'")
+        if not range_content_sha256:
+            raise ValueError("range_ref v2 must include a valid 'range_content_sha256'")
+
+        file_bytes = target_path.read_bytes()
+        file_size = len(file_bytes)
+        if artifact_byte_start < 0 or artifact_byte_end > file_size or artifact_byte_start > artifact_byte_end:
+            raise ValueError(
+                f"Range [{artifact_byte_start}:{artifact_byte_end}] is out of bounds for file size {file_size}"
+            )
+
+        content_bytes = file_bytes[artifact_byte_start:artifact_byte_end]
+        actual_range_sha256 = hashlib.sha256(content_bytes).hexdigest()
+        if actual_range_sha256 != content_sha256:
+            raise ValueError(
+                f"Range hash mismatch. Expected: {content_sha256}, Actual: {actual_range_sha256}"
+            )
+
+        try:
+            text = content_bytes.decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise ValueError(f"Extracted range could not be decoded as UTF-8: {e}")
+
+        provenance = {
+            "run_id": manifest.get("run_id"),
+            "artifact_role": role.value,
+        }
+
+        if "generator" in manifest and "config_sha256" in manifest["generator"]:
+            provenance["config_sha256"] = manifest["generator"]["config_sha256"]
+
+        return {
+            "text": text,
+            "sha256": actual_range_sha256,
+            "bytes": len(content_bytes),
+            "lines": [ref.get("artifact_line_start", -1), ref.get("artifact_line_end", -1)],
+            "provenance": provenance,
+        }
 
     if role == ArtifactRole.SOURCE_FILE:
         # Resolve directly against the hub workspace (assuming manifest is in hub/merges/run_id/)

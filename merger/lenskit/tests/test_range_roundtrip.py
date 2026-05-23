@@ -3,8 +3,8 @@ import hashlib
 from merger.lenskit.retrieval import index_db, query_core
 from merger.lenskit.core.range_resolver import resolve_range_ref
 
-def test_range_roundtrip(tmp_path):
-    # This tests the explicit stored range_ref logic (e.g. from an earlier implementation)
+def test_range_roundtrip_artifact_and_source_lines(tmp_path):
+    # This tests the explicit stored v2 range_ref logic with separate artifact/source axes.
 
     # 1. Setup the workspace files
     manifest_path = tmp_path / "bundle.manifest.json"
@@ -37,14 +37,24 @@ def test_range_roundtrip(tmp_path):
     # and helps keep stored-range and fallback-range scenarios easy to distinguish.
 
     ref_obj = {
+        "range_ref_version": "2",
         "artifact_role": "canonical_md",
         "repo_id": "r1",
+        "artifact_path": "code.md",
+        "artifact_byte_start": start_byte,
+        "artifact_byte_end": end_byte,
+        "artifact_line_start": 2,
+        "artifact_line_end": 2,
+        "source_file_path": "src/code.md",
+        "source_line_start": 10,
+        "source_line_end": 10,
+        "content_sha256": expected_sha256,
+        "range_content_sha256": hashlib.sha256(content).hexdigest(),
         "file_path": "code.md",
         "start_byte": start_byte,
         "end_byte": end_byte,
         "start_line": 2,
         "end_line": 2,
-        "content_sha256": expected_sha256
     }
 
     chunk_data = [
@@ -70,6 +80,8 @@ def test_range_roundtrip(tmp_path):
     # 4. Resolve the text
     assert "range_ref" in hit
     retrieved_ref = hit["range_ref"]
+    assert retrieved_ref["artifact_line_start"] == 2
+    assert retrieved_ref["source_line_start"] == 10
 
     resolved = resolve_range_ref(manifest_path, retrieved_ref)
 

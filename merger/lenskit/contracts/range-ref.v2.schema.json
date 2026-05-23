@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/range-ref.v2.schema.json",
+  "title": "Range Reference (range-ref v2.0)",
+  "description": "Deterministic reference to a specific artifact byte range with explicit artifact/source axis separation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "range_ref_version",
+    "artifact_role",
+    "artifact_path",
+    "artifact_byte_start",
+    "artifact_byte_end",
+    "artifact_line_start",
+    "artifact_line_end",
+    "source_file_path",
+    "source_line_start",
+    "source_line_end",
+    "content_sha256",
+    "range_content_sha256"
+  ],
+  "properties": {
+    "range_ref_version": {
+      "type": "string",
+      "const": "2"
+    },
+    "artifact_role": {
+      "type": "string",
+      "enum": [
+        "canonical_md",
+        "index_sidecar_json",
+        "chunk_index_jsonl",
+        "dump_index_json",
+        "sqlite_index",
+        "retrieval_eval_json",
+        "derived_manifest_json",
+        "architecture_summary",
+        "delta_json",
+        "graph_index_json",
+        "source_file"
+      ],
+      "description": "Machine-readable enum role for the artifact coordinate set."
+    },
+    "repo_id": {
+      "type": ["string", "null"],
+      "description": "Optional repository identifier carried for callers that still need repo-scoped source resolution."
+    },
+    "artifact_path": {
+      "type": "string",
+      "description": "Path to the resolved artifact file used for byte-range extraction."
+    },
+    "artifact_byte_start": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Inclusive start byte offset in the artifact coordinate space."
+    },
+    "artifact_byte_end": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Exclusive end byte offset in the artifact coordinate space."
+    },
+    "artifact_line_start": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Inclusive start line in the artifact coordinate space."
+    },
+    "artifact_line_end": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Inclusive end line in the artifact coordinate space."
+    },
+    "source_file_path": {
+      "type": "string",
+      "description": "Path to the original source file coordinate space."
+    },
+    "source_line_start": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Inclusive start line in the source coordinate space."
+    },
+    "source_line_end": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Inclusive end line in the source coordinate space."
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of the artifact content used to verify the resolved artifact bytes."
+    },
+    "range_content_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of the extracted byte range content."
+    },
+    "file_path": {
+      "type": "string",
+      "description": "Legacy v1 alias for artifact_path."
+    },
+    "start_byte": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Legacy v1 alias for artifact_byte_start."
+    },
+    "end_byte": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Legacy v1 alias for artifact_byte_end."
+    },
+    "start_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Legacy v1 alias for artifact_line_start."
+    },
+    "end_line": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Legacy v1 alias for artifact_line_end."
+    },
+    "chunk_id": {
+      "type": "string",
+      "description": "Optional chunk identifier."
+    }
+  }
+}

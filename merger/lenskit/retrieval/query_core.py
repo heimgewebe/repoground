@@ -5,7 +5,7 @@ import time
 from typing import Dict, Any, Optional, List
 
 from .router import route_query
-from ..core.range_resolver import build_derived_range_ref
+from ..core.range_resolver import build_derived_range_ref_v2
 from ..architecture.graph_index import load_graph_index
 
 WHY_ZERO_TOKENS = "tokens too restrictive"
@@ -438,14 +438,18 @@ def execute_query(
                     content_sha256 = r["content_sha256"]
 
                     if source_file and start_byte is not None and end_byte is not None and end_byte > start_byte and content_sha256:
-                        hit["derived_range_ref"] = build_derived_range_ref(
+                        hit["derived_range_ref"] = build_derived_range_ref_v2(
                             repo_id=hit["repo_id"],
-                            file_path=source_file,
-                            start_byte=start_byte,
-                            end_byte=end_byte,
-                            start_line=r["start_line"],
-                            end_line=r["end_line"],
-                            content_sha256=content_sha256
+                            artifact_path=source_file,
+                            artifact_byte_start=start_byte,
+                            artifact_byte_end=end_byte,
+                            artifact_line_start=r["start_line"],
+                            artifact_line_end=r["end_line"],
+                            source_file_path=source_file,
+                            source_line_start=r["start_line"],
+                            source_line_end=r["end_line"],
+                            content_sha256=content_sha256,
+                            range_content_sha256=content_sha256,
                         )
                 except IndexError:
                     pass

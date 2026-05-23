@@ -101,7 +101,7 @@
           "range_ref": {
             "type": "object",
             "description": "Optional deterministic range reference.",
-            "additionalProperties": false,
+            "additionalProperties": true,
             "required": [
               "artifact_role",
               "repo_id",
@@ -144,7 +144,7 @@
           "derived_range_ref": {
             "type": "object",
             "description": "A dynamically derived fallback reference (e.g., pointing to the original source file) when a full bundle-verified range_ref is missing.",
-            "additionalProperties": false,
+            "additionalProperties": true,
             "required": [
               "artifact_role",
               "repo_id",

@@ -24,7 +24,7 @@ from .constants import ArtifactRole
 from . import clock
 from .chunker import Chunker
 from .redactor import Redactor
-from .range_resolver import build_explicit_range_ref
+from .range_resolver import build_explicit_range_ref, build_explicit_range_ref_v2
 from . import __core_version__ as CORE_VERSION
 
 try:
@@ -5287,16 +5287,32 @@ def write_reports_v2(
                             can_start_line = d["start_line"]
                             can_end_line = d["end_line"]
 
-                        d["content_range_ref"] = build_explicit_range_ref(
-                            artifact_role=ArtifactRole.CANONICAL_MD.value,
-                            repo_id=fi.root_label,
-                            file_path=md_file_name,
-                            start_byte=abs_start,
-                            end_byte=abs_end,
-                            start_line=can_start_line,
-                            end_line=can_end_line,
-                            content_sha256=can_sha256,
-                        )
+                        if canonical_md_bytes is not None:
+                            d["content_range_ref"] = build_explicit_range_ref_v2(
+                                artifact_role=ArtifactRole.CANONICAL_MD.value,
+                                artifact_path=md_file_name,
+                                artifact_byte_start=abs_start,
+                                artifact_byte_end=abs_end,
+                                artifact_line_start=can_start_line,
+                                artifact_line_end=can_end_line,
+                                source_file_path=fi.rel_path.as_posix(),
+                                source_line_start=d["start_line"],
+                                source_line_end=d["end_line"],
+                                content_sha256=can_sha256,
+                                range_content_sha256=d["sha256"],
+                                repo_id=fi.root_label,
+                            )
+                        else:
+                            d["content_range_ref"] = build_explicit_range_ref(
+                                artifact_role=ArtifactRole.CANONICAL_MD.value,
+                                repo_id=fi.root_label,
+                                file_path=md_file_name,
+                                start_byte=abs_start,
+                                end_byte=abs_end,
+                                start_line=can_start_line,
+                                end_line=can_end_line,
+                                content_sha256=can_sha256,
+                            )
 
                         if canonical_md_bytes is not None:
                             d["canonical_range"] = {

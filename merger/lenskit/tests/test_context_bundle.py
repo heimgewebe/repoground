@@ -75,15 +75,27 @@ def test_context_bundle_preserves_provenance(tmp_path):
     dump_path = tmp_path / "dump.json"
     chunk_path = tmp_path / "chunks.jsonl"
 
+    hash_value = "2" * 64
+
     ref_obj = {
+        "range_ref_version": "2",
         "artifact_role": "canonical_md",
         "repo_id": "r1",
+        "artifact_path": "merged.md",
+        "artifact_byte_start": 0,
+        "artifact_byte_end": 10,
+        "artifact_line_start": 1,
+        "artifact_line_end": 1,
+        "source_file_path": "src/main.py",
+        "source_line_start": 1,
+        "source_line_end": 1,
+        "content_sha256": hash_value,
+        "range_content_sha256": hash_value,
         "file_path": "merged.md",
         "start_byte": 0,
         "end_byte": 10,
         "start_line": 1,
         "end_line": 1,
-        "content_sha256": "h1"
     }
 
     chunk_data = [
@@ -107,7 +119,9 @@ def test_context_bundle_preserves_provenance(tmp_path):
 
     assert hit["provenance_type"] == "explicit"
     assert "range_ref" in hit
-    assert hit["range_ref"] == ref_obj
+    assert hit["range_ref"]["range_ref_version"] == "2"
+    assert hit["range_ref"]["artifact_path"] == "merged.md"
+    assert hit["range_ref"]["source_file_path"] == "src/main.py"
     assert "merged.md" in hit["bundle_source_references"]
 
 

@@ -8,15 +8,27 @@ def test_schema_validates_both_cases(tmp_path):
     dump_path = tmp_path / "dump.json"
     chunk_path = tmp_path / "chunks.jsonl"
 
+    hash_value = "3" * 64
+
     ref_obj = {
+        "range_ref_version": "2",
         "artifact_role": "canonical_md",
         "repo_id": "r1",
+        "artifact_path": "merged.md",
+        "artifact_byte_start": 0,
+        "artifact_byte_end": 10,
+        "artifact_line_start": 1,
+        "artifact_line_end": 1,
+        "source_file_path": "src/main.py",
+        "source_line_start": 1,
+        "source_line_end": 1,
+        "content_sha256": hash_value,
+        "range_content_sha256": hash_value,
         "file_path": "merged.md",
         "start_byte": 0,
         "end_byte": 10,
         "start_line": 1,
         "end_line": 1,
-        "content_sha256": "h1"
     }
 
     chunk_data = [
@@ -46,6 +58,7 @@ def test_schema_validates_both_cases(tmp_path):
     res_with_ref = query_core.execute_query(db_path, query_text="hello", k=1)
     assert len(res_with_ref["results"]) == 1
     assert "range_ref" in res_with_ref["results"][0]
+    assert res_with_ref["results"][0]["range_ref"]["range_ref_version"] == "2"
 
     # Must validate cleanly against the strict schema
     jsonschema.validate(instance=res_with_ref, schema=schema)
