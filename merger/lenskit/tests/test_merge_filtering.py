@@ -304,3 +304,85 @@ def test_scan_repo_preserves_intentional_hidden_paths(tmp_path):
     assert ".github/workflows/ci.yml" in found_paths
     assert ".wgx/config.yml" in found_paths
     assert ".ai-context.yml" in found_paths
+
+
+def test_noise_dirs_absent_from_generated_bundle_surfaces(tmp_path):
+    """
+    Integration test: bundle surfaces (canonical_md, chunk_index) generated via
+    write_reports_v2() must not contain content from cache/noise dirs.
+
+    This closes the A2 proof gap: not just 'scan_repo() is clean' but
+    'the generated canonical markdown and chunk index are also clean'.
+
+    Focuses on the two directories newly added by A2 (.cache, coverage),
+    plus the existing ones. Hidden context files (.github, .wgx, .ai-context.yml)
+    must remain present in output.
+    """
+    from merger.lenskit.core.merge import write_reports_v2, ExtrasConfig
+
+    repo = tmp_path / "repo"
+    out_dir = tmp_path / "out"
+    repo.mkdir()
+    out_dir.mkdir()
+
+    # Real source file
+    (repo / "src").mkdir()
+    (repo / "src" / "main.py").write_text("def main(): pass\n", encoding="utf-8")
+
+    # Intentional hidden context (must survive)
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+    (repo / ".wgx").mkdir()
+    (repo / ".wgx" / "config.yml").write_text("agent: true\n", encoding="utf-8")
+    (repo / ".ai-context.yml").write_text("role: repo\n", encoding="utf-8")
+
+    # Noise dirs — A2-new entries get distinct sentinels for precise assertions
+    sentinels = {
+        ".cache": "LENSKIT_TEST_SENTINEL_DOTCACHE_SHOULD_NOT_APPEAR\n",
+        "coverage": "LENSKIT_TEST_SENTINEL_COVERAGE_SHOULD_NOT_APPEAR\n",
+    }
+    (repo / ".cache").mkdir()
+    (repo / ".cache" / "pip_wheels.txt").write_text(sentinels[".cache"], encoding="utf-8")
+    (repo / "coverage").mkdir()
+    (repo / "coverage" / "lcov.info").write_text(sentinels["coverage"], encoding="utf-8")
+
+    summary = merge.scan_repo(repo, include_hidden=True, calculate_md5=True)
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=tmp_path,
+        repo_summaries=[summary],
+        detail="max",
+        mode="gesamt",
+        max_bytes=0,
+        plan_only=False,
+        output_mode="dual",
+        extras=ExtrasConfig(json_sidecar=True, augment_sidecar=False),
+    )
+
+    md_text = artifacts.canonical_md.read_text(encoding="utf-8")
+    chunk_text = artifacts.chunk_index.read_text(encoding="utf-8")
+
+    # Sentinels must not appear in any generated surface
+    for dir_name, sentinel in sentinels.items():
+        assert sentinel.strip() not in md_text, (
+            f"A2 new noise dir '{dir_name}' content must not appear in canonical_md"
+        )
+        assert sentinel.strip() not in chunk_text, (
+            f"A2 new noise dir '{dir_name}' content must not appear in chunk_index"
+        )
+
+    # Noise dir names must not appear as file path components in generated markdown
+    md_file_paths = [
+        line.split('path="', 1)[1].split('"', 1)[0]
+        for line in md_text.splitlines()
+        if "<!-- FILE_START path=" in line
+    ]
+    for dir_name in sentinels:
+        assert not any(dir_name in p for p in md_file_paths), (
+            f"A2 new noise dir '{dir_name}' must not appear as path in canonical_md: {md_file_paths}"
+        )
+
+    # Source file must be present
+    assert any("src/main.py" in p for p in md_file_paths), (
+        f"src/main.py must appear in canonical_md file paths: {md_file_paths}"
+    )

@@ -91,6 +91,22 @@ Verifies that path-component matching (not substring) prevents misclassification
 
 Ensures that only actual parent-directory names trigger noise classification.
 
+### Bundle-Surface Integration (canonical_md + chunk_index)
+
+Test: `test_noise_dirs_absent_from_generated_bundle_surfaces`
+
+Uses `write_reports_v2()` to generate a complete bundle from a synthetic repo containing:
+- `src/main.py` (real source)
+- `.cache/pip_wheels.txt` and `coverage/lcov.info` (A2-new noise dirs, with distinct sentinels)
+- `.github/workflows/ci.yml`, `.wgx/config.yml`, `.ai-context.yml` (intentional hidden context)
+
+Verifies on generated `canonical_md` and `chunk_index`:
+- ✅ `.cache` and `coverage` sentinel content absent from both surfaces
+- ✅ `.cache` and `coverage` absent as path components in markdown file markers
+- ✅ `src/main.py` present in markdown file paths
+
+This closes the A2 proof gap from "traversal is clean" to "generated bundle surfaces are clean".
+
 ## Scope
 
 ### What Changed
@@ -120,7 +136,7 @@ This is out of scope for A2 (hygiene consolidation only); will be added when tra
 ## Tests Run
 
 ```
-pytest merger/lenskit/tests/test_merge_filtering.py       # 23 passed
+pytest merger/lenskit/tests/test_merge_filtering.py       # 24 passed
 pytest merger/lenskit/tests/test_output_health.py         # 45 passed
 pytest merger/lenskit/tests/test_agent_reading_pack.py    # 8 passed
 pytest merger/lenskit/tests/test_retrieval_index.py       # 3 passed
@@ -128,9 +144,9 @@ pytest merger/lenskit/tests/test_bundle_manifest_integration.py  # 28 passed
 pytest merger/lenskit/tests/test_post_emit_health.py      # 32 passed
 ```
 
-**Total: 167 tests, all pass.**
+**Total: 168 tests, all pass.**
 
-(Includes new tests for false-positive prevention and single-source-of-truth validation.)
+(Includes tests for false-positive prevention, single-source validation, and bundle-surface integration.)
 
 ---
 
