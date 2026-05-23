@@ -54,6 +54,10 @@ SKIP_DIRS = {
     "__pycache__",
     ".pytest_cache",
     ".DS_Store",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".cache",
+    "coverage",
 }
 
 # Top-Level-Verzeichnisse, die bei Auto-Discovery nicht als Repos genommen werden sollen

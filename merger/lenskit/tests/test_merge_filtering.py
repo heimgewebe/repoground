@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from merger.lenskit.core import merge
-from merger.lenskit.core.merge import FileInfo
+from merger.lenskit.core.merge import FileInfo, NOISE_DIR_SEGMENTS, SKIP_DIRS
 
 
 def create_file_info(rel_path: str, category: str = "other", tags=None, content: str = "content") -> FileInfo:
@@ -163,3 +165,65 @@ def test_auto_warning_only_on_actual_auto_downgrade():
         )
     )
     assert "⚠️ **Auto-Drosselung:**" not in report3
+
+
+# ── A2: Output Noise Hygiene tests ───────────────────────────────────────────
+
+@pytest.mark.parametrize("rel_path", [
+    ".pytest_cache/v/cache/lastfailed",
+    ".mypy_cache/3.11/builtins.json",
+    ".ruff_cache/0.1.0/CACHEDIR.TAG",
+    ".cache/pip/wheels/something.whl",
+    "__pycache__/module.cpython-311.pyc",
+    "coverage/html/index.html",
+    "node_modules/lodash/index.js",
+])
+def test_is_noise_file_returns_true_for_cache_paths(rel_path):
+    fi = create_file_info(rel_path)
+    assert merge.is_noise_file(fi), f"Expected is_noise_file=True for {rel_path}"
+
+
+@pytest.mark.parametrize("rel_path", [
+    ".github/workflows/ci.yml",
+    ".github/CODEOWNERS",
+    ".wgx/config.yml",
+    ".wgx/agents/main.py",
+    ".ai-context.yml",
+    "src/main.py",
+    "README.md",
+])
+def test_is_noise_file_returns_false_for_intentional_hidden_paths(rel_path):
+    fi = create_file_info(rel_path)
+    assert not merge.is_noise_file(fi), f"Expected is_noise_file=False for {rel_path}"
+
+
+def test_noise_dir_segments_aligned_with_skip_dirs():
+    """NOISE_DIR_SEGMENTS must cover all cache/tool dirs in SKIP_DIRS."""
+    # Strip trailing slash from NOISE_DIR_SEGMENTS for comparison
+    noise_set = {seg.rstrip("/") for seg in NOISE_DIR_SEGMENTS}
+    cache_dirs_in_skip = {
+        d for d in SKIP_DIRS
+        if d in {"__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache", "coverage",
+                 "node_modules", "dist", "build", "target", "venv", ".venv"}
+    }
+    missing = cache_dirs_in_skip - noise_set
+    assert not missing, f"SKIP_DIRS cache entries missing from NOISE_DIR_SEGMENTS: {missing}"
+
+
+def test_noise_manifest_label_contains_noise_annotation():
+    """Files under noise paths should get (noise) label in manifest output."""
+    files = [
+        create_file_info(".pytest_cache/v/cache/lastfailed", content="{}"),
+        create_file_info("src/main.py", content="# code"),
+    ]
+    report = "".join(
+        merge.iter_report_blocks(
+            files=files,
+            level="max",
+            max_file_bytes=100_000,
+            sources=[Path("/tmp/test-repo")],
+            plan_only=False,
+            meta_density="standard",
+        )
+    )
+    assert "(noise)" in report, "Expected (noise) annotation for cache file in manifest"

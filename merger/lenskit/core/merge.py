@@ -310,8 +310,26 @@ SKIP_DIRS = {
     ".DS_Store",
     ".mypy_cache",
     ".ruff_cache",
+    ".cache",
     "coverage",
 }
+
+# Canonical noise/cache directory segments used by is_noise_file().
+# Must stay in sync with SKIP_DIRS cache entries above.
+NOISE_DIR_SEGMENTS: tuple[str, ...] = (
+    "node_modules/",
+    "dist/",
+    "build/",
+    "target/",
+    "venv/",
+    ".venv/",
+    "__pycache__/",
+    ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+    ".cache/",
+    "coverage/",
+)
 
 # Top-level roots to skip in auto-discovery
 SKIP_ROOTS = {
@@ -1769,16 +1787,7 @@ def is_noise_file(fi: "FileInfo") -> bool:
         sys.stderr.write(f"Warning: is_noise_file failed for {fi.rel_path}: {e}\n")
         return False
 
-    noisy_dirs = (
-        "node_modules/",
-        "dist/",
-        "build/",
-        "target/",
-        "venv/",
-        ".venv/",
-        "__pycache__/",
-    )
-    if any(seg in path_str for seg in noisy_dirs):
+    if any(seg in path_str for seg in NOISE_DIR_SEGMENTS):
         return True
 
     lock_names = {

@@ -274,6 +274,9 @@ def compute_output_health(
     # Agent reading pack (navigation entry-point). Non-blocking in v1.
     agent_reading_pack_path: Optional[Path] = None,
     agent_reading_pack_expected: bool = False,
+    # Diagnostic-only: list of noise/cache paths excluded during traversal.
+    # Not content truth, not safety truth, not navigation truth.
+    excluded_noise_paths: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Compute the output health report.  Does NOT write to disk.
@@ -467,6 +470,17 @@ def compute_output_health(
 
     checks["redaction_status_explicit"] = True
     checks["redact_secrets_enabled"] = bool(redact_secrets)
+
+    # ── excluded_noise (diagnostic-only) ────────────────────────────────────
+    # Records which noise/cache paths were excluded during traversal.
+    # This is informational only: not a content claim, not a safety verdict,
+    # not navigation truth. Never used as agent_safe/agent_ready signal.
+    if excluded_noise_paths is not None:
+        checks["excluded_noise"] = {
+            "status": "diagnostic",
+            "count": len(excluded_noise_paths),
+            "paths": list(excluded_noise_paths),
+        }
 
     # ── diagnostic_artifacts ────────────────────────────────────────────────
     diagnostic_artifacts: Dict[str, Any] = {}
