@@ -251,7 +251,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 | **forbidden_inference** | `verdict=pass` als Beweis für Repo-Korrektheit; `verdict=pass` als Beweis für Antwortsicherheit; diagnostics als Wahrheit über den Inhalt; `projection_status=complete` als Vollständigkeitsbeweis. |
 | **valid_consumers** | CI-Pipelines, Entwickler, Debug-Tools. Nicht: LLM-Agents als primäre Wissensquelle. |
 | **export_constraints** | Conditional: nur mit explizitem Disclaimer (`authority: diagnostic_signal`). Nie als primäre Wissensquelle exportieren. |
-| **required_disclaimers** | `does_not_prove` oder `does_not_mean` mit mindestens: `repo_understood`, `retrieval_complete`, `answer_safe_without_citations`, `claims_true`. |
+| **required_disclaimers** | Rolle-spezifisches `does_not_prove` oder `does_not_mean`. C1 fordert nicht ein identisches Disclaimer-Set für alle Diagnostic-Artefakte; bestehende Contracts behalten ihre spezialisierten Grenzen. Mindestprinzip: Diagnostik darf keine Repo-Verstandenheit, Retrieval-Vollständigkeit, Antwortsicherheit, Claim-Wahrheit oder Abwesenheitsbeweise implizieren. |
 | **risk_class** | `diagnostic` |
 | **typical_producers** | `core.output_health`, `core.post_emit_health`, `core.context_quality`, `retrieval.eval_core`. |
 | **typical_consumers** | CI, Entwickler, parity_guard. |
@@ -388,8 +388,7 @@ Diese Übergänge sind unabhängig von Implementierungsdetails verboten:
 ### P1 — Contracts-first
 
 Inferenzgrenzen werden in Contracts deklariert, bevor Runtime-Code sie durchsetzt.
-Ein Contract ohne explizite `allowed_inference`/`forbidden_inference`-Sektionen
-ist unvollständig.
+Für zukünftige C2-Contract-Normierung gilt: Ein neuer oder migrierter Contract ohne explizite `allowed_inference`/`forbidden_inference`-Sektionen bleibt governance-unvollständig.
 
 *Bestehende Partial-Implementierung: `does_not_prove` in `retrieval-eval.v1`,
 `agent-query-session.v2`, `context-quality.v1`, `post-emit-health.v1`.*
