@@ -166,11 +166,23 @@ Gate:
 - Blueprint kompatibel mit bestehenden Contracts und B1/B2-Invarianten (geprüft)
 - Keine Runtime-Änderungen in C1
 
-Mögliche Folgearbeiten (separate PRs, nicht Teil von C1):
-- C2: Contract-Normierung (allowed/forbidden inferences als Schema-Felder)
-- C3: Lint-Regeln (L1–L6)
-- C4: Runtime-Annotation
-- C5: Export-Gate-Integration
+### C2a — Authority / Inference Boundary Contract Gap Audit (Proof)
+
+Status: Audit/Proof (docs-only), `docs/proofs/authority-contract-gap-audit.md`.
+Scope: prüft die C1-Kompatibilität bestehender Contracts unter `merger/lenskit/contracts/`
+und bereitet die Contract-Normierung (C2) vor — **ohne** C2 zu implementieren.
+
+- Kein Runtime-Code, keine Schemas, keine Lints, keine Contract-Änderung.
+- Befund: Runtime-Lookups, `retrieval-eval.v1` und `context-quality.v1` sind bereits
+  C1-kompatibel; größte Lücke ist ein systemweit fehlendes `risk_class`. Sicherster nächster
+  Schritt (C2.1) sind additive, optionale `authority`/`risk_class`-Felder für bereits
+  disclaimer-tragende Diagnose-Contracts.
+
+Mögliche Folgearbeiten (separate PRs, nicht Teil von C1 oder C2a):
+- C2: Contract-Normierung (allowed/forbidden inferences als Schema-Felder) — **offen**
+- C3: Lint-Regeln (L1–L6) — **offen**
+- C4: Runtime-Annotation — **offen**
+- C5: Export-Gate-Integration — **offen**
 
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot
