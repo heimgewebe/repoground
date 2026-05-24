@@ -923,3 +923,60 @@ def test_miss_taxonomy_schema_rejects_missing_required_by_type_key():
 
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=invalid_output, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# C2.1: additive, optional top-level authority/risk_class self-declaration
+# ---------------------------------------------------------------------------
+
+def _minimal_valid_retrieval_eval():
+    return {
+        "metrics": {"total_queries": 1, "hits": 0, "stale_flag": False},
+        "details": [],
+        "claim_boundaries": {
+            "proves": ["x"],
+            "does_not_prove": ["y"],
+            "evidence_basis": ["eval_queries"],
+            "requires_live_check": True,
+        },
+    }
+
+
+def test_c2_1_legacy_eval_without_top_level_authority_stays_valid():
+    import jsonschema
+
+    schema = _load_retrieval_eval_schema()
+    out = _minimal_valid_retrieval_eval()
+    assert "authority" not in out
+    assert "risk_class" not in out
+    jsonschema.validate(instance=out, schema=schema)
+
+
+def test_c2_1_correct_top_level_authority_risk_class_valid():
+    import jsonschema
+
+    schema = _load_retrieval_eval_schema()
+    out = _minimal_valid_retrieval_eval()
+    out["authority"] = "diagnostic_signal"
+    out["risk_class"] = "diagnostic"
+    jsonschema.validate(instance=out, schema=schema)
+
+
+def test_c2_1_wrong_top_level_authority_invalid():
+    import jsonschema
+
+    schema = _load_retrieval_eval_schema()
+    out = _minimal_valid_retrieval_eval()
+    out["authority"] = "canonical_content"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=out, schema=schema)
+
+
+def test_c2_1_wrong_top_level_risk_class_invalid():
+    import jsonschema
+
+    schema = _load_retrieval_eval_schema()
+    out = _minimal_valid_retrieval_eval()
+    out["risk_class"] = "content"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=out, schema=schema)

@@ -30,6 +30,16 @@
       "type": "string",
       "const": "1.0"
     },
+    "authority": {
+      "type": "string",
+      "const": "diagnostic_signal",
+      "description": "Optional, additive self-declaration of this artifact's authority class (C2.1). When present it MUST be the diagnostic_signal constant; it is not a truth verdict and does not gate anything."
+    },
+    "risk_class": {
+      "type": "string",
+      "const": "diagnostic",
+      "description": "Optional, additive self-declaration of this artifact's risk class (C2.1). When present it MUST be the diagnostic constant."
+    },
     "run_id": {
       "type": "string",
       "minLength": 1,

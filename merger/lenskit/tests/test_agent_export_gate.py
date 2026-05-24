@@ -474,6 +474,52 @@ def test_schema_rejects_does_not_mean_without_claims_true(tmp_path):
         jsonschema.validate(instance=bad, schema=schema)
 
 
+# ---------------------------------------------------------------------------
+# C2.1: additive, optional authority/risk_class self-declaration
+# ---------------------------------------------------------------------------
+
+def _valid_gate_report(tmp_path) -> dict:
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    return evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+
+def test_c2_1_legacy_report_without_authority_stays_valid(tmp_path):
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_gate_report(tmp_path)
+    assert "authority" not in report
+    assert "risk_class" not in report
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_c2_1_correct_authority_risk_class_valid(tmp_path):
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_gate_report(tmp_path)
+    report["authority"] = "diagnostic_signal"
+    report["risk_class"] = "diagnostic"
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_c2_1_wrong_authority_invalid(tmp_path):
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_gate_report(tmp_path)
+    report["authority"] = "runtime_observation"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
+def test_c2_1_wrong_risk_class_invalid(tmp_path):
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_gate_report(tmp_path)
+    report["risk_class"] = "content"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
 def test_agent_export_gate_does_not_mutate_manifest(tmp_path):
     manifest = _write_manifest(tmp_path, redaction=True)
     _write_post_health(tmp_path, "pass")

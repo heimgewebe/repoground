@@ -180,9 +180,27 @@ und bereitet die Contract-Normierung (C2) vor — **ohne** C2 zu implementieren.
   nächster Schritt (C2.1) sind additive, optionale `authority`/`risk_class`-Felder für bereits
   disclaimer-tragende Diagnose-Contracts.
 
-Mögliche Folgearbeiten (separate PRs, nicht Teil von C1 oder C2a):
-- C2: Contract-Normierung (allowed/forbidden inferences als Schema-Felder) — **offen**
-- C3: Lint-Regeln (L1–L6) — **offen**
+### C2.1 — Additive Authority/Risk-Class für Diagnose-Contracts (umgesetzt)
+
+Status: **UMGESETZT** (Contract-only, additiv), Beleg
+`docs/proofs/authority-risk-class-c2-1-proof.md`.
+Scope: additive, optionale, **const** Felder `authority` (`diagnostic_signal`) und
+`risk_class` (`diagnostic`) in genau drei bereits disclaimer-tragenden Diagnose-Contracts:
+`post-emit-health.v1`, `agent-export-gate.v1` und top-level `retrieval-eval.v1`.
+
+- **Keine** Pflichtfelder, **keine** Lockerung bestehender Constraints, `additionalProperties:
+  false` bleibt erhalten.
+- **Keine** Runtime-/CLI-/Producer-Änderung, **keine** Lints, **keine** Export-Gates.
+- `miss_taxonomy` in `retrieval-eval.v1` bleibt unverändert; `output-health.v1`,
+  `bundle-manifest.v1`, `agent-query-session.v2` und die Federation-Contracts wurden **nicht**
+  angefasst.
+- Validierung: 86 passed in den drei Zielsuiten (74 Baseline + 12 additive Tests),
+  75 passed in der Consumer-Regression, ruff `F401,F811` sauber.
+
+Mögliche Folgearbeiten (separate PRs, nicht Teil von C1, C2a oder C2.1):
+- C2.2: `bundle-manifest.v1`-Normierung (per-role `risk_class`, `output_health`-Authority-Zweig) — **offen**
+- C2.3: `allowed_inference`/`forbidden_inference` als optionale Schema-Felder — **offen**
+- C3 / C2.4: Lint-Regeln (L1–L6) — **offen**
 - C4: Runtime-Annotation — **offen**
 - C5: Export-Gate-Integration — **offen**
 

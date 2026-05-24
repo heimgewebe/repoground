@@ -309,6 +309,50 @@ def test_post_emit_health_blocked_precedes_fail(tmp_path):
     assert len(report["errors"]) >= 1
 
 
+# ---------------------------------------------------------------------------
+# C2.1: additive, optional authority/risk_class self-declaration
+# ---------------------------------------------------------------------------
+
+def _valid_post_emit_report(tmp_path) -> dict:
+    manifest = _make_bundle(tmp_path)
+    return compute_post_emit_health(str(manifest))
+
+
+def test_c2_1_legacy_report_without_authority_stays_valid(tmp_path):
+    """A report that omits authority/risk_class (current producer output) is valid."""
+    schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_post_emit_report(tmp_path)
+    assert "authority" not in report
+    assert "risk_class" not in report
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_c2_1_correct_authority_risk_class_valid(tmp_path):
+    schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_post_emit_report(tmp_path)
+    report["authority"] = "diagnostic_signal"
+    report["risk_class"] = "diagnostic"
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_c2_1_wrong_authority_invalid(tmp_path):
+    import pytest
+    schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_post_emit_report(tmp_path)
+    report["authority"] = "canonical_content"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
+def test_c2_1_wrong_risk_class_invalid(tmp_path):
+    import pytest
+    schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = _valid_post_emit_report(tmp_path)
+    report["risk_class"] = "content"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
 def test_write_post_emit_health_persists_unregistered_artifact(tmp_path):
     manifest = _make_bundle(tmp_path)
     manifest_before = manifest.read_text(encoding="utf-8")
