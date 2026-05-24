@@ -360,9 +360,11 @@ Folgearbeit.
 - **C2.2** — `risk_class`/Authority-Normierung für die **manifest-tragenden Rollen** in
   `bundle-manifest.v1` (optional pro Rolle, plus `output_health`-Authority-Zweig). (Migration:
   additive optional; Pflicht nur in neuer Major-Version.)
-- **C2.3** — Schema-Level-Boundary-Validierung: bestehende `does_not_prove`/`does_not_mean`
-  gegen eine Klassen-Norm prüfen (Konsistenz-Check, **keine** Ersetzung der rollenspezifischen
-  Sätze).
+- **C2.3** — Vorbereitung von `allowed_inference`/`forbidden_inference` als optionale
+  Schema-Felder, basierend auf bestehenden `does_not_prove`/`does_not_mean`-Grenzen; keine
+  Pflichtfelder ohne Deprecation-Fenster. Schema-Level-Boundary-Validierung: bestehende
+  `does_not_prove`/`does_not_mean` gegen eine Klassen-Norm prüfen (Konsistenz-Check,
+  **keine** Ersetzung der rollenspezifischen Sätze).
 - **C2.4** — Vorbereitung der Lint-Regeln (C1 §6 L1–L6) als spätere CI-Stufe — **erst** nachdem
   die Contracts stabil normiert sind.
 - **C2.5** — Export-Gate-Integration von Risk-Class/Exportability — **erst** nach stabilen
@@ -412,8 +414,11 @@ Diese Contracts tragen bereits Disclaimer, sind unregistriert und haben eine kle
   ohne Parity-Gate-Koordination.
 - Kein generisches `authority` neben `session_authority` in `agent-query-session.v2`.
 - Keine Boundary-/Authority-Felder in den Federation-Contracts vor Federation-Hardening.
-- Keine Lint-Regeln, keine Export-Gates, keine `allowed_inference`/`forbidden_inference` in echten
-  Contracts in der Contract-Normierungsstufe selbst — diese folgen als C2.3–C2.5.
+- Keine Lint-Regeln oder Export-Gates in C2.1.
+- Keine `allowed_inference`/`forbidden_inference`-Pflichtfelder ohne vorherige Consumer- und
+  Backcompat-Prüfung. `allowed_inference`/`forbidden_inference` bleiben Ziel der späteren
+  Contract-Normierung, sollen aber erst nach additiver Authority-/Risk-Class-Normierung und
+  Boundary-Validierung eingeführt werden.
 
 ---
 
