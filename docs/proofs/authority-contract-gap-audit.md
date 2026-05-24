@@ -296,7 +296,7 @@ Keine konkreten Schema-Patches — nur Bewertung. Empfohlene Migrationsart pro K
 - **Migrationsart:** additive optional field first (oder docs-only, da Manifest die Authority
   bereits trägt).
 
-### 6.4 Runtime-Lookups (`artifact-lookup`, `trace-lookup`, `context-lookup`)
+### 6.4 Typed Runtime-Lookups (`artifact-lookup`, `trace-lookup`, `context-lookup`)
 - **Ergänzung:** optionales `risk_class` (const `observation`).
 - **Warum:** vervollständigt das C1-Tripel (authority+canonicality+risk_class) für Runtime.
 - **Risiko:** niedrig; diese Contracts sind bereits am stärksten C1-konform.
@@ -401,10 +401,11 @@ Abschnitt additiv.)
 
 ## 10. Audit Conclusion
 
-**Bereits C1-kompatibel (aligned):** die Runtime-Lookups (`artifact-lookup`, `trace-lookup`,
+**Bereits C1-kompatibel (aligned):** die Typed Runtime-Lookups (`artifact-lookup`, `trace-lookup`,
 `context-lookup`), `retrieval-eval.v1` (inkl. `miss_taxonomy`) und `context-quality.v1`. Sie
 tragen Authority und/oder vollständige `claim_boundaries`/`does_not_prove`/`does_not_mean` und
-respektieren die C1-Drift-Verbote.
+respektieren die C1-Drift-Verbote. `diagnostics-lookup.v1` bleibt bewusst nicht als aligned
+eingestuft, da es keine eigene Authority-/Canonicality-/Claim-Boundary-Selbstdeklaration trägt.
 
 **Größte Lücken:** (1) `risk_class` fehlt systemweit außer in zwei Diagnose-Contracts;
 (2) mehrere Diagnose-/Gate-Contracts (`post-emit-health`, `agent-export-gate`, `output-health`)
