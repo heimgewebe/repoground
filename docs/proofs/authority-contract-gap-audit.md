@@ -212,14 +212,14 @@ Contracts ohne explizites Authority-Feld (weder generisch noch spezialisiert):
 Contracts ohne Canonicality-Bezug im Contract selbst:
 - alle Diagnose-Contracts (`context-quality`, `post-emit-health`, `agent-export-gate`,
   `output-health`, `retrieval-eval`)
-- `query-context-bundle.v1`, alle Federation-Contracts
+- `diagnostics-lookup.v1`, `query-context-bundle.v1`, alle Federation-Contracts
 - (Anmerkung: für reine Diagnose-Selbstdeklarationen ist das C1-konform und kein Defekt.)
 
 ### C. Missing risk_class
 Contracts ohne `risk_class` (= fast alle, außer `context-quality.v1` und `miss_taxonomy`):
 - `bundle-manifest.v1`, `post-emit-health.v1`, `agent-export-gate.v1`, `output-health.v1`,
-  `agent-query-session.v2`, `query-context-bundle.v1`, alle Runtime-Lookups, alle
-  Federation-Contracts, `citation-map.v1`.
+  `agent-query-session.v2`, `query-context-bundle.v1`, alle Runtime-Lookups inklusive
+  `diagnostics-lookup.v1`, alle Federation-Contracts, `citation-map.v1`.
 
 ### D. Missing inference boundaries
 Contracts ohne `does_not_prove`/`does_not_mean`/`claim_boundaries` oder äquivalente
