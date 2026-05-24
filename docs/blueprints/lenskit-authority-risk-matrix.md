@@ -164,17 +164,20 @@ Inferenzgrenzen.
 **`authority`**  
 Wer oder was ist die Quelle einer Aussage? Authority beschreibt die Ursprungsklasse
 eines Artefakts, nicht seine Qualität oder Korrektheit.  
-Werte: `canonical_content`, `navigation_index`, `retrieval_index`, `runtime_cache`,
-`diagnostic_signal`, `runtime_observation`, `agent_context_projection`,
-`external_unverified`, `derived_projection`  
-*Bereits partiell in `artifact-inventory.md` §6 normiert.*
+Werte (inventory-belegt): `canonical_content`, `navigation_index`, `retrieval_index`,
+`runtime_cache`, `diagnostic_signal`, `runtime_observation`, `agent_context_projection`  
+Werte (neu in C1 normiert): `external_unverified`, `derived_projection`, `agent_generated`  
+*Inventory-belegte Terme aus `artifact-inventory.md` §6; C1-Erweiterungen werden hier
+neu normiert und widersprechen keinem bestehenden Contract.*
 
 **`canonicality`**  
 In welchem Verhältnis steht ein Artefakt zum Repo-Inhalt? Canonicality beschreibt
 den Ableitungsgrad, nicht die Korrektheit.  
-Werte: `content_source`, `derived`, `index_only`, `cache`, `diagnostic`,
-`observation`, `agent_generated`  
-*Bereits partiell in `artifact-inventory.md` §6 normiert.*
+Werte (inventory-belegt): `content_source`, `derived`, `index_only`, `cache`,
+`diagnostic`, `observation`  
+*Inventory-belegte Terme aus `artifact-inventory.md` §6. Agent-Ausgaben werden in C1
+nicht als separater Canonicality-Wert geführt — sie werden modelliert als
+`authority: agent_generated` + `canonicality: derived`.*
 
 **`risk_class`**  
 Welches epistemische Missbrauchsrisiko trägt das Artefakt? Risk-Class ist
@@ -274,16 +277,21 @@ vertreten. Diese Matrix normiert die Grenzen explizit.
 
 ### 3.4 `derived_projection`
 
+> **Konzeptionelle Klasse (C1):** `derived_projection` ist eine konzeptionelle Governance-Klasse
+> für zukünftige, nicht-diagnostische Projektionen. Bestehende Artefakte werden durch C1 **nicht
+> umklassifiziert**: `context_quality` bleibt `diagnostic_signal`; `derived_manifest_json` bleibt
+> `navigation_index`.
+
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Artefakt, das aus vorhandenen Artefakten projiziert wird, ohne neue Informationen hinzuzufügen. In Lenskit: `context_quality` (Projektion von Signalen), `derived_manifest_json`. |
+| **Definition** | Konzeptionelle Klasse für Artefakte, die aus vorhandenen Artefakten projiziert werden, ohne neue Informationen hinzuzufügen und ohne diagnostischen Charakter. Kein bestehender Lenskit-Artefakttyp wird durch C1 in diese Klasse umklassifiziert. |
 | **allowed_inference** | Den projizierten Zustand zum Projektionszeitpunkt lesen; als Zusammenfassung vorhandener Signale verwenden. |
 | **forbidden_inference** | Als autoritative Aussage über Repo-Inhalt; als Beweis für irgendeine Property der zugrundeliegenden Artefakte; `projection_status=complete` als Vollständigkeitsbeweis. |
 | **valid_consumers** | Entwickler, CI (als Übersicht), Debug-Tools. |
 | **export_constraints** | Conditional: nur mit vollständiger Angabe der Projektionsbasis. |
 | **required_disclaimers** | Projektionsbasis explizit auflisten; `authority: derived_projection`; keine Wahrheitsaussagen. |
 | **risk_class** | `derived` |
-| **typical_producers** | `core.context_quality`, `core.merge`. |
+| **typical_producers** | Zukünftige Projektions-Komponenten (nicht Teil von C1). |
 | **typical_consumers** | Entwickler, CI. |
 | **possible_ci_rules** | Fehler wenn `derived_projection` als primäre Signalquelle für eine authority-tragende Entscheidung verwendet wird. |
 
@@ -367,7 +375,7 @@ Diese Übergänge sind unabhängig von Implementierungsdetails verboten:
 | `retrieval_miss` → `absence_proof` | Ein FTS-Miss beweist nicht, dass ein Chunk oder Dokument nicht im Repo existiert. |
 | `navigation_index` → `semantic_importance` | Position oder Ranking in einem Index impliziert keine Bedeutung. |
 | `cache` → `evidence` | SQLite ist ein beschleunigter Spiegel — kein Beleg. |
-| `agent_output` → `authority_inheritance` | Agents erben keine Autorität ihrer Inputs. |
+| `agent_generated` → `authority_inheritance` | Agents erben keine Autorität ihrer Inputs. |
 | `export` → `truth_verification` | Ein exportiertes Bundle ist nicht verifikationsäquivalent zu einer internen CI-Prüfung. |
 | `runtime_observation` → `repository_state` | Eine Query-Session beschreibt einen Laufzeitmoment, nicht den Repo-Zustand. |
 | `eval_metric` → `retrieval_completeness` | `recall@k = 1.0` ist kein Beweis für vollständiges Retrieval. |
