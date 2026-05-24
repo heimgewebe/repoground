@@ -163,7 +163,7 @@ dürfen **nicht** umgedeutet werden. Die folgende Bewertung respektiert das.
   `retrieval-eval.v1`/`miss_taxonomy` (const `diagnostic_signal`).
 - **Spezialform:** `agent-query-session.v2.session_authority` (const `agent_context_projection`).
 - **Fehlt bei:** `post-emit-health.v1`, `agent-export-gate.v1`, `output-health.v1`,
-  `query-context-bundle.v1` (top-level), den Federation-Contracts.
+  `query-context-bundle.v1` (top-level), `diagnostics-lookup.v1`, den Federation-Contracts.
 - **C1-Passung:** die vorhandenen Werte sind mit dem C1-Inventory-Vokabular deckungsgleich.
   Die C1-**Neuklassen** (`external_unverified`, `derived_projection`, `agent_generated`)
   kommen in **keinem** bestehenden Contract vor — laut C1 korrekt, da neu/konzeptionell.
@@ -174,7 +174,7 @@ dürfen **nicht** umgedeutet werden. Die folgende Bewertung respektiert das.
 ### `canonicality`
 - **Vorkommen:** `bundle-manifest.v1` (per-role), Runtime-Lookups (const `observation`).
 - **Fehlt bei:** allen Diagnose-Contracts als Selbstdeklaration (dort über Manifest/Inventory
-  abgebildet).
+  abgebildet), außerdem bei `diagnostics-lookup.v1`, `query-context-bundle.v1`, und allen Federation-Contracts.
 - **C1-Passung:** ausreichend. C1 verlangt Canonicality nicht für jede Diagnose-Selbstdeklaration.
 - **C2-Empfehlung:** nur dort ergänzen, wo eine Rolle ihre Canonicality nicht bereits über das
   Manifest erbt. Niedrige Priorität.
