@@ -232,6 +232,16 @@ def run_verify(bundle: str, level: str = "full") -> int:
     ``_fail`` (which raises ``SystemExit``); that is caught here and converted
     to a return code, keeping the standalone behaviour identical.
     """
+    # Validate level parameter
+    allowed_levels = {"basic", "full"}
+    if level not in allowed_levels:
+        allowed = ", ".join(sorted(allowed_levels))
+        print(
+            f"❌ Invalid verification level: {level!r}. Expected one of: {allowed}",
+            file=sys.stderr,
+        )
+        return 2
+
     try:
         target = Path(bundle)
         if target.is_dir():

@@ -65,8 +65,9 @@ Drifts/Widersprüche (nicht Phase-0-Altbefunde):
 ## 7. Suboptimalitäten-Audit (2026-05-25)
 
 Systematischer Sweep über Code (`merger/lenskit/`, `scripts/`, `tools/`) und Tests auf
-Drift, Inkonsistenzen und Tech-Debt. Behobene Punkte sind verifiziert (volle Testsuite:
-1456 passed, 1 skipped; 7 vorbestehende Browser-/Playwright-Errors ohne Bezug zum Audit).
+Drift, Inkonsistenzen und Tech-Debt. Behobene Punkte sind verifiziert (Python-/Repo-Testlauf:
+1456 passed, 1 skipped; zusätzlich wurden 7 vorbestehende Browser-/Playwright-Errors beobachtet,
+ohne Bezug zu diesem Audit-Patch).
 Offene Punkte tragen eine klare Folgeaktion und wurden bewusst **nicht** blind geändert.
 
 | Befund | Beleg | Status | Folge |
