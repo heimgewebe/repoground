@@ -48,7 +48,7 @@ def test_atlas_merge_recursive_and_limits(tmp_path):
     scanner = AtlasScanner(tmp_path)
 
     # Test recursive
-    result = scanner.merge_folder("rec", output_file, recursive=True)
+    scanner.merge_folder("rec", output_file, recursive=True)
     content = output_file.read_text(encoding="utf-8")
 
     assert "rec/root.txt" in content

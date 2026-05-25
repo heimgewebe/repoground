@@ -146,7 +146,7 @@ def test_runner_empty_list_warning(mock_job_store, temp_hub):
     job.hub_resolved = str(temp_hub)
     mock_job_store.get_job.return_value = job
 
-    with patch("merger.lenskit.service.runner.scan_repo") as mock_scan, \
+    with patch("merger.lenskit.service.runner.scan_repo"), \
          patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
          patch("merger.lenskit.service.runner.validate_source_dir"):
 

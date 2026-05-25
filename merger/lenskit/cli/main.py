@@ -102,8 +102,10 @@ def main(args: Optional[List[str]] = None) -> int:
     pr_explain_parser = subparsers.add_parser("pr-explain", help="Explain PR context")
     pr_explain_parser.add_argument("--delta", required=True, help="Path to delta.json file")
 
-    # Verify command (placeholder)
-    subparsers.add_parser("verify", help="Verify artifacts or bundles")
+    # Verify command (PR-Schau bundle verifier)
+    verify_parser = subparsers.add_parser("verify", help="Verify a PR-Schau bundle (schema, integrity, no-truncate guard)")
+    verify_parser.add_argument("bundle", help="Path to a PR-Schau bundle (index file or directory)")
+    verify_parser.add_argument("--level", choices=["basic", "full"], default="full", help="Verification level")
 
     # Artifact lookup command
     artifact_parser = subparsers.add_parser("artifact", help="Look up a stored query artifact by ID")
@@ -217,8 +219,8 @@ def main(args: Optional[List[str]] = None) -> int:
         from . import pr_explain
         return pr_explain.run_pr_explain(parsed_args)
     elif parsed_args.command == "verify":
-        print("Verify command placeholder. Use pr-schau-verify for now.")
-        return 1
+        from . import pr_schau_verify
+        return pr_schau_verify.run_verify(parsed_args.bundle, parsed_args.level)
     elif parsed_args.command == "architecture":
         from . import cmd_architecture
         return cmd_architecture.run_architecture_cmd(parsed_args)

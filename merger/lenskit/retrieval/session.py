@@ -164,7 +164,17 @@ def build_agent_query_session(
     This function adheres to the agent_query_session.v1 contract and strictly extracts
     resolved bundles and warnings from the provided result without inventing references.
 
-    DEPRECATED: Use build_agent_query_session_v2 for the v2 schema.
+    Note on v1 vs v2 (do not naively migrate): this v1 builder is the on-disk
+    *file-artifact* shape used by the `lenskit query --trace` flow. It computes
+    integrity SHA256s (refs.integrity) and an environment block, and its output is
+    validated against agent-query-session.v1.schema.json (see test_cli_agent_session.py).
+    `build_agent_query_session_v2` is the *runtime-inline* shape used by the service
+    (claim_boundaries, artifact_refs store IDs) validated against the v2 schema; it does
+    NOT compute integrity/environment and takes different inputs (context_bundle /
+    federation_trace instead of the raw result). The two are parallel delivery shapes,
+    not predecessor/successor — swapping this caller to v2 would drop the integrity and
+    environment data and change the emitted schema. Consolidating to a single session
+    schema is tracked in docs/architecture/inconsistencies.md (§7).
     """
     import importlib.metadata
     from datetime import datetime, timezone

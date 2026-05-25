@@ -201,7 +201,7 @@ def test_cli_atlas_analyze_growth_error_missing_snapshot(tmp_path, monkeypatch):
     atlas_base = tmp_path / "atlas"
     atlas_base.mkdir(parents=True)
     from merger.lenskit.atlas.registry import AtlasRegistry
-    with AtlasRegistry(registry_path) as reg:
+    with AtlasRegistry(registry_path):
         pass # Empty registry
     monkeypatch.chdir(tmp_path)
     repo_root = Path(__file__).resolve().parent.parent.parent.parent
