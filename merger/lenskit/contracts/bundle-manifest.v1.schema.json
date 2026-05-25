@@ -408,6 +408,9 @@
                 "canonicality": {
                   "const": "derived"
                 }
+              },
+              "not": {
+                "required": ["risk_class"]
               }
             }
           },
@@ -505,6 +508,9 @@
                 "canonicality": {
                   "const": "derived"
                 }
+              },
+              "not": {
+                "required": ["risk_class"]
               }
             }
           },

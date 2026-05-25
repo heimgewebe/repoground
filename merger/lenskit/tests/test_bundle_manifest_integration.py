@@ -977,16 +977,17 @@ def test_c22_output_health_wrong_authority_is_invalid():
         _validate(_artifact("output_health", canonicality="content_source"))
 
 
-def test_c22_retrieval_index_roles_have_no_risk_class_constraint():
-    # STOP rationale: C1 documents no unambiguous risk_class for retrieval_index.
-    # The schema therefore must NOT constrain risk_class for these roles, i.e.
-    # both "navigation" and "derived" (and absence) must validate.
+def test_c22_retrieval_index_roles_reject_any_risk_class_until_c1_defines_it():
+    # STOP: C1 documents no risk_class for retrieval_index, so the schema actively
+    # forbids any risk_class on these roles — an absent field is a real stop, not a sign.
     for role in ("chunk_index_jsonl", "graph_index_json"):
         artifact = _artifact(role, authority="retrieval_index",
                              canonicality="derived")
         if role == "graph_index_json":
             artifact["contract"] = {"id": "x", "version": "v1"}
             artifact["interpretation"] = {"mode": "contract"}
-        _validate(dict(artifact))  # no risk_class
-        _validate({**artifact, "risk_class": "navigation"})
-        _validate({**artifact, "risk_class": "derived"})
+        _validate(dict(artifact))  # absent risk_class: valid
+        for risk in ("content", "navigation", "diagnostic", "cache",
+                     "observation", "derived", "external"):
+            with pytest.raises(jsonschema.ValidationError):
+                _validate({**artifact, "risk_class": risk})

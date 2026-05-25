@@ -221,9 +221,12 @@ Producer emittierten Annotation.
   Anwesenheit → Legacy-Bundles ohne `risk_class` bleiben valide.
 - **Keine** Producer-/Runtime-/CLI-Emission von `risk_class`, **kein** Lint, **kein**
   Export-Gate. **Kein** Eingriff in `output-health.v1.schema.json` (nur die Manifest-Rolle).
-- **STOP (scoped, begründet):** `retrieval_index`-Rollen (`chunk_index_jsonl`,
-  `graph_index_json`) erhalten **keinen** risk_class-Constraint, da C1 für `retrieval_index`
-  keinen eindeutigen risk_class dokumentiert (C1 §3 hat keine `retrieval_index`-Klasse).
+- **STOP (scoped, aktiv erzwungen):** `retrieval_index`-Rollen (`chunk_index_jsonl`,
+  `graph_index_json`) erhalten **keinen** risk_class-Wert — und das Schema **verbietet**
+  `risk_class` für sie aktiv (`not: {required: ["risk_class"]}`), weil C1 keinen
+  eindeutigen risk_class für `retrieval_index` dokumentiert (kein §3-Abschnitt). Jeder
+  Enum-Wert wird abgewiesen; ein blosses Weglassen des Constraints würde die Tür für
+  semantische Aufwertungen öffnen (C1 §4 P4 / §3.9).
 - Validierung: 30 passed in der Zielsuite (Manifest + Rollen-Completeness, inkl. 6 additiver
   C2.2-Tests), 188 passed in der Bundle-/Health-/Parity-Regression, ruff `F401,F811` sauber.
 

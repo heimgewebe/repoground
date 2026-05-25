@@ -119,7 +119,7 @@ Pflichtfeldern.
 
 ---
 
-## 4. STOP-Begründung: `retrieval_index` ohne risk_class
+## 4. STOP-Begründung: `retrieval_index` — aktives Schema-Verbot statt offener Tür
 
 Die Rollen `chunk_index_jsonl` und `graph_index_json` tragen `authority: retrieval_index`,
 `canonicality: derived`. Für `retrieval_index` gilt:
@@ -138,12 +138,25 @@ Die Rollen `chunk_index_jsonl` und `graph_index_json` tragen `authority: retriev
   umklassifiziert (chunk_index bleibt `retrieval_index`). Eine Ableitung `retrieval_index →
   derived` wäre daher **nicht eindeutig belegt**.
 
-Gemäß Aufgaben-Regel („retrieval_index → navigation oder derived nur nach belegter
-bestehender Semantik; wenn unklar: STOP und begründen") wird `risk_class` für diese beiden
-Rollen **nicht** gesetzt. Das Schema lässt sie unbeschränkt (Test
-`test_c22_retrieval_index_roles_have_no_risk_class_constraint` belegt, dass sowohl
-`navigation` als auch `derived` als auch Abwesenheit validieren). Die Lücke ist additiv-
-sicher und kann in einer späteren PR nach expliziter C1-Ergänzung geschlossen werden.
+**Konsequenz:** Da `risk_class` als optionales globales Enum eingeführt wird, würde ein
+blosses Weglassen des per-Rolle-Constraints diese Rollen für **jeden** Enum-Wert öffnen —
+einschließlich semantisch gefährlicher Aufwertungen wie `content` oder `diagnostic`. Das
+wäre genau die Art stiller Authority-Eskalation, die C1 §4 P4 und §3.9 verhindern soll.
+
+Daher wird für `chunk_index_jsonl` und `graph_index_json` im `then`-Zweig **aktiv
+verboten**, dass `risk_class` vorhanden ist:
+
+```json
+"not": { "required": ["risk_class"] }
+```
+
+Das bedeutet: Abwesenheit von `risk_class` validiert; jeder Wert aus dem Enum — inklusive
+`derived` und `navigation` — wird abgewiesen. Das Schema ist damit ein echter Sperrriegel,
+kein Hinweisschild. Test `test_c22_retrieval_index_roles_reject_any_risk_class_until_c1_defines_it`
+belegt, dass alle 7 Enum-Werte bei diesen Rollen eine `ValidationError` auslösen.
+
+Die Lücke kann nach expliziter C1-Erweiterung für `retrieval_index` in einer späteren PR
+durch Ersetzen des `not`-Zweigs durch einen `const`-Zweig geschlossen werden.
 
 ---
 
@@ -174,7 +187,7 @@ Sechs additive Tests in `test_bundle_manifest_integration.py`:
 3. `test_c22_wrong_per_role_risk_class_is_invalid` — falsche risk_class pro Rolle abgewiesen.
 4. `test_c22_output_health_correct_authority_canonicality_is_valid` — neuer Zweig positiv.
 5. `test_c22_output_health_wrong_authority_is_invalid` — neuer Zweig negativ.
-6. `test_c22_retrieval_index_roles_have_no_risk_class_constraint` — STOP-Beleg.
+6. `test_c22_retrieval_index_roles_reject_any_risk_class_until_c1_defines_it` — STOP-Beleg: alle 7 Enum-Werte werden abgewiesen; Abwesenheit validiert.
 
 Bestehende Tests blieben unverändert; nur additive Testfunktionen kamen hinzu.
 
@@ -232,8 +245,9 @@ All checks passed!
   abgewiesen.
 - Der `output_health`-Zweig deckt sich exakt mit der bereits vom Producer emittierten
   authority/canonicality; reale Bundles validieren unverändert weiter.
-- **Bewusste Lücke:** `retrieval_index`-Rollen tragen keinen risk_class-Constraint (§4).
-  Schließung erst nach expliziter C1-Ergänzung des risk_class für `retrieval_index`.
+- **Aktiver Sperrriegel:** `retrieval_index`-Rollen verbieten `risk_class` explizit per
+  `not: {required: ["risk_class"]}` (§4). Freischaltung erst nach C1-Normierung des
+  risk_class für `retrieval_index`; dann Ersetzen des `not`-Zweigs durch `const`.
 - C2.3–C5 bleiben offen (siehe Roadmap); insbesondere `allowed_inference`/
   `forbidden_inference`, Lint und Export-Gate sind ausdrücklich nicht enthalten.
 - Eine Pflicht-Anhebung von `risk_class`/`authority` im Manifest bleibt einer **neuen
