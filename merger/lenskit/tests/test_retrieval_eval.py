@@ -3,6 +3,7 @@ import pytest
 from pathlib import Path
 from merger.lenskit.cli import cmd_eval
 from merger.lenskit.retrieval import index_db, eval_core
+import jsonschema
 
 @pytest.fixture
 def mini_index_for_eval(tmp_path):
@@ -943,8 +944,6 @@ def _minimal_valid_retrieval_eval():
 
 
 def test_c2_1_legacy_eval_without_top_level_authority_stays_valid():
-    import jsonschema
-
     schema = _load_retrieval_eval_schema()
     out = _minimal_valid_retrieval_eval()
     assert "authority" not in out
@@ -953,8 +952,6 @@ def test_c2_1_legacy_eval_without_top_level_authority_stays_valid():
 
 
 def test_c2_1_correct_top_level_authority_risk_class_valid():
-    import jsonschema
-
     schema = _load_retrieval_eval_schema()
     out = _minimal_valid_retrieval_eval()
     out["authority"] = "diagnostic_signal"
@@ -963,8 +960,6 @@ def test_c2_1_correct_top_level_authority_risk_class_valid():
 
 
 def test_c2_1_wrong_top_level_authority_invalid():
-    import jsonschema
-
     schema = _load_retrieval_eval_schema()
     out = _minimal_valid_retrieval_eval()
     out["authority"] = "canonical_content"
@@ -973,8 +968,6 @@ def test_c2_1_wrong_top_level_authority_invalid():
 
 
 def test_c2_1_wrong_top_level_risk_class_invalid():
-    import jsonschema
-
     schema = _load_retrieval_eval_schema()
     out = _minimal_valid_retrieval_eval()
     out["risk_class"] = "content"

@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import jsonschema
+import pytest
 
 from merger.lenskit.core.post_emit_health import (
     DOES_NOT_MEAN,
@@ -336,7 +337,6 @@ def test_c2_1_correct_authority_risk_class_valid(tmp_path):
 
 
 def test_c2_1_wrong_authority_invalid(tmp_path):
-    import pytest
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     report = _valid_post_emit_report(tmp_path)
     report["authority"] = "canonical_content"
@@ -345,7 +345,6 @@ def test_c2_1_wrong_authority_invalid(tmp_path):
 
 
 def test_c2_1_wrong_risk_class_invalid(tmp_path):
-    import pytest
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     report = _valid_post_emit_report(tmp_path)
     report["risk_class"] = "content"

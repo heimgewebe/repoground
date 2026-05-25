@@ -48,7 +48,7 @@ Dieser Patch ist bewusst minimal. Er enthält:
 - **kein generisches `authority` neben `session_authority`** — `agent-query-session.v2`
   wird **nicht** verändert (Ambiguitätsverbot aus dem Audit §5.F/§7).
 - **`miss_taxonomy` unverändert** — der vorhandene retrieval-eval Taxonomie-Block bleibt
-  bit-identisch (eigene `required`-Liste intakt).
+  schema-semantisch unverändert; C2.1 ergänzt nur optionale top-level Felder im umgebenden `retrieval-eval.v1`-Schema.
 
 Explizit **nicht** Teil dieses Patches (bleibt Folgearbeit):
 `bundle-manifest.v1` (C2.2), `allowed_inference`/`forbidden_inference` (C2.3),
