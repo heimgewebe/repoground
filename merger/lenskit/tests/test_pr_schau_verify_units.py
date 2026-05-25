@@ -113,59 +113,38 @@ def test_verify_full_zone_dual_read(tmp_path, capsys):
     with pytest.raises(SystemExit):
         check_content('<!-- zone:begin type="files_manifest" -->')
 
-def test_run_verify_invalid_level():
+def test_run_verify_invalid_level(capsys):
     """Verify run_verify returns exit code 2 for invalid level parameter."""
     from merger.lenskit.cli.pr_schau_verify import run_verify
-    
-    result = run_verify("/nonexistent/bundle.json", level="banana")
-    assert result == 2
 
-def test_main_verify_dispatches_to_run_verify(tmp_path, monkeypatch, capsys):
+    result = run_verify("/nonexistent/bundle.json", level="banana")
+
+    assert result == 2
+    captured = capsys.readouterr()
+    assert "Invalid verification level: 'banana'" in captured.err
+    assert "Expected one of: basic, full" in captured.err
+
+def test_main_verify_dispatches_to_run_verify(tmp_path, monkeypatch):
     """Verify that lenskit main() correctly dispatches verify command to run_verify."""
     from merger.lenskit.cli.main import main as lenskit_main
-    
-    # Create a minimal valid bundle
+    from merger.lenskit.cli import pr_schau_verify
+
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir()
-    
-    bundle_json = bundle_dir / "bundle.json"
-    valid_sha256 = "6ae8a75555209fd6c44157c0aed8016e763ff435a19cf186f76863140143ff72"
-    bundle_data = {
-        "kind": "repolens.pr_schau.bundle",
-        "version": "1.0",
-        "meta": {
-            "repo": "test-repo",
-            "generated_at": "2026-05-25T18:54:43Z",
-            "generator": {
-                "name": "test-generator"
-            }
-        },
-        "completeness": {
-            "parts": ["review.md"],
-            "primary_part": "review.md",
-            "is_complete": True,
-            "policy": "split",
-            "expected_bytes": 100,
-            "emitted_bytes": 100
-        },
-        "artifacts": [
-            {"role": "canonical_md", "basename": "review.md", "sha256": valid_sha256, "mime": "text/markdown"}
-        ]
-    }
-    bundle_json.write_text(json.dumps(bundle_data), encoding="utf-8")
-    
-    # Create the review.md file
-    review_md = bundle_dir / "review.md"
-    review_md.write_text('<!-- zone:begin type="summary" -->\n<!-- zone:begin type="files_manifest" -->\ntest content', encoding="utf-8")
-    
-    # Mock _compute_sha256 to avoid hash mismatch
-    with patch("merger.lenskit.cli.pr_schau_verify._compute_sha256", return_value=valid_sha256):
-        # Test basic level dispatch
-        rc = lenskit_main(["verify", str(bundle_dir), "--level", "basic"])
-        assert rc == 0
-        
-        captured = capsys.readouterr()
-        assert "Verifying" in captured.out
+
+    calls = {}
+
+    def fake_run_verify(bundle, level):
+        calls["bundle"] = bundle
+        calls["level"] = level
+        return 23
+
+    monkeypatch.setattr(pr_schau_verify, "run_verify", fake_run_verify)
+
+    rc = lenskit_main(["verify", str(bundle_dir), "--level", "basic"])
+
+    assert rc == 23
+    assert calls == {"bundle": str(bundle_dir), "level": "basic"}
 
 
 
