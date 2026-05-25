@@ -462,8 +462,8 @@ PR 9 (Milestone B2 — Retrieval Miss Taxonomy, separat): **UMGESETZT**
 PR 10 (Suboptimalitäten-Audit, 2026-05-25): **TEILWEISE UMGESETZT**
 - Scope: Repo-weiter Sweep auf Drift/Inkonsistenzen/Tech-Debt; sichere, eng abgegrenzte
   Fixes sofort, größere Punkte getrackt. Vollbefund: `docs/architecture/inconsistencies.md` §7.
-- Behoben (verifiziert, volle Suite 1456 passed / 1 skipped; 7 vorbestehende Playwright-Errors
-  ohne Bezug):
+- Behoben (verifiziert: Python-/Repo-Testlauf 1456 passed / 1 skipped; zusätzlich wurden
+  7 vorbestehende Browser-/Playwright-Errors beobachtet, ohne Bezug zu diesem Audit-Patch):
   - MD5-Härtungs-Konsistenz: `usedforsecurity=False` + `# nosec B303` an `merge.py:2674`
     und `adapters/sources.py:318` (Angleichung an kanonisches Muster, verhindert bandit-B303-Drift).
   - Debug-`print`-Ausgaben von stdout auf `sys.stderr` umgestellt (`merge.py:3330,3401-3404,3654,4975`),
