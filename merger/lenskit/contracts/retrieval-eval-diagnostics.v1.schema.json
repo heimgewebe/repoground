@@ -1,0 +1,220 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lenskit.merger/schemas/retrieval-eval-diagnostics.v1.json",
+  "title": "Lenskit Retrieval Evaluation Diagnostics Report",
+  "description": "Diagnostic classification of retrieval evaluation misses. Provides per-miss root-cause analysis without modifying existing metrics or ranking behavior. Categorizes why each expected target was not found in top-k results.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["metadata", "diagnostics"],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "description": "Metadata about the diagnostic run.",
+      "additionalProperties": false,
+      "required": ["version", "timestamp", "total_misses"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "1.0",
+          "description": "Schema version."
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp of diagnostic generation."
+        },
+        "total_misses": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of misses (expected targets not found in top-k)."
+        },
+        "diagnostic_breakdowns": {
+          "type": "object",
+          "description": "Count of misses by primary diagnosis category.",
+          "additionalProperties": false,
+          "properties": {
+            "target_in_top_k": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Expected target found in top-k (not a miss)."
+            },
+            "target_exists_not_in_top_k": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Target exists in index/canonical but ranked outside top-k."
+            },
+            "target_missing_from_index": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Target path/identifier not in current chunk index."
+            },
+            "target_missing_from_canonical": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Target path not found in canonical_md artifact."
+            },
+            "target_missing_from_citation_map": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Target not reachable via citation_map_jsonl."
+            },
+            "stale_expected_target": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Expected target path indicates stale snapshot (historical identifier)."
+            },
+            "query_target_ambiguous": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Query or target definition is ambiguous or malformed."
+            },
+            "diagnostic_inconclusive": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Miss could not be conclusively classified (instrumentation gap)."
+            }
+          }
+        },
+        "index_stats": {
+          "type": "object",
+          "description": "Statistics about the index and canonical artifacts.",
+          "additionalProperties": false,
+          "properties": {
+            "total_chunks": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Total number of chunks in the index."
+            },
+            "total_paths": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Unique paths in the index."
+            },
+            "canonical_md_exists": {
+              "type": "boolean",
+              "description": "Whether canonical_md artifact exists and is readable."
+            },
+            "citation_map_exists": {
+              "type": "boolean",
+              "description": "Whether citation_map_jsonl artifact exists and is readable."
+            }
+          }
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "description": "Array of diagnostic records, one per query miss.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "query_id",
+          "query_text",
+          "expected_target",
+          "primary_diagnosis",
+          "diagnosis_details"
+        ],
+        "properties": {
+          "query_id": {
+            "type": "string",
+            "description": "Unique identifier for the query (from queries.md or gold set)."
+          },
+          "query_text": {
+            "type": "string",
+            "description": "The query string as executed."
+          },
+          "expected_target": {
+            "type": "string",
+            "description": "The expected target path or identifier from the gold set."
+          },
+          "primary_diagnosis": {
+            "type": "string",
+            "enum": [
+              "target_in_top_k",
+              "target_exists_not_in_top_k",
+              "target_missing_from_index",
+              "target_missing_from_canonical",
+              "target_missing_from_citation_map",
+              "stale_expected_target",
+              "query_target_ambiguous",
+              "diagnostic_inconclusive"
+            ],
+            "description": "Primary root cause of the miss."
+          },
+          "diagnosis_details": {
+            "type": "object",
+            "description": "Detailed information supporting the diagnosis.",
+            "additionalProperties": false,
+            "properties": {
+              "target_found_in_index": {
+                "type": "boolean",
+                "description": "Was the expected target path found in the chunk index?"
+              },
+              "target_found_in_canonical": {
+                "type": "boolean",
+                "description": "Was the expected target found in canonical_md?"
+              },
+              "target_found_in_citation_map": {
+                "type": "boolean",
+                "description": "Is the target reachable via citation_map_jsonl?"
+              },
+              "rank_in_results": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "If found, rank position in unfiltered results (1-indexed). null if not found."
+              },
+              "top_k": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "The k value used for top-k evaluation. null if not applicable."
+              },
+              "query_had_zero_hits": {
+                "type": "boolean",
+                "description": "Did the query return 0 total results from the search?"
+              },
+              "canonical_path_check": {
+                "type": "string",
+                "description": "Status of path lookup in canonical_md ('exact_match', 'variant_found', 'not_found', 'canonical_unavailable')."
+              },
+              "possible_path_variants": {
+                "type": "array",
+                "description": "If target not found exactly, list of similar or related paths in index.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "staleness_indicator": {
+                "type": "string",
+                "description": "Evidence of target being stale (e.g., 'path_format_obsolete', 'timestamp_mismatch', 'none')."
+              },
+              "secondary_diagnoses": {
+                "type": "array",
+                "description": "Additional contributing factors (informational, not primary cause).",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "low_query_specificity",
+                    "partial_match_outside_top_k",
+                    "index_stale",
+                    "citation_gap",
+                    "ambiguous_target_definition"
+                  ]
+                }
+              },
+              "confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "Confidence level in the diagnosis classification."
+              },
+              "instrumentation_notes": {
+                "type": "string",
+                "description": "Optional notes if diagnosis is inconclusive or requires manual review."
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
