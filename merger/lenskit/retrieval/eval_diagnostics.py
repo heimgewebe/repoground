@@ -312,6 +312,7 @@ class RetrievalEvalDiagnosticsCalibrator:
         # Load artifacts once
         self._index_paths: Optional[set] = None
         self._path_to_chunk_ids: Optional[Dict[str, set]] = None
+        self._index_unavailable: bool = False
         self._canonical_md: Optional[str] = None
         self._citation_map: Optional[Dict[str, Any]] = None
         self._citation_chunk_ids: Optional[set] = None
@@ -322,9 +323,11 @@ class RetrievalEvalDiagnosticsCalibrator:
             try:
                 self._index_paths = self.inspector.load_index_paths()
                 self._path_to_chunk_ids = self.inspector.load_path_to_chunk_ids()
+                self._index_unavailable = False
             except MissingArtifactError:
-                self._index_paths = set()
-                self._path_to_chunk_ids = {}
+                self._index_paths = None
+                self._path_to_chunk_ids = None
+                self._index_unavailable = True
 
         if self.canonical_path:
             try:
@@ -385,7 +388,12 @@ class RetrievalEvalDiagnosticsCalibrator:
             "staleness_indicator": "none",
             "secondary_diagnoses": [],
             "confidence": "medium",
+            "instrumentation_notes": None,
         }
+
+        if self._index_unavailable:
+            details["instrumentation_notes"] = "index artifact unavailable"
+            details["confidence"] = "low"
 
         # If found in results, that's the primary diagnosis
         if found_in_results:
@@ -478,6 +486,10 @@ class RetrievalEvalDiagnosticsCalibrator:
         # Non path-like targets cannot be proven against path-only index keys.
         if not self._target_looks_path_like(expected_target):
             return "query_target_ambiguous"
+
+        # If an index path was configured but could not be read, do not infer absence.
+        if self._index_unavailable or self._index_paths is None:
+            return "diagnostic_inconclusive"
 
         # Check index with substring semantics.
         if self._index_paths is not None and not details["target_found_in_index"]:

@@ -358,3 +358,35 @@ class TestRetrievalEvalDiagnosticsCalibrator:
         stats = report["metadata"]["index_stats"]
         assert stats["total_paths"] == 1
         assert stats["total_chunks"] == 2
+
+    def test_unreadable_index_is_inconclusive_not_missing(self):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=Path("/does/not/exist.jsonl"))
+        record = calibrator.diagnose_miss(
+            query_id="q_missing_index",
+            query_text="find merge",
+            expected_target="merge.py",
+            found_in_results=False,
+            rank_in_results=None,
+            top_k=10,
+        )
+        assert record.primary_diagnosis == "diagnostic_inconclusive"
+        assert record.primary_diagnosis != "target_missing_from_index"
+        note = record.diagnosis_details.get("instrumentation_notes")
+        assert isinstance(note, str)
+        assert "index" in note.lower()
+        assert "unavailable" in note.lower()
+
+    def test_readable_empty_index_can_be_missing_from_index(self, tmp_path):
+        index_file = tmp_path / "empty_chunks.jsonl"
+        index_file.write_text("", encoding="utf-8")
+
+        calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=index_file)
+        record = calibrator.diagnose_miss(
+            query_id="q_empty_index",
+            query_text="find merge",
+            expected_target="merge.py",
+            found_in_results=False,
+            rank_in_results=None,
+            top_k=10,
+        )
+        assert record.primary_diagnosis == "target_missing_from_index"
