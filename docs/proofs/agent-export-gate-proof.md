@@ -42,3 +42,24 @@ Profile policy is fail-closed:
 ## Manifest mutation
 
 The gate reads manifest and optional health files only. It does not write to or mutate the bundle manifest.
+
+## A5 verified/closed
+
+Verified acceptance criteria:
+- agent-facing export is blocked without a valid post_emit_health report
+- agent-facing export is blocked when capabilities.redaction is false
+- canonical agent-portable / agent-safe profiles are treated as agent-facing export profiles
+- internal local-search / debug-full / max-private / forensic-strict profiles are blocked from agent export
+- non-agent-facing profiles do not claim agent-surface certification
+- output_health.verdict=pass is observation only and does not certify agent-safe export
+- the gate does not mutate the manifest
+- the gate validates against agent-export-gate.v1.schema.json through its test coverage
+
+Test evidence:
+- `python -m pytest merger/lenskit/tests/test_agent_export_gate.py merger/lenskit/tests/test_agent_profiles.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py` -> 75 passed
+- `python -m pytest merger/lenskit/tests/test_context_quality.py merger/lenskit/tests/test_cli_context_quality.py` -> 28 passed
+
+Closure notes:
+- output_health pass means pre-emit or diagnostic health only; it is not agent-safe proof
+- post_emit_health is the final bundle-surface certification layer for agent-facing export
+- the gate is a diagnostic_signal, not a truth verdict
