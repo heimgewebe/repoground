@@ -354,11 +354,12 @@ async function fetchHealth() {
     }
 }
 
-async function fetchRepos(hub) {
-    // Preserve current checked repos before wiping list
-    const previouslyChecked = new Set(
-        Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value)
-    );
+async function fetchRepos(hub, options = {}) {
+    const preserveSelection = options.preserveSelection !== false;
+    // Preserve checked repos only for normal refreshes; reset flow can disable this.
+    const previouslyChecked = preserveSelection
+        ? new Set(Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value))
+        : new Set();
 
     const list = document.getElementById('repoList');
     list.innerHTML = '<div class="text-gray-500 italic">Loading repos...</div>';
@@ -619,7 +620,7 @@ function saveConfig() {
     setTimeout(() => btn.innerText = oldText, 1000);
 }
 
-function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
+async function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
     const defaults = {
         profile: 'max',
         mode: 'gesamt',
@@ -648,7 +649,11 @@ function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
         renderSelectionPool();
     }
     if (typeof fetchRepos === 'function') {
-        fetchRepos((hubPathEl && hubPathEl.value) || '');
+        await fetchRepos((hubPathEl && hubPathEl.value) || '', { preserveSelection: false });
+        // Defensive clear after rerender to keep reset deterministic even under racey UI updates.
+        document.querySelectorAll('input[name="repos"]').forEach(cb => {
+            cb.checked = false;
+        });
     }
 
     const profileEl = document.getElementById('profile');
@@ -1253,7 +1258,7 @@ async function startJob(e) {
             streamLogs(job.id); // This will connect to the last one, acceptable for now
         }
 
-        resetMergeFormToDefaultsAfterSuccessfulSubmit();
+        await resetMergeFormToDefaultsAfterSuccessfulSubmit();
 
         btn.disabled = false;
         btn.innerText = "Start Job";

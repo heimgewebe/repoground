@@ -57,7 +57,14 @@ def page_with_static(page: Page):
     page.route("**/api/version", lambda route: route.fulfill(json={"version": "test", "build_id": "test-1"}))
     page.route("**/api/health", lambda route: route.fulfill(json={"status": "ok", "hub": "/mock/hub", "merges_dir": "/mock/merges"}))
     page.route("**/api/artifacts", lambda route: route.fulfill(json=[]))
-    page.route("**/api/repos*", lambda route: route.fulfill(json=["repoA", "repoB", "../dirtyRepo"]))
+    repo_fetch_count = {"count": 0}
+
+    def handle_repos(route: Route):
+        repo_fetch_count["count"] += 1
+        route.fulfill(json=["repoA", "repoB", "repoC", "../dirtyRepo"])
+
+    page.route("**/api/repos*", handle_repos)
+    setattr(page, "_repo_fetch_count", repo_fetch_count)
 
     return page
 
@@ -427,6 +434,7 @@ def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
             route.continue_()
 
     page_with_static.route("**/api/jobs", handle_jobs)
+    repo_fetch_count_before_submit = getattr(page_with_static, "_repo_fetch_count", {"count": 0})["count"]
     page_with_static.click("#jobForm button[type='submit']")
 
     start = time.time()
@@ -447,8 +455,14 @@ def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
     assert sent["extras"] == "health,heatmap"
 
     page_with_static.wait_for_function("""
-        () => Array.from(document.querySelectorAll('input[name="repos"]')).every(b => b.checked === false)
+      () => Array.from(document.querySelectorAll('input[name="repos"]')).length > 0
+        && Array.from(document.querySelectorAll('input[name="repos"]')).every(b => b.checked === false)
+        && document.querySelector('#profile')?.value === 'max'
     """)
+
+    repo_fetch_count_after_submit = getattr(page_with_static, "_repo_fetch_count", {"count": 0})["count"]
+    assert repo_fetch_count_after_submit >= 2
+    assert repo_fetch_count_after_submit > repo_fetch_count_before_submit
 
     checked_count = page_with_static.evaluate("""
         () => Array.from(document.querySelectorAll('input[name="repos"]')).filter(b => b.checked).length
