@@ -354,11 +354,12 @@ async function fetchHealth() {
     }
 }
 
-async function fetchRepos(hub) {
-    // Preserve current checked repos before wiping list
-    const previouslyChecked = new Set(
-        Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value)
-    );
+async function fetchRepos(hub, options = {}) {
+    const preserveSelection = options.preserveSelection !== false;
+    // Preserve checked repos only for normal refreshes; reset flow can disable this.
+    const previouslyChecked = preserveSelection
+        ? new Set(Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value))
+        : new Set();
 
     const list = document.getElementById('repoList');
     list.innerHTML = '<div class="text-gray-500 italic">Loading repos...</div>';
@@ -617,6 +618,92 @@ function saveConfig() {
     const oldText = btn.innerText;
     btn.innerText = "Saved!";
     setTimeout(() => btn.innerText = oldText, 1000);
+}
+
+function getEffectiveMergeFormDefaults() {
+    const factoryDefaults = {
+        profile: 'max',
+        mode: 'gesamt',
+        splitSize: '25MB',
+        maxBytes: '0',
+        metaDensity: 'auto',
+        pathFilter: '',
+        extFilter: '',
+        planOnly: false,
+        codeOnly: false,
+        extras: [...DEFAULT_EXTRAS]
+    };
+
+    try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        const saved = raw ? JSON.parse(raw) : {};
+        if (saved && typeof saved === 'object') {
+            return {
+                ...factoryDefaults,
+                profile: saved.profile ?? factoryDefaults.profile,
+                mode: saved.mode ?? factoryDefaults.mode,
+                splitSize: saved.splitSize ?? factoryDefaults.splitSize,
+                maxBytes: saved.maxBytes ?? factoryDefaults.maxBytes,
+                metaDensity: saved.metaDensity ?? factoryDefaults.metaDensity,
+                pathFilter: saved.pathFilter ?? factoryDefaults.pathFilter,
+                extFilter: saved.extFilter ?? factoryDefaults.extFilter,
+                planOnly: saved.planOnly ?? factoryDefaults.planOnly,
+                codeOnly: saved.codeOnly ?? factoryDefaults.codeOnly,
+                extras: Array.isArray(saved.extras) ? saved.extras : factoryDefaults.extras
+            };
+        }
+    } catch (e) {
+        console.warn('Failed to read saved merge defaults', e);
+    }
+
+    return factoryDefaults;
+}
+
+async function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
+    const defaults = getEffectiveMergeFormDefaults();
+
+    document.querySelectorAll('input[name="repos"]').forEach(cb => {
+        cb.checked = false;
+    });
+
+    const hubPathEl = document.getElementById('hubPath');
+    const mergesPathEl = document.getElementById('mergesPath');
+
+    savedPrescanSelections.clear();
+    persistSavedPrescanSelections();
+    renderSelectionPool();
+
+    await fetchRepos((hubPathEl && hubPathEl.value) || '', { preserveSelection: false });
+    document.querySelectorAll('input[name="repos"]').forEach(cb => {
+        cb.checked = false;
+    });
+
+    const profileEl = document.getElementById('profile');
+    const modeEl = document.getElementById('mode');
+    const splitSizeEl = document.getElementById('splitSize');
+    const maxBytesEl = document.getElementById('maxBytes');
+    const metaDensityEl = document.getElementById('metaDensity');
+    const pathFilterEl = document.getElementById('pathFilter');
+    const extFilterEl = document.getElementById('extFilter');
+    const planOnlyEl = document.getElementById('planOnly');
+    const codeOnlyEl = document.getElementById('codeOnly');
+
+    if (profileEl) profileEl.value = defaults.profile;
+    if (modeEl) modeEl.value = defaults.mode;
+    if (splitSizeEl) splitSizeEl.value = defaults.splitSize;
+    if (maxBytesEl) maxBytesEl.value = defaults.maxBytes;
+    if (metaDensityEl) metaDensityEl.value = defaults.metaDensity;
+    if (pathFilterEl) pathFilterEl.value = defaults.pathFilter;
+    if (extFilterEl) extFilterEl.value = defaults.extFilter;
+    if (planOnlyEl) planOnlyEl.checked = defaults.planOnly;
+    if (codeOnlyEl) codeOnlyEl.checked = defaults.codeOnly;
+
+    const defaultExtras = new Set(defaults.extras);
+    document.querySelectorAll('input[name="extras"]').forEach(cb => {
+        cb.checked = defaultExtras.has(cb.value);
+    });
+
+    showNotification('Job submitted; form reset to defaults', 'info');
 }
 
 function restoreConfig() {
@@ -1161,6 +1248,8 @@ async function startJob(e) {
             const job = await res.json();
             streamLogs(job.id); // This will connect to the last one, acceptable for now
         }
+
+        await resetMergeFormToDefaultsAfterSuccessfulSubmit();
 
         btn.disabled = false;
         btn.innerText = "Start Job";
