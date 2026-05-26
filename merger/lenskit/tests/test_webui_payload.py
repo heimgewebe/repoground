@@ -57,7 +57,14 @@ def page_with_static(page: Page):
     page.route("**/api/version", lambda route: route.fulfill(json={"version": "test", "build_id": "test-1"}))
     page.route("**/api/health", lambda route: route.fulfill(json={"status": "ok", "hub": "/mock/hub", "merges_dir": "/mock/merges"}))
     page.route("**/api/artifacts", lambda route: route.fulfill(json=[]))
-    page.route("**/api/repos*", lambda route: route.fulfill(json=["repoA", "repoB", "../dirtyRepo"]))
+    repo_fetch_count = {"count": 0}
+
+    def handle_repos(route: Route):
+        repo_fetch_count["count"] += 1
+        route.fulfill(json=["repoA", "repoB", "../dirtyRepo"])
+
+    page.route("**/api/repos*", handle_repos)
+    setattr(page, "_repo_fetch_count", repo_fetch_count)
 
     return page
 
@@ -376,6 +383,99 @@ def test_run_merge_plan_only_omits_force_new(page_with_static: Page):
 
     assert p["plan_only"] is True
     assert "force_new" not in p, "force_new should be omitted for plan_only jobs"
+
+
+def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
+    pool_state = {
+        "repoA": {"raw": ["src/a.py"], "compressed": ["src/a.py"]},
+        "repoB": {"raw": None, "compressed": None},
+    }
+
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+
+    page_with_static.evaluate(f"""
+        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
+    """)
+    page_with_static.reload()
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    page_with_static.evaluate("""
+        document.querySelectorAll('input[name="repos"]').forEach(b => {
+            if (b.value === 'repoA' || b.value === 'repoB') b.checked = true;
+        });
+    """)
+
+    page_with_static.select_option("#profile", "overview")
+    page_with_static.select_option("#mode", "gesamt")
+    page_with_static.fill("#splitSize", "10MB")
+    page_with_static.fill("#maxBytes", "2048")
+    page_with_static.select_option("#metaDensity", "full")
+    page_with_static.fill("#pathFilter", "src/")
+    page_with_static.fill("#extFilter", ".py,.md")
+    page_with_static.check("#planOnly")
+    page_with_static.check("#codeOnly")
+
+    payloads = []
+
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            data = route.request.post_data_json or json.loads(route.request.post_data)
+            payloads.append(data)
+            route.fulfill(json={"id": "job-reset", "status": "queued"})
+        else:
+            route.continue_()
+
+    page_with_static.route("**/api/jobs", handle_jobs)
+    repo_fetch_count_before_submit = getattr(page_with_static, "_repo_fetch_count", {"count": 0})["count"]
+    page_with_static.click("#jobForm button[type='submit']")
+
+    start = time.time()
+    while len(payloads) == 0 and time.time() - start < 5:
+        page_with_static.wait_for_timeout(50)
+
+    assert len(payloads) == 1
+    sent = payloads[0]
+    assert sent["level"] == "overview"
+    assert sent["split_size"] == "10MB"
+    assert sent["max_bytes"] == "2048"
+    assert sent["path_filter"] is None
+    assert sent["extensions"] is None
+    assert sent["include_paths_by_repo"]["repoA"] == ["src/a.py"]
+    assert sent["include_paths_by_repo"]["repoB"] is None
+    assert sent["plan_only"] is True
+    assert sent["code_only"] is True
+
+    page_with_static.wait_for_function("""
+      () => Array.from(document.querySelectorAll('input[name="repos"]')).length > 0
+        && Array.from(document.querySelectorAll('input[name="repos"]')).every(b => b.checked === false)
+        && document.querySelector('#profile')?.value === 'max'
+    """)
+
+    repo_fetch_count_after_submit = getattr(page_with_static, "_repo_fetch_count", {"count": 0})["count"]
+    assert repo_fetch_count_after_submit >= 2
+    assert repo_fetch_count_after_submit > repo_fetch_count_before_submit
+
+    pool_after = page_with_static.evaluate("""
+        () => JSON.parse(localStorage.getItem('lenskit.prescan.savedSelections.v1') || '{}')
+    """)
+    assert pool_after == {}
+
+    page_with_static.wait_for_function("""
+        () => !document.querySelector('#repoList')?.innerText.includes('POOL')
+    """)
+
+    repos_present = page_with_static.evaluate("""
+        () => Array.from(document.querySelectorAll('input[name="repos"]')).map(b => b.value)
+    """)
+    assert repos_present == ["repoA", "repoB", "../dirtyRepo"]
+
+    checked_count = page_with_static.evaluate("""
+        () => Array.from(document.querySelectorAll('input[name="repos"]')).filter(b => b.checked).length
+    """)
+    assert checked_count == 0
+    assert page_with_static.input_value("#profile") == "max"
 
 def test_query_tab_submits_payload(page_with_static: Page):
     from playwright.sync_api import expect

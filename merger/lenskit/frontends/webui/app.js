@@ -354,11 +354,12 @@ async function fetchHealth() {
     }
 }
 
-async function fetchRepos(hub) {
-    // Preserve current checked repos before wiping list
-    const previouslyChecked = new Set(
-        Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value)
-    );
+async function fetchRepos(hub, options = {}) {
+    const preserveSelection = options.preserveSelection !== false;
+    // Preserve checked repos only for normal refreshes; reset flow can disable this.
+    const previouslyChecked = preserveSelection
+        ? new Set(Array.from(document.querySelectorAll('input[name="repos"]:checked')).map(cb => cb.value))
+        : new Set();
 
     const list = document.getElementById('repoList');
     list.innerHTML = '<div class="text-gray-500 italic">Loading repos...</div>';
@@ -617,6 +618,94 @@ function saveConfig() {
     const oldText = btn.innerText;
     btn.innerText = "Saved!";
     setTimeout(() => btn.innerText = oldText, 1000);
+}
+
+async function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
+    const defaults = {
+        profile: 'max',
+        mode: 'gesamt',
+        splitSize: '25MB',
+        maxBytes: '0',
+        metaDensity: 'auto',
+        pathFilter: '',
+        extFilter: '',
+        planOnly: false,
+        codeOnly: false,
+        extras: [...DEFAULT_EXTRAS]
+    };
+
+    document.querySelectorAll('input[name="repos"]').forEach(cb => {
+        cb.checked = false;
+    });
+
+    const hubPathEl = document.getElementById('hubPath');
+    const mergesPathEl = document.getElementById('mergesPath');
+
+    savedPrescanSelections.clear();
+    persistSavedPrescanSelections();
+    renderSelectionPool();
+
+    await fetchRepos((hubPathEl && hubPathEl.value) || '', { preserveSelection: false });
+    document.querySelectorAll('input[name="repos"]').forEach(cb => {
+        cb.checked = false;
+    });
+
+    const profileEl = document.getElementById('profile');
+    const modeEl = document.getElementById('mode');
+    const splitSizeEl = document.getElementById('splitSize');
+    const maxBytesEl = document.getElementById('maxBytes');
+    const metaDensityEl = document.getElementById('metaDensity');
+    const pathFilterEl = document.getElementById('pathFilter');
+    const extFilterEl = document.getElementById('extFilter');
+    const planOnlyEl = document.getElementById('planOnly');
+    const codeOnlyEl = document.getElementById('codeOnly');
+
+    if (profileEl) profileEl.value = defaults.profile;
+    if (modeEl) modeEl.value = defaults.mode;
+    if (splitSizeEl) splitSizeEl.value = defaults.splitSize;
+    if (maxBytesEl) maxBytesEl.value = defaults.maxBytes;
+    if (metaDensityEl) metaDensityEl.value = defaults.metaDensity;
+    if (pathFilterEl) pathFilterEl.value = defaults.pathFilter;
+    if (extFilterEl) extFilterEl.value = defaults.extFilter;
+    if (planOnlyEl) planOnlyEl.checked = defaults.planOnly;
+    if (codeOnlyEl) codeOnlyEl.checked = defaults.codeOnly;
+
+    const defaultExtras = new Set(defaults.extras);
+    document.querySelectorAll('input[name="extras"]').forEach(cb => {
+        cb.checked = defaultExtras.has(cb.value);
+    });
+
+    try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        const existingConfig = raw ? JSON.parse(raw) : {};
+        const nextConfig = (existingConfig && typeof existingConfig === 'object')
+            ? { ...existingConfig }
+            : {};
+
+        nextConfig.profile = defaults.profile;
+        nextConfig.mode = defaults.mode;
+        nextConfig.splitSize = defaults.splitSize;
+        nextConfig.maxBytes = defaults.maxBytes;
+        nextConfig.planOnly = defaults.planOnly;
+        nextConfig.codeOnly = defaults.codeOnly;
+        nextConfig.metaDensity = defaults.metaDensity;
+        nextConfig.pathFilter = defaults.pathFilter;
+        nextConfig.extFilter = defaults.extFilter;
+        nextConfig.extras = defaults.extras;
+
+        if (nextConfig.hubPath === undefined && hubPathEl) {
+            nextConfig.hubPath = hubPathEl.value;
+        }
+        if (nextConfig.mergesPath === undefined && mergesPathEl) {
+            nextConfig.mergesPath = mergesPathEl.value;
+        }
+
+        localStorage.setItem(CONFIG_KEY, JSON.stringify(nextConfig));
+    } catch (e) {
+        console.warn('Failed to persist reset merge defaults', e);
+    }
+
+    showNotification('Job submitted; form reset to defaults', 'info');
 }
 
 function restoreConfig() {
@@ -1161,6 +1250,8 @@ async function startJob(e) {
             const job = await res.json();
             streamLogs(job.id); // This will connect to the last one, acceptable for now
         }
+
+        await resetMergeFormToDefaultsAfterSuccessfulSubmit();
 
         btn.disabled = false;
         btn.innerText = "Start Job";
