@@ -227,10 +227,12 @@ def verify_full(bundle_path: Path, data: Dict[str, Any]) -> None:
 def run_verify(bundle: str, level: str = "full") -> int:
     """Library entry point: verify a PR-Schau bundle and return an exit code.
 
-    Mirrors ``main()`` but returns 0/1 instead of calling ``sys.exit`` so the
-    unified ``lenskit`` CLI can dispatch to it. The internal checks still use
-    ``_fail`` (which raises ``SystemExit``); that is caught here and converted
-    to a return code, keeping the standalone behaviour identical.
+    Mirrors ``main()`` but returns an int exit code instead of calling
+    ``sys.exit`` so the unified ``lenskit`` CLI can dispatch to it. Returns
+    0 on success, 1 on verification failure, and 2 for invalid parameters.
+    The internal checks still use ``_fail`` (which raises ``SystemExit``);
+    that is caught here and converted to a return code, keeping the standalone
+    behaviour identical.
     """
     # Validate level parameter
     allowed_levels = {"basic", "full"}
