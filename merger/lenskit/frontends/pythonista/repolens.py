@@ -2893,17 +2893,41 @@ class MergerUI(object):
 
         sheet.present("sheet")
 
+    def _run_merge_form_reset_after_success_safe(self) -> None:
+        """Safely reset form after success, with error handling and logging."""
+        try:
+           self.reset_merge_form_to_defaults_after_success()
+        except Exception as exc:
+           print(
+               f"[repolens] Warning: failed to reset merge form after success: {exc}",
+               file=sys.stderr,
+           )
+
+    def schedule_merge_form_reset_after_success(self) -> None:
+        """Schedule form reset on main thread (UI thread) if possible."""
+        if ui is not None and hasattr(ui, "delay"):
+           ui.delay(self._run_merge_form_reset_after_success_safe, 0.0)
+        else:
+           self._run_merge_form_reset_after_success_safe()
+
     def reset_merge_form_to_defaults_after_success(self) -> None:
         """Reset only merge-related transient UI state after a successful merge run."""
-        self.saved_prescan_selections = {}
+        pool = getattr(self, "saved_prescan_selections", None)
+        if pool is None:
+            self.saved_prescan_selections = {}
+        else:
+            pool.clear()
 
         try:
             if getattr(self, "tv", None) is not None:
                 self.tv.selected_rows = []
                 if hasattr(self.tv, "reload_data"):
                     self.tv.reload_data()
-        except Exception:
-            pass
+        except Exception as exc:
+            print(
+                f"[repolens] Warning: failed to reset table view selection: {exc}",
+                file=sys.stderr,
+            )
 
         if getattr(self, "ext_field", None) is not None:
             self.ext_field.text = ""
@@ -3316,7 +3340,7 @@ class MergerUI(object):
                 print(f"  - {p.name}")
 
         if all_out_paths:
-            self.reset_merge_form_to_defaults_after_success()
+            self.schedule_merge_form_reset_after_success()
 
 
 # --- CLI Mode ---

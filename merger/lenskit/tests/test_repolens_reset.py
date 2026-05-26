@@ -7,6 +7,7 @@ needed.
 """
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -103,6 +104,10 @@ class _DummyUI:
     def _update_repo_info(self) -> None:
         self._update_repo_info_called = True
 
+    def _run_merge_form_reset_after_success_safe(self) -> None:
+        """Safely reset form after success, with error handling and logging."""
+        MergerUI.reset_merge_form_to_defaults_after_success(self)
+
     # --- Methods called by save_last_state ---
 
     def _get_selected_repos(self, explicit_only: bool = False):
@@ -129,7 +134,8 @@ class _DummyUI:
                 existing = json.loads(self._state_path.read_text(encoding="utf-8"))
                 if isinstance(existing, dict):
                     data.update(existing)
-            except Exception:
+            except (OSError, json.JSONDecodeError):
+                # Ignore unreadable/invalid persisted state and continue with defaults.
                 pass
 
         data["ignored_repos"] = sorted(self.ignored_repos)
@@ -279,6 +285,45 @@ class TestResetMergeFormAfterSuccess(unittest.TestCase):
     def test_saved_ignored_repos_preserved(self) -> None:
         self._reset()
         self.assertEqual(self._saved()["ignored_repos"], ["keep-me"])
+
+    # --- In-place clear verification ---
+
+    def test_prescan_pool_cleared_in_place(self) -> None:
+        """Verify that pool is cleared in-place, not reassigned."""
+        old_pool = self.dummy.saved_prescan_selections
+        self._reset()
+        # After reset, the same object should exist, but be empty
+        self.assertIs(self.dummy.saved_prescan_selections, old_pool)
+        self.assertEqual(old_pool, {})
+
+    # --- Scheduler method tests ---
+
+    def test_schedule_merge_form_reset_after_success_fallback(self) -> None:
+        """Test scheduler fallback when ui.delay is not available."""
+        # Simulate no ui.delay by unsetting ui module
+        original_ui = sys.modules.get("ui")
+        sys.modules["ui"] = None
+        try:
+            # Reset state first
+            self.dummy.saved_prescan_selections = {
+                "repo-a": {"raw": ["a.py"], "compressed": ["a.py"]},
+            }
+            self.dummy.tv.selected_rows = [(0, 0)]
+            self.dummy._update_repo_info_called = False
+
+            # Call scheduler (should fallback to direct call)
+            MergerUI.schedule_merge_form_reset_after_success(self.dummy)
+
+            # Verify reset happened
+            self.assertEqual(self.dummy.saved_prescan_selections, {})
+            self.assertEqual(self.dummy.tv.selected_rows, [])
+            self.assertTrue(self.dummy._update_repo_info_called)
+        finally:
+            # Restore original ui module
+            if original_ui is not None:
+                sys.modules["ui"] = original_ui
+            else:
+                sys.modules.pop("ui", None)
 
 
 if __name__ == "__main__":
