@@ -469,7 +469,8 @@ PR 10 (Suboptimalitäten-Audit, 2026-05-25): **TEILWEISE UMGESETZT**
   - Debug-`print`-Ausgaben von stdout auf `sys.stderr` umgestellt (`merge.py:3330,3401-3404,3654,4975`),
     damit aktiver `debug` den maschinenlesbaren Daten-Kanal nicht verschmutzt.
   - `lenskit verify` von Platzhalter-No-op auf echten contract-Verifier verdrahtet
-    (`pr_schau_verify.run_verify()`, `pr-schau.v1`); Standalone-`main()` + Verifier-Tests unverändert.
+    (`pr_schau_verify.run_verify()`, `pr-schau.v1`); Standalone-`main()`-Verhalten erhalten;
+    Verifier-Tests erweitert.
   - Irreführender `DEPRECATED`-Hinweis an `build_agent_query_session` (v1) korrigiert: v1 (Datei-Artefakt
     mit Integrity/Environment, CLI `--trace`) und v2 (Runtime-Inline, Service) sind parallele Formen,
     keine Migration ohne Datenverlust.
