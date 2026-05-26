@@ -48,13 +48,15 @@ The gate reads manifest and optional health files only. It does not write to or 
 Verified acceptance criteria:
 - agent-facing export is blocked without a valid post_emit_health report
 - agent-facing export is blocked when capabilities.redaction is false
+- canonical agent-portable / agent-safe profiles are treated as agent-facing export profiles
+- internal local-search / debug-full / max-private profiles are blocked from agent export
 - non-agent-facing profiles do not claim agent-surface certification
 - output_health.verdict=pass is observation only and does not certify agent-safe export
 - the gate does not mutate the manifest
 - the gate validates against agent-export-gate.v1.schema.json through its test coverage
 
 Test evidence:
-- `python -m pytest merger/lenskit/tests/test_agent_export_gate.py merger/lenskit/tests/test_agent_profiles.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py` -> 67 passed
+- `python -m pytest merger/lenskit/tests/test_agent_export_gate.py merger/lenskit/tests/test_agent_profiles.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py` -> 72 passed
 - `python -m pytest merger/lenskit/tests/test_context_quality.py merger/lenskit/tests/test_cli_context_quality.py` -> 28 passed
 
 Closure notes:

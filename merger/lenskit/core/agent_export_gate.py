@@ -35,12 +35,24 @@ _POST_HEALTH_KIND = "lenskit.post_emit_health"
 _POST_HEALTH_VERSION = "1.0"
 _POST_STATUSES = {"pass", "warn", "fail", "blocked"}
 # A5-local profile policy derived from repository output_profile vocabulary.
-_AGENT_FACING_PROFILES = {"agent_minimal"}
+_AGENT_FACING_PROFILES = {"agent_minimal", "agent-portable", "agent-safe"}
 _NON_AGENT_PROFILES = {
     "human_review",
     "ui_navigation",
     "lookup_minimal",
     "review_context",
+    "lean-readable",
+    "lean-evidence",
+    "local-search",
+    "debug-full",
+    "max-private",
+    "forensic-strict",
+}
+_NON_EXPORTABLE_PROFILES = {
+    "local-search",
+    "debug-full",
+    "max-private",
+    "forensic-strict",
 }
 _KNOWN_PROFILES = _AGENT_FACING_PROFILES | _NON_AGENT_PROFILES
 
@@ -244,6 +256,7 @@ def evaluate_agent_export_gate(
     profile_unknown = isinstance(profile, str) and profile not in _KNOWN_PROFILES
     agent_facing = _is_agent_facing(profile)
     redaction_required = True if agent_facing else False
+    profile_non_exportable = isinstance(profile, str) and profile in _NON_EXPORTABLE_PROFILES
 
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     redaction_value = capabilities.get("redaction")
@@ -287,6 +300,9 @@ def evaluate_agent_export_gate(
     elif profile_unknown:
         status = "blocked"
         errors.append(f"unknown export profile: {profile!r}")
+    elif profile_non_exportable:
+        status = "blocked"
+        errors.append(f"profile is internal and not agent-exportable: {profile!r}")
 
     if agent_facing:
         if not manifest_run_id_valid:
@@ -309,7 +325,7 @@ def evaluate_agent_export_gate(
         if redaction_required and redaction_enabled is not True:
             status = "fail" if status != "blocked" else status
             errors.append("agent-facing export requires capabilities.redaction=true")
-    else:
+    elif not profile_non_exportable:
         warnings.append(
             "non-agent-facing profile result does not certify agent-surface export"
         )
