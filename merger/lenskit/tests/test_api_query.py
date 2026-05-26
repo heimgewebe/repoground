@@ -81,7 +81,6 @@ def test_api_query_valid(mini_index):
     assert "hits" not in data # Because we didn't use an output profile, it returns the raw wrapper
     assert "results" in data
     assert len(data["results"]) == 1
-    hit = data["results"][0]
     assert "explain" in data
 
     # Internal fields should not be present

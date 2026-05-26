@@ -315,7 +315,7 @@ def refresh(hub_path: Path):
     org_index_out = cache_dir / "organism.index.snapshot.json"
     org_snapshot = {
         "schema_version": "organism.index.snapshot.v1",
-        "snapshot_id": hashlib.md5(f"stub-{ts}".encode()).hexdigest(),
+        "snapshot_id": hashlib.md5(f"stub-{ts}".encode(), usedforsecurity=False).hexdigest(),  # nosec B303
         "generated_at": ts,
         "source": "repoLens.sources_refresh",
         "organisms": []

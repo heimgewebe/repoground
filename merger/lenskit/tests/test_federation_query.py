@@ -145,7 +145,6 @@ def test_execute_federated_query_resolves_relative_paths(federated_setup, monkey
 
 def test_execute_federated_query_find_bundle_index_direct_file(federated_setup):
     import json
-    bundle_db_path = federated_setup.parent / "repo2" / "chunk_index.index.sqlite"
 
     # Update federation.json to point directly to the file
     with federated_setup.open("r", encoding="utf-8") as f:

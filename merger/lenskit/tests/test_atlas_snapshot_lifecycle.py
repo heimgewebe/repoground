@@ -363,7 +363,6 @@ def test_lifecycle_executor_exception_marks_failed():
 
 def test_lifecycle_executor_zombie_guard():
     """run_scan_lifecycle: if mark_failed itself raises, finally guard catches zombie."""
-    guard_calls = []
 
     def scan_fn():
         raise RuntimeError("scan error")

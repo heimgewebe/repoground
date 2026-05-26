@@ -28,7 +28,6 @@ def test_compute_sha256_with_size_open_permission_error(tmp_path, monkeypatch):
     f = tmp_path / "open_perm.txt"
     content = "can stat but not open due to permission"
     f.write_text(content, encoding="utf-8")
-    content_bytes = content.encode("utf-8")
 
     # Targeted patch for open
     cls = type(f)

@@ -237,10 +237,6 @@ class TestiPadFSScanner(unittest.TestCase):
             create_mock_entry(name2)
         ]
 
-        # Store original scandir to fallback for non-mock paths if needed
-        # (Though unit tests should be isolated, safety first)
-        original_scandir = os.scandir
-
         @contextlib.contextmanager
         def fake_scandir(path):
             # Check if we are scanning the root path we intend to mock

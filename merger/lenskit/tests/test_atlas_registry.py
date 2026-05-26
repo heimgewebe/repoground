@@ -200,19 +200,19 @@ def test_machine_health(registry):
     assert len(health) == 1
     assert health[0]["machine_id"] == "m1"
     assert health[0]["total_complete_snapshots"] == 0
-    assert health[0]["has_snapshots"] == False
+    assert health[0]["has_snapshots"] is False
 
     # Add a running snapshot
     registry.create_snapshot("s1", "m1", "r1", "hash1", "running")
     health = registry.get_machine_health()
     assert health[0]["total_complete_snapshots"] == 0
-    assert health[0]["has_snapshots"] == False
+    assert health[0]["has_snapshots"] is False
 
     # Mark as complete
     registry.update_snapshot_status("s1", "complete")
     health = registry.get_machine_health()
     assert health[0]["total_complete_snapshots"] == 1
-    assert health[0]["has_snapshots"] == True
+    assert health[0]["has_snapshots"] is True
     assert health[0]["last_snapshot_at"] is not None
 
 def test_root_registry_validation(registry):

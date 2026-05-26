@@ -343,7 +343,6 @@ def test_duplicate_citation_id_reported_as_error(tmp_path):
 
 def test_path_traversal_in_canonical_md_path_fails(tmp_path):
     content = b"traversal test"
-    chunk = _make_chunk(content, "merge.md", 0, 5)
 
     manifest = {
         "kind": "repolens.bundle.manifest",
@@ -380,8 +379,6 @@ def test_path_traversal_in_canonical_md_path_fails(tmp_path):
 
 
 def test_absolute_canonical_md_path_fails(tmp_path):
-    content = b"absolute path test"
-
     manifest = {
         "kind": "repolens.bundle.manifest",
         "version": "1.0",

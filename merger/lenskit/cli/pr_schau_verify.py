@@ -224,37 +224,65 @@ def verify_full(bundle_path: Path, data: Dict[str, Any]) -> None:
 
         _pass(f"Byte consistency check passed (Overhead: {overhead} bytes)")
 
+def run_verify(bundle: str, level: str = "full") -> int:
+    """Library entry point: verify a PR-Schau bundle and return an exit code.
+
+    Mirrors ``main()`` but returns an int exit code instead of calling
+    ``sys.exit`` so the unified ``lenskit`` CLI can dispatch to it. Returns
+    0 on success, 1 on verification failure, and 2 for invalid parameters.
+    The internal checks still use ``_fail`` (which raises ``SystemExit``);
+    that is caught here and converted to a return code, keeping the standalone
+    behaviour identical.
+    """
+    # Validate level parameter
+    allowed_levels = {"basic", "full"}
+    if level not in allowed_levels:
+        allowed = ", ".join(sorted(allowed_levels))
+        print(
+            f"❌ Invalid verification level: {level!r}. Expected one of: {allowed}",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        target = Path(bundle)
+        if target.is_dir():
+            target = target / "bundle.json"
+
+        if not target.exists():
+            _fail(f"Bundle file not found: {target}")
+
+        print(f"🔍 Verifying {target} [Level: {level}]...")
+
+        try:
+            with target.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            _fail(f"Invalid JSON: {e}")
+
+        schema = load_schema()
+
+        # Always run basic
+        verify_basic(target, data, schema)
+
+        if level == "full":
+            verify_full(target, data)
+    except SystemExit as e:
+        code = e.code
+        if code is None:
+            return 0
+        return code if isinstance(code, int) else 1
+
+    print("\n✨ Verification Successful.")
+    return 0
+
 def main():
     parser = argparse.ArgumentParser(description="PR-Schau Verify")
     parser.add_argument("bundle", help="Path to bundle.json or bundle directory")
     parser.add_argument("--level", choices=["basic", "full"], default="full", help="Verification level")
     args = parser.parse_args()
 
-    target = Path(args.bundle)
-    if target.is_dir():
-        target = target / "bundle.json"
-
-    if not target.exists():
-        _fail(f"Bundle file not found: {target}")
-
-    print(f"🔍 Verifying {target} [Level: {args.level}]...")
-
-    try:
-        with target.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        _fail(f"Invalid JSON: {e}")
-
-    schema = load_schema()
-
-    # Always run basic
-    verify_basic(target, data, schema)
-
-    if args.level == "full":
-        verify_full(target, data)
-
-    print("\n✨ Verification Successful.")
-    sys.exit(0)
+    sys.exit(run_verify(args.bundle, args.level))
 
 if __name__ == "__main__":
     main()

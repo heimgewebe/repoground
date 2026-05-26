@@ -65,7 +65,6 @@ class ReportParser:
             else:
                 # is end
                 end_type = match.group(4) or match.group(5)
-                end_attrs_str = match.group(6) # Capturing for debugging if needed
 
                 if not stack:
                     raise ValueError(f"Orphaned end tag at {match.start()}")

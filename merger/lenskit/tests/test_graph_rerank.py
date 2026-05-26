@@ -53,7 +53,7 @@ def mini_index_with_graph(tmp_path):
 def test_graph_rerank(mini_index_with_graph):
     db_path, graph_index_path = mini_index_with_graph
 
-    res_base = query_core.execute_query(db_path, query_text="hello", k=10, explain=True)
+    query_core.execute_query(db_path, query_text="hello", k=10, explain=True)
 
     res_graph = query_core.execute_query(db_path, query_text="hello", k=10, explain=True, graph_index_path=graph_index_path, test_penalty=0.5)
 

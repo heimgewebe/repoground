@@ -2671,7 +2671,7 @@ def _generate_run_id(
         components.append(repo_names[0].replace("/", "-"))
     else:
         repo_str = "-".join(sorted(repo_names))
-        repo_hash = hashlib.md5(repo_str.encode("utf-8")).hexdigest()[:6]
+        repo_hash = hashlib.md5(repo_str.encode("utf-8"), usedforsecurity=False).hexdigest()[:6]  # nosec B303
         components.append(f"multi-{repo_hash}")
 
     # Mode + profile blocks
@@ -3327,7 +3327,7 @@ def iter_report_blocks(
     structure_present = False
 
     if debug:
-        print("[lenskit] merge.py loaded from:", __file__)
+        print("[lenskit] merge.py loaded from:", __file__, file=sys.stderr)
 
     # Resolve Effective Meta Density (Consistency Fix)
     requested_meta_density = meta_density
@@ -3398,10 +3398,10 @@ def iter_report_blocks(
         processed_files.append((fi, status))
 
     if debug:
-        print("DEBUG: total files:", len(files))
-        print("DEBUG: unknown categories:", unknown_categories)
-        print("DEBUG: unknown tags:", unknown_tags)
-        print("DEBUG: files without anchors:", [fi.rel_path for fi in files if not hasattr(fi, "anchor")])
+        print("DEBUG: total files:", len(files), file=sys.stderr)
+        print("DEBUG: unknown categories:", unknown_categories, file=sys.stderr)
+        print("DEBUG: unknown tags:", unknown_tags, file=sys.stderr)
+        print("DEBUG: files without anchors:", [fi.rel_path for fi in files if not hasattr(fi, "anchor")], file=sys.stderr)
 
     total_size = sum(fi.size for fi in files)
     text_files = [fi for fi in files if fi.is_text]
@@ -3651,7 +3651,7 @@ def iter_report_blocks(
         coverage_pct = 0.0
 
     if debug:
-        print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present)
+        print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present, file=sys.stderr)
 
     # Determine if roles are actually present/computed
     # Security fix (PR12): Ensure roles are computed before consulting them for meta
@@ -4972,7 +4972,7 @@ def extract_file_offsets(md_paths: List[Path], debug: bool = False) -> Dict[str,
                         current_id = None
                     elif current_id and "<!-- zone:end" in line_str:
                         if debug:
-                            print(f"warning: malformed zone marker in {md_path.name}")
+                            print(f"warning: malformed zone marker in {md_path.name}", file=sys.stderr)
                         current_id = None
 
                     pos += line_len

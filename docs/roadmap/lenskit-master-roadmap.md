@@ -458,3 +458,26 @@ PR 9 (Milestone B2 — Retrieval Miss Taxonomy, separat): **UMGESETZT**
   - Keine Mutation bestehender Artefakte oder CLIs
 - Python-Version: 3.10.12 (lokal getestet; `python3.11` lokal nicht vorhanden)
 - B2 bleibt **separates Arbeitspaket** von B1; keine Vermischung diagnostischer Schichten.
+
+PR 10 (Suboptimalitäten-Audit, 2026-05-25): **TEILWEISE UMGESETZT**
+- Scope: Repo-weiter Sweep auf Drift/Inkonsistenzen/Tech-Debt; sichere, eng abgegrenzte
+  Fixes sofort, größere Punkte getrackt. Vollbefund: `docs/architecture/inconsistencies.md` §7.
+- Behoben (verifiziert: Python-/Repo-Testlauf 1456 passed / 1 skipped; zusätzlich wurden
+  7 vorbestehende Browser-/Playwright-Errors beobachtet, ohne Bezug zu diesem Audit-Patch):
+  - MD5-Härtungs-Konsistenz: `usedforsecurity=False` + `# nosec B303` an `merge.py:2674`
+    und `adapters/sources.py:318` (Angleichung an kanonisches Muster, verhindert bandit-B303-Drift).
+  - Debug-`print`-Ausgaben von stdout auf `sys.stderr` umgestellt (`merge.py:3330,3401-3404,3654,4975`),
+    damit aktiver `debug` den maschinenlesbaren Daten-Kanal nicht verschmutzt.
+  - `lenskit verify` von Platzhalter-No-op auf echten contract-Verifier verdrahtet
+    (`pr_schau_verify.run_verify()`, `pr-schau.v1`); Standalone-`main()`-Verhalten erhalten;
+    Verifier-Tests erweitert.
+  - Irreführender `DEPRECATED`-Hinweis an `build_agent_query_session` (v1) korrigiert: v1 (Datei-Artefakt
+    mit Integrity/Environment, CLI `--trace`) und v2 (Runtime-Inline, Service) sind parallele Formen,
+    keine Migration ohne Datenverlust.
+  - Test-Lint-Debt (18× F841/E712 in 13 Test-Dateien) bereinigt; `ruff` mit `F401,F811,F841,E711,E712` sauber.
+- Offen (getrackt, bewusst nicht blind geändert):
+  - Atlas-CLI-Subparser-Duplikation `cli/main.py` ↔ `cli/rlens.py` zentralisieren.
+  - Audit breiter `except Exception: pass`-Blöcke in Kern/Service (defensive Pfade nicht pauschal ändern).
+  - Konsolidierungs-Entscheidung agent_query_session v1/v2 (eine Schema-Form mit Integrity/Environment?).
+- Nicht-Ziele: keine Massen-Stilkorrektur (E701/E402/E741 sind bewusst nicht im CI-Gate),
+  keine Schema-/Verhaltensänderung an emittierten Artefakten.
