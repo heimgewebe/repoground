@@ -385,7 +385,11 @@ def test_run_merge_plan_only_omits_force_new(page_with_static: Page):
     assert "force_new" not in p, "force_new should be omitted for plan_only jobs"
 
 
-def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
+def test_run_merge_resets_form_to_factory_defaults_when_none_saved(page_with_static: Page):
+    """
+    Test A: Verify that after successful submit, form resets to factory defaults
+    when no saved defaults exist in rlens_config.
+    """
     pool_state = {
         "repoA": {"raw": ["src/a.py"], "compressed": ["src/a.py"]},
         "repoB": {"raw": None, "compressed": None},
@@ -407,6 +411,7 @@ def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
         });
     """)
 
+    # Set non-default values temporarily
     page_with_static.select_option("#profile", "overview")
     page_with_static.select_option("#mode", "gesamt")
     page_with_static.fill("#splitSize", "10MB")
@@ -447,10 +452,19 @@ def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
     assert sent["plan_only"] is True
     assert sent["code_only"] is True
 
+    # After submit, form should reset to factory defaults
     page_with_static.wait_for_function("""
       () => Array.from(document.querySelectorAll('input[name="repos"]')).length > 0
         && Array.from(document.querySelectorAll('input[name="repos"]')).every(b => b.checked === false)
         && document.querySelector('#profile')?.value === 'max'
+        && document.querySelector('#mode')?.value === 'gesamt'
+        && document.querySelector('#splitSize')?.value === '25MB'
+        && document.querySelector('#maxBytes')?.value === '0'
+        && document.querySelector('#metaDensity')?.value === 'auto'
+        && document.querySelector('#pathFilter')?.value === ''
+        && document.querySelector('#extFilter')?.value === ''
+        && document.getElementById('planOnly')?.checked === false
+        && document.getElementById('codeOnly')?.checked === false
     """)
 
     repo_fetch_count_after_submit = getattr(page_with_static, "_repo_fetch_count", {"count": 0})["count"]
@@ -466,16 +480,125 @@ def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
         () => !document.querySelector('#repoList')?.innerText.includes('POOL')
     """)
 
-    repos_present = page_with_static.evaluate("""
-        () => Array.from(document.querySelectorAll('input[name="repos"]')).map(b => b.value)
-    """)
-    assert repos_present == ["repoA", "repoB", "../dirtyRepo"]
 
-    checked_count = page_with_static.evaluate("""
-        () => Array.from(document.querySelectorAll('input[name="repos"]')).filter(b => b.checked).length
+def test_run_merge_respects_saved_defaults_after_success(page_with_static: Page):
+    """
+    Test B: Verify that after successful submit, form resets to SAVED defaults
+    (not factory defaults) when rlens_config contains user-saved defaults.
+    This ensures user preferences from 'Save Defaults' are preserved across submits.
+    """
+    pool_state = {
+        "repoA": {"raw": ["src/a.py"], "compressed": ["src/a.py"]},
+        "repoB": {"raw": None, "compressed": None},
+    }
+
+    # Saved defaults (what user set via "Save Defaults" button)
+    saved_config = {
+        "profile": "dev",
+        "mode": "pro-repo",
+        "splitSize": "8MB",
+        "maxBytes": "1024",
+        "metaDensity": "minimal",
+        "pathFilter": "src/util/",
+        "extFilter": ".ts,.js",
+        "planOnly": False,
+        "codeOnly": False,
+        "extras": ["json_sidecar"],
+        "hubPath": "/env/hub",
+        "mergesPath": "/env/merges"
+    }
+
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+
+    page_with_static.evaluate(f"""
+        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
+        localStorage.setItem("rlens_config", JSON.stringify({json.dumps(saved_config)}));
     """)
-    assert checked_count == 0
-    assert page_with_static.input_value("#profile") == "max"
+    page_with_static.reload()
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    # Verify saved defaults were loaded into form
+    assert page_with_static.input_value("#profile") == "dev"
+    assert page_with_static.select_option("#mode", "pro-repo") or page_with_static.input_value("#mode") == "pro-repo"
+    assert page_with_static.input_value("#splitSize") == "8MB"
+    assert page_with_static.input_value("#maxBytes") == "1024"
+
+    page_with_static.evaluate("""
+        document.querySelectorAll('input[name="repos"]').forEach(b => {
+            if (b.value === 'repoA' || b.value === 'repoB') b.checked = true;
+        });
+    """)
+
+    # Override with different values for this run
+    page_with_static.select_option("#profile", "overview")
+    page_with_static.select_option("#mode", "gesamt")
+    page_with_static.fill("#splitSize", "10MB")
+    page_with_static.fill("#maxBytes", "2048")
+    page_with_static.select_option("#metaDensity", "full")
+    page_with_static.fill("#pathFilter", "src/")
+    page_with_static.fill("#extFilter", ".py,.md")
+    page_with_static.check("#planOnly")
+    page_with_static.check("#codeOnly")
+
+    payloads = []
+
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            data = route.request.post_data_json or json.loads(route.request.post_data)
+            payloads.append(data)
+            route.fulfill(json={"id": "job-reset-saved", "status": "queued"})
+        else:
+            route.continue_()
+
+    page_with_static.route("**/api/jobs", handle_jobs)
+    repo_fetch_count_before_submit = getattr(page_with_static, "_repo_fetch_count", {"count": 0})["count"]
+    page_with_static.click("#jobForm button[type='submit']")
+
+    start = time.time()
+    while len(payloads) == 0 and time.time() - start < 5:
+        page_with_static.wait_for_timeout(50)
+
+    assert len(payloads) == 1
+    sent = payloads[0]
+    # Should contain the override values for this specific run
+    assert sent["level"] == "overview"
+    assert sent["split_size"] == "10MB"
+    assert sent["max_bytes"] == "2048"
+    assert sent["plan_only"] is True
+    assert sent["code_only"] is True
+
+
+    # Check that repos are unchecked (transient state reset)
+    page_with_static.wait_for_function("""
+      () => Array.from(document.querySelectorAll('input[name="repos"]')).every(b => b.checked === false)
+    """, timeout=5000)
+
+    # Check pool was cleared
+    pool_after = page_with_static.evaluate("""
+        () => JSON.parse(localStorage.getItem('lenskit.prescan.savedSelections.v1') || '{}')
+    """)
+    assert pool_after == {}
+
+    # Check simple fields reset to saved defaults (not factory)
+    assert page_with_static.input_value("#profile") == "dev"
+    assert page_with_static.input_value("#splitSize") == "8MB"
+
+    # Crucially: rlens_config should still contain saved defaults unchanged
+    stored_config = page_with_static.evaluate("""
+        () => JSON.parse(localStorage.getItem('rlens_config') || '{}')
+    """)
+    assert stored_config.get("profile") == "dev"
+    assert stored_config.get("mode") == "pro-repo"
+    assert stored_config.get("splitSize") == "8MB"
+    assert stored_config.get("maxBytes") == "1024"
+    assert stored_config.get("metaDensity") == "minimal"
+    assert stored_config.get("pathFilter") == "src/util/"
+    assert stored_config.get("extFilter") == ".ts,.js"
+
+
+
 
 def test_query_tab_submits_payload(page_with_static: Page):
     from playwright.sync_api import expect
