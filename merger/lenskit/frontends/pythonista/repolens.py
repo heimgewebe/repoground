@@ -3316,7 +3316,8 @@ class MergerUI(object):
             for p in all_out_paths:
                 print(f"  - {p.name}")
 
-        self.reset_merge_form_to_defaults_after_success()
+        if all_out_paths:
+            self.reset_merge_form_to_defaults_after_success()
 
 
 # --- CLI Mode ---
