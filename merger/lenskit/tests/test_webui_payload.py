@@ -377,6 +377,242 @@ def test_run_merge_plan_only_omits_force_new(page_with_static: Page):
     assert p["plan_only"] is True
     assert "force_new" not in p, "force_new should be omitted for plan_only jobs"
 
+
+def test_run_merge_resets_form_and_pool_after_success(page_with_static: Page):
+    pool_state = {
+        "repoA": {"raw": ["src/a.py"], "compressed": ["src/a.py"]},
+        "repoB": {"raw": None, "compressed": None},
+    }
+
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+
+    page_with_static.evaluate(f"""
+        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
+    """)
+    page_with_static.reload()
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    page_with_static.evaluate("""
+        document.querySelectorAll('input[name="repos"]').forEach(b => {
+            if (b.value === 'repoA' || b.value === 'repoB') b.checked = true;
+        });
+    """)
+
+    page_with_static.select_option("#profile", "overview")
+    page_with_static.select_option("#mode", "gesamt")
+    page_with_static.fill("#splitSize", "10MB")
+    page_with_static.fill("#maxBytes", "2048")
+    page_with_static.select_option("#metaDensity", "full")
+    page_with_static.fill("#pathFilter", "src/")
+    page_with_static.fill("#extFilter", ".py,.md")
+    page_with_static.check("#planOnly")
+    page_with_static.check("#codeOnly")
+
+    page_with_static.evaluate("""
+        document.querySelectorAll('input[name="extras"]').forEach(b => {
+            b.checked = (b.value === 'health' || b.value === 'heatmap');
+        });
+    """)
+
+    payloads = []
+
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            data = route.request.post_data_json or json.loads(route.request.post_data)
+            payloads.append(data)
+            route.fulfill(json={"id": "job-reset", "status": "queued"})
+        else:
+            route.continue_()
+
+    page_with_static.route("**/api/jobs", handle_jobs)
+    page_with_static.click("#jobForm button[type='submit']")
+
+    start = time.time()
+    while len(payloads) == 0 and time.time() - start < 5:
+        page_with_static.wait_for_timeout(50)
+
+    assert len(payloads) == 1
+    sent = payloads[0]
+    assert sent["level"] == "overview"
+    assert sent["split_size"] == "10MB"
+    assert sent["max_bytes"] == "2048"
+    assert sent["path_filter"] is None
+    assert sent["extensions"] is None
+    assert sent["include_paths_by_repo"]["repoA"] == ["src/a.py"]
+    assert sent["include_paths_by_repo"]["repoB"] is None
+    assert sent["plan_only"] is True
+    assert sent["code_only"] is True
+    assert sent["extras"] == "health,heatmap"
+
+    page_with_static.wait_for_function("""
+        () => Array.from(document.querySelectorAll('input[name="repos"]')).every(b => b.checked === false)
+    """)
+
+    checked_count = page_with_static.evaluate("""
+        () => Array.from(document.querySelectorAll('input[name="repos"]')).filter(b => b.checked).length
+    """)
+    assert checked_count == 0
+
+    pool_after = page_with_static.evaluate("""
+        () => JSON.parse(localStorage.getItem('lenskit.prescan.savedSelections.v1') || '{}')
+    """)
+    assert pool_after == {}
+
+    page_with_static.wait_for_function("""
+        () => !document.querySelector('#repoList')?.innerText.includes('POOL')
+    """)
+
+    assert page_with_static.input_value("#profile") == "max"
+    assert page_with_static.input_value("#mode") == "gesamt"
+    assert page_with_static.input_value("#splitSize") == "25MB"
+    assert page_with_static.input_value("#maxBytes") == "0"
+    assert page_with_static.input_value("#metaDensity") == "auto"
+    assert page_with_static.input_value("#pathFilter") == ""
+    assert page_with_static.input_value("#extFilter") == ""
+    assert page_with_static.is_checked("#planOnly") is False
+    assert page_with_static.is_checked("#codeOnly") is False
+
+    checked_extras = page_with_static.evaluate("""
+        () => Array.from(document.querySelectorAll('input[name="extras"]'))
+            .filter(b => b.checked)
+            .map(b => b.value)
+            .sort()
+    """)
+    assert checked_extras == ["augment_sidecar", "json_sidecar"]
+
+
+def test_run_merge_does_not_reset_on_job_error(page_with_static: Page):
+    pool_state = {
+        "repoA": {"raw": ["src/a.py"], "compressed": ["src/a.py"]}
+    }
+
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+
+    page_with_static.evaluate(f"""
+        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
+    """)
+    page_with_static.reload()
+    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    page_with_static.check("input[name='repos'][value='repoA']")
+    page_with_static.select_option("#profile", "dev")
+    page_with_static.fill("#splitSize", "5MB")
+    page_with_static.fill("#maxBytes", "1234")
+    page_with_static.fill("#pathFilter", "pkg/")
+    page_with_static.fill("#extFilter", ".py")
+    page_with_static.check("#planOnly")
+    page_with_static.evaluate("""
+        document.querySelectorAll('input[name="extras"]').forEach(b => {
+            b.checked = (b.value === 'health');
+        });
+    """)
+
+    dialog_messages = []
+    page_with_static.on("dialog", lambda dialog: (dialog_messages.append(dialog.message), dialog.accept()))
+
+    page_with_static.route(
+        "**/api/jobs",
+        lambda route: route.fulfill(status=500, json={"detail": "boom"})
+        if route.request.method == "POST"
+        else route.continue_(),
+    )
+
+    page_with_static.click("#jobForm button[type='submit']")
+    page_with_static.wait_for_function(
+        """
+        () => {
+            const submitBtn = document.querySelector("#jobForm button[type='submit']");
+            return submitBtn && submitBtn.disabled === false && submitBtn.innerText === "Start Job";
+        }
+        """
+    )
+
+    assert any("Failed to start job" in m for m in dialog_messages)
+    assert page_with_static.is_checked("input[name='repos'][value='repoA']") is True
+    assert page_with_static.input_value("#profile") == "dev"
+    assert page_with_static.input_value("#splitSize") == "5MB"
+    assert page_with_static.input_value("#maxBytes") == "1234"
+    assert page_with_static.input_value("#pathFilter") == "pkg/"
+    assert page_with_static.input_value("#extFilter") == ".py"
+    assert page_with_static.is_checked("#planOnly") is True
+
+    checked_extras = page_with_static.evaluate("""
+        () => Array.from(document.querySelectorAll('input[name="extras"]'))
+            .filter(b => b.checked)
+            .map(b => b.value)
+    """)
+    assert checked_extras == ["health"]
+
+    pool_after = page_with_static.evaluate("""
+        () => JSON.parse(localStorage.getItem('lenskit.prescan.savedSelections.v1') || '{}')
+    """)
+    assert pool_after == pool_state
+
+
+def test_run_merge_success_keeps_environment_storage(page_with_static: Page):
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    page_with_static.evaluate("""
+        localStorage.setItem('rlens_token', 'token-keep');
+        localStorage.setItem('rlens_state_version', 'state-keep');
+        localStorage.setItem('rlens_atlas_config_v2', JSON.stringify({version: 2, root: 'hub', token: 'atlas-keep'}));
+        localStorage.setItem('rlens_config', JSON.stringify({
+            profile: 'dev',
+            mode: 'pro-repo',
+            splitSize: '8MB',
+            maxBytes: '1024',
+            pathFilter: 'x/',
+            extFilter: '.py',
+            planOnly: true,
+            codeOnly: true,
+            extras: ['health'],
+            hubPath: '/env/hub',
+            mergesPath: '/env/merges'
+        }));
+        document.getElementById('hubPath').value = '/env/hub';
+        document.getElementById('mergesPath').value = '/env/merges';
+    """)
+
+    page_with_static.check("input[name='repos'][value='repoA']")
+
+    page_with_static.route(
+        "**/api/jobs",
+        lambda route: route.fulfill(json={"id": "job-env", "status": "queued"})
+        if route.request.method == "POST"
+        else route.continue_(),
+    )
+
+    page_with_static.click("#jobForm button[type='submit']")
+    page_with_static.wait_for_function(
+        """
+        () => {
+            const profileOk = document.querySelector('#profile')?.value === 'max';
+            const reposUnchecked = Array.from(document.querySelectorAll('input[name="repos"]')).every(b => !b.checked);
+            const poolBadgeGone = !document.querySelector('#repoList')?.innerText.includes('POOL');
+            const cfg = JSON.parse(localStorage.getItem('rlens_config') || '{}');
+            const cfgProfileOk = cfg.profile === 'max';
+            return profileOk && reposUnchecked && poolBadgeGone && cfgProfileOk;
+        }
+        """
+    )
+
+    token = page_with_static.evaluate("() => localStorage.getItem('rlens_token')")
+    state_version = page_with_static.evaluate("() => localStorage.getItem('rlens_state_version')")
+    atlas = page_with_static.evaluate("() => localStorage.getItem('rlens_atlas_config_v2')")
+    cfg = page_with_static.evaluate("() => JSON.parse(localStorage.getItem('rlens_config'))")
+
+    assert token == "token-keep"
+    assert state_version == "state-keep"
+    assert json.loads(atlas) == {"version": 2, "root": "hub", "token": "atlas-keep"}
+    assert cfg["hubPath"] == "/env/hub"
+    assert cfg["mergesPath"] == "/env/merges"
+
 def test_query_tab_submits_payload(page_with_static: Page):
     from playwright.sync_api import expect
 

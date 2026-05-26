@@ -1550,6 +1550,69 @@ class MergerUI(object):
                 names.append(self.repos[row])
         return names
 
+    def reset_merge_form_to_defaults_after_success(self) -> None:
+        """Reset only merge-related transient UI state after a successful merge run."""
+        self.saved_prescan_selections = {}
+
+        # Clear explicit table selection; keep the repo list and ignore set unchanged.
+        try:
+            if getattr(self, "tv", None) is not None:
+                self.tv.selected_rows = []
+                if hasattr(self.tv, "reload_data"):
+                    self.tv.reload_data()
+        except Exception:
+            pass
+
+        if getattr(self, "ext_field", None) is not None:
+            self.ext_field.text = ""
+        if getattr(self, "path_field", None) is not None:
+            self.path_field.text = ""
+
+        if getattr(self, "max_field", None) is not None:
+            self.max_field.text = "" if DEFAULT_MAX_FILE_BYTES <= 0 else str(DEFAULT_MAX_FILE_BYTES)
+
+        if getattr(self, "split_field", None) is not None:
+            split_text = ""
+            if DEFAULT_SPLIT_SIZE and str(DEFAULT_SPLIT_SIZE).strip() not in ("", "0"):
+                raw = str(DEFAULT_SPLIT_SIZE).strip()
+                if raw.isdigit():
+                    split_text = raw
+                else:
+                    try:
+                        mb = int(round(parse_human_size(raw) / (1024 * 1024)))
+                        split_text = str(mb) if mb > 0 else ""
+                    except Exception:
+                        split_text = raw
+            self.split_field.text = split_text
+
+        if getattr(self, "seg_detail", None) is not None:
+            try:
+                self.seg_detail.selected_index = self.seg_detail.segments.index(DEFAULT_LEVEL)
+            except Exception:
+                self.seg_detail.selected_index = 0
+            if hasattr(self, "on_profile_changed"):
+                self.on_profile_changed(None)
+
+        if getattr(self, "seg_mode", None) is not None:
+            self.seg_mode.selected_index = 1 if DEFAULT_MODE == "pro-repo" else 0
+
+        if getattr(self, "seg_meta", None) is not None:
+            try:
+                self.seg_meta.selected_index = self.seg_meta.segments.index(DEFAULT_META_DENSITY)
+            except Exception:
+                self.seg_meta.selected_index = 0
+
+        if getattr(self, "plan_only_switch", None) is not None:
+            self.plan_only_switch.value = False
+        if getattr(self, "code_only_switch", None) is not None:
+            self.code_only_switch.value = False
+
+        extras_defaults, _ = ExtrasConfig.from_csv(DEFAULT_EXTRAS)
+        self.extras_config = extras_defaults
+
+        self._update_repo_info()
+        self.save_last_state()
+
     def _parse_max_bytes(self) -> int:
         txt = (self.max_field.text or "").strip()
         # Leeres Feld → Standard: unbegrenzt (0 = „no limit“)
@@ -3252,6 +3315,9 @@ class MergerUI(object):
             print(f"repoLens: {msg}")
             for p in all_out_paths:
                 print(f"  - {p.name}")
+
+        if all_out_paths:
+            self.reset_merge_form_to_defaults_after_success()
 
 
 # --- CLI Mode ---

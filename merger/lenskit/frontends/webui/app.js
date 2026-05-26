@@ -619,6 +619,97 @@ function saveConfig() {
     setTimeout(() => btn.innerText = oldText, 1000);
 }
 
+function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
+    const defaults = {
+        profile: 'max',
+        mode: 'gesamt',
+        splitSize: '25MB',
+        maxBytes: '0',
+        metaDensity: 'auto',
+        pathFilter: '',
+        extFilter: '',
+        planOnly: false,
+        codeOnly: false,
+        extras: [...DEFAULT_EXTRAS]
+    };
+
+    // Clear explicit repo selection only; keep repository list and environment untouched.
+    document.querySelectorAll('input[name="repos"]').forEach(cb => {
+        cb.checked = false;
+    });
+
+    const hubPathEl = document.getElementById('hubPath');
+    const mergesPathEl = document.getElementById('mergesPath');
+
+    // Clear selection pool without touching unrelated localStorage keys.
+    savedPrescanSelections.clear();
+    persistSavedPrescanSelections();
+    if (typeof renderSelectionPool === 'function') {
+        renderSelectionPool();
+    }
+    if (typeof fetchRepos === 'function') {
+        fetchRepos((hubPathEl && hubPathEl.value) || '');
+    }
+
+    const profileEl = document.getElementById('profile');
+    const modeEl = document.getElementById('mode');
+    const splitSizeEl = document.getElementById('splitSize');
+    const maxBytesEl = document.getElementById('maxBytes');
+    const metaDensityEl = document.getElementById('metaDensity');
+    const pathFilterEl = document.getElementById('pathFilter');
+    const extFilterEl = document.getElementById('extFilter');
+    const planOnlyEl = document.getElementById('planOnly');
+    const codeOnlyEl = document.getElementById('codeOnly');
+
+    if (profileEl) profileEl.value = defaults.profile;
+    if (modeEl) modeEl.value = defaults.mode;
+    if (splitSizeEl) splitSizeEl.value = defaults.splitSize;
+    if (maxBytesEl) maxBytesEl.value = defaults.maxBytes;
+    if (metaDensityEl) metaDensityEl.value = defaults.metaDensity;
+    if (pathFilterEl) pathFilterEl.value = defaults.pathFilter;
+    if (extFilterEl) extFilterEl.value = defaults.extFilter;
+    if (planOnlyEl) planOnlyEl.checked = defaults.planOnly;
+    if (codeOnlyEl) codeOnlyEl.checked = defaults.codeOnly;
+
+    const defaultExtras = new Set(defaults.extras);
+    document.querySelectorAll('input[name="extras"]').forEach(cb => {
+        cb.checked = defaultExtras.has(cb.value);
+    });
+
+    // Keep persisted environment fields (hub/merges) and unrelated keys; only refresh merge-form defaults.
+    try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        const existingConfig = raw ? JSON.parse(raw) : {};
+        const nextConfig = (existingConfig && typeof existingConfig === 'object')
+            ? { ...existingConfig }
+            : {};
+
+        nextConfig.profile = defaults.profile;
+        nextConfig.mode = defaults.mode;
+        nextConfig.splitSize = defaults.splitSize;
+        nextConfig.maxBytes = defaults.maxBytes;
+        nextConfig.planOnly = defaults.planOnly;
+        nextConfig.codeOnly = defaults.codeOnly;
+        nextConfig.metaDensity = defaults.metaDensity;
+        nextConfig.pathFilter = defaults.pathFilter;
+        nextConfig.extFilter = defaults.extFilter;
+        nextConfig.extras = defaults.extras;
+
+        if (nextConfig.hubPath === undefined && hubPathEl) {
+            nextConfig.hubPath = hubPathEl.value;
+        }
+        if (nextConfig.mergesPath === undefined && mergesPathEl) {
+            nextConfig.mergesPath = mergesPathEl.value;
+        }
+
+        localStorage.setItem(CONFIG_KEY, JSON.stringify(nextConfig));
+    } catch (e) {
+        console.warn('Failed to persist reset merge defaults', e);
+    }
+
+    showNotification('Job submitted; form reset to defaults', 'info');
+}
+
 function restoreConfig() {
     try {
         const config = JSON.parse(localStorage.getItem(CONFIG_KEY));
@@ -1161,6 +1252,8 @@ async function startJob(e) {
             const job = await res.json();
             streamLogs(job.id); // This will connect to the last one, acceptable for now
         }
+
+        resetMergeFormToDefaultsAfterSuccessfulSubmit();
 
         btn.disabled = false;
         btn.innerText = "Start Job";

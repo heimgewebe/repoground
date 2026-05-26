@@ -1,6 +1,14 @@
 import unittest
+import sys
+from pathlib import Path
+
+PYTHONISTA_FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontends" / "pythonista"
+if str(PYTHONISTA_FRONTEND_DIR) not in sys.path:
+    sys.path.insert(0, str(PYTHONISTA_FRONTEND_DIR))
+
 from merger.lenskit.frontends.pythonista.repolens_utils import normalize_path, normalize_repo_id
 from merger.lenskit.frontends.pythonista.repolens_helpers import resolve_pool_include_paths, deserialize_prescan_pool, _sanitize_list
+from merger.lenskit.frontends.pythonista import repolens
 
 class TestSanitizeListInternal(unittest.TestCase):
     def test_sanitize_list_mixed(self):
@@ -157,6 +165,108 @@ class TestPrescanPool(unittest.TestCase):
         res_structured = deserialize_prescan_pool(data_structured)
         self.assertEqual(res_structured["repo_structured"]["raw"], ["a", ".", "b"])
         self.assertEqual(res_structured["repo_structured"]["compressed"], ["x", ".", "y"])
+
+
+class TestRepoLensResetAfterSuccess(unittest.TestCase):
+    def test_reset_merge_form_to_defaults_after_success(self):
+        class DummyField:
+            def __init__(self, text=""):
+                self.text = text
+
+        class DummySwitch:
+            def __init__(self, value=False):
+                self.value = value
+
+        class DummySegment:
+            def __init__(self, segments, selected_index):
+                self.segments = segments
+                self.selected_index = selected_index
+
+        class DummyTable:
+            def __init__(self):
+                self.selected_rows = [(0, 0), (0, 1)]
+                self.reloaded = False
+
+            def reload_data(self):
+                self.reloaded = True
+
+        class DummyUI:
+            def __init__(self):
+                self.saved_prescan_selections = {
+                    "repoa": {"raw": ["a.py"], "compressed": ["a.py"]}
+                }
+                self.ignored_repos = {"keep-me"}
+
+                self.ext_field = DummyField(".py")
+                self.path_field = DummyField("src/")
+                self.max_field = DummyField("1234")
+                self.split_field = DummyField("7")
+
+                self.seg_detail = DummySegment(["overview", "summary", "dev", "max"], 0)
+                self.seg_mode = DummySegment(["combined", "per repo"], 1)
+                self.seg_meta = DummySegment(["auto", "min", "standard", "full"], 3)
+
+                self.plan_only_switch = DummySwitch(True)
+                self.code_only_switch = DummySwitch(True)
+                self.tv = DummyTable()
+
+                extras_cfg, _ = repolens.ExtrasConfig.from_csv("health,heatmap")
+                self.extras_config = extras_cfg
+
+                self.saved_state = None
+                self.repo_info_updated = False
+                self.profile_hint = DummyField("stale")
+
+            def on_profile_changed(self, _sender):
+                idx = self.seg_detail.selected_index
+                seg = self.seg_detail.segments[idx]
+                self.profile_hint.text = repolens.PROFILE_DESCRIPTIONS.get(seg, "")
+
+            def _update_repo_info(self):
+                self.repo_info_updated = True
+
+            def save_last_state(self):
+                selected_repos = []
+                for section, row in (self.tv.selected_rows or []):
+                    if section == 0:
+                        selected_repos.append(f"repo-{row}")
+                self.saved_state = {
+                    "prescan_pool": self.saved_prescan_selections,
+                    "selected_repos": selected_repos,
+                    "ignored_repos": sorted(self.ignored_repos),
+                }
+
+        dummy = DummyUI()
+        repolens.MergerUI.reset_merge_form_to_defaults_after_success(dummy)
+
+        self.assertEqual(dummy.saved_prescan_selections, {})
+        self.assertEqual(dummy.tv.selected_rows, [])
+        self.assertTrue(dummy.tv.reloaded)
+
+        self.assertEqual(dummy.ext_field.text, "")
+        self.assertEqual(dummy.path_field.text, "")
+        self.assertEqual(dummy.max_field.text, "")
+        self.assertEqual(dummy.split_field.text, "25")
+
+        self.assertEqual(dummy.seg_detail.selected_index, 3)  # max
+        self.assertEqual(dummy.seg_mode.selected_index, 0)  # gesamt/combined
+        self.assertEqual(dummy.seg_meta.selected_index, 0)  # auto
+        self.assertFalse(dummy.plan_only_switch.value)
+        self.assertFalse(dummy.code_only_switch.value)
+        self.assertEqual(
+            dummy.profile_hint.text,
+            repolens.PROFILE_DESCRIPTIONS["max"],
+        )
+
+        self.assertTrue(dummy.extras_config.augment_sidecar)
+        self.assertTrue(dummy.extras_config.json_sidecar)
+        self.assertFalse(dummy.extras_config.health)
+        self.assertFalse(dummy.extras_config.heatmap)
+
+        self.assertTrue(dummy.repo_info_updated)
+        self.assertEqual(dummy.saved_state["prescan_pool"], {})
+        self.assertEqual(dummy.saved_state["selected_repos"], [])
+        self.assertEqual(dummy.saved_state["ignored_repos"], ["keep-me"])
 
 if __name__ == '__main__':
     unittest.main()
