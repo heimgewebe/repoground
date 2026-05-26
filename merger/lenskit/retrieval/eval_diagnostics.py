@@ -117,24 +117,25 @@ class IndexInspector:
         if self.index_path is None:
             return set()
 
-        paths = set()
+        if self.index_path.suffix != ".jsonl":
+            raise MissingArtifactError(f"Unsupported chunk index format: {self.index_path}")
 
-        if self.index_path.suffix == ".jsonl":
-            try:
-                with open(self.index_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if not line.strip():
-                            continue
-                        try:
-                            chunk = json.loads(line)
-                            if "path" in chunk:
-                                paths.add(chunk["path"])
-                        except (json.JSONDecodeError, KeyError):
-                            continue
-            except (IOError, OSError) as e:
-                raise MissingArtifactError(
-                    f"Failed to read chunk index from {self.index_path}: {e}"
-                )
+        paths = set()
+        try:
+            with open(self.index_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        if "path" in chunk:
+                            paths.add(chunk["path"])
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+        except (IOError, OSError) as e:
+            raise MissingArtifactError(
+                f"Failed to read chunk index from {self.index_path}: {e}"
+            )
         # For SQLite index, would need similar logic
         # For now, assume JSONL format
 
@@ -157,8 +158,7 @@ class IndexInspector:
             return mapping
 
         if self.index_path.suffix != ".jsonl":
-            self._path_to_chunk_ids_cache = mapping
-            return mapping
+            raise MissingArtifactError(f"Unsupported chunk index format: {self.index_path}")
 
         try:
             with open(self.index_path, "r", encoding="utf-8") as f:
@@ -392,11 +392,16 @@ class RetrievalEvalDiagnosticsCalibrator:
         }
 
         if self._index_unavailable:
-            details["instrumentation_notes"] = "index artifact unavailable"
+            details["instrumentation_notes"] = "index artifact unavailable or unsupported format"
             details["confidence"] = "low"
 
-        # If found in results, that's the primary diagnosis
-        if found_in_results:
+        # Found-in-results only proves a top-k hit when rank metadata confirms rank <= top_k.
+        if (
+            found_in_results
+            and rank_in_results is not None
+            and top_k is not None
+            and rank_in_results <= top_k
+        ):
             record = DiagnosticsRecord(
                 query_id=query_id,
                 query_text=query_text,
@@ -505,7 +510,15 @@ class RetrievalEvalDiagnosticsCalibrator:
 
         # If target exists in index but is not observed in top-k results,
         # classify as top-k/ranking signal without claiming absolute rank.
-        if details["target_found_in_index"] and not found_in_results:
+        if details["target_found_in_index"] and (
+            not found_in_results
+            or (
+                found_in_results
+                and rank_in_results is not None
+                and top_k is not None
+                and rank_in_results > top_k
+            )
+        ):
             return "target_exists_not_in_top_k"
 
         # Fallback

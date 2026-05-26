@@ -390,3 +390,40 @@ class TestRetrievalEvalDiagnosticsCalibrator:
             top_k=10,
         )
         assert record.primary_diagnosis == "target_missing_from_index"
+
+    def test_unsupported_index_format_is_inconclusive_not_missing(self, tmp_path):
+        sqlite_like_index = tmp_path / "chunk_index.index.sqlite"
+        sqlite_like_index.write_text("not-a-jsonl-index", encoding="utf-8")
+
+        calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=sqlite_like_index)
+        record = calibrator.diagnose_miss(
+            query_id="q_sqlite_index",
+            query_text="find merge",
+            expected_target="merge.py",
+            found_in_results=False,
+            rank_in_results=None,
+            top_k=10,
+        )
+        assert record.primary_diagnosis == "diagnostic_inconclusive"
+        assert record.primary_diagnosis != "target_missing_from_index"
+        note = record.diagnosis_details.get("instrumentation_notes")
+        assert isinstance(note, str)
+        assert "index" in note.lower() or "unsupported" in note.lower()
+
+    def test_found_outside_top_k_not_classified_as_top_k_hit(self, tmp_artifacts):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"],
+            canonical_path=tmp_artifacts["canonical"],
+            citation_path=tmp_artifacts["citation"],
+        )
+        record = calibrator.diagnose_miss(
+            query_id="q_overfetch",
+            query_text="find merge",
+            expected_target="merge.py",
+            found_in_results=True,
+            rank_in_results=45,
+            top_k=10,
+        )
+        assert record.primary_diagnosis == "target_exists_not_in_top_k"
+        assert record.primary_diagnosis != "target_in_top_k"
+        assert record.diagnosis_details["rank_in_results"] == 45
