@@ -56,7 +56,7 @@ Verified acceptance criteria:
 - the gate validates against agent-export-gate.v1.schema.json through its test coverage
 
 Test evidence:
-- `python -m pytest merger/lenskit/tests/test_agent_export_gate.py merger/lenskit/tests/test_agent_profiles.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py` -> 72 passed
+- `python -m pytest merger/lenskit/tests/test_agent_export_gate.py merger/lenskit/tests/test_agent_profiles.py merger/lenskit/tests/test_post_emit_health.py merger/lenskit/tests/test_cli_bundle_health.py` -> 75 passed
 - `python -m pytest merger/lenskit/tests/test_context_quality.py merger/lenskit/tests/test_cli_context_quality.py` -> 28 passed
 
 Closure notes:
