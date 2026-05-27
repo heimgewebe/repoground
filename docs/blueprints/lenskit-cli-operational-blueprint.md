@@ -9,14 +9,27 @@ Er verhindert die Fehlinterpretation: Ein fehlendes globales `lenskit`-Kommando 
 
 ## 2. CLI-Oberflächen
 
-Die folgenden Modul-Aufrufe sind die maßgeblichen CLI-Oberflächen:
+### Core / Module CLI
+
+Die folgenden Modul-Aufrufe sind die maßgeblichen Core-CLI-Oberflächen:
 
 ```bash
 python -m merger.lenskit.cli --help
 python -m merger.lenskit.cli.main --help
-python -m merger.lenskit.cli.rlens --help
 python -m merger.lenskit.cli.main rlens-client --help
 ```
+
+`rlens-client` ist die CLI-Client-Oberfläche.
+
+### Optionaler rLens service launcher
+
+```bash
+python -m merger.lenskit.cli.rlens --help
+```
+
+`cli.rlens` ist der rLens-Service-Launcher und darf optional/serviceabhängig sein.
+Ein Fehlschlag von `python -m merger.lenskit.cli.rlens --help` wegen fehlender Service-Dependencies
+ist kein Gegenbeweis gegen Core-CLI-Readiness.
 
 Voraussetzung: Die Befehle werden aus einem Kontext ausgeführt, in dem das Paket importierbar ist
 (z.B. Repo-Root, aktivierte Projektumgebung, editable install oder passend gesetztes `PYTHONPATH`).
@@ -27,13 +40,15 @@ Stand: 2026-05-27.
 
 Dieser Abschnitt ist eine lokale Momentaufnahme, kein dauerhafter Contract. Nach Wechsel von Host,
 Python-Umgebung, Shell oder Installation ist §7 erneut auszuführen. Normativ bleibt die Trennung aus
-§4: Modul-CLI-Readiness, Shell-Wrapper-Readiness, Service-Readiness und WebUI-Readiness sind
-verschiedene Zustände.
+§4: Modul-CLI-Readiness, Shell-Wrapper-Readiness, rLens-Service-Launcher-Readiness,
+Service-Readiness und WebUI-Readiness sind verschiedene Zustände.
 
-- `python -m merger.lenskit.cli --help`: verifiziert
-- `python -m merger.lenskit.cli.main --help`: verifiziert
-- `python -m merger.lenskit.cli.rlens --help`: verifiziert
-- `python -m merger.lenskit.cli.main rlens-client --help`: verifiziert
+- Core / Module CLI:
+  - `python -m merger.lenskit.cli --help`: verifiziert
+  - `python -m merger.lenskit.cli.main --help`: verifiziert
+  - `python -m merger.lenskit.cli.main rlens-client --help`: verifiziert
+- rLens service launcher:
+  - `python -m merger.lenskit.cli.rlens --help`: lokal verifiziert, optional/serviceabhängig
 - globales `rlens`: vorhanden unter `/home/alex/.local/bin/rlens`
 - globales `lenskit`: nicht vorhanden
 - globale Wrapper-Aussagen beziehen sich auf den geprüften lokalen User-Kontext.
@@ -42,7 +57,15 @@ verschiedene Zustände.
 
 ### CLI readiness
 
-Die Hilfe-/Command-Surface der Modul-CLI ist erreichbar.
+CLI readiness meint Core / Module CLI.
+Die Hilfe-/Command-Surface der Core-CLI ist erreichbar. Der serviceabhängige rLens-Launcher ist dafür
+nicht zwingend erforderlich.
+
+### rLens service launcher readiness
+
+Separat von Core-CLI readiness.
+Der Help-Aufruf prüft die Launcher-Importierbarkeit inklusive service-naher Dependencies,
+aber nicht, ob der rLens-Service läuft.
 
 ### Shell wrapper readiness
 
@@ -78,11 +101,18 @@ Ein globaler `lenskit`-Wrapper darf später ergänzt werden, wenn:
 
 ## 7. Verifikationskommandos
 
+Core CLI checks:
+
 ```bash
 python -m merger.lenskit.cli --help
 python -m merger.lenskit.cli.main --help
-python -m merger.lenskit.cli.rlens --help
 python -m merger.lenskit.cli.main rlens-client --help
+```
+
+Optional service launcher / wrapper checks:
+
+```bash
+python -m merger.lenskit.cli.rlens --help
 command -v lenskit || true
 command -v rlens || true
 ```
