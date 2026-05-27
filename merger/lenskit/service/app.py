@@ -42,6 +42,10 @@ from merger.lenskit.core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
 # Global Version Info
 SERVER_START_TIME = datetime.now(timezone.utc).isoformat()
 
+# Logging setup
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 def _get_server_version():
     # 1. Env Var (Canonical for builds)
     env_ver = os.getenv("RLENS_VERSION")
@@ -85,10 +89,6 @@ elif SERVER_VERSION != "dev":
     BUILD_ID = SERVER_VERSION
 else:
     BUILD_ID = f"dev-{int(time.time())}"
-
-# Logging setup
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 ACTIVE_JOB_STATUSES = {"queued", "running", "canceling"}
 

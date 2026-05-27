@@ -1,4 +1,5 @@
 import pytest
+import importlib
 from fastapi.testclient import TestClient
 from pathlib import Path
 import tempfile
@@ -316,6 +317,24 @@ def test_get_server_version_logs_debug_on_git_failure(monkeypatch, caplog):
         version = service_app._get_server_version()
 
     assert version == "dev"
+    assert any("Falling back to dev server version" in rec.message for rec in caplog.records)
+
+def test_app_module_reload_survives_git_failure_during_server_version_init(monkeypatch, caplog):
+    import subprocess
+    import merger.lenskit.service.app as service_app
+
+    monkeypatch.delenv("RLENS_VERSION", raising=False)
+
+    def fail_check_output(*args, **kwargs):
+        raise RuntimeError("git unavailable during import")
+
+    monkeypatch.setattr(subprocess, "check_output", fail_check_output)
+
+    with caplog.at_level(logging.DEBUG, logger="merger.lenskit.service.app"):
+        reloaded = importlib.reload(service_app)
+
+    assert reloaded.SERVER_VERSION == "dev"
+    assert reloaded.logger.name == "merger.lenskit.service.app"
     assert any("Falling back to dev server version" in rec.message for rec in caplog.records)
 
 def test_api_fs_list_logs_debug_when_parent_token_generation_fails(monkeypatch, caplog, tmp_path):
