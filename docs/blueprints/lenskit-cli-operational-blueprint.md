@@ -7,6 +7,16 @@ Stand: 2026-05-27
 Dieser Blueprint definiert, wie Lenskit über CLI betrieben wird.
 Er verhindert die Fehlinterpretation: Ein fehlendes globales `lenskit`-Kommando im `PATH` bedeutet **nicht**, dass die Modul-CLI nicht funktioniert.
 
+
+## Beziehung zu bestehender rLens-Client-Doku
+
+Dieses Dokument ist ein operativer Readiness-Blueprint. Es ersetzt nicht
+`docs/blueprints/rlens-cli-client-blueprint.md`.
+- `docs/blueprints/rlens-cli-client-blueprint.md` beschreibt Client-API,
+  Sicherheitsmodell, Profile und rLens-Client-Produktpfad.
+- Dieses Dokument beschreibt, welche lokalen CLI-/Wrapper-/Service-Zustände
+  nicht miteinander verwechselt werden dürfen.
+
 ## 2. CLI-Oberflächen
 
 ### Core / Module CLI
@@ -38,7 +48,11 @@ Voraussetzung: Die Befehle werden aus einem Kontext ausgeführt, in dem das Pake
 
 Stand: 2026-05-27.
 
-Dieser Abschnitt ist eine lokale Momentaufnahme, kein dauerhafter Contract. Nach Wechsel von Host,
+Dieser Abschnitt ist eine lokale Momentaufnahme, kein dauerhafter Contract.
+Die lokalen Wrapper-Angaben sind kein Contract und kein CI-Nachweis.
+Sie dienen nur dazu, den geprüften Host-/User-Zustand nicht mit Modul-CLI-Readiness
+zu verwechseln.
+Nach Wechsel von Host,
 Python-Umgebung, Shell oder Installation ist §7 erneut auszuführen. Normativ bleibt die Trennung aus
 §4: Modul-CLI-Readiness, Shell-Wrapper-Readiness, rLens-Service-Launcher-Readiness,
 Service-Readiness und WebUI-Readiness sind verschiedene Zustände.
