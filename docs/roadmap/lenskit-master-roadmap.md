@@ -476,7 +476,7 @@ PR 10 (Suboptimalitäten-Audit, 2026-05-25): **TEILWEISE UMGESETZT**
     keine Migration ohne Datenverlust.
   - Test-Lint-Debt (18× F841/E712 in 13 Test-Dateien) bereinigt; `ruff` mit `F401,F811,F841,E711,E712` sauber.
 - Offen (getrackt, bewusst nicht blind geändert):
-  - Atlas-CLI-Subparser-Duplikation `cli/main.py` ↔ `cli/rlens.py` zentralisieren.
+  - ~~Atlas-CLI-Subparser-Duplikation `cli/main.py` ↔ `cli/rlens.py` zentralisieren.~~ **UMGESETZT** (2026-05-27): `register_atlas_commands` + `handle_atlas_command` in `merger/lenskit/cli/cmd_atlas.py` als Single Source of Truth; beide Entry-Points konsumieren den Registrar. Beleg: `inconsistencies.md` §7 (Status "behoben").
   - Audit breiter `except Exception: pass`-Blöcke in Kern/Service (defensive Pfade nicht pauschal ändern).
   - Konsolidierungs-Entscheidung agent_query_session v1/v2 (eine Schema-Form mit Integrity/Environment?).
 - Nicht-Ziele: keine Massen-Stilkorrektur (E701/E402/E741 sind bewusst nicht im CI-Gate),
