@@ -48,18 +48,6 @@ def test_registrar_exposes_expected_subcommands():
     assert registered == _EXPECTED_ATLAS_SUBCOMMANDS
 
 
-def test_lenskit_registers_same_atlas_subcommands():
-    """lenskit entry point offers the same atlas subcommands as the registrar."""
-    root = argparse.ArgumentParser()
-    subs = root.add_subparsers(dest="command")
-
-    cmd_atlas_module.register_atlas_commands(subs)
-    atlas_parser = subs.choices["atlas"]
-    atlas_subs_action = next(a for a in atlas_parser._subparsers._group_actions if a.dest == "atlas_cmd")
-    registered = set(atlas_subs_action.choices.keys())
-    assert registered == _EXPECTED_ATLAS_SUBCOMMANDS
-
-
 # ---------------------------------------------------------------------------
 # Dispatch tests via lenskit_main
 # ---------------------------------------------------------------------------
@@ -188,12 +176,12 @@ def test_rlens_dispatches_atlas_analyze_growth(monkeypatch):
 # Registration parity: both entry points expose the same atlas subcommands
 # ---------------------------------------------------------------------------
 
-def _subcommands_from_argv(entry_main, argv_prefix: list, monkeypatch) -> set:
-    """Parse `--help` output to extract atlas subcommand names.
+def _registered_atlas_subcommands() -> set:
+    """Extract the set of atlas subcommand names from the shared registrar.
 
-    We use argparse internals rather than stdout so the check is
-    deterministic and not sensitive to per-entry-point usage: prefixes
-    like 'lenskit atlas' vs 'rlens atlas'.
+    This builds a parser and calls register_atlas_commands to verify the
+    registrar state; it does not inspect the real lenskit or rlens entry
+    points, but rather tests the registered parser shape directly.
     """
     root = argparse.ArgumentParser()
     subs = root.add_subparsers(dest="command")
@@ -208,12 +196,13 @@ def _subcommands_from_argv(entry_main, argv_prefix: list, monkeypatch) -> set:
 def test_registration_parity_lenskit_and_rlens():
     """Both entry points produce the same set of atlas subcommands via the shared registrar.
 
-    We do not compare the full help string (which contains entry-point-specific
-    usage: prefixes). We compare the set of registered subcommand names.
+    This test verifies that the shared registrar provides a stable, consistent
+    set of atlas subcommands. It does not test the actual lenskit or rlens
+    entry-point parsers, but rather verifies the registrar state directly.
+    Entry-point parity is verified by the dispatch tests below.
     """
-    for_lenskit = _subcommands_from_argv(lenskit_main, ["lenskit", "atlas"], None)
-    for_rlens = _subcommands_from_argv(rlens_main, ["rlens", "atlas"], None)
-    assert for_lenskit == for_rlens == _EXPECTED_ATLAS_SUBCOMMANDS
+    registered = _registered_atlas_subcommands()
+    assert registered == _EXPECTED_ATLAS_SUBCOMMANDS
 
 
 def test_handle_atlas_command_raises_on_unknown():
