@@ -2893,6 +2893,92 @@ class MergerUI(object):
 
         sheet.present("sheet")
 
+    def _run_merge_form_reset_after_success_safe(self) -> None:
+        """Safely reset form after success, with error handling and logging."""
+        try:
+            self.reset_merge_form_to_defaults_after_success()
+        except Exception as exc:
+            print(
+                f"[repolens] Warning: failed to reset merge form after success: {exc}",
+                file=sys.stderr,
+            )
+
+    def schedule_merge_form_reset_after_success(self) -> None:
+        """Schedule form reset on main thread (UI thread) if possible."""
+        if ui is not None and hasattr(ui, "delay"):
+            ui.delay(self._run_merge_form_reset_after_success_safe, 0.0)
+        else:
+            self._run_merge_form_reset_after_success_safe()
+
+    def reset_merge_form_to_defaults_after_success(self) -> None:
+        """Reset only merge-related transient UI state after a successful merge run."""
+        pool = getattr(self, "saved_prescan_selections", None)
+        if pool is None:
+            self.saved_prescan_selections = {}
+        else:
+            pool.clear()
+
+        try:
+            if getattr(self, "tv", None) is not None:
+                self.tv.selected_rows = []
+                if hasattr(self.tv, "reload_data"):
+                    self.tv.reload_data()
+        except Exception as exc:
+            print(
+                f"[repolens] Warning: failed to reset table view selection: {exc}",
+                file=sys.stderr,
+            )
+
+        if getattr(self, "ext_field", None) is not None:
+            self.ext_field.text = ""
+        if getattr(self, "path_field", None) is not None:
+            self.path_field.text = ""
+
+        if getattr(self, "max_field", None) is not None:
+            self.max_field.text = "" if DEFAULT_MAX_FILE_BYTES <= 0 else str(DEFAULT_MAX_FILE_BYTES)
+
+        if getattr(self, "split_field", None) is not None:
+            split_text = ""
+            if DEFAULT_SPLIT_SIZE and str(DEFAULT_SPLIT_SIZE).strip() not in ("", "0"):
+                raw = str(DEFAULT_SPLIT_SIZE).strip()
+                if raw.isdigit():
+                    split_text = raw
+                else:
+                    try:
+                        mb = int(round(parse_human_size(raw) / (1024 * 1024)))
+                        split_text = str(mb) if mb > 0 else ""
+                    except Exception:
+                        split_text = raw
+            self.split_field.text = split_text
+
+        if getattr(self, "seg_detail", None) is not None:
+            try:
+                self.seg_detail.selected_index = self.seg_detail.segments.index(DEFAULT_LEVEL)
+            except Exception:
+                self.seg_detail.selected_index = 0
+            if hasattr(self, "on_profile_changed"):
+                self.on_profile_changed(None)
+
+        if getattr(self, "seg_mode", None) is not None:
+            self.seg_mode.selected_index = 1 if DEFAULT_MODE == "pro-repo" else 0
+
+        if getattr(self, "seg_meta", None) is not None:
+            try:
+                self.seg_meta.selected_index = self.seg_meta.segments.index(DEFAULT_META_DENSITY)
+            except Exception:
+                self.seg_meta.selected_index = 0
+
+        if getattr(self, "plan_only_switch", None) is not None:
+            self.plan_only_switch.value = False
+        if getattr(self, "code_only_switch", None) is not None:
+            self.code_only_switch.value = False
+
+        extras_defaults, _ = ExtrasConfig.from_csv(DEFAULT_EXTRAS)
+        self.extras_config = extras_defaults
+
+        self._update_repo_info()
+        self.save_last_state()
+
     def run_merge(self, sender) -> None:
         """
         UI-Handler: niemals schwere Arbeit im Main-Thread ausführen,
@@ -3252,6 +3338,9 @@ class MergerUI(object):
             print(f"repoLens: {msg}")
             for p in all_out_paths:
                 print(f"  - {p.name}")
+
+        if all_out_paths:
+            self.schedule_merge_form_reset_after_success()
 
 
 # --- CLI Mode ---
