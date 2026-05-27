@@ -324,17 +324,19 @@ def test_app_module_reload_survives_git_failure_during_server_version_init(monke
     def fail_check_output(*args, **kwargs):
         raise RuntimeError("git unavailable during import")
 
-    with monkeypatch.context() as m:
-        m.delenv("RLENS_VERSION", raising=False)
-        m.setattr(subprocess, "check_output", fail_check_output)
-        # Reload is required here because SERVER_VERSION is initialized at import time.
-        with caplog.at_level(logging.DEBUG, logger="merger.lenskit.service.app"):
-            reloaded = importlib.reload(service_app)
+    try:
+        with monkeypatch.context() as m:
+            m.delenv("RLENS_VERSION", raising=False)
+            m.setattr(subprocess, "check_output", fail_check_output)
+            # Reload is required here because SERVER_VERSION is initialized at import time.
+            with caplog.at_level(logging.DEBUG, logger="merger.lenskit.service.app"):
+                reloaded = importlib.reload(service_app)
 
-    assert reloaded.SERVER_VERSION == "dev"
-    assert reloaded.logger.name == "merger.lenskit.service.app"
-    assert any("Falling back to dev server version" in rec.message for rec in caplog.records)
-    importlib.reload(service_app)
+        assert reloaded.SERVER_VERSION == "dev"
+        assert reloaded.logger.name == "merger.lenskit.service.app"
+        assert any("Falling back to dev server version" in rec.message for rec in caplog.records)
+    finally:
+        importlib.reload(service_app)
 
 def test_api_fs_list_logs_debug_when_parent_token_generation_fails(monkeypatch, caplog, tmp_path):
     trusted_path = tmp_path / "allowed" / "child"
