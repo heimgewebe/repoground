@@ -123,6 +123,7 @@ def handle_federation_command(args: argparse.Namespace) -> int:
 
                 status_map = res["federation_trace"].get("bundle_status", {})
                 error_map = res["federation_trace"].get("bundle_errors", {})
+                latency_map = res["federation_trace"].get("bundle_latency_ms", {})
 
                 for b in fed_data.get("bundles", []):
                     repo_id = b["repo_id"]
@@ -133,12 +134,10 @@ def handle_federation_command(args: argparse.Namespace) -> int:
                     }
                     if "last_fingerprint" in b:
                         b_obj["fingerprint"] = b["last_fingerprint"]
+                    if repo_id in latency_map:
+                        b_obj["latency_ms"] = float(latency_map[repo_id])
                     if repo_id in error_map:
                         b_obj["error_message"] = error_map[repo_id]
-
-                    # Omitting latency_ms as it is not currently accurately tracked per bundle in execution.
-                    # We avoid putting 0.0 fake telemetry here; if the schema requires it, the schema should be relaxed
-                    # or true latency telemetry integrated into execution logic.
 
                     trace_obj["bundles"].append(b_obj)
 

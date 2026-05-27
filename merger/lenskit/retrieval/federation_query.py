@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -116,6 +117,7 @@ def execute_federated_query(
     bundle_traces = {}
     bundle_status = {}
     bundle_errors = {}
+    bundle_latency_ms = {}
 
     queried_bundles_total = len(bundles)
     queried_bundles_effective = 0
@@ -130,26 +132,29 @@ def execute_federated_query(
     for b in bundles:
         repo_id = b["repo_id"]
         bundle_path_str = b["bundle_path"]
+        # Per-bundle processing latency, including validation and early exits;
+        # not a pure DB query benchmark.
+        bundle_start = time.perf_counter()
 
-        if filters and filters.get("repo") and filters["repo"] != repo_id:
-            bundle_status[repo_id] = "filtered_out"
-            continue
-
-        if "://" in bundle_path_str:
-            bundle_status[repo_id] = "bundle_path_unsupported"
-            continue
-
-        bundle_path = Path(bundle_path_str)
-        if not bundle_path.is_absolute():
-            bundle_path = federation_index_path.parent / bundle_path
-
-        db_path = _find_bundle_index(bundle_path)
-        if not db_path:
-            bundle_status[repo_id] = "index_missing"
-            continue
-
-        import sqlite3
         try:
+            if filters and filters.get("repo") and filters["repo"] != repo_id:
+                bundle_status[repo_id] = "filtered_out"
+                continue
+
+            if "://" in bundle_path_str:
+                bundle_status[repo_id] = "bundle_path_unsupported"
+                continue
+
+            bundle_path = Path(bundle_path_str)
+            if not bundle_path.is_absolute():
+                bundle_path = federation_index_path.parent / bundle_path
+
+            db_path = _find_bundle_index(bundle_path)
+            if not db_path:
+                bundle_status[repo_id] = "index_missing"
+                continue
+
+            import sqlite3
             # Check for staleness using fingerprint (last_fingerprint from federation index vs DB)
             # Note: staleness detection is strictly best-effort and must never fail the federated query.
             expected_fingerprint = b.get("last_fingerprint")
@@ -206,6 +211,8 @@ def execute_federated_query(
         except Exception as e:
             bundle_status[repo_id] = "query_error"
             bundle_errors[repo_id] = str(e)
+        finally:
+            bundle_latency_ms[repo_id] = (time.perf_counter() - bundle_start) * 1000.0
 
     # Conflict Detection Heuristic (Minimal)
     # Group results by filename (`Path.name`) as a primitive heuristic.
@@ -302,7 +309,8 @@ def execute_federated_query(
             "queried_bundles_effective": queried_bundles_effective,
             "bundle_status": bundle_status,
             "bundle_errors": bundle_errors,
-            "bundle_traces": bundle_traces
+            "bundle_traces": bundle_traces,
+            "bundle_latency_ms": bundle_latency_ms,
         }
 
     return out

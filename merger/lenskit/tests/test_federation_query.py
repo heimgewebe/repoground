@@ -97,6 +97,11 @@ def test_execute_federated_query_with_trace(federated_setup):
     assert "bundle_traces" in trace
     assert "repo1" in trace["bundle_traces"]
     assert "repo2" in trace["bundle_traces"]
+    assert "bundle_latency_ms" in trace
+    assert isinstance(trace["bundle_latency_ms"]["repo1"], float)
+    assert isinstance(trace["bundle_latency_ms"]["repo2"], float)
+    assert trace["bundle_latency_ms"]["repo1"] >= 0.0
+    assert trace["bundle_latency_ms"]["repo2"] >= 0.0
 
 def test_execute_federated_query_is_deterministic_on_tie(federated_setup):
     # 'hello' will yield score ties.
@@ -470,7 +475,11 @@ def test_execute_federated_query_handles_query_error(federated_setup, monkeypatc
     trace = res["federation_trace"]
     assert trace["bundle_status"]["repo1"] == "query_error"
     assert "Database corruption" in trace["bundle_errors"]["repo1"]
+    assert isinstance(trace["bundle_latency_ms"]["repo1"], float)
+    assert trace["bundle_latency_ms"]["repo1"] >= 0.0
     assert trace["bundle_status"]["repo2"] == "ok"
+    assert isinstance(trace["bundle_latency_ms"]["repo2"], float)
+    assert trace["bundle_latency_ms"]["repo2"] >= 0.0
     assert trace["queried_bundles_effective"] == 1
     # Ein Bundle liefert Ergebnisse
     assert res["count"] > 0

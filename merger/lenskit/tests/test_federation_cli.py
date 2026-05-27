@@ -229,6 +229,10 @@ def test_federation_query_cli_trace_projection(tmp_path: Path, monkeypatch):
 
     # Check bundle projection
     assert len(trace_data["bundles"]) == 2
+    for bundle in trace_data["bundles"]:
+        assert "latency_ms" in bundle
+        assert isinstance(bundle["latency_ms"], float)
+        assert bundle["latency_ms"] >= 0.0
 
     # Hard schema validation — skip only if jsonschema is not installed
     try:
@@ -240,6 +244,61 @@ def test_federation_query_cli_trace_projection(tmp_path: Path, monkeypatch):
     with schema_path.open("r", encoding="utf-8") as sf:
         schema = json.load(sf)
     jsonschema.validate(instance=trace_data, schema=schema)
+
+
+def test_federation_query_cli_trace_projection_includes_latency_on_index_missing(tmp_path: Path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    out_path = tmp_path / "fed.json"
+    init_federation("trace-fed-missing", out_path)
+
+    from merger.lenskit.retrieval import index_db
+    bundle_path = tmp_path / "b1"
+    bundle_path.mkdir()
+    b_dump = bundle_path / "dump.json"
+    b_chunks = bundle_path / "chunks.jsonl"
+    db_path = bundle_path / "chunk_index.index.sqlite"
+
+    chunk_data = [
+        {
+            "chunk_id": "c1",
+            "repo_id": "repo1",
+            "path": "src/main.py",
+            "content": "hello repo1",
+            "start_line": 1,
+            "end_line": 1,
+            "layer": "core",
+            "artifact_type": "code",
+            "content_sha256": "h1",
+            "source_file": "src/main.py",
+            "start_byte": 0,
+            "end_byte": 100,
+        }
+    ]
+    with b_chunks.open("w", encoding="utf-8") as f:
+        for c in chunk_data:
+            f.write(json.dumps(c) + "\n")
+    b_dump.write_text(json.dumps({"dummy": "data"}), encoding="utf-8")
+    index_db.build_index(b_dump, b_chunks, db_path)
+    add_bundle(out_path, "repo1", str(bundle_path))
+
+    # Force index_missing status for the bundle.
+    db_path.unlink()
+
+    from merger.lenskit.cli import main
+    ret = main.main(["federation", "query", "--index", str(out_path), "-q", "hello", "--trace"])
+    assert ret == 0
+
+    trace_file = tmp_path / "federation_trace.json"
+    assert trace_file.exists()
+    trace_data = json.loads(trace_file.read_text(encoding="utf-8"))
+
+    assert len(trace_data["bundles"]) == 1
+    b0 = trace_data["bundles"][0]
+    assert b0["status"] == "index_missing"
+    assert "latency_ms" in b0
+    assert isinstance(b0["latency_ms"], float)
+    assert b0["latency_ms"] >= 0.0
 
 def test_federation_query_trace_writes_conflicts_json(tmp_path: Path, monkeypatch):
     # Isolate execution to tmp_path to verify file creation safely
