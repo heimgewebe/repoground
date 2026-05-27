@@ -1432,9 +1432,6 @@ def run_debug_checks(file_infos: List["FileInfo"], debug: DebugCollector) -> Non
             )
 
 
-# Directories considered "noise" (build artifacts etc.)
-NOISY_DIRECTORIES = ("node_modules/", "dist/", "build/", "target/")
-
 # Standard lockfile names
 LOCKFILE_NAMES = {
     "Cargo.lock",

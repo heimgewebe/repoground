@@ -223,6 +223,41 @@ def test_build_and_cache_dirs_are_single_source_of_truth():
     # SKIP_DIRS adds .git, .idea, .DS_Store (traversal-skip only, no is_noise_file semantic)
 
 
+@pytest.mark.parametrize("dir_name", sorted(_BUILD_AND_CACHE_DIRS))
+def test_every_build_and_cache_dir_is_noise_and_skipped(dir_name, tmp_path):
+    """
+    Property test: for EVERY entry in _BUILD_AND_CACHE_DIRS, both surfaces must agree:
+      1. is_noise_file() returns True for a file under that directory
+      2. scan_repo() skips that directory at traversal time (SKIP_DIRS coverage)
+
+    This is the structural anti-drift guard: if a new entry is added to
+    _BUILD_AND_CACHE_DIRS but, for any reason, one of the two consumers stops
+    using it, this parametrized test fails for that specific entry.
+    """
+    # Part 1: is_noise_file must classify a file under <dir_name>/ as noise
+    fi = create_file_info(f"{dir_name}/some_file.txt")
+    assert merge.is_noise_file(fi), (
+        f"is_noise_file must return True for path under '{dir_name}/' "
+        f"(it is in _BUILD_AND_CACHE_DIRS but is_noise_file did not recognise it)"
+    )
+
+    # Part 2: scan_repo must skip <dir_name> at traversal time
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("def main(): pass")
+    target = tmp_path / dir_name / "nested"
+    target.mkdir(parents=True)
+    (target / "noise_file.txt").write_text("noise payload")
+
+    result = merge.scan_repo(tmp_path, include_hidden=True, calculate_md5=False)
+    found_paths = {str(fi_.rel_path).replace("\\", "/") for fi_ in result["files"]}
+
+    assert "src/main.py" in found_paths, "real source must survive scan_repo"
+    assert not any(p.startswith(f"{dir_name}/") for p in found_paths), (
+        f"scan_repo must skip '{dir_name}/' (it is in _BUILD_AND_CACHE_DIRS / SKIP_DIRS); "
+        f"leaked paths: {sorted(p for p in found_paths if p.startswith(f'{dir_name}/'))}"
+    )
+
+
 def test_manifest_annotates_noise_files_that_bypass_traversal():
     """
     is_noise_file() annotates files as (noise) in the manifest.
