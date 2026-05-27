@@ -11,6 +11,7 @@ import sys
 import json
 import hashlib
 import datetime
+import logging
 import re
 import tempfile
 import unicodedata
@@ -36,6 +37,8 @@ except Exception:  # pragma: no cover
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 EPISTEMIC_HUMILITY_WARNING = "⚠️ **Hinweis:** Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein von Dateien im Repository. Fehlende Einträge bedeuten lediglich „nicht im Ausschnitt enthalten“."
+
+logger = logging.getLogger(__name__)
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
@@ -5883,9 +5886,8 @@ def write_reports_v2(
         try:
             if p.exists() and p.is_file() and p.stat().st_size > 0:
                 verified_md.append(p)
-        except Exception:
-            # treat as missing
-            pass
+        except Exception as exc:
+            logger.warning("Failed to verify reported markdown artifact %s: %s", p, exc)
 
     if md_paths and not verified_md:
         # We *expected* at least one markdown output, but none is actually usable.
@@ -5905,8 +5907,8 @@ def write_reports_v2(
                     d = json.loads(p.read_text(encoding="utf-8"))
                     _validate_agent_json_dict(d)
                     verified_json.append(p)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to verify reported JSON artifact %s: %s", p, exc)
         if json_paths and not verified_json:
             raise RuntimeError(
                 "repoLens: JSON primary artifact was announced as written, but no valid non-empty .json exists on disk."

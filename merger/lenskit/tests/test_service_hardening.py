@@ -2,6 +2,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pathlib import Path
 import tempfile
+import logging
+from types import SimpleNamespace
 from merger.lenskit.service.app import app, init_service, state
 from merger.lenskit.service.models import JobRequest, Artifact
 from datetime import datetime, timezone
@@ -298,3 +300,47 @@ def test_create_job_fresh_hub_no_state_dir(client_and_hub):
     # 5. Verify the directory and jobs.json were created
     assert storage_dir.exists(), "State directory was not recreated"
     assert (storage_dir / "jobs.json").exists(), "jobs.json was not created"
+
+def test_get_server_version_logs_debug_on_git_failure(monkeypatch, caplog):
+    import subprocess
+    import merger.lenskit.service.app as service_app
+
+    monkeypatch.delenv("RLENS_VERSION", raising=False)
+
+    def fail_check_output(*args, **kwargs):
+        raise RuntimeError("git unavailable")
+
+    monkeypatch.setattr(subprocess, "check_output", fail_check_output)
+
+    with caplog.at_level(logging.DEBUG, logger="merger.lenskit.service.app"):
+        version = service_app._get_server_version()
+
+    assert version == "dev"
+    assert any("Falling back to dev server version" in rec.message for rec in caplog.records)
+
+def test_api_fs_list_logs_debug_when_parent_token_generation_fails(monkeypatch, caplog, tmp_path):
+    import merger.lenskit.service.app as service_app
+
+    trusted_path = tmp_path / "allowed" / "child"
+    trusted_path.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        service_app,
+        "resolve_fs_path",
+        lambda **kwargs: SimpleNamespace(path=trusted_path),
+    )
+    monkeypatch.setattr(service_app, "_list_dir", lambda path: {"entries": []})
+
+    class FailingSecurityConfig:
+        def validate_path(self, path):
+            raise RuntimeError("parent blocked")
+
+    monkeypatch.setattr(service_app, "get_security_config", lambda: FailingSecurityConfig())
+    monkeypatch.setattr(service_app.state, "hub", tmp_path)
+    monkeypatch.setattr(service_app.state, "merges_dir", tmp_path / "merges", raising=False)
+
+    with caplog.at_level(logging.DEBUG, logger="merger.lenskit.service.app"):
+        payload = service_app.api_fs_list(token="opaque")
+
+    assert "parent_token" not in payload
+    assert any("Skipping parent token generation" in rec.message for rec in caplog.records)

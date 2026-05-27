@@ -176,8 +176,8 @@ class JobStore:
                 target.relative_to(base.resolve())
                 if target.exists():
                     target.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Failed to delete artifact file %s relative to %s: %s", rel, base, exc)
 
         for art_id in job.artifact_ids:
             art = self._artifacts_cache.get(art_id)
@@ -191,16 +191,16 @@ class JobStore:
                     if merges_dir.exists():
                         for fname in art.paths.values():
                             _safe_unlink(merges_dir, fname)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Failed to clean up artifact %s for job %s: %s", art_id, job_id, exc)
                 del self._artifacts_cache[art_id]
 
         log_p = self.logs_dir / f"{job_id}.log"
         try:
             if log_p.exists():
                 log_p.unlink()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to delete log file for job %s: %s", job_id, exc)
 
         # Notify any waiting SSE streams before we drop the job so they can exit gracefully.
         self._notify_log_subscribers(job_id)
@@ -265,8 +265,8 @@ class JobStore:
                         "queued", "running", "canceling"
                     ):
                         to_remove.add(job.id)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Skipping cleanup age check for job %s due to invalid created_at %r: %s", job.id, job.created_at, exc)
 
             remaining = [j for j in all_jobs if j.id not in to_remove]
             finished = [j for j in remaining if j.status not in ("queued", "running", "canceling")]

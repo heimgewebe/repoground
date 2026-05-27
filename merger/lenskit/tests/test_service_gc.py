@@ -1,5 +1,7 @@
 
 import uuid
+import logging
+from pathlib import Path
 from merger.lenskit.service.models import Job, Artifact, JobRequest
 
 def test_gc_deletes_real_artifacts(service_client):
@@ -92,3 +94,60 @@ def test_gc_safe_unlink(service_client):
     # Verify sensitive file still exists
     assert sensitive_file.exists()
     assert sensitive_file.read_text() == "secret"
+
+def test_gc_logs_warning_when_artifact_delete_fails(service_client, monkeypatch, caplog):
+    ctx = service_client
+
+    dummy_file = ctx.merges_dir / "warn-artifact.md"
+    dummy_file.write_text("content", encoding="utf-8")
+
+    req = JobRequest()
+    job = Job.create(req)
+    job.status = "succeeded"
+    ctx.store.add_job(job)
+
+    art_id = str(uuid.uuid4())
+    art = Artifact(
+        id=art_id,
+        job_id=job.id,
+        hub=str(ctx.hub_path),
+        repos=[],
+        created_at=job.created_at,
+        paths={"md": dummy_file.name},
+        params=req,
+    )
+    ctx.store.add_artifact(art)
+    job.artifact_ids.append(art_id)
+    ctx.store.update_job(job)
+
+    original_unlink = Path.unlink
+
+    def fail_once(path_obj, *args, **kwargs):
+        if path_obj == dummy_file:
+            raise OSError("simulated unlink failure")
+        return original_unlink(path_obj, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_once)
+
+    with caplog.at_level(logging.WARNING, logger="merger.lenskit.service.jobstore"):
+        ctx.store.remove_job(job.id)
+
+    assert ctx.store.get_job(job.id) is None
+    assert ctx.store.get_artifact(art_id) is None
+    assert dummy_file.exists()
+    assert any("Failed to delete artifact file" in rec.message for rec in caplog.records)
+
+def test_cleanup_jobs_logs_warning_for_invalid_created_at(service_client, caplog):
+    ctx = service_client
+
+    req = JobRequest()
+    job = Job.create(req)
+    job.created_at = "not-a-timestamp"
+    job.status = "succeeded"
+    ctx.store.add_job(job)
+
+    with caplog.at_level(logging.WARNING, logger="merger.lenskit.service.jobstore"):
+        ctx.store.cleanup_jobs(max_jobs=100, max_age_hours=0)
+
+    assert ctx.store.get_job(job.id) is not None
+    assert any("Skipping cleanup age check" in rec.message for rec in caplog.records)

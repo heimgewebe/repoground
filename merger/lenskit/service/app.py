@@ -67,8 +67,8 @@ def _get_server_version():
             cwd=repo_root,
             stderr=subprocess.DEVNULL
         ).decode().strip()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Falling back to dev server version: %s", exc)
 
     return "dev"
 
@@ -331,8 +331,8 @@ def api_fs_list(token: Optional[str] = None, root: Optional[str] = None, rel: Op
         if p.parent and p.parent != p:
             parent_resolved = sec.validate_path(p.parent)
             payload["parent_token"] = issue_fs_token(parent_resolved)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Skipping parent token generation for %s: %s", trusted.path, exc)
     return {"root": root, "rel": rel, "token": token, **payload}
 
 @app.post("/api/sources/refresh", dependencies=[Depends(verify_token)])
@@ -1023,8 +1023,8 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
                 try:
                     if await request.is_disconnected():
                         break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Failed to check client disconnect state for job %s: %s", job_id, exc)
 
                 # Read logs from file (async safe)
                 # Use abstracted provider to allow deterministic mocking in tests
