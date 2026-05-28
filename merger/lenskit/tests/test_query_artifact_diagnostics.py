@@ -249,3 +249,112 @@ class TestQueryArtifactStoreDiagnosticsLegacy:
         assert diag["by_artifact_type"] == {"query_trace": 1}
         assert diag["oldest_created_at"] is None
         assert diag["newest_created_at"] is None
+
+    def test_legacy_entry_without_artifact_type_counts_as_unknown(self, storage_dir):
+        """Entry missing artifact_type field should be counted under 'unknown'."""
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        store_file = storage_dir / "query_artifacts.json"
+        entries = [
+            {
+                "id": "qart-no-type",
+                "data": {"query_input": "test"},
+                "provenance": {"source_query": "test", "timestamp": "t"},
+                "created_at": "2024-01-01T00:00:00+00:00",
+                # no artifact_type
+            },
+        ]
+        store_file.write_text(json.dumps(entries), encoding="utf-8")
+
+        store = QueryArtifactStore(storage_dir)
+        diag = store.diagnostics()
+        assert diag["total_artifacts"] == 1
+        assert diag["by_artifact_type"] == {"unknown": 1}
+
+    def test_legacy_entry_with_empty_artifact_type_counts_as_unknown(
+        self, storage_dir
+    ):
+        """Entry with empty artifact_type should be counted under 'unknown'."""
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        store_file = storage_dir / "query_artifacts.json"
+        entries = [
+            {
+                "id": "qart-empty-type",
+                "artifact_type": "",
+                "data": {"query_input": "test"},
+                "provenance": {"source_query": "test", "timestamp": "t"},
+                "created_at": "2024-01-01T00:00:00+00:00",
+            },
+        ]
+        store_file.write_text(json.dumps(entries), encoding="utf-8")
+
+        store = QueryArtifactStore(storage_dir)
+        diag = store.diagnostics()
+        assert diag["total_artifacts"] == 1
+        assert diag["by_artifact_type"] == {"unknown": 1}
+
+    def test_legacy_entry_with_non_string_artifact_type_counts_as_unknown(
+        self, storage_dir
+    ):
+        """Entry with non-string artifact_type should be counted under 'unknown'."""
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        store_file = storage_dir / "query_artifacts.json"
+        entries = [
+            {
+                "id": "qart-int-type",
+                "artifact_type": 123,  # Non-string type
+                "data": {"query_input": "test"},
+                "provenance": {"source_query": "test", "timestamp": "t"},
+                "created_at": "2024-01-01T00:00:00+00:00",
+            },
+        ]
+        store_file.write_text(json.dumps(entries), encoding="utf-8")
+
+        store = QueryArtifactStore(storage_dir)
+        diag = store.diagnostics()
+        assert diag["total_artifacts"] == 1
+        assert diag["by_artifact_type"] == {"unknown": 1}
+
+    def test_mix_of_known_and_unknown_artifact_types(self, storage_dir):
+        """Multiple artifacts with mixed known and unknown types counted separately."""
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        store_file = storage_dir / "query_artifacts.json"
+        entries = [
+            {
+                "id": "qart-trace",
+                "artifact_type": "query_trace",
+                "data": {},
+                "provenance": {"source_query": "q", "timestamp": "t"},
+                "created_at": "2024-01-01T00:00:00+00:00",
+            },
+            {
+                "id": "qart-unknown",
+                "data": {},
+                "provenance": {"source_query": "q", "timestamp": "t"},
+                "created_at": "2024-01-01T01:00:00+00:00",
+                # no artifact_type
+            },
+            {
+                "id": "qart-bundle",
+                "artifact_type": "context_bundle",
+                "data": {},
+                "provenance": {"source_query": "q", "timestamp": "t"},
+                "created_at": "2024-01-01T02:00:00+00:00",
+            },
+            {
+                "id": "qart-bad-type",
+                "artifact_type": None,
+                "data": {},
+                "provenance": {"source_query": "q", "timestamp": "t"},
+                "created_at": "2024-01-01T03:00:00+00:00",
+            },
+        ]
+        store_file.write_text(json.dumps(entries), encoding="utf-8")
+
+        store = QueryArtifactStore(storage_dir)
+        diag = store.diagnostics()
+        assert diag["total_artifacts"] == 4
+        assert diag["by_artifact_type"] == {
+            "query_trace": 1,
+            "context_bundle": 1,
+            "unknown": 2,  # 2 entries with missing/None artifact_type
+        }

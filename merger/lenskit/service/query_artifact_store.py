@@ -248,8 +248,16 @@ class QueryArtifactStore:
             oldest: Optional[str] = None
             newest: Optional[str] = None
             for entry in self._cache.values():
-                artifact_type = entry.get("artifact_type", "unknown")
+                # Robustly handle artifact_type: treat missing, empty, or non-string
+                # values as "unknown" for counting purposes.
+                artifact_type = entry.get("artifact_type")
+                if not isinstance(artifact_type, str) or not artifact_type:
+                    artifact_type = "unknown"
                 by_type[artifact_type] = by_type.get(artifact_type, 0) + 1
+
+                # Timestamp comparison: store_files are expected to use normalized
+                # ISO-8601 UTC timestamps (created by datetime.now(timezone.utc).isoformat()).
+                # Lexicographic string comparison is safe and stable for this format.
                 created = entry.get("created_at")
                 if isinstance(created, str) and created:
                     if oldest is None or created < oldest:
