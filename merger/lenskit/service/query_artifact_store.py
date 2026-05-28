@@ -211,3 +211,65 @@ class QueryArtifactStore:
                 key=lambda e: e.get("created_at", ""),
                 reverse=True,
             )
+
+    def diagnostics(self) -> Dict[str, Any]:
+        """Return a read-only retention diagnostics snapshot of the store.
+
+        The store currently has no GC and no TTL: it grows unbounded for the
+        lifetime of the underlying JSON file.  This method surfaces what *is*
+        there (counts, age range, on-disk size) so operators can observe
+        growth without enabling any deletion path.
+
+        Read-only contract:
+        - Does not mutate the in-memory cache.
+        - Does not write to or truncate the on-disk store file.
+        - Does not enable any retention/GC/TTL behaviour.
+        - Does not enumerate artifact IDs or payloads.
+
+        Legacy entries written before the runtime-metadata schema (which may
+        lack lifecycle fields like ``lifecycle_status`` / ``expires_at``) are
+        counted from the cache directly; no backfill is persisted.
+
+        Returns:
+            Dict with keys:
+                ``total_artifacts``         — int, number of entries cached
+                ``by_artifact_type``        — dict[str, int], counts per type
+                ``oldest_created_at``       — str | None, ISO 8601 of earliest
+                ``newest_created_at``       — str | None, ISO 8601 of latest
+                ``store_file_size_bytes``   — int, on-disk size of the JSON
+                                              file (0 if not yet written)
+                ``retention_policy``        — const ``"unbounded_currently"``
+                ``gc_enabled``              — const ``False``
+                ``ttl_enabled``             — const ``False``
+        """
+        with self._lock:
+            total = len(self._cache)
+            by_type: Dict[str, int] = {}
+            oldest: Optional[str] = None
+            newest: Optional[str] = None
+            for entry in self._cache.values():
+                artifact_type = entry.get("artifact_type", "unknown")
+                by_type[artifact_type] = by_type.get(artifact_type, 0) + 1
+                created = entry.get("created_at")
+                if isinstance(created, str) and created:
+                    if oldest is None or created < oldest:
+                        oldest = created
+                    if newest is None or created > newest:
+                        newest = created
+            try:
+                store_file_size = (
+                    self._store_file.stat().st_size if self._store_file.exists() else 0
+                )
+            except OSError:
+                store_file_size = 0
+
+        return {
+            "total_artifacts": total,
+            "by_artifact_type": by_type,
+            "oldest_created_at": oldest,
+            "newest_created_at": newest,
+            "store_file_size_bytes": store_file_size,
+            "retention_policy": "unbounded_currently",
+            "gc_enabled": False,
+            "ttl_enabled": False,
+        }
