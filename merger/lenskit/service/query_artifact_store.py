@@ -93,6 +93,27 @@ def _with_runtime_metadata(entry: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
+def _parse_created_at_for_diagnostics(value: Any) -> Optional[datetime]:
+    """Parse created_at for diagnostics min/max comparison.
+
+    Accepts only non-empty strings in ISO-8601 format with an explicit offset.
+    A trailing ``Z`` is normalized to ``+00:00`` for parsing only. Naive
+    datetimes (without tzinfo) and malformed values are rejected.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+
+    candidate = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return None
+    return parsed
+
+
 class QueryArtifactStore:
     """Persistent store for query runtime artifacts.
 
@@ -211,3 +232,89 @@ class QueryArtifactStore:
                 key=lambda e: e.get("created_at", ""),
                 reverse=True,
             )
+
+    def diagnostics(self) -> Dict[str, Any]:
+        """Return a read-only retention diagnostics snapshot of the store.
+
+        The store currently has no GC and no TTL: it grows unbounded for the
+        lifetime of the underlying JSON file.  This method surfaces what *is*
+        there (counts, age range, on-disk size) so operators can observe
+        growth without enabling any deletion path.
+
+        Read-only contract:
+        - Does not mutate the in-memory cache.
+        - Does not write to or truncate the on-disk store file.
+        - Does not enable any retention/GC/TTL behaviour.
+        - Does not enumerate artifact IDs or payloads.
+
+        Legacy entries written before the runtime-metadata schema (which may
+        lack lifecycle fields like ``lifecycle_status`` / ``expires_at``) are
+        counted from the cache directly; no backfill is persisted.
+
+        Age range calculation: malformed, naive, empty, missing, and non-string
+        ``created_at`` values are ignored for oldest/newest computation. Returned
+        timestamps are not normalized and never rewritten.
+
+        Returns:
+            Dict with keys:
+                ``total_artifacts``         — int, number of entries cached
+                ``by_artifact_type``        — dict[str, int], counts per type
+                ``oldest_created_at``       — str | None, original ``created_at``
+                                              string for the chronologically
+                                              earliest valid offset-aware
+                                              ISO-8601 timestamp, or ``None``
+                ``newest_created_at``       — str | None, original ``created_at``
+                                              string for the chronologically
+                                              latest valid offset-aware
+                                              ISO-8601 timestamp, or ``None``
+                ``store_file_size_bytes``   — int, on-disk size of the JSON
+                                              file (0 if not yet written)
+                ``retention_policy``        — const ``"unbounded_currently"``
+                ``gc_enabled``              — const ``False``
+                ``ttl_enabled``             — const ``False``
+        """
+        with self._lock:
+            total = len(self._cache)
+            by_type: Dict[str, int] = {}
+            oldest: Optional[str] = None
+            newest: Optional[str] = None
+            oldest_dt: Optional[datetime] = None
+            newest_dt: Optional[datetime] = None
+            for entry in self._cache.values():
+                # Robustly handle artifact_type: treat missing, empty, or non-string
+                # values as "unknown" for counting purposes.
+                artifact_type = entry.get("artifact_type")
+                if not isinstance(artifact_type, str) or not artifact_type:
+                    artifact_type = "unknown"
+                by_type[artifact_type] = by_type.get(artifact_type, 0) + 1
+
+                # For oldest/newest diagnostics, created_at values are validated and parsed
+                # only for comparison. Legacy/malformed values are skipped for age range,
+                # are not normalized in the returned payload, and are never rewritten.
+                created = entry.get("created_at")
+                created_dt = _parse_created_at_for_diagnostics(created)
+                if created_dt is not None:
+                    created_str = created
+                    if oldest_dt is None or created_dt < oldest_dt:
+                        oldest_dt = created_dt
+                        oldest = created_str
+                    if newest_dt is None or created_dt > newest_dt:
+                        newest_dt = created_dt
+                        newest = created_str
+            try:
+                store_file_size = (
+                    self._store_file.stat().st_size if self._store_file.exists() else 0
+                )
+            except OSError:
+                store_file_size = 0
+
+        return {
+            "total_artifacts": total,
+            "by_artifact_type": by_type,
+            "oldest_created_at": oldest,
+            "newest_created_at": newest,
+            "store_file_size_bytes": store_file_size,
+            "retention_policy": "unbounded_currently",
+            "gc_enabled": False,
+            "ttl_enabled": False,
+        }
