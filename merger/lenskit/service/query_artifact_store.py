@@ -251,23 +251,22 @@ class QueryArtifactStore:
         lack lifecycle fields like ``lifecycle_status`` / ``expires_at``) are
         counted from the cache directly; no backfill is persisted.
 
+        Age range calculation: malformed, naive, empty, missing, and non-string
+        ``created_at`` values are ignored for oldest/newest computation. Returned
+        timestamps are not normalized and never rewritten.
+
         Returns:
             Dict with keys:
                 ``total_artifacts``         — int, number of entries cached
                 ``by_artifact_type``        — dict[str, int], counts per type
                 ``oldest_created_at``       — str | None, original ``created_at``
-                                              string of the chronologically
-                                              oldest valid offset-aware ISO-8601
-                                              timestamp; malformed, empty,
-                                              non-string, or naive timestamps
-                                              are ignored for min/max
+                                              string for the chronologically
+                                              earliest valid offset-aware
+                                              ISO-8601 timestamp, or ``None``
                 ``newest_created_at``       — str | None, original ``created_at``
-                                              string of the chronologically
-                                              newest valid offset-aware ISO-8601
-                                              timestamp; malformed, empty,
-                                              non-string, or naive timestamps
-                                              are ignored for min/max; values
-                                              are not normalized or rewritten
+                                              string for the chronologically
+                                              latest valid offset-aware
+                                              ISO-8601 timestamp, or ``None``
                 ``store_file_size_bytes``   — int, on-disk size of the JSON
                                               file (0 if not yet written)
                 ``retention_policy``        — const ``"unbounded_currently"``
