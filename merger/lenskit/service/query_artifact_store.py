@@ -255,8 +255,19 @@ class QueryArtifactStore:
             Dict with keys:
                 ``total_artifacts``         — int, number of entries cached
                 ``by_artifact_type``        — dict[str, int], counts per type
-                ``oldest_created_at``       — str | None, ISO 8601 of earliest
-                ``newest_created_at``       — str | None, ISO 8601 of latest
+                ``oldest_created_at``       — str | None, original ``created_at``
+                                              string of the chronologically
+                                              oldest valid offset-aware ISO-8601
+                                              timestamp; malformed, empty,
+                                              non-string, or naive timestamps
+                                              are ignored for min/max
+                ``newest_created_at``       — str | None, original ``created_at``
+                                              string of the chronologically
+                                              newest valid offset-aware ISO-8601
+                                              timestamp; malformed, empty,
+                                              non-string, or naive timestamps
+                                              are ignored for min/max; values
+                                              are not normalized or rewritten
                 ``store_file_size_bytes``   — int, on-disk size of the JSON
                                               file (0 if not yet written)
                 ``retention_policy``        — const ``"unbounded_currently"``
