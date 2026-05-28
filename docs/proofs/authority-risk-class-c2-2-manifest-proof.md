@@ -248,17 +248,131 @@ All checks passed!
 
 ---
 
+## 7a. Producer-Emission für eindeutig klassifizierte Manifest-Rollen (Follow-up)
+
+Producer-Emission für eindeutig klassifizierte Manifest-Rollen umgesetzt. Der
+`ARTIFACT_AUTHORITY_REGISTRY` in `merger/lenskit/core/merge.py` trägt jetzt für jede
+Rolle mit unzweideutig belegtem C1-risk_class einen `risk_class`-Eintrag. Die Mapping-
+Tabelle aus §1 wird so ohne Lockerung des Schemas in die Producer-Pfad übersetzt:
+
+| Rolle | emittierter `risk_class` |
+| :--- | :--- |
+| `canonical_md` | `content` |
+| `index_sidecar_json` | `navigation` |
+| `dump_index_json` | `navigation` |
+| `derived_manifest_json` | `navigation` |
+| `sqlite_index` | `cache` |
+| `retrieval_eval_json` | `diagnostic` |
+| `output_health` | `diagnostic` |
+| `citation_map_jsonl` | `navigation` |
+| `agent_reading_pack` | `navigation` |
+| `chunk_index_jsonl` | — (kein Wert, retrieval_index-STOP nach §4) |
+| `graph_index_json` | — (kein Wert, retrieval_index-STOP nach §4) |
+
+Eigenschaften der Producer-Erweiterung:
+
+- **Additiv pro Rolle.** Bestehende `authority`/`canonicality`/`regenerable`/
+  `staleness_sensitive`-Emission bleibt unverändert; `risk_class` erscheint nur als
+  zusätzliches Feld in denselben Artefakt-Einträgen.
+- **Schema-treu.** Das emittierte Feld deckt sich exakt mit den per-Rolle-
+  `risk_class`-`const`-Zweigen aus §1; reale Bundles validieren weiter gegen
+  `bundle-manifest.v1.schema.json`.
+- **STOP für `retrieval_index` aktiv erhalten.** Für `chunk_index_jsonl` und
+  `graph_index_json` wird **kein** `risk_class` emittiert. Damit bleibt der in §4
+  beschriebene Schema-Sperrriegel (`not: {required: ["risk_class"]}`) unverletzt.
+- **`must_resolve_to` weiterhin nicht emittiert.** Die Manifest-Schema-Eigenschaft
+  `additionalProperties: false` auf Artefakt-Item-Ebene und das Fehlen einer
+  `must_resolve_to`-Property im Schema bedeuten, dass ein producer-seitiges
+  `must_resolve_to` heute schema-inkompatibel wäre. Die in C1 §3.3 skizzierte
+  Resolve-Pflicht bleibt damit Governance-Norm und wird hier nicht in einen
+  Manifest-Eintrag gehoben.
+- **Keine Pflichtfelder, kein Lint, kein Export-Gate.** Es wird keine
+  Anti-Hallucination-Lint-Regel hinzugefügt, kein Export-Gate aktiviert und
+  `risk_class` bleibt im Schema weiterhin optional. C2.3–C5 bleiben offen.
+- **Kein Eingriff in `canonical_md` oder Retrieval-Verhalten.** Der Producer ändert
+  weder den kanonischen Markdown-Inhalt noch die Retrieval-Pipeline.
+
+Test-Strategie (additive Producer-Emissionstests in
+`test_bundle_manifest_integration.py`):
+
+1. `test_c22_producer_emits_risk_class_for_classified_roles` — der Producer schreibt
+   den erwarteten `risk_class` pro klassifizierter Rolle in das emittierte Manifest;
+   das Manifest validiert weiter gegen `bundle-manifest.v1.schema.json`.
+2. `test_c22_producer_does_not_emit_risk_class_for_retrieval_index_roles` — für
+   `chunk_index_jsonl` und `graph_index_json` ist `risk_class` im emittierten
+   Manifest abwesend; das Manifest validiert weiter gegen das Schema.
+
+Zielsuite (Manifest + Rollen-Completeness, inkl. 2 neuer Producer-Tests):
+
+```
+$ python -m pytest -q \
+    merger/lenskit/tests/test_bundle_manifest_integration.py \
+    merger/lenskit/tests/test_role_completeness.py
+32 passed
+```
+
+Regression (Bundle-/Health-/Parity-/Reading-Pack-Suiten):
+
+```
+$ python -m pytest -q \
+    merger/lenskit/tests/test_bundle_manifest_integration.py \
+    merger/lenskit/tests/test_role_completeness.py \
+    merger/lenskit/tests/test_output_health.py \
+    merger/lenskit/tests/test_post_emit_health.py \
+    merger/lenskit/tests/test_cli_bundle_health.py \
+    merger/lenskit/tests/test_context_quality.py \
+    merger/lenskit/tests/test_parity.py \
+    merger/lenskit/tests/test_parity_state.py \
+    merger/lenskit/tests/test_agent_reading_pack.py
+190 passed
+```
+
+Lint:
+
+```
+$ python -m ruff check \
+    merger/lenskit/core/merge.py \
+    merger/lenskit/tests/test_bundle_manifest_integration.py \
+    merger/lenskit/tests/test_role_completeness.py \
+    --select=F401,F811,F841,E711,E712
+All checks passed!
+```
+
+Geänderte Dateien (Follow-up):
+
+- `merger/lenskit/core/merge.py` — `ARTIFACT_AUTHORITY_REGISTRY` um `risk_class` pro
+  Rolle erweitert (nur für eindeutig belegte Rollen; `retrieval_index`-Rollen bleiben
+  ohne `risk_class`).
+- `merger/lenskit/tests/test_bundle_manifest_integration.py` — 2 additive Tests
+  (`test_c22_producer_emits_risk_class_for_classified_roles`,
+  `test_c22_producer_does_not_emit_risk_class_for_retrieval_index_roles`).
+
+**Non-Changes (explizit unverändert):** `bundle-manifest.v1.schema.json` (Schema bleibt
+identisch zur ursprünglichen C2.2-Form), alle anderen Contracts, `output-health.v1`,
+`agent-query-session.v2`, Federation-Contracts; keine Lints, keine Export-Gates, keine
+Pflichtfeld-Erhebung, keine canonical_md- oder Retrieval-Änderung.
+
+---
+
 ## 8. Verbleibende Risiken
 
-- **Niedrig.** `risk_class` ist optional und const; ohne Producer-Emission ist die einzige
-  Wirkung, dass ein Manifest das Feld tragen *darf*. Falsche Werte werden pro Rolle
-  abgewiesen.
+- **Niedrig.** `risk_class` ist optional und const. Ursprünglich C2.2-Patch (Contract-only)
+  emittierte nichts; der Producer-Follow-up (§7a) emittiert `risk_class` jetzt für
+  eindeutig klassifizierte Rollen (`canonical_content`/`navigation_index`/`runtime_cache`/
+  `diagnostic_signal`). Falsche Werte werden weiter pro Rolle per Schema-`const`
+  abgewiesen; Altbundles ohne `risk_class` validieren unverändert.
 - Der `output_health`-Zweig deckt sich exakt mit der bereits vom Producer emittierten
   authority/canonicality; reale Bundles validieren unverändert weiter.
 - **Aktiver Sperrriegel:** `retrieval_index`-Rollen verbieten `risk_class` explizit per
-  `not: {required: ["risk_class"]}` (§4). Freischaltung erst nach C1-Normierung des
+  `not: {required: ["risk_class"]}` (§4). Der Producer-Follow-up emittiert für diese
+  Rollen bewusst **kein** `risk_class`. Freischaltung erst nach C1-Normierung des
   risk_class für `retrieval_index`; dann Ersetzen des `not`-Zweigs durch `const`.
 - C2.3–C5 bleiben offen (siehe Roadmap); insbesondere `allowed_inference`/
-  `forbidden_inference`, Lint und Export-Gate sind ausdrücklich nicht enthalten.
+  `forbidden_inference`, Anti-Hallucination-Lint und Export-Gate sind ausdrücklich
+  nicht enthalten.
 - Eine Pflicht-Anhebung von `risk_class`/`authority` im Manifest bleibt einer **neuen
-  Major-Manifest-Version** vorbehalten (würde sonst Altbundles brechen).
+  Major-Manifest-Version** vorbehalten (würde sonst Altbundles brechen). Der
+  Producer-Follow-up führt **keine** Pflichtfeld-Migration durch.
+- `must_resolve_to` für Navigation-Rollen wird nicht emittiert, weil das Schema das
+  Feld nicht kennt und `additionalProperties: false` greift; eine Schema-Erweiterung
+  bleibt eigener Folgeschritt.

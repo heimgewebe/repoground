@@ -231,6 +231,28 @@ Producer emittierten Annotation.
 - Validierung: 30 passed in der Zielsuite (Manifest + Rollen-Completeness, inkl. 6 additiver
   C2.2-Tests), 188 passed in der Bundle-/Health-/Parity-Regression, ruff `F401,F811` sauber.
 
+### C2.2 Follow-up — Producer-Emission für eindeutig klassifizierte Manifest-Rollen (umgesetzt)
+
+Status: **UMGESETZT** (additive Producer-Emission), Beleg
+`docs/proofs/authority-risk-class-c2-2-manifest-proof.md` §7a.
+Scope: `ARTIFACT_AUTHORITY_REGISTRY` in `merger/lenskit/core/merge.py` emittiert
+`risk_class` für Rollen mit eindeutig belegtem C1-risk_class:
+`canonical_content → content`, `navigation_index → navigation`, `runtime_cache → cache`,
+`diagnostic_signal → diagnostic`. Producer-Emission für eindeutig klassifizierte
+Manifest-Rollen umgesetzt.
+
+- **STOP für `retrieval_index` aktiv erhalten:** Für `chunk_index_jsonl` und
+  `graph_index_json` wird **kein** `risk_class` emittiert; der Schema-Sperrriegel aus
+  C2.2 (`not: {required: ["risk_class"]}`) bleibt unverletzt.
+- **`must_resolve_to`:** Wird nicht emittiert, weil das Manifest-Schema das Feld nicht
+  kennt und `additionalProperties: false` auf Artefakt-Item-Ebene greift.
+- **Keine** Pflichtfeld-Migration, **keine** Anti-Hallucination-Lint, **kein**
+  Export-Gate, **keine** Änderung an `canonical_md` oder am Retrieval-Verhalten,
+  **keine** Schema-Änderung.
+- Validierung: 32 passed in der Zielsuite (Manifest + Rollen-Completeness, inkl. 2
+  additiver Producer-Emissionstests), 190 passed in der Bundle-/Health-/Parity-/
+  Reading-Pack-Regression, ruff `F401,F811,F841,E711,E712` sauber.
+
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot
 - Lenskit = Knowledge Compiler / Evidence Runtime

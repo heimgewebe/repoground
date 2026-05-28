@@ -1013,3 +1013,74 @@ def test_c22_retrieval_index_roles_reject_any_risk_class_until_c1_defines_it():
                      "observation", "derived", "external"):
             with pytest.raises(jsonschema.ValidationError):
                 _validate({**artifact, "risk_class": risk})
+
+
+# ── C2.2 follow-up — producer-side risk_class emission ──────────────────────
+#
+# Schema slice (C2.2) is content-only; the manifest schema already permits the
+# optional per-role risk_class const. The producer now emits risk_class for
+# roles whose risk_class is unambiguously documented in the C1 authority/risk
+# matrix:
+#   * canonical_content   → content
+#   * navigation_index    → navigation
+#   * runtime_cache       → cache
+#   * diagnostic_signal   → diagnostic
+# retrieval_index roles (chunk_index_jsonl, graph_index_json) stay silent
+# until C1 normalizes a risk_class for retrieval_index.
+
+
+_EXPECTED_RISK_CLASS_BY_ROLE = {
+    ArtifactRole.CANONICAL_MD.value: "content",
+    ArtifactRole.INDEX_SIDECAR_JSON.value: "navigation",
+    ArtifactRole.DUMP_INDEX_JSON.value: "navigation",
+    ArtifactRole.DERIVED_MANIFEST_JSON.value: "navigation",
+    ArtifactRole.SQLITE_INDEX.value: "cache",
+    ArtifactRole.RETRIEVAL_EVAL_JSON.value: "diagnostic",
+    ArtifactRole.OUTPUT_HEALTH.value: "diagnostic",
+    ArtifactRole.CITATION_MAP_JSONL.value: "navigation",
+    ArtifactRole.AGENT_READING_PACK.value: "navigation",
+}
+
+_RETRIEVAL_INDEX_ROLES = (
+    ArtifactRole.CHUNK_INDEX_JSONL.value,
+    ArtifactRole.GRAPH_INDEX_JSON.value,
+)
+
+
+def test_c22_producer_emits_risk_class_for_classified_roles(tmp_path):
+    _, data, _ = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    # Schema guard: emitted manifest must still validate with risk_class present.
+    schema = json.loads(_BUNDLE_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=data, schema=schema)
+
+    roles_map = {item["role"]: item for item in data["artifacts"]}
+
+    for role, expected_risk in _EXPECTED_RISK_CLASS_BY_ROLE.items():
+        entry = roles_map.get(role)
+        if entry is None:
+            # Some roles are profile-dependent (e.g. sqlite_index requires fts5_bm25).
+            # The producer test only asserts the contract for roles actually emitted.
+            continue
+        assert entry.get("risk_class") == expected_risk, (
+            f"role {role}: expected risk_class={expected_risk!r}, "
+            f"got {entry.get('risk_class')!r}"
+        )
+
+
+def test_c22_producer_does_not_emit_risk_class_for_retrieval_index_roles(tmp_path):
+    _, data, _ = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    schema = json.loads(_BUNDLE_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=data, schema=schema)
+
+    roles_map = {item["role"]: item for item in data["artifacts"]}
+
+    for role in _RETRIEVAL_INDEX_ROLES:
+        entry = roles_map.get(role)
+        if entry is None:
+            continue
+        assert "risk_class" not in entry, (
+            f"role {role}: retrieval_index roles must not carry risk_class "
+            f"until C1 normalizes one; got {entry.get('risk_class')!r}"
+        )
