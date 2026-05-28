@@ -10,13 +10,25 @@ Kurzüberblick über Ordner:
 ### repoLens (Empfohlen)
 
 Das Hauptwerkzeug, um Repositories für LLMs aufzubereiten.
+`merger.lenskit.frontends.pythonista.repolens` ist der direkte repoLens Dump-/Bundle-Emitter für lokale Modulaufrufe, insbesondere aus Pythonista/iPad-Kontexten.
+`merger.lenskit.cli.rlens` ist die rLens-Service-/Host-Surface und nicht der direkte `repoLens . --level ...`-Aufruf; rLens bleibt die operative Heim-PC/Service-Schicht.
 
 ```bash
 # Overview
-python3 -m merger.lenskit.cli.rlens . --level overview
+python3 -m merger.lenskit.frontends.pythonista.repolens . --level overview
 
-# Full Merge mit Split (20MB) und Meta-Drosselung
-python3 -m merger.lenskit.cli.rlens . --level max --split-size 20MB --meta-density standard
+# Full Merge mit Split (20MB), voller Metadichte und Dual-Output
+python3 -m merger.lenskit.frontends.pythonista.repolens . \
+  --level max \
+  --split-size 20MB \
+  --meta-density full \
+  --output-mode dual
+```
+
+Direkte Datei-Ausführung ist ebenfalls möglich, falls der Modulaufruf in einer lokalen Umgebung nicht greift:
+
+```bash
+python3 merger/lenskit/frontends/pythonista/repolens.py . --level max --split-size 20MB --meta-density full --output-mode dual
 ```
 
 Siehe [merger/lenskit/repoLens-spec.md](merger/lenskit/repoLens-spec.md) für Details.
