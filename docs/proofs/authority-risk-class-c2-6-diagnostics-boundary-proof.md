@@ -66,6 +66,64 @@ takes the stronger and more consistent route:
 - An *optional* boundary would be boundary-theater: the L3 rule exists precisely so
   diagnostic artifacts carry their epistemic limits, not merely *may* carry them.
 
+## 3a. Consumer & Fixture Audit (Breaking-Change Evidence)
+
+The claim that `required` is safe requires positive evidence. The following
+searches were executed on the full repository tree:
+
+```bash
+# 1. Schema references outside the implementation and test files
+grep -rn "retrieval-eval-diagnostics" \
+  --include="*.py" --include="*.json" --include="*.yaml" --include="*.yml" \
+  . | grep -v "merger/lenskit/contracts/" \
+      | grep -v "merger/lenskit/retrieval/eval_diagnostics" \
+      | grep -v "merger/lenskit/tests/" \
+      | grep -v "merger/lenskit/core/anti_hallucination" \
+      | grep -v "docs/"
+# Result: (empty) — no external Python/config consumer references the schema path.
+
+# 2. External callers of generate_report / RetrievalEvalDiagnosticsCalibrator
+grep -rn "generate_report\|eval_diagnostics\|RetrievalEvalDiagnosticsCalibrator" \
+  --include="*.py" . \
+  | grep -v "__pycache__" \
+  | grep -v "test_retrieval_eval_diagnostics.py" \
+  | grep -v "eval_diagnostics.py"
+# Result: merger/lenskit/retrieval/eval_diagnostics_integration.py — the only
+#   non-test caller. It calls calibrator.generate_report() but does NOT load the
+#   schema and does NOT call jsonschema.validate; it passes the result through.
+
+# 3. Stored fixtures / golden files containing diagnostic report keys
+find . -name "*.json" | xargs grep -l \
+  "diagnostic_breakdowns\|does_not_prove\|primary_diagnosis" 2>/dev/null \
+  | grep -v "__pycache__" | grep -v ".git"
+# Result: only merger/lenskit/contracts/retrieval-eval-diagnostics.v1.schema.json
+#   (the schema itself, not a stored report).
+
+# 4. jsonschema.validate calls targeting the diagnostics schema (outside our tests)
+grep -rn "jsonschema.validate" --include="*.py" . \
+  | grep -v "__pycache__" \
+  | grep -v "test_retrieval_eval_diagnostics.py" \
+  | grep -v "test_anti_hallucination_lint.py" \
+  | grep -v "anti_hallucination_lint.py" \
+  | xargs grep -l "retrieval-eval-diagnostics" 2>/dev/null
+# Result: (empty) — no other file both calls jsonschema.validate and references the
+#   diagnostics schema.
+```
+
+**Findings:**
+
+| Check | Result |
+|-------|--------|
+| External Python/config consumers of the schema path | None found |
+| Callers of `generate_report` outside test files | One: `eval_diagnostics_integration.py` — does not validate against the schema |
+| Committed JSON fixtures / golden files with diagnostics report keys | None found |
+| Non-test `jsonschema.validate` calls targeting this schema | None found |
+
+**Conclusion:** The artifact is confirmed ephemeral with no committed corpus and no
+external schema-validation consumer. Making `does_not_prove` required breaks no
+existing usage. If a stored fixture or external consumer were found, the correct
+response would be to revert to `optional` and document a separate migration path.
+
 ## 4. Lint Effect
 
 `DEFERRED_BOUNDARY_CONTRACTS` is now `{}`. The deferral *mechanism* in `_check_l3`
