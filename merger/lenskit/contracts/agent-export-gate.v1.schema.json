@@ -40,6 +40,20 @@
       "const": "diagnostic",
       "description": "Optional, additive self-declaration of this artifact's risk class (C2.1). When present it MUST be the diagnostic constant."
     },
+    "allowed_inferences": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional C2.3 inference-boundary notes describing permitted uses of this diagnostic artifact. Free strings for now: this is contract-only preparation, not a closed policy vocabulary, truth verdict, lint, or export gate."
+    },
+    "forbidden_inferences": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional C2.3 inference-boundary notes that machine-readably mirror existing boundary disclaimers (e.g. does_not_mean). Free strings for now: this is contract-only preparation, not claim evaluation, lint, or export gate."
+    },
     "status": {
       "type": "string",
       "enum": ["pass", "fail", "blocked"]

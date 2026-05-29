@@ -200,7 +200,7 @@ Scope: additive, optionale, **const** Felder `authority` (`diagnostic_signal`) u
 
 Mögliche Folgearbeiten (separate PRs, nicht Teil von C1, C2a oder C2.1):
 - C2.2: `bundle-manifest.v1`-Normierung (per-role `risk_class`, `output_health`-Authority-Zweig) — **UMGESETZT** (siehe C2.2-Abschnitt unten)
-- C2.3: `allowed_inference`/`forbidden_inference` als optionale Schema-Felder — **offen**
+- C2.3: `allowed_inferences`/`forbidden_inferences` als optionale Schema-Felder — **UMGESETZT** (contract-only/test-only; siehe C2.3-Abschnitt unten)
 - C3 / C2.4: Lint-Regeln (L1–L6) — **offen**
 - C4: Runtime-Annotation — **offen**
 - C5: Export-Gate-Integration — **offen**
@@ -252,6 +252,27 @@ Manifest-Rollen umgesetzt.
 - Validierung: 32 passed in der Zielsuite (Manifest + Rollen-Completeness, inkl. 2
   additiver Producer-Emissionstests), 190 passed in der Bundle-/Health-/Parity-/
   Reading-Pack-Regression, ruff `F401,F811,F841,E711,E712` sauber.
+
+### C2.3 — Additive optionale Inference-Boundary-Felder (umgesetzt)
+
+Status: **UMGESETZT** (contract-only/test-only), Beleg
+`docs/proofs/authority-risk-class-c2-3-inference-boundary-proof.md`.
+Scope: additive, optionale, plural benannte `allowed_inferences` und
+`forbidden_inferences` als `array[string]` in vier bereits boundary-nahen Diagnose-
+Contracts: `post-emit-health.v1`, `agent-export-gate.v1`, `retrieval-eval.v1` und
+`context-quality.v1`.
+
+- **Keine** Pflichtfelder, **keine** Major-Version, **keine** Producer-/Runtime-/CLI-Emission.
+- **Keine** claim-Bewertung (`supported`/`unsupported`/`proven`) und **kein** Wahrheitsurteil;
+  `allowed_inferences` beschreibt erlaubte Nutzung, `forbidden_inferences` ergänzt
+  bestehende Boundary-Disclaimer (z. B. `does_not_mean` oder
+  `claim_boundaries.does_not_prove`) maschinenlesbar.
+- **Freie Strings bewusst beibehalten:** kein Enum/const-Vokabular in C2.3, weil spätere
+  C2.4/C2.5-Arbeit die Policy-/Lint-Vokabulare erst stabilisieren muss.
+- **Nicht angefasst:** `output-health.v1`, Federation-Contracts, `agent-query-session.v2`,
+  `bundle-manifest.v1`; keine neuen `authority-matrix.v1`- oder `inference-boundary.v1`-
+  Contracts.
+- C2.4/C3 (Lint), C2.5/C5 (Export-Gate) und C4 (Runtime-Annotation) bleiben **offen**.
 
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot
