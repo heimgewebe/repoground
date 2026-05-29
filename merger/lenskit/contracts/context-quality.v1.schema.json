@@ -73,7 +73,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Optional C2.3 inference-boundary notes that machine-readably mirror existing does_not_prove/does_not_mean limits. Free strings for now: this is contract-only preparation, not claim evaluation, lint, or export gate."
+      "description": "Optional C2.3 inference-boundary notes that machine-readably mirror existing boundary disclaimers (e.g. does_not_mean). Free strings for now: this is contract-only preparation, not claim evaluation, lint, or export gate."
     },
     "signals": {
       "type": "object",

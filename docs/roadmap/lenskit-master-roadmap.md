@@ -265,7 +265,8 @@ Contracts: `post-emit-health.v1`, `agent-export-gate.v1`, `retrieval-eval.v1` un
 - **Keine** Pflichtfelder, **keine** Major-Version, **keine** Producer-/Runtime-/CLI-Emission.
 - **Keine** claim-Bewertung (`supported`/`unsupported`/`proven`) und **kein** Wahrheitsurteil;
   `allowed_inferences` beschreibt erlaubte Nutzung, `forbidden_inferences` ergänzt
-  bestehende `does_not_prove`/`does_not_mean`-Grenzen maschinenlesbar.
+  bestehende Boundary-Disclaimer (z. B. `does_not_mean` oder
+  `claim_boundaries.does_not_prove`) maschinenlesbar.
 - **Freie Strings bewusst beibehalten:** kein Enum/const-Vokabular in C2.3, weil spätere
   C2.4/C2.5-Arbeit die Policy-/Lint-Vokabulare erst stabilisieren muss.
 - **Nicht angefasst:** `output-health.v1`, Federation-Contracts, `agent-query-session.v2`,

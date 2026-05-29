@@ -13,8 +13,10 @@ boundary-adjacent diagnostic contracts:
 The patch adds exactly two optional top-level fields to each selected contract:
 
 ```json
-"allowed_inferences": ["..."]
-"forbidden_inferences": ["..."]
+{
+  "allowed_inferences": ["..."],
+  "forbidden_inferences": ["..."]
+}
 ```
 
 Both fields are arrays of strings. They are **not** required and do not change the
@@ -39,8 +41,8 @@ Rationale:
 ## 3. Semantics
 
 `forbidden_inferences` is a machine-readable companion to existing local boundaries
-such as `does_not_prove` and `does_not_mean`. It does not replace those fields and it
-is not a claim-verdict field.
+such as `does_not_mean` or `claim_boundaries.does_not_prove`, depending on the
+selected contract. It does not replace those fields and it is not a claim-verdict field.
 
 `allowed_inferences` describes permitted use of the artifact as a diagnostic signal.
 It is not a truth judgment. It must not be read as `supported`, `unsupported`,
