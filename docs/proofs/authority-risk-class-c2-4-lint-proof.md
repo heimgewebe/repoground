@@ -91,6 +91,15 @@ a boundary array:
 stale if its contract is absent, no longer self-declares a governed authority, or
 has since gained a boundary. A test asserts the registry is currently non-stale.
 
+> **Update (resolved by C2.6):** this deferral has since been closed. The additive
+> follow-up gave `retrieval-eval-diagnostics.v1` a required root `does_not_prove`
+> boundary (with producer emission), so `DEFERRED_BOUNDARY_CONTRACTS` is now empty
+> and the lint reports **0 deferred**. The deferral *mechanism* (and its rot guard)
+> is retained for any future contract. See
+> `docs/proofs/authority-risk-class-c2-6-diagnostics-boundary-proof.md`. The §5/§8
+> figures below describe the original C2.4 state (1 deferred) and are kept as the
+> historical record.
+
 ## 5. Why The Gate Is Green Today
 
 Ground-truth scan of `merger/lenskit/contracts/*.schema.json`:

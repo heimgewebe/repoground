@@ -7,6 +7,7 @@ import jsonschema
 import pytest
 
 from merger.lenskit.retrieval.eval_diagnostics import (
+    DOES_NOT_PROVE,
     DiagnosticsRecord,
     IndexInspector,
     MissingArtifactError,
@@ -406,6 +407,37 @@ class TestRetrievalEvalDiagnosticsCalibrator:
         schema_path = Path(__file__).resolve().parent.parent / "contracts" / "retrieval-eval-diagnostics.v1.schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         jsonschema.validate(instance=report, schema=schema)
+
+    def test_report_carries_does_not_prove_boundary(self, tmp_artifacts):
+        # C1 L3: the diagnostics artifact must carry a machine-readable inference
+        # boundary (resolves the C2.4-tracked deferral). The producer emits the
+        # canonical does_not_prove entries the contract requires.
+        calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=tmp_artifacts["index"])
+        report = calibrator.generate_report([])
+
+        boundary = report["does_not_prove"]
+        assert isinstance(boundary, list) and boundary
+        assert list(DOES_NOT_PROVE) == boundary
+        for token in (
+            "absence_of_retrieval_hit_does_not_prove_absence_in_repository",
+            "miss_diagnosis_does_not_prove_claim_truth_or_falsehood",
+            "primary_diagnosis_does_not_prove_root_cause_certainty",
+            "retrieval_eval_does_not_prove_retrieval_completeness",
+            "diagnosis_is_diagnostic_not_authoritative",
+        ):
+            assert token in boundary
+
+    def test_schema_requires_does_not_prove_boundary(self, tmp_artifacts):
+        # The boundary is required: a report missing it fails contract validation
+        # (locks the C2.4 deferral resolution against regression).
+        calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=tmp_artifacts["index"])
+        report = calibrator.generate_report([])
+        report.pop("does_not_prove")
+
+        schema_path = Path(__file__).resolve().parent.parent / "contracts" / "retrieval-eval-diagnostics.v1.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(instance=report, schema=schema)
 
     def test_deterministic_sorting(self, tmp_artifacts):
         calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=tmp_artifacts["index"])

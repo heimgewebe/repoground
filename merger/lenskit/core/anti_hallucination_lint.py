@@ -103,17 +103,14 @@ BOUNDARY_PROPERTY_NAMES: frozenset[str] = (
 
 # L3 — explicitly deferred contracts: they self-declare a boundary-requiring
 # authority but predate boundary normalization. Tracked here (not silently
-# skipped, not force-migrated). Adding the boundary is a separate additive
-# contract follow-up; C2.4 only *prepares* the lint (gap audit §8 / §5.D / §7).
-DEFERRED_BOUNDARY_CONTRACTS: dict[str, str] = {
-    "retrieval-eval-diagnostics.v1.schema.json": (
-        "self-declares authority=diagnostic_signal but carries no machine-readable "
-        "boundary (does_not_prove/does_not_mean/claim_boundaries); not covered by the "
-        "C2a gap-audit table, which audited the distinct retrieval-eval.v1. Boundary "
-        "addition is a separate additive C2.x follow-up; C2.4 prepares the lint as a CI "
-        "stage without forcing premature contract migration."
-    ),
-}
+# skipped, not force-migrated) so the gap is honest rather than ignored, and
+# :func:`audit_deferral_registry` guards the list against rot.
+#
+# Currently empty: the sole former entry — ``retrieval-eval-diagnostics.v1`` —
+# was resolved by the additive C2.x follow-up that gave the contract a required
+# root ``does_not_prove`` boundary (and producer emission). The mechanism is kept
+# for any future contract that must be deferred with a documented rationale.
+DEFERRED_BOUNDARY_CONTRACTS: dict[str, str] = {}
 
 # Rules documented as out-of-scope for the contract-static C2.4 stage.
 OUT_OF_SCOPE_RULES: dict[str, str] = {
