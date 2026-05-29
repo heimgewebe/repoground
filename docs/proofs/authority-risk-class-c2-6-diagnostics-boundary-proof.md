@@ -8,7 +8,7 @@ deliberately did not fix: `retrieval-eval-diagnostics.v1.schema.json`
 self-declared `authority: diagnostic_signal` (a boundary-requiring authority
 under C1 / L3) but carried **no** machine-readable inference boundary. C2.4
 surfaced this honestly as a non-blocking `deferred` lint finding and named the
-fix as a "separate additive C2.x follow-up". This slice is that follow-up.
+fix as a separate C2.6 boundary-normalizing follow-up. This slice is that follow-up.
 
 It is **boundary-normalizing, producer-compatible, and intentionally
 tightening**: it gives the diagnostics report a required root `does_not_prove`

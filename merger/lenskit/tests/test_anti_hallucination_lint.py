@@ -3,9 +3,10 @@
 Covers the two contract-static rules (L3 boundary presence, L5 truth-language)
 with synthetic schemas, and asserts the lint is green on the real contract set
 with an empty deferral registry. The former sole deferral
-(retrieval-eval-diagnostics.v1) was resolved by the additive C2.x follow-up that
-gave the contract a required root does_not_prove boundary; the deferral
-*mechanism* itself is still exercised here via a synthetic registry entry.
+(retrieval-eval-diagnostics.v1) was resolved by the C2.6 boundary-normalizing
+follow-up that gave the contract a required root does_not_prove boundary; the
+deferral *mechanism* itself is still exercised here via a synthetic registry
+entry.
 """
 import json
 from pathlib import Path

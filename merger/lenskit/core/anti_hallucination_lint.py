@@ -107,9 +107,9 @@ BOUNDARY_PROPERTY_NAMES: frozenset[str] = (
 # :func:`audit_deferral_registry` guards the list against rot.
 #
 # Currently empty: the sole former entry — ``retrieval-eval-diagnostics.v1`` —
-# was resolved by the additive C2.x follow-up that gave the contract a required
-# root ``does_not_prove`` boundary (and producer emission). The mechanism is kept
-# for any future contract that must be deferred with a documented rationale.
+# was resolved by the C2.6 boundary-normalizing follow-up that gave the contract
+# a required root ``does_not_prove`` boundary (and producer emission). The mechanism
+# is kept for any future contract that must be deferred with a documented rationale.
 DEFERRED_BOUNDARY_CONTRACTS: dict[str, str] = {}
 
 # Rules documented as out-of-scope for the contract-static C2.4 stage.

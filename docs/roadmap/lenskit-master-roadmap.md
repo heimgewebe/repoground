@@ -320,7 +320,7 @@ Contract-Migration zu erzwingen.
   diagnostic_signal` ohne Boundary-Array und war **nicht** in der C2a-Audit-Tabelle
   erfasst. C2.4 machte diese Lücke ehrlich als `deferred` sichtbar, statt sie still zu
   ignorieren oder die Contract-Migration zu erzwingen (Gap-Audit §8/§5.D/§7). Das
-  Hinzufügen der Boundary war als additive C2.x-Folgearbeit angekündigt und ist
+  Hinzufügen der Boundary war als C2.x-Folgearbeit angekündigt und ist
   **inzwischen durch C2.6 umgesetzt** (Root-`does_not_prove` + Producer-Emission;
   Deferral-Registry jetzt leer). `audit_deferral_registry()` + Test verhindern
   weiterhin, dass die Deferral-Liste verrottet.
