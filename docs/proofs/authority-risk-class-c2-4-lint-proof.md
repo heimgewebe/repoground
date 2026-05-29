@@ -30,8 +30,8 @@ contract mutation, and **no** claim-truth evaluation.
 A contract whose **root** object self-declares a boundary-requiring authority via
 an `authority` / `session_authority` `const` in
 `{diagnostic_signal, runtime_observation, agent_context_projection}` MUST declare
-a machine-readable boundary array at the root: `does_not_prove`, `does_not_mean`,
-or `claim_boundaries`.
+a machine-readable boundary information at the root: a `does_not_prove` / `does_not_mean`
+array, or a `claim_boundaries` object.
 
 - Only the **root** declaration is governed. `bundle-manifest.v1` assigns
   authority to *other* artifacts per-role (nested enum), so it is correctly
@@ -151,7 +151,7 @@ python -m ruff check --select=F401,F811,F841,E711,E712 --exclude='**/fixtures/**
 
 - `governance lint`: `PASS` — 38 scanned, 0 errors, 1 deferred
   (`retrieval-eval-diagnostics.v1`), exit 0.
-- `test_anti_hallucination_lint.py`: 25 passed.
+- `test_anti_hallucination_lint.py`: 29 passed.
 - Regression (contracts/health/quality/eval/cli): no regressions.
 - `ruff --select=F401,F811,F841,E711,E712`: clean.
 - Python: 3.11.15 (local). CI runs 3.12.

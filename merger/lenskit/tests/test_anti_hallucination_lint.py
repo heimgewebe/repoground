@@ -6,6 +6,7 @@ with exactly one tracked deferral (retrieval-eval-diagnostics.v1).
 """
 import json
 from pathlib import Path
+import pytest
 
 from merger.lenskit.core.anti_hallucination_lint import (
     DEFERRED_BOUNDARY_CONTRACTS,
@@ -274,7 +275,7 @@ def test_real_contracts_single_known_deferral():
     assert deferred == set(DEFERRED_BOUNDARY_CONTRACTS)
 
 
-def test_real_contracts_normized_self_declarers_pass_l3():
+def test_real_contracts_normalized_self_declarers_pass_l3():
     # Every contract that self-declares a boundary-requiring authority and is NOT
     # in the deferral registry must carry a root boundary (no L3 error).
     schemas = load_contract_schemas(_CONTRACTS_DIR)
@@ -307,3 +308,32 @@ def test_cli_governance_lint_json_is_valid(capsys):
     assert payload["status"] == "pass"
     assert payload["authority"] == "diagnostic_signal"
     assert payload["error_count"] == 0
+
+
+def test_l5_flags_forbidden_verdict_const_value_in_composition():
+    schema = _diag_schema(
+        {"status": {"oneOf": [{"const": "verified"}, {"const": "pass"}]}}
+    )
+    findings = lint_contract_schema(schema, contract_name="x.schema.json")
+    assert any(f.rule == "L5" and "verified" in f.message for f in findings)
+
+
+def test_load_contract_schemas_rejects_missing_dir(tmp_path):
+    with pytest.raises(ValueError, match="contracts dir does not exist"):
+        load_contract_schemas(tmp_path / "missing")
+
+
+def test_load_contract_schemas_rejects_non_directory(tmp_path):
+    not_a_dir = tmp_path / "not-a-dir"
+    not_a_dir.write_text("not a directory", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="contracts dir is not a directory"):
+        load_contract_schemas(not_a_dir)
+
+
+def test_load_contract_schemas_rejects_empty_contract_dir(tmp_path):
+    empty_dir = tmp_path / "empty-contracts"
+    empty_dir.mkdir()
+
+    with pytest.raises(ValueError, match=r"no \*\.schema\.json files found"):
+        load_contract_schemas(empty_dir)

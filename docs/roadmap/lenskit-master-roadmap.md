@@ -323,7 +323,7 @@ Contract-Migration zu erzwingen.
   Claim-Wahrheitsbewertung. Der Lint-Report ist selbst ein `diagnostic_signal`
   (`authority`/`risk_class`/`does_not_mean`).
 - Validierung: `governance lint` → PASS (38 gescannt, 0 Fehler, 1 deferred), exit 0;
-  `test_anti_hallucination_lint.py` 25 passed; Regression
+  `test_anti_hallucination_lint.py` 29 passed; Regression
   (contracts/health/quality/eval/cli) ohne Regression; ruff
   `F401,F811,F841,E711,E712` sauber.
 

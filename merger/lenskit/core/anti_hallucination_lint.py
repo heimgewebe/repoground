@@ -14,8 +14,8 @@ Implemented (blocking):
   self-declares an authority class that warns-but-does-not-prove
   (``diagnostic_signal``, ``runtime_observation``, or the
   ``agent_context_projection`` session authority) MUST declare a machine-readable
-  boundary array at the root (``does_not_prove`` / ``does_not_mean`` /
-  ``claim_boundaries``). Known, deliberately deferred gaps are tracked in
+  boundary declaration at the root (``does_not_prove`` / ``does_not_mean`` arrays,
+  or a ``claim_boundaries`` object). Known, deliberately deferred gaps are tracked in
   :data:`DEFERRED_BOUNDARY_CONTRACTS` and reported as non-blocking ``deferred``
   findings rather than silently ignored or force-fixed.
 
@@ -271,31 +271,29 @@ def _check_l5(schema: object, contract_name: str) -> list[LintFinding]:
 def _verdict_values(field_schema: dict) -> Iterator[str]:
     """Yield string verdict values from a verdict field schema.
 
-    Covers direct ``const``, direct ``enum``, and array ``items.const`` /
-    ``items.enum``. Non-string values are ignored because L5 only governs exact
-    forbidden truth-language tokens.
+    Covers direct and composed ``const`` / ``enum`` declarations, including
+    nested ``oneOf`` / ``anyOf`` / ``allOf`` branches and array ``items``.
+    Non-string values are ignored because L5 only governs exact forbidden
+    truth-language tokens.
     """
-    const = field_schema.get("const")
-    if isinstance(const, str):
-        yield const
+    yield from _schema_const_enum_values(field_schema)
 
-    enum = field_schema.get("enum")
-    if isinstance(enum, list):
-        for value in enum:
-            if isinstance(value, str):
-                yield value
 
-    items = field_schema.get("items")
-    if isinstance(items, dict):
-        item_const = items.get("const")
-        if isinstance(item_const, str):
-            yield item_const
+def _schema_const_enum_values(node: object) -> Iterator[str]:
+    if isinstance(node, dict):
+        const = node.get("const")
+        if isinstance(const, str):
+            yield const
 
-        item_enum = items.get("enum")
-        if isinstance(item_enum, list):
-            for value in item_enum:
-                if isinstance(value, str):
-                    yield value
+        enum = node.get("enum")
+        if isinstance(enum, list):
+            yield from (value for value in enum if isinstance(value, str))
+
+        for value in node.values():
+            yield from _schema_const_enum_values(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _schema_const_enum_values(item)
 
 
 # --- L3: Missing Inference Boundary -----------------------------------------
@@ -394,8 +392,17 @@ def default_contracts_dir() -> Path:
 
 def load_contract_schemas(contracts_dir: Path) -> dict[str, dict]:
     """Load all ``*.schema.json`` files in ``contracts_dir`` (non-recursive)."""
+    if not contracts_dir.exists():
+        raise ValueError(f"contracts dir does not exist: {contracts_dir}")
+    if not contracts_dir.is_dir():
+        raise ValueError(f"contracts dir is not a directory: {contracts_dir}")
+
+    paths = sorted(contracts_dir.glob("*.schema.json"))
+    if not paths:
+        raise ValueError(f"no *.schema.json files found in contracts dir: {contracts_dir}")
+
     schemas: dict[str, dict] = {}
-    for path in sorted(contracts_dir.glob("*.schema.json")):
+    for path in paths:
         try:
             schemas[path.name] = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
