@@ -62,6 +62,23 @@ _DOES_NOT_MEAN = [
     "claims_true",
 ]
 
+# C2.5 / C5 minimal (anti-hallucination matrix §6 L6): export-risk inference
+# vocabulary. A diagnostic artifact may machine-readably forbid an inference via
+# the optional C2.3 ``forbidden_inferences`` field. If a bundle's diagnostics
+# forbid one of these high-risk inferences, an agent-facing export must not look
+# clean: an agent could otherwise read the bundle as establishing claim truth,
+# repository understanding, citation-free answer safety, or retrieval
+# completeness. This is an export-eligibility boundary, not a truth verdict, and
+# it mirrors the context_quality DOES_NOT_MEAN vocabulary.
+_EXPORT_RISK_FORBIDDEN_INFERENCES = frozenset(
+    {
+        "claims_true",
+        "repo_understood",
+        "answer_safe_without_citations",
+        "retrieval_complete",
+    }
+)
+
 
 def _now_iso() -> str:
     ts = now_utc()
@@ -128,6 +145,56 @@ def _find_output_health_verdict(manifest: Dict[str, Any], manifest_dir: Path) ->
     if isinstance(verdict, str):
         return verdict
     return None
+
+
+def _doc_forbidden_inferences(doc: Dict[str, Any]) -> set[str]:
+    """Return the optional C2.3 ``forbidden_inferences`` strings of a diagnostic doc."""
+    values = doc.get("forbidden_inferences")
+    if not isinstance(values, list):
+        return set()
+    return {v for v in values if isinstance(v, str)}
+
+
+def _collect_forbidden_inferences(
+    manifest: Dict[str, Any],
+    manifest_dir: Path,
+    post_doc: Optional[Dict[str, Any]],
+) -> set[str]:
+    """Collect ``forbidden_inferences`` declared by in-bundle diagnostic artifacts.
+
+    Sources:
+    - manifest artifacts that self-declare ``authority == diagnostic_signal``,
+      resolved securely within the bundle directory, and
+    - the already-loaded ``post_emit_health`` document.
+
+    Reads only the optional C2.3 ``forbidden_inferences`` field. It performs no
+    truth evaluation, mutates nothing, and silently skips artifacts that cannot
+    be securely resolved or read as JSON objects.
+    """
+    found: set[str] = set()
+
+    artifacts = manifest.get("artifacts")
+    if isinstance(artifacts, list):
+        for art in artifacts:
+            if not isinstance(art, dict):
+                continue
+            if art.get("authority") != "diagnostic_signal":
+                continue
+            rel_path = art.get("path")
+            if not isinstance(rel_path, str) or not rel_path:
+                continue
+            try:
+                art_path = resolve_secure_path(manifest_dir, rel_path)
+                doc, _ = _load_json(art_path)
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if isinstance(doc, dict):
+                found |= _doc_forbidden_inferences(doc)
+
+    if isinstance(post_doc, dict):
+        found |= _doc_forbidden_inferences(post_doc)
+
+    return found
 
 
 def _validate_post_health_schema(post_doc: Dict[str, Any]) -> Optional[str]:
@@ -340,6 +407,22 @@ def evaluate_agent_export_gate(
         warnings.append(
             "output_health.verdict=pass observed but not sufficient for export gate"
         )
+
+    # C2.5 / C5 (L6) minimal: honor explicit export-risk inference boundaries.
+    # Only agent-facing export is constrained here; non-agent-facing results are
+    # checked separately above and never certify the agent surface anyway, so the
+    # diagnostic boundaries are read only when they can actually gate the export.
+    if agent_facing:
+        blocking_inferences = sorted(
+            _collect_forbidden_inferences(manifest, manifest_dir, post_doc)
+            & _EXPORT_RISK_FORBIDDEN_INFERENCES
+        )
+        if blocking_inferences:
+            status = "fail" if status != "blocked" else status
+            errors.append(
+                "agent-facing export blocked by forbidden inference(s): "
+                + ", ".join(blocking_inferences)
+            )
 
     return {
         "kind": KIND,

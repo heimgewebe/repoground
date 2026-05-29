@@ -88,7 +88,11 @@ def _write_manifest(
 
 
 def _write_post_health(
-    tmp_path: Path, status: str, *, observed_output_health: str | None = "pass"
+    tmp_path: Path,
+    status: str,
+    *,
+    observed_output_health: str | None = "pass",
+    forbidden_inferences: list[str] | None = None,
 ) -> Path:
     report = {
         "kind": "lenskit.post_emit_health",
@@ -109,9 +113,44 @@ def _write_post_health(
     }
     if observed_output_health is not None:
         report["output_health_verdict"] = observed_output_health
+    if forbidden_inferences is not None:
+        report["forbidden_inferences"] = list(forbidden_inferences)
     path = tmp_path / "demo.bundle_health.post.json"
     path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return path
+
+
+def _attach_diagnostic_artifact(
+    manifest_path: Path,
+    tmp_path: Path,
+    *,
+    forbidden_inferences: list[str],
+    filename: str = "demo.retrieval_eval.json",
+    authority: str = "diagnostic_signal",
+) -> None:
+    """Append an in-bundle diagnostic artifact carrying forbidden_inferences."""
+    doc = {
+        "metrics": {"total_queries": 0, "hits": 0, "stale_flag": False},
+        "details": [],
+        "forbidden_inferences": list(forbidden_inferences),
+    }
+    blob = json.dumps(doc, indent=2).encode("utf-8")
+    (tmp_path / filename).write_bytes(blob)
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].append(
+        {
+            "role": "retrieval_eval_json",
+            "path": filename,
+            "content_type": "application/json",
+            "bytes": len(blob),
+            "sha256": _sha256(blob),
+            "authority": authority,
+            "canonicality": "diagnostic",
+            "interpretation": {"mode": "role_only"},
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def test_agent_facing_pass_when_post_emit_pass_and_redaction_true(tmp_path):
@@ -595,3 +634,208 @@ def test_agent_export_gate_does_not_mutate_manifest(tmp_path):
 
     after = manifest.read_text(encoding="utf-8")
     assert after == before
+
+
+# ---------------------------------------------------------------------------
+# C2.5 / C5 (L6): export-risk inference boundaries
+# ---------------------------------------------------------------------------
+
+_BLOCKING_INFERENCES = [
+    "claims_true",
+    "repo_understood",
+    "answer_safe_without_citations",
+    "retrieval_complete",
+]
+
+
+def test_c2_5_legacy_post_health_without_forbidden_inferences_passes(tmp_path):
+    """Legacy documents that never declare forbidden_inferences stay clean."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass", forbidden_inferences=None)
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert not any("forbidden inference" in e for e in report["errors"])
+
+
+def test_c2_5_harmless_forbidden_inference_does_not_block(tmp_path):
+    """A free-string forbidden inference outside the export-risk vocabulary is harmless."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(
+        tmp_path,
+        "pass",
+        forbidden_inferences=["does_not_establish_claim_truth", "use_only_as_signal"],
+    )
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert not any("forbidden inference" in e for e in report["errors"])
+
+
+@pytest.mark.parametrize("inference", _BLOCKING_INFERENCES)
+def test_c2_5_blocking_inference_in_post_health_fails_agent_export(tmp_path, inference):
+    """An export-risk inference forbidden by a diagnostic blocks agent-facing export."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass", forbidden_inferences=[inference])
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "fail"
+    assert report["agent_facing"] is True
+    assert any(
+        "forbidden inference" in e and inference in e for e in report["errors"]
+    )
+
+
+def test_c2_5_blocking_inference_in_manifest_diagnostic_fails_agent_export(tmp_path):
+    """forbidden_inferences on an in-bundle diagnostic artifact also blocks export."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    _attach_diagnostic_artifact(
+        manifest, tmp_path, forbidden_inferences=["retrieval_complete"]
+    )
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "fail"
+    assert any("retrieval_complete" in e for e in report["errors"])
+
+
+def test_c2_5_non_agent_facing_not_blocked_by_forbidden_inference(tmp_path):
+    """Non-agent-facing profiles are evaluated separately and are not export-risk gated."""
+    manifest = _write_manifest(tmp_path, redaction=False)
+    _attach_diagnostic_artifact(
+        manifest, tmp_path, forbidden_inferences=["claims_true"]
+    )
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="human_review",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert report["agent_facing"] is False
+    assert not any("forbidden inference" in e for e in report["errors"])
+
+
+def test_c2_5_non_diagnostic_authority_forbidden_inference_is_ignored(tmp_path):
+    """forbidden_inferences are only read from diagnostic_signal artifacts (no overreach)."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    _attach_diagnostic_artifact(
+        manifest,
+        tmp_path,
+        forbidden_inferences=["claims_true"],
+        authority="navigation_index",
+    )
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert not any("forbidden inference" in e for e in report["errors"])
+
+
+def test_c2_5_invalid_utf8_diagnostic_artifact_is_skipped(tmp_path):
+    """A corrupt diagnostic artifact must not abort export-gate certification."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    bad_path = tmp_path / "bad.retrieval_eval.json"
+    bad_blob = b"\xff\xfe\x00not-valid-utf8"
+    bad_path.write_bytes(bad_blob)
+
+    manifest_doc = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_doc["artifacts"].append(
+        {
+            "role": "retrieval_eval_json",
+            "path": bad_path.name,
+            "content_type": "application/json",
+            "bytes": len(bad_blob),
+            "sha256": _sha256(bad_blob),
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "interpretation": {"mode": "role_only"},
+        }
+    )
+    manifest.write_text(json.dumps(manifest_doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert not any("forbidden inference" in e for e in report["errors"])
+
+
+def test_c2_5_out_of_bundle_diagnostic_forbidden_inference_not_read(tmp_path):
+    """A diagnostic path escaping the bundle is rejected, so its boundary is not read."""
+    outside_doc = {"forbidden_inferences": ["claims_true"]}
+    outside_blob = json.dumps(outside_doc, indent=2).encode("utf-8")
+    (tmp_path.parent / "outside.retrieval_eval.json").write_bytes(outside_blob)
+
+    manifest_path = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].append(
+        {
+            "role": "retrieval_eval_json",
+            "path": "../outside.retrieval_eval.json",
+            "content_type": "application/json",
+            "bytes": len(outside_blob),
+            "sha256": _sha256(outside_blob),
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "interpretation": {"mode": "role_only"},
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest_path),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert not any("forbidden inference" in e for e in report["errors"])
+
+
+def test_c2_5_blocked_report_validates_against_schema(tmp_path):
+    """The export-risk failure path still emits a schema-valid gate report."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass", forbidden_inferences=["claims_true"])
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "fail"
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)

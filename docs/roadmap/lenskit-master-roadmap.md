@@ -201,9 +201,9 @@ Scope: additive, optionale, **const** Felder `authority` (`diagnostic_signal`) u
 Mögliche Folgearbeiten (separate PRs, nicht Teil von C1, C2a oder C2.1):
 - C2.2: `bundle-manifest.v1`-Normierung (per-role `risk_class`, `output_health`-Authority-Zweig) — **UMGESETZT** (siehe C2.2-Abschnitt unten)
 - C2.3: `allowed_inferences`/`forbidden_inferences` als optionale Schema-Felder — **UMGESETZT** (contract-only/test-only; siehe C2.3-Abschnitt unten)
-- C3 / C2.4: Anti-Hallucination-Contract-Lint (kontraktstatischer L3+L5-Teil) — **UMGESETZT** (siehe C2.4-Abschnitt unten). Die AST-/codepfadbasierten Regeln L1/L2/L4 und der Export-Gate-Teil L6 bleiben **offen**.
+- C3 / C2.4: Anti-Hallucination-Contract-Lint (kontraktstatischer L3+L5-Teil) — **UMGESETZT** (siehe C2.4-Abschnitt unten). Die AST-/codepfadbasierten Regeln L1/L2/L4 bleiben **offen**.
 - C4: Runtime-Annotation — **offen**
-- C5: Export-Gate-Integration (inkl. L6) — **offen**
+- C2.5 / C5: Export-Gate-Integration für L6-Export-Risk-Inferenzen — **MINIMAL UMGESETZT** (siehe C2.5-Abschnitt unten). Das breitere C5-Governance-Framework bleibt **offen**.
 
 ### C2.2 — Additive per-role Risk-Class + output_health-Authority im Bundle-Manifest (umgesetzt)
 
@@ -273,8 +273,9 @@ Contracts: `post-emit-health.v1`, `agent-export-gate.v1`, `retrieval-eval.v1` un
   `bundle-manifest.v1`; keine neuen `authority-matrix.v1`- oder `inference-boundary.v1`-
   Contracts.
 - C2.4/C3 (kontraktstatischer Lint) ist mit dem nächsten Abschnitt **UMGESETZT**;
-  die AST-Regeln (L1/L2/L4) und C2.5/C5 (Export-Gate inkl. L6) sowie C4
-  (Runtime-Annotation) bleiben **offen**.
+  C2.5/C5 (Export-Gate, L6-Export-Risk-Inferenzen) ist **minimal umgesetzt**
+  (siehe C2.5-Abschnitt). Die AST-Regeln (L1/L2/L4) und C4 (Runtime-Annotation)
+  bleiben **offen**.
 
 ### C2.4 — Anti-Hallucination-Contract-Lint (kontraktstatischer L3+L5-Teil, umgesetzt)
 
@@ -309,7 +310,8 @@ Contract-Migration zu erzwingen.
 - **STOP / Out of Scope (dokumentiert, nicht implementiert):**
   - **L1/L2/L4** erfordern Python-**AST-/Codepfad**-Analyse (hohe False-Positive-Fläche
     laut Blueprint §6) → spätere AST-Lint-Stufe.
-  - **L6** (Export-Risk) = Export-Gate-Integration = **C5**.
+  - **L6** (Export-Risk) = Export-Gate-Integration = **C5** (inzwischen minimal
+    umgesetzt für die Export-Risk-Inferenzen: siehe C2.5-Abschnitt).
   - Die Out-of-Scope-Regeln werden maschinenlesbar im Report (`rules_out_of_scope`)
     geführt.
 - **Deferral-Registry (getrackt, nicht-blockierend):** genau
@@ -326,6 +328,45 @@ Contract-Migration zu erzwingen.
   `test_anti_hallucination_lint.py` 32 passed; Regression
   (contracts/health/quality/eval/cli) ohne Regression; ruff
   `F401,F811,F841,E711,E712` sauber.
+
+### C2.5 — Export-Gate liest L6-Export-Risk-Inferenzen (minimal umgesetzt)
+
+Status: **MINIMAL UMGESETZT** (additive Gate-Härtung, keine Contract-Änderung),
+Beleg `docs/proofs/authority-risk-class-c2-5-export-gate-proof.md`.
+Scope: der **Export-Gate-Teil** der C1-Regel **L6**, den C2.4 ausdrücklich nach
+C5 verschoben hat. Das bestehende `agent_export_gate` (A5) wird **minimal
+gehärtet**, nicht ersetzt: es liest jetzt das optionale C2.3-Feld
+`forbidden_inferences` aus den Diagnoseartefakten des Bundles.
+
+- Geänderte/ergänzte Dateien:
+  - `merger/lenskit/core/agent_export_gate.py` (additives Lesen + Gate-Bedingung)
+  - `merger/lenskit/tests/test_agent_export_gate.py` (C2.5-Tests)
+  - `docs/proofs/authority-risk-class-c2-5-export-gate-proof.md`
+- Regel (blockierend, **nur agent-facing**): Wenn ein Diagnoseartefakt im Bundle
+  maschinenlesbar eine Inferenz aus dem geschlossenen Export-Risk-Vokabular
+  verbietet, wird ein **agent-facing** Export auf `fail` herabgestuft (bzw. bleibt
+  `blocked`) und ein Fehler benennt die Inferenz. Nicht-agent-facing Profile
+  werden weiterhin getrennt geprüft und sind **nicht** export-risk-gegated.
+- Export-Risk-Vokabular (klein, geschlossen, exakt; spiegelt
+  `context_quality.DOES_NOT_MEAN`): `claims_true`, `repo_understood`,
+  `answer_safe_without_citations`, `retrieval_complete`. Freie C2.3-Strings
+  außerhalb dieses Vokabulars blockieren **nicht**.
+- Lesefläche: Manifest-Artefakte mit `authority == diagnostic_signal` (sicher via
+  `resolve_secure_path`, bundle-intern) plus das bereits geladene
+  `post_emit_health`-Dokument. Kein Lesen außerhalb des Bundles.
+- **STOP / bewusst nicht enthalten:** **kein** neuer Contract, **keine**
+  Runtime-Annotation, **keine** Producer-Emission von `forbidden_inferences`,
+  **keine** Wahrheitsermittlung, **keine** Manifest-Mutation, **keine** Änderung
+  an `canonical_md` oder am Retrieval. Report-Form unverändert (Grund in
+  bestehendem `errors`-Array → weiterhin schema-valide gegen
+  `agent-export-gate.v1`). Die `evaluate_agent_export_gate`-Signatur bleibt
+  gleich; die `bundle-health export-gate`-CLI ist unverändert. C4
+  (Runtime-Annotation) und das breitere C5-Governance-Framework bleiben **offen**.
+- Validierung: Zieltrio (`test_agent_export_gate.py`,
+  `test_contract_inference_boundaries.py`, `test_anti_hallucination_lint.py`) →
+  **107 passed** (`test_agent_export_gate.py` 47, davon 11 neue C2.5-Fälle);
+  Regression (health/quality/eval/contract-guards/cli) 97 passed, keine
+  Regression; ruff `F401,F811,F841,E711,E712` sauber; `git diff --check` sauber.
 
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot
