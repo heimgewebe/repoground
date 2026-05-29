@@ -758,6 +758,40 @@ def test_c2_5_non_diagnostic_authority_forbidden_inference_is_ignored(tmp_path):
     assert not any("forbidden inference" in e for e in report["errors"])
 
 
+def test_c2_5_invalid_utf8_diagnostic_artifact_is_skipped(tmp_path):
+    """A corrupt diagnostic artifact must not abort export-gate certification."""
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    bad_path = tmp_path / "bad.retrieval_eval.json"
+    bad_blob = b"\xff\xfe\x00not-valid-utf8"
+    bad_path.write_bytes(bad_blob)
+
+    manifest_doc = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest_doc["artifacts"].append(
+        {
+            "role": "retrieval_eval_json",
+            "path": bad_path.name,
+            "content_type": "application/json",
+            "bytes": len(bad_blob),
+            "sha256": _sha256(bad_blob),
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "interpretation": {"mode": "role_only"},
+        }
+    )
+    manifest.write_text(json.dumps(manifest_doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert not any("forbidden inference" in e for e in report["errors"])
+
+
 def test_c2_5_out_of_bundle_diagnostic_forbidden_inference_not_read(tmp_path):
     """A diagnostic path escaping the bundle is rejected, so its boundary is not read."""
     outside_doc = {"forbidden_inferences": ["claims_true"]}

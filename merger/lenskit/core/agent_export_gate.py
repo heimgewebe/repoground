@@ -185,9 +185,9 @@ def _collect_forbidden_inferences(
                 continue
             try:
                 art_path = resolve_secure_path(manifest_dir, rel_path)
-            except ValueError:
+                doc, _ = _load_json(art_path)
+            except (ValueError, UnicodeDecodeError):
                 continue
-            doc, _ = _load_json(art_path)
             if isinstance(doc, dict):
                 found |= _doc_forbidden_inferences(doc)
 
