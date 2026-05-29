@@ -151,7 +151,7 @@ python -m ruff check --select=F401,F811,F841,E711,E712 --exclude='**/fixtures/**
 
 - `governance lint`: `PASS` — 38 scanned, 0 errors, 1 deferred
   (`retrieval-eval-diagnostics.v1`), exit 0.
-- `test_anti_hallucination_lint.py`: 23 passed.
+- `test_anti_hallucination_lint.py`: 25 passed.
 - Regression (contracts/health/quality/eval/cli): no regressions.
 - `ruff --select=F401,F811,F841,E711,E712`: clean.
 - Python: 3.11.15 (local). CI runs 3.12.

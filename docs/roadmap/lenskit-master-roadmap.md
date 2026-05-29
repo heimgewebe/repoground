@@ -290,7 +290,7 @@ Contract-Migration zu erzwingen.
 - Geänderte/ergänzte Dateien:
   - `merger/lenskit/core/anti_hallucination_lint.py` (reine Funktionen + IO-Adapter)
   - `merger/lenskit/cli/cmd_governance.py` (`lenskit governance lint`, Dispatch in `cli/main.py`)
-  - `merger/lenskit/tests/test_anti_hallucination_lint.py` (23 Tests)
+  - `merger/lenskit/tests/test_anti_hallucination_lint.py` (25 Tests)
   - `.github/workflows/anti-hallucination-lint.yml` (path-scoped blockierender Gate)
   - `docs/proofs/authority-risk-class-c2-4-lint-proof.md`
 - Implementiert (blockierend):
@@ -323,7 +323,7 @@ Contract-Migration zu erzwingen.
   Claim-Wahrheitsbewertung. Der Lint-Report ist selbst ein `diagnostic_signal`
   (`authority`/`risk_class`/`does_not_mean`).
 - Validierung: `governance lint` → PASS (38 gescannt, 0 Fehler, 1 deferred), exit 0;
-  `test_anti_hallucination_lint.py` 23 passed; Regression
+  `test_anti_hallucination_lint.py` 25 passed; Regression
   (contracts/health/quality/eval/cli) ohne Regression; ruff
   `F401,F811,F841,E711,E712` sauber.
 
