@@ -404,7 +404,11 @@ class TestRetrievalEvalDiagnosticsCalibrator:
             ]
         )
 
-        schema_path = Path(__file__).resolve().parent.parent / "contracts" / "retrieval-eval-diagnostics.v1.schema.json"
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         jsonschema.validate(instance=report, schema=schema)
 
@@ -434,7 +438,11 @@ class TestRetrievalEvalDiagnosticsCalibrator:
         report = calibrator.generate_report([])
         report.pop("does_not_prove")
 
-        schema_path = Path(__file__).resolve().parent.parent / "contracts" / "retrieval-eval-diagnostics.v1.schema.json"
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(instance=report, schema=schema)
