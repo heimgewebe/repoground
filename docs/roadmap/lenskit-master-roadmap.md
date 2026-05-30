@@ -429,7 +429,7 @@ Vorbau und beweist, dass er auf Realcode keine Massen-False-Positives erzeugt.
   - `merger/lenskit/core/anti_hallucination_ast_lint.py` (neue Lint-Engine, reine Funktionen)
   - `merger/lenskit/cli/cmd_governance.py` (`lenskit governance ast-lint`, experimentell)
   - `merger/lenskit/cli/main.py` (Dispatch für das neue Subkommando)
-  - `merger/lenskit/tests/test_anti_hallucination_ast_lint.py` (24 Tests)
+  - `merger/lenskit/tests/test_anti_hallucination_ast_lint.py` (25 Tests)
   - `docs/proofs/authority-risk-class-c2-7-ast-lint-proof.md`
 - **Negativbefund (vor Implementierung verifiziert):** L1/L2/L4 standen in Roadmap,
   C2.4-/C2.6-Proof, Test-Matrix und `OUT_OF_SCOPE_RULES` als offen; es existierte
@@ -460,8 +460,8 @@ Vorbau und beweist, dass er auf Realcode keine Massen-False-Positives erzeugt.
   (diagnostic → PackModel → rendered pack) nicht detektierbar. Nächster Schritt: Authority-
   Registry / Upgrade-Deklaration für inferenz-basierte Hebung (C2.9+).
 - Validierung C2.7-Baseline: `governance ast-lint` → PASS (91 gescannt, 0 skipped, **0 Findings**, exit 0);
-  Zielsuiten (`test_anti_hallucination_lint.py` 33, `test_anti_hallucination_ast_lint.py` 24)
-  57 passed; Regression (contracts/version-guards/eval-diagnostics/cli) 71 passed, keine
+  Zielsuiten (`test_anti_hallucination_lint.py` 33, `test_anti_hallucination_ast_lint.py` 25)
+  58 passed; Regression (contracts/version-guards/eval-diagnostics/cli) 71 passed, keine
   Regression; ruff `F401,F811,F841,E711,E712` sauber; `git diff --check` sauber.
   *Hinweis: Nach C2.8-Pilot sind es 4 intentionale L4-Findings (merge.py, alle in
   Upgrade-Sites), nicht 0 Findings.*
@@ -497,7 +497,7 @@ Low-Authority-Variablen; Lint erstmals gegen Produktionspfade gelaufen.
   `health → PackModel`-Muster; (3) maschinenlesbare Authority-Registry als Prerequisite für
   inferenz-basierte Hebung. C4 ist **kein** Prerequisite.
 - Validierung: `governance ast-lint` → WARN (91 gescannt, 0 skipped, **4 Findings**, exit 1,
-  non-blocking); Zielsuiten 57 passed; Regression 45 passed, keine Regression; ruff sauber.
+  non-blocking); Zielsuiten 58 passed; Regression 45 passed, keine Regression; ruff sauber.
 
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot

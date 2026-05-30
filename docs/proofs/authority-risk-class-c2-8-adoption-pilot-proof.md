@@ -193,7 +193,7 @@ git diff --check
 - `governance lint`: `PASS` — 38 scanned, 0 errors, 0 deferred, exit 0 (unchanged).
 - `governance ast-lint`: `WARN` — 91 files scanned, 0 skipped, **4 findings**
   (all L4 in merge.py), exit 1. Non-blocking (`blocking: false`).
-- `test_anti_hallucination_lint.py` (33) + `test_anti_hallucination_ast_lint.py` (24): **57 passed**.
+- `test_anti_hallucination_lint.py` (33) + `test_anti_hallucination_ast_lint.py` (25): **58 passed**.
 - Regression (contracts/version-guards/cli): 45 passed, no regressions.
 - `ruff --select=F401,F811,F841,E711,E712`: clean. `git diff --check`: clean.
 - Python: 3.11.15 (local). CI runs 3.12.

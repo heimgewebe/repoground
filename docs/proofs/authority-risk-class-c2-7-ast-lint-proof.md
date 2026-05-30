@@ -19,7 +19,7 @@ New / changed files:
 - `merger/lenskit/core/anti_hallucination_ast_lint.py` (new lint engine, pure functions)
 - `merger/lenskit/cli/cmd_governance.py` (`lenskit governance ast-lint`, experimental)
 - `merger/lenskit/cli/main.py` (dispatch wiring for the new subcommand)
-- `merger/lenskit/tests/test_anti_hallucination_ast_lint.py` (24 tests)
+- `merger/lenskit/tests/test_anti_hallucination_ast_lint.py` (25 tests)
 - `docs/proofs/authority-risk-class-c2-7-ast-lint-proof.md` (this file)
 - `docs/roadmap/lenskit-master-roadmap.md`, `docs/testing/test-matrix.md` (status)
 
@@ -168,7 +168,7 @@ git diff --check
 
 - `governance lint`: `PASS` — 38 scanned, 0 errors, 0 deferred, exit 0 (unchanged).
 - `governance ast-lint`: `PASS` — 91 files scanned, 0 skipped, **0 findings**, exit 0 (C2.7 baseline; markers not yet adopted in production code).
-- `test_anti_hallucination_lint.py` (33) + `test_anti_hallucination_ast_lint.py` (24): **57 passed**.
+- `test_anti_hallucination_lint.py` (33) + `test_anti_hallucination_ast_lint.py` (25): **58 passed**.
 - Regression (contracts/version-guards/eval-diagnostics/cli): 71 passed, no regressions.
 - `ruff --select=F401,F811,F841,E711,E712`: clean. `git diff --check`: clean.
 - Python: 3.11.15 (local). CI runs 3.12.
