@@ -287,6 +287,7 @@ def test_real_tree_c2_8_pilot_findings_match_expected():
     assert len(l4_merge) == 4
     assert all(f.symbol == "md_parts" for f in l4_merge)
     assert all(f.line > _pilot_merge_annotation_line() for f in l4_merge)
+    assert all("resolve_canonical_md" in f.message for f in l4_merge)
 
 
 # --- CLI smoke --------------------------------------------------------------
