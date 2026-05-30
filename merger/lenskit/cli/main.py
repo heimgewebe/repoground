@@ -212,9 +212,11 @@ def main(args: Optional[List[str]] = None) -> int:
             f"Unexpected parity command dispatch: {parsed_args.parity_cmd!r}"
         )
     elif parsed_args.command == "governance":
-        from .cmd_governance import run_governance_lint
+        from .cmd_governance import run_governance_ast_lint, run_governance_lint
         if parsed_args.governance_cmd == "lint":
             return run_governance_lint(parsed_args)
+        elif parsed_args.governance_cmd == "ast-lint":
+            return run_governance_ast_lint(parsed_args)
         else:
             parser.parse_args(["governance", "--help"])
             return 0

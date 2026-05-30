@@ -399,7 +399,7 @@ def _stable_file_id(fi: "FileInfo") -> str:
     return "FILE:f_" + hashlib.sha1(raw).hexdigest()[:12]
 
 
-def resolve_canonical_md(md_parts: List[Path]) -> Optional[Path]:
+def resolve_canonical_md(md_parts: List[Path]) -> Optional[Path]:  # lenskit:requires-authority=canonical_content
     """
     Returns the canonical markdown artifact from a list of markdown parts.
     By contract, only the first part is fully bundle-backed.
@@ -5686,7 +5686,7 @@ def write_reports_v2(
                     include_hidden=include_hidden,
                 )
             # Generate JSON filename using deterministic base name (via base_name_func)
-            md_parts = [p for p in generated_paths if p.suffix.lower() == ".md"]
+            md_parts = [p for p in generated_paths if p.suffix.lower() == ".md"]  # lenskit:authority=derived_projection
 
             json_path = base_name_func(part_suffix="").with_suffix('.json')
 

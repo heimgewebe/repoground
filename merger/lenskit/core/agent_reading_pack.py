@@ -642,7 +642,7 @@ def _verify_referenced_artifact(
     return abs_path, actual
 
 
-def produce_agent_reading_pack(
+def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
     manifest_path_str: str,
     output_path_str: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -777,7 +777,7 @@ def produce_agent_reading_pack(
 
     verified_soft_paths: Dict[str, str] = {}
 
-    health: HealthSummary = HealthSummary(present=False)
+    health: HealthSummary = HealthSummary(present=False)  # lenskit:authority=diagnostic_signal
     if _OUTPUT_HEALTH in by_role:
         res = _verify_referenced_artifact(
             by_role[_OUTPUT_HEALTH], manifest_dir, "output_health",
