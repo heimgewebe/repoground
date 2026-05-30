@@ -2,7 +2,11 @@
 
 Covers the two contract-static rules (L3 boundary presence, L5 truth-language)
 with synthetic schemas, and asserts the lint is green on the real contract set
-with exactly one tracked deferral (retrieval-eval-diagnostics.v1).
+with an empty deferral registry. The former sole deferral
+(retrieval-eval-diagnostics.v1) was resolved by the C2.6 boundary-normalizing
+follow-up that gave the contract a required root does_not_prove boundary; the
+deferral *mechanism* itself is still exercised here via a synthetic registry
+entry.
 """
 import json
 from pathlib import Path
@@ -257,16 +261,26 @@ def test_l3_ignores_non_governed_authority_const():
     assert [f for f in findings if f.rule == "L3"] == []
 
 
-def test_l3_deferred_contract_is_non_blocking():
+def test_l3_deferral_mechanism_downgrades_registered_contract(monkeypatch):
+    # The live registry is currently empty (the retrieval-eval-diagnostics.v1
+    # deferral was resolved). The deferral *mechanism* must still downgrade a
+    # registered contract's missing-boundary finding to a non-blocking `deferred`,
+    # while an unregistered contract with the same gap stays a blocking `error`.
     schema = {
         "type": "object",
         "properties": {"authority": {"type": "string", "const": "diagnostic_signal"}},
     }
-    name = next(iter(DEFERRED_BOUNDARY_CONTRACTS))
-    findings = lint_contract_schema(schema, contract_name=name)
-    l3 = [f for f in findings if f.rule == "L3"]
-    assert len(l3) == 1
-    assert l3[0].severity == "deferred"
+    monkeypatch.setitem(
+        DEFERRED_BOUNDARY_CONTRACTS, "synthetic-deferred.v1.schema.json", "synthetic rationale"
+    )
+
+    deferred = lint_contract_schema(schema, contract_name="synthetic-deferred.v1.schema.json")
+    l3_deferred = [f for f in deferred if f.rule == "L3"]
+    assert len(l3_deferred) == 1
+    assert l3_deferred[0].severity == "deferred"
+
+    blocking = lint_contract_schema(schema, contract_name="unregistered.v1.schema.json")
+    assert any(f.rule == "L3" and f.severity == "error" for f in blocking)
 
 
 # --- Report shape ----------------------------------------------------------
@@ -305,10 +319,23 @@ def test_real_contracts_lint_is_green():
     assert report.contracts_scanned >= 30
 
 
-def test_real_contracts_single_known_deferral():
+def test_real_contracts_deferral_set_matches_registry():
     report = lint_contracts_dir(_CONTRACTS_DIR)
     deferred = {f.contract for f in report.deferred}
     assert deferred == set(DEFERRED_BOUNDARY_CONTRACTS)
+    # The registry is currently empty: every self-declaring contract carries a
+    # root boundary, so there are no tracked deferrals.
+    assert report.deferred_count == 0
+
+
+def test_retrieval_eval_diagnostics_carries_root_boundary():
+    # The former sole deferral now carries a required root does_not_prove array,
+    # so it is no longer registered and produces no L3 finding (blocking or deferred).
+    name = "retrieval-eval-diagnostics.v1.schema.json"
+    assert name not in DEFERRED_BOUNDARY_CONTRACTS
+    schema = load_contract_schemas(_CONTRACTS_DIR)[name]
+    findings = lint_contract_schema(schema, contract_name=name)
+    assert [f for f in findings if f.rule == "L3"] == []
 
 
 def test_real_contracts_normalized_self_declarers_pass_l3():

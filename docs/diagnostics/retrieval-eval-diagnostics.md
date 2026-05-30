@@ -88,6 +88,13 @@ The calibrator asks five questions in sequence:
 {
   "authority": "diagnostic_signal",
   "risk_class": "diagnostic",
+  "does_not_prove": [
+    "absence_of_retrieval_hit_does_not_prove_absence_in_repository",
+    "miss_diagnosis_does_not_prove_claim_truth_or_falsehood",
+    "primary_diagnosis_does_not_prove_root_cause_certainty",
+    "retrieval_eval_does_not_prove_retrieval_completeness",
+    "diagnosis_is_diagnostic_not_authoritative"
+  ],
   "metadata": {
     "version": "1.0",
     "timestamp": "2026-05-26T12:00:00Z",
@@ -375,6 +382,10 @@ Key test scenarios:
 Per the schema:
 - **authority:** `diagnostic_signal` (diagnostic only, not authoritative)
 - **risk_class:** `diagnostic` (informational, not a decision gate)
+- **does_not_prove:** required machine-readable inference boundary (C1 / L3). Every
+  report carries the canonical `does_not_prove` entries above, so the anti-hallucination
+  contract lint (Governance C2.4) governs this contract as a clean L3 case rather than a
+  tracked deferral. See `docs/proofs/authority-risk-class-c2-6-diagnostics-boundary-proof.md`.
 
 Diagnostics do **not**:
 - Prove absence of content in the repository

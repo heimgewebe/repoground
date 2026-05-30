@@ -21,6 +21,20 @@ from datetime import datetime, timezone
 import re
 
 
+# C1 L3 inference boundary for the retrieval-eval-diagnostics.v1 artifact
+# (resolves the C2.4-tracked deferral). A retrieval-miss diagnosis is a mechanical
+# diagnostic_signal, never a truth/absence/completeness verdict. These mirror the
+# sibling retrieval-eval.v1 miss_taxonomy.does_not_prove discipline and are the
+# const entries the contract's does_not_prove array is required to contain.
+DOES_NOT_PROVE: Tuple[str, ...] = (
+    "absence_of_retrieval_hit_does_not_prove_absence_in_repository",
+    "miss_diagnosis_does_not_prove_claim_truth_or_falsehood",
+    "primary_diagnosis_does_not_prove_root_cause_certainty",
+    "retrieval_eval_does_not_prove_retrieval_completeness",
+    "diagnosis_is_diagnostic_not_authoritative",
+)
+
+
 class RetrievalEvalDiagnosticsError(Exception):
     """Base exception for diagnostics module."""
     pass
@@ -609,6 +623,7 @@ class RetrievalEvalDiagnosticsCalibrator:
         report = {
             "authority": "diagnostic_signal",
             "risk_class": "diagnostic",
+            "does_not_prove": list(DOES_NOT_PROVE),
             "metadata": {
                 "version": "1.0",
                 "timestamp": datetime.now(timezone.utc).isoformat(),

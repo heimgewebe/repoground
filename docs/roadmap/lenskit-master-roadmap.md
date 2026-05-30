@@ -204,6 +204,7 @@ Mögliche Folgearbeiten (separate PRs, nicht Teil von C1, C2a oder C2.1):
 - C3 / C2.4: Anti-Hallucination-Contract-Lint (kontraktstatischer L3+L5-Teil) — **UMGESETZT** (siehe C2.4-Abschnitt unten). Die AST-/codepfadbasierten Regeln L1/L2/L4 bleiben **offen**.
 - C4: Runtime-Annotation — **offen**
 - C2.5 / C5: Export-Gate-Integration für L6-Export-Risk-Inferenzen — **MINIMAL UMGESETZT** (siehe C2.5-Abschnitt unten). Das breitere C5-Governance-Framework bleibt **offen**.
+- C2.6: Auflösung der C2.4-Deferral — required Root-Boundary (`does_not_prove`) für `retrieval-eval-diagnostics.v1` plus Producer-Emission — **UMGESETZT** (siehe C2.6-Abschnitt unten). Deferral-Registry jetzt leer.
 
 ### C2.2 — Additive per-role Risk-Class + output_health-Authority im Bundle-Manifest (umgesetzt)
 
@@ -315,12 +316,14 @@ Contract-Migration zu erzwingen.
   - Die Out-of-Scope-Regeln werden maschinenlesbar im Report (`rules_out_of_scope`)
     geführt.
 - **Deferral-Registry (getrackt, nicht-blockierend):** genau
-  `retrieval-eval-diagnostics.v1.schema.json` deklariert `authority:
-  diagnostic_signal` ohne Boundary-Array und ist **nicht** in der C2a-Audit-Tabelle
-  erfasst. C2.4 macht diese Lücke ehrlich als `deferred` sichtbar, statt sie still zu
+  `retrieval-eval-diagnostics.v1.schema.json` deklarierte `authority:
+  diagnostic_signal` ohne Boundary-Array und war **nicht** in der C2a-Audit-Tabelle
+  erfasst. C2.4 machte diese Lücke ehrlich als `deferred` sichtbar, statt sie still zu
   ignorieren oder die Contract-Migration zu erzwingen (Gap-Audit §8/§5.D/§7). Das
-  Hinzufügen der Boundary ist additive C2.x-Folgearbeit. `audit_deferral_registry()`
-  + Test verhindern, dass die Deferral-Liste verrottet.
+  Hinzufügen der Boundary war als C2.x-Folgearbeit angekündigt und ist
+  **inzwischen durch C2.6 umgesetzt** (Root-`does_not_prove` + Producer-Emission;
+  Deferral-Registry jetzt leer). `audit_deferral_registry()` + Test verhindern
+  weiterhin, dass die Deferral-Liste verrottet.
 - **Keine** Contract-Änderung, **keine** Producer-/Runtime-Emission, **keine**
   Claim-Wahrheitsbewertung. Der Lint-Report ist selbst ein `diagnostic_signal`
   (`authority`/`risk_class`/`does_not_mean`).
@@ -364,9 +367,51 @@ gehärtet**, nicht ersetzt: es liest jetzt das optionale C2.3-Feld
   (Runtime-Annotation) und das breitere C5-Governance-Framework bleiben **offen**.
 - Validierung: Zieltrio (`test_agent_export_gate.py`,
   `test_contract_inference_boundaries.py`, `test_anti_hallucination_lint.py`) →
-  **107 passed** (`test_agent_export_gate.py` 47, davon 11 neue C2.5-Fälle);
+  **107 passed** (`test_agent_export_gate.py` 47, davon 12 neue C2.5-pytest-Fälle);
   Regression (health/quality/eval/contract-guards/cli) 97 passed, keine
   Regression; ruff `F401,F811,F841,E711,E712` sauber; `git diff --check` sauber.
+
+### C2.6 — Auflösung der C2.4-Deferral: retrieval-eval-diagnostics.v1 Root-Boundary (umgesetzt)
+
+Status: **UMGESETZT** (boundary-normalizing Contract-Tightening + Producer-Emission),
+Beleg `docs/proofs/authority-risk-class-c2-6-diagnostics-boundary-proof.md`.
+Scope: löst die einzige von C2.4 getrackte Deferral. `retrieval-eval-diagnostics.v1`
+deklarierte `authority: diagnostic_signal` (boundary-pflichtig unter C1/L3), trug
+aber keine maschinenlesbare Inference-Boundary. C2.6 ergänzt eine required
+Root-Boundary und emittiert sie aus dem bestehenden Producer.
+
+- Geänderte/ergänzte Dateien:
+  - `merger/lenskit/contracts/retrieval-eval-diagnostics.v1.schema.json`
+    (Pflicht-Root-`does_not_prove` als `array[string]`, `minItems: 1`, `allOf`/`contains`)
+  - `merger/lenskit/retrieval/eval_diagnostics.py` (`DOES_NOT_PROVE`-Konstante +
+    Emission in `generate_report`)
+  - `merger/lenskit/core/anti_hallucination_lint.py` (`DEFERRED_BOUNDARY_CONTRACTS`
+    jetzt leer; Mechanismus erhalten)
+  - `merger/lenskit/tests/test_anti_hallucination_lint.py`,
+    `merger/lenskit/tests/test_retrieval_eval_diagnostics.py`
+  - `docs/proofs/authority-risk-class-c2-6-diagnostics-boundary-proof.md`
+- Boundary-Vokabular (Pflicht-`contains`, an `retrieval-eval.v1`
+  `miss_taxonomy.does_not_prove` angelehnt, auf die per-Miss-*Diagnose* dieses
+  Contracts adaptiert): `absence_of_retrieval_hit_does_not_prove_absence_in_repository`,
+  `miss_diagnosis_does_not_prove_claim_truth_or_falsehood`,
+  `primary_diagnosis_does_not_prove_root_cause_certainty`,
+  `retrieval_eval_does_not_prove_retrieval_completeness`,
+  `diagnosis_is_diagnostic_not_authoritative`.
+- **Pflichtfeld bewusst gewählt** (anders als die rein optionalen C2.1–C2.3-Felder):
+  Producer steht unter eigener Kontrolle und wird mitgeändert, keine persistierten
+  Alt-Artefakte (keine Manifest-Rolle, keine Beispiel-Fixtures), und das Sibling
+  `retrieval-eval.v1` führt `miss_taxonomy.does_not_prove` ebenfalls als Pflicht mit
+  `contains`. Ein optionales Feld wäre Boundary-Theater.
+- **STOP / bewusst nicht enthalten:** keine Wahrheits-/Claim-Bewertung, keine
+  Repository-Abwesenheitsbehauptung, keine Ranking-/Retrieval-Verhaltensänderung,
+  keine Manifest-Mutation, kein neuer Contract, keine Änderung an den L3/L5-Lint-Regeln
+  oder am Export-Gate (C5). C4 (Runtime-Annotation) und das breitere C5-Framework
+  bleiben **offen**.
+- Validierung: `governance lint` → PASS (38 gescannt, 0 Fehler, **0 deferred**, exit 0);
+  Zielsuiten (`test_anti_hallucination_lint.py`, `test_retrieval_eval_diagnostics.py`)
+  59 passed; Regression (contracts/health/quality/eval/export-gate/cli) 173 passed,
+  keine Regression; Schema-Meta-Validierung (`Draft7Validator.check_schema`) OK; ruff
+  `F401,F811,F841,E711,E712` sauber.
 
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot

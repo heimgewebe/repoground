@@ -122,7 +122,9 @@ Explicitly unchanged:
    (no overreach).
 7. A diagnostic path escaping the bundle is rejected and its boundary is not
    read (security posture).
-8. The export-risk `fail` report still validates against `agent-export-gate.v1`.
+8. A diagnostic artifact with invalid UTF-8 is skipped and does not abort
+   export-gate certification.
+9. The export-risk `fail` report still validates against `agent-export-gate.v1`.
 
 Existing A5 / C2.1 / C2.3 gate tests remain green.
 
@@ -145,7 +147,7 @@ git diff --check
 ## 9. Results (local run)
 
 - Targeted trio: **107 passed**
-  (`test_agent_export_gate.py` 47, including 11 new C2.5 cases).
+  (`test_agent_export_gate.py` 47, including 12 new C2.5 pytest cases).
 - `ruff --select=F401,F811,F841,E711,E712`: clean.
 - `git diff --check`: clean.
 - Regression (`test_post_emit_health.py`, `test_context_quality.py`,

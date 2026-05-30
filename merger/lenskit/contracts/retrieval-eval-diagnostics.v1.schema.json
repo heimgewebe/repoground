@@ -5,7 +5,7 @@
   "description": "Diagnostic classification of retrieval evaluation misses. Provides per-miss root-cause analysis without modifying existing metrics or ranking behavior. Categorizes why each expected target was not found in top-k results.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["authority", "risk_class", "metadata", "diagnostics"],
+  "required": ["authority", "risk_class", "does_not_prove", "metadata", "diagnostics"],
   "properties": {
     "authority": {
       "type": "string",
@@ -16,6 +16,19 @@
       "type": "string",
       "const": "diagnostic",
       "description": "Top-level self-declaration of risk class for this diagnostics artifact."
+    },
+    "does_not_prove": {
+      "type": "array",
+      "description": "Machine-readable epistemic boundary: explicit statements of what these retrieval-miss diagnostics do NOT prove. A miss diagnosis is a mechanical signal, never a truth/absence/completeness verdict. Mirrors the sibling retrieval-eval.v1 miss_taxonomy.does_not_prove discipline and satisfies the C1 L3 inference-boundary requirement (resolves the C2.4-tracked deferral). diagnostic_signal only.",
+      "items": {"type": "string"},
+      "minItems": 1,
+      "allOf": [
+        {"contains": {"const": "absence_of_retrieval_hit_does_not_prove_absence_in_repository"}},
+        {"contains": {"const": "miss_diagnosis_does_not_prove_claim_truth_or_falsehood"}},
+        {"contains": {"const": "primary_diagnosis_does_not_prove_root_cause_certainty"}},
+        {"contains": {"const": "retrieval_eval_does_not_prove_retrieval_completeness"}},
+        {"contains": {"const": "diagnosis_is_diagnostic_not_authoritative"}}
+      ]
     },
     "metadata": {
       "type": "object",
