@@ -61,8 +61,8 @@ blueprint's own anticipated L2 integration ("`authority: T` annotation with stat
 checking"):
 
 - The lint fires **only** on code carrying explicit, lint-only governance markers.
-- Because the markers are **not adopted anywhere** in the runtime code, the lint
-  produces **zero findings on the real tree** (§6) — it is safe to run, cannot
+- Because the markers are **not adopted anywhere** in the runtime code (C2.7 baseline), the lint
+  produces **zero findings on the real tree** (§6/7) — it is safe to run, cannot
   block CI, and is not wired into any GitHub Actions gate.
 - Synthetic fixtures (annotated source strings) prove the detector fires correctly
   for each rule.
@@ -138,7 +138,7 @@ into an *undeclared* sink, and marker text inside a string literal all produce
 # Existing contract lint (unchanged; min-test requirement)
 python3 -m merger.lenskit.cli.main governance lint
 
-# New experimental, non-blocking AST lint (real tree → 0 findings, exit 0)
+# C2.7 baseline: experimental, non-blocking AST lint (before C2.8 adoption: real tree → 0 findings, exit 0)
 python3 -m merger.lenskit.cli.main governance ast-lint
 python3 -m merger.lenskit.cli.main governance ast-lint --json
 
@@ -164,10 +164,10 @@ python3 -m ruff check --select=F401,F811,F841,E711,E712 --exclude='**/fixtures/*
 git diff --check
 ```
 
-## 7. Results (local run)
+## 7. Results — C2.7 Baseline (before C2.8 adoption)
 
 - `governance lint`: `PASS` — 38 scanned, 0 errors, 0 deferred, exit 0 (unchanged).
-- `governance ast-lint`: `PASS` — 91 files scanned, 0 skipped, **0 findings**, exit 0.
+- `governance ast-lint`: `PASS` — 91 files scanned, 0 skipped, **0 findings**, exit 0 (C2.7 baseline; markers not yet adopted in production code).
 - `test_anti_hallucination_lint.py` (33) + `test_anti_hallucination_ast_lint.py` (24): **57 passed**.
 - Regression (contracts/version-guards/eval-diagnostics/cli): 71 passed, no regressions.
 - `ruff --select=F401,F811,F841,E711,E712`: clean. `git diff --check`: clean.

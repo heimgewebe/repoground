@@ -1,13 +1,18 @@
-"""Tests for the C2.7 experimental marker-gated anti-hallucination AST lint.
+"""Tests for the C2.7 experimental marker-gated anti-hallucination AST lint and C2.8 adoption pilot.
 
 Covers the three AST/code-path rules (L1 forbidden semantic upgrade, L2 authority
-escalation, L4 derived-artifact misuse) with synthetic source fixtures, and
-asserts the lint produces **zero findings on the real, un-annotated package tree**
-(the by-construction guarantee that it cannot mass-false-positive or block CI).
+escalation, L4 derived-artifact misuse) with synthetic source fixtures.
+
+C2.7 baseline: produces **zero findings on the un-annotated package tree** (by-construction
+guarantee that it cannot mass-false-positive or block CI).
+
+C2.8 adoption pilot: applies markers to 3 real canonical-content sinks; the real tree now
+yields 4 intentional L4 findings in merge.py (derived_projection → resolve_canonical_md),
+revealing authority-upgrade sites and the need for an authority-upgrade-declaration mechanism.
 
 The lint is marker-gated and opt-in: it fires only on code carrying explicit,
 lint-only governance markers. It performs no type inference and is not a runtime
-annotation (C4 remains open).
+annotation (C4 remains open). Non-blocking; not wired into CI gates.
 """
 import json
 

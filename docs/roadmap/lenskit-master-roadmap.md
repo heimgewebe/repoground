@@ -459,10 +459,12 @@ Vorbau und beweist, dass er auf Realcode keine Massen-False-Positives erzeugt.
   intentional); 0 Findings in citation_map.py/agent_reading_pack.py; Lücke: indirekte Flüsse
   (diagnostic → PackModel → rendered pack) nicht detektierbar. Nächster Schritt: Authority-
   Registry / Upgrade-Deklaration für inferenz-basierte Hebung (C2.9+).
-- Validierung: `governance ast-lint` → PASS (91 gescannt, 0 skipped, **0 Findings**, exit 0);
+- Validierung C2.7-Baseline: `governance ast-lint` → PASS (91 gescannt, 0 skipped, **0 Findings**, exit 0);
   Zielsuiten (`test_anti_hallucination_lint.py` 33, `test_anti_hallucination_ast_lint.py` 24)
   57 passed; Regression (contracts/version-guards/eval-diagnostics/cli) 71 passed, keine
   Regression; ruff `F401,F811,F841,E711,E712` sauber; `git diff --check` sauber.
+  *Hinweis: Nach C2.8-Pilot sind es 4 intentionale L4-Findings (merge.py, alle in
+  Upgrade-Sites), nicht 0 Findings.*
 
 ### C2.8 — Adoptions-Pilot: Real-Tree Sink-Annotation (umgesetzt)
 
