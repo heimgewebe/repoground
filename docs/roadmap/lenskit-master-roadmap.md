@@ -206,6 +206,7 @@ Mögliche Folgearbeiten (separate PRs, nicht Teil von C1, C2a oder C2.1):
 - C2.5 / C5: Export-Gate-Integration für L6-Export-Risk-Inferenzen — **MINIMAL UMGESETZT** (siehe C2.5-Abschnitt unten). Das breitere C5-Governance-Framework bleibt **offen**.
 - C2.6: Auflösung der C2.4-Deferral — required Root-Boundary (`does_not_prove`) für `retrieval-eval-diagnostics.v1` plus Producer-Emission — **UMGESETZT** (siehe C2.6-Abschnitt unten). Deferral-Registry jetzt leer.
 - C2.7: Experimenteller marker-gated AST-Lint-Vorbau für L1/L2/L4 — **MINIMAL UMGESETZT** (siehe C2.7-Abschnitt unten). Separater, nicht-blockierender Mechanismus; Real-Tree-Lauf 0 Findings. Vollständige inferenzbasierte L1/L2/L4 und C4 bleiben **offen**.
+- C2.8: Adoptions-Pilot — 3 Canonical-Content-Sinks markiert, Lint erstmals gegen Produktivpfade gelaufen — **UMGESETZT** (siehe C2.8-Abschnitt unten). 4 L4-Findings (alle merge.py, `derived_projection`→`resolve_canonical_md`, bewusst-intentional), 0 Findings in citation_map.py/agent_reading_pack.py. FP-Rate 100 % an Upgrade-Stellen → Upgrades-Registry als nächster Schritt identifiziert.
 
 ### C2.2 — Additive per-role Risk-Class + output_health-Authority im Bundle-Manifest (umgesetzt)
 
@@ -453,14 +454,48 @@ Vorbau und beweist, dass er auf Realcode keine Massen-False-Positives erzeugt.
   kein *deklarierter* Low-Authority-Fluss in einen *deklarierten* Canonical-Sink); der
   Report ist selbst `diagnostic_signal` (`authority`/`risk_class`/`does_not_mean`,
   `experimental: true`).
-- Nächster Slice (C2.8+): Adoptions-Pilot an wenigen echten High-Risk-Sinks (weiter
-  non-blocking) → Hebung von marker-gated auf inferenz-/typbasiert (FP-Kalibrierung gegen
-  Blueprint Phase-3-Stop-Kriterium) → erst danach CI-Promotion. C4 ist **kein**
-  Prerequisite dafür.
+- **Nächster Slice: C2.8 Adoptions-Pilot (UMGESETZT)** — 3 Sinks annotiert, Pilot-Findings
+  analysiert; Ergebnis: FP-Rate 100 % an `resolve_canonical_md`-Upgrade-Stellen (bewusst-
+  intentional); 0 Findings in citation_map.py/agent_reading_pack.py; Lücke: indirekte Flüsse
+  (diagnostic → PackModel → rendered pack) nicht detektierbar. Nächster Schritt: Authority-
+  Registry / Upgrade-Deklaration für inferenz-basierte Hebung (C2.9+).
 - Validierung: `governance ast-lint` → PASS (91 gescannt, 0 skipped, **0 Findings**, exit 0);
   Zielsuiten (`test_anti_hallucination_lint.py` 33, `test_anti_hallucination_ast_lint.py` 24)
   57 passed; Regression (contracts/version-guards/eval-diagnostics/cli) 71 passed, keine
   Regression; ruff `F401,F811,F841,E711,E712` sauber; `git diff --check` sauber.
+
+### C2.8 — Adoptions-Pilot: Real-Tree Sink-Annotation (umgesetzt)
+
+Status: **UMGESETZT** (experimentell, nicht-blockierend),
+Beleg `docs/proofs/authority-risk-class-c2-8-adoption-pilot-proof.md`.
+Scope: 3 Canonical-Content-Sinks mit `# lenskit:requires-authority=canonical_content`
+auf `def`-Zeilen annotiert; 2 Authority-Marker (`# lenskit:authority=<class>`) auf
+Low-Authority-Variablen; Lint erstmals gegen Produktionspfade gelaufen.
+
+- Annotierte Sinks:
+  - `resolve_canonical_md()` (`core/merge.py:402`) + `md_parts` als `derived_projection`
+    (`core/merge.py:5689`)
+  - `produce_citation_map()` (`core/citation_map.py:713`) — keine Low-Authority-Inputs in
+    File-Scope
+  - `produce_agent_reading_pack()` (`core/agent_reading_pack.py:645`) + `health` als
+    `diagnostic_signal` (`core/agent_reading_pack.py:780`)
+- **Findings:** 4 L4-Warnings in `merge.py` (`md_parts` → `resolve_canonical_md`, Zeilen
+  5699/5714/5824/5843). Alle bewusst-intentional: `resolve_canonical_md()` ist die
+  Authority-Upgrade-Funktion des Bundle-Pipelines. **FP-Rate: 100 %** an diesen
+  Upgrade-Stellen — konsistent mit Blueprint-Erwartung ohne Upgrade-Registry.
+- **0 Findings in `citation_map.py`** (sauberer Canonical-Producer, keine In-File-
+  Authority-Verletzungen detektierbar).
+- **0 Findings in `agent_reading_pack.py`** (indirekter `health → PackModel → render`-Fluss
+  nicht detektierbar durch file-scoped Engine — Lücke dokumentiert).
+- **STOP / bewusst nicht enthalten:** **keine** neuen Lint-Regeln, **keine** Typ-Inferenz,
+  **keine** Runtime-Annotation (C4 bleibt offen), **keine** Producer-/Contract-/Manifest-
+  Änderung, **kein** neuer blockierender CI-Workflow.
+- **Nächste Schritte (C2.9+):** (1) Authority-Upgrade-Deklaration für
+  `resolve_canonical_md`-Aufruf-Stellen; (2) Objekt-Intermediär-/Datenfluss-Tracking für
+  `health → PackModel`-Muster; (3) maschinenlesbare Authority-Registry als Prerequisite für
+  inferenz-basierte Hebung. C4 ist **kein** Prerequisite.
+- Validierung: `governance ast-lint` → WARN (91 gescannt, 0 skipped, **4 Findings**, exit 1,
+  non-blocking); Zielsuiten 57 passed; Regression 45 passed, keine Regression; ruff sauber.
 
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot

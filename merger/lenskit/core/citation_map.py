@@ -710,7 +710,7 @@ def is_manifest_coherent_for_citation_map(manifest_path: Path) -> bool:
     return check_manifest_coherence_for_citation_map(manifest_path).coherent
 
 
-def produce_citation_map(
+def produce_citation_map(  # lenskit:requires-authority=canonical_content
     manifest_path_str: str,
     output_path_str: Optional[str] = None,
 ) -> Dict[str, Any]:

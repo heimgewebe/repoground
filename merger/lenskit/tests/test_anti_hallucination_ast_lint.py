@@ -245,35 +245,56 @@ def test_clean_report_status_is_pass():
 # --- Integration against the real package tree ------------------------------
 
 
-def test_real_tree_lint_is_clean_zero_findings():
-    # The opt-in markers are not adopted anywhere in the runtime code, so the
-    # marker-gated lint produces zero findings — it cannot mass-false-positive or
-    # block CI. This is the core safety guarantee of the C2.7 Vorbau.
+def test_real_tree_c2_8_pilot_findings_match_expected():
+    # C2.8 adoption pilot: three canonical sinks annotated in the real tree.
+    # - resolve_canonical_md() in merge.py: marked as canonical sink; md_parts
+    #   annotated as derived_projection at one call site → 4 expected L4 findings
+    #   (file-scoped over-approximation propagates the authority to all resolve_canonical_md(md_parts)
+    #   calls in the file).
+    # - produce_citation_map() in citation_map.py: marked as canonical sink, no
+    #   low-authority variables in scope → 0 findings (clean producer).
+    # - produce_agent_reading_pack() in agent_reading_pack.py: marked as canonical
+    #   sink; health annotated as diagnostic_signal but flows via PackModel
+    #   intermediary → 0 findings (reveals indirect-flow gap in file-scoped engine).
     report = lint_default_tree()
-    assert report.status == "pass", [f.to_dict() for f in report.findings]
-    assert report.finding_count == 0
     assert report.files_skipped == 0
     assert report.files_scanned >= 20
+
+    l4_merge = [
+        f for f in report.findings
+        if f.rule == "L4" and f.file.endswith("merge.py")
+    ]
+    unexpected = [
+        f for f in report.findings
+        if not (f.rule == "L4" and f.file.endswith("merge.py"))
+    ]
+    assert unexpected == [], f"Unexpected findings outside merge.py L4: {[f.to_dict() for f in unexpected]}"
+    # All L4 findings are md_parts → resolve_canonical_md (intentional boundary crossing).
+    assert len(l4_merge) == 4
+    assert all(f.symbol == "md_parts" for f in l4_merge)
+    assert {f.line for f in l4_merge} == {5699, 5714, 5824, 5843}
 
 
 # --- CLI smoke --------------------------------------------------------------
 
 
-def test_cli_governance_ast_lint_exit_zero():
+def test_cli_governance_ast_lint_exits_one_for_c2_8_findings():
+    # C2.8 pilot annotations produce findings → exit 1 (warn). The lint is still
+    # non-blocking (blocking: false) and not wired into any CI gate.
     from merger.lenskit.cli.main import main
 
-    assert main(["governance", "ast-lint"]) == 0
+    assert main(["governance", "ast-lint"]) == 1
 
 
 def test_cli_governance_ast_lint_json_is_valid(capsys):
     from merger.lenskit.cli.main import main
 
     rc = main(["governance", "ast-lint", "--json"])
-    assert rc == 0
+    assert rc == 1
     payload = json.loads(capsys.readouterr().out)
-    assert payload["status"] == "pass"
+    assert payload["status"] == "warn"
     assert payload["experimental"] is True
     assert payload["blocking"] is False
     assert payload["authority"] == "diagnostic_signal"
-    assert payload["finding_count"] == 0
+    assert payload["finding_count"] == 4
     assert payload["rules_covered"] == list(RULES_COVERED)
