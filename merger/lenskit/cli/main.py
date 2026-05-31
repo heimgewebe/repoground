@@ -46,6 +46,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_governance import register_governance_commands
     register_governance_commands(subparsers)
 
+    # Doc-freshness command (diagnostic: docs-vs-code drift)
+    from .cmd_doc_freshness import register_doc_freshness_commands
+    register_doc_freshness_commands(subparsers)
+
     # rLens client command
     from .cmd_rlens_client import register_rlens_client_commands
     register_rlens_client_commands(subparsers)
@@ -219,6 +223,18 @@ def main(args: Optional[List[str]] = None) -> int:
             return run_governance_ast_lint(parsed_args)
         else:
             parser.parse_args(["governance", "--help"])
+            return 0
+    elif parsed_args.command == "doc-freshness":
+        from .cmd_doc_freshness import (
+            run_doc_freshness_inspect,
+            run_doc_freshness_update,
+        )
+        if parsed_args.doc_freshness_cmd == "inspect":
+            return run_doc_freshness_inspect(parsed_args)
+        elif parsed_args.doc_freshness_cmd == "update":
+            return run_doc_freshness_update(parsed_args)
+        else:
+            parser.parse_args(["doc-freshness", "--help"])
             return 0
     elif parsed_args.command == "artifact":
         from . import cmd_artifact

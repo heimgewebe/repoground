@@ -23,6 +23,7 @@ das Inventar listet Artefakte, diese Matrix beschreibt die Übergänge.
 | `context_bundle` | `agent_query_session` | Session verweist auf anderen Kontext | `context_bundle` + `artifact_refs` | `test_agent_session_builder.py` | Session neu erzeugen |
 | `architecture_summary` | architecture graph / `graph_index` | Summary behauptet nicht belegte Kante | Graph Contract / Graph Index, Summary nur Diagnose | Graph-Struktur-Anker: `test_graph_eval.py`, `test_graph_index.py`; dedizierter Summary-vs-Graph-Guard fehlt | Summary regenerieren |
 | PR-Schau JSON | PR-Schau Markdown | JSON meldet vollständig, Markdown fehlt oder ist unvollständig | Markdown Content + Completeness Block | `pr_schau_verify` als Verifier-Pfad; dedizierter Completeness-Test fehlt. `test_pr_schau_consumer_gate.py` prüft nur Consumer-Zugriff | PR-Schau Bundle neu bauen |
+| Doku-Aussage (Spec/Roadmap/TODO) | Code/Test/Proof-Beleg | Doku behauptet anderen Implementierungsstand als der Code (z. B. stale `TODO`, „existiert nicht") | Code/Test/Proof = Beleg; Doku nur Behauptung | `lenskit doc-freshness inspect` + `test_doc_freshness.py` (diagnostisch, nicht-blockierend); Registry `docs/doc-freshness-registry.yml` gegen `doc-freshness-registry.v1.schema.json` | `lenskit doc-freshness update --write` regeneriert `docs/_generated/doc-freshness.md` + stempelt `last_verified` |
 
 ## citation_map_jsonl — geplante Driftkanten (kein Producer vorhanden)
 

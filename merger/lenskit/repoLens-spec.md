@@ -50,9 +50,18 @@ Header muss enthalten:
 
 ---
 
-### TODO: Super-Merger / Extras (für google-labs-jules[bot])
+### Super-Merger / Extras — implementiert (2026-05)
 
-Die folgenden Punkte sind für die Super-Merger-Ausbaustufe umzusetzen.
+> **Status: implementiert.** `ExtrasConfig` und die Extras-Schalter sind in
+> `merger/lenskit/core/merge.py` umgesetzt (`class ExtrasConfig`,
+> `_build_extras_meta()`, Emission in den `@meta`-Block). Beleg:
+> `docs/proofs/weiterentwicklungsplan-2026-05-reconciliation-proof.md` §2 (Zeile 1)
+> und `docs/proofs/doc-freshness-registry-v0-proof.md`. Dieser Abschnitt
+> dokumentiert daher den **umgesetzten** Extras-Contract; er ist kein offenes TODO
+> mehr. Drift wird durch den Doc-Freshness-Eintrag
+> `repolens-spec-super-merger-extras` überwacht.
+
+Der Super-Merger-Ausbau umfasst die folgenden, umgesetzten Punkte:
 
 1. **Extras-Schalter in der UI implementieren**
    - Flags in `MergerUI`:

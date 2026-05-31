@@ -1,0 +1,114 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/doc-freshness-registry.v1.schema.json",
+  "title": "Doc-Freshness Registry (doc-freshness-registry v1.0)",
+  "description": "Machine-readable binding between documentation claims (TODOs, roadmap/spec/blueprint statements) and verifiable code/test/proof evidence. The registry is the source-of-truth layer; the verifier (lenskit doc-freshness) checks whether each declared status still matches the code reality and flags contradictions (drift). This artifact is itself a diagnostic_signal: a clean run does not prove the documentation is complete or correct, only that no declared claim contradicts its declared evidence.",
+  "type": "object",
+  "required": ["kind", "version", "entries"],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.doc_freshness_registry"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "authority": {
+      "type": "string",
+      "const": "diagnostic_signal",
+      "description": "Optional, const. The registry and its verifier report are diagnostic signals, never canonical content authority."
+    },
+    "risk_class": {
+      "type": "string",
+      "const": "diagnostic"
+    },
+    "does_not_prove": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional machine-readable inference boundary (L3-style). A green verify does not prove docs are complete/correct, only that declared claims do not contradict declared evidence."
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["id", "doc", "claim", "status", "owner", "last_verified", "evidence"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Stable, unique slug for this tracked claim."
+        },
+        "doc": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path of the document that carries the claim."
+        },
+        "locator": {
+          "type": "string",
+          "description": "Optional human pointer (heading/anchor/section) to the claim inside the doc."
+        },
+        "claim": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Short statement of what the doc asserts (e.g. 'ExtrasConfig / Super-Merger extras implemented')."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["none", "partial", "done", "stale", "historical"],
+          "description": "Declared status of the claim in the doc. none=not started, partial=v1 done/rest open, done=implemented and the doc reflects it, stale=known drift (doc still presents it as open though it is done), historical=explanatory/archival, not status-checked."
+        },
+        "normative": {
+          "type": "boolean",
+          "description": "True when the carrying doc is normative (spec, master-roadmap, contracts-matrix). Normative + stale is the class an enforcement promotion would block first; historical docs are never blocked.",
+          "default": false
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who is accountable for keeping this claim fresh (doc/area owner, not necessarily a person)."
+        },
+        "last_verified": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+          "description": "ISO date this entry was last machine-verified. `doc-freshness update --write` stamps this for entries whose evidence verifies."
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": ["kind", "target"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["symbol", "file", "text", "absent_text", "proof", "test"],
+          "description": "symbol: 'relpath::Name' defined (AST for .py, substring otherwise). file: path exists. text: 'relpath::needle' substring present. absent_text: 'relpath::needle' substring absent. proof: docs/proofs path exists. test: 'relpath[::test_name]' exists."
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "implies": {
+          "type": "string",
+          "enum": ["done", "open"],
+          "description": "Optional. What the *presence* of this evidence implies about implementation state. symbol/test/proof default to 'done'; text/absent_text default to 'none' (no implication) unless set. 'done' evidence present while status is none triggers an understated-drift finding."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

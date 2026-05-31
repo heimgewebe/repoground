@@ -551,6 +551,30 @@ Schließt Lücke (1) aus C2.8 §9.
   PackModel`); (2) Hebung marker-gated → inferenzbasiert mit gemessener FP-Rate vor jeder
   CI-Promotion; (3) CI-Promotion erst nach niedriger FP-Rate. C4 bleibt separat offen.
 
+## Track D — Doc-Freshness (Doku ↔ Code Drift)
+
+Dieser Track schließt die Lücke „kein maschinenlesbarer Mechanismus, der
+Roadmap-/TODO-/Spec-Aussagen gegen den realen Code-Stand aktuell hält".
+Unabhängig von A–C; blockiert nichts.
+
+### D1 — Doc-Freshness Registry / Verifier v0 (umgesetzt)
+
+Status: **UMGESETZT** (diagnostisch, nicht-blockierend), Beleg
+`docs/proofs/doc-freshness-registry-v0-proof.md`.
+Scope: declarative Registry (`docs/doc-freshness-registry.yml` gegen
+`contracts/doc-freshness-registry.v1.schema.json`) bindet Doku-Claims an
+verifizierbare Belege (`symbol`/`file`/`text`/`absent_text`/`proof`/`test`);
+`merger/lenskit/core/doc_freshness.py` + CLI `lenskit doc-freshness
+inspect|update` klassifizieren Drift und regenerieren die Ansicht
+`docs/_generated/doc-freshness.md`. Pilot: der `repoLens-spec.md`
+Super-Merger/Extras-Drift (jetzt geschlossen, gegen Rückfall gesichert).
+
+- **Diagnose vor Blocking** (wie Drift-Matrix): warnend, kein scharfer Gate.
+- **Keine** Prosa-Auto-Umschreibung; **keine** LLM-Semantikprüfung; `stale` wird
+  sichtbar getrackt (`stale_confirmed`), nicht stumm unterdrückt (wie C2.9).
+- Nächste Slices: `inspect --strict` für normative Specs blockierend schalten;
+  Generierte-Ansicht-Staleness als Guard; breitere Registry-Abdeckung.
+
 ## Paralleltrack Atlas
 - Atlas = physische Wahrnehmung / Filesystem-Snapshot
 - Lenskit = Knowledge Compiler / Evidence Runtime

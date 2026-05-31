@@ -1,0 +1,74 @@
+name: Doc-Freshness (diagnostic v0)
+
+# Diagnostic, NON-BLOCKING doc-freshness verifier. Couples documentation claims
+# (TODOs, roadmap/spec statements) to verifiable code/test/proof evidence via
+# docs/doc-freshness-registry.yml and surfaces drift, without (yet) blocking.
+# Follows the artifact-drift-matrix rollout rule (diagnose before blocking):
+# only the test suite is blocking; `inspect` and the generated-view staleness
+# check are surfaced via continue-on-error. Promotion to a blocking
+# `inspect --strict` gate is the documented next slice
+# (docs/proofs/doc-freshness-registry-v0-proof.md §7).
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "merger/lenskit/core/doc_freshness.py"
+      - "merger/lenskit/cli/cmd_doc_freshness.py"
+      - "merger/lenskit/cli/main.py"
+      - "merger/lenskit/contracts/doc-freshness-registry.v1.schema.json"
+      - "docs/doc-freshness-registry.yml"
+      - "docs/_generated/doc-freshness.md"
+      - "merger/lenskit/tests/test_doc_freshness.py"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - ".github/workflows/doc-freshness.yml"
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "merger/lenskit/core/doc_freshness.py"
+      - "merger/lenskit/cli/cmd_doc_freshness.py"
+      - "merger/lenskit/cli/main.py"
+      - "merger/lenskit/contracts/doc-freshness-registry.v1.schema.json"
+      - "docs/doc-freshness-registry.yml"
+      - "docs/_generated/doc-freshness.md"
+      - "merger/lenskit/tests/test_doc_freshness.py"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - ".github/workflows/doc-freshness.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  doc-freshness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Doc-freshness inspect (diagnostic, non-blocking)
+        # Surfaces drift in the run log without failing the build (v0). Exit 1
+        # on findings is expected and tolerated here.
+        continue-on-error: true
+        run: python -m merger.lenskit.cli.main doc-freshness inspect
+
+      - name: Generated view in sync (diagnostic, non-blocking)
+        # docs/_generated/doc-freshness.md must match a fresh regeneration from
+        # the registry. Non-blocking for v0; promotion to blocking is planned.
+        continue-on-error: true
+        run: |
+          python -m merger.lenskit.cli.main doc-freshness update --write
+          git diff --exit-code docs/_generated/doc-freshness.md
+
+      - name: Doc-freshness test suite (blocking)
+        run: pytest -q merger/lenskit/tests/test_doc_freshness.py

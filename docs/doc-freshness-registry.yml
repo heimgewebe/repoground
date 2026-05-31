@@ -1,0 +1,91 @@
+# Doc-Freshness Registry (doc-freshness-registry v1.0)
+#
+# Source-of-truth binding between documentation claims and the verifiable
+# code/test/proof evidence that proves or refutes them. Validated against
+# merger/lenskit/contracts/doc-freshness-registry.v1.schema.json.
+#
+# Verify:    python -m merger.lenskit.cli.main doc-freshness inspect
+# Regenerate the human view + stamp last_verified:
+#            python -m merger.lenskit.cli.main doc-freshness update --write
+#
+# Status values: none | partial | done | stale | historical
+# `historical` docs are never status-checked; `stale` declares a KNOWN, tracked
+# drift (surfaced, not suppressed — mirrors the C2.9 authority-upgrade registry).
+#
+# This file is hand-authored; docs/_generated/doc-freshness.md is generated FROM
+# it (do not hand-edit the generated view).
+
+kind: lenskit.doc_freshness_registry
+version: "1.0"
+authority: diagnostic_signal
+risk_class: diagnostic
+does_not_prove:
+  - "a green verify does not prove the docs are complete or correct, only that no tracked claim contradicts its declared evidence"
+
+entries:
+  # --- Pilot: the drift the reconciliation proof explicitly deferred to a
+  # focused PR (repoLens-spec.md still framed ExtrasConfig as a TODO though it is
+  # implemented at core/merge.py). This PR fixes the spec; the absent_text
+  # evidence asserts the stale TODO heading is gone, the symbol asserts the
+  # implementation exists. ------------------------------------------------------
+  - id: repolens-spec-super-merger-extras
+    doc: merger/lenskit/repoLens-spec.md
+    locator: "section 'Super-Merger / Extras'"
+    claim: "Super-Merger extras (ExtrasConfig + extras flags) are implemented"
+    status: done
+    normative: true
+    owner: repolens-spec
+    last_verified: "2026-05-31"
+    evidence:
+      - kind: symbol
+        target: "merger/lenskit/core/merge.py::ExtrasConfig"
+      - kind: proof
+        target: "docs/proofs/weiterentwicklungsplan-2026-05-reconciliation-proof.md"
+      - kind: absent_text
+        target: "merger/lenskit/repoLens-spec.md::### TODO: Super-Merger / Extras"
+    notes: >-
+      Reconciliation proof §6.1 flagged this exact section as drift
+      (ExtrasConfig at core/merge.py:458, spec still said "umzusetzen") and left
+      the spec edit to a focused PR. The absent_text guard keeps the TODO heading
+      from silently returning.
+
+  # --- A previously-real drift the reconciliation proof already corrected
+  # (system-map claimed federation modules "existieren derzeit nicht"). Tracked
+  # so it cannot regress. ------------------------------------------------------
+  - id: system-map-federation-exists
+    doc: docs/architecture/system-map.lenskit.md
+    locator: "section 'Bekannte Lücken' / Federation"
+    claim: "Federation modules exist in the source tree"
+    status: done
+    normative: false
+    owner: architecture
+    last_verified: "2026-05-31"
+    evidence:
+      - kind: symbol
+        target: "merger/lenskit/core/federation.py::init_federation"
+      - kind: absent_text
+        target: "docs/architecture/system-map.lenskit.md::existieren derzeit nicht im Quellbaum"
+    notes: >-
+      Corrected in the reconciliation PR (proof §6.2). The absent_text guard
+      prevents the stale "do not exist" claim from reappearing.
+
+  # --- A genuinely-open item: demonstrates that declared-`partial` work is NOT
+  # false-flagged even though related v1 symbols exist. ------------------------
+  - id: agent-reading-pack-v2-claim-evidence-map
+    doc: docs/roadmap/lenskit-master-roadmap.md
+    locator: "Phase 5 / Agent Reading Pack v2"
+    claim: "Agent Reading Pack v2 claim_evidence_map is produced (Arbeitspaket F)"
+    status: partial
+    normative: false
+    owner: roadmap
+    last_verified: "2026-05-31"
+    evidence:
+      - kind: symbol
+        target: "merger/lenskit/core/agent_reading_pack.py::produce_agent_reading_pack"
+      - kind: text
+        target: "merger/lenskit/core/agent_reading_pack.py::`claim_evidence_map` is not yet produced"
+        implies: open
+    notes: >-
+      Agent Reading Pack v1 ships; the v2 claim_evidence_map is still open
+      (agent_reading_pack.py marks it "not yet produced"). Declared partial so
+      the verifier tracks it without demanding completion.
