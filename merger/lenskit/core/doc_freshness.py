@@ -650,7 +650,6 @@ def restamp_last_verified(
     Operates on the raw text (preserves comments, order, formatting). ``updates``
     maps entry id → ISO date. Returns ``(new_text, changed_ids)``.
     """
-    import re
 
     id_re = re.compile(r"^\s*-?\s*id:\s*(['\"]?)([A-Za-z0-9][A-Za-z0-9-]*)\1\s*$")
     lv_re = re.compile(r"^(?P<indent>\s*)last_verified:\s*.*$")
