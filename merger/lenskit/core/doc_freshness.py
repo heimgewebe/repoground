@@ -247,6 +247,15 @@ def _present_open_markers(results: Iterable[EvidenceResult]) -> list[EvidenceRes
     ]
 
 
+def _missing_open_markers(results: Iterable[EvidenceResult]) -> list[EvidenceResult]:
+    """text refs declared ``implies: open`` that are NOT present (open marker gone)."""
+    return [
+        r
+        for r in results
+        if r.ref.kind == "text" and r.ref.effective_implies == "open" and not r.satisfied
+    ]
+
+
 def _hard_dangling(results: Iterable[EvidenceResult]) -> list[EvidenceResult]:
     """symbol/file/proof/test refs that are not satisfied (cited but absent)."""
     return [
@@ -291,6 +300,15 @@ def classify_entry(
                 "error",
                 "partial claim cites evidence that no longer exists: "
                 + "; ".join(d.detail for d in dangling),
+            )
+        missing_open = _missing_open_markers(results)
+        if missing_open:
+            return (
+                "partial_maybe_resolved",
+                "warning",
+                "partial claim's open marker(s) are gone; implementation may be "
+                "complete — either promote to done, mark stale, or verify: "
+                + "; ".join(m.detail for m in missing_open),
             )
         return "partial_ok", "ok", "partial (mixed state asserted by owner)"
 
@@ -472,6 +490,27 @@ def verify(data: dict, repo_root: Path, strict: bool = False) -> DocFreshnessRep
     """Verify every registry entry against the live tree."""
     report = DocFreshnessReport(strict=strict)
     for entry in data.get("entries", []):
+        doc_path_rel = entry.get("doc", "")
+        doc_path = repo_root / doc_path_rel
+
+        # Check if the document exists; if not, short-circuit to dangling_doc error.
+        if not doc_path.is_file():
+            dangling_result = EntryResult(
+                entry_id=entry.get("id", "<no-id>"),
+                doc=doc_path_rel,
+                claim=entry.get("claim", ""),
+                declared_status=entry.get("status", ""),
+                normative=bool(entry.get("normative", False)),
+                classification="dangling_doc",
+                severity="error",
+                message=f"registry entry's doc does not exist: {doc_path_rel}",
+                evidence=[],
+            )
+            report.results.append(dangling_result)
+            report.findings.append(dangling_result)
+            report.entries_scanned += 1
+            continue
+
         refs = _entry_to_refs(entry)
         results = [resolve_evidence(ref, repo_root) for ref in refs]
         classification, severity, message = classify_entry(
@@ -499,12 +538,14 @@ def verify(data: dict, repo_root: Path, strict: bool = False) -> DocFreshnessRep
 _STATUS_BADGE = {
     "consistent": "✅ consistent",
     "partial_ok": "🟡 partial",
+    "partial_maybe_resolved": "🟡 partial (maybe resolved)",
     "historical": "📜 historical",
     "stale_confirmed": "⚠️ stale (tracked)",
     "stale_marker_present": "⚠️ stale marker",
     "stale_resolved": "🔧 stale resolved",
     "understated": "⬆️ understated",
     "regressed": "❌ regressed",
+    "dangling_doc": "❌ dangling doc",
 }
 
 

@@ -202,6 +202,15 @@ def test_partial_regressed_when_evidence_vanishes():
     assert cls == "regressed"
 
 
+def test_partial_maybe_resolved_when_open_marker_gone():
+    """partial entries with text implies:open should warn when marker disappears."""
+    results = [resolve_evidence_stub("text", satisfied=False, implies="open")]
+    cls, sev, msg = classify_entry("partial", results)
+    assert cls == "partial_maybe_resolved"
+    assert sev == "warning"
+    assert "open marker" in msg.lower()
+
+
 def test_historical_never_checked():
     results = [resolve_evidence_stub("symbol", satisfied=False, implies="done")]
     cls, sev, _ = classify_entry("historical", results)
@@ -297,6 +306,32 @@ def test_verify_dangling_evidence_is_error(tmp_path):
     assert report.status == "fail"
     assert report.error_count == 1
     assert report.results[0].classification == "regressed"
+
+
+def test_verify_dangling_doc_is_error():
+    """Registry entry with missing doc file should report dangling_doc error."""
+    data = _make_registry(
+        [
+            {
+                "id": "missing-doc",
+                "doc": "nonexistent.md",
+                "claim": "test",
+                "status": "done",
+                "normative": True,
+                "evidence": [{"kind": "symbol", "target": "mod.py::Foo"}],
+            }
+        ]
+    )
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmpdir:
+        root = Path(tmpdir)
+        # Create the evidence file but NOT the doc file
+        _write(root, "mod.py", "class Foo:\n    pass\n")
+        report = verify(data, root)
+        assert report.status == "fail"
+        assert report.error_count == 1
+        assert any(r.classification == "dangling_doc" for r in report.results)
+        assert any("does not exist" in r.message for r in report.results)
 
 
 def test_strict_escalates_normative_stale_confirmed(tmp_path):
