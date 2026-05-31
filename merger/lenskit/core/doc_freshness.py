@@ -40,7 +40,10 @@ import ast
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+import re
 from typing import Iterable, Optional
+
+from merger.lenskit.core.path_security import resolve_secure_path
 
 # ``kind`` of evidence whose *presence* implies the work is implemented ("done").
 _DONE_KINDS = frozenset({"symbol", "test", "proof"})
@@ -134,7 +137,10 @@ def resolve_evidence(ref: EvidenceRef, repo_root: Path) -> EvidenceResult:
     it means the forbidden needle is genuinely absent).
     """
     rel, needle = _split_target(ref.target)
-    path = (repo_root / rel).resolve()
+    try:
+        path = resolve_secure_path(repo_root, rel)
+    except ValueError as exc:
+        return EvidenceResult(ref, False, f"invalid path: {exc}")
 
     if ref.kind in ("file", "proof"):
         ok = path.is_file()
@@ -145,7 +151,8 @@ def resolve_evidence(ref: EvidenceRef, repo_root: Path) -> EvidenceResult:
             return EvidenceResult(ref, False, f"MISSING test file: {rel}")
         if needle:
             text = _read(path)
-            ok = f"def {needle}" in text
+            pattern = rf"(?m)^\s*(?:async\s+def|def)\s+{re.escape(needle)}\b"
+            ok = bool(re.search(pattern, text))
             return EvidenceResult(
                 ref, ok, f"{'found' if ok else 'MISSING'} test {needle} in {rel}"
             )
@@ -184,7 +191,7 @@ def resolve_evidence(ref: EvidenceRef, repo_root: Path) -> EvidenceResult:
 
 def _read(path: Path) -> str:
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -500,9 +507,24 @@ def verify(data: dict, repo_root: Path, strict: bool = False) -> DocFreshnessRep
     report = DocFreshnessReport(strict=strict)
     for entry in data.get("entries", []):
         doc_path_rel = entry.get("doc", "")
-        doc_path = repo_root / doc_path_rel
+        try:
+            doc_path = resolve_secure_path(repo_root, doc_path_rel)
+        except ValueError as exc:
+            dangling_result = EntryResult(
+                entry_id=entry.get("id", "<no-id>"),
+                doc=doc_path_rel,
+                claim=entry.get("claim", ""),
+                declared_status=entry.get("status", ""),
+                normative=bool(entry.get("normative", False)),
+                classification="dangling_doc",
+                severity="error",
+                message=f"registry entry doc path is invalid: {exc}",
+                evidence=[],
+            )
+            report.results.append(dangling_result)
+            report.entries_scanned += 1
+            continue
 
-        # Check if the document exists; if not, short-circuit to dangling_doc error.
         if not doc_path.is_file():
             dangling_result = EntryResult(
                 entry_id=entry.get("id", "<no-id>"),

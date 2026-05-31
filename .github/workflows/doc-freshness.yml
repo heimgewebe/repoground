@@ -81,10 +81,8 @@ jobs:
       - name: Generated view in sync (diagnostic, non-blocking)
         # docs/_generated/doc-freshness.md must match a fresh regeneration from
         # the registry. Non-blocking for v0; promotion to blocking is planned.
-        # Note: doc-freshness update --write can mutate docs/doc-freshness-registry.yml
-        # (by stamping last_verified), so we run this after live registry tests and
-        # check both files.
+        # Use --no-stamp to avoid date-based registry mutations during CI sync checks.
         continue-on-error: true
         run: |
-          python -m merger.lenskit.cli.main doc-freshness update --write
+          python -m merger.lenskit.cli.main doc-freshness update --write --no-stamp
           git diff --exit-code docs/_generated/doc-freshness.md docs/doc-freshness-registry.yml

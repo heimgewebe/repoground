@@ -65,6 +65,14 @@ def register_doc_freshness_commands(subparsers) -> None:
         action="store_true",
         help="Persist changes (default is a dry run that prints what would change).",
     )
+    update_parser.add_argument(
+        "--no-stamp",
+        action="store_true",
+        help=(
+            "Regenerate the generated view without updating last_verified "
+            "(useful for deterministic CI sync checks)."
+        ),
+    )
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -152,19 +160,19 @@ def run_doc_freshness_update(args: argparse.Namespace) -> int:
         return 2
 
     report = verify(data, repo_root, strict=False)
+    stamp = not bool(getattr(args, "no_stamp", False))
     today = date.today().isoformat()
 
     # Stamp last_verified for entries whose state is OK (never for findings).
     ok_ids = verified_entry_ids(report)
     registry_text = registry_path.read_text(encoding="utf-8")
-    new_registry_text, changed_ids = restamp_last_verified(
-        registry_text, {eid: today for eid in ok_ids}
-    )
+    stamp_updates = {eid: today for eid in ok_ids} if stamp else {}
+    new_registry_text, changed_ids = restamp_last_verified(registry_text, stamp_updates)
     registry_changed = new_registry_text != registry_text
 
     # Regenerate the human-readable view from the verified registry. Use the
     # restamped data so the view's last_verified column is consistent.
-    stamped_data = _restamp_data(data, ok_ids, today)
+    stamped_data = _restamp_data(data, ok_ids, today) if stamp else data
     # Deterministic "generated_at": derived from the data (max last_verified),
     # NOT wall-clock, so regeneration is a pure function of the registry + tree
     # and a CI "regenerate & git-diff" check does not flap across days.
@@ -179,6 +187,8 @@ def run_doc_freshness_update(args: argparse.Namespace) -> int:
     print(f"doc-freshness update — status: {report.status.upper()}")
     print(f"  verified entries (stampable): {len(ok_ids)}")
     print(f"  registry last_verified to change: {len(changed_ids)} {changed_ids or ''}")
+    if not stamp:
+        print("  stamping disabled (--no-stamp)")
     print(f"  generated view: {'WOULD CHANGE' if view_changed else 'up to date'} ({view_path})")
     if report.findings:
         print(

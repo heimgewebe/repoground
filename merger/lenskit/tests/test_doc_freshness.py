@@ -104,6 +104,27 @@ def test_file_proof_test_evidence(tmp_path):
     ).satisfied
 
 
+def test_test_evidence_matches_async_def(tmp_path):
+    _write(tmp_path, "tests/test_async.py", "async def test_async_case():\n    assert True\n")
+    assert resolve_evidence(
+        EvidenceRef("test", "tests/test_async.py::test_async_case"), tmp_path
+    ).satisfied
+
+
+def test_resolve_evidence_rejects_path_escape(tmp_path):
+    outside = tmp_path.parent / "outside.py"
+    outside.write_text("class Hidden:\n    pass\n", encoding="utf-8")
+    res = resolve_evidence(EvidenceRef("symbol", "../outside.py::Hidden"), tmp_path)
+    assert not res.satisfied
+    assert "invalid path" in res.detail
+
+
+def test_read_replaces_invalid_utf8(tmp_path):
+    p = tmp_path / "bin.dat"
+    p.write_bytes(b"\xff\xfeTODO")
+    assert resolve_evidence(EvidenceRef("text", "bin.dat::TODO"), tmp_path).satisfied
+
+
 def test_symbol_in_non_python_file_uses_substring(tmp_path):
     _write(tmp_path, "schema.json", '{"const": "WidgetThing"}\n')
     assert resolve_evidence(
@@ -341,6 +362,26 @@ def test_verify_dangling_doc_is_error():
         assert report.error_count == 1
         assert any(r.classification == "dangling_doc" for r in report.results)
         assert any("does not exist" in r.message for r in report.results)
+
+
+def test_verify_dangling_doc_invalid_path_is_error(tmp_path):
+    data = _make_registry(
+        [
+            {
+                "id": "invalid-doc",
+                "doc": "../outside.md",
+                "claim": "test",
+                "status": "done",
+                "normative": True,
+                "evidence": [{"kind": "symbol", "target": "mod.py::Foo"}],
+            }
+        ]
+    )
+    _write(tmp_path, "mod.py", "class Foo:\n    pass\n")
+    report = verify(data, tmp_path)
+    assert report.status == "fail"
+    assert any(r.classification == "dangling_doc" for r in report.results)
+    assert any("invalid" in r.message for r in report.results)
 
 
 def test_verify_missing_absent_text_target_is_error(tmp_path):
