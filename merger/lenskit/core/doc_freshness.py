@@ -169,12 +169,13 @@ def resolve_evidence(ref: EvidenceRef, repo_root: Path) -> EvidenceResult:
         if needle is None:
             return EvidenceResult(ref, False, f"{ref.kind} ref needs '::needle'")
         if not path.is_file():
-            # A text claim about a missing file cannot hold; absent_text trivially holds.
-            present = False
-            detail = f"file MISSING: {rel}"
-        else:
-            present = needle in _read(path)
-            detail = f"needle {'present' if present else 'absent'} in {rel}"
+            return EvidenceResult(
+                ref,
+                False,
+                f"MISSING file for {ref.kind} evidence: {rel}",
+            )
+        present = needle in _read(path)
+        detail = f"needle {'present' if present else 'absent'} in {rel}"
         satisfied = present if ref.kind == "text" else (not present)
         return EvidenceResult(ref, satisfied, detail)
 
@@ -257,11 +258,19 @@ def _missing_open_markers(results: Iterable[EvidenceResult]) -> list[EvidenceRes
 
 
 def _hard_dangling(results: Iterable[EvidenceResult]) -> list[EvidenceResult]:
-    """symbol/file/proof/test refs that are not satisfied (cited but absent)."""
+    """Evidence refs whose cited file/symbol/test/proof target is dangling."""
     return [
         r
         for r in results
-        if r.ref.kind in ("symbol", "file", "proof", "test") and not r.satisfied
+        if (
+            r.ref.kind in ("symbol", "file", "proof", "test")
+            and not r.satisfied
+        )
+        or (
+            r.ref.kind in ("text", "absent_text")
+            and not r.satisfied
+            and r.detail.startswith("MISSING file")
+        )
     ]
 
 

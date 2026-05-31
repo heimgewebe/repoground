@@ -75,6 +75,15 @@ def test_text_and_absent_text(tmp_path):
     ).satisfied
 
 
+def test_text_and_absent_text_missing_file_are_not_satisfied(tmp_path):
+    assert not resolve_evidence(
+        EvidenceRef("text", "missing.md::TODO"), tmp_path
+    ).satisfied
+    assert not resolve_evidence(
+        EvidenceRef("absent_text", "missing.md::TODO"), tmp_path
+    ).satisfied
+
+
 def test_file_proof_test_evidence(tmp_path):
     _write(tmp_path, "docs/proofs/x-proof.md", "# proof\n")
     _write(tmp_path, "tests/test_x.py", "def test_x():\n    assert True\n")
@@ -332,6 +341,33 @@ def test_verify_dangling_doc_is_error():
         assert report.error_count == 1
         assert any(r.classification == "dangling_doc" for r in report.results)
         assert any("does not exist" in r.message for r in report.results)
+
+
+def test_verify_missing_absent_text_target_is_error(tmp_path):
+    _write(tmp_path, "spec.md", "done\n")
+    _write(tmp_path, "core.py", "class Thing:\n    pass\n")
+    data = _make_registry(
+        [
+            {
+                "id": "missing-absent-text-target",
+                "doc": "spec.md",
+                "claim": "Thing done",
+                "status": "done",
+                "owner": "x",
+                "last_verified": "2026-05-31",
+                "evidence": [
+                    {"kind": "symbol", "target": "core.py::Thing"},
+                    {"kind": "absent_text", "target": "missing.md::### TODO: Thing"},
+                ],
+            }
+        ]
+    )
+
+    report = verify(data, tmp_path)
+    assert report.status == "fail"
+    assert report.error_count == 1
+    assert report.results[0].classification == "regressed"
+    assert "MISSING file" in report.results[0].message
 
 
 def test_strict_escalates_normative_stale_confirmed(tmp_path):

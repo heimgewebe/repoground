@@ -39,6 +39,8 @@ entries:
     evidence:
       - kind: symbol
         target: "merger/lenskit/core/merge.py::ExtrasConfig"
+      - kind: symbol
+        target: "merger/lenskit/core/merge.py::_build_extras_meta"
       - kind: proof
         target: "docs/proofs/weiterentwicklungsplan-2026-05-reconciliation-proof.md"
       - kind: absent_text
