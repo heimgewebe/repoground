@@ -82,4 +82,15 @@ Die Systemkommunikation läuft über JSON Schemas in `merger/lenskit/contracts/`
 - `range-ref.v1.schema.json` (Build/Resolver → Provenienz-Sicherheit)
 
 ## 3. Bekannte Lücken (Systemkarte)
-- **Phase 5 (Cross-Repo):** Föderations-Module (z.B. `federation_index.py`, `federation_links.json`) existieren derzeit nicht im Quellbaum. Die Query-Runtime ist rein lokal auf ein Index-Artefakt beschränkt.
+- **Cross-Repo / Federation (Roadmap Phase 4):** Föderations-Module sind
+  inzwischen vorhanden — `merger/lenskit/core/federation.py`,
+  `merger/lenskit/retrieval/federation_query.py`,
+  `merger/lenskit/cli/cmd_federation.py` sowie die Contracts
+  `federation-index/cross-repo-links/federation-conflicts/federation-trace.v1`.
+  Die *lokale* Query-Runtime (`query_core`) bleibt bewusst auf ein Index-Artefakt
+  beschränkt; föderierte Abfragen laufen über `federation_query`. Offen bleibt
+  das **Hardening** (Identity-Engine, Conflict-Behandlung) — siehe
+  `docs/roadmap/lenskit-master-roadmap.md` (Phase 4).
+  *(Korrigiert 2026-05-31: frühere Aussage „existieren derzeit nicht im
+  Quellbaum" war veraltet; belegt in
+  `docs/proofs/weiterentwicklungsplan-2026-05-reconciliation-proof.md`.)*

@@ -413,3 +413,39 @@ def test_non_source_file_safe_relative_path_accepted(tmp_path):
     }
     result = resolve_range_ref(manifest_path, ref)
     assert result["text"] == "hello world\n"
+
+
+# ---------------------------------------------------------------------------
+# Schema-load memoization (perf: avoid re-reading the immutable range-ref schema
+# once per chunk on large bundles). Behaviour is unchanged; only the second and
+# subsequent loads of the same schema path are served from cache.
+# ---------------------------------------------------------------------------
+
+def test_load_schema_is_memoized():
+    from merger.lenskit.core import range_resolver
+
+    range_resolver._load_schema.cache_clear()
+
+    v2_path = range_resolver._RANGE_REF_V2_SCHEMA_PATH
+    first = range_resolver._load_schema(v2_path)
+    second = range_resolver._load_schema(v2_path)
+
+    # Same object on the second call -> no re-read / re-parse.
+    assert first is second
+    assert isinstance(first, dict)
+    assert range_resolver._load_schema.cache_info().hits >= 1
+
+
+def test_load_schema_missing_file_not_negatively_cached(tmp_path):
+    from merger.lenskit.core import range_resolver
+
+    range_resolver._load_schema.cache_clear()
+
+    missing = tmp_path / "does-not-exist.schema.json"
+    with pytest.raises(RuntimeError, match="Schema file not found"):
+        range_resolver._load_schema(missing)
+
+    # The error path must not be memoized: creating the file then loading works.
+    missing.write_text(json.dumps({"type": "object"}), encoding="utf-8")
+    loaded = range_resolver._load_schema(missing)
+    assert loaded == {"type": "object"}

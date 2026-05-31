@@ -5,6 +5,14 @@ Kurzüberblick über Ordner:
 - `merger/lenskit/` – **repoLens** (Primary Tool) – erzeugt strukturierte Merge-Berichte für KIs.
 - `merger/repomerger/` – Legacy-Merger (Standalone).
 
+## Einstieg & Dokumentation
+
+- 🚀 [Getting Started](docs/GETTING_STARTED.md) – Dump erzeugen, Bundle lesen, durchsuchen
+- 📖 [Glossar](docs/glossary.md) · [FAQ](docs/FAQ.md)
+- 🗺️ [Systemkarte](docs/architecture/system-map.lenskit.md) – Modul-Zusammenspiel
+- 🧭 [Master-Roadmap](docs/roadmap/lenskit-master-roadmap.md) – Reihenfolge & Tracks
+- 🤝 [CONTRIBUTING](CONTRIBUTING.md) · [CHANGELOG](CHANGELOG.md)
+
 ## Nutzung (Beispiele)
 
 ### repoLens (Empfohlen)

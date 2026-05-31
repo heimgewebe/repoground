@@ -1,5 +1,6 @@
 import json
 import hashlib
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -22,7 +23,20 @@ def _require_jsonschema() -> None:
         )
 
 
+@lru_cache(maxsize=8)
 def _load_schema(schema_path: Path) -> Dict[str, Any]:
+    """Load and parse a range-ref JSON schema, memoized per path.
+
+    Range-ref schemas are immutable, version-pinned files shipped in the repo
+    (``range-ref.v1.schema.json`` / ``range-ref.v2.schema.json``). Before this
+    cache, ``resolve_range_ref`` re-read and re-parsed the schema on every call,
+    i.e. once per chunk when resolving large bundles. ``lru_cache`` does not
+    memoize the raised ``RuntimeError``, so a missing file is re-checked on the
+    next call rather than negatively cached.
+
+    The returned dict MUST be treated as read-only: it is shared across calls and
+    is only ever passed to ``jsonschema.validate()``, which does not mutate it.
+    """
     if not schema_path.exists():
         raise RuntimeError(f"Schema file not found: {schema_path}")
 
