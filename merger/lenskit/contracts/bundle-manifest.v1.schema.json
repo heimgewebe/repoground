@@ -82,6 +82,7 @@
               "architecture_summary",
               "output_health",
               "citation_map_jsonl",
+              "claim_evidence_map_json",
               "agent_reading_pack"
             ],
             "description": "Machine-readable enum role for this artifact."
@@ -171,7 +172,8 @@
               "cache",
               "observation",
               "derived",
-              "external"
+              "external",
+              "evidence_index"
             ]
           },
           "regenerable": {
@@ -586,6 +588,63 @@
                 },
                 "risk_class": {
                   "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "claim_evidence_map_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/json"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "claim-evidence-map"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "evidence_index"
                 },
                 "regenerable": {
                   "const": true

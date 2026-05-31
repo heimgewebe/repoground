@@ -847,3 +847,64 @@ def test_citation_map_jsonl_cannot_claim_cache(schema):
     }
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# claim_evidence_map_json: navigation_index / derived / evidence_index.
+# Reference-only claim->evidence index; never canonical content.
+# ---------------------------------------------------------------------------
+
+def test_claim_evidence_map_json_valid_with_correct_contract(schema):
+    artifact = {
+        "role": "claim_evidence_map_json",
+        "path": "out.claim_evidence_map.json",
+        "content_type": "application/json",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "claim-evidence-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "evidence_index",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    }
+    jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_claim_evidence_map_json_wrong_contract_id_rejected(schema):
+    artifact = {
+        "role": "claim_evidence_map_json",
+        "path": "out.claim_evidence_map.json",
+        "content_type": "application/json",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "citation-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "evidence_index",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_claim_evidence_map_json_cannot_claim_canonical_content(schema):
+    artifact = {
+        "role": "claim_evidence_map_json",
+        "path": "out.claim_evidence_map.json",
+        "content_type": "application/json",
+        "bytes": 2048,
+        "sha256": TEST_ARTIFACT_SHA256,
+        "contract": {"id": "claim-evidence-map", "version": "v1"},
+        "interpretation": {"mode": "contract"},
+        "authority": "canonical_content",
+        "canonicality": "derived",
+        "risk_class": "evidence_index",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)

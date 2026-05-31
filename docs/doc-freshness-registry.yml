@@ -77,17 +77,20 @@ entries:
     doc: docs/roadmap/lenskit-master-roadmap.md
     locator: "Phase 5 / Agent Reading Pack v2"
     claim: "Agent Reading Pack v2 claim_evidence_map is produced (Arbeitspaket F)"
-    status: partial
+    status: done
     normative: false
     owner: roadmap
     last_verified: "2026-05-31"
     evidence:
       - kind: symbol
+        target: "merger/lenskit/core/claim_evidence_map.py::produce_claim_evidence_map"
+      - kind: test
+        target: "merger/lenskit/tests/test_claim_evidence_map.py::test_produce_claim_evidence_map_from_doc_freshness_registry"
+      - kind: symbol
         target: "merger/lenskit/core/agent_reading_pack.py::produce_agent_reading_pack"
-      - kind: text
-        target: "merger/lenskit/core/agent_reading_pack.py::`claim_evidence_map` is not yet produced"
-        implies: open
+      - kind: proof
+        target: "docs/proofs/claim-evidence-map-v1-proof.md"
     notes: >-
-      Agent Reading Pack v1 ships; the v2 claim_evidence_map is still open
-      (agent_reading_pack.py marks it "not yet produced"). Declared partial so
-      the verifier tracks it without demanding completion.
+      claim_evidence_map v1 is now produced from doc-freshness registry,
+      emitted in bundle manifests, and summarized by agent_reading_pack when
+      present as a reference-only navigation/evidence index.

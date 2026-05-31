@@ -76,12 +76,81 @@ def _health_doc(verdict: str = "pass") -> dict:
     }
 
 
+def _claim_evidence_map_doc() -> dict:
+    return {
+        "kind": "lenskit.claim_evidence_map",
+        "version": "1.0",
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "evidence_index",
+        "source": {
+            "registry_path": "docs/doc-freshness-registry.yml",
+            "registry_sha256": "a" * 64,
+            "generated_at": "2026-05-31T00:00:00Z",
+        },
+        "does_not_establish": [
+            "truth",
+            "sufficiency",
+            "causality",
+            "completeness",
+            "freshness_beyond_last_verified",
+        ],
+        "claims": [
+            {
+                "id": "a",
+                "claim": "A",
+                "doc": "docs/a.md",
+                "locator": "A",
+                "status": "done",
+                "normative": False,
+                "owner": "x",
+                "last_verified": "2026-05-31",
+                "requires_live_check": False,
+                "evidence_refs": [{"kind": "symbol", "target": "x.py::A"}],
+                "relation": "declared_evidence_ref",
+                "does_not_establish": [
+                    "truth",
+                    "sufficiency",
+                    "causality",
+                    "completeness",
+                ],
+            },
+            {
+                "id": "b",
+                "claim": "B",
+                "doc": "docs/b.md",
+                "locator": "B",
+                "status": "partial",
+                "normative": False,
+                "owner": "y",
+                "last_verified": "2026-05-31",
+                "requires_live_check": True,
+                "evidence_refs": [
+                    {
+                        "kind": "text",
+                        "target": "y.py::open marker",
+                        "implies": "open",
+                    }
+                ],
+                "relation": "declared_evidence_ref",
+                "does_not_establish": [
+                    "truth",
+                    "sufficiency",
+                    "causality",
+                    "completeness",
+                ],
+            },
+        ],
+    }
+
+
 def _make_bundle(
     tmp_path: Path,
     *,
     include_health: bool = True,
     include_canonical: bool = True,
     include_chunks: bool = True,
+    include_claim_evidence_map: bool = False,
     manifest_name: str = "demo.bundle.manifest.json",
     break_canonical_sha: bool = False,
 ) -> Path:
@@ -128,6 +197,19 @@ def _make_bundle(
             "sha256": _sha256(health_bytes),
             "authority": "diagnostic_signal",
             "canonicality": "diagnostic",
+        })
+
+    if include_claim_evidence_map:
+        claim_map_bytes = json.dumps(_claim_evidence_map_doc(), indent=2).encode("utf-8")
+        (tmp_path / "demo.claim_evidence_map.json").write_bytes(claim_map_bytes)
+        artifacts.append({
+            "role": "claim_evidence_map_json",
+            "path": "demo.claim_evidence_map.json",
+            "content_type": "application/json",
+            "bytes": len(claim_map_bytes),
+            "sha256": _sha256(claim_map_bytes),
+            "authority": "navigation_index",
+            "canonicality": "derived",
         })
 
     manifest = {
@@ -441,6 +523,30 @@ def test_invalid_citation_map_suppresses_citation_guidance(tmp_path):
     assert "citation guidance suppressed" in body
 
 
+def test_claim_evidence_map_summary_present_when_artifact_is_available(tmp_path):
+    manifest = _make_bundle(tmp_path, include_claim_evidence_map=True)
+    report = produce_agent_reading_pack(str(manifest))
+    assert report["status"] == "ok"
+
+    body = Path(report["output_path"]).read_text(encoding="utf-8")
+    assert "## CLAIM_EVIDENCE_MAP_SUMMARY" in body
+    assert "- claims: 2" in body
+    assert "- evidence_refs: 2" in body
+    assert "- requires_live_check: 1" in body
+    assert "navigation/evidence index, not truth" in body
+    assert "`claim_evidence_map` is not yet produced" not in body
+
+
+def test_claim_evidence_map_absence_keeps_epistemic_note(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    report = produce_agent_reading_pack(str(manifest))
+    assert report["status"] == "ok"
+
+    body = Path(report["output_path"]).read_text(encoding="utf-8")
+    assert "`claim_evidence_map_json` is absent" in body
+    assert "`claim_evidence_map` is not yet produced" in body
+
+
 # ---------------------------------------------------------------------------
 # Pure functions
 # ---------------------------------------------------------------------------
@@ -491,6 +597,10 @@ def test_render_is_pure_from_model():
         dump_index_path=None,
         sqlite_index_path=None,
         citation_map_path=None,
+        claim_evidence_map_path=None,
+        claim_count=None,
+        claim_evidence_ref_count=None,
+        claim_requires_live_check_count=None,
         absent_notes=("note one",),
     )
     body = render_agent_reading_pack(model)

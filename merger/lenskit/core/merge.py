@@ -222,6 +222,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.GRAPH_INDEX_JSON: {"id": "architecture.graph_index", "version": "v1"},
     ArtifactRole.PR_DELTA_JSON: {"id": "pr-schau-delta", "version": "1.0"},
     ArtifactRole.CITATION_MAP_JSONL: {"id": "citation-map", "version": "v1"},
+    ArtifactRole.CLAIM_EVIDENCE_MAP_JSON: {"id": "claim-evidence-map", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -290,6 +291,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.CLAIM_EVIDENCE_MAP_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "evidence_index",
         "regenerable": True,
         "staleness_sensitive": True,
     },
@@ -553,6 +561,7 @@ class MergeArtifacts:
     derived_manifest: Optional[Path] = None
     bundle_manifest: Optional[Path] = None
     output_health: Optional[Path] = None
+    claim_evidence_map: Optional[Path] = None
     agent_reading_pack: Optional[Path] = None
     other: List[Path] = None
 
@@ -585,6 +594,8 @@ class MergeArtifacts:
             paths.append(self.retrieval_eval)
         if self.output_health:
             paths.append(self.output_health)
+        if self.claim_evidence_map and self.claim_evidence_map not in paths:
+            paths.append(self.claim_evidence_map)
         if self.agent_reading_pack and self.agent_reading_pack not in paths:
             paths.append(self.agent_reading_pack)
         if self.bundle_manifest:
@@ -6115,6 +6126,40 @@ def write_reports_v2(
                 f"{coherence.reason}"
             )
 
+    # Claim-evidence map: derived reference-only navigation/evidence index from
+    # doc-freshness registry. Optional: production may fail if registry invalid.
+    claim_evidence_map_path = None
+    claim_evidence_registry_path = Path(__file__).resolve().parents[3] / "docs" / "doc-freshness-registry.yml"
+    if claim_evidence_registry_path.is_file():
+        from .claim_evidence_map import produce_claim_evidence_map
+
+        claim_evidence_map_path = bundle_manifest_path.with_name(
+            bundle_manifest_path.name.replace(
+                ".bundle.manifest.json", ".claim_evidence_map.json"
+            )
+        )
+        try:
+            produce_claim_evidence_map(
+                claim_evidence_registry_path,
+                claim_evidence_map_path,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed to produce claim_evidence_map_json: " + str(exc)
+            ) from exc
+        else:
+            out_paths.append(claim_evidence_map_path)
+            if claim_evidence_map_path not in other_paths:
+                other_paths.append(claim_evidence_map_path)
+            _add_artifact(
+                claim_evidence_map_path,
+                ArtifactRole.CLAIM_EVIDENCE_MAP_JSON,
+                "application/json",
+            )
+            artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
+            bundle_manifest["artifacts"] = artifacts_list
+            _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
+
     # Agent reading pack: compact navigation entry-point for LLM agents.
     # Produced LAST, from the finalized manifest, so it can reflect every other
     # artifact (including citation_map and output_health). Like output_health it
@@ -6155,6 +6200,7 @@ def write_reports_v2(
             derived_manifest=derived_manifests[-1] if derived_manifests else None,
             bundle_manifest=bundle_manifest_path,
             output_health=output_health_path,
+            claim_evidence_map=claim_evidence_map_path,
             agent_reading_pack=agent_reading_pack_path,
             other=other_paths
         )
@@ -6171,6 +6217,7 @@ def write_reports_v2(
             derived_manifest=derived_manifests[-1] if derived_manifests else None,
             bundle_manifest=bundle_manifest_path,
             output_health=output_health_path,
+            claim_evidence_map=claim_evidence_map_path,
             agent_reading_pack=agent_reading_pack_path,
             other=other_paths
         )

@@ -57,6 +57,7 @@ _DUMP_INDEX = ArtifactRole.DUMP_INDEX_JSON.value
 _SQLITE_INDEX = ArtifactRole.SQLITE_INDEX.value
 _OUTPUT_HEALTH = ArtifactRole.OUTPUT_HEALTH.value
 _CITATION_MAP = ArtifactRole.CITATION_MAP_JSONL.value
+_CLAIM_EVIDENCE_MAP = ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value
 _SELF_ROLE = ArtifactRole.AGENT_READING_PACK.value
 
 
@@ -192,6 +193,10 @@ class PackModel:
     dump_index_path: Optional[str]
     sqlite_index_path: Optional[str]
     citation_map_path: Optional[str]
+    claim_evidence_map_path: Optional[str]
+    claim_count: Optional[int]
+    claim_evidence_ref_count: Optional[int]
+    claim_requires_live_check_count: Optional[int]
     absent_notes: Tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -369,6 +374,7 @@ _ROLE_GUIDE = {
     _SQLITE_INDEX: "runtime cache: FTS5 full-text search over chunk content",
     _OUTPUT_HEALTH: "diagnostic self-test: trust the bundle only if verdict=pass",
     _CITATION_MAP: "stable citation_id → canonical byte/line range mapping",
+    _CLAIM_EVIDENCE_MAP: "claim → declared evidence_refs map (navigation/evidence index, not truth)",
     "index_sidecar_json": "navigation index sidecar (repolens-agent contract)",
     "derived_manifest_json": "registry of derived artifacts",
     "graph_index_json": "import/entry-point graph for graph-aware retrieval",
@@ -483,6 +489,28 @@ def render_agent_reading_pack(model: PackModel) -> str:
             "`citation_id` to a `canonical_range` (file_path/start_byte/end_byte/"
             "start_line/end_line/content_sha256) inside `canonical_md`."
         )
+    lines.append("")
+
+    # ── CLAIM_EVIDENCE_MAP_SUMMARY ───────────────────────────────────────
+    lines.append("## CLAIM_EVIDENCE_MAP_SUMMARY")
+    if (
+        model.claim_evidence_map_path
+        and model.claim_count is not None
+        and model.claim_evidence_ref_count is not None
+        and model.claim_requires_live_check_count is not None
+    ):
+        lines.append(f"- artifact: `{model.claim_evidence_map_path}`")
+        lines.append(f"- claims: {model.claim_count}")
+        lines.append(f"- evidence_refs: {model.claim_evidence_ref_count}")
+        lines.append(f"- requires_live_check: {model.claim_requires_live_check_count}")
+        lines.append(
+            "- note: Claim Evidence Map is navigation/evidence index, not truth."
+        )
+        lines.append(
+            "- does_not_establish: truth, sufficiency, causality, completeness."
+        )
+    else:
+        lines.append("- _No verified `claim_evidence_map_json` artifact present._")
     lines.append("")
 
     # ── TOP_CHUNK_SPANS ──────────────────────────────────────────────────
@@ -778,6 +806,9 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
     verified_soft_paths: Dict[str, str] = {}
 
     health: HealthSummary = HealthSummary(present=False)  # lenskit:authority=diagnostic_signal
+    claim_count: Optional[int] = None
+    claim_evidence_ref_count: Optional[int] = None
+    claim_requires_live_check_count: Optional[int] = None
     if _OUTPUT_HEALTH in by_role:
         res = _verify_referenced_artifact(
             by_role[_OUTPUT_HEALTH], manifest_dir, "output_health",
@@ -789,8 +820,12 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
             except (json.JSONDecodeError, OSError) as e:
                 warnings.append(f"output_health: cannot parse ({e})")
 
-    for soft_role, label in ((_CITATION_MAP, "citation_map_jsonl"), (_DUMP_INDEX, "dump_index_json"),
-                             (_SQLITE_INDEX, "sqlite_index")):
+    for soft_role, label in (
+        (_CITATION_MAP, "citation_map_jsonl"),
+        (_CLAIM_EVIDENCE_MAP, "claim_evidence_map_json"),
+        (_DUMP_INDEX, "dump_index_json"),
+        (_SQLITE_INDEX, "sqlite_index"),
+    ):
         if soft_role in by_role:
             res = _verify_referenced_artifact(
                 by_role[soft_role], manifest_dir, label,
@@ -799,6 +834,31 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
             if res:
                 protected.add(res[0])
                 verified_soft_paths[soft_role] = str(by_role[soft_role].get("path"))
+                if soft_role == _CLAIM_EVIDENCE_MAP:
+                    try:
+                        claim_doc = load_manifest(res[0])
+                    except (json.JSONDecodeError, OSError) as e:
+                        warnings.append(f"claim_evidence_map_json: cannot parse ({e})")
+                        verified_soft_paths.pop(_CLAIM_EVIDENCE_MAP, None)
+                    else:
+                        claims = claim_doc.get("claims") if isinstance(claim_doc, dict) else None
+                        if isinstance(claims, list):
+                            claim_count = len(claims)
+                            claim_evidence_ref_count = 0
+                            claim_requires_live_check_count = 0
+                            for claim in claims:
+                                if not isinstance(claim, dict):
+                                    continue
+                                refs = claim.get("evidence_refs")
+                                if isinstance(refs, list):
+                                    claim_evidence_ref_count += len(refs)
+                                if claim.get("requires_live_check") is True:
+                                    claim_requires_live_check_count += 1
+                        else:
+                            warnings.append(
+                                "claim_evidence_map_json: missing or invalid 'claims' list"
+                            )
+                            verified_soft_paths.pop(_CLAIM_EVIDENCE_MAP, None)
 
     if errors:
         _s = _remove_stale_output(output_path, protected) if not output_is_explicit else None
@@ -849,15 +909,23 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
         absent_notes.append(
             "`citation_map_jsonl` is present but failed verification; citation guidance suppressed."
         )
+    if _CLAIM_EVIDENCE_MAP not in by_role:
+        absent_notes.append(
+            "`claim_evidence_map_json` is absent: claim→evidence navigation index not available."
+        )
+        absent_notes.append(
+            "`claim_evidence_map` is not yet produced (planned: output-optimierung Arbeitspaket F)."
+        )
+    elif _CLAIM_EVIDENCE_MAP not in verified_soft_paths:
+        absent_notes.append(
+            "`claim_evidence_map_json` is present but failed verification or parsing; claim-evidence summary suppressed."
+        )
     if _OUTPUT_HEALTH not in by_role:
         absent_notes.append("`output_health` is absent: bundle integrity is self-unverified.")
     elif not health.present:
         absent_notes.append(
             "`output_health` is present but failed verification or parsing; health summary suppressed."
         )
-    absent_notes.append(
-        "`claim_evidence_map` is not yet produced (planned: output-optimierung Arbeitspaket F)."
-    )
 
     generator = manifest.get("generator") if isinstance(manifest.get("generator"), dict) else {}
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
@@ -888,6 +956,10 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
         dump_index_path=verified_soft_paths.get(_DUMP_INDEX),
         sqlite_index_path=verified_soft_paths.get(_SQLITE_INDEX),
         citation_map_path=verified_soft_paths.get(_CITATION_MAP),
+        claim_evidence_map_path=verified_soft_paths.get(_CLAIM_EVIDENCE_MAP),
+        claim_count=claim_count,
+        claim_evidence_ref_count=claim_evidence_ref_count,
+        claim_requires_live_check_count=claim_requires_live_check_count,
         absent_notes=tuple(absent_notes),
     )
 

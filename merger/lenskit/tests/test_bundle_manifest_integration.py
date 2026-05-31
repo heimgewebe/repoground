@@ -137,6 +137,17 @@ def test_generate_bundle_manifest_integration(tmp_path):
     assert citation_entry["staleness_sensitive"] is True
     assert citation_entry["path"].endswith(".citation_map.jsonl")
 
+    claim_map_entry = roles_map.get(ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value)
+    assert claim_map_entry and "contract" in claim_map_entry
+    assert claim_map_entry["contract"]["id"] == "claim-evidence-map"
+    assert claim_map_entry["contract"]["version"] == "v1"
+    assert claim_map_entry["interpretation"]["mode"] == "contract"
+    assert claim_map_entry["authority"] == "navigation_index"
+    assert claim_map_entry["canonicality"] == "derived"
+    assert claim_map_entry["regenerable"] is True
+    assert claim_map_entry["staleness_sensitive"] is True
+    assert claim_map_entry["path"].endswith(".claim_evidence_map.json")
+
     output_health_entry = roles_map.get(ArtifactRole.OUTPUT_HEALTH.value)
     assert output_health_entry and "contract" not in output_health_entry
     assert output_health_entry["interpretation"]["mode"] == "role_only"
@@ -953,6 +964,13 @@ def test_c22_correct_per_role_risk_class_is_valid():
                                                 "canonicality": "derived",
                                                 "regenerable": True,
                                                 "staleness_sensitive": True}),
+        "claim_evidence_map_json": ("evidence_index", {"contract": {"id": "claim-evidence-map", "version": "v1"},
+                            "interpretation": {"mode": "contract"},
+                            "content_type": "application/json",
+                            "authority": "navigation_index",
+                            "canonicality": "derived",
+                            "regenerable": True,
+                            "staleness_sensitive": True}),
         "agent_reading_pack":  ("navigation",  {"content_type": "text/markdown",
                                                 "authority": "navigation_index",
                                                 "canonicality": "derived"}),
@@ -1038,6 +1056,7 @@ _EXPECTED_RISK_CLASS_BY_ROLE = {
     ArtifactRole.RETRIEVAL_EVAL_JSON.value: "diagnostic",
     ArtifactRole.OUTPUT_HEALTH.value: "diagnostic",
     ArtifactRole.CITATION_MAP_JSONL.value: "navigation",
+    ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value: "evidence_index",
     ArtifactRole.AGENT_READING_PACK.value: "navigation",
 }
 

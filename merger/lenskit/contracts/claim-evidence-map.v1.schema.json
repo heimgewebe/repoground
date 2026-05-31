@@ -1,0 +1,171 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/claim-evidence-map.v1.schema.json",
+  "title": "Claim Evidence Map (claim-evidence-map v1.0)",
+  "description": "Derived navigation/evidence index linking declared documentation claims to declared evidence references from docs/doc-freshness-registry.yml. This artifact is not a truth verdict.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "authority",
+    "canonicality",
+    "risk_class",
+    "source",
+    "does_not_establish",
+    "claims"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.claim_evidence_map"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "authority": {
+      "type": "string",
+      "const": "navigation_index"
+    },
+    "canonicality": {
+      "type": "string",
+      "const": "derived"
+    },
+    "risk_class": {
+      "type": "string",
+      "const": "evidence_index"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry_path",
+        "registry_sha256",
+        "generated_at"
+      ],
+      "properties": {
+        "registry_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "registry_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "generated_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "claim",
+          "doc",
+          "locator",
+          "status",
+          "normative",
+          "owner",
+          "last_verified",
+          "requires_live_check",
+          "evidence_refs",
+          "relation",
+          "does_not_establish"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1
+          },
+          "doc": {
+            "type": "string",
+            "minLength": 1
+          },
+          "locator": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "none",
+              "partial",
+              "done",
+              "stale",
+              "historical"
+            ]
+          },
+          "normative": {
+            "type": "boolean"
+          },
+          "owner": {
+            "type": "string",
+            "minLength": 1
+          },
+          "last_verified": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "requires_live_check": {
+            "type": "boolean"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "target"
+              ],
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "target": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "implies": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          "relation": {
+            "type": "string",
+            "const": "declared_evidence_ref"
+          },
+          "does_not_establish": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}
