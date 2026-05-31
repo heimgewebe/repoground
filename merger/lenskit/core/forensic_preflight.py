@@ -105,12 +105,12 @@ def _check_artifact_hash(
 
 def _validate_claim_map_schema(claim_map_doc: Dict[str, Any]) -> Tuple[str, str]:
     if jsonschema is None:
-        return "warn", "claim-evidence-map schema validation skipped: jsonschema unavailable"
+        return "blocked", "claim-evidence-map schema validation unavailable: jsonschema not installed"
 
     schema_path = Path(__file__).parent.parent / "contracts" / "claim-evidence-map.v1.schema.json"
     doc, err = _load_json(schema_path)
     if doc is None:
-        return "warn", f"claim-evidence-map schema unavailable: {err}"
+        return "blocked", f"claim-evidence-map schema unavailable: {err}"
     try:
         jsonschema.validate(instance=claim_map_doc, schema=doc)
     except jsonschema.ValidationError as e:  # type: ignore[union-attr]
@@ -223,6 +223,8 @@ def compute_forensic_preflight(
                 schema_status, schema_detail = _validate_claim_map_schema(claim_doc)
                 checks.append(_check("claim_evidence_map_schema_valid", schema_status, schema_detail))
                 if schema_status == "fail":
+                    errors.append(schema_detail)
+                elif schema_status == "blocked":
                     errors.append(schema_detail)
                 elif schema_status == "warn":
                     warnings.append(schema_detail)

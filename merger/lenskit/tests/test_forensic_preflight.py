@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from merger.lenskit.cli.main import main
+from merger.lenskit.core import forensic_preflight as forensic_preflight_module
 from merger.lenskit.core.forensic_preflight import compute_forensic_preflight
 from merger.lenskit.core.post_emit_health import compute_post_emit_health, derive_post_health_path
 
@@ -183,6 +184,16 @@ def test_forensic_strict_blocked_without_claim_evidence_map(tmp_path):
     assert by_name["claim_evidence_map_present"]["status"] == "blocked"
 
 
+def test_forensic_strict_blocked_without_citation_map(tmp_path):
+    manifest = _make_bundle(tmp_path, include_claim_map=True, include_citation_map=False)
+    _write_post_health(manifest)
+    report = compute_forensic_preflight(str(manifest))
+
+    assert report["status"] == "blocked"
+    by_name = {item["name"]: item for item in report["checks"]}
+    assert by_name["citation_map_hash_ok"]["status"] == "blocked"
+
+
 def test_forensic_strict_blocked_without_post_emit_health(tmp_path):
     manifest = _make_bundle(tmp_path, include_claim_map=True)
     report = compute_forensic_preflight(str(manifest))
@@ -190,6 +201,18 @@ def test_forensic_strict_blocked_without_post_emit_health(tmp_path):
     assert report["status"] == "blocked"
     by_name = {item["name"]: item for item in report["checks"]}
     assert by_name["post_emit_health_present"]["status"] == "blocked"
+
+
+def test_forensic_strict_blocked_when_jsonschema_unavailable(tmp_path, monkeypatch):
+    manifest = _make_bundle(tmp_path, include_claim_map=True)
+    _write_post_health(manifest)
+    monkeypatch.setattr(forensic_preflight_module, "jsonschema", None)
+
+    report = compute_forensic_preflight(str(manifest))
+
+    assert report["status"] == "blocked"
+    by_name = {item["name"]: item for item in report["checks"]}
+    assert by_name["claim_evidence_map_schema_valid"]["status"] == "blocked"
 
 
 def test_forensic_strict_fail_outranks_blocked(tmp_path):
