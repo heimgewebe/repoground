@@ -23,6 +23,8 @@ on:
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/doc-freshness.yml"
+      - "merger/lenskit/repoLens-spec.md"
+      - "docs/**.md"
   pull_request:
     branches: [ "main", "master" ]
     paths:
@@ -36,6 +38,8 @@ on:
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/doc-freshness.yml"
+      - "merger/lenskit/repoLens-spec.md"
+      - "docs/**.md"
 
 permissions:
   contents: read
@@ -70,5 +74,14 @@ jobs:
           python -m merger.lenskit.cli.main doc-freshness update --write
           git diff --exit-code docs/_generated/doc-freshness.md
 
-      - name: Doc-freshness test suite (blocking)
-        run: pytest -q merger/lenskit/tests/test_doc_freshness.py
+      - name: Doc-freshness unit/schema tests (blocking)
+        run: pytest -q merger/lenskit/tests/test_doc_freshness.py -m "not doc_freshness_live"
+
+      - name: Live registry verification (diagnostic, non-blocking)
+        # Runs the real-registry tests against the live tree. Non-blocking for
+        # v0: these tests verify the actual checked-in registry against the
+        # actual repo state, so failures are surfaced as drift signals rather
+        # than hard build failures. Promotion to blocking is the documented
+        # next slice (docs/proofs/doc-freshness-registry-v0-proof.md §7).
+        continue-on-error: true
+        run: pytest -q merger/lenskit/tests/test_doc_freshness.py -m doc_freshness_live

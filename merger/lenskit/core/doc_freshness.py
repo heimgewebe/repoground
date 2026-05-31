@@ -52,15 +52,6 @@ _OK_CLASSIFICATIONS = frozenset(
     {"consistent", "partial_ok", "historical", "stale_confirmed"}
 )
 
-# Per-classification severity for findings.
-_SEVERITY = {
-    "regressed": "error",
-    "dangling": "error",
-    "understated": "warning",
-    "stale_marker_present": "warning",
-    "stale_resolved": "warning",
-}
-
 
 def repo_root_from_here() -> Path:
     """Best-effort repo root: ``merger/lenskit/core/doc_freshness.py`` → root."""
@@ -413,9 +404,11 @@ class DocFreshnessReport:
             "warning_count": self.warning_count,
             "stale_confirmed_count": len(self.stale_confirmed),
             "does_not_prove": [
-                "a green run does not prove the documentation is complete or "
-                "correct, only that no declared claim contradicts its declared "
-                "evidence",
+                (
+                    "a green run does not prove the documentation is complete or "
+                    + "correct, only that no declared claim contradicts its declared "
+                    + "evidence"
+                ),
                 "this report is a diagnostic_signal, not canonical content",
             ],
             "results": [r.to_dict() for r in self.results],

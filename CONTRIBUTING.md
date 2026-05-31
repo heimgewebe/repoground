@@ -86,7 +86,9 @@ PRs gegen `main` müssen u. a. grün sein bei:
 
 ## Was nicht tun
 
-- Generierte Docs (`docs/_generated/*`) nicht editieren.
+- Generierte Docs (`docs/_generated/*`) nicht editieren. Änderungen sind nur
+  über den jeweiligen Generator erlaubt. Für Doc-Freshness lautet der Generator:
+  `python -m merger.lenskit.cli.main doc-freshness update --write`
 - Lokale Runtime-Artefakte nicht committen.
 - Den rLens-**Launcher** (`cli/rlens.py`) nicht still als HTTP-Client
   umdeuten — der CLI-Client ist `cli/cmd_rlens_client.py`.

@@ -33,7 +33,7 @@ For repolens-vs-rlens, evidence, or runtime-state changes, read in this order be
 The parity-gate terms `content_parity_pass` and `diagnostic_parity_pass` are backed by a production module (`merger/lenskit/core/parity_gates.py` + `parity_state.py`) and are enforced via the `lenskit parity enforce --require {content,diagnostic}` CLI and the `Parity Gate` CI workflow (`.github/workflows/parity-gate.yml`).
 They are not (yet) a service-runtime gate inside the rLens service; do not describe them as such. The required level is policy/profile-dependent — capability-degraded iOS/Pythonista hosts may require only `content` (see `docs/architecture/artifact-capability-matrix.md`).
 
-Do not modify generated docs (`docs/_generated/*`) or commit local runtime artifacts.
+Do not modify generated docs (`docs/_generated/*`) or commit local runtime artifacts. Changes to generated files are only permitted via the owning generator. For doc-freshness, the generator is: `python -m merger.lenskit.cli.main doc-freshness update --write`
 
 ## rLens CLI Client vs Service Launcher
 

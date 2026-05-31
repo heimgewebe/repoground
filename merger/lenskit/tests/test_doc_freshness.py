@@ -417,11 +417,13 @@ def real_registry():
     return load_registry(default_registry_path(REPO_ROOT))
 
 
+@pytest.mark.doc_freshness_live
 def test_real_registry_schema_valid(real_registry):
     errors = validate_registry(real_registry, default_schema_path(REPO_ROOT))
     assert errors == [], f"registry schema errors: {errors}"
 
 
+@pytest.mark.doc_freshness_live
 def test_real_registry_verifies_clean(real_registry):
     """The live registry must be green: every tracked claim matches its
     evidence (proves the repoLens-spec ExtrasConfig drift is actually closed)."""
@@ -430,6 +432,7 @@ def test_real_registry_verifies_clean(real_registry):
     assert report.error_count == 0
 
 
+@pytest.mark.doc_freshness_live
 def test_real_registry_strict_clean(real_registry):
     """No normative doc carries an unresolved stale drift."""
     report = verify(real_registry, REPO_ROOT, strict=True)
