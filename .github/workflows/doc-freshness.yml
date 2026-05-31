@@ -4,9 +4,9 @@ name: Doc-Freshness (diagnostic v0)
 # (TODOs, roadmap/spec statements) to verifiable code/test/proof evidence via
 # docs/doc-freshness-registry.yml and surfaces drift, without (yet) blocking.
 # Follows the artifact-drift-matrix rollout rule (diagnose before blocking):
-# only the test suite is blocking; `inspect` and the generated-view staleness
-# check are surfaced via continue-on-error. Promotion to a blocking
-# `inspect --strict` gate is the documented next slice
+# only unit/schema tests are blocking; inspect, generated-view staleness,
+# and live-registry verification are surfaced via continue-on-error.
+# Promotion to a blocking `inspect --strict` gate is the documented next slice
 # (docs/proofs/doc-freshness-registry-v0-proof.md §7).
 
 on:
@@ -66,14 +66,6 @@ jobs:
         continue-on-error: true
         run: python -m merger.lenskit.cli.main doc-freshness inspect
 
-      - name: Generated view in sync (diagnostic, non-blocking)
-        # docs/_generated/doc-freshness.md must match a fresh regeneration from
-        # the registry. Non-blocking for v0; promotion to blocking is planned.
-        continue-on-error: true
-        run: |
-          python -m merger.lenskit.cli.main doc-freshness update --write
-          git diff --exit-code docs/_generated/doc-freshness.md
-
       - name: Doc-freshness unit/schema tests (blocking)
         run: pytest -q merger/lenskit/tests/test_doc_freshness.py -m "not doc_freshness_live"
 
@@ -85,3 +77,14 @@ jobs:
         # next slice (docs/proofs/doc-freshness-registry-v0-proof.md §7).
         continue-on-error: true
         run: pytest -q merger/lenskit/tests/test_doc_freshness.py -m doc_freshness_live
+
+      - name: Generated view in sync (diagnostic, non-blocking)
+        # docs/_generated/doc-freshness.md must match a fresh regeneration from
+        # the registry. Non-blocking for v0; promotion to blocking is planned.
+        # Note: doc-freshness update --write can mutate docs/doc-freshness-registry.yml
+        # (by stamping last_verified), so we run this after live registry tests and
+        # check both files.
+        continue-on-error: true
+        run: |
+          python -m merger.lenskit.cli.main doc-freshness update --write
+          git diff --exit-code docs/_generated/doc-freshness.md docs/doc-freshness-registry.yml
