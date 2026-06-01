@@ -2,17 +2,38 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-workdir="${LENSKIT_FORENSIC_CALIBRATION_WORKDIR:-$(mktemp -d)}"
 keep="${LENSKIT_FORENSIC_CALIBRATION_KEEP:-0}"
 
+# Determine workdir and track the directory that this harness owns (and may delete).
+# When the caller supplies LENSKIT_FORENSIC_CALIBRATION_WORKDIR we create a scoped
+# child directory inside it and never delete the caller-supplied parent.
+_caller_supplied_workdir="${LENSKIT_FORENSIC_CALIBRATION_WORKDIR:-}"
+_owned_workdir=""
+
+if [[ -n "${_caller_supplied_workdir}" ]]; then
+  mkdir -p "${_caller_supplied_workdir}"
+  _base="$(cd "${_caller_supplied_workdir}" && pwd)"
+  # Safety guard: refuse empty, filesystem root, or repo-root paths.
+  if [[ -z "${_base}" || "${_base}" == "/" || "${_base}" == "${repo_root}" ]]; then
+    echo "ERROR: LENSKIT_FORENSIC_CALIBRATION_WORKDIR '${_caller_supplied_workdir}' is a forbidden path (empty, /, or repo root)." >&2
+    exit 1
+  fi
+  # Create a scoped child so cleanup never touches the caller-supplied parent.
+  workdir="${_base}/lenskit-calibration-$$"
+  mkdir -p "${workdir}"
+  _owned_workdir="${workdir}"
+else
+  workdir="$(mktemp -d)"
+  _owned_workdir="${workdir}"
+fi
+
 cleanup() {
-  if [[ "${keep}" != "1" && -d "${workdir}" ]]; then
-    rm -rf "${workdir}"
+  if [[ "${keep}" != "1" && -n "${_owned_workdir}" && -d "${_owned_workdir}" ]]; then
+    rm -rf -- "${_owned_workdir}"
   fi
 }
 trap cleanup EXIT
 
-mkdir -p "${workdir}"
 cd "${repo_root}"
 
 python3 - <<'PY' "${repo_root}" "${workdir}"
@@ -25,7 +46,7 @@ import sys
 from pathlib import Path
 
 from merger.lenskit.core.merge import ExtrasConfig, scan_repo, write_reports_v2
-from merger.lenskit.core.post_emit_health import write_post_emit_health
+from merger.lenskit.core.post_emit_health import derive_post_health_path, write_post_emit_health
 
 REQUIRED_ROLES = {
     "canonical_md",
@@ -37,7 +58,6 @@ REQUIRED_ROLES = {
 repo_root = Path(sys.argv[1]).resolve()
 workdir = Path(sys.argv[2]).resolve()
 fixture_repo = workdir / "fixture-repo"
-merges_dir = workdir / "merges"
 results_dir = workdir / "results"
 
 
@@ -164,7 +184,7 @@ def _checks(report: dict) -> dict[str, str]:
 
 
 def _post_health_path(manifest: Path) -> Path:
-    return manifest.with_name(manifest.name.replace(".bundle.manifest.json", ".bundle_health.post.json"))
+    return derive_post_health_path(manifest)
 
 
 def main() -> None:
@@ -191,7 +211,7 @@ def main() -> None:
     missing_claim_manifest = _copy_case(positive_manifest, "missing-claim-map")
     missing_doc = _load_manifest(missing_claim_manifest)
     missing_doc["artifacts"] = [
-        a for a in missing_doc.get("artifacts", []) if a.get("role") != "claim_evidence_map_json"
+        a for a in missing_doc.get("artifacts", []) if isinstance(a, dict) and a.get("role") != "claim_evidence_map_json"
     ]
     _write_manifest(missing_claim_manifest, missing_doc)
     write_post_emit_health(str(missing_claim_manifest))
