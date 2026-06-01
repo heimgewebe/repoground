@@ -8,7 +8,7 @@ import jsonschema
 import pytest
 
 from merger.lenskit.core.constants import ArtifactRole
-from merger.lenskit.core.merge import FileInfo, write_reports_v2
+from merger.lenskit.core.merge import FileInfo, scan_repo, write_reports_v2
 from merger.lenskit.core.output_health import compute_output_health
 from merger.lenskit.tests._test_constants import make_generator_info
 
@@ -1282,3 +1282,56 @@ def test_claim_evidence_map_surface_invalid_registry_raises(tmp_path):
     raise RuntimeError during bundle production (no silent skip)."""
     with pytest.raises(RuntimeError, match="claim_evidence_map"):
         _make_bundle_with_registry(tmp_path, invalid_registry=True)
+
+
+def test_claim_evidence_map_surface_uses_scan_repo_root(tmp_path):
+    """End-to-end: scan_repo(src_dir) must yield a summary whose 'root' field
+    causes write_reports_v2 to discover docs/doc-freshness-registry.yml and
+    emit claim_evidence_map_json in the bundle manifest.
+
+    This test walks the real pipeline path that was broken before the fix:
+    scan_repo -> repo_summaries[0]['root'] -> registry lookup -> bundle emission.
+    """
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "README.md").write_text("# Test repo\n", encoding="utf-8")
+    (src_dir / "docs").mkdir()
+    (src_dir / "docs" / "doc-freshness-registry.yml").write_text(
+        _MINIMAL_REGISTRY_YAML, encoding="utf-8"
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    summary = scan_repo(src_dir)
+
+    # The field the fix depends on must be present and correct.
+    assert "root" in summary, "scan_repo must return a dict with 'root' key"
+    assert Path(summary["root"]).resolve() == src_dir.resolve(), (
+        "scan_repo 'root' must resolve to the scanned directory"
+    )
+
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[summary],
+        detail="test",
+        mode="gesamt",
+        max_bytes=10000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+
+    data = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    roles = {item["role"] for item in data["artifacts"]}
+
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value in roles, (
+        "claim_evidence_map_json must be in manifest when scan_repo root has docs/doc-freshness-registry.yml"
+    )
+    assert artifacts.claim_evidence_map is not None
+    assert artifacts.claim_evidence_map.exists()
