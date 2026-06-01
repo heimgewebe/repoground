@@ -8,7 +8,7 @@ import jsonschema
 import pytest
 
 from merger.lenskit.core.constants import ArtifactRole
-from merger.lenskit.core.merge import FileInfo, write_reports_v2
+from merger.lenskit.core.merge import FileInfo, scan_repo, write_reports_v2
 from merger.lenskit.core.output_health import compute_output_health
 from merger.lenskit.tests._test_constants import make_generator_info
 
@@ -21,7 +21,36 @@ _OUTPUT_HEALTH_SCHEMA_PATH = (
     _CONTRACTS_DIR / "output-health.v1.schema.json"
 )
 _CITATION_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "citation-map.v1.schema.json"
+_CLAIM_EVIDENCE_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "claim-evidence-map.v1.schema.json"
 _SHA256_HEX_LENGTH = 64
+
+_MINIMAL_REGISTRY_YAML = """\
+kind: lenskit.doc_freshness_registry
+version: "1.0"
+authority: diagnostic_signal
+risk_class: diagnostic
+does_not_prove:
+  - "a green verify does not prove docs complete or correct"
+entries:
+  - id: test-claim-done
+    doc: docs/README.md
+    locator: "section intro"
+    claim: "Feature X is implemented"
+    status: done
+    normative: true
+    owner: test
+    last_verified: "2026-06-01"
+    evidence:
+      - kind: symbol
+        target: "src/feature.py::FeatureX"
+"""
+
+_INVALID_REGISTRY_YAML = """\
+kind: lenskit.doc_freshness_registry
+version: "1.0"
+entries:
+  - not_a_mapping_value
+"""
 
 
 def _sha256_file(path: Path) -> str:
@@ -56,6 +85,12 @@ def test_generate_bundle_manifest_integration(tmp_path):
     src_dir.mkdir()
     f1 = src_dir / "file1.txt"
     f1.write_text("Hello World", encoding="utf-8")
+
+    # Provide a minimal doc-freshness-registry.yml so claim_evidence_map_json is produced.
+    (src_dir / "docs").mkdir()
+    (src_dir / "docs" / "doc-freshness-registry.yml").write_text(
+        _MINIMAL_REGISTRY_YAML, encoding="utf-8"
+    )
 
     out_dir = tmp_path / "out"
     out_dir.mkdir()
@@ -1103,3 +1138,200 @@ def test_c22_producer_does_not_emit_risk_class_for_retrieval_index_roles(tmp_pat
             f"role {role}: retrieval_index roles must not carry risk_class "
             f"until C1 normalizes one; got {entry.get('risk_class')!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Claim-evidence map surface-parity tests (PR: claim-evidence-map-surface-parity)
+# ---------------------------------------------------------------------------
+
+def _make_bundle_with_registry(tmp_path, *, registry_yaml: str | None = None, invalid_registry: bool = False):
+    """Helper: build a minimal bundle from a source repo that optionally contains
+    docs/doc-freshness-registry.yml. Returns (artifacts, manifest_data, src_dir)."""
+    src_dir = tmp_path / "src"
+    (src_dir / "docs").mkdir(parents=True)
+    f1 = src_dir / "README.md"
+    f1.write_text("# Test repo\nHello", encoding="utf-8")
+
+    if invalid_registry:
+        (src_dir / "docs" / "doc-freshness-registry.yml").write_text(
+            _INVALID_REGISTRY_YAML, encoding="utf-8"
+        )
+    elif registry_yaml is not None:
+        (src_dir / "docs" / "doc-freshness-registry.yml").write_text(
+            registry_yaml, encoding="utf-8"
+        )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    fi1 = FileInfo(
+        root_label="test-repo",
+        abs_path=f1,
+        rel_path=Path("README.md"),
+        size=f1.stat().st_size,
+        is_text=True,
+        md5="test",
+        category="docs",
+        tags=[],
+        ext=".md",
+        skipped=False,
+    )
+
+    repo_summary = {
+        "name": "test-repo",
+        "path": str(src_dir),
+        "root": src_dir,
+        "files": [fi1],
+        "source_files": [fi1],
+    }
+
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[repo_summary],
+        detail="test",
+        mode="gesamt",
+        max_bytes=10000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+    data = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    return artifacts, data, src_dir
+
+
+def test_claim_evidence_map_surface_single_repo_with_registry(tmp_path):
+    """Single-repo bundle with docs/doc-freshness-registry.yml must produce
+    claim_evidence_map_json in the manifest and on disk."""
+    artifacts, data, _ = _make_bundle_with_registry(tmp_path, registry_yaml=_MINIMAL_REGISTRY_YAML)
+
+    # .claim_evidence_map.json file must exist
+    assert artifacts.claim_evidence_map is not None, "claim_evidence_map path should be set"
+    assert artifacts.claim_evidence_map.exists(), ".claim_evidence_map.json must exist on disk"
+
+    # JSON must be parseable and validate against the contract schema
+    cem = json.loads(artifacts.claim_evidence_map.read_text(encoding="utf-8"))
+    schema = json.loads(_CLAIM_EVIDENCE_MAP_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=cem, schema=schema)
+
+    # Manifest must carry the role
+    roles_map = {item["role"]: item for item in data["artifacts"]}
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value in roles_map, (
+        "claim_evidence_map_json must appear in bundle manifest"
+    )
+
+    # Contract metadata must be present
+    entry = roles_map[ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value]
+    assert entry.get("contract", {}).get("id") == "claim-evidence-map"
+    assert entry.get("contract", {}).get("version") == "v1"
+    assert entry.get("authority") == "navigation_index"
+    assert entry.get("canonicality") == "derived"
+
+
+def test_claim_evidence_map_surface_agent_reading_pack_shows_summary(tmp_path):
+    """After a bundle with registry, the agent reading pack must NOT show
+    EPISTEMIC_EMPTINESS for claim_evidence_map and MUST show a summary."""
+    artifacts, _, _ = _make_bundle_with_registry(tmp_path, registry_yaml=_MINIMAL_REGISTRY_YAML)
+
+    assert artifacts.agent_reading_pack is not None
+    assert artifacts.agent_reading_pack.exists()
+    pack_text = artifacts.agent_reading_pack.read_text(encoding="utf-8")
+
+    # Must contain the CLAIM_EVIDENCE_MAP_SUMMARY section with substantive content
+    assert "## CLAIM_EVIDENCE_MAP_SUMMARY" in pack_text
+    assert "claims:" in pack_text, "agent reading pack should show claim count"
+
+    # Must NOT contain the absence note
+    assert "claim_evidence_map_json` is absent" not in pack_text, (
+        "agent reading pack must not report claim_evidence_map as absent when registry exists"
+    )
+    assert "claim_evidence_map` is absent in this bundle" not in pack_text, (
+        "agent reading pack must not show EPISTEMIC_EMPTINESS for claim_evidence_map when produced"
+    )
+
+
+def test_claim_evidence_map_surface_no_registry_leaves_epistemic_gap(tmp_path):
+    """Single-repo bundle WITHOUT docs/doc-freshness-registry.yml must NOT
+    produce claim_evidence_map_json; agent reading pack must show the gap."""
+    artifacts, data, _ = _make_bundle_with_registry(tmp_path, registry_yaml=None)
+
+    # No file on disk
+    assert artifacts.claim_evidence_map is None, (
+        "claim_evidence_map should be None when no registry is present"
+    )
+
+    # No role in manifest
+    roles_map = {item["role"]: item for item in data["artifacts"]}
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value not in roles_map, (
+        "claim_evidence_map_json must not appear in manifest without registry"
+    )
+
+    # Agent reading pack must still show epistemic gap
+    pack_text = artifacts.agent_reading_pack.read_text(encoding="utf-8")
+    assert "claim_evidence_map" in pack_text and (
+        "absent" in pack_text or "not available" in pack_text
+    ), "agent reading pack must report the epistemic gap for missing claim_evidence_map"
+
+
+def test_claim_evidence_map_surface_invalid_registry_raises(tmp_path):
+    """Single-repo bundle with an INVALID docs/doc-freshness-registry.yml must
+    raise RuntimeError during bundle production (no silent skip)."""
+    with pytest.raises(RuntimeError, match="claim_evidence_map"):
+        _make_bundle_with_registry(tmp_path, invalid_registry=True)
+
+
+def test_claim_evidence_map_surface_uses_scan_repo_root(tmp_path):
+    """End-to-end: scan_repo(src_dir) must yield a summary whose 'root' field
+    causes write_reports_v2 to discover docs/doc-freshness-registry.yml and
+    emit claim_evidence_map_json in the bundle manifest.
+
+    This test walks the real pipeline path that was broken before the fix:
+    scan_repo -> repo_summaries[0]['root'] -> registry lookup -> bundle emission.
+    """
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "README.md").write_text("# Test repo\n", encoding="utf-8")
+    (src_dir / "docs").mkdir()
+    (src_dir / "docs" / "doc-freshness-registry.yml").write_text(
+        _MINIMAL_REGISTRY_YAML, encoding="utf-8"
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    summary = scan_repo(src_dir)
+
+    # The field the fix depends on must be present and correct.
+    assert "root" in summary, "scan_repo must return a dict with 'root' key"
+    assert Path(summary["root"]).resolve() == src_dir.resolve(), (
+        "scan_repo 'root' must resolve to the scanned directory"
+    )
+
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[summary],
+        detail="test",
+        mode="gesamt",
+        max_bytes=10000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+
+    data = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    roles = {item["role"] for item in data["artifacts"]}
+
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value in roles, (
+        "claim_evidence_map_json must be in manifest when scan_repo root has docs/doc-freshness-registry.yml"
+    )
+    assert artifacts.claim_evidence_map is not None
+    assert artifacts.claim_evidence_map.exists()

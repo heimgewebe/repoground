@@ -212,7 +212,7 @@
 - [ ] Contracts-Abschnitt (Rollen→Contract-Mapping; mechanisch, keine Wichtigkeitsaussage)
 - [ ] Artifact-Lookup/Trace/Context-Lookup-Fluss
 - [ ] Driftpunkte
-- [ ] Claim-Evidence-Map (hängt an Arbeitspaket F)
+- [x] Claim-Evidence-Map (Surface-Parity-Fix 2026-06-01: Single-Repo emittiert `claim_evidence_map_json`)
 
 ### Governance
 - [x] Klar markieren: Navigation, nicht Wahrheit (Sentinel-Kommentar + Banner).
@@ -262,14 +262,25 @@
 > `docs/proofs/anti-hallucination-capability-audit.md` §2.6 und
 > `docs/blueprints/lenskit-anti-hallucination-output-architecture.md` (PR F1–F3).
 
+> **Surface-Parity-Fix (2026-06-01):** Producer, Contract und Bundle-Integration
+> existierten bereits. Aber der Registry-Pfad in `merge.py` verwendete
+> `Path(__file__).resolve().parents[3]`, was nur beim Ausführen aus dem
+> lenskit-Source-Tree funktioniert. Fix: Registry-Pfad aus
+> `repo_summaries[0]["root"]` (Single-Repo-Bundles). Validierungsschema aus
+> Package-Pfad. Multi-Repo out of scope. Beweis: 5 neue Tests in
+> `test_bundle_manifest_integration.py`. `claim_evidence_map_json` wird jetzt
+> in realen Bundles emittiert; Agent Reading Pack zeigt Summary statt
+> EPISTEMIC_EMPTINESS.
+
 ### Ziel
-- [ ] `<stem>.claim_evidence_map.json` einführen — **nur Referenz, kein Verdikt**.
-- [ ] Pro Claim maschinenlesbar ausweisen:
-  - [ ] `claim → evidence_refs` (evidenztragende Artefakte + Range-Refs)
-  - [ ] `relation: citation_attached`
-  - [ ] `does_not_establish` (`truth`, `sufficiency`, `causality`, `completeness`)
-  - [ ] `requires_live_check`
-- [ ] **Verboten:** `supported`, `unsupported`, `true`, `false`, `proven`,
+- [x] `<stem>.claim_evidence_map.json` einführen — **nur Referenz, kein Verdikt**.
+- [x] Pro Claim maschinenlesbar ausweisen:
+  - [x] `claim → evidence_refs` (evidenztragende Artefakte + Range-Refs)
+  - [x] `relation: declared_evidence_ref`
+  - [x] `does_not_establish` (`truth`, `sufficiency`, `causality`, `completeness`)
+  - [x] `requires_live_check`
+- [ ] Multi-Repo-Aggregation (explizit out of scope dieses Slices)
+- **Verboten:** `supported`, `unsupported`, `true`, `false`, `proven`,
   `auto_extracted`.
 
 ---
