@@ -118,6 +118,33 @@ def _validate_claim_map_schema(claim_map_doc: Dict[str, Any]) -> Tuple[str, str]
     return "pass", "claim_evidence_map schema valid"
 
 
+def _post_health_binding_status(
+    post_doc: Dict[str, Any],
+    *,
+    resolved_manifest: Path,
+    manifest_run_id: Any,
+) -> Tuple[str, str]:
+    post_manifest_path = post_doc.get("bundle_manifest_path")
+    if not isinstance(post_manifest_path, str) or not post_manifest_path:
+        return "blocked", "post_emit_health missing bundle_manifest_path binding"
+
+    resolved_post_manifest = _resolve(post_manifest_path)
+    if resolved_post_manifest != resolved_manifest:
+        return (
+            "fail",
+            "post_emit_health bundle_manifest_path does not match requested manifest",
+        )
+
+    if isinstance(manifest_run_id, str):
+        post_bundle_run_id = post_doc.get("bundle_run_id")
+        if not isinstance(post_bundle_run_id, str) or not post_bundle_run_id:
+            return "blocked", "post_emit_health missing bundle_run_id binding"
+        if post_bundle_run_id != manifest_run_id:
+            return "fail", "post_emit_health bundle_run_id does not match manifest run_id"
+
+    return "pass", "post_emit_health bound to requested manifest"
+
+
 def compute_forensic_preflight(
     manifest_path: str,
     *,
@@ -208,8 +235,8 @@ def compute_forensic_preflight(
             checks.append(
                 _check(
                     "claim_evidence_map_schema_valid",
-                    "blocked" if c["status"] == "blocked" else "fail",
-                    "schema check skipped because claim_evidence_map hash is invalid",
+                    "skipped",
+                    "schema check skipped because claim_evidence_map hash is unverified",
                 )
             )
         else:
@@ -234,89 +261,126 @@ def compute_forensic_preflight(
     if post_doc is None:
         checks.append(_check("post_emit_health_present", "blocked", f"post_emit_health missing: {post_err}"))
         checks.append(_check("post_emit_health_pass", "blocked", "post_emit_health missing"))
+        checks.append(_check("post_emit_health_bound_to_manifest", "blocked", "post_emit_health missing"))
         checks.append(_check("range_citation_strict", "blocked", "cannot verify without post_emit_health"))
         checks.append(_check("no_required_checks_skipped", "blocked", "cannot verify without post_emit_health"))
         errors.append(f"post_emit_health missing: {post_err}")
     else:
         checks.append(_check("post_emit_health_present", "pass", "post_emit_health loaded"))
-        post_status = post_doc.get("status")
-        if post_status == "pass":
-            checks.append(_check("post_emit_health_pass", "pass", "post_emit_health status=pass"))
-        elif post_status == "warn":
-            checks.append(_check("post_emit_health_pass", "warn", "post_emit_health status=warn"))
-            warnings.append("post_emit_health status=warn")
-        elif post_status in {"blocked", "fail"}:
-            checks.append(_check("post_emit_health_pass", "blocked", f"post_emit_health status={post_status}"))
-            errors.append(f"post_emit_health status={post_status}")
-        else:
-            checks.append(_check("post_emit_health_pass", "fail", f"post_emit_health status invalid: {post_status!r}"))
-            errors.append(f"post_emit_health status invalid: {post_status!r}")
-
-        reached = post_doc.get("evidence_levels_reached")
-        range_status = post_doc.get("range_ref_resolution_status")
-        if isinstance(reached, list) and "range_strict" in reached and range_status == "ok":
-            checks.append(_check("range_citation_strict", "pass", "range_strict evidence reached"))
-        elif post_status == "pass":
+        binding_status, binding_detail = _post_health_binding_status(
+            post_doc,
+            resolved_manifest=resolved_manifest,
+            manifest_run_id=manifest.get("run_id"),
+        )
+        checks.append(_check("post_emit_health_bound_to_manifest", binding_status, binding_detail))
+        if binding_status in {"blocked", "fail"}:
+            errors.append(binding_detail)
+            checks.append(
+                _check(
+                    "post_emit_health_pass",
+                    "blocked",
+                    "cannot trust post_emit_health status because binding is missing or mismatched",
+                )
+            )
             checks.append(
                 _check(
                     "range_citation_strict",
                     "blocked",
-                    "range_strict evidence not reached in post_emit_health",
+                    "cannot verify because post_emit_health binding is missing or mismatched",
                 )
             )
-            errors.append("range_strict evidence not reached in post_emit_health")
-        else:
             checks.append(
                 _check(
-                    "range_citation_strict",
+                    "no_required_checks_skipped",
                     "blocked",
-                    "range_strict evidence unavailable because post_emit_health is not pass",
+                    "cannot verify because post_emit_health binding is missing or mismatched",
                 )
             )
-
-        required_checks = {
-            "manifest_schema_valid",
-            "artifact_paths_exist",
-            "artifact_hashes_match",
-            "canonical_md_present",
-            "agent_pack_present",
-            "claim_evidence_map_present",
-            "claim_evidence_map_hash_ok",
-            "claim_evidence_map_schema_valid",
-            "range_ref_resolution",
-        }
-        post_checks = post_doc.get("checks")
-        if not isinstance(post_checks, list):
-            checks.append(_check("no_required_checks_skipped", "blocked", "post_emit_health checks missing"))
-            errors.append("post_emit_health checks missing")
         else:
-            status_by_name = {}
-            for item in post_checks:
-                if isinstance(item, dict) and isinstance(item.get("name"), str):
-                    status_by_name[item["name"]] = item.get("status")
-
-            missing = sorted(name for name in required_checks if name not in status_by_name)
-            skipped = sorted(name for name in required_checks if status_by_name.get(name) == "skipped")
-            if missing:
-                checks.append(
-                    _check(
-                        "no_required_checks_skipped",
-                        "blocked",
-                        f"required post_emit checks missing: {', '.join(missing)}",
-                    )
-                )
-                errors.append(f"required post_emit checks missing: {', '.join(missing)}")
-            elif skipped:
-                checks.append(
-                    _check(
-                        "no_required_checks_skipped",
-                        "blocked",
-                        f"required post_emit checks skipped: {', '.join(skipped)}",
-                    )
-                )
-                errors.append(f"required post_emit checks skipped: {', '.join(skipped)}")
+            post_status = post_doc.get("status")
+            if post_status == "pass":
+                checks.append(_check("post_emit_health_pass", "pass", "post_emit_health status=pass"))
+            elif post_status == "warn":
+                checks.append(_check("post_emit_health_pass", "warn", "post_emit_health status=warn"))
+                warnings.append("post_emit_health status=warn")
+            elif post_status in {"blocked", "fail"}:
+                checks.append(_check("post_emit_health_pass", "blocked", f"post_emit_health status={post_status}"))
+                errors.append(f"post_emit_health status={post_status}")
             else:
-                checks.append(_check("no_required_checks_skipped", "pass", "no required post_emit checks skipped"))
+                checks.append(
+                    _check(
+                        "post_emit_health_pass",
+                        "fail",
+                        f"post_emit_health status invalid: {post_status!r}",
+                    )
+                )
+                errors.append(f"post_emit_health status invalid: {post_status!r}")
+
+            reached = post_doc.get("evidence_levels_reached")
+            range_status = post_doc.get("range_ref_resolution_status")
+            if isinstance(reached, list) and "range_strict" in reached and range_status == "ok":
+                checks.append(_check("range_citation_strict", "pass", "range_strict evidence reached"))
+            elif post_status == "pass":
+                checks.append(
+                    _check(
+                        "range_citation_strict",
+                        "blocked",
+                        "range_strict evidence not reached in post_emit_health",
+                    )
+                )
+                errors.append("range_strict evidence not reached in post_emit_health")
+            else:
+                checks.append(
+                    _check(
+                        "range_citation_strict",
+                        "blocked",
+                        "range_strict evidence unavailable because post_emit_health is not pass",
+                    )
+                )
+
+            required_checks = {
+                "manifest_schema_valid",
+                "artifact_paths_exist",
+                "artifact_hashes_match",
+                "canonical_md_present",
+                "agent_pack_present",
+                "claim_evidence_map_present",
+                "claim_evidence_map_hash_ok",
+                "claim_evidence_map_schema_valid",
+                "range_ref_resolution",
+            }
+            post_checks = post_doc.get("checks")
+            if not isinstance(post_checks, list):
+                checks.append(_check("no_required_checks_skipped", "blocked", "post_emit_health checks missing"))
+                errors.append("post_emit_health checks missing")
+            else:
+                status_by_name = {}
+                for item in post_checks:
+                    if isinstance(item, dict) and isinstance(item.get("name"), str):
+                        status_by_name[item["name"]] = item.get("status")
+
+                missing = sorted(name for name in required_checks if name not in status_by_name)
+                skipped = sorted(name for name in required_checks if status_by_name.get(name) == "skipped")
+                if missing:
+                    checks.append(
+                        _check(
+                            "no_required_checks_skipped",
+                            "blocked",
+                            f"required post_emit checks missing: {', '.join(missing)}",
+                        )
+                    )
+                    errors.append(f"required post_emit checks missing: {', '.join(missing)}")
+                elif skipped:
+                    checks.append(
+                        _check(
+                            "no_required_checks_skipped",
+                            "blocked",
+                            f"required post_emit checks skipped: {', '.join(skipped)}",
+                        )
+                    )
+                    errors.append(f"required post_emit checks skipped: {', '.join(skipped)}")
+                else:
+                    checks.append(_check("no_required_checks_skipped", "pass", "no required post_emit checks skipped"))
 
     capabilities = manifest.get("capabilities")
     redaction = capabilities.get("redaction") if isinstance(capabilities, dict) else None

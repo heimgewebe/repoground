@@ -223,8 +223,45 @@ def test_forensic_strict_fail_outranks_blocked(tmp_path):
 
     by_name = {item["name"]: item for item in report["checks"]}
     assert by_name["claim_evidence_map_hash_ok"]["status"] == "fail"
+    assert by_name["claim_evidence_map_schema_valid"]["status"] == "skipped"
     assert by_name["post_emit_health_present"]["status"] == "blocked"
     assert report["status"] == "fail"
+
+
+def test_forensic_preflight_rejects_stale_post_emit_health(tmp_path):
+    bundle_a_dir = tmp_path / "a"
+    bundle_a_dir.mkdir()
+    manifest_a = _make_bundle(bundle_a_dir, include_claim_map=True)
+    post_health_a = _write_post_health(manifest_a)
+
+    bundle_b_dir = tmp_path / "b"
+    bundle_b_dir.mkdir()
+    manifest_b = _make_bundle(bundle_b_dir, include_claim_map=True)
+
+    report = compute_forensic_preflight(str(manifest_b), post_health_path=str(post_health_a))
+
+    by_name = {item["name"]: item for item in report["checks"]}
+    assert by_name["post_emit_health_bound_to_manifest"]["status"] == "fail"
+    assert by_name["post_emit_health_pass"]["status"] == "blocked"
+    assert by_name["range_citation_strict"]["status"] == "blocked"
+    assert by_name["no_required_checks_skipped"]["status"] == "blocked"
+    assert report["status"] in {"blocked", "fail"}
+
+
+def test_forensic_preflight_rejects_adjacent_stale_post_emit_health(tmp_path):
+    manifest = _make_bundle(tmp_path, include_claim_map=True)
+    post_path = _write_post_health(manifest)
+    post_doc = json.loads(post_path.read_text(encoding="utf-8"))
+    post_doc["bundle_manifest_path"] = str(tmp_path / "other.bundle.manifest.json")
+    post_doc["bundle_run_id"] = "other-run"
+    post_path.write_text(json.dumps(post_doc, indent=2), encoding="utf-8")
+
+    report = compute_forensic_preflight(str(manifest))
+
+    by_name = {item["name"]: item for item in report["checks"]}
+    assert by_name["post_emit_health_bound_to_manifest"]["status"] == "fail"
+    assert by_name["post_emit_health_pass"]["status"] == "blocked"
+    assert report["status"] in {"blocked", "fail"}
 
 
 def test_forensic_strict_preflight_passes_with_all_prerequisites(tmp_path):
@@ -241,6 +278,7 @@ def test_forensic_strict_preflight_passes_with_all_prerequisites(tmp_path):
         "claim_evidence_map_hash_ok",
         "claim_evidence_map_schema_valid",
         "post_emit_health_present",
+        "post_emit_health_bound_to_manifest",
         "post_emit_health_pass",
         "range_citation_strict",
         "redaction_policy_explicit",
