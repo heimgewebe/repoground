@@ -267,7 +267,7 @@
 > `Path(__file__).resolve().parents[3]`, was nur beim Ausführen aus dem
 > lenskit-Source-Tree funktioniert. Fix: Registry-Pfad aus
 > `repo_summaries[0]["root"]` (Single-Repo-Bundles). Validierungsschema aus
-> Package-Pfad. Multi-Repo out of scope. Beweis: 4 neue Tests in
+> Package-Pfad. Multi-Repo out of scope. Beweis: 5 neue Tests in
 > `test_bundle_manifest_integration.py`. `claim_evidence_map_json` wird jetzt
 > in realen Bundles emittiert; Agent Reading Pack zeigt Summary statt
 > EPISTEMIC_EMPTINESS.

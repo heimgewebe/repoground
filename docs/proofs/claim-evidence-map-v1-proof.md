@@ -169,6 +169,9 @@ Paketen oder beim Scannen anderer Repos zeigte der Pfad auf das falsche
   Registry → keine Map, Leerstelle sichtbar.
 - `test_claim_evidence_map_surface_invalid_registry_raises`: Ungültige
   Registry → RuntimeError (kein stilles Skippen).
+- `test_claim_evidence_map_surface_uses_scan_repo_root`: echter Pfad
+  `scan_repo → repo_summaries[0]["root"] → registry lookup → bundle emission`
+  erzeugt `claim_evidence_map_json` im Manifest (End-to-End-Brückentest).
 
 ## 13. Next Slice
 
