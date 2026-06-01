@@ -697,6 +697,210 @@ def test_rlens_client_job_http_404_no_token_leak(
     assert "shhh-secret" not in err
 
 
+# ---------------------------------------------------------------------------
+# run / cancel (PR E scope)
+# ---------------------------------------------------------------------------
+
+
+def _decode_request_json(req: urllib.request.Request) -> dict:
+    raw = req.data or b"{}"
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    return json.loads(raw.decode("utf-8"))
+
+
+def test_rlens_client_run_posts_job_request(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    fake_data = {
+        "id": "job-run-1",
+        "status": "queued",
+        "repos": ["lenskit"],
+        "hub_resolved": "/hub",
+    }
+    captured, opener = _make_opener(fake_data)
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(
+        [
+            "rlens-client",
+            "run",
+            "--repo",
+            "lenskit",
+            "--level",
+            "max",
+            "--mode",
+            "gesamt",
+            "--json",
+        ]
+    )
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    parsed = json.loads(out)
+    assert parsed["id"] == "job-run-1"
+    req = captured["req"]
+    assert req.get_method() == "POST"
+    assert req.get_header("Content-type") == "application/json"
+    _assert_request_url(req, scheme="http", netloc="127.0.0.1:8787", path="/api/jobs")
+    payload = _decode_request_json(req)
+    assert payload == {"repos": ["lenskit"], "level": "max", "mode": "gesamt"}
+
+
+def test_rlens_client_run_repeated_repo_force_new_and_plan_only(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-run-2", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(
+        [
+            "rlens-client",
+            "run",
+            "--repo",
+            "lenskit",
+            "--repo",
+            "metarepo",
+            "--hub",
+            "/tmp/hub",
+            "--merges-dir",
+            "/tmp/merges",
+            "--force-new",
+            "--plan-only",
+            "--json",
+        ]
+    )
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["repos"] == ["lenskit", "metarepo"]
+    assert payload["hub"] == "/tmp/hub"
+    assert payload["merges_dir"] == "/tmp/merges"
+    assert payload["force_new"] is True
+    assert payload["plan_only"] is True
+    assert payload["level"] == "dev"
+    assert payload["mode"] == "gesamt"
+
+
+def test_rlens_client_run_text_output(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _, opener = _make_opener(
+        {
+            "id": "job-run-text",
+            "status": "queued",
+            "repos": ["lenskit", "metarepo"],
+            "hub_resolved": "/hub",
+        }
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "job-run-text" in out
+    assert "queued" in out
+    assert "lenskit" in out
+    assert "/hub" in out
+
+
+def test_rlens_client_run_sets_bearer_header_and_no_query_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "run-secret")
+    captured, opener = _make_opener({"id": "job-run-token", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit", "--json"])
+
+    assert rc == 0
+    assert captured["req"].get_header("Authorization") == "Bearer run-secret"
+    assert "run-secret" not in captured["req"].full_url
+
+
+def test_rlens_client_run_http_error_exit_1_no_token_leak(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "run-secret")
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise urllib.error.HTTPError(
+            url=None, code=500, msg="Internal Server Error", hdrs=None, fp=None
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit", "--json"])
+    out, err = capsys.readouterr()
+
+    assert rc == 1
+    parsed = json.loads(out)
+    assert parsed["status"] == "error"
+    assert parsed["error_kind"] == "remote_error"
+    assert "run-secret" not in out
+    assert "run-secret" not in err
+
+
+def test_rlens_client_cancel_posts_to_url_encoded_job_path(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"status": "canceling"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "cancel", "job id/with weird", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    parsed = json.loads(out)
+    assert parsed["status"] == "canceling"
+    req = captured["req"]
+    assert req.get_method() == "POST"
+    assert " " not in req.full_url.split("?")[0]
+    assert "/api/jobs/" in req.full_url
+    suffix = req.full_url.split("/api/jobs/", 1)[1]
+    assert suffix.endswith("/cancel")
+    assert suffix[: -len("/cancel")].count("/") == 0
+
+
+def test_rlens_client_cancel_text_finished_message(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    _, opener = _make_opener({"status": "succeeded", "message": "Job already finished"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "cancel", "job-done"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 0
+    assert "succeeded" in out
+    assert "Job already finished" in out
+
+
+def test_rlens_client_cancel_http_404_no_token_leak(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "cancel-secret")
+
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise urllib.error.HTTPError(
+            url=None, code=404, msg="Not Found", hdrs=None, fp=None
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "cancel", "missing-id", "--json"])
+    out, err = capsys.readouterr()
+
+    assert rc == 1
+    parsed = json.loads(out)
+    assert parsed["status"] == "error"
+    assert parsed["error_kind"] == "remote_error"
+    assert "cancel-secret" not in out
+    assert "cancel-secret" not in err
+
+
 def test_rlens_client_logs_text_streams_data_lines(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:

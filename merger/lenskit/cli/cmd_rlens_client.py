@@ -214,6 +214,43 @@ def _fetch_json(url: str, token: Optional[str], timeout: int = DEFAULT_TIMEOUT_S
     return json.loads(body)
 
 
+def _post_json(
+    url: str,
+    token: Optional[str],
+    payload: Optional[dict] = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> Any:
+    data = b""
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    if payload is not None:
+        req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        body = resp.read()
+    return json.loads(body)
+
+
+def _post_json_with_errors(
+    args: argparse.Namespace,
+    url: str,
+    token: Optional[str],
+    payload: Optional[dict] = None,
+) -> Tuple[Optional[Any], Optional[int]]:
+    try:
+        return _post_json(url, token, payload), None
+    except urllib.error.HTTPError as e:
+        return None, _exit_error(args, "remote_error", f"HTTP {e.code}: {e.reason}", token)
+    except urllib.error.URLError as e:
+        return None, _exit_error(args, "remote_error", f"Connection error: {e.reason}", token)
+    except json.JSONDecodeError as e:
+        return None, _exit_error(args, "parse_error", f"Invalid JSON response: {e}", token)
+    except (ValueError, TimeoutError, OSError) as e:
+        return None, _exit_error(args, "remote_error", f"Request failed: {e}", token)
+
+
 def _fetch_json_with_errors(
     args: argparse.Namespace, url: str, token: Optional[str]
 ) -> Tuple[Optional[Any], Optional[int]]:
@@ -300,6 +337,37 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
     job_parser = client_subparsers.add_parser("job", help="Get job details by id")
     _add_common_options(job_parser, suppress_defaults=True, dest_prefix="leaf_")
     job_parser.add_argument("job_id", help="Job ID")
+
+    run_parser = client_subparsers.add_parser(
+        "run", help="Create or reuse an rLens bundle job"
+    )
+    _add_common_options(run_parser, suppress_defaults=True, dest_prefix="leaf_")
+    run_parser.add_argument(
+        "--repo",
+        action="append",
+        default=None,
+        help="Repository name to include; repeat for multiple repos (omit for all)",
+    )
+    run_parser.add_argument("--hub", default=None, help="Hub path override")
+    run_parser.add_argument("--merges-dir", default=None, help="Output directory override")
+    run_parser.add_argument(
+        "--level",
+        choices=("overview", "summary", "dev", "max"),
+        default="dev",
+        help="Bundle level (default: dev, matching JobRequest)",
+    )
+    run_parser.add_argument(
+        "--mode",
+        choices=("gesamt", "pro-repo"),
+        default="gesamt",
+        help="Bundle mode (default: gesamt)",
+    )
+    run_parser.add_argument("--force-new", action="store_true", help="Do not reuse matching existing jobs")
+    run_parser.add_argument("--plan-only", action="store_true", help="Plan only; do not write bundle artifacts")
+
+    cancel_parser = client_subparsers.add_parser("cancel", help="Request job cancellation")
+    _add_common_options(cancel_parser, suppress_defaults=True, dest_prefix="leaf_")
+    cancel_parser.add_argument("job_id", help="Job ID")
 
     logs_parser = client_subparsers.add_parser(
         "logs", help="Stream job logs via SSE until event: end"
@@ -502,6 +570,74 @@ def _cmd_job(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_run(args: argparse.Namespace) -> int:
+    try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
+        base_url = _resolve_base_url(args)
+    except ValueError as e:
+        return _exit_config_error(args, str(e))
+
+    payload: dict = {
+        "level": args.level,
+        "mode": args.mode,
+    }
+    if args.repo:
+        payload["repos"] = args.repo
+    if args.hub:
+        payload["hub"] = args.hub
+    if args.merges_dir:
+        payload["merges_dir"] = args.merges_dir
+    if args.force_new:
+        payload["force_new"] = True
+    if args.plan_only:
+        payload["plan_only"] = True
+
+    url = f"{base_url}/api/jobs"
+    data, error_code = _post_json_with_errors(args, url, token, payload)
+    if error_code is not None:
+        return error_code
+
+    if _is_json_output(args):
+        print(json.dumps(data, indent=2))
+        return 0
+
+    print(f"id: {data.get('id', '?')}")
+    print(f"status: {data.get('status', '?')}")
+    repos = data.get("repos")
+    if repos:
+        if isinstance(repos, list):
+            print(f"repos: {', '.join(str(repo) for repo in repos)}")
+        else:
+            print(f"repos: {repos}")
+    if data.get("hub_resolved"):
+        print(f"hub: {data['hub_resolved']}")
+    return 0
+
+
+def _cmd_cancel(args: argparse.Namespace) -> int:
+    try:
+        _ensure_profile_config_valid_if_present(args)
+        token = _resolve_token(args)
+        base_url = _resolve_base_url(args)
+    except ValueError as e:
+        return _exit_config_error(args, str(e))
+
+    url = f"{base_url}/api/jobs/{urllib.parse.quote(args.job_id, safe='')}/cancel"
+    data, error_code = _post_json_with_errors(args, url, token, None)
+    if error_code is not None:
+        return error_code
+
+    if _is_json_output(args):
+        print(json.dumps(data, indent=2))
+        return 0
+
+    print(f"status: {data.get('status', '?')}")
+    if data.get("message"):
+        print(f"message: {data['message']}")
+    return 0
+
+
 def _strip_sse_value(value: str) -> str:
     # Per SSE spec, a single optional leading space after the colon is stripped.
     if value.startswith(" "):
@@ -678,7 +814,7 @@ def run_rlens_client(args: argparse.Namespace) -> int:
     if not hasattr(args, "rlens_cmd") or args.rlens_cmd is None:
         print("Usage: lenskit rlens-client <subcommand>", file=sys.stderr)
         print(
-            "Subcommands: health, artifacts, latest, jobs, job, logs, profiles",
+            "Subcommands: health, artifacts, latest, jobs, job, run, cancel, logs, profiles",
             file=sys.stderr,
         )
         return 2
@@ -692,6 +828,10 @@ def run_rlens_client(args: argparse.Namespace) -> int:
         return _cmd_jobs(args)
     if args.rlens_cmd == "job":
         return _cmd_job(args)
+    if args.rlens_cmd == "run":
+        return _cmd_run(args)
+    if args.rlens_cmd == "cancel":
+        return _cmd_cancel(args)
     if args.rlens_cmd == "logs":
         return _cmd_logs(args)
     if args.rlens_cmd == "profiles":
