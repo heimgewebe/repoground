@@ -1,4 +1,4 @@
-"""Read-only rLens HTTP CLI client. No new runtime dependencies."""
+"""rLens HTTP CLI client. No new runtime dependencies."""
 import argparse
 import json
 import os

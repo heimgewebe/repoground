@@ -1,4 +1,4 @@
-"""Tests for the read-only rLens CLI client (cmd_rlens_client.py).
+"""Tests for the rLens CLI client (cmd_rlens_client.py).
 
 No real rLens server is used. urllib.request.urlopen is monkeypatched.
 """
@@ -876,6 +876,20 @@ def test_rlens_client_cancel_text_finished_message(
     assert rc == 0
     assert "succeeded" in out
     assert "Job already finished" in out
+
+
+def test_rlens_client_cancel_sets_bearer_header_and_no_query_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RLENS_TOKEN", "cancel-secret")
+    captured, opener = _make_opener({"status": "canceling"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "cancel", "job-1", "--json"])
+
+    assert rc == 0
+    assert captured["req"].get_header("Authorization") == "Bearer cancel-secret"
+    assert "cancel-secret" not in captured["req"].full_url
 
 
 def test_rlens_client_cancel_http_404_no_token_leak(

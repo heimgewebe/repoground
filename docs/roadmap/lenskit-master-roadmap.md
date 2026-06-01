@@ -683,7 +683,11 @@ PR 5 (docs-only): rLens CLI Client Blueprint und Umsetzungspfad
   - [x] `jobs` — `GET /api/jobs` (optional `--status`, `--limit`)
   - [x] `job JOB_ID` — `GET /api/jobs/{job_id}`
   - [x] `logs JOB_ID` — `GET /api/jobs/{job_id}/logs` (SSE bis `event: end`, optional `--last-id`, `--timeout`)
-  - [ ] `run`, `cancel` (PR E) — nach API-/Sicherheitsreview
+  - [x] `run`, `cancel` (PR E) — umgesetzt
+  - `run` — `POST /api/jobs`
+  - `cancel JOB_ID` — `POST /api/jobs/{job_id}/cancel`
+  - Sicherheitsinvarianten: Bearer-Token nur im Header, kein Query-Token, URL-Encoding fuer `job_id`, bestehende Base-URL-/Profilvalidierung bleibt aktiv.
+  - Tests: `merger/lenskit/tests/test_cli_rlens_client.py` deckt POST, Payload, URL-Encoding, Token-Header, Text-/JSON-Ausgabe und HTTP-Fehler ab.
 - [x] Host-Profile (PR D)
   - [x] `--profile NAME` an allen Subkommandos
   - [x] `RLENS_PROFILE`-Env-Variable

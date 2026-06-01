@@ -257,9 +257,17 @@ Heim-PC/Heimserver-Betriebsentscheidung bleibt offen — der Profile-Mechanismus
 
 ### PR E: Mutierende Kommandos
 
-- `run`
-- `cancel`
-- nur nach API-/Sicherheitsreview
+Status: umgesetzt.
+
+- `run` erzeugt oder reused einen rLens-Bundle-Job via `POST /api/jobs`.
+- `cancel JOB_ID` fordert Job-Abbruch via `POST /api/jobs/{job_id}/cancel` an.
+- Der CLI-Scope bleibt konservativ: exponiert werden `--repo`, `--hub`, `--merges-dir`, `--level`, `--mode`, `--force-new`, `--plan-only`.
+- Sicherheitsreview / Invarianten:
+  - Token werden ausschließlich als Bearer-Header gesendet, nie als Query-Parameter.
+  - `job_id` wird als Pfadsegment URL-encodiert.
+  - Base-URL-/Profilvalidierung bleibt vor Netzwerkzugriff aktiv.
+  - Remote-/HTTP-/Parse-Fehler liefern Exit-Code 1; lokale Config-/Input-Fehler liefern Exit-Code 2.
+- Tests: `merger/lenskit/tests/test_cli_rlens_client.py` deckt POST-Methode, Payload, Text-/JSON-Ausgabe, URL-Encoding, Token-Header und Fehler-Redaction ab.
 
 ## Akzeptanzkriterien für PR B
 
