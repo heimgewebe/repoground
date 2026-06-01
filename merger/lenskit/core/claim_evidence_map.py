@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from merger.lenskit.core.doc_freshness import (
-    default_schema_path,
     load_registry,
     validate_registry,
 )
@@ -154,8 +153,14 @@ def produce_claim_evidence_map(
 
     registry = load_registry(registry_path)
 
-    repo_root = registry_path.resolve().parents[1]
-    schema_errors = validate_registry(registry, default_schema_path(repo_root))
+    # The validation schema is part of the lenskit package, not the scanned
+    # repo. Derive it from the package source so this works regardless of
+    # where the scanned repo lives (or whether lenskit is installed as a
+    # package vs. run from its own source tree).
+    _pkg_contracts = Path(__file__).parent.parent / "contracts"
+    schema_errors = validate_registry(
+        registry, _pkg_contracts / "doc-freshness-registry.v1.schema.json"
+    )
     if schema_errors:
         raise ValueError(
             "doc-freshness registry validation failed: " + "; ".join(schema_errors)

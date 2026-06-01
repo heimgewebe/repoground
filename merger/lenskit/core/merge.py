@@ -6128,9 +6128,19 @@ def write_reports_v2(
 
     # Claim-evidence map: derived reference-only navigation/evidence index from
     # doc-freshness registry. Optional: production may fail if registry invalid.
+    #
+    # Registry path is derived from the *source repo context*, not from the
+    # package install path. For single-repo bundles we use the scanned repo's
+    # own docs/doc-freshness-registry.yml. Multi-repo aggregation is out of
+    # scope for this implementation; when multiple repos are present we skip
+    # claim-evidence-map production and leave the epistemic gap visible.
     claim_evidence_map_path = None
-    claim_evidence_registry_path = Path(__file__).resolve().parents[3] / "docs" / "doc-freshness-registry.yml"
-    if claim_evidence_registry_path.is_file():
+    if len(repo_summaries) == 1:
+        claim_evidence_registry_path = Path(repo_summaries[0]["root"]) / "docs" / "doc-freshness-registry.yml"
+    else:
+        # Multi-repo claim_evidence_map aggregation remains out of scope.
+        claim_evidence_registry_path = None
+    if claim_evidence_registry_path is not None and claim_evidence_registry_path.is_file():
         from .claim_evidence_map import produce_claim_evidence_map
 
         claim_evidence_map_path = bundle_manifest_path.with_name(
