@@ -7,11 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from .clock import now_utc
-from .constants import (
-    CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY,
-    CLAIM_EVIDENCE_MAP_ABSENCE_REASONS,
-    CLAIM_EVIDENCE_MAP_ABSENCE_REASON_MESSAGES,
-)
+from .claim_evidence_diagnostics import claim_absence_reason_from_manifest, claim_absence_reason_detail
 from .path_security import resolve_secure_path
 from .post_emit_health import derive_post_health_path
 
@@ -72,16 +68,6 @@ def _find_artifact(artifacts: list[Any], role: str) -> Optional[Dict[str, Any]]:
     for art in artifacts:
         if isinstance(art, dict) and art.get("role") == role:
             return art
-    return None
-
-
-def _claim_absence_reason_from_manifest(manifest: Dict[str, Any]) -> Optional[str]:
-    links = manifest.get("links") if isinstance(manifest.get("links"), dict) else None
-    if links is None:
-        return None
-    raw = links.get(CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY)
-    if isinstance(raw, str) and raw in CLAIM_EVIDENCE_MAP_ABSENCE_REASONS:
-        return raw
     return None
 
 
@@ -232,11 +218,8 @@ def compute_forensic_preflight(
 
     claim_present = _find_artifact(artifacts, "claim_evidence_map_json")
     if claim_present is None:
-        claim_absence_reason = _claim_absence_reason_from_manifest(manifest)
-        reason_detail = CLAIM_EVIDENCE_MAP_ABSENCE_REASON_MESSAGES.get(
-            claim_absence_reason,
-            "reason unavailable",
-        )
+        claim_absence_reason = claim_absence_reason_from_manifest(manifest)
+        reason_detail = claim_absence_reason_detail(claim_absence_reason)
         reason_suffix = (
             f" reason={claim_absence_reason} ({reason_detail})"
             if claim_absence_reason is not None

@@ -1326,7 +1326,7 @@ def test_claim_evidence_map_surface_multi_repo_absence_reason(tmp_path):
     assert manifest_doc.get("links", {}).get("claim_evidence_map_absence_reason") == "multi_repo_out_of_scope"
 
 
-def test_claim_evidence_map_surface_real_registry_regression_guard(tmp_path):
+def test_claim_evidence_map_surface_real_registry_payload_regression_guard(tmp_path):
     """Real-bundle surface guard: use the repository's real registry payload,
     not a synthetic minimal fixture, and enforce manifest/pack/post-emit visibility."""
     assert _REAL_DOC_FRESHNESS_REGISTRY_PATH.is_file(), "real registry fixture missing in repository"
@@ -1434,3 +1434,56 @@ def test_claim_evidence_map_surface_uses_scan_repo_root(tmp_path):
     )
     assert artifacts.claim_evidence_map is not None
     assert artifacts.claim_evidence_map.exists()
+
+
+def test_claim_evidence_map_unexpected_missing_with_registry(tmp_path, monkeypatch):
+    assert _REAL_DOC_FRESHNESS_REGISTRY_PATH.is_file(), "real registry fixture missing in repository"
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "README.md").write_text("# Real registry guard\n", encoding="utf-8")
+    (src_dir / "docs").mkdir()
+    (src_dir / "docs" / "doc-freshness-registry.yml").write_text(
+        _REAL_DOC_FRESHNESS_REGISTRY_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    # Monkeypatch the module where it is imported. merge.py imports produce_claim_evidence_map inside _add_artifact
+    # We patch the underlying module to return successfully but silently not write the file.
+    import merger.lenskit.core.claim_evidence_map as cem
+    def fake_produce(*args, **kwargs):
+        pass # do not write the file, simulate silent failure
+    monkeypatch.setattr(cem, "produce_claim_evidence_map", fake_produce)
+
+    summary = scan_repo(src_dir)
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[summary],
+        detail="test",
+        mode="gesamt",
+        max_bytes=10000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+
+    manifest_doc = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    roles_map = {item["role"]: item for item in manifest_doc["artifacts"]}
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value not in roles_map
+    assert manifest_doc.get("links", {}).get("claim_evidence_map_absence_reason") == "unexpected_missing_with_registry"
+
+    pack_text = artifacts.agent_reading_pack.read_text(encoding="utf-8")
+    assert "reason=unexpected_missing_with_registry" in pack_text
+
+    post_emit = compute_post_emit_health(str(artifacts.bundle_manifest))
+    checks = {item["name"]: item for item in post_emit["checks"]}
+    assert checks["claim_evidence_map_present"]["status"] == "skipped"
+    assert "reason=unexpected_missing_with_registry" in checks["claim_evidence_map_present"]["detail"]

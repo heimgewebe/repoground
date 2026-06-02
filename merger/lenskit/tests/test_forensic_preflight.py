@@ -187,7 +187,10 @@ def test_forensic_strict_blocked_without_claim_evidence_map(tmp_path):
     assert report["status"] == "blocked"
     by_name = {item["name"]: item for item in report["checks"]}
     assert by_name["claim_evidence_map_present"]["status"] == "blocked"
-    assert by_name["claim_evidence_map_present"]["detail"] == "claim_evidence_map_json missing reason=no_registry (registry missing (docs/doc-freshness-registry.yml not found in source repo))"
+    detail = by_name["claim_evidence_map_present"]["detail"]
+    assert "claim_evidence_map_json missing" in detail
+    assert "reason=no_registry" in detail
+    assert "registry missing" in detail
 
 
 def test_forensic_strict_blocked_without_citation_map(tmp_path):

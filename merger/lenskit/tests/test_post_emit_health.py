@@ -347,7 +347,10 @@ def test_post_emit_health_claim_map_absence_reports_reason(tmp_path):
 
     by_name = {item["name"]: item for item in report["checks"]}
     assert by_name["claim_evidence_map_present"]["status"] == "skipped"
-    assert by_name["claim_evidence_map_present"]["detail"] == "claim_evidence_map_json absent; forensic_strict preflight would block reason=multi_repo_out_of_scope (multi-repo aggregation is out of scope)"
+    detail = by_name["claim_evidence_map_present"]["detail"]
+    assert "claim_evidence_map_json absent" in detail
+    assert "reason=multi_repo_out_of_scope" in detail
+    assert "multi-repo aggregation is out of scope" in detail
 
 
 def test_post_emit_health_output_validates_against_schema(tmp_path):

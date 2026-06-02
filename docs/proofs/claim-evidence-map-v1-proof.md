@@ -184,13 +184,13 @@ Positivfall und negativen Fällen für fehlende Claim-Map, stale
 Die optionale CI-Promotion von `forensic_strict` bleibt ein separater PR und
 setzt weitere stabile Real-Bundle-Läufe voraus.
 
-## 14. Real-Bundle Surface Guard + Diagnosetaxonomie (2026-06-01)
+## 14. Real-Registry-Payload Surface Guard + Diagnosetaxonomie (2026-06-01)
 
 Zusätzlich zur Minimal-/Fixture-Abdeckung wurde ein Real-Surface-Guard
-ergänzt, der den tatsächlichen Bundle-Surface-Pfad gegen eine echte Registry
+ergänzt, der den repo-scan-basierten Single-Repo-Bundlepfad gegen eine echte Registry
 absichert:
 
-- `test_claim_evidence_map_surface_real_registry_regression_guard` verwendet
+- `test_claim_evidence_map_surface_real_registry_payload_regression_guard` verwendet
   den realen Registry-Inhalt (`docs/doc-freshness-registry.yml`) im
   Single-Repo-Bundlepfad und prüft:
   - Manifest enthält `claim_evidence_map_json`.
@@ -208,3 +208,19 @@ Diese Diagnose wird zusätzlich im Agent Reading Pack und in
 `post_emit_health`/`forensic_preflight` sichtbar gemacht (Check-Details mit
 `reason=<code>`), damit ein grünes `output_health` nicht als stilles
 Forensic-Ready-Signal fehlinterpretiert wird.
+
+
+### Manueller Smoke Test
+
+Zusätzlich zum CI-Guard kann der Surface Guard manuell wie folgt validiert werden:
+
+```bash
+python3 -m merger.lenskit.cli.rlens . --level max --split-size 20MB --meta-density full
+```
+
+Danach im Output-Manifest prüfen:
+* `claim_evidence_map_json` ist als Artefakt vorhanden
+* `links.claim_evidence_map_absence_reason` ist **nicht** gesetzt
+* Das Agent Reading Pack zeigt eine Claim-Map-Summary an
+
+Dieser Smoke Test ist rein informativ und ersetzt nicht die CI-Promotion von `forensic_strict`.
