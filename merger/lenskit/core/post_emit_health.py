@@ -43,6 +43,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .clock import now_utc
+from .claim_evidence_diagnostics import (
+    claim_absence_reason_detail,
+    claim_absence_reason_from_manifest,
+)
 from .constants import ArtifactRole
 from .output_health import _is_jsonschema_unavailable_error
 from .path_security import resolve_secure_path
@@ -558,15 +562,35 @@ def compute_post_emit_health(
     # ── claim_evidence_map: optional globally, required for forensic_strict preflight ──
     claim_entry = by_role.get(_CLAIM_EVIDENCE_MAP)
     if claim_entry is None:
+        claim_absence_reason = claim_absence_reason_from_manifest(manifest)
+        reason_detail = claim_absence_reason_detail(claim_absence_reason)
+        reason_suffix = (
+            f" reason={claim_absence_reason} ({reason_detail})"
+            if claim_absence_reason is not None
+            else ""
+        )
         checks.append(
             _check(
                 "claim_evidence_map_present",
                 "skipped",
-                "claim_evidence_map_json absent; forensic_strict preflight would block",
+                "claim_evidence_map_json absent; forensic_strict preflight would block"
+                + reason_suffix,
             )
         )
-        checks.append(_check("claim_evidence_map_hash_ok", "skipped", "claim_evidence_map_json absent"))
-        checks.append(_check("claim_evidence_map_schema_valid", "skipped", "claim_evidence_map_json absent"))
+        checks.append(
+            _check(
+                "claim_evidence_map_hash_ok",
+                "skipped",
+                "claim_evidence_map_json absent" + reason_suffix,
+            )
+        )
+        checks.append(
+            _check(
+                "claim_evidence_map_schema_valid",
+                "skipped",
+                "claim_evidence_map_json absent" + reason_suffix,
+            )
+        )
     else:
         checks.append(_check("claim_evidence_map_present", "pass"))
         claim_hash_ok = _CLAIM_EVIDENCE_MAP in valid_roles

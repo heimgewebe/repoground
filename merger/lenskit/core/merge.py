@@ -21,7 +21,10 @@ from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass, asdict
 
 from . import lenses
-from .constants import ArtifactRole
+from .constants import (
+    ArtifactRole,
+    CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY,
+)
 from . import clock
 from .chunker import Chunker
 from .redactor import Redactor
@@ -6135,12 +6138,19 @@ def write_reports_v2(
     # scope for this implementation; when multiple repos are present we skip
     # claim-evidence-map production and leave the epistemic gap visible.
     claim_evidence_map_path = None
+    claim_evidence_absence_reason: Optional[str] = None
+    claim_evidence_registry_exists = False
     if len(repo_summaries) == 1:
         claim_evidence_registry_path = Path(repo_summaries[0]["root"]) / "docs" / "doc-freshness-registry.yml"
+        claim_evidence_registry_exists = claim_evidence_registry_path.is_file()
+        if not claim_evidence_registry_exists:
+            claim_evidence_absence_reason = "no_registry"
     else:
         # Multi-repo claim_evidence_map aggregation remains out of scope.
         claim_evidence_registry_path = None
-    if claim_evidence_registry_path is not None and claim_evidence_registry_path.is_file():
+        claim_evidence_absence_reason = "multi_repo_out_of_scope"
+
+    if claim_evidence_registry_path is not None and claim_evidence_registry_exists:
         from .claim_evidence_map import produce_claim_evidence_map
 
         claim_evidence_map_path = bundle_manifest_path.with_name(
@@ -6158,17 +6168,31 @@ def write_reports_v2(
                 "Failed to produce claim_evidence_map_json: " + str(exc)
             ) from exc
         else:
-            out_paths.append(claim_evidence_map_path)
-            if claim_evidence_map_path not in other_paths:
-                other_paths.append(claim_evidence_map_path)
-            _add_artifact(
-                claim_evidence_map_path,
-                ArtifactRole.CLAIM_EVIDENCE_MAP_JSON,
-                "application/json",
-            )
-            artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
-            bundle_manifest["artifacts"] = artifacts_list
-            _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
+            if not claim_evidence_map_path.is_file():
+                claim_evidence_absence_reason = "unexpected_missing_with_registry"
+                claim_evidence_map_path = None
+            else:
+                claim_evidence_absence_reason = None
+            if claim_evidence_map_path is not None:
+                out_paths.append(claim_evidence_map_path)
+                if claim_evidence_map_path not in other_paths:
+                    other_paths.append(claim_evidence_map_path)
+                _add_artifact(
+                    claim_evidence_map_path,
+                    ArtifactRole.CLAIM_EVIDENCE_MAP_JSON,
+                    "application/json",
+                )
+                artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
+                bundle_manifest["artifacts"] = artifacts_list
+
+    if claim_evidence_map_path is None:
+        if claim_evidence_absence_reason is None:
+            claim_evidence_absence_reason = "unexpected_missing_with_registry"
+        links[CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY] = claim_evidence_absence_reason
+    else:
+        links.pop(CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY, None)
+    bundle_manifest["links"] = links
+    _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
 
     # Agent reading pack: compact navigation entry-point for LLM agents.
     # Produced LAST, from the finalized manifest, so it can reflect every other

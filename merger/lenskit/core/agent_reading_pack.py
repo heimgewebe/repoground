@@ -36,6 +36,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .citation_map import byte_range_to_line_range, normalize_canonical_range
+from .claim_evidence_diagnostics import (
+    claim_absence_reason_detail,
+    claim_absence_reason_from_manifest,
+)
 from .constants import ArtifactRole
 from .path_security import resolve_secure_path
 
@@ -874,6 +878,7 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
     repo_ids: List[str] = []
     indexed_chunk_count = 0
     absent_notes: List[str] = []
+    claim_absence_reason = claim_absence_reason_from_manifest(manifest)
 
     if canonical_md_path is not None and chunk_index_path is not None:
         try:
@@ -910,8 +915,15 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
             "`citation_map_jsonl` is present but failed verification; citation guidance suppressed."
         )
     if _CLAIM_EVIDENCE_MAP not in by_role:
+        reason_detail = claim_absence_reason_detail(claim_absence_reason)
+        reason_suffix = (
+            f" reason={claim_absence_reason} ({reason_detail})."
+            if claim_absence_reason is not None
+            else ""
+        )
         absent_notes.append(
             "`claim_evidence_map_json` is absent: claim→evidence navigation index not available."
+            + reason_suffix
         )
         absent_notes.append(
             "`claim_evidence_map` is absent in this bundle; claim→evidence navigation remains explicitly unavailable."

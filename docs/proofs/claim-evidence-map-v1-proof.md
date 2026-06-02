@@ -183,3 +183,48 @@ Positivfall und negativen Fällen für fehlende Claim-Map, stale
 
 Die optionale CI-Promotion von `forensic_strict` bleibt ein separater PR und
 setzt weitere stabile Real-Bundle-Läufe voraus.
+
+## 14. Real-Registry-Payload Surface Guard + Diagnosetaxonomie (2026-06-01)
+
+Zusätzlich zur Minimal-/Fixture-Abdeckung wurde ein Real-Surface-Guard
+ergänzt, der den repo-scan-basierten Single-Repo-Bundlepfad gegen eine echte Registry
+absichert:
+
+- `test_claim_evidence_map_surface_real_registry_payload_regression_guard` verwendet
+  den realen Registry-Inhalt (`docs/doc-freshness-registry.yml`) im
+  Single-Repo-Bundlepfad und prüft:
+  - Manifest enthält `claim_evidence_map_json`.
+  - Agent Reading Pack zeigt Summary statt EPISTEMIC_EMPTINESS.
+  - `post_emit_health` bestätigt Presence/Hash/Schema für die Claim-Map.
+
+Für fehlende Claim-Map wurde eine maschinenlesbare Abwesenheitsdiagnose
+eingeführt (`links.claim_evidence_map_absence_reason` im Bundle-Manifest):
+
+- `no_registry`
+- `multi_repo_out_of_scope`
+- `unexpected_missing_with_registry`
+
+Diese Diagnose wird zusätzlich im Agent Reading Pack und in
+`post_emit_health`/`forensic_preflight` sichtbar gemacht (Check-Details mit
+`reason=<code>`), damit ein grünes `output_health` nicht als stilles
+Forensic-Ready-Signal fehlinterpretiert wird.
+
+
+### Manueller Smoke Test
+
+Zusätzlich zum CI-Guard kann der Surface Guard manuell wie folgt validiert werden:
+
+```bash
+REPOLENS_HEADLESS=1 python3 -m merger.lenskit.frontends.pythonista.repolens . \
+  --level max \
+  --split-size 20MB \
+  --meta-density full \
+  --output-mode dual
+```
+
+Danach im Output-Manifest prüfen:
+* `claim_evidence_map_json` ist als Artefakt vorhanden
+* `links.claim_evidence_map_absence_reason` ist **nicht** gesetzt
+* Das Agent Reading Pack zeigt eine Claim-Map-Summary an
+
+Dieser Smoke Test ist rein informativ und ersetzt nicht die CI-Promotion von `forensic_strict`.

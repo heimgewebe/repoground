@@ -4,6 +4,7 @@ from pathlib import Path
 
 import jsonschema
 from merger.lenskit.tests._test_constants import TEST_CONFIG_SHA256, TEST_ARTIFACT_SHA256
+from merger.lenskit.core.constants import CLAIM_EVIDENCE_MAP_ABSENCE_REASONS
 
 
 def _assert_manifest_has_output_health_presence_gate(manifest: dict):
@@ -908,3 +909,9 @@ def test_claim_evidence_map_json_cannot_claim_canonical_content(schema):
     }
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=_wrap_artifact(artifact), schema=schema)
+
+
+def test_claim_evidence_map_absence_reasons_match_bundle_manifest_schema(schema):
+    links_props = schema["properties"]["links"]["properties"]
+    schema_reasons = set(links_props["claim_evidence_map_absence_reason"]["enum"])
+    assert schema_reasons == set(CLAIM_EVIDENCE_MAP_ABSENCE_REASONS)

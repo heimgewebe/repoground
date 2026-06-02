@@ -18,6 +18,7 @@ def _make_bundle(
     include_claim_map: bool,
     include_citation_map: bool = True,
     redaction: bool = True,
+    claim_absence_reason: str | None = None,
 ) -> Path:
     canonical = b"# repo: demo\n\n## file: a.py\nx = 1\n"
     (tmp_path / "demo.md").write_bytes(canonical)
@@ -152,6 +153,10 @@ def _make_bundle(
         }
     )
 
+    links = {}
+    if claim_absence_reason is not None:
+        links["claim_evidence_map_absence_reason"] = claim_absence_reason
+
     manifest = {
         "kind": "repolens.bundle.manifest",
         "version": "1.0",
@@ -159,7 +164,7 @@ def _make_bundle(
         "created_at": "2026-05-20T00:00:00Z",
         "generator": {"name": "test", "version": "1.0", "config_sha256": "a" * 64},
         "artifacts": artifacts,
-        "links": {},
+        "links": links,
         "capabilities": {"fts5_bm25": False, "redaction": redaction},
     }
     out = tmp_path / "demo.bundle.manifest.json"
@@ -175,13 +180,17 @@ def _write_post_health(manifest: Path) -> Path:
 
 
 def test_forensic_strict_blocked_without_claim_evidence_map(tmp_path):
-    manifest = _make_bundle(tmp_path, include_claim_map=False)
+    manifest = _make_bundle(tmp_path, include_claim_map=False, claim_absence_reason="no_registry")
     _write_post_health(manifest)
     report = compute_forensic_preflight(str(manifest))
 
     assert report["status"] == "blocked"
     by_name = {item["name"]: item for item in report["checks"]}
     assert by_name["claim_evidence_map_present"]["status"] == "blocked"
+    detail = by_name["claim_evidence_map_present"]["detail"]
+    assert "claim_evidence_map_json missing" in detail
+    assert "reason=no_registry" in detail
+    assert "registry missing" in detail
 
 
 def test_forensic_strict_blocked_without_citation_map(tmp_path):

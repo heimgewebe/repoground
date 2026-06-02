@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from .clock import now_utc
+from .claim_evidence_diagnostics import (
+    claim_absence_reason_detail,
+    claim_absence_reason_from_manifest,
+)
 from .path_security import resolve_secure_path
 from .post_emit_health import derive_post_health_path
 
@@ -217,10 +221,18 @@ def compute_forensic_preflight(
 
     claim_present = _find_artifact(artifacts, "claim_evidence_map_json")
     if claim_present is None:
-        checks.append(_check("claim_evidence_map_present", "blocked", "claim_evidence_map_json missing"))
-        checks.append(_check("claim_evidence_map_hash_ok", "blocked", "claim_evidence_map_json missing"))
-        checks.append(_check("claim_evidence_map_schema_valid", "blocked", "claim_evidence_map_json missing"))
-        errors.append("claim_evidence_map_json missing")
+        claim_absence_reason = claim_absence_reason_from_manifest(manifest)
+        reason_detail = claim_absence_reason_detail(claim_absence_reason)
+        reason_suffix = (
+            f" reason={claim_absence_reason} ({reason_detail})"
+            if claim_absence_reason is not None
+            else ""
+        )
+        missing_detail = "claim_evidence_map_json missing" + reason_suffix
+        checks.append(_check("claim_evidence_map_present", "blocked", missing_detail))
+        checks.append(_check("claim_evidence_map_hash_ok", "blocked", missing_detail))
+        checks.append(_check("claim_evidence_map_schema_valid", "blocked", missing_detail))
+        errors.append(missing_detail)
     else:
         checks.append(_check("claim_evidence_map_present", "pass", "claim_evidence_map_json present"))
         c, _, claim_path, _, _ = _check_artifact_hash(
