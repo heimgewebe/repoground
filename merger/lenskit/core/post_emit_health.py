@@ -43,10 +43,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .clock import now_utc
-from .constants import (
-    ArtifactRole,
+from .claim_evidence_diagnostics import (
+    claim_absence_reason_detail,
+    claim_absence_reason_from_manifest,
 )
-from .claim_evidence_diagnostics import claim_absence_reason_from_manifest, claim_absence_reason_detail
+from .constants import ArtifactRole
 from .output_health import _is_jsonschema_unavailable_error
 from .path_security import resolve_secure_path
 

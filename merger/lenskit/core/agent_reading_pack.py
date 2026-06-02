@@ -36,10 +36,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .citation_map import byte_range_to_line_range, normalize_canonical_range
-from .constants import (
-    ArtifactRole,
+from .claim_evidence_diagnostics import (
+    claim_absence_reason_detail,
+    claim_absence_reason_from_manifest,
 )
-from .claim_evidence_diagnostics import claim_absence_reason_from_manifest, claim_absence_reason_detail
+from .constants import ArtifactRole
 from .path_security import resolve_secure_path
 
 PRODUCED_BY = "agent_reading_pack_producer/v1"
