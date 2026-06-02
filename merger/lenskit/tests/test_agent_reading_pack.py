@@ -151,6 +151,7 @@ def _make_bundle(
     include_canonical: bool = True,
     include_chunks: bool = True,
     include_claim_evidence_map: bool = False,
+    claim_absence_reason: str | None = None,
     manifest_name: str = "demo.bundle.manifest.json",
     break_canonical_sha: bool = False,
 ) -> Path:
@@ -212,6 +213,10 @@ def _make_bundle(
             "canonicality": "derived",
         })
 
+    links = {}
+    if claim_absence_reason is not None:
+        links["claim_evidence_map_absence_reason"] = claim_absence_reason
+
     manifest = {
         "kind": "repolens.bundle.manifest",
         "version": "1.0",
@@ -219,7 +224,7 @@ def _make_bundle(
         "created_at": "2026-05-20T00:00:00Z",
         "generator": {"name": "test", "version": "1.0", "config_sha256": "a" * 64},
         "artifacts": artifacts,
-        "links": {},
+        "links": links,
         "capabilities": {"fts5_bm25": True, "redaction": False},
     }
     manifest_path = tmp_path / manifest_name
@@ -538,13 +543,14 @@ def test_claim_evidence_map_summary_present_when_artifact_is_available(tmp_path)
 
 
 def test_claim_evidence_map_absence_keeps_epistemic_note(tmp_path):
-    manifest = _make_bundle(tmp_path)
+    manifest = _make_bundle(tmp_path, claim_absence_reason="no_registry")
     report = produce_agent_reading_pack(str(manifest))
     assert report["status"] == "ok"
 
     body = Path(report["output_path"]).read_text(encoding="utf-8")
     assert "`claim_evidence_map_json` is absent" in body
     assert "`claim_evidence_map` is absent in this bundle" in body
+    assert "reason=no_registry" in body
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import pytest
 from merger.lenskit.core.constants import ArtifactRole
 from merger.lenskit.core.merge import FileInfo, scan_repo, write_reports_v2
 from merger.lenskit.core.output_health import compute_output_health
+from merger.lenskit.core.post_emit_health import compute_post_emit_health
 from merger.lenskit.tests._test_constants import make_generator_info
 
 
@@ -22,6 +23,9 @@ _OUTPUT_HEALTH_SCHEMA_PATH = (
 )
 _CITATION_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "citation-map.v1.schema.json"
 _CLAIM_EVIDENCE_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "claim-evidence-map.v1.schema.json"
+_REAL_DOC_FRESHNESS_REGISTRY_PATH = (
+    Path(__file__).resolve().parents[3] / "docs" / "doc-freshness-registry.yml"
+)
 _SHA256_HEX_LENGTH = 64
 
 _MINIMAL_REGISTRY_YAML = """\
@@ -1269,12 +1273,107 @@ def test_claim_evidence_map_surface_no_registry_leaves_epistemic_gap(tmp_path):
     assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value not in roles_map, (
         "claim_evidence_map_json must not appear in manifest without registry"
     )
+    assert data.get("links", {}).get("claim_evidence_map_absence_reason") == "no_registry"
 
     # Agent reading pack must still show epistemic gap
     pack_text = artifacts.agent_reading_pack.read_text(encoding="utf-8")
     assert "claim_evidence_map" in pack_text and (
         "absent" in pack_text or "not available" in pack_text
     ), "agent reading pack must report the epistemic gap for missing claim_evidence_map"
+    assert "reason=no_registry" in pack_text
+
+
+def test_claim_evidence_map_surface_multi_repo_absence_reason(tmp_path):
+    repo_a = tmp_path / "repo_a"
+    repo_b = tmp_path / "repo_b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    (repo_a / "README.md").write_text("# A\n", encoding="utf-8")
+    (repo_b / "README.md").write_text("# B\n", encoding="utf-8")
+    (repo_a / "docs").mkdir()
+    (repo_b / "docs").mkdir()
+    (repo_a / "docs" / "doc-freshness-registry.yml").write_text(
+        _MINIMAL_REGISTRY_YAML, encoding="utf-8"
+    )
+    (repo_b / "docs" / "doc-freshness-registry.yml").write_text(
+        _MINIMAL_REGISTRY_YAML, encoding="utf-8"
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    summary_a = scan_repo(repo_a)
+    summary_b = scan_repo(repo_b)
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[summary_a, summary_b],
+        detail="test",
+        mode="gesamt",
+        max_bytes=10000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+
+    manifest_doc = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    roles = {item["role"] for item in manifest_doc["artifacts"]}
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value not in roles
+    assert manifest_doc.get("links", {}).get("claim_evidence_map_absence_reason") == "multi_repo_out_of_scope"
+
+
+def test_claim_evidence_map_surface_real_registry_regression_guard(tmp_path):
+    """Real-bundle surface guard: use the repository's real registry payload,
+    not a synthetic minimal fixture, and enforce manifest/pack/post-emit visibility."""
+    assert _REAL_DOC_FRESHNESS_REGISTRY_PATH.is_file(), "real registry fixture missing in repository"
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "README.md").write_text("# Real registry guard\n", encoding="utf-8")
+    (src_dir / "docs").mkdir()
+    (src_dir / "docs" / "doc-freshness-registry.yml").write_text(
+        _REAL_DOC_FRESHNESS_REGISTRY_PATH.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    summary = scan_repo(src_dir)
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[summary],
+        detail="test",
+        mode="gesamt",
+        max_bytes=10000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+
+    manifest_doc = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    roles_map = {item["role"]: item for item in manifest_doc["artifacts"]}
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value in roles_map
+    assert "claim_evidence_map_absence_reason" not in manifest_doc.get("links", {})
+
+    pack_text = artifacts.agent_reading_pack.read_text(encoding="utf-8")
+    assert "## CLAIM_EVIDENCE_MAP_SUMMARY" in pack_text
+    assert "claim_evidence_map_json` is absent" not in pack_text
+
+    post_emit = compute_post_emit_health(str(artifacts.bundle_manifest))
+    checks = {item["name"]: item for item in post_emit["checks"]}
+    assert checks["claim_evidence_map_present"]["status"] == "pass"
+    assert checks["claim_evidence_map_hash_ok"]["status"] == "pass"
+    assert checks["claim_evidence_map_schema_valid"]["status"] == "pass"
 
 
 def test_claim_evidence_map_surface_invalid_registry_raises(tmp_path):

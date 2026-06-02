@@ -42,6 +42,7 @@ def _make_bundle(
     pack_canonicality: str = "derived",
     range_key: str = "canonical_range",
     include_claim_map: bool = False,
+    claim_absence_reason: str | None = None,
 ) -> Path:
     """Build a synthetic bundle on disk and return the manifest path."""
     artifacts = []
@@ -173,11 +174,15 @@ def _make_bundle(
             "interpretation": {"mode": "contract"},
         })
 
+    links = {}
+    if claim_absence_reason is not None:
+        links["claim_evidence_map_absence_reason"] = claim_absence_reason
+
     manifest = {
         "kind": "repolens.bundle.manifest", "version": "1.0", "run_id": "demo-run",
         "created_at": "2026-05-20T00:00:00Z",
         "generator": {"name": "test", "version": "1.0", "config_sha256": "a" * 64},
-        "artifacts": artifacts, "links": {},
+        "artifacts": artifacts, "links": links,
         "capabilities": {"fts5_bm25": False, "redaction": redaction},
     }
     manifest_path = tmp_path / "demo.bundle.manifest.json"
@@ -330,6 +335,19 @@ def test_post_emit_health_fails_on_invalid_claim_map_schema(tmp_path):
     assert by_name["claim_evidence_map_present"]["status"] == "pass"
     assert by_name["claim_evidence_map_hash_ok"]["status"] == "pass"
     assert by_name["claim_evidence_map_schema_valid"]["status"] == "fail"
+
+
+def test_post_emit_health_claim_map_absence_reports_reason(tmp_path):
+    manifest = _make_bundle(
+        tmp_path,
+        include_claim_map=False,
+        claim_absence_reason="multi_repo_out_of_scope",
+    )
+    report = compute_post_emit_health(str(manifest))
+
+    by_name = {item["name"]: item for item in report["checks"]}
+    assert by_name["claim_evidence_map_present"]["status"] == "skipped"
+    assert by_name["claim_evidence_map_present"]["detail"] == "claim_evidence_map_json absent; forensic_strict preflight would block reason=multi_repo_out_of_scope (multi-repo aggregation is out of scope)"
 
 
 def test_post_emit_health_output_validates_against_schema(tmp_path):

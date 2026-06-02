@@ -731,6 +731,15 @@
             "type": "string"
           },
           "description": "Graph edges back to origin sources."
+        },
+        "claim_evidence_map_absence_reason": {
+          "type": "string",
+          "enum": [
+            "no_registry",
+            "multi_repo_out_of_scope",
+            "unexpected_missing_with_registry"
+          ],
+          "description": "Machine-readable reason why claim_evidence_map_json is absent in this bundle."
         }
       }
     },

@@ -183,3 +183,28 @@ Positivfall und negativen Fällen für fehlende Claim-Map, stale
 
 Die optionale CI-Promotion von `forensic_strict` bleibt ein separater PR und
 setzt weitere stabile Real-Bundle-Läufe voraus.
+
+## 14. Real-Bundle Surface Guard + Diagnosetaxonomie (2026-06-01)
+
+Zusätzlich zur Minimal-/Fixture-Abdeckung wurde ein Real-Surface-Guard
+ergänzt, der den tatsächlichen Bundle-Surface-Pfad gegen eine echte Registry
+absichert:
+
+- `test_claim_evidence_map_surface_real_registry_regression_guard` verwendet
+  den realen Registry-Inhalt (`docs/doc-freshness-registry.yml`) im
+  Single-Repo-Bundlepfad und prüft:
+  - Manifest enthält `claim_evidence_map_json`.
+  - Agent Reading Pack zeigt Summary statt EPISTEMIC_EMPTINESS.
+  - `post_emit_health` bestätigt Presence/Hash/Schema für die Claim-Map.
+
+Für fehlende Claim-Map wurde eine maschinenlesbare Abwesenheitsdiagnose
+eingeführt (`links.claim_evidence_map_absence_reason` im Bundle-Manifest):
+
+- `no_registry`
+- `multi_repo_out_of_scope`
+- `unexpected_missing_with_registry`
+
+Diese Diagnose wird zusätzlich im Agent Reading Pack und in
+`post_emit_health`/`forensic_preflight` sichtbar gemacht (Check-Details mit
+`reason=<code>`), damit ein grünes `output_health` nicht als stilles
+Forensic-Ready-Signal fehlinterpretiert wird.
