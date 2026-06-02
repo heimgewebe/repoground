@@ -1,0 +1,98 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/bundle-surface-validation.v1.schema.json",
+  "title": "Bundle Surface Validation (bundle-surface-validation v1.0)",
+  "description": "Machine-readable self-check of a final emitted Lenskit bundle surface, produced by the generator after the manifest, agent_reading_pack and post_emit_health are present. Asserts surface coherence (claim_evidence_map present XOR machine-readable absence reason, agent-pack consistency, post_emit_health persistence AND status, generator runtime provenance, link coherence). Independent of output_health and never a truth/forensic verdict: a pass means the emitted surface is internally coherent, not that any claim is true.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "bundle_run_id",
+    "checked_at",
+    "bundle_manifest_path",
+    "require_claim_evidence_map",
+    "status",
+    "checks",
+    "does_not_mean"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.bundle_surface_validation"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "authority": {
+      "type": "string",
+      "const": "diagnostic_signal",
+      "description": "Optional, additive self-declaration of this artifact's authority class. When present it MUST be the diagnostic_signal constant; it is not a truth verdict and does not gate anything."
+    },
+    "risk_class": {
+      "type": "string",
+      "const": "diagnostic",
+      "description": "Optional, additive self-declaration of this artifact's risk class. When present it MUST be the diagnostic constant."
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique id for this surface validation run (not the bundle run)."
+    },
+    "bundle_run_id": {
+      "type": ["string", "null"],
+      "description": "run_id of the validated bundle manifest, when available."
+    },
+    "checked_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp of validation."
+    },
+    "bundle_manifest_path": {
+      "type": "string",
+      "description": "Path to the validated bundle manifest."
+    },
+    "require_claim_evidence_map": {
+      "type": "boolean",
+      "description": "Whether a coherent claim_evidence_map surface was required for this bundle (true for a single-repo dump whose source repo ships docs/doc-freshness-registry.yml)."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "warn", "fail", "blocked"],
+      "description": "fail = active surface defect (silent claim-map absence, present/announced-absent contradiction, stale pack placeholder, missing provenance fields, dangling links, or a failed post_emit_health). blocked = a declared, honest gap (claim map absent with a machine-readable reason while required). warn = usable but degraded. pass = the emitted surface is internally coherent."
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail", "blocked", "skipped"]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "does_not_mean": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 2,
+      "description": "Disclaimers of what a surface pass deliberately does NOT establish. These are NOT claim verdicts; in particular a coherent surface is not forensic-readiness.",
+      "allOf": [
+        { "contains": { "const": "claims_true" } },
+        { "contains": { "const": "forensic_ready" } }
+      ]
+    }
+  }
+}

@@ -30,6 +30,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_bundle_health import register_bundle_health_commands
     register_bundle_health_commands(subparsers)
 
+    # Bundle surface command (real-dump surface self-check)
+    from .cmd_bundle_surface import register_bundle_surface_commands
+    register_bundle_surface_commands(subparsers)
+
     # Context quality command (diagnostic projection)
     from .cmd_context_quality import register_context_quality_commands
     register_context_quality_commands(subparsers)
@@ -195,6 +199,13 @@ def main(args: Optional[List[str]] = None) -> int:
             return run_bundle_health_export_gate(parsed_args)
         else:
             parser.parse_args(["bundle-health", "--help"])
+            return 0
+    elif parsed_args.command == "bundle-surface":
+        from .cmd_bundle_surface import run_bundle_surface_validate
+        if parsed_args.bundle_surface_cmd == "validate":
+            return run_bundle_surface_validate(parsed_args)
+        else:
+            parser.parse_args(["bundle-surface", "--help"])
             return 0
     elif parsed_args.command == "context-quality":
         from .cmd_context_quality import run_context_quality_inspect

@@ -6074,16 +6074,23 @@ def write_reports_v2(
     # Ensure deterministic artifact ordering for stable machine diffs
     artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
 
+    # Runtime provenance makes runtime/entry-point drift diagnosable from the
+    # bundle itself (e.g. a service emitting from a stale build that no longer
+    # matches the repository code). Absolute paths are nulled when redacting.
+    from .runtime_provenance import build_runtime_provenance
+    generator_block = {
+        "name": generator_info.get("name", "lenskit"),
+        "version": generator_info.get("version", "unknown"),
+        "config_sha256": config_sha256,
+        "runtime": build_runtime_provenance(redact=redact_secrets),
+    }
+
     bundle_manifest = {
         "kind": "repolens.bundle.manifest",
         "version": "1.0",
         "run_id": run_id,
         "created_at": clock.now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "generator": {
-            "name": generator_info.get("name", "lenskit"),
-            "version": generator_info.get("version", "unknown"),
-            "config_sha256": config_sha256
-        },
+        "generator": generator_block,
         "artifacts": artifacts_list,
         "links": links,
         "capabilities": {
@@ -6220,6 +6227,62 @@ def write_reports_v2(
     artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
     bundle_manifest["artifacts"] = artifacts_list
     _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
+
+    # ── Post-emit health + surface self-check (real-dump gate) ───────────────
+    # output_health (above) is a PRE-emit signal anchored to the dump_index; it
+    # cannot see the finalized surface (agent pack, claim map) and never implies
+    # forensic-readiness. Persist post_emit_health and run a surface self-check
+    # against the FINAL manifest so a stale runtime cannot silently emit a bundle
+    # that lacks the claim-evidence-map surface while still looking healthy.
+    from .post_emit_health import write_post_emit_health
+    from .bundle_surface_validate import write_bundle_surface_validation
+
+    post_health_path, _ = write_post_emit_health(str(bundle_manifest_path))
+    out_paths.append(post_health_path)
+    if post_health_path not in other_paths:
+        other_paths.append(post_health_path)
+
+    # A coherent claim-evidence-map surface is REQUIRED exactly when the bundle
+    # is a single-repo dump whose source repo ships docs/doc-freshness-registry.yml.
+    require_claim_surface = len(repo_summaries) == 1 and claim_evidence_registry_exists
+    surface_path, surface_report = write_bundle_surface_validation(
+        str(bundle_manifest_path),
+        require_claim_evidence_map=require_claim_surface,
+    )
+    out_paths.append(surface_path)
+    if surface_path not in other_paths:
+        other_paths.append(surface_path)
+
+    # Record machine-readable pointers + verdict in links. The sidecars are
+    # intentionally UNregistered as artifacts: a self-check must not verify its
+    # own hash, and post_emit_health must not create manifest hash circularity.
+    links["post_emit_health_path"] = post_health_path.name
+    links["bundle_surface_validation_path"] = surface_path.name
+    links["bundle_surface_validation_status"] = surface_report["status"]
+    bundle_manifest["links"] = links
+    _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
+
+    # Hard, visible gate: when the claim-map surface is required, an active
+    # DEFECT of the claim-map invariant — a silently absent claim map (no reason),
+    # a present/announced-absent contradiction, or a stale pack placeholder —
+    # blocks the run. The gate is deliberately scoped to the claim-map invariant
+    # checks: a *declared* gap (claim_evidence_map_surface=blocked, e.g.
+    # unexpected_missing_with_registry) is recorded but does not raise, and other
+    # surface concerns (e.g. a failed post_emit_health) are recorded loudly via
+    # the persisted sidecar + links.bundle_surface_validation_status rather than
+    # aborting the whole dump.
+    _invariant_checks = ("claim_evidence_map_surface", "agent_reading_pack_consistency")
+    _blocking = [
+        c for c in surface_report.get("checks", [])
+        if c.get("name") in _invariant_checks and c.get("status") == "fail"
+    ]
+    if require_claim_surface and _blocking:
+        failed = "; ".join(f"{c['name']}: {c.get('detail', '')}" for c in _blocking)
+        raise RuntimeError(
+            "Bundle surface self-check failed for a single-repo dump with a "
+            "doc-freshness registry (claim-evidence-map surface required): "
+            + failed
+        )
 
     if extras and extras.json_sidecar:
         # JSON is primary when json_sidecar is enabled

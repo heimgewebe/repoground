@@ -85,6 +85,22 @@ Validierung, Emission und Registrierung bleiben getrennt:
 - `--register-artifact` (Manifest-Mutation) ist bewusst **nicht** implementiert und bleibt
   späteren, explizit registrierenden Schritten vorbehalten.
 
+### 5.1 Persistenz im realen Dump-Pfad (Nachtrag 2026-06-02)
+
+Ursprünglich wurde `post_emit_health` **nur** auf CLI-Anforderung (`--emit-artifact`)
+geschrieben; der reale Dump-Pfad (`write_reports_v2`) persistierte es **nicht** — nur das
+pre-emit `output_health` lag vor, was ein grünes, aber nicht forensic-ready Bundle
+nahelegte.
+
+`write_reports_v2` ruft jetzt nach finalem Manifest + Agent-Pack automatisch
+`write_post_emit_health(...)` auf und persistiert `<stem>.bundle_health.post.json`. Der
+Pfad wird maschinenlesbar über `links.post_emit_health_path` referenziert. Das Artefakt
+bleibt **unregistriert** (kein Self-Hash, keine Manifest-Hash-Zirkularität) — die
+Invariante aus §5 gilt unverändert; persistiert wird der Sidecar, nicht eine
+Manifest-Rolle. Abgrenzung zu `output_health` (pre-emit, beobachtend) bleibt explizit
+und wird durch den Surface-Self-Check (`output_health_not_forensic_ready`) sichtbar
+gemacht. Siehe [real-dump-surface-self-check-proof.md](real-dump-surface-self-check-proof.md).
+
 ## 6. Validierung
 
 ```

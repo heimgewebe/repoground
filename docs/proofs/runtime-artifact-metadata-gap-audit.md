@@ -180,3 +180,40 @@ Dieser PR ist vollständig, wenn:
 - Retention/GC-Implementierung (`retention_policy` dokumentiert nur den Ist-Zustand)
 - Maschinelle Durchsetzung von `artifact_shape` beim Speichern
 - `agent_query_session` Lookup-Endpoint (existiert nicht — nur `artifact_lookup` mit type=agent_query_session)
+
+---
+
+## Nachtrag (2026-06-02): Generator-Runtime-Provenance (eigenständiger Aspekt)
+
+> Abgrenzung: Dieser Nachtrag betrifft **nicht** die oben behandelten Runtime-*Artefakte*
+> (`query_trace`/`context_bundle`/`agent_query_session`), sondern die **Runtime des
+> Generators**, der ein Bundle erzeugt.
+
+**These:** Der Bundle-Manifest-Generator-Block trug nur `{name, version, config_sha256}`.
+
+**Antithese:** Damit ist **Runtime-/Service-Drift nicht diagnostizierbar**. Lässt ein
+Service-Dump still ein Artefakt (z. B. `claim_evidence_map_json`) weg, weil die laufende
+Runtime ein veralteter Build ist, sieht man dem Dump nicht an, **welcher Build** ihn
+erzeugte (Repo-Code vs. installierte Service-Runtime).
+
+**Synthese:** `merger/lenskit/core/runtime_provenance.py` ergänzt einen optionalen
+`generator.runtime`-Block (Contract-erweitert in `bundle-manifest.v1.schema.json`):
+
+| Feld | Zweck |
+| :--- | :--- |
+| `module` | Dotted-Name des Kern-Generatormoduls (`merger.lenskit.core.merge`) |
+| `module_file` | Absoluter Pfad der laufenden Datei (Repo-Checkout vs. site-packages) |
+| `package_root` | Installations-Root des `merger`-Pakets |
+| `python_executable` | Interpreter, der den Generator fuhr |
+| `python_version` | Python-Version des Generators |
+| `git_commit` | Commit des Generator-Working-Trees (oder `null`, z. B. Wheel-Install) |
+| `git_dirty` | uncommittete Änderungen (oder `null`) |
+
+**Drift-Diagnose:** `module_file`/`package_root`/`git_commit` zeigen unmittelbar, ob ein
+Dump vom Repo-Code oder von einer abweichenden Service-Runtime stammt. **Redaction:** bei
+`redact_secrets=True` werden die absoluten Pfadfelder auf `null` gesetzt; `git_commit`,
+`module` und `python_version` bleiben als redaction-sichere Drift-Anker erhalten. Tests:
+`test_runtime_provenance.py` (u. a.
+`test_bundle_manifest_generator_runtime_provenance_present`,
+`test_generator_runtime_provenance_redacts_absolute_paths_when_redaction_enabled`). Siehe
+[real-dump-surface-self-check-proof.md](real-dump-surface-self-check-proof.md).
