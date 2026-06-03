@@ -18,7 +18,7 @@ This created silent drift: cache/tool directories like `.mypy_cache`, `.ruff_cac
 All build-artefact and tool-cache directory names are defined once:
 ```python
 _BUILD_AND_CACHE_DIRS: frozenset[str] = frozenset({
-    "node_modules", ".svelte-kit", ".next",
+    ".tmp", "node_modules", ".svelte-kit", ".next",
     "dist", "build", "target",
     ".venv", "venv",
     "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache",
@@ -34,9 +34,10 @@ Both downstream uses are now **derived**, not duplicated:
 
 Drift is now structurally **impossible**: changing `_BUILD_AND_CACHE_DIRS` automatically propagates to both uses.
 
-### Included Cache Dirs
+### Included Cache/Scratch Dirs
 
 All of the following are now excluded from traversal and marked as noise:
+- `.tmp/` (local scratch and CI-canary artifacts)
 - `.pytest_cache/`, `.mypy_cache/`, `.ruff_cache/` (Python tooling)
 - `.cache/` (generic cache)
 - `coverage/` (test coverage artifacts)
@@ -109,16 +110,35 @@ Verifies on generated `canonical_md` and `chunk_index` (JSONL format):
 
 This closes the A2 proof gap from "traversal is clean" to "generated bundle surfaces are demonstrably clean".
 
-**Note:** `agent_reading_pack` is not directly tested in this integration. The bundle-surface proof is limited to `canonical_md` and `chunk_index` JSONL file_path fields; `agent_reading_pack` cleanliness follows from upstream scan_repo() inputs being noise-free.
+### Output Noise Hygiene A2 Regression
+
+Test: `test_standard_dump_excludes_tmp_noise_but_keeps_repo_dotdirs`
+
+Uses `scan_repo()` plus `write_reports_v2()` to generate a complete bundle from a synthetic repo containing:
+- `README.md` and `src/app.py` (real content)
+- `.tmp/forensic-preflight-ci-canary/artifacts/forensic-preflight-canary.json` (the observed real-dump leak)
+- `.pytest_cache/`, `.ruff_cache/`, `.mypy_cache/`, and `__pycache__/` (tool/cache noise)
+- `.github/workflows/guard.yml` and `.wgx/profile.yml` (intentional repository dotdirs)
+
+The test verifies:
+- ✅ `.tmp/forensic-preflight-ci-canary/artifacts/forensic-preflight-canary.json` is absent from `canonical_md`, `chunk_index`, the JSON sidecar index, and `agent_reading_pack`
+- ✅ `.github/` and `.wgx/` remain present in generated output
+- ✅ `output_health.checks.excluded_noise` reports count, samples, and patterns, including `.tmp/`
+- ✅ `output_health.checks.noise_hygiene.available=true` when scan diagnostics are supplied; direct `compute_output_health()` callers without scanner context report `available=false`
+- ✅ `post_emit_health.noise_hygiene.available=true` and carries the `excluded_noise_count` from validated `output_health`
+
+This closes the earlier deferred diagnostic gap: `.gitignore` can keep local scratch files out of Git, but Lenskit scans the filesystem directly, so dump policy is enforced in scanner traversal and reported in health diagnostics.
 
 ## Scope
 
 ### What Changed
 - Consolidated skip/noise definition via `_BUILD_AND_CACHE_DIRS`
 - Added `.cache` and `coverage` to `_BUILD_AND_CACHE_DIRS` / `SKIP_DIRS` (were missing)
+- Added `.tmp` to `_BUILD_AND_CACHE_DIRS` / `SKIP_DIRS` for local scratch and CI-canary artifacts
 - Updated `is_noise_file()` to use `_BUILD_AND_CACHE_DIRS` via exact parent-directory component matching, preventing substring false positives (e.g., `src/mycoverage/` does not match `coverage`)
-- Added regression tests covering noise classification, traversal exclusion, hidden-path preservation, manifest annotation, single-source validation, and substring false-positive prevention
-- `excluded_noise` output_health diagnostic: **not implemented in this PR** — traversal does not yet surface skipped-dir counts (see Deferred section)
+- Added bounded `excluded_noise` scan diagnostics (count + capped samples + patterns) surfaced through `output_health.checks.excluded_noise` and `output_health.checks.noise_hygiene`
+- Updated `post_emit_health` to inherit validated `output_health` noise-hygiene diagnostics
+- Added regression tests covering noise classification, traversal exclusion, hidden-path preservation, manifest annotation, single-source validation, substring false-positive prevention, and `.tmp` exclusion across canonical/chunk/sidecar/agent-pack surfaces
 
 ### What Did NOT Change
 - Redaction enforcement, detection, or gates
@@ -129,13 +149,12 @@ This closes the A2 proof gap from "traversal is clean" to "generated bundle surf
 - Retrieval ranking or query scoring
 - Agent export gates or agent_safe/agent_ready signals
 
-## Deferred
+## Boundaries / Deferred Follow-Up
 
-**excluded_noise diagnostic in output_health.json:**  
-The diagnostic field to record which noise/cache paths were excluded during traversal is deferred.  
-Reason: `scan_repo()` currently drops SKIP_DIRS entries silently (no collection of skipped directory counts).  
-To wire this diagnostic, the traversal pipeline would need to surface skipped-dir statistics upstream to `write_output_health()`.  
-This is out of scope for A2 (hygiene consolidation only); will be added when traversal instrumentation allows.
+- Full `.gitignore` semantics are intentionally not implemented. Git ignore rules are not automatically dump policy.
+- There is no broad “exclude every dotdir” rule; `.github/` and `.wgx/` remain dumpable repository context.
+- `excluded_noise` diagnostics are bounded (count cap + sample cap) so large vendor/cache trees do not create unbounded health payloads.
+- A future noise-ratchet or CI-blocking policy for new noise patterns remains a follow-up; this slice only excludes known local scratch/cache directories and reports the exclusion.
 
 ## Tests Run
 
@@ -146,6 +165,7 @@ pytest merger/lenskit/tests/test_agent_reading_pack.py    # 8 passed
 pytest merger/lenskit/tests/test_retrieval_index.py       # 3 passed
 pytest merger/lenskit/tests/test_bundle_manifest_integration.py  # 28 passed
 pytest merger/lenskit/tests/test_post_emit_health.py      # 32 passed
+pytest merger/lenskit/tests/test_output_noise_hygiene.py   # 1 passed
 ```
 
 **Total: 168 tests, all pass.**

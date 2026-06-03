@@ -274,6 +274,7 @@ def compute_output_health(
     # Agent reading pack (navigation entry-point). Non-blocking in v1.
     agent_reading_pack_path: Optional[Path] = None,
     agent_reading_pack_expected: bool = False,
+    excluded_noise: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Compute the output health report.  Does NOT write to disk.
@@ -467,6 +468,37 @@ def compute_output_health(
 
     checks["redaction_status_explicit"] = True
     checks["redact_secrets_enabled"] = bool(redact_secrets)
+
+    noise_count = 0
+    noise_samples: List[str] = []
+    noise_patterns: List[str] = []
+    noise_truncated = False
+    diagnostic_available = isinstance(excluded_noise, dict)
+    if diagnostic_available:
+        noise_count = int(excluded_noise.get("count", 0) or 0)
+        noise_samples = [
+            str(sample)
+            for sample in (excluded_noise.get("samples") or [])
+            if isinstance(sample, str)
+        ][:20]
+        noise_patterns = [
+            str(pattern)
+            for pattern in (excluded_noise.get("patterns") or [])
+            if isinstance(pattern, str)
+        ]
+        noise_truncated = bool(excluded_noise.get("count_truncated"))
+    checks["excluded_noise"] = {
+        "count": noise_count,
+        "samples": noise_samples,
+        "patterns": noise_patterns,
+        "count_truncated": noise_truncated,
+    }
+    checks["noise_hygiene"] = {
+        "available": diagnostic_available,
+        "excluded_noise_count": noise_count,
+        "excluded_noise_samples": noise_samples,
+        "patterns": noise_patterns,
+    }
 
     # ── diagnostic_artifacts ────────────────────────────────────────────────
     diagnostic_artifacts: Dict[str, Any] = {}

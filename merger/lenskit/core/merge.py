@@ -330,6 +330,7 @@ MAX_DELTA_FILES = 10  # Maximum number of files to show in each delta section
 # Intentionally preserved (not noise): .github/, .wgx/, .ai-context.yml and
 # other repo config/CI paths that carry real project context.
 _BUILD_AND_CACHE_DIRS: frozenset[str] = frozenset({
+    ".tmp",
     "node_modules",
     ".svelte-kit",
     ".next",
@@ -348,6 +349,11 @@ _BUILD_AND_CACHE_DIRS: frozenset[str] = frozenset({
 
 # Traversal skip set: build/cache dirs plus VCS and system noise.
 SKIP_DIRS: frozenset[str] = _BUILD_AND_CACHE_DIRS | frozenset({".git", ".idea", ".DS_Store"})
+NOISE_HYGIENE_SAMPLE_LIMIT = 20
+NOISE_HYGIENE_COUNT_LIMIT = 1000
+NOISE_HYGIENE_PATTERNS: tuple[str, ...] = tuple(
+    f"{name}/" for name in sorted(_BUILD_AND_CACHE_DIRS)
+)
 
 # Top-level roots to skip in auto-discovery
 SKIP_ROOTS = {
@@ -2226,6 +2232,51 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
         "total_bytes": total_bytes
     }
 
+
+def _record_excluded_noise_dir(
+    repo_root: Path,
+    skipped_dir: Path,
+    excluded_noise: Dict[str, Any],
+) -> None:
+    """Record a bounded diagnostic sample for a skipped noise directory.
+
+    Traversal skips must stay cheap even for large vendor/build directories, so this
+    function samples/counts only up to a fixed cap.  The scanner exclusion itself
+    remains segment-based via SKIP_DIRS; this helper only produces diagnostics.
+    """
+    count = int(excluded_noise.get("count", 0) or 0)
+    samples = excluded_noise.setdefault("samples", [])
+
+    def _rel(path: Path) -> str:
+        try:
+            return path.relative_to(repo_root).as_posix()
+        except ValueError:
+            return path.as_posix()
+
+    saw_file = False
+    try:
+        for walk_dir, walk_dirs, walk_files in os.walk(skipped_dir):
+            walk_dirs.sort()
+            for fn in sorted(walk_files):
+                saw_file = True
+                count += 1
+                if len(samples) < NOISE_HYGIENE_SAMPLE_LIMIT:
+                    samples.append(_rel(Path(walk_dir) / fn))
+                if count >= NOISE_HYGIENE_COUNT_LIMIT:
+                    excluded_noise["count_truncated"] = True
+                    excluded_noise["count"] = count
+                    return
+    except OSError:
+        # Still record that a skipped noise directory existed.
+        pass
+
+    if not saw_file:
+        count += 1
+        if len(samples) < NOISE_HYGIENE_SAMPLE_LIMIT:
+            samples.append(_rel(skipped_dir) + "/")
+
+    excluded_noise["count"] = count
+
 def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_contains: Optional[str] = None, max_bytes: int = DEFAULT_MAX_BYTES, include_paths: Optional[List[str]] = None, calculate_md5: bool = True, include_hidden: bool = True) -> Dict[str, Any]:
     """
     Scans a repository and returns a summary dict with file info.
@@ -2296,6 +2347,12 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
     root_str = str(repo_root)
     root_len = len(root_str)
 
+    excluded_noise: Dict[str, Any] = {
+        "count": 0,
+        "samples": [],
+        "patterns": list(NOISE_HYGIENE_PATTERNS),
+    }
+
     # Files awaiting MD5 calculation: list of (FileInfo, abs_path, effective_limit)
     files_to_hash: List[Tuple[FileInfo, Path, Optional[int]]] = []
     # 0 oder <0 = "kein Limit" → komplette Textdateien hashen
@@ -2309,6 +2366,8 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         keep_dirs = []
         for d in dirnames:
             if d in SKIP_DIRS:
+                if d in _BUILD_AND_CACHE_DIRS:
+                    _record_excluded_noise_dir(repo_root, Path(dirpath) / d, excluded_noise)
                 continue
             if not include_hidden and d.startswith("."):
                 continue
@@ -2474,6 +2533,7 @@ def scan_repo(repo_root: Path, extensions: Optional[List[str]] = None, path_cont
         "total_files": total_files,
         "total_bytes": total_bytes,
         "ext_hist": ext_hist,
+        "excluded_noise": excluded_noise,
     }
 
 def parse_human_size(text: str) -> int:
@@ -6042,6 +6102,24 @@ def write_reports_v2(
         if output_mode in ("retrieval", "dual") and final_chunk_index
         else None
     )
+    excluded_noise_count = 0
+    excluded_noise_samples: List[str] = []
+    excluded_noise_truncated = False
+    for summary in repo_summaries:
+        noise = summary.get("excluded_noise") if isinstance(summary, dict) else None
+        if not isinstance(noise, dict):
+            continue
+        excluded_noise_count += int(noise.get("count", 0) or 0)
+        excluded_noise_truncated = excluded_noise_truncated or bool(noise.get("count_truncated"))
+        for sample in noise.get("samples", []) or []:
+            if isinstance(sample, str) and len(excluded_noise_samples) < NOISE_HYGIENE_SAMPLE_LIMIT:
+                excluded_noise_samples.append(sample)
+    excluded_noise = {
+        "count": excluded_noise_count,
+        "samples": excluded_noise_samples,
+        "patterns": list(NOISE_HYGIENE_PATTERNS),
+        "count_truncated": excluded_noise_truncated,
+    }
     write_output_health(
         output_health_path,
         run_id=run_id,
@@ -6059,6 +6137,7 @@ def write_reports_v2(
         expected_chunk_index_sha256=_exp_chunk_sha,
         retrieval_eval_path=retrieval_evals[-1] if retrieval_evals else None,
         retrieval_eval_sha256=_exp_eval_sha,
+        excluded_noise=excluded_noise,
     )
     out_paths.append(output_health_path)
     _add_artifact(output_health_path, ArtifactRole.OUTPUT_HEALTH, "application/json")

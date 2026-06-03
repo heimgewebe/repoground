@@ -1091,3 +1091,27 @@ def test_range_ref_jsonschema_importerror_is_warn_not_fail(tmp_path):
     assert result["checks"]["range_ref_resolution_status"] == "environment_error"
     assert any("jsonschema" in w.lower() for w in result["warnings"])
     assert result["errors"] == []
+
+
+def test_output_health_noise_hygiene_unavailable_without_scan_diagnostic(tmp_path):
+    kwargs = _base_kwargs(tmp_path=tmp_path)
+    result = compute_output_health(**kwargs)
+
+    assert result["checks"]["noise_hygiene"]["available"] is False
+    assert result["checks"]["excluded_noise"]["count"] == 0
+
+
+def test_output_health_noise_hygiene_available_with_scan_diagnostic(tmp_path):
+    kwargs = _base_kwargs(tmp_path=tmp_path)
+    kwargs["excluded_noise"] = {
+        "count": 1,
+        "samples": [".tmp/forensic-preflight-ci-canary/artifacts/forensic-preflight-canary.json"],
+        "patterns": [".tmp/"],
+    }
+    result = compute_output_health(**kwargs)
+
+    assert result["checks"]["noise_hygiene"]["available"] is True
+    assert result["checks"]["noise_hygiene"]["excluded_noise_count"] == 1
+    assert result["checks"]["excluded_noise"]["samples"] == [
+        ".tmp/forensic-preflight-ci-canary/artifacts/forensic-preflight-canary.json"
+    ]

@@ -68,6 +68,23 @@
       "missing_evidence": [
         "Full blocking forensic_strict promotion to a required check remains a follow-up after several stable canary runs across bundle profiles."
       ]
+    },
+    {
+      "id": "TASK-NOISE-001",
+      "title": "Output Noise Hygiene A2",
+      "status": "done",
+      "description": "Exclude local scratch, CI-canary, and tool-cache noise from standard Lenskit dumps while preserving meaningful repository dotdirs. The scanner now skips the .tmp path segment along with existing cache/build noise, surfaces bounded excluded-noise diagnostics through output_health, and lets post_emit_health inherit the validated noise-hygiene signal.",
+      "evidence": [
+        "merger/lenskit/core/merge.py",
+        "merger/lenskit/core/output_health.py",
+        "merger/lenskit/core/post_emit_health.py",
+        "merger/lenskit/tests/test_output_noise_hygiene.py",
+        "docs/proofs/output-noise-hygiene-proof.md"
+      ],
+      "missing_evidence": [
+        "Full .gitignore semantics remain a non-goal; dump policy uses explicit scanner skip segments.",
+        "Noise ratchet or CI-blocking for newly discovered noise patterns remains a follow-up PR."
+      ]
     }
   ]
 }

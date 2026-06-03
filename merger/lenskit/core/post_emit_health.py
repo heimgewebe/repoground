@@ -688,10 +688,25 @@ def compute_post_emit_health(
                 excluded = oh_checks.get("excluded_noise")
                 if excluded is None:
                     excluded = oh_doc.get("excluded_noise")
+                hygiene = oh_checks.get("noise_hygiene")
+                if not isinstance(hygiene, dict):
+                    hygiene = oh_doc.get("noise_hygiene")
+                hygiene_available = isinstance(hygiene, dict) and hygiene.get("available") is True
+                excluded_count: Optional[int] = None
+                legacy_available = False
                 if isinstance(excluded, list):
+                    excluded_count = len(excluded)
+                    legacy_available = True
+                elif isinstance(excluded, dict) and hygiene_available:
+                    raw_count = excluded.get("count")
+                    excluded_count = raw_count if isinstance(raw_count, int) else None
+                if excluded_count is None and hygiene_available:
+                    raw_count = hygiene.get("excluded_noise_count")
+                    excluded_count = raw_count if isinstance(raw_count, int) else None
+                if excluded_count is not None and (hygiene_available or legacy_available):
                     noise_hygiene = {
                         "available": True,
-                        "excluded_noise_count": len(excluded),
+                        "excluded_noise_count": excluded_count,
                         "source": "output_health",
                     }
 

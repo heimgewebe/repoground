@@ -37,6 +37,8 @@ def _make_bundle(
     include_health: bool = True,
     include_citation: bool = False,
     health_verdict: str = "pass",
+    health_checks: dict | None = None,
+    health_top_level: dict | None = None,
     redaction: bool = False,
     pack_authority: str = "navigation_index",
     pack_canonicality: str = "derived",
@@ -79,12 +81,17 @@ def _make_bundle(
     })
 
     if include_health:
+        checks = {"chunk_count": 1}
+        if health_checks:
+            checks.update(health_checks)
         health_doc = {
             "kind": "lenskit.output_health", "version": "1.0", "run_id": "demo-run",
             "created_at": "2026-05-20T00:00:00Z", "stem": "demo",
-            "checks": {"chunk_count": 1}, "diagnostic_artifacts": {},
+            "checks": checks, "diagnostic_artifacts": {},
             "warnings": [], "errors": [], "verdict": health_verdict,
         }
+        if health_top_level:
+            health_doc.update(health_top_level)
         health_bytes = json.dumps(health_doc, indent=2).encode("utf-8")
         (tmp_path / "demo.output_health.json").write_bytes(health_bytes)
         artifacts.append({
@@ -193,6 +200,47 @@ def _make_bundle(
 # ---------------------------------------------------------------------------
 # Required tests
 # ---------------------------------------------------------------------------
+
+
+def test_post_emit_health_respects_output_health_noise_hygiene_unavailable(tmp_path):
+    manifest = _make_bundle(
+        tmp_path,
+        health_checks={
+            "excluded_noise": {
+                "count": 0,
+                "samples": [],
+                "patterns": [],
+                "count_truncated": False,
+            },
+            "noise_hygiene": {
+                "available": False,
+                "excluded_noise_count": 0,
+                "excluded_noise_samples": [],
+                "patterns": [],
+            },
+        },
+    )
+
+    report = compute_post_emit_health(str(manifest))
+
+    assert report["noise_hygiene"]["available"] is False
+    assert report["noise_hygiene"]["excluded_noise_count"] is None
+
+
+def test_post_emit_health_accepts_legacy_excluded_noise_list(tmp_path):
+    manifest = _make_bundle(
+        tmp_path,
+        health_top_level={
+            "excluded_noise": [
+                {"path": ".tmp/forensic-preflight-ci-canary/artifacts/forensic-preflight-canary.json"}
+            ]
+        },
+    )
+
+    report = compute_post_emit_health(str(manifest))
+
+    assert report["noise_hygiene"]["available"] is True
+    assert report["noise_hygiene"]["excluded_noise_count"] == 1
 
 def test_post_emit_health_requires_agent_pack(tmp_path):
     """A bundle without an agent_reading_pack must not silently pass."""
