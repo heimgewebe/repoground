@@ -160,12 +160,12 @@ This closes the earlier deferred diagnostic gap: `.gitignore` can keep local scr
 ## Tests Run
 
 ```
-pytest merger/lenskit/tests/test_merge_filtering.py       # 24 passed
-pytest merger/lenskit/tests/test_output_health.py         # 45 passed
-pytest merger/lenskit/tests/test_agent_reading_pack.py    # 8 passed
-pytest merger/lenskit/tests/test_retrieval_index.py       # 3 passed
-pytest merger/lenskit/tests/test_bundle_manifest_integration.py  # 28 passed
-pytest merger/lenskit/tests/test_post_emit_health.py      # 32 passed
+pytest merger/lenskit/tests/test_merge_filtering.py       # passed
+pytest merger/lenskit/tests/test_output_health.py         # passed
+pytest merger/lenskit/tests/test_agent_reading_pack.py    # passed
+pytest merger/lenskit/tests/test_retrieval_index.py       # passed
+pytest merger/lenskit/tests/test_bundle_manifest_integration.py  # passed
+pytest merger/lenskit/tests/test_post_emit_health.py      # passed
 pytest merger/lenskit/tests/test_output_noise_hygiene.py   # passed
 ```
 
