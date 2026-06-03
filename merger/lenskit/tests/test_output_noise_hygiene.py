@@ -1,4 +1,6 @@
 import json
+
+import pytest
 from pathlib import Path
 
 from merger.lenskit.core.constants import ArtifactRole
@@ -95,3 +97,28 @@ def test_standard_dump_excludes_tmp_noise_but_keeps_repo_dotdirs(tmp_path):
     post_emit = compute_post_emit_health(str(artifacts.bundle_manifest))
     assert post_emit["noise_hygiene"]["available"] is True
     assert post_emit["noise_hygiene"]["excluded_noise_count"] == excluded["count"]
+
+
+def test_symlinked_tmp_noise_diagnostic_does_not_enumerate_external_target(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# Demo\n", encoding="utf-8")
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "external-secret.txt").write_text("secret name should not leak\n", encoding="utf-8")
+
+    tmp_link = repo / ".tmp"
+    try:
+        tmp_link.symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation is not available: {exc}")
+
+    summary = scan_repo(repo, calculate_md5=True, include_hidden=True)
+    scanned_paths = {fi.rel_path.as_posix() for fi in summary["files"]}
+    samples = summary["excluded_noise"]["samples"]
+
+    assert "external-secret.txt" not in scanned_paths
+    assert all("external-secret.txt" not in sample for sample in samples)
+    assert ".tmp/" in samples
+    assert summary["excluded_noise"]["count"] == 1

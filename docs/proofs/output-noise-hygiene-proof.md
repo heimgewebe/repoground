@@ -126,6 +126,7 @@ The test verifies:
 - ✅ `output_health.checks.excluded_noise` reports count, samples, and patterns, including `.tmp/`
 - ✅ `output_health.checks.noise_hygiene.available=true` when scan diagnostics are supplied; direct `compute_output_health()` callers without scanner context report `available=false`
 - ✅ `post_emit_health.noise_hygiene.available=true` and carries the `excluded_noise_count` from validated `output_health`
+- ✅ symlinked noise directories (for example `repo/.tmp -> /outside`) are counted as excluded without walking or sampling external target filenames
 
 This closes the earlier deferred diagnostic gap: `.gitignore` can keep local scratch files out of Git, but Lenskit scans the filesystem directly, so dump policy is enforced in scanner traversal and reported in health diagnostics.
 
@@ -153,7 +154,7 @@ This closes the earlier deferred diagnostic gap: `.gitignore` can keep local scr
 
 - Full `.gitignore` semantics are intentionally not implemented. Git ignore rules are not automatically dump policy.
 - There is no broad “exclude every dotdir” rule; `.github/` and `.wgx/` remain dumpable repository context.
-- `excluded_noise` diagnostics are bounded (count cap + sample cap) so large vendor/cache trees do not create unbounded health payloads.
+- `excluded_noise` diagnostics are bounded (count cap + sample cap) so large vendor/cache trees do not create unbounded health payloads; skipped noise symlinks are sampled only as repo-relative directory paths and are not traversed.
 - A future noise-ratchet or CI-blocking policy for new noise patterns remains a follow-up; this slice only excludes known local scratch/cache directories and reports the exclusion.
 
 ## Tests Run

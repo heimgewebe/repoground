@@ -2253,6 +2253,19 @@ def _record_excluded_noise_dir(
         except ValueError:
             return path.as_posix()
 
+    def _append_dir_sample(path: Path) -> None:
+        sample = _rel(path)
+        if not sample.endswith("/"):
+            sample += "/"
+        samples.append(sample)
+
+    if skipped_dir.is_symlink():
+        count += 1
+        if len(samples) < NOISE_HYGIENE_SAMPLE_LIMIT:
+            _append_dir_sample(skipped_dir)
+        excluded_noise["count"] = count
+        return
+
     saw_file = False
     try:
         for walk_dir, walk_dirs, walk_files in os.walk(skipped_dir):
@@ -2273,7 +2286,7 @@ def _record_excluded_noise_dir(
     if not saw_file:
         count += 1
         if len(samples) < NOISE_HYGIENE_SAMPLE_LIMIT:
-            samples.append(_rel(skipped_dir) + "/")
+            _append_dir_sample(skipped_dir)
 
     excluded_noise["count"] = count
 
