@@ -79,6 +79,35 @@ def _write_fixture_repo() -> None:
         "# Usage\n\nCall `answer()` when the fixture needs deterministic source content.\n",
         encoding="utf-8",
     )
+    # The single-repo claim_evidence_map is derived from the *scanned* repo's own
+    # docs/doc-freshness-registry.yml (core/merge.py). Ship a minimal,
+    # schema-valid registry so the positive case actually produces
+    # claim_evidence_map_json; without it the map is correctly absent and the
+    # positive bundle could never satisfy the forensic_strict prerequisites.
+    (fixture_repo / "docs" / "doc-freshness-registry.yml").write_text(
+        "kind: lenskit.doc_freshness_registry\n"
+        'version: "1.0"\n'
+        "authority: diagnostic_signal\n"
+        "risk_class: diagnostic\n"
+        "does_not_prove:\n"
+        '  - "a green verify does not prove docs are complete or correct, only'
+        ' that no tracked claim contradicts its declared evidence"\n'
+        "entries:\n"
+        "  - id: calibration-fixture-app-answer\n"
+        "    doc: docs/usage.md\n"
+        "    locator: \"section 'Usage'\"\n"
+        '    claim: "answer() returns a deterministic result"\n'
+        "    status: done\n"
+        "    normative: false\n"
+        "    owner: forensic-calibration\n"
+        '    last_verified: "2026-06-01"\n'
+        "    evidence:\n"
+        "      - kind: symbol\n"
+        '        target: "src/app.py::answer"\n'
+        "      - kind: file\n"
+        '        target: "docs/usage.md"\n',
+        encoding="utf-8",
+    )
 
 
 def _make_real_bundle(label: str) -> Path:

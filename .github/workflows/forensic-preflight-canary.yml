@@ -1,0 +1,102 @@
+name: Forensic Preflight Canary
+
+# Controlled, path-scoped canary for the diagnostic `governance forensic-preflight`
+# readiness check. It promotes the existing F2c calibration into CI *visibility*:
+# it builds a small hermetic fixture bundle, runs the preflight CLI and asserts a
+# strict PASS, persisting a machine-readable JSON report as a build artifact.
+#
+# This is a CANARY, not a global gate. A PASS means the formal forensic_strict
+# prerequisites are present; it is NOT a claim-truth verdict and does NOT make
+# forensic_strict a required check for all PRs. Full blocking promotion remains a
+# follow-up after several stable canary runs (see
+# docs/proofs/forensic-preflight-ci-canary-proof.md). The canary changes no core
+# bundle-emission, claim-map or surface logic.
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - ".github/workflows/forensic-preflight-canary.yml"
+      - "scripts/proofs/forensic_preflight_ci_canary.sh"
+      - "scripts/proofs/forensic_preflight_calibration.sh"
+      - "merger/lenskit/core/forensic_preflight.py"
+      - "merger/lenskit/core/post_emit_health.py"
+      - "merger/lenskit/core/bundle_surface_validate.py"
+      - "merger/lenskit/core/claim_evidence_map.py"
+      - "merger/lenskit/core/agent_reading_pack.py"
+      - "merger/lenskit/core/merge.py"
+      - "merger/lenskit/cli/cmd_governance.py"
+      - "merger/lenskit/cli/main.py"
+      - "merger/lenskit/contracts/**"
+      - "merger/lenskit/tests/test_forensic_preflight.py"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - "docs/proofs/forensic-preflight-ci-canary-proof.md"
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - ".github/workflows/forensic-preflight-canary.yml"
+      - "scripts/proofs/forensic_preflight_ci_canary.sh"
+      - "scripts/proofs/forensic_preflight_calibration.sh"
+      - "merger/lenskit/core/forensic_preflight.py"
+      - "merger/lenskit/core/post_emit_health.py"
+      - "merger/lenskit/core/bundle_surface_validate.py"
+      - "merger/lenskit/core/claim_evidence_map.py"
+      - "merger/lenskit/core/agent_reading_pack.py"
+      - "merger/lenskit/core/merge.py"
+      - "merger/lenskit/cli/cmd_governance.py"
+      - "merger/lenskit/cli/main.py"
+      - "merger/lenskit/contracts/**"
+      - "merger/lenskit/tests/test_forensic_preflight.py"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - "docs/proofs/forensic-preflight-ci-canary-proof.md"
+
+permissions:
+  contents: read
+
+jobs:
+  forensic-preflight-canary:
+    name: forensic preflight canary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Log Python Version
+        run: python --version
+
+      - name: Install Dependencies
+        # merger/lenskit/requirements.txt provides jsonschema, which the preflight
+        # needs to validate the claim-evidence-map schema. Without it the positive
+        # case would block on claim_evidence_map_schema_valid rather than pass.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Shell syntax checks
+        run: |
+          bash -n scripts/proofs/forensic_preflight_ci_canary.sh
+          bash -n scripts/proofs/forensic_preflight_calibration.sh
+
+      - name: Unit coverage for forensic preflight (blocking)
+        run: pytest -q merger/lenskit/tests/test_forensic_preflight.py
+
+      - name: Run forensic preflight canary (blocking)
+        # Builds a hermetic fixture bundle, runs `governance forensic-preflight
+        # --json` and asserts status=pass. Fails only on a real canary violation.
+        run: bash scripts/proofs/forensic_preflight_ci_canary.sh
+
+      - name: Upload forensic preflight canary artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forensic-preflight-canary
+          path: .tmp/forensic-preflight-ci-canary/artifacts/
+          if-no-files-found: warn

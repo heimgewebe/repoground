@@ -52,6 +52,22 @@
       "missing_evidence": [
         "Keine Core-Änderung; der Slice bleibt bewusst operativ. Eine echte Service-Automation (z. B. ExecStartPre=git pull, Post-Merge-Hook mit `systemctl --user restart rlens`) wird explizit nicht eingeführt (Begründung im Proof)."
       ]
+    },
+    {
+      "id": "TASK-FORENSIC-001",
+      "title": "Forensic Strict CI Canary",
+      "status": "done",
+      "description": "Adds a controlled, path-scoped GitHub Actions canary that runs governance forensic-preflight against a small, hermetic, registry-bearing fixture bundle and persists a machine-readable JSON report as a build artifact. This promotes the existing F2c calibration into CI visibility without making forensic_strict a global blocking policy and without changing core bundle emission, claim-map production or the surface validator. The canary builds the fixture through the standard merge pipeline (scan_repo + write_reports_v2, max_bytes=100_000), writes post_emit_health and asserts a strict status=pass. A pre-existing diagnostic bug was fixed as part of this slice: commit 39f27873 moved claim_evidence_map derivation from the lenskit package registry to the scanned repo's own docs/doc-freshness-registry.yml (correct surface parity), which left the registry-less calibration fixture unable to produce claim_evidence_map_json; both proof fixtures now ship a minimal schema-valid registry. PASS means the formal forensic_strict prerequisites are present; it is explicitly not a truth verdict and not a license to answer without citations.",
+      "evidence": [
+        ".github/workflows/forensic-preflight-canary.yml",
+        "scripts/proofs/forensic_preflight_ci_canary.sh",
+        "scripts/proofs/forensic_preflight_calibration.sh",
+        "merger/lenskit/tests/test_forensic_preflight.py",
+        "docs/proofs/forensic-preflight-ci-canary-proof.md"
+      ],
+      "missing_evidence": [
+        "Full blocking forensic_strict promotion to a required check remains a follow-up after several stable canary runs across bundle profiles."
+      ]
     }
   ]
 }

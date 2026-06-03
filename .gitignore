@@ -25,6 +25,9 @@ metrics.json
 merges/
 *_merge.md
 
+# Scratch / CI canary working + artifact dirs
+.tmp/
+
 # RepoLens
 merger/repoLens/merges/
 **/.repolens-hub-path.txt
