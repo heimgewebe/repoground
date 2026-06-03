@@ -166,10 +166,10 @@ pytest merger/lenskit/tests/test_agent_reading_pack.py    # 8 passed
 pytest merger/lenskit/tests/test_retrieval_index.py       # 3 passed
 pytest merger/lenskit/tests/test_bundle_manifest_integration.py  # 28 passed
 pytest merger/lenskit/tests/test_post_emit_health.py      # 32 passed
-pytest merger/lenskit/tests/test_output_noise_hygiene.py   # 1 passed
+pytest merger/lenskit/tests/test_output_noise_hygiene.py   # passed
 ```
 
-**Total: 168 tests, all pass.**
+**All listed checks passed.**
 
 (Includes tests for false-positive prevention, single-source validation, and bundle-surface integration.)
 
