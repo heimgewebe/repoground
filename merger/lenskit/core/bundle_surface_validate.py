@@ -233,6 +233,13 @@ def _pack_consistency_check(
         )
     # claim map absent: a placeholder is expected; if a reason is set the pack
     # should surface it rather than carry a bare blanket gap.
+    if has_summary_artifact:
+        return _check(
+            "agent_reading_pack_consistency",
+            "fail",
+            "claim_evidence_map_json absent from manifest but agent_reading_pack "
+            "advertises a CLAIM_EVIDENCE_MAP_SUMMARY artifact line",
+        )
     if absence_reason is not None and "reason=" not in pack_text:
         return _check(
             "agent_reading_pack_consistency",

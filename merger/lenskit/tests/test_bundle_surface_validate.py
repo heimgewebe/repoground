@@ -201,6 +201,37 @@ def test_pack_missing_summary_while_map_present_fails(tmp_path):
     assert _check(report, "agent_reading_pack_consistency")["status"] == "fail"
 
 
+def test_pack_summary_artifact_while_map_absent_with_reason_fails(tmp_path):
+    """Pack claims CLAIM_EVIDENCE_MAP_SUMMARY with artifact line while manifest
+    has no claim_evidence_map_json. This is a contradiction: the pack advertises
+    a non-existent artifact. Fails even when absence_reason is set."""
+    mp = _make_manifest(
+        tmp_path,
+        claim_present=False,
+        absence_reason="no_registry",
+        pack_text=_PACK_SUMMARY_PRESENT,
+    )
+    report = validate_bundle_surface(mp, require_claim_evidence_map=False)
+    assert report["status"] == "fail"
+    pack = _check(report, "agent_reading_pack_consistency")
+    assert pack["status"] == "fail"
+    assert "absent from manifest" in pack["detail"]
+
+
+def test_pack_summary_artifact_while_map_absent_and_required_fails(tmp_path):
+    """Pack claims artifact while map absent and required. The pack contradiction
+    is caught before any require-claim check, so status is fail."""
+    mp = _make_manifest(
+        tmp_path,
+        claim_present=False,
+        absence_reason="no_registry",
+        pack_text=_PACK_SUMMARY_PRESENT,
+    )
+    report = validate_bundle_surface(mp, require_claim_evidence_map=True)
+    assert report["status"] == "fail"
+    assert _check(report, "agent_reading_pack_consistency")["status"] == "fail"
+
+
 # ── surface link coherence ──────────────────────────────────────────────────
 
 def test_links_absent_skipped(tmp_path):
