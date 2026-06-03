@@ -5,7 +5,6 @@ import shutil
 import json
 from unittest.mock import patch
 import io
-import sys
 
 import scripts.docmeta.check_planning_registration as check_plan
 
