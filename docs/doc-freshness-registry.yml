@@ -35,7 +35,7 @@ entries:
     status: done
     normative: true
     owner: repolens-spec
-    last_verified: "2026-05-31"
+    last_verified: "2026-06-02"
     evidence:
       - kind: symbol
         target: "merger/lenskit/core/merge.py::ExtrasConfig"
@@ -61,7 +61,7 @@ entries:
     status: done
     normative: false
     owner: architecture
-    last_verified: "2026-05-31"
+    last_verified: "2026-06-02"
     evidence:
       - kind: symbol
         target: "merger/lenskit/core/federation.py::init_federation"
@@ -80,7 +80,7 @@ entries:
     status: done
     normative: false
     owner: roadmap
-    last_verified: "2026-05-31"
+    last_verified: "2026-06-02"
     evidence:
       - kind: symbol
         target: "merger/lenskit/core/claim_evidence_map.py::produce_claim_evidence_map"

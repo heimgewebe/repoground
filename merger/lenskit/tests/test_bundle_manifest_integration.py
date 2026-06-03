@@ -23,6 +23,9 @@ _OUTPUT_HEALTH_SCHEMA_PATH = (
 )
 _CITATION_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "citation-map.v1.schema.json"
 _CLAIM_EVIDENCE_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "claim-evidence-map.v1.schema.json"
+_BUNDLE_SURFACE_VALIDATION_SCHEMA_PATH = (
+    _CONTRACTS_DIR / "bundle-surface-validation.v1.schema.json"
+)
 _REAL_DOC_FRESHNESS_REGISTRY_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "doc-freshness-registry.yml"
 )
@@ -1489,3 +1492,99 @@ def test_claim_evidence_map_unexpected_missing_with_registry(tmp_path, monkeypat
     checks = {item["name"]: item for item in post_emit["checks"]}
     assert checks["claim_evidence_map_present"]["status"] == "skipped"
     assert "reason=unexpected_missing_with_registry" in checks["claim_evidence_map_present"]["detail"]
+
+
+# ── Real-dump surface self-check gate (standard-dump hook integration) ────────
+# These guard the standard-dump wiring that was implemented in fe6723d, then
+# silently reverted by a graft in PR #736. They assert that write_reports_v2
+# itself (not just the standalone validator) persists post_emit_health + the
+# bundle surface validation as sidecars, records the machine-readable links, and
+# stamps generator.runtime — so a regression can no longer make a real dump
+# silently lack the surface while output_health still reads pass.
+def test_real_dump_surface_hook_emits_runtime_and_surface_links(tmp_path):
+    """Standard dump path for a single-repo bundle with a doc-freshness registry
+    must wire the full surface self-check: generator.runtime provenance,
+    persisted post_emit_health + surface validation sidecars, and links pointing
+    at them with a coherent (pass) verdict."""
+    artifacts, data, _ = _make_bundle_with_registry(
+        tmp_path, registry_yaml=_MINIMAL_REGISTRY_YAML
+    )
+    manifest_dir = artifacts.bundle_manifest.parent
+
+    # generator.runtime provenance (criterion D)
+    runtime = data["generator"].get("runtime")
+    assert isinstance(runtime, dict), "generator.runtime must be present"
+    assert runtime.get("module"), "runtime.module must be set"
+    assert runtime.get("python_version"), "runtime.python_version must be set"
+
+    # links carry both sidecar pointers + the surface verdict (criterion C)
+    links = data.get("links", {})
+    post_path = links.get("post_emit_health_path")
+    surface_path = links.get("bundle_surface_validation_path")
+    status = links.get("bundle_surface_validation_status")
+    assert post_path, "links.post_emit_health_path must be set"
+    assert surface_path, "links.bundle_surface_validation_path must be set"
+    assert status in {"pass", "warn", "blocked", "fail"}
+
+    # sidecars persisted by the standard dump (criteria A + B)
+    assert (manifest_dir / post_path).is_file(), "post_emit_health sidecar must exist"
+    surface_file = manifest_dir / surface_path
+    assert surface_file.is_file(), "bundle_surface_validation sidecar must exist"
+
+    # the sidecar verdict equals the recorded link status, and a valid
+    # single-repo+registry dump is a coherent, required surface (criteria E + G)
+    report = json.loads(surface_file.read_text(encoding="utf-8"))
+    assert report["kind"] == "lenskit.bundle_surface_validation"
+    assert report["status"] == status
+    assert report["require_claim_evidence_map"] is True
+    assert status == "pass", f"expected a coherent surface, got {status}: {report['checks']}"
+
+    # surface_links_coherent must resolve to pass in the two-phase finalization
+    # (the second validation pass sees the manifest with surface links already set)
+    checks_by_name = {c["name"]: c for c in report["checks"]}
+    assert checks_by_name["surface_links_coherent"]["status"] == "pass", (
+        f"surface_links_coherent must be pass after two-phase finalization, "
+        f"got: {checks_by_name['surface_links_coherent']}"
+    )
+
+    # claim map present (criterion E) and pack free of the legacy placeholder (F)
+    roles = {e["role"] for e in data["artifacts"]}
+    assert ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value in roles
+    pack_text = artifacts.agent_reading_pack.read_text(encoding="utf-8")
+    assert "claim_evidence_map is not yet produced" not in pack_text
+
+
+def test_real_dump_surface_sidecars_are_unregistered(tmp_path):
+    """The post_emit_health and bundle_surface_validation sidecars must NOT be
+    registered as manifest artifacts: a self-check must never verify its own
+    hash, and post_emit_health must not introduce manifest hash circularity
+    (review trap 1)."""
+    _, data, _ = _make_bundle_with_registry(
+        tmp_path, registry_yaml=_MINIMAL_REGISTRY_YAML
+    )
+    links = data["links"]
+    sidecar_names = {
+        links["post_emit_health_path"],
+        links["bundle_surface_validation_path"],
+    }
+    artifact_names = {Path(e["path"]).name for e in data["artifacts"]}
+    assert sidecar_names.isdisjoint(artifact_names), (
+        "surface self-check sidecars must stay unregistered as artifacts"
+    )
+
+
+def test_real_dump_surface_validation_sidecar_schema_valid(tmp_path):
+    """The persisted surface validation sidecar must validate against its
+    published contract (bundle-surface-validation.v1)."""
+    artifacts, data, _ = _make_bundle_with_registry(
+        tmp_path, registry_yaml=_MINIMAL_REGISTRY_YAML
+    )
+    surface_file = (
+        artifacts.bundle_manifest.parent
+        / data["links"]["bundle_surface_validation_path"]
+    )
+    report = json.loads(surface_file.read_text(encoding="utf-8"))
+    schema = json.loads(
+        _BUNDLE_SURFACE_VALIDATION_SCHEMA_PATH.read_text(encoding="utf-8")
+    )
+    jsonschema.validate(instance=report, schema=schema)

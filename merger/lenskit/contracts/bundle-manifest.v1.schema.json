@@ -51,6 +51,45 @@
         "config_sha256": {
           "type": "string",
           "pattern": "^[a-f0-9]{64}$"
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Runtime provenance of the generating process, used to diagnose runtime/entry-point drift (e.g. a service running a stale build that no longer matches the repository code).",
+          "properties": {
+            "module": {
+              "type": "string",
+              "description": "Dotted import path of the core generator module that produced the bundle."
+            },
+            "module_file": {
+              "type": ["string", "null"],
+              "description": "Absolute filesystem path of the generator module. Null when redacted."
+            },
+            "package_root": {
+              "type": ["string", "null"],
+              "description": "Filesystem root of the installed generator package. Null when redacted."
+            },
+            "python_executable": {
+              "type": ["string", "null"],
+              "description": "Interpreter that ran the generator. Null when redacted."
+            },
+            "python_version": {
+              "type": "string",
+              "description": "Python version string of the generating interpreter."
+            },
+            "git_commit": {
+              "type": ["string", "null"],
+              "description": "Git commit of the generator package working tree, or null if unavailable."
+            },
+            "git_dirty": {
+              "type": ["boolean", "null"],
+              "description": "Whether the generator package working tree had uncommitted changes, or null if unavailable."
+            }
+          },
+          "required": [
+            "module",
+            "python_version"
+          ]
         }
       }
     },
@@ -740,6 +779,24 @@
             "unexpected_missing_with_registry"
           ],
           "description": "Machine-readable reason why claim_evidence_map_json is absent in this bundle."
+        },
+        "bundle_surface_validation_status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "blocked"
+          ],
+          "description": "Self-check verdict of the bundle surface validator run by the generator after final emission (claim-map surface coherence, post-emit health persistence, generator provenance)."
+        },
+        "bundle_surface_validation_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the persisted bundle_surface_validation sidecar. Unregistered as an artifact (a self-check never verifies its own hash)."
+        },
+        "post_emit_health_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the persisted post_emit_health sidecar. Unregistered as an artifact to avoid self-hash circularity."
         }
       }
     },

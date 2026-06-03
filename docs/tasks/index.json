@@ -15,6 +15,29 @@
         "Frontmatter-Ausnahmefluss ist noch nicht schema-/contract-stabil.",
         "CI ist report-only angebunden; blocking/ratchet bleibt bewusst ausstehend."
       ]
+    },
+    {
+      "id": "TASK-BUNDLE-001",
+      "title": "Real Dump Surface Self-Check Gate",
+      "status": "done",
+      "description": "After final bundle emission the standard dump path runs a read-only surface self-check: it persists post_emit_health and bundle_surface_validation sidecars, records machine-readable links (post_emit_health_path, bundle_surface_validation_path, bundle_surface_validation_status) and stamps generator.runtime provenance. A single-repo dump shipping docs/doc-freshness-registry.yml can no longer silently lack the claim_evidence_map surface while output_health still reads pass: the map is present XOR a machine-readable absence reason, and an active surface defect aborts emission. output_health stays a pre-emit signal; this gate is additive and is never a truth/forensic verdict. The work was originally implemented in fe6723d, then silently reverted by a graft in PR #736; this task restores it (verified against current main) and adds standard-dump-hook integration coverage.",
+      "evidence": [
+        "merger/lenskit/core/bundle_surface_validate.py",
+        "merger/lenskit/core/runtime_provenance.py",
+        "merger/lenskit/cli/cmd_bundle_surface.py",
+        "merger/lenskit/cli/main.py",
+        "merger/lenskit/core/merge.py",
+        "merger/lenskit/contracts/bundle-manifest.v1.schema.json",
+        "merger/lenskit/contracts/bundle-surface-validation.v1.schema.json",
+        "merger/lenskit/tests/test_bundle_surface_validate.py",
+        "merger/lenskit/tests/test_cli_bundle_surface.py",
+        "merger/lenskit/tests/test_runtime_provenance.py",
+        "merger/lenskit/tests/test_bundle_manifest_integration.py",
+        "docs/proofs/real-dump-surface-self-check-proof.md"
+      ],
+      "missing_evidence": [
+        "forensic_strict CI-Promotion bleibt ein separater PR (Nicht-Ziel dieses Auftrags)."
+      ]
     }
   ]
 }

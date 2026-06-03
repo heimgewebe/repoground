@@ -228,3 +228,23 @@ Danach im Output-Manifest prüfen:
 * Das Agent Reading Pack zeigt eine Claim-Map-Summary an
 
 Dieser Smoke Test ist rein informativ und ersetzt nicht die CI-Promotion von `forensic_strict`.
+
+### Drei Surface-Ebenen (Abgrenzung)
+
+Die Claim-Map-Garantie wird auf drei getrennten Ebenen geprüft — diese Trennung ist
+bewusst und darf nicht vermischt werden:
+
+1. **Unit-/Fixture-Surface** — synthetische Registry/Manifeste in
+   `test_claim_evidence_map.py`, `test_bundle_manifest_integration.py`.
+2. **Real-Registry-Payload Surface** — der Codepfad gegen die echte
+   `docs/doc-freshness-registry.yml` (`test_claim_evidence_map_unexpected_missing_with_registry`).
+3. **Real-Dump Surface Self-Check** — der **erzeugte** Dump prüft sich selbst:
+   `bundle_surface_validate` läuft am Ende von `write_reports_v2`, persistiert
+   `<stem>.bundle_surface_validation.json` und trägt `bundle_surface_validation_status`
+   in die `links` ein. Ein Single-Repo-Dump mit Registry, dem die Claim-Map **ohne**
+   Absenzgrund fehlt, bricht jetzt hart ab statt still durchzulaufen. Siehe
+   [real-dump-surface-self-check-proof.md](real-dump-surface-self-check-proof.md).
+
+Der historische Bruch war: Unit-/Surface-Test grün, **echter Dump** (Service-Runtime)
+ohne Claim-Map — diagnostiziert als Runtime-Drift, da der aktuelle Code den Dump heute
+korrekt mit Claim-Map erzeugt. Die `forensic_strict`-Promotion bleibt davon getrennt.
