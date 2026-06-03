@@ -2,6 +2,18 @@
 Description=rLens Web UI (rlens user-unit example/template)
 After=network.target
 
+# Operating note (TASK-SERVICE-001, 2026-06-03):
+# Python lädt Module beim Prozessstart. Nach jedem `git pull`/Merge in %h/repos/lenskit
+# MUSS dieser User-Service neu gestartet werden, damit die Dumps gegen den frischen
+# Code laufen:
+#   systemctl --user restart rlens
+# Ein laufender Service sieht neue Repo-Dateien nicht automatisch; ohne Restart
+# emittiert er Dumps aus einer eingefrorenen Code-Sicht (z. B. fehlende
+# generator.runtime, post_emit_health_path, bundle_surface_validation_path,
+# bundle_surface_validation_status, claim_evidence_map_json). Beweis + Smoke-Script:
+# docs/proofs/rlens-post-merge-restart-smoke-proof.md
+# scripts/rlens-post-merge-surface-smoke.sh
+
 [Service]
 Type=simple
 Environment=RLENS_HUB=%h/repos

@@ -38,6 +38,20 @@
       "missing_evidence": [
         "forensic_strict CI-Promotion bleibt ein separater PR (Nicht-Ziel dieses Auftrags)."
       ]
+    },
+    {
+      "id": "TASK-SERVICE-001",
+      "title": "rlens post-merge restart smoke",
+      "status": "done",
+      "description": "After a `git pull`/merge in `repos/lenskit`, the systemd --user `rlens.service` MUST be restarted (`systemctl --user restart rlens`) before any new dump is treated as evidence of the current code state. Python loads modules at process start; a long-running service keeps emitting from its frozen module snapshot, which previously produced dumps without `generator.runtime`, `links.post_emit_health_path`, `links.bundle_surface_validation_path`, `links.bundle_surface_validation_status`, and `claim_evidence_map_json`. This task adds a runbook proof, a non-automating comment in the systemd unit, and a smoke script that asserts the surface fields against the latest `*_merge.bundle.manifest.json` and that the agent reading pack carries no legacy `claim_evidence_map is not yet produced` placeholder. No core bundle/surface code is changed.",
+      "evidence": [
+        "scripts/rlens-post-merge-surface-smoke.sh",
+        "docs/proofs/rlens-post-merge-restart-smoke-proof.md",
+        "docs/systemd/rlens.service"
+      ],
+      "missing_evidence": [
+        "Keine Core-Änderung; der Slice bleibt bewusst operativ. Eine echte Service-Automation (z. B. ExecStartPre=git pull, Post-Merge-Hook mit `systemctl --user restart rlens`) wird explizit nicht eingeführt (Begründung im Proof)."
+      ]
     }
   ]
 }
