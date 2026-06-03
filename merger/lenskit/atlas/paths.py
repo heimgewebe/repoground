@@ -17,6 +17,17 @@ def resolve_atlas_base_dir(registry_db_path: Optional[Path] = None) -> Path:
     # Fallback only used if absolutely unavoidable
     return (Path.cwd() / "atlas").resolve()
 
+def resolve_index_db_path(registry_db_path: Optional[Path] = None) -> Path:
+    """
+    Determines the canonical path for the global Atlas FTS index.
+
+    Per ADR-008 the index lives at ``<atlas_base>/indexes/fts.sqlite``. The
+    base is derived deterministically from the registry path (independent of
+    the process CWD), matching the registry/artifact resolution strategy.
+    """
+    atlas_base = resolve_atlas_base_dir(registry_db_path)
+    return atlas_base / "indexes" / "fts.sqlite"
+
 def resolve_snapshot_dir(atlas_base_dir: Path, machine_id: str, root_id: str, snapshot_id: str) -> Path:
     """
     Determines the canonical directory for a specific snapshot.

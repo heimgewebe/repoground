@@ -26,6 +26,7 @@ _EXPECTED_ATLAS_SUBCOMMANDS = {
     "diff",
     "history",
     "search",
+    "index",
     "analyze",
 }
 

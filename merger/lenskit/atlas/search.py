@@ -1,19 +1,83 @@
 import json
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import fnmatch
 
-TEXT_DETECTION_MAX_BYTES = 20 * 1024 * 1024
-
 from merger.lenskit.atlas.registry import AtlasRegistry
-from merger.lenskit.atlas.paths import resolve_atlas_base_dir, resolve_artifact_ref
+from merger.lenskit.atlas.paths import resolve_atlas_base_dir, resolve_artifact_ref, resolve_index_db_path
+
+TEXT_DETECTION_MAX_BYTES = 20 * 1024 * 1024
 
 def parse_iso_datetime(value: str) -> datetime:
     if value.endswith('Z'):
         value = value[:-1] + '+00:00'
     return datetime.fromisoformat(value)
+
+
+def _content_match(root_value: str, item: Dict[str, Any], content_query_lower: str) -> Tuple[bool, Optional[str]]:
+    """Confirm a content-query substring match against the live file and build a snippet.
+
+    Returns (matched, snippet). This preserves the exact semantics of the
+    original best-effort live-filesystem content search (case-insensitive
+    substring on a single line, first match wins, snippet trimmed to 200 chars)
+    while being reusable by both the legacy and index-backed search paths.
+    """
+    if not root_value:
+        return False, None
+
+    # Guard 1: skip declared symlinks
+    if item.get('is_symlink'):
+        return False, None
+
+    root_path = Path(root_value).resolve()
+    rel_path = item.get('rel_path', '')
+    candidate_path = root_path / rel_path
+
+    try:
+        if candidate_path.is_symlink():
+            return False, None
+    except OSError:
+        return False, None
+
+    try:
+        full_path = candidate_path.resolve(strict=False)
+        full_path.relative_to(root_path)
+    except (ValueError, OSError, RuntimeError):
+        return False, None
+
+    try:
+        if not full_path.is_file() or full_path.is_symlink():
+            return False, None
+    except OSError:
+        return False, None
+
+    size = item.get('size_bytes', 0)
+    if size > TEXT_DETECTION_MAX_BYTES:
+        return False, None
+
+    is_text_flag = item.get('is_text')
+    if is_text_flag is False:
+        return False, None
+    if is_text_flag is None:
+        from merger.lenskit.adapters.atlas import is_probably_text
+        if not is_probably_text(full_path, size):
+            return False, None
+
+    try:
+        with open(full_path, 'r', encoding='utf-8', errors='replace') as f_content:
+            for line in f_content:
+                if content_query_lower in line.lower():
+                    snippet = line.strip()
+                    if len(snippet) > 200:
+                        snippet = snippet[:197] + "..."
+                    return True, snippet
+    except Exception:
+        return False, None
+
+    return False, None
+
 
 class AtlasSearch:
     def __init__(self, registry_db_path: Path):
@@ -31,7 +95,9 @@ class AtlasSearch:
                max_size: Optional[int] = None,
                date_after: Optional[str] = None,
                date_before: Optional[str] = None,
-               content_query: Optional[str] = None) -> List[Dict[str, Any]]:
+               content_query: Optional[str] = None,
+               all_snapshots: bool = False,
+               use_index: bool = True) -> List[Dict[str, Any]]:
 
         # Open registry to find the appropriate snapshots
         try:
@@ -46,19 +112,15 @@ class AtlasSearch:
             print(f"[atlas-search] warning: failed to connect to registry {self.registry_db_path}: {e}", file=sys.stderr)
             return []
 
-        if not snapshot_id:
-            # Keep only the latest snapshot per root
-            # Since order is DESC, the first one encountered per root is the latest
+        if not snapshot_id and not all_snapshots:
+            # Keep only the latest snapshot per root (DESC order => first wins).
             latest_snapshots = {}
             for s in snapshots:
                 if s['root_id'] not in latest_snapshots:
                     latest_snapshots[s['root_id']] = s
             snapshots = list(latest_snapshots.values())
 
-        atlas_base = resolve_atlas_base_dir(self.registry_db_path)
-        results = []
-
-        # Parse date filters once
+        # Parse date filters once (shared by both paths).
         after_dt = None
         before_dt = None
         try:
@@ -70,11 +132,130 @@ class AtlasSearch:
             print(f"[atlas-search] warning: invalid date filter format: {e}", file=sys.stderr)
             return []
 
-        # If ext doesn't start with '.', add it to match how it's stored
+        # Normalize ext to match how it's stored (leading dot).
         if ext and not ext.startswith('.'):
             ext = f".{ext}"
 
         content_query_lower = content_query.lower() if content_query else None
+
+        # Prefer the FTS index when it exists and covers every candidate snapshot.
+        if use_index:
+            index_results = self._try_index_search(
+                snapshots, roots_cache, query, path_pattern, name_pattern, ext,
+                min_size, max_size, after_dt, before_dt, content_query, content_query_lower,
+            )
+            if index_results is not None:
+                return index_results
+
+        return self._search_linear(
+            snapshots, roots_cache, query, path_pattern, name_pattern, ext,
+            min_size, max_size, after_dt, before_dt, content_query, content_query_lower,
+        )
+
+    # ------------------------------------------------------------------
+    # Index-backed path
+    # ------------------------------------------------------------------
+    def _try_index_search(self, snapshots, roots_cache, query, path_pattern, name_pattern,
+                          ext, min_size, max_size, after_dt, before_dt,
+                          content_query, content_query_lower) -> Optional[List[Dict[str, Any]]]:
+        index_path = resolve_index_db_path(self.registry_db_path)
+        if not index_path.exists():
+            return None
+
+        from merger.lenskit.atlas.index import AtlasFTSIndex
+
+        snapshot_ids = [s['snapshot_id'] for s in snapshots]
+        snap_by_id = {s['snapshot_id']: s for s in snapshots}
+
+        try:
+            with AtlasFTSIndex(index_path) as idx:
+                # The index can only answer authoritatively if it covers all
+                # candidate snapshots; otherwise defer to the linear fallback.
+                if any(not idx.is_snapshot_indexed(sid) for sid in snapshot_ids):
+                    return None
+
+                after_epoch = after_dt.timestamp() if after_dt else None
+                before_epoch = before_dt.timestamp() if before_dt else None
+
+                restrict_uids = None
+                if content_query:
+                    # Narrow content candidates via FTS for content-bearing
+                    # snapshots; non-content snapshots are scanned in full and
+                    # confirmed against the live filesystem (hybrid fallback).
+                    content_snaps = [sid for sid in snapshot_ids if idx.snapshot_has_content(sid)]
+                    plain_snaps = [sid for sid in snapshot_ids if not idx.snapshot_has_content(sid)]
+                    narrowed = idx.fts_content_candidates(content_snaps, content_query)
+                    if narrowed is None:
+                        # Unusable tokens: cannot narrow, scan all candidates.
+                        restrict_uids = None
+                    else:
+                        plain_rows = idx.query_metadata(
+                            plain_snaps, ext=ext, min_size=min_size, max_size=max_size,
+                            after_epoch=after_epoch, before_epoch=before_epoch,
+                        )
+                        restrict_uids = set(narrowed) | {r['file_uid'] for r in plain_rows}
+
+                rows = idx.query_metadata(
+                    snapshot_ids, ext=ext, min_size=min_size, max_size=max_size,
+                    after_epoch=after_epoch, before_epoch=before_epoch,
+                    restrict_uids=restrict_uids,
+                )
+        except Exception as e:
+            print(f"[atlas-search] warning: index search failed, falling back to linear scan: {e}", file=sys.stderr)
+            return None
+
+        results: List[Dict[str, Any]] = []
+        for row in rows:
+            try:
+                item = json.loads(row['raw_json'])
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            if not self._passes_name_filters(item, query, path_pattern, name_pattern):
+                continue
+
+            if content_query:
+                snap = snap_by_id.get(row['snapshot_id'])
+                root = roots_cache.get(snap['root_id']) if snap else None
+                root_val = root.get('root_value') if root else None
+                if not root_val:
+                    continue
+                matched, snippet = _content_match(root_val, item, content_query_lower)
+                if not matched:
+                    continue
+                if snippet:
+                    item['content_snippet'] = snippet
+
+            result_item = dict(item)
+            result_item['machine_id'] = row['machine_id']
+            result_item['root_id'] = row['root_id']
+            result_item['snapshot_id'] = row['snapshot_id']
+            results.append(result_item)
+
+        return results
+
+    @staticmethod
+    def _passes_name_filters(item, query, path_pattern, name_pattern) -> bool:
+        if path_pattern and not fnmatch.fnmatch(item.get('rel_path', ''), path_pattern):
+            return False
+        if name_pattern and not fnmatch.fnmatch(item.get('name', ''), name_pattern):
+            return False
+        if query:
+            q_lower = query.lower()
+            name_lower = item.get('name', '').lower()
+            path_lower = item.get('rel_path', '').lower()
+            if q_lower not in name_lower and q_lower not in path_lower:
+                return False
+        return True
+
+    # ------------------------------------------------------------------
+    # Legacy linear path (fallback when index is absent or incomplete)
+    # ------------------------------------------------------------------
+    def _search_linear(self, snapshots, roots_cache, query, path_pattern, name_pattern,
+                       ext, min_size, max_size, after_dt, before_dt,
+                       content_query, content_query_lower) -> List[Dict[str, Any]]:
+        atlas_base = resolve_atlas_base_dir(self.registry_db_path)
+        results: List[Dict[str, Any]] = []
 
         for snap in snapshots:
             inv_ref = snap.get("inventory_ref")
@@ -95,11 +276,7 @@ class AtlasSearch:
                         try:
                             item = json.loads(line)
 
-                            # Apply filters
-                            if path_pattern and not fnmatch.fnmatch(item.get('rel_path', ''), path_pattern):
-                                continue
-
-                            if name_pattern and not fnmatch.fnmatch(item.get('name', ''), name_pattern):
+                            if not self._passes_name_filters(item, query, path_pattern, name_pattern):
                                 continue
 
                             if ext and item.get('ext', '') != ext:
@@ -108,7 +285,6 @@ class AtlasSearch:
                             size = item.get('size_bytes', 0)
                             if min_size is not None and size < min_size:
                                 continue
-
                             if max_size is not None and size > max_size:
                                 continue
 
@@ -127,14 +303,6 @@ class AtlasSearch:
                                 if before_dt and mtime_dt > before_dt:
                                     continue
 
-                            # Basic content/query match (search in name or path if query provided)
-                            if query:
-                                q_lower = query.lower()
-                                name_lower = item.get('name', '').lower()
-                                path_lower = item.get('rel_path', '').lower()
-                                if q_lower not in name_lower and q_lower not in path_lower:
-                                    continue
-
                             if content_query:
                                 root = roots_cache.get(snap['root_id'])
                                 if not root:
@@ -142,79 +310,12 @@ class AtlasSearch:
                                 root_val = root.get('root_value')
                                 if not root_val:
                                     continue
-
-                                # Guard 1: Skip if inventory explicitly says it's a symlink
-                                if item.get('is_symlink'):
+                                matched, snippet = _content_match(root_val, item, content_query_lower)
+                                if not matched:
                                     continue
+                                if snippet:
+                                    item['content_snippet'] = snippet
 
-                                # Safe path resolution to prevent traversal
-                                root_path = Path(root_val).resolve()
-                                rel_path = item.get('rel_path', '')
-
-                                # Guard 2: Form candidate path and check it before resolve
-                                candidate_path = root_path / rel_path
-
-                                try:
-                                    if candidate_path.is_symlink():
-                                        continue
-                                except OSError:
-                                    # Defensively handle file system access errors
-                                    continue
-
-                                try:
-                                    # strict=False because it might be a broken symlink or deleted file
-                                    full_path = candidate_path.resolve(strict=False)
-                                    # Must be strictly within root
-                                    full_path.relative_to(root_path)
-                                except (ValueError, OSError, RuntimeError):
-                                    # Escaped the root directory or file system error
-                                    continue
-
-                                # Guard 3: Ensure the resolved file actually exists and didn't become a symlink mid-flight
-                                try:
-                                    if not full_path.is_file() or full_path.is_symlink():
-                                        continue
-                                except OSError:
-                                    continue
-
-                                # Apply limits
-                                size = item.get('size_bytes', 0)
-                                if size > TEXT_DETECTION_MAX_BYTES:
-                                    continue
-
-                                # Verify text
-                                is_text_flag = item.get('is_text')
-                                if is_text_flag is False:
-                                    continue
-
-                                if is_text_flag is None:
-                                    # Heuristic
-                                    from merger.lenskit.adapters.atlas import is_probably_text
-                                    if not is_probably_text(full_path, size):
-                                        continue
-
-                                # Read content and check for query iteratively (line-by-line)
-                                try:
-                                    matched = False
-                                    snippet = ""
-                                    with open(full_path, 'r', encoding='utf-8', errors='replace') as f_content:
-                                        for line in f_content:
-                                            if content_query_lower in line.lower():
-                                                matched = True
-                                                snippet = line.strip()
-                                                if len(snippet) > 200:
-                                                    snippet = snippet[:197] + "..."
-                                                break
-                                    if not matched:
-                                        continue
-
-                                    if snippet:
-                                        item['content_snippet'] = snippet
-                                except Exception:
-                                    # Ignore files we cannot read for content search
-                                    continue
-
-                            # Enrich result with snapshot context
                             result_item = dict(item)
                             result_item['machine_id'] = snap['machine_id']
                             result_item['root_id'] = snap['root_id']

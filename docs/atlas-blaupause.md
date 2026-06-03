@@ -835,6 +835,8 @@ Atlas-Artefakte werden deterministisch gegen einen kanonischen Atlas-Basisordner
 - [x] ADR-005 Registry in SQLite, large artifacts as files
 - [x] ADR-006 Content enrichment is optional and mode-dependent
 - [x] ADR-007 Canonical Artifact Resolution for diff/comparison paths (Resolves against registry_db path, independent of CWD)
+- [x] ADR-008 Official Atlas directory structure (machines/registry/indexes layout)
+- [x] ADR-009 Atlas FTS search index (global index, derive write-path, hard-delete, latest-only default)
 
 ## 4. Abhakbare Roadmap
 
@@ -901,8 +903,8 @@ Ziel: Große Roots effizient aktualisierbar machen.
 
 ### Phase 4 — Suchschicht
 Ziel: Dateien und Inhalte systemweit abfragbar machen.
-- [ ] SQLite-FTS evaluieren und festziehen
-  - *Architekturnotiz: FTS5 ist technologisch bestätigt (bereits für Chunks im Einsatz) und performant (Context7). Die Atlas-spezifische Integration ist jedoch unvollständig: `search.py` nutzt aktuell noch lineares Scannen der JSONL-Inventare. Das erforderliche Integrationsdesign ist in `docs/architecture/atlas-fts-integration.md` konzipiert; die dort benannten offenen Entscheidungen müssen vor einer vollständigen Markierung als `[x]` verbindlich entschieden werden.*
+- [x] SQLite-FTS evaluieren und festziehen
+  - *Architekturnotiz: FTS5 ist technologisch bestätigt (bereits für Chunks im Einsatz) und performant. Die vier offenen Integrationsentscheidungen aus `docs/architecture/atlas-fts-integration.md` wurden in **ADR-009** verbindlich entschieden (global index, derive-write-path, hard-delete-per-snapshot, latest-only-default). Implementiert als globaler Index `atlas/indexes/fts.sqlite` in `merger/lenskit/atlas/index.py` (`AtlasFTSIndex`): Metadaten/Pfad/Größe/Datum werden aus indizierten SQLite-Spalten bedient statt aus erneutem JSONL-Parsing; die Indizierung läuft als best-effort Derivation-Schritt nach Snapshot-Abschluss. `search.py` nutzt den Index, wenn er alle Kandidaten-Snapshots abdeckt, und fällt sonst transparent auf den linearen Scan zurück. CLI: `atlas index rebuild` / `atlas index stats`, `atlas search --all-snapshots` / `--no-index`, `atlas scan --no-index`. Content-Suche: FTS-Narrowing + Live-Confirm (Snippet-Semantik unverändert).*
 - [x] Metadaten-Suchschema definieren
 - [x] Path-Search implementieren
 - [x] Name-Search implementieren

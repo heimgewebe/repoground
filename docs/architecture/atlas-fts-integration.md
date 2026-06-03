@@ -39,15 +39,18 @@ Wie sollte die Suche (`atlas search`) interagieren?
 *   **Cross-Machine Queries:** Sofern die Snapshots in der Registry verankert sind, sind systemweite Abfragen über die `machine_id` als Index-Dimension nativ möglich.
 *   **Hybrider Fallback (Präferenz):** Falls ein Root ohne Content-Enrichment gescannt wurde (oder der Index unvollständig ist), sollte als Fallback auf das direkte Lesen vom Live-Dateisystem (wie in der aktuellen `search.py`) zurückgegriffen werden.
 
-## 3. Offene Architekturentscheidungen (Vor Implementierung zwingend zu entscheiden)
+## 3. Architekturentscheidungen (Entschieden — siehe ADR-009)
 
-Bevor Code für die FTS-Integration geschrieben wird, müssen die folgenden vier epistemischen Leerstellen hart entschieden und im Repo dokumentiert werden:
+Die folgenden vier epistemischen Leerstellen wurden vor der Implementierung verbindlich entschieden und in **ADR-009 (`docs/adr/009-atlas-fts-search-index.md`)** dokumentiert. Die Umsetzung liegt in `merger/lenskit/atlas/index.py`.
 
-1.  **Index-Schnitt (Global vs. Per-Snapshot):**
-    Wird `fts.sqlite` ein globaler Atlas-Index (Referenzierung via IDs) oder generieren wir isolierte FTS-Dateien pro Snapshot/Root?
-2.  **Write-Path (Inline vs. Derive):**
-    Wird die FTS-Indizierung synchron direkt während des `content`-Scans mitgeschrieben, oder asynchron als nachgelagerter Pipeline-Schritt generiert?
-3.  **Deletion- und Tombstone-Modell:**
-    Wie repräsentiert das FTS-Schema Dateien, die in Snapshot N existierten, in N+1 aber gelöscht wurden? Werden sie hart gelöscht, weich markiert (Tombstones) oder ausschließlich über die Join-Logik mit der Snapshot-Registry gefiltert?
-4.  **Default-Query-Semantik (Latest-Only vs. Historisch):**
-    Sucht `atlas search` standardmäßig nur in den *aktuellsten* Snapshots aller Roots (was eine performante `is_latest`-Markierung erfordert), oder durchsucht es historisch alle verknüpften Snapshots, sofern nicht explizit gefiltert?
+1.  **Index-Schnitt (Global vs. Per-Snapshot): → GLOBAL.**
+    `fts.sqlite` ist ein einziger globaler Atlas-Index unter `<atlas_base>/indexes/fts.sqlite`. Jede Zeile referenziert ihren Ursprung über `machine_id`/`root_id`/`snapshot_id`; cross-machine-Abfragen sind damit nativ. Keine isolierten Per-Snapshot-Dateien.
+2.  **Write-Path (Inline vs. Derive): → DERIVE.**
+    Die Indizierung erfolgt als nachgelagerter Derivation-Schritt, nachdem der Snapshot geschrieben und als `complete` markiert wurde. Sie ist *best-effort*: ein Indizierungsfehler invalidiert niemals einen ansonsten vollständigen Snapshot, da die Suche transparent auf den linearen Inventar-Scan zurückfällt. `atlas index rebuild` ist der kanonische Vollaufbau-/Reparaturpfad.
+3.  **Deletion- und Tombstone-Modell: → HARD DELETE per snapshot_id.**
+    Re-Indizierung löscht zuerst die bestehenden Zeilen des Snapshots (idempotent). Keine weichen Tombstones: eine in N+1 gelöschte Datei erscheint schlicht nicht in den Zeilen des neueren Snapshots. Registry-Konsistenz wird durch `atlas index rebuild` (Clear + Re-Derive aus `complete`-Snapshots) und durch die Suchschicht (fragt nur registry-aufgelöste Snapshot-IDs ab) garantiert.
+4.  **Default-Query-Semantik (Latest-Only vs. Historisch): → LATEST-ONLY.**
+    `atlas search` löst standardmäßig auf den neuesten indizierten Snapshot pro `(machine_id, root_id)` auf (spiegelt das bisherige Verhalten). Historische Suche über alle Snapshots via `--all-snapshots`; ein fixer Zeitpunkt via `--snapshot-id`.
+
+### 3.1 Content-Suche: FTS-Narrow + Live-Confirm (Hybrid)
+Für content-Modus-Snapshots wird der Dateitext in die FTS-`content`-Spalte indiziert. Eine `--content-query` nutzt zuerst ein FTS-`MATCH` (Tokens AND-verknüpft) zur *Eingrenzung* der Kandidaten und liest dann die Live-Datei zur *Bestätigung* des exakten zusammenhängenden Substring-Treffers samt Snippet. Damit bleibt die bisherige Content-Semantik erhalten (case-insensitive Substring, erste Trefferzeile, 200-Zeichen-Snippet), ohne jede Textdatei lesen zu müssen. Snapshots ohne Content-Enrichment fallen für Content-Queries auf das Scannen der (bereits metadaten-eingegrenzten) Kandidaten gegen das Live-Dateisystem zurück.

@@ -10,6 +10,18 @@ datums- und Track-basiert. Roadmap-Phasen/Tracks: siehe
 ## [Unreleased]
 
 ### Added
+- **Atlas FTS-Suchindex (Blaupause Phase 4 / ADR-009):** globaler SQLite-FTS5-Index
+  unter `atlas/indexes/fts.sqlite` (`merger/lenskit/atlas/index.py`,
+  `AtlasFTSIndex`). Löst das lineare JSONL-Scannen der Suchschicht ab —
+  Metadaten/Pfad/Größe/Datum werden aus indizierten SQLite-Spalten bedient.
+  Indizierung läuft als best-effort Derivation-Schritt nach Snapshot-Abschluss;
+  `atlas search` nutzt den Index, wenn er alle Kandidaten-Snapshots abdeckt, und
+  fällt sonst transparent auf den linearen Scan zurück. Neue CLI:
+  `atlas index rebuild`, `atlas index stats`, `atlas search --all-snapshots`,
+  `atlas search --no-index`, `atlas scan --no-index`. Content-Suche: FTS-Narrowing
+  + Live-Confirm (Snippet-Semantik unverändert). Inkl. ADR-009, Auflösung der
+  vier offenen Entscheidungen in `docs/architecture/atlas-fts-integration.md` und
+  9 neuer Tests (`test_atlas_index.py`).
 - `docs/GETTING_STARTED.md` — Einstieg (Dump erzeugen, Bundle lesen, suchen,
   Fehlerbehebung).
 - `CONTRIBUTING.md` — Beitragsrichtlinien (Diagnose-first, Parität, Checks,
