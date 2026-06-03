@@ -131,8 +131,12 @@ def parse_markdown_meta(filepath):
                               meta[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
                          else:
                               meta[key] = val.strip("'\"")
-    except Exception:
-         pass
+    except OSError as exc:
+         print(f"Warning: failed to read {filepath}: {exc}", file=sys.stderr)
+    except UnicodeDecodeError as exc:
+         print(f"Warning: failed to decode {filepath}: {exc}", file=sys.stderr)
+    except Exception as exc:
+         print(f"Warning: unexpected error parsing {filepath}: {exc}", file=sys.stderr)
     return meta
 
 def run_checks():
