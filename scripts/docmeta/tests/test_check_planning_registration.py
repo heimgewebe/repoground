@@ -61,6 +61,15 @@ class TestCheckPlanningRegistration(unittest.TestCase):
         findings = check_plan.run_checks()
         self.assertEqual([f for f in findings if f["code"] == "UNREGISTERED_PLANNING_ARTIFACT"], [])
 
+    def test_master_roadmap_registered_via_top_level_roadmap_index(self):
+        self.write_file("docs/roadmap.md", "`docs/roadmap/lenskit-master-roadmap.md`")
+        self.write_file("docs/roadmap/lenskit-master-roadmap.md", "# Master Roadmap")
+        findings = check_plan.run_checks()
+        self.assertEqual(
+            [f for f in findings if f["path"] == "docs/roadmap/lenskit-master-roadmap.md"],
+            [],
+        )
+
     # --- Normalization ---
 
     def test_board_path_with_backticks_and_trailing_comma(self):

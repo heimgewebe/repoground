@@ -1,4 +1,7 @@
-# Roadmap
+# Planning Registration Index
+
+Diese Datei ist **kein Ersatz** für `docs/roadmap/lenskit-master-roadmap.md`.
+Sie dient als report-only Registrierungsindex für Planungsartefakte und wird vom Planning-Registration-Guard (`check_planning_registration.py`) genutzt.
 
 Siehe `docs/roadmap/lenskit-master-roadmap.md` für die aktuelle Hauptroadmap.
 
