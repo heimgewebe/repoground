@@ -169,20 +169,64 @@ This proves the hardened smoke detects the current-code surface, tolerates
 legitimate prose references to the canary path, and would fail a fresh dump that
 still leaks the canary scratch path as a structured file/chunk/index path.
 
-## Operator Target Proof Still Required
+## Operator Target Proof — PASS
 
-On the operator host where `rlens.service` and the real merges directory exist,
-run:
+The missing operator-host proof was completed on 2026-06-04.
+
+Observed sequence on the operator host:
+
+```text
+repo: /home/alex/repos/lenskit
+branch: main
+HEAD: ea8059c57fa550d077bcde811580ebcc82daeba3
+git pull --ff-only: Bereits aktuell.
+rlens.service restart: 2026-06-04 09:04:48 CEST
+new service PID: 1724029
+new manifest: /home/alex/repos/merges/lenskit-max-260604-0705_merge.bundle.manifest.json
+manifest_mtime: 2026-06-04 09:05:17.204580167 +0200
+```
+
+The post-merge surface smoke was then run against the real merges directory:
 
 ```bash
-systemctl --user restart rlens
-# trigger a new dump through the real rLens runner path
 bash scripts/rlens-post-merge-surface-smoke.sh /home/alex/repos/merges
 ```
 
-A valid final target proof requires the smoke to pass against the new manifest,
-not an older manifest. If it fails after restart, treat that as a codepath gap
-and inspect the manifest role that leaked `.tmp`.
+The smoke passed and reported:
+
+```json
+{
+  "noise_surface_check": "pass",
+  "structured_path_absent": ".tmp/forensic-preflight-ci-canary",
+  "checked_roles": [
+    "agent_reading_pack",
+    "canonical_md",
+    "chunk_index_jsonl",
+    "dump_index_json",
+    "index_sidecar_json"
+  ],
+  "excluded_noise_count": 450,
+  "output_health_noise_available": true,
+  "post_emit_health_noise_available": true
+}
+```
+
+The manifest runtime block showed the restarted service loading from the expected
+checkout:
+
+```text
+module_file: /home/alex/repos/lenskit/merger/lenskit/core/merge.py
+package_root: /home/alex/repos/lenskit
+python_version: 3.10.12
+git_commit: ea8059c57fa550d077bcde811580ebcc82daeba3
+git_dirty: false
+```
+
+Conclusion: the observed stale real dump was explained by runtime drift from a
+long-running `rlens.service`. After restart, the current service path emits the
+Noise-Hygiene surface correctly. No additional core scanner/writer change was
+needed for this task.
+
 
 ## Boundaries
 
