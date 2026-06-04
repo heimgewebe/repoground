@@ -1,0 +1,341 @@
+"""Bounded repo-sync mutation: fast-forward-only pre-pull preflight.
+
+This module implements a *narrow*, locally authorized repo preparation step that
+runs before an rLens scan/merge. It is classified in ``docs/service-api.md`` as a
+``bounded repo-sync mutation``: it may update a local working tree, but only via a
+clean, fast-forward-only merge of the already-configured upstream tracking branch.
+
+Hard guarantees (see ``docs/service-api.md`` — Mutation Boundary Classification):
+
+* No ``shell=True`` — every git invocation is an explicit argument list.
+* No ``git pull`` — fetch and fast-forward-only merge are separate, inspectable steps.
+* No ``reset`` / ``rebase`` / ``stash`` / ``checkout`` / ``switch`` / ``clean``.
+* Never discards local changes and never deletes untracked files.
+* Never switches branches and never resolves conflicts automatically.
+* Never prompts for credentials (``GIT_TERMINAL_PROMPT=0``); auth-required fetches
+  fail fast rather than hanging interactively.
+
+A dirty (tracked) working tree, a diverged branch, or a failed fetch/merge is a
+hard failure. A non-git path, a missing upstream, or a locally-ahead branch is a
+warn-and-continue case.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import re
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Optional, Sequence
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_TIMEOUT_SECONDS = 60
+
+
+class PrePullStatus:
+    """Terminal status vocabulary for a single repo pre-pull attempt."""
+
+    # Warn-and-continue (the repo simply cannot/need-not be fast-forwarded)
+    SKIPPED_NOT_GIT = "skipped_not_git"
+    SKIPPED_NO_UPSTREAM = "skipped_no_upstream"
+    LOCAL_AHEAD = "local_ahead"
+
+    # Success (scan proceeds)
+    UP_TO_DATE = "up_to_date"
+    FAST_FORWARDED = "fast_forwarded"
+
+    # Hard failure (job must stop before scanning stale/ambiguous state)
+    DIRTY = "dirty"
+    DIVERGED = "diverged"
+    FETCH_FAILED = "fetch_failed"
+    MERGE_FAILED = "merge_failed"
+    ERROR = "error"
+
+
+# Statuses that must abort the job. Scanning would otherwise either lose local
+# work (dirty/diverged) or silently dump a stale tree (fetch/merge failure).
+HARD_FAIL_STATUSES = frozenset(
+    {
+        PrePullStatus.DIRTY,
+        PrePullStatus.DIVERGED,
+        PrePullStatus.FETCH_FAILED,
+        PrePullStatus.MERGE_FAILED,
+        PrePullStatus.ERROR,
+    }
+)
+
+# Statuses that are surfaced as warnings but do not block the scan.
+WARN_STATUSES = frozenset(
+    {
+        PrePullStatus.SKIPPED_NOT_GIT,
+        PrePullStatus.SKIPPED_NO_UPSTREAM,
+        PrePullStatus.LOCAL_AHEAD,
+    }
+)
+
+# Statuses that represent a clean, completed pre-pull.
+SUCCESS_STATUSES = frozenset(
+    {
+        PrePullStatus.UP_TO_DATE,
+        PrePullStatus.FAST_FORWARDED,
+    }
+)
+
+# When the *running rLens code repo itself* is in one of these states, the
+# operator must be reminded to restart the service: a live Python process does
+# not reload modules just because files on disk changed.
+SELF_REPO_NOTICE_STATUSES = frozenset(
+    {
+        PrePullStatus.FAST_FORWARDED,
+        PrePullStatus.UP_TO_DATE,
+        PrePullStatus.LOCAL_AHEAD,
+    }
+)
+
+
+@dataclass
+class PrePullResult:
+    """Structured, report-producing outcome of a single repo pre-pull."""
+
+    repo: str
+    path: str
+    status: str
+    changed: bool = False
+    before_head: Optional[str] = None
+    after_head: Optional[str] = None
+    upstream: Optional[str] = None
+    message: str = ""
+    stderr: Optional[str] = None
+
+
+# Mask credentials that git can echo in remote URLs (e.g. https://user:token@host).
+_CREDENTIAL_RE = re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@")
+
+
+def _redact(text: Optional[str]) -> Optional[str]:
+    """Strip embedded credentials from git stderr before it is stored/logged."""
+    if not text:
+        return text
+    return _CREDENTIAL_RE.sub(r"\1[REDACTED]@", text)
+
+
+def _git_env() -> dict:
+    """Environment for git subprocesses: never prompt, never hang interactively."""
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def _run_git(
+    args: Sequence[str],
+    *,
+    repo_path: Optional[Path] = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> subprocess.CompletedProcess:
+    """Run a single git command as an explicit arg list (never ``shell=True``).
+
+    Timeouts and OS-level launch errors are converted into a non-zero
+    ``CompletedProcess`` so callers can branch on ``returncode`` uniformly
+    instead of handling exceptions at every call site.
+    """
+    cmd: List[str] = ["git"]
+    if repo_path is not None:
+        cmd += ["-C", str(repo_path)]
+    cmd += list(args)
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=_git_env(),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, stdout="", stderr=f"git timed out after {timeout}s")
+    except OSError as exc:  # e.g. git binary missing
+        return subprocess.CompletedProcess(cmd, 127, stdout="", stderr=str(exc))
+
+
+def is_self_repo(repo_path: Path) -> bool:
+    """True if ``repo_path`` contains the running rLens code or the process CWD.
+
+    Used only to attach a restart reminder — never to gate or skip the pre-pull.
+    """
+    try:
+        resolved = repo_path.resolve()
+    except OSError:
+        return False
+
+    candidates: List[Path] = []
+    try:
+        candidates.append(Path(__file__).resolve())
+    except OSError:
+        pass
+    try:
+        candidates.append(Path.cwd().resolve())
+    except OSError:
+        pass
+
+    for candidate in candidates:
+        if candidate == resolved or resolved in candidate.parents:
+            return True
+    return False
+
+
+def pre_pull_repo(repo_path: Path, timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS) -> PrePullResult:
+    """Fast-forward-only update of a single local git repo.
+
+    Returns a :class:`PrePullResult`; never raises for ordinary git states. See
+    module docstring for the (deliberately narrow) set of git operations used.
+    """
+    repo_path = Path(repo_path)
+    repo_name = repo_path.name
+    path_str = str(repo_path)
+
+    def make(status: str, message: str = "", **kwargs) -> PrePullResult:
+        return PrePullResult(repo=repo_name, path=path_str, status=status, message=message, **kwargs)
+
+    # 1. Is git available at all?
+    version = _run_git(["--version"], timeout=timeout_seconds)
+    if version.returncode != 0:
+        return make(
+            PrePullStatus.ERROR,
+            "git is not available (git --version failed)",
+            stderr=_redact(version.stderr),
+        )
+
+    # 2. Is the path a git work tree? If not, skip (warn-and-continue).
+    inside = _run_git(["rev-parse", "--is-inside-work-tree"], repo_path=repo_path, timeout=timeout_seconds)
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return make(
+            PrePullStatus.SKIPPED_NOT_GIT,
+            f"{repo_name} is not a git work tree; skipping pre-pull",
+        )
+
+    # 3. Record current HEAD (may be unborn on a fresh repo → tolerated).
+    head = _run_git(["rev-parse", "HEAD"], repo_path=repo_path, timeout=timeout_seconds)
+    before_head = head.stdout.strip() if head.returncode == 0 else None
+
+    # 4. Refuse to touch a dirty *tracked* tree. Untracked files do not block.
+    status = _run_git(
+        ["status", "--porcelain=v1", "--untracked-files=no"],
+        repo_path=repo_path,
+        timeout=timeout_seconds,
+    )
+    if status.returncode != 0:
+        return make(
+            PrePullStatus.ERROR,
+            f"git status failed for {repo_name}",
+            before_head=before_head,
+            stderr=_redact(status.stderr),
+        )
+    if status.stdout.strip():
+        return make(
+            PrePullStatus.DIRTY,
+            f"{repo_name} has uncommitted tracked changes; refusing pre-pull",
+            before_head=before_head,
+        )
+
+    # 5. Does the current branch track an upstream? If not, skip.
+    upstream_proc = _run_git(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        repo_path=repo_path,
+        timeout=timeout_seconds,
+    )
+    if upstream_proc.returncode != 0:
+        return make(
+            PrePullStatus.SKIPPED_NO_UPSTREAM,
+            f"{repo_name} has no upstream tracking branch; skipping pre-pull",
+            before_head=before_head,
+        )
+    upstream = upstream_proc.stdout.strip()
+
+    # 6. Fetch (prune). Non-interactive; auth failures fail fast.
+    fetch = _run_git(["fetch", "--prune"], repo_path=repo_path, timeout=timeout_seconds)
+    if fetch.returncode != 0:
+        return make(
+            PrePullStatus.FETCH_FAILED,
+            f"git fetch failed for {repo_name}",
+            before_head=before_head,
+            upstream=upstream,
+            stderr=_redact(fetch.stderr),
+        )
+
+    # 7. Fast-forward analysis via ancestry checks (no merge commits possible).
+    head_anc = _run_git(
+        ["merge-base", "--is-ancestor", "HEAD", "@{u}"],
+        repo_path=repo_path,
+        timeout=timeout_seconds,
+    )
+    up_anc = _run_git(
+        ["merge-base", "--is-ancestor", "@{u}", "HEAD"],
+        repo_path=repo_path,
+        timeout=timeout_seconds,
+    )
+    # is-ancestor returns 0 (yes) / 1 (no); anything else is an error.
+    if head_anc.returncode not in (0, 1) or up_anc.returncode not in (0, 1):
+        bad = head_anc if head_anc.returncode not in (0, 1) else up_anc
+        return make(
+            PrePullStatus.ERROR,
+            f"ancestry check failed for {repo_name}",
+            before_head=before_head,
+            upstream=upstream,
+            stderr=_redact(bad.stderr),
+        )
+
+    head_is_ancestor = head_anc.returncode == 0
+    upstream_is_ancestor = up_anc.returncode == 0
+
+    if head_is_ancestor and upstream_is_ancestor:
+        # HEAD == upstream
+        return make(
+            PrePullStatus.UP_TO_DATE,
+            f"{repo_name} is already up to date with {upstream}",
+            before_head=before_head,
+            after_head=before_head,
+            upstream=upstream,
+        )
+
+    if upstream_is_ancestor and not head_is_ancestor:
+        # Local commits not on upstream; nothing to fast-forward.
+        return make(
+            PrePullStatus.LOCAL_AHEAD,
+            f"{repo_name} is ahead of {upstream}; no fast-forward needed",
+            before_head=before_head,
+            after_head=before_head,
+            upstream=upstream,
+        )
+
+    if not head_is_ancestor and not upstream_is_ancestor:
+        # Both sides have unique commits.
+        return make(
+            PrePullStatus.DIVERGED,
+            f"{repo_name} has diverged from {upstream}; refusing pre-pull (not a fast-forward)",
+            before_head=before_head,
+            upstream=upstream,
+        )
+
+    # head_is_ancestor and not upstream_is_ancestor → strictly behind → fast-forward.
+    merge = _run_git(["merge", "--ff-only", "@{u}"], repo_path=repo_path, timeout=timeout_seconds)
+    if merge.returncode != 0:
+        return make(
+            PrePullStatus.MERGE_FAILED,
+            f"fast-forward merge failed for {repo_name}",
+            before_head=before_head,
+            upstream=upstream,
+            stderr=_redact(merge.stderr),
+        )
+
+    after = _run_git(["rev-parse", "HEAD"], repo_path=repo_path, timeout=timeout_seconds)
+    after_head = after.stdout.strip() if after.returncode == 0 else None
+    return make(
+        PrePullStatus.FAST_FORWARDED,
+        f"{repo_name} fast-forwarded to {upstream}",
+        changed=True,
+        before_head=before_head,
+        after_head=after_head,
+        upstream=upstream,
+    )

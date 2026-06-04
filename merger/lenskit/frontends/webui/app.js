@@ -604,6 +604,7 @@ function saveConfig() {
         maxBytes: document.getElementById('maxBytes').value,
         planOnly: document.getElementById('planOnly').checked,
         codeOnly: document.getElementById('codeOnly').checked,
+        prePull: document.getElementById('prePull') ? document.getElementById('prePull').checked : true,
         metaDensity: document.getElementById('metaDensity').value,
         pathFilter: document.getElementById('pathFilter').value,
         extFilter: document.getElementById('extFilter').value,
@@ -631,6 +632,7 @@ function getEffectiveMergeFormDefaults() {
         extFilter: '',
         planOnly: false,
         codeOnly: false,
+        prePull: true,
         extras: [...DEFAULT_EXTRAS]
     };
 
@@ -649,6 +651,7 @@ function getEffectiveMergeFormDefaults() {
                 extFilter: saved.extFilter ?? factoryDefaults.extFilter,
                 planOnly: saved.planOnly ?? factoryDefaults.planOnly,
                 codeOnly: saved.codeOnly ?? factoryDefaults.codeOnly,
+                prePull: saved.prePull ?? factoryDefaults.prePull,
                 extras: Array.isArray(saved.extras) ? saved.extras : factoryDefaults.extras
             };
         }
@@ -687,6 +690,7 @@ async function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
     const extFilterEl = document.getElementById('extFilter');
     const planOnlyEl = document.getElementById('planOnly');
     const codeOnlyEl = document.getElementById('codeOnly');
+    const prePullEl = document.getElementById('prePull');
 
     if (profileEl) profileEl.value = defaults.profile;
     if (modeEl) modeEl.value = defaults.mode;
@@ -697,6 +701,7 @@ async function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
     if (extFilterEl) extFilterEl.value = defaults.extFilter;
     if (planOnlyEl) planOnlyEl.checked = defaults.planOnly;
     if (codeOnlyEl) codeOnlyEl.checked = defaults.codeOnly;
+    if (prePullEl) prePullEl.checked = defaults.prePull;
 
     const defaultExtras = new Set(defaults.extras);
     document.querySelectorAll('input[name="extras"]').forEach(cb => {
@@ -716,6 +721,10 @@ function restoreConfig() {
             if (config.maxBytes) document.getElementById('maxBytes').value = config.maxBytes;
             if (config.planOnly !== undefined) document.getElementById('planOnly').checked = config.planOnly;
             if (config.codeOnly !== undefined) document.getElementById('codeOnly').checked = config.codeOnly;
+            if (config.prePull !== undefined) {
+                const prePullEl = document.getElementById('prePull');
+                if (prePullEl) prePullEl.checked = config.prePull;
+            }
             if (config.metaDensity !== undefined) document.getElementById('metaDensity').value = config.metaDensity;
             if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
             if (config.extFilter !== undefined) document.getElementById('extFilter').value = config.extFilter;
@@ -1131,6 +1140,7 @@ async function startJob(e) {
     const jsonSidecar = checkedExtras.includes('json_sidecar');
 
     const planOnlyChecked = document.getElementById('planOnly').checked;
+    const prePullEl = document.getElementById('prePull');
     const commonPayload = {
         hub: document.getElementById('hubPath').value,
         merges_dir: document.getElementById('mergesPath').value || null,
@@ -1144,7 +1154,10 @@ async function startJob(e) {
         json_sidecar: jsonSidecar,
         path_filter: document.getElementById('pathFilter').value.trim() || null,
         extensions: extensions,
-        extras: extrasCsv
+        extras: extrasCsv,
+        // Bounded repo-sync mutation: fast-forward-only update before scan.
+        // Default ON; inherited by per-repo and combined payloads via ...commonPayload.
+        pre_pull: prePullEl ? prePullEl.checked : true
     };
 
     if (!planOnlyChecked) {

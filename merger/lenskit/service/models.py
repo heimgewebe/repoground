@@ -73,6 +73,10 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
         "output_mode": req.output_mode,
         "redact_secrets": req.redact_secrets,
         "include_hidden": req.include_hidden,
+        # Pre-pull changes the meaning of a job: a fast-forwarded tree can produce
+        # a different dump than the stale one. A pre_pull=True job must not reuse a
+        # cached pre_pull=False result (and vice versa).
+        "pre_pull": req.pre_pull,
         # Merges dir excluded from content hash:
         # Same content, different output path = same logical job.
         # Client must check returned artifact for actual path.
@@ -106,6 +110,13 @@ class JobRequest(BaseModel):
     )
     json_sidecar: bool = True  # Default true for service
     force_new: bool = False
+    # Bounded repo-sync mutation: fast-forward-only fetch/merge of each selected
+    # local repo before the scan. Default on; disable for a pure read of the
+    # current on-disk state. See docs/service-api.md (Mutation Boundary).
+    pre_pull: bool = Field(
+        default=True,
+        description="Fast-forward-only fetch/merge before scan (bounded repo-sync mutation). Blocks on dirty or diverged repos.",
+    )
     # v2.4 Parity Features
     output_mode: Literal["archive", "retrieval", "dual"] = "dual"
     redact_secrets: bool = False

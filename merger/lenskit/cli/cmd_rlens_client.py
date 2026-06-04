@@ -364,6 +364,20 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
     )
     run_parser.add_argument("--force-new", action="store_true", help="Do not reuse matching existing jobs")
     run_parser.add_argument("--plan-only", action="store_true", help="Plan only; do not write bundle artifacts")
+    pre_pull_group = run_parser.add_mutually_exclusive_group()
+    pre_pull_group.add_argument(
+        "--pre-pull",
+        dest="pre_pull",
+        action="store_true",
+        default=True,
+        help="Fast-forward-only update of each selected repo before scanning (default: enabled)",
+    )
+    pre_pull_group.add_argument(
+        "--no-pre-pull",
+        dest="pre_pull",
+        action="store_false",
+        help="Disable the fast-forward-only pre-pull; scan the current on-disk state as-is",
+    )
 
     cancel_parser = client_subparsers.add_parser("cancel", help="Request job cancellation")
     _add_common_options(cancel_parser, suppress_defaults=True, dest_prefix="leaf_")
@@ -592,6 +606,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         payload["force_new"] = True
     if args.plan_only:
         payload["plan_only"] = True
+    # Always sent explicitly so behavior is unambiguous and easy to assert in tests.
+    payload["pre_pull"] = args.pre_pull
 
     url = f"{base_url}/api/jobs"
     data, error_code = _post_json_with_errors(args, url, token, payload)

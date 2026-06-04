@@ -9,6 +9,13 @@ from typing import List
 
 from .models import Artifact
 from .jobstore import JobStore
+from .repo_sync import (
+    pre_pull_repo,
+    is_self_repo,
+    HARD_FAIL_STATUSES,
+    WARN_STATUSES,
+    SELF_REPO_NOTICE_STATUSES,
+)
 from ..adapters.security import validate_source_dir, get_security_config, SecurityViolationError
 
 logger = logging.getLogger(__name__)
@@ -166,6 +173,51 @@ class JobRunner:
 
             if not sources:
                 raise ValueError("No valid repository sources found.")
+
+            # 2b. Pre-pull preflight (bounded repo-sync mutation).
+            # Runs AFTER source resolution/validation and BEFORE any scan so the
+            # dump reflects the current upstream state instead of a stale checkout.
+            # Intentionally NOT in core/merge.py: merge-core reads repo content and
+            # writes artifacts; fast-forwarding a working tree is a local mutation
+            # and belongs in service preparation. It is strictly fast-forward-only
+            # (see service/repo_sync.py) — no shell, pull, reset, rebase, stash,
+            # checkout, switch or clean.
+            if req.pre_pull:
+                log("Pre-pull enabled: updating selected repositories (fast-forward only)...")
+                prepull_warned = False
+                for src in sources:
+                    result = pre_pull_repo(src)
+                    log(f"Pre-pull {src.name}: {result.status} - {result.message}")
+                    if result.stderr:
+                        # stderr is already credential-redacted by repo_sync.
+                        log(f"Pre-pull {src.name} detail: {result.stderr.strip()}")
+
+                    # Updating the running rLens code repo does not reload the live
+                    # Python process. Surface a restart reminder; never auto-restart
+                    # (that would kill this very job) and never run systemctl here.
+                    if is_self_repo(src) and result.status in SELF_REPO_NOTICE_STATUSES:
+                        restart_warn = (
+                            f"WARN pre_pull updated or checked the running rLens code repository "
+                            f"'{src.name}' (status: {result.status}). Restart rlens.service after "
+                            f"updating lenskit; a running Python service does not reload modules "
+                            f"automatically."
+                        )
+                        log(restart_warn)
+                        job.warnings.append(restart_warn)
+                        prepull_warned = True
+
+                    if result.status in HARD_FAIL_STATUSES:
+                        raise ValueError(f"Pre-pull failed for {src.name}: {result.status} - {result.message}")
+
+                    if result.status in WARN_STATUSES:
+                        warn = f"Pre-pull {src.name}: {result.status} - {result.message}"
+                        job.warnings.append(warn)
+                        prepull_warned = True
+
+                if prepull_warned:
+                    self.job_store.update_job(job)
+            else:
+                log("Pre-pull disabled by request.")
 
             # 3. Scan Repos
             max_bytes = parse_human_size(req.max_bytes or "0")

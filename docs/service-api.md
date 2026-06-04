@@ -259,3 +259,45 @@ When submitting a job with `include_paths_by_repo`, the keys in the dictionary M
 - **Strict Mode**: If `strict_include_paths_by_repo: true` is sent, missing keys trigger a `400 Bad Request` (Job Failed) instead of a fallback. This is the default for WebUI "Combined" jobs.
 - **Soft Mode (Default)**: If strict mode is false, a missing key logs a warning and falls back to the global `include_paths` (or full scan if none).
 - This ensures predictability and prevents ambiguous matches in complex directory structures.
+
+### `pre_pull` Semantics (Bounded Repo-Sync Mutation)
+
+`JobRequest.pre_pull` (`bool`, **default `true`**) requests a fast-forward-only
+update of every selected local repo **before** it is scanned, so a fresh dump
+reflects current upstream state instead of a stale checkout.
+
+This is classified as a **`bounded repo-sync mutation`** (see *Mutation Boundary
+Classification* above), implemented in `merger/lenskit/service/repo_sync.py` and
+invoked by the runner *before* `scan_repo()` — never in `core/merge.py`.
+
+**Semantics (per selected repo):**
+
+- `fetch --prune` of the existing remote, then a **fast-forward-only** merge of
+  the current branch's upstream (`@{u}`). No merge commits, **no conflict
+  resolution**, **no branch switch**.
+- It uses explicit git argument lists only — **never** a shell, `git pull`,
+  `reset`, `rebase`, `stash`, `checkout`, `switch`, or `clean`, and it never
+  deletes untracked files or discards local changes.
+- Runs non-interactively (`GIT_TERMINAL_PROMPT=0`); auth-required fetches fail
+  fast rather than hanging.
+
+**Per-repo outcomes** (`PrePullStatus`):
+
+| Status | Class | Effect on job |
+|---|---|---|
+| `up_to_date`, `fast_forwarded` | success | Scan proceeds |
+| `skipped_not_git`, `skipped_no_upstream`, `local_ahead` | warning | Logged + added to `job.warnings`; scan proceeds |
+| `dirty`, `diverged`, `fetch_failed`, `merge_failed`, `error` | hard fail | Job fails before any scan |
+
+Notes:
+- A dirty **tracked** working tree blocks; **untracked** files do not block and
+  are preserved across a fast-forward.
+- `pre_pull` participates in the job content hash: a `pre_pull=true` job and a
+  `pre_pull=false` job are distinct and never reuse each other's cached result.
+- **Self-repo caveat:** if the selected repo is the running rLens code itself
+  (typically `repos/lenskit`), a fast-forward updates files on disk but the live
+  Python process keeps its already-loaded modules. The job emits a visible
+  restart warning (logs + `job.warnings`) and **never** auto-restarts the
+  service. Restart `rlens.service` manually after updating lenskit.
+- CLI: `lenskit rlens-client run` sends `pre_pull` explicitly; disable with
+  `--no-pre-pull`.
