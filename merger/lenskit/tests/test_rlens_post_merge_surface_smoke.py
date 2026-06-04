@@ -10,7 +10,7 @@ SCRATCH_PATH = ".tmp/forensic-preflight-ci-canary/artifacts/forensic-preflight-c
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "rlens-post-merge-surface-smoke.sh"
 
 
-def _write_bundle(tmp_path: Path):
+def _write_bundle(tmp_path: Path, *, include_noise: bool = True):
     hub = tmp_path / "hub"
     repo = hub / "repo"
     repo.mkdir(parents=True)
@@ -24,9 +24,10 @@ def _write_bundle(tmp_path: Path):
     (repo / ".github" / "workflows" / "guard.yml").write_text("name: guard\n", encoding="utf-8")
     (repo / ".wgx").mkdir()
     (repo / ".wgx" / "profile.yml").write_text("profile: demo\n", encoding="utf-8")
-    scratch = repo / SCRATCH_PATH
-    scratch.parent.mkdir(parents=True)
-    scratch.write_text('{"status":"fixture-noise"}\n', encoding="utf-8")
+    if include_noise:
+        scratch = repo / SCRATCH_PATH
+        scratch.parent.mkdir(parents=True)
+        scratch.write_text('{"status":"fixture-noise"}\n', encoding="utf-8")
 
     summary = scan_repo(repo, calculate_md5=True, include_hidden=True)
     merges = tmp_path / "merges"
@@ -51,6 +52,19 @@ def _post_emit_health_path(artifacts) -> Path:
     manifest = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
     rel = manifest["links"]["post_emit_health_path"]
     return artifacts.bundle_manifest.parent / rel
+
+
+def _write_output_health(artifacts, mutator) -> None:
+    output_health = json.loads(artifacts.output_health.read_text(encoding="utf-8"))
+    mutator(output_health)
+    artifacts.output_health.write_text(json.dumps(output_health, indent=2), encoding="utf-8")
+
+
+def _write_post_emit_health(artifacts, mutator) -> None:
+    post_path = _post_emit_health_path(artifacts)
+    post_emit = json.loads(post_path.read_text(encoding="utf-8"))
+    mutator(post_emit)
+    post_path.write_text(json.dumps(post_emit, indent=2), encoding="utf-8")
 
 
 def _run_smoke(merges: Path) -> subprocess.CompletedProcess[str]:
@@ -115,10 +129,12 @@ def test_rlens_surface_smoke_fails_structured_sidecar_file_index_leak(tmp_path):
 def test_rlens_surface_smoke_fails_when_output_health_noise_unavailable_with_zero_count(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
-    output_health = json.loads(artifacts.output_health.read_text(encoding="utf-8"))
-    output_health["checks"]["excluded_noise"]["count"] = 0
-    output_health["checks"]["noise_hygiene"]["available"] = False
-    artifacts.output_health.write_text(json.dumps(output_health, indent=2), encoding="utf-8")
+    def mutate(output_health):
+        output_health["checks"]["excluded_noise"]["count"] = 0
+        output_health["checks"]["noise_hygiene"]["excluded_noise_count"] = 0
+        output_health["checks"]["noise_hygiene"]["available"] = False
+
+    _write_output_health(artifacts, mutate)
 
     result = _run_smoke(merges)
 
@@ -130,10 +146,10 @@ def test_rlens_surface_smoke_fails_when_output_health_noise_unavailable_with_zer
 def test_rlens_surface_smoke_fails_when_post_emit_noise_unavailable(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
-    post_path = _post_emit_health_path(artifacts)
-    post_emit = json.loads(post_path.read_text(encoding="utf-8"))
-    post_emit["noise_hygiene"]["available"] = False
-    post_path.write_text(json.dumps(post_emit, indent=2), encoding="utf-8")
+    def mutate(post_emit):
+        post_emit["noise_hygiene"]["available"] = False
+
+    _write_post_emit_health(artifacts, mutate)
 
     result = _run_smoke(merges)
 
@@ -155,3 +171,76 @@ def test_rlens_surface_smoke_fails_structured_dump_index_path_leak(tmp_path):
     combined = result.stdout + result.stderr
     assert "scratch noise leaked as structured path" in combined
     assert "dump_index_json" in combined
+
+
+def test_rlens_surface_smoke_allows_zero_excluded_noise_when_diagnostics_available(tmp_path):
+    merges, _artifacts = _write_bundle(tmp_path, include_noise=False)
+
+    result = _run_smoke(merges)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert '"excluded_noise_count": 0' in result.stdout
+    assert '"output_health_noise_available": true' in result.stdout
+    assert '"post_emit_health_noise_available": true' in result.stdout
+
+
+def test_rlens_surface_smoke_fails_when_excluded_noise_count_missing(tmp_path):
+    merges, artifacts = _write_bundle(tmp_path)
+
+    def mutate(output_health):
+        del output_health["checks"]["excluded_noise"]["count"]
+
+    _write_output_health(artifacts, mutate)
+
+    result = _run_smoke(merges)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "output_health checks.excluded_noise.count missing" in combined
+
+
+def test_rlens_surface_smoke_fails_when_excluded_noise_count_is_bool(tmp_path):
+    merges, artifacts = _write_bundle(tmp_path)
+
+    def mutate(output_health):
+        output_health["checks"]["excluded_noise"]["count"] = True
+
+    _write_output_health(artifacts, mutate)
+
+    result = _run_smoke(merges)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "output_health checks.excluded_noise.count is not an integer" in combined
+
+
+def test_rlens_surface_smoke_fails_when_output_health_noise_count_mismatches_excluded_count(tmp_path):
+    merges, artifacts = _write_bundle(tmp_path)
+
+    def mutate(output_health):
+        output_health["checks"]["noise_hygiene"]["excluded_noise_count"] = (
+            output_health["checks"]["excluded_noise"]["count"] + 1
+        )
+
+    _write_output_health(artifacts, mutate)
+
+    result = _run_smoke(merges)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "output_health noise_hygiene.excluded_noise_count does not match excluded_noise.count" in combined
+
+
+def test_rlens_surface_smoke_fails_when_post_emit_noise_count_mismatches_excluded_count(tmp_path):
+    merges, artifacts = _write_bundle(tmp_path)
+
+    def mutate(post_emit):
+        post_emit["noise_hygiene"]["excluded_noise_count"] += 1
+
+    _write_post_emit_health(artifacts, mutate)
+
+    result = _run_smoke(merges)
+
+    assert result.returncode != 0
+    combined = result.stdout + result.stderr
+    assert "post_emit_health.noise_hygiene.excluded_noise_count does not match output_health excluded_noise.count" in combined

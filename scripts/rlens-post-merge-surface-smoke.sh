@@ -321,11 +321,18 @@ if not isinstance(excluded, dict):
 if not isinstance(noise, dict):
     raise SystemExit("FAILED: output_health checks.noise_hygiene missing")
 
-excluded_count = excluded.get("count", 0)
-if not isinstance(excluded_count, int):
+if "count" not in excluded:
+    raise SystemExit("FAILED: output_health checks.excluded_noise.count missing")
+excluded_count = excluded["count"]
+if type(excluded_count) is not int:
     raise SystemExit("FAILED: output_health checks.excluded_noise.count is not an integer")
 if noise.get("available") is not True:
     raise SystemExit("FAILED: output_health noise_hygiene.available is not true")
+noise_count = noise.get("excluded_noise_count")
+if type(noise_count) is not int:
+    raise SystemExit("FAILED: output_health noise_hygiene.excluded_noise_count is not an integer")
+if noise_count != excluded_count:
+    raise SystemExit("FAILED: output_health noise_hygiene.excluded_noise_count does not match excluded_noise.count")
 
 post_rel = data.get("links", {}).get("post_emit_health_path")
 if not post_rel:
@@ -337,6 +344,11 @@ if not isinstance(post_noise, dict):
     raise SystemExit("FAILED: post_emit_health.noise_hygiene missing")
 if post_noise.get("available") is not True:
     raise SystemExit("FAILED: post_emit_health.noise_hygiene.available is not true")
+post_count = post_noise.get("excluded_noise_count")
+if type(post_count) is not int:
+    raise SystemExit("FAILED: post_emit_health.noise_hygiene.excluded_noise_count is not an integer")
+if post_count != excluded_count:
+    raise SystemExit("FAILED: post_emit_health.noise_hygiene.excluded_noise_count does not match output_health excluded_noise.count")
 
 print(json.dumps({
     "noise_surface_check": "pass",

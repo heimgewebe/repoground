@@ -107,18 +107,22 @@ merges directory:
   tests mention the scratch path as explanatory prose.
 - `output_health` exists and has `checks.excluded_noise` plus
   `checks.noise_hygiene`.
-- `output_health.checks.excluded_noise.count` is an integer; it may be `0` for a
+- `output_health.checks.excluded_noise.count` is explicitly present and is an
+  exact integer (JSON booleans are not accepted as counts); it may be `0` for a
   clean repository.
 - `output_health.checks.noise_hygiene.available` must be `true` whenever the
-  current writer path is active.
-- `post_emit_health.noise_hygiene` exists and
-  `post_emit_health.noise_hygiene.available` must be `true`.
+  current writer path is active, and
+  `output_health.checks.noise_hygiene.excluded_noise_count` must be an integer
+  matching `output_health.checks.excluded_noise.count`.
+- `post_emit_health.noise_hygiene` exists,
+  `post_emit_health.noise_hygiene.available` must be `true`, and its
+  `excluded_noise_count` must match the output-health count.
 
 The smoke does **not** require `excluded_noise.count > 0`; a clean repository can
 legitimately have no excluded noise. `count=0` means the diagnostic path ran and
 found no known noise to exclude. It does not make `noise_hygiene.available=false`
-acceptable. The smoke verifies that the new diagnostic surface is present and
-internally consistent when the current writer path is active.
+acceptable. The smoke verifies that the new diagnostic surface is complete, typed,
+and internally consistent when the current writer path is active.
 
 ## Local Runner-Equivalent Proof
 
