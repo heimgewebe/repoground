@@ -10,6 +10,26 @@ datums- und Track-basiert. Roadmap-Phasen/Tracks: siehe
 ## [Unreleased]
 
 ### Added
+- **Atlas FTS-Suchindex (Blaupause Phase 4 / ADR-009):** globaler SQLite-FTS5-Index
+  unter `atlas/indexes/fts.sqlite` (`merger/lenskit/atlas/index.py`,
+  `AtlasFTSIndex`). Löst das lineare JSONL-Scannen der Suchschicht ab —
+  Scope/`ext`/Größe/Datum werden aus indizierten SQLite-Spalten bedient
+  (Glob-/Name-/Path-Exaktheit und die generische `query`-Substring-Prüfung
+  bleiben Python-Postfilter über den SQL-eingegrenzten Kandidaten, nicht via FTS).
+  Indizierung läuft als best-effort Derivation-Schritt nach Snapshot-Abschluss;
+  `atlas search` nutzt den Index, wenn er alle Kandidaten-Snapshots konsistent
+  abdeckt, und fällt sonst transparent auf den linearen Scan zurück. Neue CLI:
+  `atlas index rebuild`, `atlas index stats`, `atlas search --all-snapshots`,
+  `atlas search --no-index`, `atlas scan --no-index`. Content-Suche: die
+  FTS-`content`-Spalte ist vorbereitete Struktur, kein harter Vorfilter —
+  alle metadaten-gefilterten Kandidaten werden stets per Live-Scan
+  (`_content_match`) bestätigt. Damit sind Freshness-Gaps (Datei nach
+  Indizierung mutiert) und alle sonstigen Subtoken-/Unicode-/Punctuation-
+  Edge-Cases sicher: die Suche verliert nie Treffer gegenüber dem linearen
+  Pfad. `snapshot_coverage_ok()` prüft jetzt zusätzlich die `files_fts`-
+  Zeilenparität. Inkl. ADR-009, Auflösung der vier offenen Entscheidungen in
+  `docs/architecture/atlas-fts-integration.md` und Tests (`test_atlas_index.py`,
+  u. a. Freshness-Regression, Index/Linear-Äquivalenz für Content-Edge-Cases).
 - `docs/GETTING_STARTED.md` — Einstieg (Dump erzeugen, Bundle lesen, suchen,
   Fehlerbehebung).
 - `CONTRIBUTING.md` — Beitragsrichtlinien (Diagnose-first, Parität, Checks,

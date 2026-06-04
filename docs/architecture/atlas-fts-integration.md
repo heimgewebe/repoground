@@ -39,15 +39,29 @@ Wie sollte die Suche (`atlas search`) interagieren?
 *   **Cross-Machine Queries:** Sofern die Snapshots in der Registry verankert sind, sind systemweite Abfragen über die `machine_id` als Index-Dimension nativ möglich.
 *   **Hybrider Fallback (Präferenz):** Falls ein Root ohne Content-Enrichment gescannt wurde (oder der Index unvollständig ist), sollte als Fallback auf das direkte Lesen vom Live-Dateisystem (wie in der aktuellen `search.py`) zurückgegriffen werden.
 
-## 3. Offene Architekturentscheidungen (Vor Implementierung zwingend zu entscheiden)
+## 3. Architekturentscheidungen (Entschieden — siehe ADR-009)
 
-Bevor Code für die FTS-Integration geschrieben wird, müssen die folgenden vier epistemischen Leerstellen hart entschieden und im Repo dokumentiert werden:
+Die folgenden vier epistemischen Leerstellen wurden vor der Implementierung verbindlich entschieden und in **ADR-009 (`docs/adr/009-atlas-fts-search-index.md`)** dokumentiert. Die Umsetzung liegt in `merger/lenskit/atlas/index.py`.
 
-1.  **Index-Schnitt (Global vs. Per-Snapshot):**
-    Wird `fts.sqlite` ein globaler Atlas-Index (Referenzierung via IDs) oder generieren wir isolierte FTS-Dateien pro Snapshot/Root?
-2.  **Write-Path (Inline vs. Derive):**
-    Wird die FTS-Indizierung synchron direkt während des `content`-Scans mitgeschrieben, oder asynchron als nachgelagerter Pipeline-Schritt generiert?
-3.  **Deletion- und Tombstone-Modell:**
-    Wie repräsentiert das FTS-Schema Dateien, die in Snapshot N existierten, in N+1 aber gelöscht wurden? Werden sie hart gelöscht, weich markiert (Tombstones) oder ausschließlich über die Join-Logik mit der Snapshot-Registry gefiltert?
-4.  **Default-Query-Semantik (Latest-Only vs. Historisch):**
-    Sucht `atlas search` standardmäßig nur in den *aktuellsten* Snapshots aller Roots (was eine performante `is_latest`-Markierung erfordert), oder durchsucht es historisch alle verknüpften Snapshots, sofern nicht explizit gefiltert?
+1.  **Index-Schnitt (Global vs. Per-Snapshot): → GLOBAL.**
+    `fts.sqlite` ist ein einziger globaler Atlas-Index unter `<atlas_base>/indexes/fts.sqlite`. Jede Zeile referenziert ihren Ursprung über `machine_id`/`root_id`/`snapshot_id`; cross-machine-Abfragen sind damit nativ. Keine isolierten Per-Snapshot-Dateien.
+2.  **Write-Path (Inline vs. Derive): → DERIVE.**
+    Die Indizierung erfolgt als nachgelagerter Derivation-Schritt, nachdem der Snapshot geschrieben und als `complete` markiert wurde. Sie ist *best-effort*: ein Indizierungsfehler invalidiert niemals einen ansonsten vollständigen Snapshot, da die Suche transparent auf den linearen Inventar-Scan zurückfällt. `atlas index rebuild` ist der kanonische Vollaufbau-/Reparaturpfad.
+3.  **Deletion- und Tombstone-Modell: → HARD DELETE per snapshot_id.**
+    Re-Indizierung löscht zuerst die bestehenden Zeilen des Snapshots (idempotent). Keine weichen Tombstones: eine in N+1 gelöschte Datei erscheint schlicht nicht in den Zeilen des neueren Snapshots. Registry-Konsistenz wird durch `atlas index rebuild` (Clear + Re-Derive aus `complete`-Snapshots) und durch die Suchschicht (fragt nur registry-aufgelöste Snapshot-IDs ab) garantiert.
+4.  **Default-Query-Semantik (Latest-Only vs. Historisch): → LATEST-ONLY.**
+    `atlas search` löst standardmäßig auf den neuesten indizierten Snapshot pro `(machine_id, root_id)` auf (spiegelt das bisherige Verhalten). Historische Suche über alle Snapshots via `--all-snapshots`; ein fixer Zeitpunkt via `--snapshot-id`.
+
+### 3.1 Content-Suche: Metadaten-Filter + Live-Confirm (kein FTS-Content-Filter)
+Die FTS-`content`-Spalte wird beim Indizieren von content-Modus-Snapshots befüllt — als **vorbereitete Struktur** für potenziell künftige Nutzung. Sie wird derzeit **nicht** als harter Vorfilter für Content-Queries eingesetzt.
+
+**Warum kein FTS-Content-Narrowing (Freshness-Gap):** Der FTS-`content`-Spalte liegt der Dateiinhalt zum *Indizierungszeitpunkt* zugrunde. Ändert sich eine Live-Datei nach der Indizierung, ist der indizierte Inhalt veraltet. Ein Narrowing auf der `content`-Spalte würde solche Dateien vor dem Live-Confirm-Schritt (`_content_match`) ausfiltern und stille False Negatives produzieren.
+
+**Tatsächlicher Suchpfad:** Bei allen Content-Queries nutzt `_try_index_search` ausschließlich die metadaten-indizierten SQLite-Spalten (`ext`, `size_bytes`, `mtime_epoch`, Scope) zur Kandidateneingrenzung. Jeder Kandidat durchläuft dann `_content_match`, das die aktuelle Live-Datei liest und den exakten case-insensitiven Substring-Check durchführt. Die Snippet-Semantik (erste Trefferzeile, 200 Zeichen) ist identisch zum linearen Pfad.
+
+Snapshots ohne Content-Enrichment erhalten dieselbe Behandlung: alle metadaten-gefilterten Kandidaten werden live gescannt.
+
+`fts_content_candidates` verbleibt als Primitiv für einen möglichen künftigen Write-once-Pfad; es wird vom aktuellen Suchpfad nicht genutzt.
+
+### 3.2 Was FTS bedient — und was nicht
+SQLite ersetzt das erneute JSONL-Parsen und liefert metadaten-gefilterte Kandidaten (Scope, `ext`, Größe, Datum aus indizierten Spalten). Glob-/Name-/Path-Exaktheit sowie die generische `query`-Substring-Prüfung bleiben als Python-Postfilter über den SQL-eingegrenzten Kandidatenzeilen erhalten und werden **nicht** an FTS delegiert; ihre Semantik ist damit byte-genau identisch zum linearen Pfad.

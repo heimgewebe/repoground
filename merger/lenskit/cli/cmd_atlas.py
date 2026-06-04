@@ -246,7 +246,9 @@ def run_atlas_search(args: argparse.Namespace) -> int:
             max_size=args.max_size,
             date_after=args.date_after,
             date_before=args.date_before,
-            content_query=getattr(args, 'content_query', None)
+            content_query=getattr(args, 'content_query', None),
+            all_snapshots=getattr(args, 'all_snapshots', False),
+            use_index=not getattr(args, 'no_index', False),
         )
 
         # Print results
@@ -261,6 +263,47 @@ def run_atlas_search(args: argparse.Namespace) -> int:
     except Exception as e:
         print(f"Error executing search: {e}", file=sys.stderr)
         return 1
+
+def run_atlas_index(args: argparse.Namespace) -> int:
+    from merger.lenskit.atlas.index import AtlasFTSIndex
+    from merger.lenskit.atlas.registry import AtlasRegistry
+    from merger.lenskit.atlas.paths import resolve_atlas_base_dir, resolve_index_db_path
+
+    registry_path = Path("atlas/registry/atlas_registry.sqlite").resolve()
+    index_path = resolve_index_db_path(registry_path)
+    atlas_base = resolve_atlas_base_dir(registry_path)
+
+    command = getattr(args, "index_command", None)
+    try:
+        if command == "rebuild":
+            with AtlasRegistry(registry_path) as registry:
+                with AtlasFTSIndex(index_path) as idx:
+                    totals = idx.rebuild_from_registry(registry, atlas_base)
+            print("Atlas FTS index rebuilt:")
+            print(f" - snapshots indexed: {totals['snapshots']}")
+            print(f" - files indexed:     {totals['files_indexed']}")
+            print(f" - files with content:{totals['content_indexed']}")
+            return 0
+        elif command == "stats":
+            if not index_path.exists():
+                print("No Atlas FTS index found. Run 'atlas index rebuild' or scan a path first.")
+                return 0
+            with AtlasFTSIndex(index_path) as idx:
+                stats = idx.stats()
+            print("Atlas FTS index statistics:")
+            print(f" - location:           {index_path}")
+            print(f" - schema version:     {stats['schema_version']}")
+            print(f" - indexed snapshots:  {stats['indexed_snapshots']}")
+            print(f" - indexed files:      {stats['indexed_files']}")
+            print(f" - content snapshots:  {stats['content_snapshots']}")
+            return 0
+        else:
+            print(f"Unknown index command: {command}", file=sys.stderr)
+            return 1
+    except Exception as e:
+        print(f"Error running index command: {e}", file=sys.stderr)
+        return 1
+
 
 def run_atlas_analyze(args: argparse.Namespace) -> int:
     if args.analyze_command == "duplicates":
@@ -806,6 +849,29 @@ def run_atlas_scan(args: argparse.Namespace) -> int:
             # Registry is canonical for CLI lifecycle — mark complete here.
             registry.update_snapshot_status(snapshot_id, "complete")
 
+            # Derivation step (Phase 4): update the global FTS index for this
+            # snapshot. Best-effort — a failure here must never invalidate an
+            # otherwise complete snapshot (search transparently falls back to a
+            # linear inventory scan when the index is missing/incomplete).
+            if not getattr(args, "no_index", False):
+                try:
+                    from merger.lenskit.atlas.index import AtlasFTSIndex
+                    from merger.lenskit.atlas.paths import resolve_index_db_path
+
+                    snap_row = registry.get_snapshot(snapshot_id)
+                    index_content = (args.mode == "content")
+                    with AtlasFTSIndex(resolve_index_db_path(registry_path)) as idx:
+                        idx_stats = idx.index_snapshot(
+                            snap_row,
+                            atlas_base,
+                            root_value=root_value,
+                            index_content=index_content,
+                        )
+                    print(f"Indexed {idx_stats['files_indexed']} files into the Atlas FTS index"
+                          + (f" ({idx_stats['content_indexed']} with content)" if index_content else ""))
+                except Exception as idx_err:
+                    print(f"Warning: FTS indexing failed (search will use linear fallback): {idx_err}", file=sys.stderr)
+
             print(f"Done. Outputs generated for mode '{args.mode}':")
             for k, v in registry_artifacts.items():
                 print(f" - {k}: {v}")
@@ -1144,6 +1210,7 @@ def register_atlas_commands(subparsers) -> None:
     atlas_scan_parser.add_argument("--root-id", help="Explicit root ID for the registry")
     atlas_scan_parser.add_argument("--root-label", help="Explicit root label for the registry")
     atlas_scan_parser.add_argument("--incremental", action="store_true", help="Perform an incremental scan based on the latest snapshot")
+    atlas_scan_parser.add_argument("--no-index", action="store_true", help="Skip updating the global FTS search index after the scan")
 
     atlas_subparsers.add_parser("machine-health", help="List registered machines with health status and last seen info")
     atlas_subparsers.add_parser("machines", help="List registered machines")
@@ -1172,7 +1239,14 @@ def register_atlas_commands(subparsers) -> None:
     atlas_search_parser.add_argument("--max-size", type=int, help="Filter by maximum size in bytes")
     atlas_search_parser.add_argument("--date-after", help="Filter by modified date after (ISO format)")
     atlas_search_parser.add_argument("--date-before", help="Filter by modified date before (ISO format)")
-    atlas_search_parser.add_argument("--content-query", help="Filter by file content (full text search within matched text files)")
+    atlas_search_parser.add_argument("--content-query", help="Filter by live file content using substring match after metadata filtering")
+    atlas_search_parser.add_argument("--all-snapshots", action="store_true", help="Search all snapshots historically instead of just the latest per root")
+    atlas_search_parser.add_argument("--no-index", action="store_true", help="Bypass the FTS index and scan inventories linearly")
+
+    atlas_index_parser = atlas_subparsers.add_parser("index", help="Manage the global Atlas FTS search index")
+    atlas_index_subparsers = atlas_index_parser.add_subparsers(dest="index_command", required=True)
+    atlas_index_subparsers.add_parser("rebuild", help="Rebuild the FTS index from all complete snapshots in the registry")
+    atlas_index_subparsers.add_parser("stats", help="Show statistics about the FTS index")
 
     atlas_analyze_parser = atlas_subparsers.add_parser("analyze", help="Run analysis on a snapshot")
     atlas_analyze_subparsers = atlas_analyze_parser.add_subparsers(dest="analyze_command", required=True)
@@ -1206,6 +1280,7 @@ _ATLAS_DISPATCH = {
     "diff": "run_atlas_diff",
     "history": "run_atlas_history",
     "search": "run_atlas_search",
+    "index": "run_atlas_index",
     "analyze": "run_atlas_analyze",
 }
 
