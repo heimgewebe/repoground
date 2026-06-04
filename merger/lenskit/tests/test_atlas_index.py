@@ -433,3 +433,32 @@ def test_index_path_does_not_fall_back_when_index_is_covered(tmp_path, monkeypat
     assert len(res) == 1
     assert res[0]["name"] == "c.txt"
 
+
+def test_query_metadata_result_order_is_deterministic(tmp_path):
+    """query_metadata must return rows in a stable, reproducible order.
+
+    Without ORDER BY, SQLite returns rows in arbitrary heap order, which makes
+    search results non-deterministic across runs. This test checks that
+    repeated calls to query_metadata return rows in the same order and that
+    the order follows the expected (snapshot_id, file_uid ASC) contract.
+    """
+    registry_path = _build_search_fixture(tmp_path)
+    index_path = resolve_index_db_path(registry_path)
+
+    with AtlasFTSIndex(index_path) as idx:
+        # s2 has 3 files; call twice — order must be identical.
+        first = idx.query_metadata(["s2"])
+        second = idx.query_metadata(["s2"])
+        first_uids = [r["file_uid"] for r in first]
+        second_uids = [r["file_uid"] for r in second]
+        assert first_uids == second_uids, "query_metadata is not deterministic"
+        # Within a single snapshot, file_uid should be ascending.
+        assert first_uids == sorted(first_uids), "rows not in file_uid ASC order"
+
+    # Multi-snapshot: s1 rows come after s2 rows if s2 > s1 lexically, or
+    # before if s1 < s2. Either way, the order must be stable across calls.
+    with AtlasFTSIndex(index_path) as idx:
+        a = [r["file_uid"] for r in idx.query_metadata(["s1", "s2"])]
+        b = [r["file_uid"] for r in idx.query_metadata(["s1", "s2"])]
+        assert a == b, "multi-snapshot query_metadata is not deterministic"
+

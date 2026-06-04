@@ -25,14 +25,17 @@ follows (see ADR-009):
    opt into historical search via ``all_snapshots=True`` or an explicit
    ``snapshot_id``.
 
-Content search note: the FTS ``content`` column is populated as prepared
-structure but is not used as a hard filter in the current search path. Content
-queries use SQLite metadata filtering (``ext``, ``size_bytes``, ``mtime_epoch``,
-scope) and then always reach ``_content_match`` for live-file confirmation.
-This avoids false negatives from freshness gaps (live files mutated after
-indexing) while preserving exact substring semantics (case-insensitive,
-first-match snippet, 200 chars). Snapshots without content enrichment receive
-the same treatment: all metadata-filtered candidates are live-scanned.
+Content search note: the FTS ``content`` column is populated opportunistically
+from **live files at index time** (not from snapshot artifacts). It is therefore
+a live-at-index-time cache, not a snapshot-canonical derivation: re-running
+``atlas index rebuild`` reads current live content, not the historical content
+at snapshot creation. This column is **not used as a filter** in the active
+search path. Content queries use only SQLite metadata filtering (``ext``,
+``size_bytes``, ``mtime_epoch``, scope) and then always reach ``_content_match``
+for live-file confirmation. This avoids false negatives from freshness gaps
+(live files mutated after indexing). Future activation of ``fts_content_candidates``
+as a narrowing gate would require an immutable content source (e.g. stored in
+the snapshot artifact) or an explicit freshness guard.
 """
 
 import json
@@ -162,8 +165,8 @@ class AtlasFTSIndex:
                 CREATE INDEX IF NOT EXISTS idx_files_ext ON files(ext);
                 CREATE INDEX IF NOT EXISTS idx_files_size ON files(size_bytes);
 
-                -- Contentless-style FTS table; rowid is kept in lockstep with
-                -- files.file_uid for cheap joins.
+                -- FTS table; rowid is kept in lockstep with files.file_uid for
+                -- cheap joins. Both the content and path_tokens columns are stored.
                 CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
                     content,
                     path_tokens
@@ -535,7 +538,13 @@ class AtlasFTSIndex:
         before_epoch: Optional[float] = None,
         restrict_uids: Optional[Iterable[int]] = None,
     ) -> List[sqlite3.Row]:
-        """Fetch candidate file rows for the given snapshots using indexed SQL filters."""
+        """Fetch candidate file rows for the given snapshots using indexed SQL filters.
+
+        Results are returned in a stable, deterministic order: ``snapshot_id``
+        descending (newest snapshot first), then ``file_uid`` ascending within
+        each snapshot. The order is an explicit contract so that callers and CLI
+        output are reproducible across runs, vacuums, and SQLite versions.
+        """
         if not snapshot_ids:
             return []
         placeholders = ",".join("?" for _ in snapshot_ids)
@@ -566,6 +575,7 @@ class AtlasFTSIndex:
             sql += f" AND file_uid IN ({uid_placeholders})"
             params.extend(restrict_list)
 
+        sql += " ORDER BY snapshot_id DESC, file_uid ASC"
         return self.conn.execute(sql, params).fetchall()
 
     def stats(self) -> Dict[str, Any]:

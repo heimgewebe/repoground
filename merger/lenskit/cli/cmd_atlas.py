@@ -1239,7 +1239,7 @@ def register_atlas_commands(subparsers) -> None:
     atlas_search_parser.add_argument("--max-size", type=int, help="Filter by maximum size in bytes")
     atlas_search_parser.add_argument("--date-after", help="Filter by modified date after (ISO format)")
     atlas_search_parser.add_argument("--date-before", help="Filter by modified date before (ISO format)")
-    atlas_search_parser.add_argument("--content-query", help="Filter by file content (full text search within matched text files)")
+    atlas_search_parser.add_argument("--content-query", help="Filter by live file content using substring match after metadata filtering")
     atlas_search_parser.add_argument("--all-snapshots", action="store_true", help="Search all snapshots historically instead of just the latest per root")
     atlas_search_parser.add_argument("--no-index", action="store_true", help="Bypass the FTS index and scan inventories linearly")
 
