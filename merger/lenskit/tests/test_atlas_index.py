@@ -240,3 +240,148 @@ def test_content_search_via_index(tmp_path):
     # Token that does not appear -> no matches.
     res = searcher.search(content_query="nonexistentword")
     assert len(res) == 0
+
+
+def _build_content_index(tmp_path, files):
+    """Build a content-mode snapshot from {rel_path: text} and index it.
+
+    Returns (searcher, registry_path). All files are treated as text.
+    """
+    registry_path = _make_registry(tmp_path)
+    registry = AtlasRegistry(registry_path)
+    registry.register_machine("m1", "host1")
+
+    root_dir = tmp_path / "content_root"
+    root_dir.mkdir()
+    records = []
+    for rel_path, text in files.items():
+        fpath = root_dir / rel_path
+        fpath.parent.mkdir(parents=True, exist_ok=True)
+        fpath.write_text(text, encoding="utf-8")
+        records.append({
+            "rel_path": rel_path,
+            "name": fpath.name,
+            "ext": fpath.suffix,
+            "size_bytes": len(text.encode("utf-8")),
+            "is_text": True,
+        })
+
+    registry.register_root("r1", "m1", "abs_path", str(root_dir))
+    inv = tmp_path / "inv_content.jsonl"
+    _write_inv(inv, records)
+    registry.create_snapshot("s1", "m1", "r1", "hash1", "complete")
+    registry.update_snapshot_artifacts("s1", {"inventory": str(inv), "content": "content.json"})
+
+    atlas_base = resolve_atlas_base_dir(registry_path)
+    index_path = resolve_index_db_path(registry_path)
+    with AtlasFTSIndex(index_path) as idx:
+        idx.index_snapshot(
+            registry.get_snapshot("s1"), atlas_base,
+            root_value=str(root_dir), index_content=True,
+        )
+    registry.close()
+    return AtlasSearch(registry_path), registry_path
+
+
+def _content_keys(rows):
+    return sorted((r["snapshot_id"], r["rel_path"]) for r in rows)
+
+
+# --- Regression: the index-backed content search must never lose a hit that
+# --- the linear (live-filesystem substring) path would find (ADR-009 invariant).
+
+def test_content_subtoken_substring_not_lost(tmp_path):
+    """'oob' is a substring of 'foobar' but not an FTS token of it.
+
+    FTS token-narrowing must NOT drop this hit before live confirmation.
+    """
+    searcher, _ = _build_content_index(tmp_path, {"a.txt": "foobar baz"})
+
+    via_linear = searcher.search(use_index=False, content_query="oob")
+    via_index = searcher.search(use_index=True, content_query="oob")
+
+    assert _content_keys(via_linear) == [("s1", "a.txt")]
+    assert _content_keys(via_index) == _content_keys(via_linear)
+
+
+def test_content_unicode_query_not_lost(tmp_path):
+    """ASCII tokenisation must not destroy a Unicode substring hit."""
+    searcher, _ = _build_content_index(
+        tmp_path, {"u.txt": "Überraschung für Müller heute"}
+    )
+
+    via_linear = searcher.search(use_index=False, content_query="für Müller")
+    via_index = searcher.search(use_index=True, content_query="für Müller")
+
+    assert _content_keys(via_linear) == [("s1", "u.txt")]
+    assert _content_keys(via_index) == _content_keys(via_linear)
+
+
+def test_content_punctuation_query_not_lost(tmp_path):
+    """Punctuation-heavy / operator-like queries stay equivalent across paths."""
+    searcher, _ = _build_content_index(
+        tmp_path,
+        {
+            "code.txt": "C++ parser uses foo-bar paths",
+            "noise.txt": "completely unrelated content",
+        },
+    )
+
+    for q in ("C++", "foo-bar", "foo-bar paths"):
+        via_linear = searcher.search(use_index=False, content_query=q)
+        via_index = searcher.search(use_index=True, content_query=q)
+        assert _content_keys(via_index) == _content_keys(via_linear), f"mismatch for {q!r}"
+    # sanity: the queries above actually hit code.txt and nobody else
+    assert _content_keys(searcher.search(content_query="foo-bar")) == [("s1", "code.txt")]
+
+
+def test_content_index_linear_equivalence_matrix(tmp_path):
+    """Broad equivalence sweep of index vs. linear content search."""
+    searcher, _ = _build_content_index(
+        tmp_path,
+        {
+            "doc1.txt": "the quick brown fox jumps over the lazy dog",
+            "doc2.md": "uninteresting prefixes: interesting is inside uninteresting",
+            "doc3.log": "snapshot foobar token boundaries: foo_bar fooBar",
+        },
+    )
+    queries = [
+        "quick brown",       # interior token narrowable
+        "interesting",       # substring of 'uninteresting' -> must not be lost
+        "oob",               # subtoken
+        "FOO",               # case-insensitive subtoken of foobar/fooBar
+        "lazy dog",
+        "boundaries:",
+        "nonexistent",       # genuinely absent -> both empty
+        "fooBar",            # mixed case exact
+    ]
+    for q in queries:
+        via_linear = searcher.search(use_index=False, content_query=q)
+        via_index = searcher.search(use_index=True, content_query=q)
+        assert _content_keys(via_index) == _content_keys(via_linear), f"mismatch for {q!r}"
+
+
+def test_fts_content_candidates_safety_contract(tmp_path):
+    """Direct contract check on the narrowing primitive.
+
+    - Unsafe queries (no left-bounded ASCII token) must return None so the
+      caller live-scans every candidate (never a hard [] that hides matches).
+    - A genuinely absent-but-safe query may return [] (provably no match).
+    """
+    searcher, registry_path = _build_content_index(tmp_path, {"a.txt": "foobar baz"})
+    index_path = resolve_index_db_path(registry_path)
+    with AtlasFTSIndex(index_path) as idx:
+        snaps = ["s1"]
+        # subtoken: not safely narrowable -> None (force live scan)
+        assert idx.fts_content_candidates(snaps, "oob") is None
+        # single bare word (could be a suffix of a larger token) -> None
+        assert idx.fts_content_candidates(snaps, "foobar") is None
+        # non-ASCII -> None
+        assert idx.fts_content_candidates(snaps, "Müller") is None
+        # leading punctuation only / operator-like single run -> None
+        assert idx.fts_content_candidates(snaps, "C++") is None
+        # has an interior/left-bounded token 'baz' -> may narrow (list, not None)
+        narrowed = idx.fts_content_candidates(snaps, "foobar baz")
+        assert narrowed is not None
+        assert isinstance(narrowed, list)
+

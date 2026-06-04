@@ -169,9 +169,10 @@ class AtlasSearch:
 
         try:
             with AtlasFTSIndex(index_path) as idx:
-                # The index can only answer authoritatively if it covers all
-                # candidate snapshots; otherwise defer to the linear fallback.
-                if any(not idx.is_snapshot_indexed(sid) for sid in snapshot_ids):
+                # The index can only answer authoritatively if it fully and
+                # consistently covers all candidate snapshots; otherwise defer to
+                # the linear fallback.
+                if any(not idx.snapshot_coverage_ok(sid) for sid in snapshot_ids):
                     return None
 
                 after_epoch = after_dt.timestamp() if after_dt else None

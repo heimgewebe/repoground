@@ -49,14 +49,50 @@ INDEX_SCHEMA_VERSION = "atlas-fts-v1"
 TEXT_DETECTION_MAX_BYTES = 20 * 1024 * 1024
 
 
-def _tokenize_for_fts(text: str) -> str:
-    """Split arbitrary text into a whitespace-joined run of FTS-safe tokens.
+def _ascii_path_tokens(text: str) -> str:
+    """Whitespace-join the ASCII alphanumeric runs of `text` for the auxiliary
+    ``path_tokens`` FTS column.
 
-    The default FTS5 tokenizer splits on non-alphanumerics, so we mirror that
-    here to derive the token set used for path indexing and to build safe MATCH
-    queries from free-form content queries (avoiding FTS syntax injection).
+    NOTE: This is a deliberately conservative ASCII approximation, NOT a faithful
+    reproduction of the FTS5 ``unicode61`` tokenizer (which treats accented and
+    other Unicode letters as token characters). It is only used to populate the
+    auxiliary ``path_tokens`` column; the safety-critical content-search
+    narrowing does NOT rely on it (see ``_safe_prefix_tokens`` /
+    ``fts_content_candidates``).
     """
     return " ".join(t for t in re.split(r"[^0-9A-Za-z]+", text) if t)
+
+
+def _safe_prefix_tokens(query: str) -> Optional[List[str]]:
+    """Tokens guaranteed to *begin* a complete FTS token in any document that
+    contains ``query`` as a (case-insensitive) substring — suitable for a
+    conservative FTS prefix-narrowing ``MATCH``.
+
+    Returns ``None`` when the query cannot be safely narrowed; the caller MUST
+    then live-scan every metadata-filtered candidate (never silently drop hits).
+
+    Safety model (ADR-009 / ``docs/architecture/atlas-fts-integration.md`` §3.1):
+
+    * **ASCII only.** The FTS5 ``unicode61`` tokenizer treats Unicode letters as
+      token characters, so an ASCII split would misplace token boundaries and
+      could drop real hits (e.g. ``Müller`` indexes as one token, but an ASCII
+      split yields ``M`` / ``ller``). Any non-ASCII character => ``None``.
+    * **Left-bounded runs only.** An alphanumeric run that is preceded *within
+      the query* by a non-alphanumeric character necessarily begins a token in
+      any matching document, so the prefix query ``run*`` is a guaranteed
+      superset. The first run (touching the query start) may be the *suffix* of
+      a larger document token, and FTS5 has no suffix search — so it is never
+      used. Substring matches like ``oob`` ⊂ ``foobar`` therefore yield no safe
+      token and fall back to a full live scan.
+    * If no run qualifies (single word, or only a leading run), return ``None``.
+    """
+    if not query or not query.isascii():
+        return None
+    runs = list(re.finditer(r"[0-9A-Za-z]+", query))
+    if not runs:
+        return None
+    safe = [m.group() for m in runs if m.start() > 0]
+    return safe or None
 
 
 class AtlasFTSIndex:
@@ -310,7 +346,7 @@ class AtlasFTSIndex:
                                 stats["content_indexed"] += 1
 
                         fts_batch.append(
-                            (uid, content_text, _tokenize_for_fts(rel_path))
+                            (uid, content_text, _ascii_path_tokens(rel_path))
                         )
                         stats["files_indexed"] += 1
 
@@ -373,6 +409,31 @@ class AtlasFTSIndex:
         ).fetchone()
         return row is not None
 
+    def snapshot_coverage_ok(self, snapshot_id: str) -> bool:
+        """Cheap integrity check that a snapshot's index rows are self-consistent.
+
+        Verifies the snapshot is registered AND that the recorded ``file_count``
+        matches the actual number of ``files`` rows — catching a truncated or
+        partially-written index for that snapshot, in which case the search layer
+        falls back to the linear inventory scan.
+
+        KNOWN LIMITATION (deliberately out of scope, see ADR-009): this does NOT
+        detect *content* staleness against the snapshot's ``inventory_ref`` (e.g.
+        an inventory artifact edited after indexing). Snapshot artifacts are
+        write-once per unique ``snapshot_id`` in the normal CLI flow, so this is a
+        low-risk gap; a full freshness check would hash ``inventory_ref`` (TODO).
+        """
+        row = self.conn.execute(
+            "SELECT file_count FROM indexed_snapshots WHERE snapshot_id = ?",
+            (snapshot_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        actual = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM files WHERE snapshot_id = ?", (snapshot_id,)
+        ).fetchone()["c"]
+        return actual == row["file_count"]
+
     def snapshot_has_content(self, snapshot_id: str) -> bool:
         row = self.conn.execute(
             "SELECT has_content FROM indexed_snapshots WHERE snapshot_id = ?",
@@ -407,21 +468,36 @@ class AtlasFTSIndex:
         return list(latest.values())
 
     def fts_content_candidates(self, snapshot_ids: Iterable[str], content_query: str) -> Optional[List[int]]:
-        """Return file_uids whose indexed content matches the query tokens.
+        """Conservatively narrow content-search candidates via FTS.
 
-        Returns None when the query yields no usable tokens (caller should then
-        fall back to scanning live files for the candidate set).
+        Return semantics (load-bearing — see ADR-009 invariant):
+
+        * ``None``  -> the query cannot be safely narrowed; the caller MUST
+          live-scan every metadata-filtered candidate. This is the safe default
+          for subtoken substrings (``oob`` ⊂ ``foobar``), Unicode queries, and
+          punctuation/operator-like queries whose FTS tokenisation is not a
+          guaranteed superset of the legacy substring match.
+        * ``[]``    -> provably no match: the query *is* safely narrowable and
+          no document contains the required prefix token(s).
+        * ``[uid…]``-> a guaranteed superset of the true matches; the caller
+          still confirms each via the live substring check in ``_content_match``.
+
+        FTS5 may only *accelerate*; the truth remains the live confirmation.
         """
-        match_expr = _tokenize_for_fts(content_query)
-        if not match_expr:
-            return None
         snapshot_ids = list(snapshot_ids)
         if not snapshot_ids:
             return []
+
+        safe_tokens = _safe_prefix_tokens(content_query)
+        if not safe_tokens:
+            # Not safely narrowable -> force a full live scan (no dropped hits).
+            return None
+
         placeholders = ",".join("?" for _ in snapshot_ids)
-        # AND-join tokens so all must be present (narrowing); live read confirms
-        # the exact contiguous substring afterwards.
-        match = " ".join(match_expr.split())
+        # Each left-bounded token begins a token in any matching document, so a
+        # prefix query is a safe superset. AND-join (implicit) across tokens;
+        # double-quote to avoid FTS operator interpretation (e.g. OR/NEAR).
+        match = " ".join(f'"{t}"*' for t in safe_tokens)
         sql = (
             f"SELECT f.file_uid FROM files_fts fts "
             f"JOIN files f ON f.file_uid = fts.rowid "
@@ -430,6 +506,7 @@ class AtlasFTSIndex:
         try:
             rows = self.conn.execute(sql, [match, *snapshot_ids]).fetchall()
         except sqlite3.OperationalError:
+            # Any unexpected MATCH parse issue -> conservative live scan.
             return None
         return [r["file_uid"] for r in rows]
 

@@ -50,11 +50,28 @@ or pin a specific point in time via `--snapshot-id`.
 
 ### Content search — FTS-narrow + live-confirm hybrid
 For content-mode snapshots (`content_ref` present) the file text is indexed in
-the FTS `content` column. A `--content-query` first uses an FTS `MATCH` (tokens
-AND-joined) to **narrow** the candidate set, then reads the live file to
-**confirm** the exact contiguous-substring match and to build the snippet. This
-preserves the prior content-search semantics (case-insensitive substring, first
-matching line, 200-char snippet) while avoiding a read of every text file.
+the FTS `content` column. A `--content-query` may use an FTS prefix `MATCH` to
+**narrow** the candidate set, after which the live file is always read to
+**confirm** the exact contiguous-substring match and to build the snippet. The
+live confirmation — not FTS — remains the source of truth, so the prior
+content-search semantics are preserved exactly (case-insensitive substring,
+first matching line, 200-char snippet).
+
+**FTS narrowing is conservative and only an accelerator.** Because FTS5 is
+token-based while the legacy match is a case-insensitive substring search, the
+narrowing primitive (`fts_content_candidates`) only restricts the candidate set
+when it can prove the restriction is a *superset* of the true substring matches:
+it narrows using prefix queries built solely from "left-bounded" ASCII tokens
+(an alphanumeric run preceded within the query by a non-alphanumeric character,
+which is therefore guaranteed to begin a token in any matching document). For
+any query that cannot be safely narrowed — subtoken substrings (`oob` ⊂
+`foobar`), non-ASCII/Unicode queries (the `unicode61` tokenizer treats accented
+letters as token characters), or single-word/leading-only/operator-like queries
+— it signals the caller to **live-scan every metadata-filtered candidate**. A
+performance loss in those cases is accepted; a lost hit is not. **Invariant:**
+`search(use_index=True, content_query=…)` never returns fewer result keys than
+`search(use_index=False, …)`.
+
 Snapshots scanned without content enrichment have no indexed content; for those,
 content queries fall back to scanning the (already metadata-narrowed) candidate
 set against the live filesystem. Content search therefore remains explicitly
@@ -62,8 +79,11 @@ best-effort with respect to live-filesystem reproducibility, consistent with the
 Blaupause.
 
 ## Consequences
-- Metadata/path/name/size/date searches are served from indexed SQLite columns
-  instead of re-parsing JSONL, which is the scalability win Phase 4 demands.
+- Metadata/size/date/scope filtering is served from indexed SQLite columns
+  instead of re-parsing JSONL each query, which is the scalability win Phase 4
+  demands. Glob/name/path exactness (and the `query` substring) remain a Python
+  post-filter over the SQL-narrowed candidate rows — they are NOT delegated to
+  FTS — so their semantics are byte-for-byte identical to the linear path.
 - The index is a pure derivation artifact: it can be deleted and rebuilt at any
   time without data loss, and its absence degrades gracefully to the linear
   scan.
