@@ -253,34 +253,28 @@ try:
     from merger.lenskit.service.repo_sync import (
         plan_pre_pull_repos,
         apply_pre_pull_plans,
-        pre_pull_repo,
         is_self_repo,
         PrePullStatus,
         HARD_FAIL_STATUSES,
         WARN_STATUSES,
-        SELF_REPO_NOTICE_STATUSES,
     )
 except ImportError:
     try:
         from lenskit.service.repo_sync import (
             plan_pre_pull_repos,
             apply_pre_pull_plans,
-            pre_pull_repo,
             is_self_repo,
             PrePullStatus,
             HARD_FAIL_STATUSES,
             WARN_STATUSES,
-            SELF_REPO_NOTICE_STATUSES,
         )
     except ImportError:
         plan_pre_pull_repos = None
         apply_pre_pull_plans = None
-        pre_pull_repo = None
         is_self_repo = lambda p: False
         PrePullStatus = None
         HARD_FAIL_STATUSES = []
         WARN_STATUSES = []
-        SELF_REPO_NOTICE_STATUSES = []
 
 
 def run_pre_pull_two_phase(sources, log=print, warn=None):
@@ -3296,6 +3290,8 @@ class MergerUI(object):
                     try:
                         console.hud_alert(f"Pre-pull failed: {e}", "error", 2.0)
                     except Exception:
+                        # Best-effort UI notification only; ignore HUD failures and continue
+                        # with stderr logging + re-raising the original pre-pull exception.
                         pass
                 print(f"Pre-pull failed: {e}", file=sys.stderr)
                 raise
