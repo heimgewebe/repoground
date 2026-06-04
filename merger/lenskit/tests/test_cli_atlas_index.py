@@ -10,8 +10,6 @@ import argparse
 import json
 from pathlib import Path
 
-import pytest
-
 from merger.lenskit.atlas.registry import AtlasRegistry
 from merger.lenskit.cli.cmd_atlas import run_atlas_index
 
