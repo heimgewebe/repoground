@@ -48,35 +48,35 @@ only queries snapshot ids it has resolved from the registry.
 Callers opt into historical search across all snapshots via `--all-snapshots`,
 or pin a specific point in time via `--snapshot-id`.
 
-### Content search — FTS-narrow + live-confirm hybrid
+### Content search — metadata index + live-confirm (no FTS content filter)
 For content-mode snapshots (`content_ref` present) the file text is indexed in
-the FTS `content` column. A `--content-query` may use an FTS prefix `MATCH` to
-**narrow** the candidate set, after which the live file is always read to
-**confirm** the exact contiguous-substring match and to build the snippet. The
-live confirmation — not FTS — remains the source of truth, so the prior
-content-search semantics are preserved exactly (case-insensitive substring,
-first matching line, 200-char snippet).
+the FTS `content` column as a **prepared structure** for potential future use.
+It is **not** used as a hard pre-filter for content queries.
 
-**FTS narrowing is conservative and only an accelerator.** Because FTS5 is
-token-based while the legacy match is a case-insensitive substring search, the
-narrowing primitive (`fts_content_candidates`) only restricts the candidate set
-when it can prove the restriction is a *superset* of the true substring matches:
-it narrows using prefix queries built solely from "left-bounded" ASCII tokens
-(an alphanumeric run preceded within the query by a non-alphanumeric character,
-which is therefore guaranteed to begin a token in any matching document). For
-any query that cannot be safely narrowed — subtoken substrings (`oob` ⊂
-`foobar`), non-ASCII/Unicode queries (the `unicode61` tokenizer treats accented
-letters as token characters), or single-word/leading-only/operator-like queries
-— it signals the caller to **live-scan every metadata-filtered candidate**. A
-performance loss in those cases is accepted; a lost hit is not. **Invariant:**
-`search(use_index=True, content_query=…)` never returns fewer result keys than
-`search(use_index=False, …)`.
+**Why FTS content is not used as a narrowing gate:** The FTS `content` column
+captures the file text at indexing time. If a live file changes after indexing
+(writes, edits, replacements), the indexed content is stale while the live file
+reflects new content. Using FTS content as a pre-filter would exclude such files
+from reaching the live-confirmation step (`_content_match`), producing silent
+false negatives — the live file contains the query string but the index does
+not, so the file is never confirmed and disappears from results.
 
-Snapshots scanned without content enrichment have no indexed content; for those,
-content queries fall back to scanning the (already metadata-narrowed) candidate
-set against the live filesystem. Content search therefore remains explicitly
-best-effort with respect to live-filesystem reproducibility, consistent with the
-Blaupause.
+**Actual search path:** For all content queries, `_try_index_search` uses only
+the metadata-indexed SQLite columns (`ext`, `size_bytes`, `mtime_epoch`, scope)
+to narrow the candidate set. Every resulting file then goes through
+`_content_match`, which reads the current live file and performs the exact
+case-insensitive substring check. The live confirmation is always the source of
+truth. Content search therefore remains explicitly best-effort with respect to
+live-filesystem reproducibility (consistent with the Blaupause), while never
+producing false negatives from index staleness.
+
+Snapshots scanned without content enrichment (`content_ref` absent) receive
+the same treatment: all metadata-filtered candidates are live-scanned.
+
+`fts_content_candidates` remains in `index.py` as a primitive that could
+accelerate content narrowing in a future write-once / immutable-snapshot
+scenario where content staleness cannot occur. It is presently unused by the
+search path.
 
 ## Consequences
 - Metadata/size/date/scope filtering is served from indexed SQLite columns
@@ -84,6 +84,9 @@ Blaupause.
   demands. Glob/name/path exactness (and the `query` substring) remain a Python
   post-filter over the SQL-narrowed candidate rows — they are NOT delegated to
   FTS — so their semantics are byte-for-byte identical to the linear path.
+- Content queries always reach `_content_match` for every metadata-filtered
+  candidate, so live file mutations after indexing are transparently reflected
+  in results. The FTS `content` column is a prepared structure, not a gate.
 - The index is a pure derivation artifact: it can be deleted and rebuilt at any
   time without data loss, and its absence degrades gracefully to the linear
   scan.

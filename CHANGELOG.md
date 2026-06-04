@@ -20,14 +20,16 @@ datums- und Track-basiert. Roadmap-Phasen/Tracks: siehe
   `atlas search` nutzt den Index, wenn er alle Kandidaten-Snapshots konsistent
   abdeckt, und fällt sonst transparent auf den linearen Scan zurück. Neue CLI:
   `atlas index rebuild`, `atlas index stats`, `atlas search --all-snapshots`,
-  `atlas search --no-index`, `atlas scan --no-index`. Content-Suche:
-  **konservatives** FTS-Narrowing (grenzt nur ein, wenn beweisbar ein Superset
-  der Substring-Treffer; sonst Live-Scan aller Kandidaten) + Live-Confirm.
-  Invariante: die indexgestützte Content-Suche verliert nie Treffer gegenüber
-  dem linearen Pfad (Subtoken-Substrings wie `oob`⊂`foobar`, Unicode- und
-  Punctuation-Queries inklusive). Inkl. ADR-009, Auflösung der vier offenen
-  Entscheidungen in `docs/architecture/atlas-fts-integration.md` und Tests
-  (`test_atlas_index.py`, u. a. Index/Linear-Äquivalenz für Content-Edge-Cases).
+  `atlas search --no-index`, `atlas scan --no-index`. Content-Suche: die
+  FTS-`content`-Spalte ist vorbereitete Struktur, kein harter Vorfilter —
+  alle metadaten-gefilterten Kandidaten werden stets per Live-Scan
+  (`_content_match`) bestätigt. Damit sind Freshness-Gaps (Datei nach
+  Indizierung mutiert) und alle sonstigen Subtoken-/Unicode-/Punctuation-
+  Edge-Cases sicher: die Suche verliert nie Treffer gegenüber dem linearen
+  Pfad. `snapshot_coverage_ok()` prüft jetzt zusätzlich die `files_fts`-
+  Zeilenparität. Inkl. ADR-009, Auflösung der vier offenen Entscheidungen in
+  `docs/architecture/atlas-fts-integration.md` und Tests (`test_atlas_index.py`,
+  u. a. Freshness-Regression, Index/Linear-Äquivalenz für Content-Edge-Cases).
 - `docs/GETTING_STARTED.md` — Einstieg (Dump erzeugen, Bundle lesen, suchen,
   Fehlerbehebung).
 - `CONTRIBUTING.md` — Beitragsrichtlinien (Diagnose-first, Parität, Checks,

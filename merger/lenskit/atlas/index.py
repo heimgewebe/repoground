@@ -412,16 +412,17 @@ class AtlasFTSIndex:
     def snapshot_coverage_ok(self, snapshot_id: str) -> bool:
         """Cheap integrity check that a snapshot's index rows are self-consistent.
 
-        Verifies the snapshot is registered AND that the recorded ``file_count``
-        matches the actual number of ``files`` rows — catching a truncated or
-        partially-written index for that snapshot, in which case the search layer
-        falls back to the linear inventory scan.
+        Verifies three conditions:
 
-        KNOWN LIMITATION (deliberately out of scope, see ADR-009): this does NOT
-        detect *content* staleness against the snapshot's ``inventory_ref`` (e.g.
-        an inventory artifact edited after indexing). Snapshot artifacts are
-        write-once per unique ``snapshot_id`` in the normal CLI flow, so this is a
-        low-risk gap; a full freshness check would hash ``inventory_ref`` (TODO).
+        1. The snapshot is registered in ``indexed_snapshots``.
+        2. The recorded ``file_count`` matches the actual number of ``files`` rows
+           (catches a truncated or partially-written ``files`` table).
+        3. Every ``files`` row has a matching ``files_fts`` row (catches a
+           truncated ``files_fts`` table where the FTS virtual table was not
+           fully populated, which would silently degrade path-token queries).
+
+        If any condition fails the search layer falls back to the linear inventory
+        scan for this snapshot.
         """
         row = self.conn.execute(
             "SELECT file_count FROM indexed_snapshots WHERE snapshot_id = ?",
@@ -432,7 +433,16 @@ class AtlasFTSIndex:
         actual = self.conn.execute(
             "SELECT COUNT(*) AS c FROM files WHERE snapshot_id = ?", (snapshot_id,)
         ).fetchone()["c"]
-        return actual == row["file_count"]
+        if actual != row["file_count"]:
+            return False
+        # Verify the FTS virtual table is in sync with the files table.
+        fts_actual = self.conn.execute(
+            "SELECT COUNT(*) AS c FROM files_fts fts "
+            "JOIN files f ON f.file_uid = fts.rowid "
+            "WHERE f.snapshot_id = ?",
+            (snapshot_id,),
+        ).fetchone()["c"]
+        return fts_actual == actual
 
     def snapshot_has_content(self, snapshot_id: str) -> bool:
         row = self.conn.execute(

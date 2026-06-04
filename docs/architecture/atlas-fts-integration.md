@@ -52,12 +52,16 @@ Die folgenden vier epistemischen Leerstellen wurden vor der Implementierung verb
 4.  **Default-Query-Semantik (Latest-Only vs. Historisch): → LATEST-ONLY.**
     `atlas search` löst standardmäßig auf den neuesten indizierten Snapshot pro `(machine_id, root_id)` auf (spiegelt das bisherige Verhalten). Historische Suche über alle Snapshots via `--all-snapshots`; ein fixer Zeitpunkt via `--snapshot-id`.
 
-### 3.1 Content-Suche: konservatives FTS-Narrow + Live-Confirm (Hybrid)
-Für content-Modus-Snapshots wird der Dateitext in die FTS-`content`-Spalte indiziert. Eine `--content-query` *kann* per FTS-Prefix-`MATCH` die Kandidaten *eingrenzen*; anschließend wird **immer** die Live-Datei gelesen, um den exakten zusammenhängenden Substring-Treffer samt Snippet zu *bestätigen*. Die Live-Bestätigung — nicht FTS — bleibt die Wahrheitsquelle; die bisherige Content-Semantik (case-insensitive Substring, erste Trefferzeile, 200-Zeichen-Snippet) bleibt damit exakt erhalten.
+### 3.1 Content-Suche: Metadaten-Filter + Live-Confirm (kein FTS-Content-Filter)
+Die FTS-`content`-Spalte wird beim Indizieren von content-Modus-Snapshots befüllt — als **vorbereitete Struktur** für potenziell künftige Nutzung. Sie wird derzeit **nicht** als harter Vorfilter für Content-Queries eingesetzt.
 
-**FTS-Narrowing ist konservativ und nur Beschleuniger.** Da FTS5 tokenbasiert ist, der Legacy-Match aber eine case-insensitive Substring-Suche, grenzt `fts_content_candidates` die Kandidaten nur dann ein, wenn die Einschränkung beweisbar ein *Superset* der echten Substring-Treffer ist: es nutzt Prefix-Queries ausschließlich aus „left-bounded" ASCII-Tokens (ein alphanumerischer Lauf, dem innerhalb der Query ein nicht-alphanumerisches Zeichen vorausgeht und der daher in jedem Treffer-Dokument garantiert einen Token *beginnt*). Für nicht sicher eingrenzbare Queries — Subtoken-Substrings (`oob` ⊂ `foobar`), Nicht-ASCII/Unicode (der `unicode61`-Tokenizer behandelt Akzentbuchstaben als Token-Zeichen), Einzelwort-/Nur-führende-/operatorartige Queries — signalisiert es dem Aufrufer **Live-Scan aller metadaten-gefilterten Kandidaten** (Rückgabe `None`, nicht `[]`). Performanceverlust ist hier akzeptiert; Trefferverlust nicht. **Invariante:** `search(use_index=True, content_query=…)` liefert nie weniger Ergebnis-Keys als `search(use_index=False, …)`.
+**Warum kein FTS-Content-Narrowing (Freshness-Gap):** Der FTS-`content`-Spalte liegt der Dateiinhalt zum *Indizierungszeitpunkt* zugrunde. Ändert sich eine Live-Datei nach der Indizierung, ist der indizierte Inhalt veraltet. Ein Narrowing auf der `content`-Spalte würde solche Dateien vor dem Live-Confirm-Schritt (`_content_match`) ausfiltern und stille False Negatives produzieren.
 
-Snapshots ohne Content-Enrichment fallen für Content-Queries auf das Scannen der (bereits metadaten-eingegrenzten) Kandidaten gegen das Live-Dateisystem zurück.
+**Tatsächlicher Suchpfad:** Bei allen Content-Queries nutzt `_try_index_search` ausschließlich die metadaten-indizierten SQLite-Spalten (`ext`, `size_bytes`, `mtime_epoch`, Scope) zur Kandidateneingrenzung. Jeder Kandidat durchläuft dann `_content_match`, das die aktuelle Live-Datei liest und den exakten case-insensitiven Substring-Check durchführt. Die Snippet-Semantik (erste Trefferzeile, 200 Zeichen) ist identisch zum linearen Pfad.
+
+Snapshots ohne Content-Enrichment erhalten dieselbe Behandlung: alle metadaten-gefilterten Kandidaten werden live gescannt.
+
+`fts_content_candidates` verbleibt als Primitiv für einen möglichen künftigen Write-once-Pfad; es wird vom aktuellen Suchpfad nicht genutzt.
 
 ### 3.2 Was FTS bedient — und was nicht
 SQLite ersetzt das erneute JSONL-Parsen und liefert metadaten-gefilterte Kandidaten (Scope, `ext`, Größe, Datum aus indizierten Spalten). Glob-/Name-/Path-Exaktheit sowie die generische `query`-Substring-Prüfung bleiben als Python-Postfilter über den SQL-eingegrenzten Kandidatenzeilen erhalten und werden **nicht** an FTS delegiert; ihre Semantik ist damit byte-genau identisch zum linearen Pfad.

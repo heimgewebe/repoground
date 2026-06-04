@@ -385,3 +385,26 @@ def test_fts_content_candidates_safety_contract(tmp_path):
         assert narrowed is not None
         assert isinstance(narrowed, list)
 
+
+def test_content_live_mutation_after_index_does_not_create_false_negative(tmp_path):
+    """Live file changes after indexing must not create false negatives.
+
+    The FTS content column is frozen at index time. If the live file mutates
+    afterwards, an FTS-narrowed content search could miss the new content
+    entirely — `fts_content_candidates` returns [] (no FTS match against stale
+    content) and `_content_match` is never invoked for the file. The search
+    layer MUST NOT use FTS content as a hard pre-filter; all
+    metadata-filtered candidates must go through live `_content_match`.
+    """
+    searcher, _ = _build_content_index(tmp_path, {"a.txt": "alpha beta"})
+
+    # Mutate the live file after the index was built.
+    root_dir = tmp_path / "content_root"
+    (root_dir / "a.txt").write_text("alpha gamma", encoding="utf-8")
+
+    via_linear = searcher.search(use_index=False, content_query="alpha gamma")
+    via_index = searcher.search(use_index=True, content_query="alpha gamma")
+
+    assert _content_keys(via_linear) == [("s1", "a.txt")]
+    assert _content_keys(via_index) == _content_keys(via_linear)
+

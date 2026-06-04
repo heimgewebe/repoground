@@ -178,24 +178,14 @@ class AtlasSearch:
                 after_epoch = after_dt.timestamp() if after_dt else None
                 before_epoch = before_dt.timestamp() if before_dt else None
 
-                restrict_uids = None
-                if content_query:
-                    # Narrow content candidates via FTS for content-bearing
-                    # snapshots; non-content snapshots are scanned in full and
-                    # confirmed against the live filesystem (hybrid fallback).
-                    content_snaps = [sid for sid in snapshot_ids if idx.snapshot_has_content(sid)]
-                    plain_snaps = [sid for sid in snapshot_ids if not idx.snapshot_has_content(sid)]
-                    narrowed = idx.fts_content_candidates(content_snaps, content_query)
-                    if narrowed is None:
-                        # Unusable tokens: cannot narrow, scan all candidates.
-                        restrict_uids = None
-                    else:
-                        plain_rows = idx.query_metadata(
-                            plain_snaps, ext=ext, min_size=min_size, max_size=max_size,
-                            after_epoch=after_epoch, before_epoch=before_epoch,
-                        )
-                        restrict_uids = set(narrowed) | {r['file_uid'] for r in plain_rows}
-
+                # For content queries, never restrict via FTS content candidates:
+                # the FTS content column is frozen at index time and can be
+                # stale if the live file mutates after indexing.  Using it as a
+                # hard pre-filter would produce false negatives (the live
+                # _content_match confirmation is never reached for excluded files).
+                # Instead, all metadata-filtered candidates are live-scanned by
+                # _content_match below, keeping FTS content as prepared structure
+                # only (potential future accelerator, not a gate).
                 rows = idx.query_metadata(
                     snapshot_ids, ext=ext, min_size=min_size, max_size=max_size,
                     after_epoch=after_epoch, before_epoch=before_epoch,
