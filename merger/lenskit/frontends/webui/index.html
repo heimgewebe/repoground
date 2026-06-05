@@ -149,6 +149,15 @@
                     </label>
                 </div>
 
+                <div class="border-t border-gray-700 pt-3">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="prePull" checked class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                        <span class="text-sm">Repo vor Merge aktualisieren</span>
+                    </label>
+                    <p class="text-xs text-gray-500 mt-1 ml-6">Fast-forward-only; blockiert bei lokalen Änderungen oder divergiertem Branch.</p>
+                    <p id="prePullPlanOnlyNote" class="text-xs text-yellow-500 mt-1 ml-6 hidden">Plan-only überspringt Pre-Pull.</p>
+                </div>
+
                 <div class="flex-1">
                     <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Extras</label>
                     <div id="extras-container" class="bg-gray-900 border border-gray-700 rounded p-2">

@@ -82,6 +82,18 @@ FEATURES = {
         "html_id": "pathFilter",
         "js_key": "path_filter",
         "repolens_usage": "args.path_filter"
+    },
+    # Surface parity only: this guard checks that the --pre-pull flag, the #prePull
+    # WebUI element, the pre_pull payload key and repoLens' args.pre_pull all exist.
+    # It does NOT (and need not) assert the shared semantics — effective_pre_pull =
+    # pre_pull and not plan_only, two-phase plan/apply, fast-forward-only — which are
+    # covered by test_repo_sync.py / test_service_runner_pre_pull.py /
+    # test_pythonista_pre_pull.py and the rLens-client tests.
+    "pre_pull": {
+        "cli_arg": "--pre-pull",
+        "html_id": "prePull",
+        "js_key": "pre_pull",
+        "repolens_usage": "args.pre_pull"
     }
 }
 

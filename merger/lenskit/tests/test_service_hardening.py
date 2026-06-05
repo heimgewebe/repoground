@@ -63,7 +63,9 @@ def test_idempotency_and_decoupling(client_and_hub):
 
 def test_reuse_finished(client_and_hub):
     client, hub_path = client_and_hub
-    req = {"hub": hub_path, "repos": ["repo_reuse"]}
+    # pre_pull=False makes the succeeded job reusable; a pre_pull=True request would
+    # (by design) force a fresh repo-sync check instead of reusing the cached result.
+    req = {"hub": hub_path, "repos": ["repo_reuse"], "pre_pull": False}
     headers = {"Authorization": "Bearer test-token"}
 
     # 1. Create and finish

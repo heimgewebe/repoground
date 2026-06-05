@@ -364,6 +364,20 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
     )
     run_parser.add_argument("--force-new", action="store_true", help="Do not reuse matching existing jobs")
     run_parser.add_argument("--plan-only", action="store_true", help="Plan only; do not write bundle artifacts")
+    pre_pull_group = run_parser.add_mutually_exclusive_group()
+    pre_pull_group.add_argument(
+        "--pre-pull",
+        dest="pre_pull",
+        action="store_true",
+        default=None,
+        help="Fast-forward-only update before scanning (default: enabled unless --plan-only)",
+    )
+    pre_pull_group.add_argument(
+        "--no-pre-pull",
+        dest="pre_pull",
+        action="store_false",
+        help="Disable the fast-forward-only pre-pull; scan the current on-disk state as-is",
+    )
 
     cancel_parser = client_subparsers.add_parser("cancel", help="Request job cancellation")
     _add_common_options(cancel_parser, suppress_defaults=True, dest_prefix="leaf_")
@@ -571,6 +585,13 @@ def _cmd_job(args: argparse.Namespace) -> int:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
+    # plan_only never mutates local repos; an explicit --pre-pull contradicts it.
+    # Reject before any network/config work so no HTTP request is made.
+    if args.plan_only and args.pre_pull is True:
+        return _exit_config_error(
+            args, "--plan-only and --pre-pull are mutually exclusive (plan_only never mutates local repos)."
+        )
+
     try:
         _ensure_profile_config_valid_if_present(args)
         token = _resolve_token(args)
@@ -592,6 +613,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
         payload["force_new"] = True
     if args.plan_only:
         payload["plan_only"] = True
+    # Effective pre_pull: explicit flag wins; otherwise default true unless plan_only.
+    # Always sent explicitly so behavior is unambiguous and easy to assert in tests.
+    effective_pre_pull = args.pre_pull
+    if effective_pre_pull is None:
+        effective_pre_pull = not args.plan_only
+    payload["pre_pull"] = effective_pre_pull
 
     url = f"{base_url}/api/jobs"
     data, error_code = _post_json_with_errors(args, url, token, payload)

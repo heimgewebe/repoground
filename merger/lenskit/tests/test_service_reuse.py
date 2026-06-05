@@ -1,3 +1,70 @@
+import time
+
+
+def _wait_terminal(ctx, job_id, timeout_s=5.0):
+    """Wait for the background runner to reach a terminal state so a later manual
+    status write cannot be overwritten by the worker thread."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        job = ctx.store.get_job(job_id)
+        if job and job.status in ("succeeded", "failed", "canceled"):
+            return job
+        time.sleep(0.02)
+    return ctx.store.get_job(job_id)
+
+
+def _force_status(ctx, job_id, status):
+    _wait_terminal(ctx, job_id)
+    job = ctx.store.get_job(job_id)
+    job.status = status
+    ctx.store.update_job(job)
+    return job
+
+
+def test_succeeded_not_reused_when_pre_pull_true(service_client):
+    """A real pre_pull=True request must NOT reuse a cached succeeded job."""
+    ctx = service_client
+    req = {"repos": ["repo-test"], "level": "summary", "pre_pull": True}
+
+    resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp1.status_code == 200
+    job1_id = resp1.json()["id"]
+    _force_status(ctx, job1_id, "succeeded")
+
+    resp2 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["id"] != job1_id, "pre_pull=True must force a fresh job"
+
+
+def test_succeeded_reused_when_pre_pull_false(service_client):
+    """pre_pull=False may reuse a cached succeeded job (no fresh-sync expectation)."""
+    ctx = service_client
+    req = {"repos": ["repo-test"], "level": "summary", "pre_pull": False}
+
+    resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp1.status_code == 200
+    job1_id = resp1.json()["id"]
+    _force_status(ctx, job1_id, "succeeded")
+
+    resp2 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["id"] == job1_id, "pre_pull=False should reuse the succeeded job"
+
+
+def test_active_job_reused_even_when_pre_pull_true(service_client):
+    """An identical *active* job is still reusable even with pre_pull=True."""
+    ctx = service_client
+    req = {"repos": ["repo-test"], "level": "summary", "pre_pull": True}
+
+    resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp1.status_code == 200
+    job1_id = resp1.json()["id"]
+    # Let the worker finish, then re-mark active so the worker can't change it again.
+    _force_status(ctx, job1_id, "running")
+
+    resp2 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["id"] == job1_id, "active identical job should be reused"
 
 
 def test_explicit_reuse_policy(service_client):
@@ -139,3 +206,19 @@ def test_whitespace_only_global_include_paths_collapsed_to_none(service_client):
 
     # Should reuse the exact same job since both normalize to None
     assert job1_id == job2_id
+
+
+def test_plan_only_pre_pull_uses_effective_hash():
+    """plan_only never mutates repos, so raw pre_pull must not split the job hash."""
+    from merger.lenskit.service.models import JobRequest, calculate_job_hash
+
+    hub = "/tmp/lenskit-test-hub"
+    version = "test-version"
+
+    plan_pre = JobRequest(repos=["repo-test"], level="summary", plan_only=True, pre_pull=True)
+    plan_no_pre = JobRequest(repos=["repo-test"], level="summary", plan_only=True, pre_pull=False)
+    real_pre = JobRequest(repos=["repo-test"], level="summary", plan_only=False, pre_pull=True)
+    real_no_pre = JobRequest(repos=["repo-test"], level="summary", plan_only=False, pre_pull=False)
+
+    assert calculate_job_hash(plan_pre, hub, version) == calculate_job_hash(plan_no_pre, hub, version)
+    assert calculate_job_hash(real_pre, hub, version) != calculate_job_hash(real_no_pre, hub, version)

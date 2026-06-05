@@ -261,7 +261,9 @@ Status: umgesetzt.
 
 - `run` erzeugt oder reused einen rLens-Bundle-Job via `POST /api/jobs`.
 - `cancel JOB_ID` fordert Job-Abbruch via `POST /api/jobs/{job_id}/cancel` an.
-- Der CLI-Scope bleibt konservativ: exponiert werden `--repo`, `--hub`, `--merges-dir`, `--level`, `--mode`, `--force-new`, `--plan-only`.
+- Der CLI-Scope bleibt konservativ: exponiert werden `--repo`, `--hub`, `--merges-dir`, `--level`, `--mode`, `--force-new`, `--plan-only`, `--pre-pull`/`--no-pre-pull`.
+- `--pre-pull` / `--no-pre-pull` steuern den Fast-Forward-only-Pre-Pull vor dem Scan (siehe `docs/service-api.md`, `pre_pull` / `bounded repo-sync mutation`). Beide Flags sind mutually exclusive; `pre_pull` wird immer explizit im Payload gesendet.
+- Effektive Semantik: `effective_pre_pull = pre_pull and not plan_only`. Ohne Flag ist Pre-Pull aktiv, außer bei `--plan-only` (dann `pre_pull=false`). `--plan-only --pre-pull` wird vor jedem Netzwerkzugriff hart abgelehnt (Exit-Code 2, `config_error`), da `plan_only` lokale Repos nie mutiert.
 - Sicherheitsreview / Invarianten:
   - Token werden ausschließlich als Bearer-Header gesendet, nie als Query-Parameter.
   - `job_id` wird als Pfadsegment URL-encodiert.

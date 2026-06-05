@@ -259,3 +259,81 @@ When submitting a job with `include_paths_by_repo`, the keys in the dictionary M
 - **Strict Mode**: If `strict_include_paths_by_repo: true` is sent, missing keys trigger a `400 Bad Request` (Job Failed) instead of a fallback. This is the default for WebUI "Combined" jobs.
 - **Soft Mode (Default)**: If strict mode is false, a missing key logs a warning and falls back to the global `include_paths` (or full scan if none).
 - This ensures predictability and prevents ambiguous matches in complex directory structures.
+
+### `pre_pull` Semantics (Bounded Repo-Sync Mutation)
+
+`JobRequest.pre_pull` (`bool`, **default `true`**) requests a fast-forward-only
+update of every selected local repo **before** it is scanned, so a fresh dump
+reflects current upstream state instead of a stale checkout.
+
+This is classified as a **`bounded repo-sync mutation`** (see *Mutation Boundary
+Classification* above), implemented in `merger/lenskit/service/repo_sync.py` and
+invoked by the runner *before* `scan_repo()` — never in `core/merge.py`.
+
+**One contract, every surface.** The effective pre-pull is the same everywhere
+(rLens service runner, WebUI, rLens-client, repoLens UI + headless):
+
+```
+effective_pre_pull = requested_pre_pull and not plan_only
+```
+
+`plan_only=true` therefore **never** mutates local repos — no fetch, no merge, no
+apply. Requesting both at once is rejected by the CLIs (`--plan-only --pre-pull`
+is an error) and the WebUI forces `pre_pull=false` (and disables the checkbox)
+while plan-only is active.
+
+**Two-phase (multi-repo safe).** Pre-pull is split into a *plan* phase and an
+*apply* phase:
+
+1. **Plan** every selected repo: read HEAD, check the tracked tree, `fetch --prune`,
+   and analyze fast-forwardability. The plan phase **never** mutates the working
+   tree.
+2. Only if **no** repo's plan hard-failed, **apply** the planned fast-forwards.
+   Each apply re-verifies HEAD against the plan (`head_changed` guard) before its
+   single `merge --ff-only`.
+
+This guarantees that a plan-phase hard failure on one repo cannot leave another repo HEAD or working tree fast-forwarded, because no apply step is started until all plans are free of hard failures. Apply-phase failures are still reported as hard failures; each apply re-verifies HEAD (`head_changed`) and uses only `merge --ff-only`, but the apply phase is not a rollback transaction if an earlier repo was already fast-forwarded.
+
+**Semantics (per selected repo):**
+
+- `fetch --prune` of the existing remote, then a **fast-forward-only** merge of
+  the current branch's upstream (`@{u}`). No merge commits, **no conflict
+  resolution**, **no branch switch**.
+- It uses explicit git argument lists only — **never** a shell, `git pull`,
+  `reset`, `rebase`, `stash`, `checkout`, `switch`, or `clean`, and it never
+  deletes untracked files or discards local changes.
+- Runs non-interactively (`GIT_TERMINAL_PROMPT=0`); auth-required fetches fail
+  fast rather than hanging. Clone of missing repos is **out of scope**.
+
+**Per-repo outcomes** (`PrePullStatus`):
+
+| Status | Class | Effect on job |
+|---|---|---|
+| `up_to_date`, `fast_forwarded` | success | Scan proceeds |
+| `planned_fast_forward` | plan-only intermediate | Becomes `fast_forwarded` in apply (never a final status) |
+| `skipped_not_git`, `skipped_no_upstream`, `local_ahead` | warning | Logged + added to `job.warnings`; scan proceeds |
+| `dirty`, `diverged`, `fetch_failed`, `merge_failed`, `head_changed`, `untracked_would_be_overwritten`, `error` | hard fail | Job fails before any scan; on a multi-repo plan failure, no repo HEADs or working trees were fast-forwarded |
+
+Notes:
+- A dirty **tracked** working tree blocks. Harmless non-colliding **untracked**
+  files do not block and are preserved across a fast-forward. Untracked files —
+  **including ignored ones** — that would be overwritten by, or path-collide
+  (file-vs-file or file-vs-directory) with, the upstream fast-forward are
+  detected during the plan phase and produce `untracked_would_be_overwritten`
+  (hard fail), preventing any apply. The plan-phase check reads paths
+  NUL-terminated; if it cannot complete, the repo hard-fails with `error` rather
+  than fast-forwarding.
+- **Job reuse:** the effective pre-pull (`pre_pull and not plan_only`) participates in the job content hash. A succeeded job
+  is **not** reused when the new request has an effective pre-pull
+  (`pre_pull=true and not plan_only`) — the user explicitly wants a fresh
+  repo-sync check. A `pre_pull=false` (or `plan_only`) request may reuse a
+  succeeded job, and an identical **active** job is always reusable.
+- **Self-repo caveat:** if the selected repo is the running rLens code itself
+  (typically `repos/lenskit`), an actual fast-forward updates files on disk but
+  the live Python process keeps its already-loaded modules. The job emits a
+  visible restart warning (logs + `job.warnings`) **only on an actual
+  `fast_forwarded`** and **never** auto-restarts the service. Restart
+  `rlens.service` manually after updating lenskit.
+- CLI: `lenskit rlens-client run` (and repoLens headless) send `pre_pull`
+  explicitly; disable with `--no-pre-pull`. `--plan-only` implies
+  `pre_pull=false`.

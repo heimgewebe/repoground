@@ -744,7 +744,86 @@ def test_rlens_client_run_posts_job_request(
     assert req.get_header("Content-type") == "application/json"
     _assert_request_url(req, scheme="http", netloc="127.0.0.1:8787", path="/api/jobs")
     payload = _decode_request_json(req)
-    assert payload == {"repos": ["lenskit"], "level": "max", "mode": "gesamt"}
+    # pre_pull defaults to True and is always sent explicitly.
+    assert payload == {"repos": ["lenskit"], "level": "max", "mode": "gesamt", "pre_pull": True}
+
+
+def test_rlens_client_run_defaults_pre_pull_true(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-pp", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["pre_pull"] is True
+
+
+def test_rlens_client_run_no_pre_pull_sends_false(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-pp2", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit", "--no-pre-pull", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["pre_pull"] is False
+    # Other options remain untouched.
+    assert payload["repos"] == ["lenskit"]
+    assert "force_new" not in payload
+
+
+def test_rlens_client_run_plan_only_sends_pre_pull_false(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-po", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit", "--plan-only", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    # plan_only never mutates local repos, so effective pre_pull is false.
+    assert payload["plan_only"] is True
+    assert payload["pre_pull"] is False
+
+
+def test_rlens_client_run_plan_only_with_pre_pull_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called for --plan-only --pre-pull")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit", "--plan-only", "--pre-pull", "--json"])
+    out, _ = capsys.readouterr()
+
+    assert rc == 2
+    parsed = json.loads(out)
+    assert parsed["status"] == "error"
+    assert parsed["error_kind"] == "config_error"
+    assert "mutually exclusive" in parsed["message"]
+
+
+def test_rlens_client_run_pre_pull_and_no_pre_pull_are_mutually_exclusive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called on argparse error")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["rlens-client", "run", "--repo", "lenskit", "--pre-pull", "--no-pre-pull"])
+    assert exc_info.value.code == 2
 
 
 def test_rlens_client_run_repeated_repo_force_new_and_plan_only(

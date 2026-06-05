@@ -936,15 +936,28 @@ def create_job(request: JobRequest):
 
     existing = state.job_store.find_job_by_hash(content_hash)
     if existing and not request.force_new:
-        # Check if we should reuse
+        # An identical job that is still active is always safe to reuse: its
+        # pre-pull (if any) has not finished, so its result will reflect the
+        # freshly-synced state once it completes.
         if existing.status in ("queued", "running", "canceling"):
             logger.info("Reusing existing active job %s", existing.id)
             return existing
 
-        # Policy: Reuse succeeded jobs (server-side default: yes)
+        # A succeeded job is only reusable when the new request does NOT ask for an
+        # *effective* pre-pull. effective_pre_pull = pre_pull and not plan_only:
+        # a plan-only job never mutates repos, so its cached result is still valid;
+        # but a real pre_pull=True request wants a fresh repo-sync check the cached
+        # result cannot provide, so we run a new job. (force_new bypasses reuse.)
         if existing.status == "succeeded":
-            logger.info("Reusing existing succeeded job %s", existing.id)
-            return existing
+            effective_pre_pull = request.pre_pull and not request.plan_only
+            if effective_pre_pull:
+                logger.info(
+                    "Not reusing succeeded job %s because pre_pull=True requires a fresh repo-sync check.",
+                    existing.id,
+                )
+            else:
+                logger.info("Reusing existing succeeded job %s", existing.id)
+                return existing
 
     job = Job.create(request, content_hash=content_hash)
     job.hub_resolved = resolved_hub_str
