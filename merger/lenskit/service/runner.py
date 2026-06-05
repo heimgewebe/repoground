@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from .models import Artifact, Job
-from .jobstore import JobStore, get_merges_dir
+from .jobstore import JobStore
 from .repo_sync import (
     plan_pre_pull_repos,
     apply_pre_pull_plans,
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # We can try absolute import first.
 
 from ..core.merge import (
+    get_merges_dir,
     scan_repo,
     write_reports_v2,
     _normalize_ext_list,
@@ -131,11 +132,11 @@ def _register_pre_pull_report_artifact_once(
         job_store.update_job(job)
         return True
     except Exception as artifact_error:
+        safe_artifact_error = _safe_text(artifact_error) or "unknown error"
         logger.warning(
             "Job %s: failed to register pre-pull report artifact: %s",
             job.id,
-            artifact_error,
-            exc_info=True,
+            safe_artifact_error,
         )
         return False
 
@@ -198,7 +199,6 @@ class JobRunner:
 
         try:
             req = job.request
-            repo_names: list[str] = []
             merges_dir: Path | None = None
             pre_pull_report_path: Path | None = None
             pre_pull_report_artifact_registered = False
@@ -231,8 +231,6 @@ class JobRunner:
 
             if not sources:
                 raise ValueError("No valid repository sources found.")
-
-            repo_names = [Path(src).name for src in sources]
 
             # 2a. Resolve Merges Dir early (for pre-pull report)
             if req.merges_dir:
@@ -658,7 +656,7 @@ class JobRunner:
                 id=artifact_id,
                 job_id=job_id,
                 hub=str(hub),
-                repos=repo_names,
+                repos=req.repos or [],
                 created_at=datetime.now(timezone.utc).isoformat(),
                 paths=path_map,
                 params=req,

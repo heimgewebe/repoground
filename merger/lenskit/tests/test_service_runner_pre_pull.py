@@ -679,3 +679,28 @@ def test_pre_pull_report_written_on_apply_exception(mock_job_store, temp_hub):
         report = json.loads(blob)
         assert report["phase"] == "apply_exception"
         assert report["repos"][-1]["plan_status"] == "error"
+
+
+def test_pre_pull_report_artifact_registration_exception_redacted(mock_job_store, temp_hub, caplog):
+    from merger.lenskit.service.runner import _register_pre_pull_report_artifact_once
+
+    job = _make_job(temp_hub, ["repoA"], pre_pull=True)
+    report_path = temp_hub / "report.json"
+    report_path.write_text("{}")
+
+    mock_job_store.add_artifact.side_effect = RuntimeError("https://secret-token@host/artifact boom")
+
+    with caplog.at_level(logging.WARNING, logger="merger.lenskit.service.runner"):
+        success = _register_pre_pull_report_artifact_once(
+            job_store=mock_job_store,
+            job=job,
+            report_path=report_path,
+            already_registered=False,
+        )
+
+    assert success is False
+    assert "secret-token" not in caplog.text
+    assert "[REDACTED]" in caplog.text
+
+    for line in job.logs:
+        assert "secret-token" not in line
