@@ -317,6 +317,9 @@ def test_pre_pull_report_written_on_plan_hard_fail(mock_job_store, temp_hub):
 
         runner._run_job(job.id)
 
+        apply.assert_not_called()
+        scan.assert_not_called()
+
         assert job.status == "failed"
         assert job.artifact_ids
         art = mock_job_store.add_artifact.call_args_list[0][0][0]

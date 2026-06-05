@@ -229,7 +229,7 @@ class JobRunner:
                 summary = {
                     "repos_total": len(sources),
                     "planned": len(plans) if plans else 0,
-                    "applied": len(results) if results else 0,
+                    "results_total": len(results) if results else 0,
                     "fast_forwarded": 0,
                     "up_to_date": 0,
                     "warnings": 0,
@@ -323,6 +323,8 @@ class JobRunner:
                 return report_path
             
             pre_pull_report_path = None
+            pre_pull_report_artifact_registered = False
+            pre_pull_phase_failed = False
             if effective_pre_pull:
                 log("Pre-pull enabled: planning updates for all repositories (fast-forward only)...")
                 plans = plan_pre_pull_repos(sources)
@@ -338,6 +340,7 @@ class JobRunner:
                     self.job_store.update_job(job)
 
                 if hard_failures:
+                    pre_pull_phase_failed = True
                     pre_pull_report_path = _write_pre_pull_report("plan_failed", plans, None)
                     detail = "; ".join(f"{p.repo}: {p.status} - {p.message}" for p in hard_failures)
                     raise ValueError(f"Pre-pull plan failed (no repo HEADs or working trees were fast-forwarded): {detail}")
@@ -359,6 +362,7 @@ class JobRunner:
                     
                 apply_hard_failures = [r for r in results if r.status in HARD_FAIL_STATUSES]
                 if apply_hard_failures:
+                    pre_pull_phase_failed = True
                     pre_pull_report_path = _write_pre_pull_report("apply_failed", plans, results)
                     detail = "; ".join(f"{r.repo}: {r.status} - {r.message}" for r in apply_hard_failures)
                     raise ValueError(f"Pre-pull apply failed: {detail}")
@@ -526,6 +530,7 @@ class JobRunner:
 
             if pre_pull_report_path and pre_pull_report_path.exists():
                 path_map["pre_pull_report"] = pre_pull_report_path.name
+                pre_pull_report_artifact_registered = True
 
             artifact_id = str(uuid.uuid4())
 
@@ -550,7 +555,7 @@ class JobRunner:
 
         except Exception as e:
             # If we failed during pre-pull, register a minimal artifact with the report
-            if 'pre_pull_report_path' in locals() and pre_pull_report_path and pre_pull_report_path.exists():
+            if 'pre_pull_phase_failed' in locals() and pre_pull_phase_failed and 'pre_pull_report_path' in locals() and pre_pull_report_path and pre_pull_report_path.exists() and not pre_pull_report_artifact_registered:
                 try:
                     artifact_id = str(uuid.uuid4())
                     art = Artifact(

@@ -339,4 +339,4 @@ Notes:
   `pre_pull=false`.
 
 **Pre-Pull Report Artifact:**
-Every job where `pre_pull` is not skipped (including hard-fail aborts) produces a structured `pre_pull_report` JSON artifact. This artifact contains structured per-repo status, phase metadata, HEAD/upstream information, messages, and credential-redacted standard error. The live job log contains only a concise digest summary of this report. No `pre_pull_report` artifact is produced when effective pre-pull is false (`plan_only=true` or `pre_pull=false`).
+Every job where `effective_pre_pull=true` (including hard-fail aborts) produces a structured `pre_pull_report` JSON artifact. This artifact contains structured per-repo status, phase metadata, HEAD/upstream information, messages, and credential-redacted standard error. The live job log contains only a concise digest summary of this report. No `pre_pull_report` artifact is produced when effective pre-pull is false (`plan_only=true` or `pre_pull=false`).
