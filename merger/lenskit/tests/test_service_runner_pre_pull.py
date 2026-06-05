@@ -474,6 +474,8 @@ def test_pre_pull_report_written_on_plan_exception(mock_job_store, temp_hub):
         runner._run_job(job.id)
 
         assert job.status == "failed"
+        assert "secret-token" not in (job.error or "")
+        assert "[REDACTED]" in (job.error or "")
         assert "plan boom" in (job.error or "")
 
         added_artifacts = mock_job_store.add_artifact.call_args_list
@@ -652,6 +654,8 @@ def test_pre_pull_report_written_on_apply_exception(mock_job_store, temp_hub):
         runner._run_job(job.id)
 
         assert job.status == "failed"
+        assert "secret-token" not in (job.error or "")
+        assert "[REDACTED]" in (job.error or "")
         assert "apply boom" in (job.error or "")
 
         added_artifacts = mock_job_store.add_artifact.call_args_list

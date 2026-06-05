@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import List
 
 from .models import Artifact, Job
-from .jobstore import JobStore
+from .jobstore import JobStore, get_merges_dir
 from .repo_sync import (
     plan_pre_pull_repos,
     apply_pre_pull_plans,
@@ -255,7 +255,6 @@ class JobRunner:
                     log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e}")
                     raise ValueError(f"SECURITY: merges_dir not allowed: {e}")
             else:
-                from .jobstore import get_merges_dir
                 merges_dir = get_merges_dir(hub)
                 merges_dir.mkdir(parents=True, exist_ok=True)
 
@@ -274,8 +273,6 @@ class JobRunner:
             # when another repo's plan hard-fails. Strictly fast-forward-only
             # (see service/repo_sync.py) — no shell, pull, reset, rebase, stash,
             # checkout, switch or clean.
-            effective_pre_pull = req.pre_pull and not req.plan_only
-
             effective_pre_pull = req.pre_pull and not req.plan_only
 
             # Helper to write report and log digest
@@ -317,6 +314,20 @@ class JobRunner:
                         rm["message"] = _safe_text(r.message) or rm["message"]
                         if r.stderr:
                             rm["stderr"] = _safe_text(r.stderr)
+                    else:
+                        repo_map[r.repo] = {
+                            "repo": r.repo,
+                            "path": r.path,
+                            "plan_status": None,
+                            "apply_status": _json_status(r.status),
+                            "changed": r.changed,
+                            "before_head": r.before_head,
+                            "after_head": r.after_head,
+                            "upstream": _safe_text(r.upstream),
+                            "message": _safe_text(r.message),
+                            "stderr": _safe_text(r.stderr)
+                        }
+                        logger.warning("Job %s: apply_pre_pull_plans returned result for repo '%s' which was not planned.", job.id, r.repo)
 
                 repos_list = list(repo_map.values())
 
@@ -359,14 +370,13 @@ class JobRunner:
 
                 # Print hard failures explicitly, max 3
                 hf_repos = [rm for rm in repos_list if (rm["apply_status"] or rm["plan_status"]) in HARD_FAIL_STATUSES]
-                for i, hf in enumerate(hf_repos):
-                    if i < 3:
-                        status = hf["apply_status"] or hf["plan_status"]
-                        msg = hf["message"] or "unknown error"
-                        log(f"Pre-pull blocked before scan: {hf['repo']}: {status} - {msg}")
-                    elif i == 3:
-                        log(f"... and {len(hf_repos) - 3} more hard failures; see {report_path.name}")
-                        break
+                for hf in hf_repos[:3]:
+                    status = hf["apply_status"] or hf["plan_status"]
+                    msg = hf["message"] or "unknown error"
+                    log(f"Pre-pull blocked before scan: {hf['repo']}: {status} - {msg}")
+
+                if len(hf_repos) > 3:
+                    log(f"... and {len(hf_repos) - 3} more hard failures; see {report_path.name}")
 
                 return report_path
             if effective_pre_pull:
@@ -674,7 +684,7 @@ class JobRunner:
             )
 
             job.status = "failed"
-            job.error = str(e)
+            job.error = _safe_text(e) or "unknown error"
             job.finished_at = datetime.now(timezone.utc).isoformat()
             log(f"Error: {e}")
             logger.exception("Job %s failed", job_id)

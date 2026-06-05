@@ -339,8 +339,8 @@ Notes:
   `pre_pull=false`.
 
 **Pre-Pull Report Artifact (Early Diagnostic):**
-Every job where `effective_pre_pull=true` (including hard-fail aborts) produces
-a structured `pre_pull_report` JSON artifact. This artifact contains structured
+Every job that reaches the effective pre-pull report-writing boundary produces
+a structured `pre_pull_report` JSON artifact, unless writing the report itself fails. This artifact contains structured
 per-repo status, phase metadata, HEAD/upstream information, messages, and
 credential-redacted standard error. The live job log contains only a concise
 digest summary of this report.
