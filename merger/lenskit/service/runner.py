@@ -14,7 +14,6 @@ from .repo_sync import (
     apply_pre_pull_plans,
     is_self_repo,
     PrePullStatus,
-    SUCCESS_STATUSES,
     HARD_FAIL_STATUSES,
     WARN_STATUSES,
     _redact as _redact_git_stderr,
@@ -251,9 +250,6 @@ class JobRunner:
                         "message": p.message,
                         "stderr": _safe_stderr(p.stderr)
                     }
-                    if p.status in SUCCESS_STATUSES:
-                        # We calculate aggregate metrics after combining plan and apply
-                        pass
 
                 for r in (results or []):
                     if r.repo in repo_map:
@@ -299,8 +295,8 @@ class JobRunner:
                     with open(report_path, "w", encoding="utf-8") as f:
                         json.dump(report, f, indent=2)
                 except Exception as exc:
-                    log(f"WARN: Failed to write pre_pull_report: {exc}")
-                    return None
+                    log(f"ERROR: Failed to write pre_pull_report: {exc}")
+                    raise RuntimeError(f"failed to write pre_pull_report: {exc}") from exc
                 
                 # Live-Log Digest
                 log(f"Pre-pull report: effective={str(effective_pre_pull).lower()}, repos={summary['repos_total']}, fast_forwarded={summary['fast_forwarded']}, up_to_date={summary['up_to_date']}, warnings={summary['warnings']}, hard_failures={summary['hard_failures']}")
@@ -321,7 +317,6 @@ class JobRunner:
             
             pre_pull_report_path = None
             pre_pull_report_artifact_registered = False
-            pre_pull_phase_failed = False
             if effective_pre_pull:
                 log("Pre-pull enabled: planning updates for all repositories (fast-forward only)...")
                 plans = plan_pre_pull_repos(sources)
@@ -337,7 +332,6 @@ class JobRunner:
                     self.job_store.update_job(job)
 
                 if hard_failures:
-                    pre_pull_phase_failed = True
                     pre_pull_report_path = _write_pre_pull_report("plan_failed", plans, None)
                     detail = "; ".join(f"{p.repo}: {p.status} - {p.message}" for p in hard_failures)
                     raise ValueError(f"Pre-pull plan failed (no repo HEADs or working trees were fast-forwarded): {detail}")
@@ -360,7 +354,6 @@ class JobRunner:
                     
                 apply_hard_failures = [r for r in results if r.status in HARD_FAIL_STATUSES]
                 if apply_hard_failures:
-                    pre_pull_phase_failed = True
                     pre_pull_report_path = _write_pre_pull_report("apply_failed", plans, results)
                     detail = "; ".join(f"{r.repo}: {r.status} - {r.message}" for r in apply_hard_failures)
                     raise ValueError(f"Pre-pull apply failed: {detail}")

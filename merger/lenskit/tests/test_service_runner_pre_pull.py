@@ -270,7 +270,7 @@ def test_pre_pull_report_written_on_success(mock_job_store, temp_hub):
     job = _make_job(temp_hub, ["repoA", "repoB"], pre_pull=True)
     mock_job_store.get_job.return_value = job
     cms = _patched()
-    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+    with cms["scan"], cms["write"] as write, cms["validate"], \
          cms["plan"] as plan, cms["apply"] as apply, cms["self"]:
         write.return_value = _fake_artifacts()
 
@@ -312,7 +312,7 @@ def test_pre_pull_report_written_on_plan_hard_fail(mock_job_store, temp_hub):
     job = _make_job(temp_hub, ["repoA", "repoB"], pre_pull=True)
     mock_job_store.get_job.return_value = job
     cms = _patched()
-    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+    with cms["scan"] as scan, cms["write"], cms["validate"], \
          cms["plan"] as plan, cms["apply"] as apply, cms["self"]:
         plan.return_value = [
             _plan("repoA", PrePullStatus.PLANNED_FAST_FORWARD, needs_apply=True),
@@ -341,7 +341,7 @@ def test_pre_pull_report_registered_when_scan_fails_after_success(mock_job_store
     job = _make_job(temp_hub, ["repoA"], pre_pull=True)
     mock_job_store.get_job.return_value = job
     cms = _patched()
-    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+    with cms["scan"] as scan, cms["write"], cms["validate"], \
          cms["plan"] as plan, cms["apply"] as apply, cms["self"]:
         plan.return_value = [_plan("repoA", PrePullStatus.PLANNED_FAST_FORWARD, needs_apply=True)]
         apply.return_value = [_result("repoA", PrePullStatus.FAST_FORWARDED, changed=True)]
@@ -366,7 +366,7 @@ def test_pre_pull_report_redacts_credentials(mock_job_store, temp_hub):
     job = _make_job(temp_hub, ["repoA"], pre_pull=True)
     mock_job_store.get_job.return_value = job
     cms = _patched()
-    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+    with cms["scan"], cms["write"] as write, cms["validate"], \
          cms["plan"] as plan, cms["apply"] as apply, cms["self"]:
         write.return_value = _fake_artifacts()
 
@@ -399,7 +399,7 @@ def test_pre_pull_report_skipped_for_plan_only(mock_job_store, temp_hub):
     job = _make_job(temp_hub, ["repoA"], pre_pull=True, plan_only=True)
     mock_job_store.get_job.return_value = job
     cms = _patched()
-    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+    with cms["scan"], cms["write"] as write, cms["validate"], \
          cms["plan"] as plan, cms["apply"] as apply, cms["self"]:
         write.return_value = _fake_artifacts()
 
@@ -418,7 +418,7 @@ def test_pre_pull_report_skipped_for_disabled(mock_job_store, temp_hub):
     job = _make_job(temp_hub, ["repoA"], pre_pull=False)
     mock_job_store.get_job.return_value = job
     cms = _patched()
-    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+    with cms["scan"], cms["write"] as write, cms["validate"], \
          cms["plan"] as plan, cms["apply"] as apply, cms["self"]:
         write.return_value = _fake_artifacts()
 
