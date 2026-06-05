@@ -319,7 +319,11 @@ class JobRunner:
             pre_pull_report_artifact_registered = False
             if effective_pre_pull:
                 log("Pre-pull enabled: planning updates for all repositories (fast-forward only)...")
-                plans = plan_pre_pull_repos(sources)
+                try:
+                    plans = plan_pre_pull_repos(sources)
+                except Exception:
+                    pre_pull_report_path = _write_pre_pull_report("plan_exception", None, None)
+                    raise
 
                 hard_failures = [p for p in plans if p.status in HARD_FAIL_STATUSES]
                 warned = False
@@ -547,7 +551,13 @@ class JobRunner:
 
         except Exception as e:
             # If we failed during pre-pull or later, register a minimal artifact with the report
-            if 'pre_pull_report_path' in locals() and pre_pull_report_path and pre_pull_report_path.exists() and not pre_pull_report_artifact_registered:
+            has_unregistered_pre_pull_report = (
+                'pre_pull_report_path' in locals()
+                and pre_pull_report_path
+                and pre_pull_report_path.exists()
+                and not pre_pull_report_artifact_registered
+            )
+            if has_unregistered_pre_pull_report:
                 try:
                     artifact_id = str(uuid.uuid4())
                     art = Artifact(

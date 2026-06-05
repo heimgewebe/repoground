@@ -430,3 +430,52 @@ def test_pre_pull_report_skipped_for_disabled(mock_job_store, temp_hub):
 
         art = mock_job_store.add_artifact.call_args_list[0][0][0]
         assert "pre_pull_report" not in art.paths
+
+
+def test_pre_pull_report_written_on_plan_exception(mock_job_store, temp_hub):
+    runner = JobRunner(mock_job_store)
+    job = _make_job(temp_hub, ["repoA"], pre_pull=True)
+    mock_job_store.get_job.return_value = job
+    cms = _patched()
+    with cms["scan"], cms["write"], cms["validate"], \
+         cms["plan"] as plan, cms["apply"], cms["self"]:
+
+        plan.side_effect = RuntimeError("unexpected git disaster")
+
+        runner._run_job(job.id)
+
+        assert job.status == "failed"
+        assert "unexpected git disaster" in (job.error or "")
+
+        added_artifacts = mock_job_store.add_artifact.call_args_list
+        assert len(added_artifacts) == 1
+        art = added_artifacts[0][0][0]
+        assert "pre_pull_report" in art.paths
+        report_file = Path(art.merges_dir) / art.paths["pre_pull_report"]
+        assert report_file.exists()
+
+        with open(report_file) as f:
+            report = json.load(f)
+        assert report["phase"] == "plan_exception"
+
+
+def test_pre_pull_report_write_failure_aborts_job(mock_job_store, temp_hub):
+    runner = JobRunner(mock_job_store)
+    job = _make_job(temp_hub, ["repoA"], pre_pull=True)
+    mock_job_store.get_job.return_value = job
+    cms = _patched()
+    with cms["scan"], cms["write"], cms["validate"], \
+         cms["plan"] as plan, cms["apply"] as apply, cms["self"], \
+         patch("json.dump", side_effect=OSError("disk full")):
+
+        plan.return_value = [_plan("repoA", PrePullStatus.PLANNED_FAST_FORWARD, needs_apply=True)]
+        apply.return_value = [_result("repoA", PrePullStatus.FAST_FORWARDED, changed=True)]
+
+        runner._run_job(job.id)
+
+        assert job.status == "failed"
+        assert "failed to write pre_pull_report" in (job.error or "")
+        assert "disk full" in (job.error or "")
+
+        added_artifacts = mock_job_store.add_artifact.call_args_list
+        assert len(added_artifacts) == 0
