@@ -456,7 +456,11 @@ def test_pre_pull_report_written_on_plan_exception(mock_job_store, temp_hub):
 
         with open(report_file) as f:
             report = json.load(f)
+        assert report["schema"] == "lenskit.pre_pull_report.v1"
         assert report["phase"] == "plan_exception"
+        assert report["effective_pre_pull"] is True
+        assert report["repos"][0]["repo"] == "__pre_pull__"
+        assert report["repos"][0]["plan_status"] == "error"
 
 
 def test_pre_pull_report_write_failure_aborts_job(mock_job_store, temp_hub):

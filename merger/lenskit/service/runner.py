@@ -14,6 +14,7 @@ from .repo_sync import (
     apply_pre_pull_plans,
     is_self_repo,
     PrePullStatus,
+    PrePullPlan,
     HARD_FAIL_STATUSES,
     WARN_STATUSES,
     _redact as _redact_git_stderr,
@@ -146,6 +147,10 @@ class JobRunner:
 
         try:
             req = job.request
+            repo_names: list[str] = []
+            merges_dir: Path | None = None
+            pre_pull_report_path: Path | None = None
+            pre_pull_report_artifact_registered = False
 
             # 1. Use resolved Hub from job
             if not job.hub_resolved:
@@ -314,15 +319,22 @@ class JobRunner:
                         break
                         
                 return report_path
-            
-            pre_pull_report_path = None
-            pre_pull_report_artifact_registered = False
             if effective_pre_pull:
                 log("Pre-pull enabled: planning updates for all repositories (fast-forward only)...")
                 try:
                     plans = plan_pre_pull_repos(sources)
-                except Exception:
-                    pre_pull_report_path = _write_pre_pull_report("plan_exception", None, None)
+                except Exception as plan_exc:
+                    plans = [
+                        PrePullPlan(
+                            repo="__pre_pull__",
+                            path=str(hub),
+                            status=PrePullStatus.ERROR,
+                            message=f"pre-pull plan crashed before per-repo results were available: {plan_exc}",
+                            needs_apply=False,
+                            stderr=_redact_git_stderr(str(plan_exc))
+                        )
+                    ]
+                    pre_pull_report_path = _write_pre_pull_report("plan_exception", plans, None)
                     raise
 
                 hard_failures = [p for p in plans if p.status in HARD_FAIL_STATUSES]
@@ -552,8 +564,7 @@ class JobRunner:
         except Exception as e:
             # If we failed during pre-pull or later, register a minimal artifact with the report
             has_unregistered_pre_pull_report = (
-                'pre_pull_report_path' in locals()
-                and pre_pull_report_path
+                pre_pull_report_path is not None
                 and pre_pull_report_path.exists()
                 and not pre_pull_report_artifact_registered
             )
@@ -564,11 +575,11 @@ class JobRunner:
                         id=artifact_id,
                         job_id=job_id,
                         hub=str(hub),
-                        repos=repo_names if 'repo_names' in locals() else [],
+                        repos=repo_names,
                         created_at=datetime.now(timezone.utc).isoformat(),
                         paths={"pre_pull_report": pre_pull_report_path.name},
                         params=req,
-                        merges_dir=str(merges_dir.resolve()) if 'merges_dir' in locals() else ""
+                        merges_dir=str(merges_dir.resolve()) if merges_dir is not None else ""
                     )
                     self.job_store.add_artifact(art)
                     job.artifact_ids.append(artifact_id)
