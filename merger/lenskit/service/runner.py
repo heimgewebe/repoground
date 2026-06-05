@@ -17,6 +17,7 @@ from .repo_sync import (
     SUCCESS_STATUSES,
     HARD_FAIL_STATUSES,
     WARN_STATUSES,
+    _redact as _redact_git_stderr,
 )
 from ..adapters.security import validate_source_dir, get_security_config, SecurityViolationError
 
@@ -219,6 +220,12 @@ class JobRunner:
             # Helper to write report and log digest
             def _write_pre_pull_report(phase: str, plans: list = None, results: list = None) -> Path | None:
                 import json
+
+                def _safe_stderr(value: str | None) -> str | None:
+                    redacted = _redact_git_stderr(value)
+                    if redacted and len(redacted) > 4000:
+                        return redacted[:4000] + " (truncated)"
+                    return redacted
                 summary = {
                     "repos_total": len(sources),
                     "planned": len(plans) if plans else 0,
@@ -242,7 +249,7 @@ class JobRunner:
                         "after_head": p.after_head,
                         "upstream": p.upstream,
                         "message": p.message,
-                        "stderr": p.stderr[:4000] + (" (truncated)" if len(p.stderr) > 4000 else "") if p.stderr else None
+                        "stderr": _safe_stderr(p.stderr)
                     }
                     if p.status in SUCCESS_STATUSES:
                         summary["up_to_date"] += 1
@@ -261,7 +268,7 @@ class JobRunner:
                         rm["upstream"] = r.upstream or rm["upstream"]
                         rm["message"] = r.message or rm["message"]
                         if r.stderr:
-                            rm["stderr"] = r.stderr[:4000] + (" (truncated)" if len(r.stderr) > 4000 else "")
+                            rm["stderr"] = _safe_stderr(r.stderr)
                         
                         # Apply result overrides plan for success stats if plan was PLANNED_FAST_FORWARD
                         if rm["plan_status"] == PrePullStatus.PLANNED_FAST_FORWARD:
@@ -362,7 +369,6 @@ class JobRunner:
                     log("Pre-pull skipped because plan_only=True.")
                 else:
                     log("Pre-pull disabled by request.")
-                pre_pull_report_path = _write_pre_pull_report("skipped")
 
             # 3. Scan Repos
             max_bytes = parse_human_size(req.max_bytes or "0")
