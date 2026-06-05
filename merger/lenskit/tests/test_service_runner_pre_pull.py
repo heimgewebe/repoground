@@ -7,6 +7,7 @@ plan hard-fail aborting before any apply, warn-and-continue, and the self-repo
 restart warning firing only on an actual fast-forward (never auto-restart).
 """
 from __future__ import annotations
+import logging
 
 import tempfile
 import json
@@ -461,7 +462,7 @@ def test_pre_pull_report_skipped_for_disabled(mock_job_store, temp_hub):
         assert "pre_pull_report" not in art.paths
 
 
-def test_pre_pull_report_written_on_plan_exception(mock_job_store, temp_hub):
+def test_pre_pull_report_written_on_plan_exception(mock_job_store, temp_hub, caplog):
     runner = JobRunner(mock_job_store)
     job = _make_job(temp_hub, ["repoA"], pre_pull=True)
     mock_job_store.get_job.return_value = job
@@ -471,12 +472,17 @@ def test_pre_pull_report_written_on_plan_exception(mock_job_store, temp_hub):
 
         plan.side_effect = RuntimeError("https://secret-token@host/repo.git plan boom")
 
-        runner._run_job(job.id)
+        with caplog.at_level(logging.INFO, logger="merger.lenskit.service.runner"):
+            runner._run_job(job.id)
 
         assert job.status == "failed"
         assert "secret-token" not in (job.error or "")
         assert "[REDACTED]" in (job.error or "")
         assert "plan boom" in (job.error or "")
+
+        assert "secret-token" not in caplog.text
+        for line in job.logs:
+            assert "secret-token" not in line
 
         added_artifacts = mock_job_store.add_artifact.call_args_list
         assert len(added_artifacts) == 1

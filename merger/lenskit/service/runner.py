@@ -361,8 +361,9 @@ class JobRunner:
                     with open(report_path, "w", encoding="utf-8") as f:
                         json.dump(report, f, indent=2, ensure_ascii=False, default=str)
                 except Exception as exc:
-                    log(f"ERROR: Failed to write pre_pull_report: {exc}")
-                    raise RuntimeError(f"failed to write pre_pull_report: {exc}") from exc
+                    safe_exc = _safe_text(exc) or "unknown error"
+                    log(f"ERROR: Failed to write pre_pull_report: {safe_exc}")
+                    raise RuntimeError(f"failed to write pre_pull_report: {safe_exc}") from exc
 
                 # Live-Log Digest
                 log(f"Pre-pull report: effective={str(effective_pre_pull).lower()}, repos={summary['repos_total']}, fast_forwarded={summary['fast_forwarded']}, up_to_date={summary['up_to_date']}, warnings={summary['warnings']}, hard_failures={summary['hard_failures']}")
@@ -683,9 +684,10 @@ class JobRunner:
                 already_registered=pre_pull_report_artifact_registered,
             )
 
+            safe_error = _safe_text(e) or "unknown error"
             job.status = "failed"
-            job.error = _safe_text(e) or "unknown error"
+            job.error = safe_error
             job.finished_at = datetime.now(timezone.utc).isoformat()
-            log(f"Error: {e}")
-            logger.exception("Job %s failed", job_id)
+            log(f"Error: {safe_error}")
+            logger.error("Job %s failed: %s", job_id, safe_error)
             self.job_store.update_job(job)
