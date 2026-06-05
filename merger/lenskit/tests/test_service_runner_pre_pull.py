@@ -238,6 +238,10 @@ def test_self_repo_fast_forwarded_emits_restart_warning(mock_job_store, temp_hub
         restart = [w for w in job.warnings if "Restart" in w and "rlens.service" in w]
         assert restart, f"expected restart warning, got {job.warnings}"
         assert "does not reload modules automatically" in restart[0]
+
+        log_lines = [call[0][1] for call in mock_job_store.append_log_line.call_args_list]
+        assert any("Restart rlens.service" in line for line in log_lines)
+
         ossystem.assert_not_called()
         for call in subproc.call_args_list:
             blob = " ".join(str(a) for a in call.args) + " ".join(str(v) for v in call.kwargs.values())
@@ -330,6 +334,31 @@ def test_pre_pull_report_written_on_plan_hard_fail(mock_job_store, temp_hub):
         log_lines = [call[0][1] for call in mock_job_store.append_log_line.call_args_list]
         assert any("Pre-pull report: effective=true" in line and "hard_failures=1" in line for line in log_lines)
         assert any("repoB: untracked_would_be_overwritten" in line and "local untracked path would be overwritten by upstream" in line for line in log_lines)
+
+
+def test_pre_pull_report_registered_when_scan_fails_after_success(mock_job_store, temp_hub):
+    runner = JobRunner(mock_job_store)
+    job = _make_job(temp_hub, ["repoA"], pre_pull=True)
+    mock_job_store.get_job.return_value = job
+    cms = _patched()
+    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+         cms["plan"] as plan, cms["apply"] as apply, cms["self"]:
+        plan.return_value = [_plan("repoA", PrePullStatus.PLANNED_FAST_FORWARD, needs_apply=True)]
+        apply.return_value = [_result("repoA", PrePullStatus.FAST_FORWARDED, changed=True)]
+
+        scan.side_effect = RuntimeError("scan boom")
+
+        runner._run_job(job.id)
+
+        assert job.status == "failed"
+        assert "scan boom" in (job.error or "")
+
+        added_artifacts = mock_job_store.add_artifact.call_args_list
+        assert len(added_artifacts) == 1
+        art = added_artifacts[0][0][0]
+        assert "pre_pull_report" in art.paths
+        report_file = Path(art.merges_dir) / art.paths["pre_pull_report"]
+        assert report_file.exists()
 
 
 def test_pre_pull_report_redacts_credentials(mock_job_store, temp_hub):

@@ -252,11 +252,8 @@ class JobRunner:
                         "stderr": _safe_stderr(p.stderr)
                     }
                     if p.status in SUCCESS_STATUSES:
-                        summary["up_to_date"] += 1
-                    elif p.status in WARN_STATUSES:
-                        summary["warnings"] += 1
-                    elif p.status in HARD_FAIL_STATUSES:
-                        summary["hard_failures"] += 1
+                        # We calculate aggregate metrics after combining plan and apply
+                        pass
 
                 for r in (results or []):
                     if r.repo in repo_map:
@@ -269,19 +266,19 @@ class JobRunner:
                         rm["message"] = r.message or rm["message"]
                         if r.stderr:
                             rm["stderr"] = _safe_stderr(r.stderr)
-                        
-                        # Apply result overrides plan for success stats if plan was PLANNED_FAST_FORWARD
-                        if rm["plan_status"] == PrePullStatus.PLANNED_FAST_FORWARD:
-                            if r.status == PrePullStatus.FAST_FORWARDED:
-                                summary["fast_forwarded"] += 1
-                            elif r.status == PrePullStatus.UP_TO_DATE:
-                                summary["up_to_date"] += 1
-                            elif r.status in WARN_STATUSES:
-                                summary["warnings"] += 1
-                            elif r.status in HARD_FAIL_STATUSES:
-                                summary["hard_failures"] += 1
-                
+
                 repos_list = list(repo_map.values())
+
+                for rm in repos_list:
+                    final_status = rm["apply_status"] or rm["plan_status"]
+                    if final_status == PrePullStatus.FAST_FORWARDED:
+                        summary["fast_forwarded"] += 1
+                    elif final_status == PrePullStatus.UP_TO_DATE:
+                        summary["up_to_date"] += 1
+                    elif final_status in WARN_STATUSES:
+                        summary["warnings"] += 1
+                    elif final_status in HARD_FAIL_STATUSES:
+                        summary["hard_failures"] += 1
                 
                 report = {
                   "schema": "lenskit.pre_pull_report.v1",
@@ -354,6 +351,7 @@ class JobRunner:
                             f"'{result.repo}'. Restart rlens.service after updating lenskit; a "
                             f"running Python service does not reload modules automatically."
                         )
+                        log(restart_warn)
                         job.warnings.append(restart_warn)
                         results_warned = True
 
@@ -530,7 +528,6 @@ class JobRunner:
 
             if pre_pull_report_path and pre_pull_report_path.exists():
                 path_map["pre_pull_report"] = pre_pull_report_path.name
-                pre_pull_report_artifact_registered = True
 
             artifact_id = str(uuid.uuid4())
 
@@ -547,6 +544,8 @@ class JobRunner:
 
             self.job_store.add_artifact(art)
             job.artifact_ids.append(artifact_id)
+            if "pre_pull_report" in path_map:
+                pre_pull_report_artifact_registered = True
 
             job.status = "succeeded"
             job.finished_at = datetime.now(timezone.utc).isoformat()
@@ -554,8 +553,8 @@ class JobRunner:
             self.job_store.update_job(job)
 
         except Exception as e:
-            # If we failed during pre-pull, register a minimal artifact with the report
-            if 'pre_pull_phase_failed' in locals() and pre_pull_phase_failed and 'pre_pull_report_path' in locals() and pre_pull_report_path and pre_pull_report_path.exists() and not pre_pull_report_artifact_registered:
+            # If we failed during pre-pull or later, register a minimal artifact with the report
+            if 'pre_pull_report_path' in locals() and pre_pull_report_path and pre_pull_report_path.exists() and not pre_pull_report_artifact_registered:
                 try:
                     artifact_id = str(uuid.uuid4())
                     art = Artifact(
