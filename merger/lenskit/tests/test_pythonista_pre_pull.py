@@ -89,3 +89,22 @@ def test_headless_pre_pull_and_no_pre_pull_argparse_error(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         repolens.main_cli()
     assert exc.value.code == 2
+
+
+# --- resolve_pre_pull_switch_value helper -----------------------------------
+
+def test_resolve_pre_pull_switch_value_none_returns_true():
+    """Absent switch defaults to True (matches the documented pre_pull default)."""
+    assert repolens.resolve_pre_pull_switch_value(None) is True
+
+
+def test_resolve_pre_pull_switch_value_switch_on():
+    class FakeSwitch:
+        value = True
+    assert repolens.resolve_pre_pull_switch_value(FakeSwitch()) is True
+
+
+def test_resolve_pre_pull_switch_value_switch_off():
+    class FakeSwitch:
+        value = False
+    assert repolens.resolve_pre_pull_switch_value(FakeSwitch()) is False

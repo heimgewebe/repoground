@@ -277,6 +277,15 @@ except ImportError:
         WARN_STATUSES = []
 
 
+def resolve_pre_pull_switch_value(pre_pull_switch) -> bool:
+    """Return the pre-pull boolean from a UI switch, defaulting to True when absent.
+
+    Accepts a Pythonista ``ui.Switch`` object or ``None`` (missing widget).
+    Default-True matches the documented pre_pull default across all surfaces.
+    """
+    return True if pre_pull_switch is None else bool(pre_pull_switch.value)
+
+
 def run_pre_pull_two_phase(sources, log=print, warn=None):
     """Two-phase fast-forward-only pre-pull across all sources (shared by UI + headless).
 
@@ -3099,7 +3108,7 @@ class MergerUI(object):
         self._pending_plan_only = self.plan_only_switch.value
         # Use getattr for code_only just in case (legacy robustness)
         self._pending_code_only = bool(getattr(self, "code_only_switch", None) and self.code_only_switch.value)
-        self._pending_pre_pull = bool(getattr(self, "pre_pull_switch", None) and self.pre_pull_switch.value)
+        self._pending_pre_pull = resolve_pre_pull_switch_value(getattr(self, "pre_pull_switch", None))
 
         try:
             import ui as _ui

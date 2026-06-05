@@ -312,12 +312,14 @@ This guarantees that a plan-phase hard failure on one repo cannot leave another 
 | `up_to_date`, `fast_forwarded` | success | Scan proceeds |
 | `planned_fast_forward` | plan-only intermediate | Becomes `fast_forwarded` in apply (never a final status) |
 | `skipped_not_git`, `skipped_no_upstream`, `local_ahead` | warning | Logged + added to `job.warnings`; scan proceeds |
-| `dirty`, `diverged`, `fetch_failed`, `merge_failed`, `head_changed`, `error` | hard fail | Job fails before any scan; on a multi-repo plan failure, no repo HEADs or working trees were fast-forwarded |
+| `dirty`, `diverged`, `fetch_failed`, `merge_failed`, `head_changed`, `untracked_would_be_overwritten`, `error` | hard fail | Job fails before any scan; on a multi-repo plan failure, no repo HEADs or working trees were fast-forwarded |
 
 Notes:
-- A dirty **tracked** working tree blocks; **untracked** files do not block and
-  are preserved across a fast-forward.
-- **Job reuse:** `pre_pull` participates in the job content hash. A succeeded job
+- A dirty **tracked** working tree blocks; harmless **untracked** files do not block
+  and are preserved across a fast-forward. Untracked files that share a path with
+  files the upstream fast-forward would write are detected in the plan phase and
+  produce `untracked_would_be_overwritten` (hard fail), preventing any apply.
+- **Job reuse:** the effective pre-pull (`pre_pull and not plan_only`) participates in the job content hash. A succeeded job
   is **not** reused when the new request has an effective pre-pull
   (`pre_pull=true and not plan_only`) — the user explicitly wants a fresh
   repo-sync check. A `pre_pull=false` (or `plan_only`) request may reuse a

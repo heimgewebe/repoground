@@ -20,6 +20,7 @@ from merger.lenskit.service.repo_sync import (
     plan_pre_pull_repo,
     apply_pre_pull_plan,
     plan_pre_pull_repos,
+    HARD_FAIL_STATUSES,
 )
 
 
@@ -375,6 +376,98 @@ def test_untracked_files_do_not_block_plan_or_apply(repos):
     result = apply_pre_pull_plan(plan)
     assert result.status == PrePullStatus.FAST_FORWARDED
     assert (local / "scratch.tmp").read_text(encoding="utf-8") == "untracked\n"
+
+
+# --- credential redaction --------------------------------------------------
+
+def test_redact_user_colon_token_at_host():
+    url = "https://user:secret@example.com/repo.git"
+    assert repo_sync._redact(url) == "https://[REDACTED]@example.com/repo.git"
+
+
+def test_redact_token_only_at_host():
+    url = "https://secret@example.com/repo.git"
+    assert repo_sync._redact(url) == "https://[REDACTED]@example.com/repo.git"
+
+
+def test_redact_no_credential_unchanged():
+    url = "https://example.com/repo.git"
+    assert repo_sync._redact(url) == url
+
+
+def test_redact_none_passthrough():
+    assert repo_sync._redact(None) is None
+
+
+# --- untracked-overwrite detection -----------------------------------------
+
+def test_plan_hard_fails_when_untracked_would_be_overwritten(repos):
+    """Plan phase detects collision: untracked file shares path with upstream addition."""
+    source, local = repos["source"], repos["local"]
+    before = _head(local)
+
+    # Commit a NEW file in source so it is not yet in local.
+    _commit_file(source, "new_remote.txt", "upstream content\n", "add new_remote.txt")
+    _git("push", "origin", "main", cwd=source)
+
+    # Place an untracked file at the same path in local before planning.
+    (local / "new_remote.txt").write_text("local untracked\n", encoding="utf-8")
+
+    plan = plan_pre_pull_repo(local)
+
+    assert plan.status == PrePullStatus.UNTRACKED_WOULD_BE_OVERWRITTEN
+    assert plan.status in HARD_FAIL_STATUSES
+    assert plan.needs_apply is False
+    assert "new_remote.txt" in plan.message
+    assert "refusing pre-pull" in plan.message
+    # Working tree must be untouched.
+    assert _head(local) == before
+    assert (local / "new_remote.txt").read_text(encoding="utf-8") == "local untracked\n"
+
+
+def test_untracked_non_colliding_still_allowed(repos):
+    """Harmless untracked files with paths NOT in upstream remain non-blocking."""
+    source, local = repos["source"], repos["local"]
+
+    _commit_file(source, "new_remote.txt", "upstream content\n", "add new_remote.txt")
+    _git("push", "origin", "main", cwd=source)
+
+    # Different name — no collision.
+    (local / "scratch.tmp").write_text("harmless\n", encoding="utf-8")
+
+    plan = plan_pre_pull_repo(local)
+
+    assert plan.status == PrePullStatus.PLANNED_FAST_FORWARD
+    assert plan.needs_apply is True
+
+
+def test_batch_plan_hard_fails_on_untracked_overwrite_prevents_other_apply(repos, tmp_path: Path):
+    """Multi-repo batch: untracked-overwrite hard-fail in one repo leaves the other unapplied."""
+    source = repos["source"]
+    remote = repos["remote"]
+    ff_repo = repos["local"]  # will be strictly behind
+
+    # A second clone where an untracked file would collide.
+    collision_repo = tmp_path / "collision"
+    _git("clone", "-b", "main", str(remote), str(collision_repo), cwd=tmp_path)
+
+    # Commit new file to source, push.
+    _commit_file(source, "new_remote.txt", "upstream\n", "add new_remote.txt")
+    _git("push", "origin", "main", cwd=source)
+    ff_before = _head(ff_repo)
+
+    # Place untracked collision file only in collision_repo.
+    (collision_repo / "new_remote.txt").write_text("local untracked\n", encoding="utf-8")
+
+    plans = plan_pre_pull_repos([ff_repo, collision_repo])
+    statuses = {p.repo: p.status for p in plans}
+
+    assert statuses[ff_repo.name] == PrePullStatus.PLANNED_FAST_FORWARD
+    assert statuses[collision_repo.name] == PrePullStatus.UNTRACKED_WOULD_BE_OVERWRITTEN
+    # Plan phase is side-effect-free: ff_repo was not fast-forwarded.
+    assert _head(ff_repo) == ff_before
+    # Untracked file in collision_repo is preserved.
+    assert (collision_repo / "new_remote.txt").read_text(encoding="utf-8") == "local untracked\n"
 
 
 def test_no_forbidden_git_operations(repos, monkeypatch: pytest.MonkeyPatch):

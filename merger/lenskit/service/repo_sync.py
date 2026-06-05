@@ -59,6 +59,11 @@ class PrePullStatus:
     # HEAD moved between plan and apply (a concurrent local commit/checkout):
     # the planned fast-forward is no longer valid, so we refuse rather than guess.
     HEAD_CHANGED = "head_changed"
+    # Untracked files in the working tree share a path with files the upstream
+    # fast-forward would write. git merge --ff-only would abort with an error,
+    # but only in the apply phase — detecting this in the plan phase prevents
+    # any repo from being partially fast-forwarded in a multi-repo batch.
+    UNTRACKED_WOULD_BE_OVERWRITTEN = "untracked_would_be_overwritten"
     ERROR = "error"
 
 
@@ -72,6 +77,7 @@ HARD_FAIL_STATUSES = frozenset(
         PrePullStatus.FETCH_FAILED,
         PrePullStatus.MERGE_FAILED,
         PrePullStatus.HEAD_CHANGED,
+        PrePullStatus.UNTRACKED_WOULD_BE_OVERWRITTEN,
         PrePullStatus.ERROR,
     }
 )
@@ -148,8 +154,9 @@ class PrePullPlan:
     needs_apply: bool = False
 
 
-# Mask credentials that git can echo in remote URLs (e.g. https://user:token@host).
-_CREDENTIAL_RE = re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@")
+# Mask credentials that git can echo in remote URLs.
+# Handles both https://user:token@host and https://token@host forms.
+_CREDENTIAL_RE = re.compile(r"(https?://)(?:[^/\s:@]+:)?[^/\s@]+@")
 
 
 def _redact(text: Optional[str]) -> Optional[str]:
@@ -363,8 +370,37 @@ def plan_pre_pull_repo(repo_path: Path, timeout_seconds: int = DEFAULT_TIMEOUT_S
         )
 
     # head_is_ancestor and not upstream_is_ancestor → strictly behind → a clean
-    # fast-forward is possible. Plan it; the apply phase performs the merge after
-    # re-verifying HEAD. No working-tree mutation happens here.
+    # fast-forward is *potentially* possible. Before committing to the plan,
+    # check whether any untracked file in the working tree would be overwritten
+    # by the fast-forward. git merge --ff-only would reject these in the apply
+    # phase, but catching them here prevents any other repo from being applied
+    # first in a multi-repo batch.
+    upstream_files_proc = _run_git(
+        ["diff", "--name-only", f"HEAD..{upstream}"],
+        repo_path=repo_path,
+        timeout=timeout_seconds,
+    )
+    untracked_proc = _run_git(
+        ["ls-files", "--others", "--exclude-standard"],
+        repo_path=repo_path,
+        timeout=timeout_seconds,
+    )
+    if upstream_files_proc.returncode == 0 and untracked_proc.returncode == 0:
+        upstream_files = set(upstream_files_proc.stdout.splitlines())
+        untracked_files = set(untracked_proc.stdout.splitlines())
+        collision = sorted(upstream_files & untracked_files)
+        if collision:
+            shown = collision[:10]
+            suffix = f" (and {len(collision) - 10} more)" if len(collision) > 10 else ""
+            paths_str = ", ".join(shown) + suffix
+            return make(
+                PrePullStatus.UNTRACKED_WOULD_BE_OVERWRITTEN,
+                f"{repo_name} has untracked files that would be overwritten by fast-forward: "
+                f"{paths_str}; refusing pre-pull",
+                before_head=before_head,
+                upstream=upstream,
+            )
+
     return make(
         PrePullStatus.PLANNED_FAST_FORWARD,
         f"{repo_name} can fast-forward to {upstream}",
