@@ -1969,7 +1969,7 @@ async function loadAtlasArtifacts() {
                     }));
                 }
 
-                if (art.paths.pre_pull_report) {
+                if (art?.paths?.pre_pull_report) {
                     dlDiv.appendChild(createArtifactDownloadButton({
                         url: `${API_BASE}/atlas/${art.id}/download?key=pre_pull_report`,
                         filename: art.paths.pre_pull_report,

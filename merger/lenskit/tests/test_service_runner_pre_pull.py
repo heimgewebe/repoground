@@ -378,6 +378,7 @@ def test_pre_pull_report_registered_when_scan_fails_after_success(mock_job_store
         added_artifacts = mock_job_store.add_artifact.call_args_list
         assert len(added_artifacts) == 1
         art = added_artifacts[0][0][0]
+        assert art.repos == ["repoA"]
         assert "pre_pull_report" in art.paths
         report_file = Path(art.merges_dir) / art.paths["pre_pull_report"]
         assert report_file.exists()

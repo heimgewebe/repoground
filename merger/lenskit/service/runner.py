@@ -182,6 +182,8 @@ class JobRunner:
             if not sources:
                 raise ValueError("No valid repository sources found.")
 
+            repo_names = [Path(src).name for src in sources]
+
             # 2a. Resolve Merges Dir early (for pre-pull report)
             if req.merges_dir:
                 p = Path(req.merges_dir)
