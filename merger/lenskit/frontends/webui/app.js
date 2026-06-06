@@ -605,6 +605,9 @@ function saveConfig() {
         planOnly: document.getElementById('planOnly').checked,
         codeOnly: document.getElementById('codeOnly').checked,
         prePull: document.getElementById('prePull') ? document.getElementById('prePull').checked : true,
+        sourceMode: document.getElementById('sourceMode') ? document.getElementById('sourceMode').value : 'local_ff',
+        remoteRefPolicy: document.getElementById('remoteRefPolicy') ? document.getElementById('remoteRefPolicy').value : 'upstream',
+        remoteRef: document.getElementById('remoteRef') ? document.getElementById('remoteRef').value : '',
         metaDensity: document.getElementById('metaDensity').value,
         pathFilter: document.getElementById('pathFilter').value,
         extFilter: document.getElementById('extFilter').value,
@@ -633,6 +636,9 @@ function getEffectiveMergeFormDefaults() {
         planOnly: false,
         codeOnly: false,
         prePull: true,
+        sourceMode: 'local_ff',
+        remoteRefPolicy: 'upstream',
+        remoteRef: '',
         extras: [...DEFAULT_EXTRAS]
     };
 
@@ -652,6 +658,11 @@ function getEffectiveMergeFormDefaults() {
                 planOnly: saved.planOnly ?? factoryDefaults.planOnly,
                 codeOnly: saved.codeOnly ?? factoryDefaults.codeOnly,
                 prePull: saved.prePull ?? factoryDefaults.prePull,
+                // Migrate legacy prePull-only configs to a source mode when one
+                // was not stored: prePull=false => local_current, else local_ff.
+                sourceMode: saved.sourceMode ?? ((saved.prePull === false) ? 'local_current' : factoryDefaults.sourceMode),
+                remoteRefPolicy: saved.remoteRefPolicy ?? factoryDefaults.remoteRefPolicy,
+                remoteRef: saved.remoteRef ?? factoryDefaults.remoteRef,
                 extras: Array.isArray(saved.extras) ? saved.extras : factoryDefaults.extras
             };
         }
@@ -703,12 +714,20 @@ async function resetMergeFormToDefaultsAfterSuccessfulSubmit() {
     if (codeOnlyEl) codeOnlyEl.checked = defaults.codeOnly;
     if (prePullEl) prePullEl.checked = defaults.prePull;
 
+    const sourceModeEl = document.getElementById('sourceMode');
+    if (sourceModeEl) sourceModeEl.value = defaults.sourceMode;
+    const remoteRefPolicyEl = document.getElementById('remoteRefPolicy');
+    if (remoteRefPolicyEl) remoteRefPolicyEl.value = defaults.remoteRefPolicy;
+    const remoteRefEl = document.getElementById('remoteRef');
+    if (remoteRefEl) remoteRefEl.value = defaults.remoteRef;
+
     const defaultExtras = new Set(defaults.extras);
     document.querySelectorAll('input[name="extras"]').forEach(cb => {
         cb.checked = defaultExtras.has(cb.value);
     });
 
     syncPrePullWithPlanOnly();
+    syncSourceModeFields();
 
     showNotification('Job submitted; form reset to defaults', 'info');
 }
@@ -731,6 +750,16 @@ function syncPrePullWithPlanOnly() {
     if (note && note.classList) note.classList.toggle('hidden', !planOnly);
 }
 
+// Show the remote-snapshot ref fields only when the Quelle dropdown selects it.
+// remote_snapshot supports a plan-only dry-plan, so plan-only does not disable it.
+function syncSourceModeFields() {
+    const sourceModeEl = document.getElementById('sourceMode');
+    const fields = document.getElementById('remoteSnapshotFields');
+    if (!sourceModeEl || !fields || !fields.classList) return;
+    const isRemote = sourceModeEl.value === 'remote_snapshot';
+    fields.classList.toggle('hidden', !isRemote);
+}
+
 function restoreConfig() {
     try {
         const config = JSON.parse(localStorage.getItem(CONFIG_KEY));
@@ -744,6 +773,20 @@ function restoreConfig() {
             if (config.prePull !== undefined) {
                 const prePullEl = document.getElementById('prePull');
                 if (prePullEl) prePullEl.checked = config.prePull;
+            }
+            // Source mode: explicit when stored, otherwise migrate from legacy prePull.
+            const sourceModeEl = document.getElementById('sourceMode');
+            if (sourceModeEl) {
+                if (config.sourceMode) sourceModeEl.value = config.sourceMode;
+                else if (config.prePull === false) sourceModeEl.value = 'local_current';
+            }
+            if (config.remoteRefPolicy !== undefined) {
+                const el = document.getElementById('remoteRefPolicy');
+                if (el) el.value = config.remoteRefPolicy;
+            }
+            if (config.remoteRef !== undefined) {
+                const el = document.getElementById('remoteRef');
+                if (el) el.value = config.remoteRef;
             }
             if (config.metaDensity !== undefined) document.getElementById('metaDensity').value = config.metaDensity;
             if (config.pathFilter !== undefined) document.getElementById('pathFilter').value = config.pathFilter;
@@ -1162,8 +1205,22 @@ async function startJob(e) {
     const planOnlyChecked = document.getElementById('planOnly').checked;
     const prePullEl = document.getElementById('prePull');
     const rawPrePull = prePullEl ? prePullEl.checked : true;
-    // effective pre_pull: plan-only never mutates local repos, so it forces false.
-    const effectivePrePull = planOnlyChecked ? false : rawPrePull;
+
+    // rLens Source Acquisition: the Quelle dropdown is the leading semantics.
+    // When it is absent/empty (legacy markup) we fall back to the pre-pull
+    // checkbox so older configs keep working.
+    const sourceModeEl = document.getElementById('sourceMode');
+    const sourceMode = (sourceModeEl && sourceModeEl.value) ? sourceModeEl.value : null;
+
+    // Derive pre_pull from the source mode for legacy compatibility:
+    //   local_ff => true, local_current/remote_snapshot => false.
+    let derivedPrePull;
+    if (sourceMode === 'local_ff') derivedPrePull = true;
+    else if (sourceMode === 'local_current' || sourceMode === 'remote_snapshot') derivedPrePull = false;
+    else derivedPrePull = rawPrePull;
+    // plan-only never mutates local repos, so it forces pre_pull false.
+    const effectivePrePull = planOnlyChecked ? false : derivedPrePull;
+
     const commonPayload = {
         hub: document.getElementById('hubPath').value,
         merges_dir: document.getElementById('mergesPath').value || null,
@@ -1183,6 +1240,18 @@ async function startJob(e) {
         // combined payloads via ...commonPayload.
         pre_pull: effectivePrePull
     };
+
+    // Explicit source mode (and remote_snapshot ref selection) when chosen.
+    if (sourceMode) {
+        commonPayload.repo_source_mode = sourceMode;
+        if (sourceMode === 'remote_snapshot') {
+            const policyEl = document.getElementById('remoteRefPolicy');
+            commonPayload.remote_ref_policy = (policyEl && policyEl.value) ? policyEl.value : 'upstream';
+            const refEl = document.getElementById('remoteRef');
+            const refVal = refEl && refEl.value ? refEl.value.trim() : '';
+            if (refVal) commonPayload.remote_ref = refVal;
+        }
+    }
 
     if (!planOnlyChecked) {
         commonPayload.force_new = true;
@@ -1372,6 +1441,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     const planOnlyToggleEl = document.getElementById('planOnly');
     if (planOnlyToggleEl) planOnlyToggleEl.addEventListener('change', syncPrePullWithPlanOnly);
     syncPrePullWithPlanOnly();
+
+    // Reveal the remote-snapshot ref fields when the Quelle dropdown selects it.
+    const sourceModeToggleEl = document.getElementById('sourceMode');
+    if (sourceModeToggleEl) sourceModeToggleEl.addEventListener('change', syncSourceModeFields);
+    syncSourceModeFields();
 
     // Optional: accept token from URL once, then scrub it from the address bar.
     // Enables local wrapper to open UI already authenticated.
@@ -1975,6 +2049,16 @@ async function loadAtlasArtifacts() {
                         filename: art.paths.pre_pull_report,
                         label: 'Pre-Pull',
                         title: 'Pre-Pull Diagnostic Report',
+                        className: 'bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-cyan-400'
+                    }));
+                }
+
+                if (art?.paths?.source_acquisition_report) {
+                    dlDiv.appendChild(createArtifactDownloadButton({
+                        url: `${API_BASE}/atlas/${art.id}/download?key=source_acquisition_report`,
+                        filename: art.paths.source_acquisition_report,
+                        label: 'Source',
+                        title: 'Source Acquisition Report',
                         className: 'bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-cyan-400'
                     }));
                 }

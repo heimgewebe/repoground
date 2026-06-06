@@ -20,6 +20,7 @@ from .models import JobRequest, Job, Artifact, AtlasRequest, AtlasArtifact, Atla
 from .jobstore import JobStore
 from .query_artifact_store import QueryArtifactStore
 from .runner import JobRunner
+from .source_acquisition import resolve_effective_source_mode
 from .logging_provider import LogProvider, FileLogProvider
 from .auth import verify_token
 from ..adapters.security import (
@@ -948,11 +949,20 @@ def create_job(request: JobRequest):
         # a plan-only job never mutates repos, so its cached result is still valid;
         # but a real pre_pull=True request wants a fresh repo-sync check the cached
         # result cannot provide, so we run a new job. (force_new bypasses reuse.)
+        # A succeeded remote_snapshot job is likewise never reused: moving ref
+        # names are not content-stable, so the cached result may no longer match
+        # the current remote. (See rlens-source-acquisition-blueprint.md.)
         if existing.status == "succeeded":
             effective_pre_pull = request.pre_pull and not request.plan_only
+            effective_remote_snapshot = resolve_effective_source_mode(request) == "remote_snapshot"
             if effective_pre_pull:
                 logger.info(
                     "Not reusing succeeded job %s because pre_pull=True requires a fresh repo-sync check.",
+                    existing.id,
+                )
+            elif effective_remote_snapshot:
+                logger.info(
+                    "Not reusing succeeded job %s because remote_snapshot requires fresh remote resolution.",
                     existing.id,
                 )
             else:

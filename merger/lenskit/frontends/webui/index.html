@@ -150,12 +150,30 @@
                 </div>
 
                 <div class="border-t border-gray-700 pt-3">
-                    <label class="flex items-center space-x-2 cursor-pointer">
-                        <input type="checkbox" id="prePull" checked class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
-                        <span class="text-sm">Repo vor Merge aktualisieren</span>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Quelle</label>
+                    <select id="sourceMode" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                        <option value="local_current">Lokaler Stand</option>
+                        <option value="local_ff" selected>Lokaler Fast-Forward</option>
+                        <option value="remote_snapshot">Remote-Snapshot</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Lokaler Fast-Forward = Pre-Pull (fast-forward-only). Remote-Snapshot scannt einen isolierten Remote-Stand ohne lokale Git-Änderung.</p>
+
+                    <div id="remoteSnapshotFields" class="mt-2 hidden grid grid-cols-2 gap-2">
+                        <select id="remoteRefPolicy" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                            <option value="upstream">Upstream</option>
+                            <option value="same_branch">Gleicher Branch</option>
+                            <option value="default_branch">Default Branch</option>
+                        </select>
+                        <input type="text" id="remoteRef" placeholder="remote_ref (optional, z.B. origin/main)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                    </div>
+
+                    <!-- Legacy pre-pull checkbox: hidden, kept for backward compat / migration.
+                         The Quelle dropdown is the leading semantics; this checkbox is only a
+                         derived mirror for the local fast-forward mode. -->
+                    <label class="hidden">
+                        <input type="checkbox" id="prePull" checked>
                     </label>
-                    <p class="text-xs text-gray-500 mt-1 ml-6">Fast-forward-only; blockiert bei lokalen Änderungen oder divergiertem Branch.</p>
-                    <p id="prePullPlanOnlyNote" class="text-xs text-yellow-500 mt-1 ml-6 hidden">Plan-only überspringt Pre-Pull.</p>
+                    <p id="prePullPlanOnlyNote" class="text-xs text-yellow-500 mt-1 hidden">Plan-only überspringt Pre-Pull.</p>
                 </div>
 
                 <div class="flex-1">

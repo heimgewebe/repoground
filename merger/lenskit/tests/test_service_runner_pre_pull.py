@@ -20,6 +20,7 @@ from merger.lenskit.service.runner import JobRunner, ARTIFACT_PATH_FIELDS
 from merger.lenskit.service.jobstore import JobStore
 from merger.lenskit.service.models import JobRequest, Job
 from merger.lenskit.service.repo_sync import PrePullPlan, PrePullResult, PrePullStatus
+from merger.lenskit.service.source_acquisition import RemoteSnapshotResult, RemoteRefResolution, SourceStatus
 
 
 def _fake_artifacts() -> MagicMock:
@@ -81,8 +82,132 @@ def _patched(*, plan=None, apply=None, self_repo=False):
         "plan": patch("merger.lenskit.service.runner.plan_pre_pull_repos"),
         "apply": patch("merger.lenskit.service.runner.apply_pre_pull_plans"),
         "self": patch("merger.lenskit.service.runner.is_self_repo", return_value=self_repo),
+        "materialize": patch("merger.lenskit.service.runner.materialize_remote_snapshot"),
+        "resolve_ref": patch("merger.lenskit.service.runner.resolve_remote_ref"),
     }
     return cms
+
+
+def _snap_result(repo, snapshot_path, *, status=SourceStatus.SNAPSHOT_CREATED, warnings=None):
+    return RemoteSnapshotResult(
+        repo=repo,
+        original_path=str(Path("/hub") / repo),
+        snapshot_path=snapshot_path,
+        source_mode="remote_snapshot",
+        status=status,
+        remote_ref_policy="default_branch",
+        requested_remote_ref=None,
+        resolved_ref="origin/main",
+        resolved_commit="deadbeef" * 5,
+        remote_url_redacted="https://[REDACTED]@host/repo.git",
+        local_repo_mutated=False,
+        message="ok",
+        warnings=warnings or [],
+    )
+
+
+# ---------------------------------------------------------------------------
+# remote_snapshot source acquisition
+# ---------------------------------------------------------------------------
+
+
+def test_remote_snapshot_scans_snapshot_and_skips_pre_pull(mock_job_store, temp_hub):
+    runner = JobRunner(mock_job_store)
+    snap = temp_hub / "snap-repoA"
+    snap.mkdir()
+    job = _make_job(temp_hub, ["repoA"], repo_source_mode="remote_snapshot", pre_pull=False,
+                    remote_ref_policy="default_branch")
+    mock_job_store.get_job.return_value = job
+    cms = _patched()
+    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+         cms["plan"] as plan, cms["apply"] as apply, cms["self"], \
+         cms["materialize"] as materialize, cms["resolve_ref"], \
+         patch("merger.lenskit.service.runner.get_security_config") as mock_sec:
+        mock_sec.return_value.validate_path.side_effect = lambda x: x
+        write.return_value = _fake_artifacts()
+        materialize.return_value = _snap_result("repoA", str(snap))
+
+        runner._run_job(job.id)
+
+        assert job.status == "succeeded"
+        # No pre-pull plan/apply for remote_snapshot.
+        plan.assert_not_called()
+        apply.assert_not_called()
+        materialize.assert_called_once()
+        # Scan runs against the materialized snapshot path, not the local repo.
+        assert scan.call_count == 1
+        assert str(scan.call_args[0][0]) == str(snap)
+
+        # Source acquisition report registered with original-path provenance.
+        art = mock_job_store.add_artifact.call_args_list[0][0][0]
+        assert "source_acquisition_report" in art.paths
+        report_file = Path(art.merges_dir) / art.paths["source_acquisition_report"]
+        report = json.loads(report_file.read_text())
+        assert report["schema"] == "lenskit.source_acquisition_report.v1"
+        assert report["mode"] == "remote_snapshot"
+        # Provenance carried through verbatim, original_path distinct from scan_path.
+        assert report["repos"][0]["original_path"] == str(Path("/hub") / "repoA")
+        assert report["repos"][0]["scan_path"] == str(snap)
+        assert report["repos"][0]["original_path"] != report["repos"][0]["scan_path"]
+        assert report["repos"][0]["local_repo_mutated"] is False
+
+
+def test_remote_snapshot_plan_only_dry_plan(mock_job_store, temp_hub):
+    runner = JobRunner(mock_job_store)
+    job = _make_job(temp_hub, ["repoA"], repo_source_mode="remote_snapshot", pre_pull=False,
+                    plan_only=True, remote_ref_policy="default_branch")
+    mock_job_store.get_job.return_value = job
+    cms = _patched()
+    with cms["scan"] as scan, cms["write"] as write, cms["validate"], \
+         cms["plan"] as plan, cms["apply"] as apply, cms["self"], \
+         cms["materialize"] as materialize, cms["resolve_ref"] as resolve_ref, \
+         patch("merger.lenskit.service.runner.get_security_config") as mock_sec:
+        mock_sec.return_value.validate_path.side_effect = lambda x: x
+        resolve_ref.return_value = RemoteRefResolution(
+            repo="repoA", repo_path=str(temp_hub / "repoA"), policy="default_branch",
+            requested_remote_ref=None, resolved_ref="origin/main", resolved_commit="cafe" * 10,
+            status=SourceStatus.RESOLVED, message="ok",
+            remote_url_redacted="https://[REDACTED]@host/repo.git",
+        )
+
+        runner._run_job(job.id)
+
+        assert job.status == "succeeded"
+        # Dry-plan: ref resolution only, no materialization, no scan, no bundle write.
+        resolve_ref.assert_called_once()
+        materialize.assert_not_called()
+        scan.assert_not_called()
+        write.assert_not_called()
+        plan.assert_not_called()
+        apply.assert_not_called()
+
+        art = mock_job_store.add_artifact.call_args_list[0][0][0]
+        assert "source_acquisition_report" in art.paths
+        report = json.loads((Path(art.merges_dir) / art.paths["source_acquisition_report"]).read_text())
+        assert report["repos"][0]["status"] == SourceStatus.PLANNED
+        assert report["repos"][0]["resolved_ref"] == "origin/main"
+
+
+def test_remote_snapshot_failure_fails_job_and_writes_report(mock_job_store, temp_hub):
+    runner = JobRunner(mock_job_store)
+    job = _make_job(temp_hub, ["repoA"], repo_source_mode="remote_snapshot", pre_pull=False,
+                    remote_ref_policy="upstream")
+    mock_job_store.get_job.return_value = job
+    cms = _patched()
+    with cms["scan"] as scan, cms["write"], cms["validate"], \
+         cms["plan"], cms["apply"], cms["self"], \
+         cms["materialize"] as materialize, cms["resolve_ref"], \
+         patch("merger.lenskit.service.runner.get_security_config") as mock_sec:
+        mock_sec.return_value.validate_path.side_effect = lambda x: x
+        materialize.return_value = _snap_result("repoA", None, status=SourceStatus.MISSING_REF)
+
+        runner._run_job(job.id)
+
+        assert job.status == "failed"
+        assert "Source acquisition failed" in (job.error or "")
+        scan.assert_not_called()
+        art = mock_job_store.add_artifact.call_args_list[0][0][0]
+        assert "source_acquisition_report" in art.paths
 
 
 def test_plan_only_skips_pre_pull_even_if_requested(mock_job_store, temp_hub):

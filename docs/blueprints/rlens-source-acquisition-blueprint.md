@@ -1,0 +1,143 @@
+# rLens Source Acquisition v1 — Blueprint
+
+Status: implemented (`task/rlens-source-acquisition-v1`).
+Schema: `lenskit.source_acquisition_report.v1`.
+
+## Problem
+
+A local repo can sit on a branch that has no upstream tracking branch. Concrete
+case: `weltgewebe` checked out on `pr-1164-api-strict` while `origin/main`
+exists but the branch has no `@{u}`. The existing bounded pre-pull then correctly
+reports `skipped_no_upstream` — `git rev-parse @{u}` fails, so there is nothing to
+fast-forward.
+
+Operators want rLens to scan *the remote default branch* in that situation,
+**without** mutating the local checkout.
+
+## Why "git pull always" is wrong
+
+Forcing an upstream, switching branches, resetting, or running `git pull` to
+"make pre-pull work" would silently discard or rewrite local work, move the
+operator's HEAD, or fetch+merge in a single non-inspectable step. The pre-pull
+boundary (see `docs/service-api.md`, *Mutation Boundary Classification*) is
+deliberately fast-forward-only and never switches branches. The fix is not to
+loosen that boundary; it is to add an explicitly *non-mutating* way to scan
+remote content.
+
+## Source modes
+
+`JobRequest.repo_source_mode` selects how the on-disk content to scan is
+acquired:
+
+| Mode              | Local git mutation         | Scans                         |
+| ----------------- | -------------------------- | ----------------------------- |
+| `local_current`   | none                       | current local working tree    |
+| `local_ff`        | fast-forward-only pre-pull | current local working tree    |
+| `remote_snapshot` | none                       | isolated remote materialization |
+
+### Backwards compatibility
+
+`repo_source_mode is None` (the default) preserves existing behaviour, derived
+from the legacy `pre_pull`/`plan_only` flags:
+
+* `pre_pull=True and not plan_only` → effective mode `local_ff`.
+* `pre_pull=False` or `plan_only=True` → effective mode `local_current`.
+
+When `repo_source_mode` is set explicitly it wins.
+
+## Security invariants
+
+`remote_snapshot`:
+
+* never mutates local hub repos (no fetch into them, no merge, no checkout);
+* never sets an upstream;
+* never switches branches;
+* uses a **job-bound** cache/temp directory under the validated `merges_dir`:
+  `<merges_dir>/.rlens-source-snapshots/<job_id>/<repo>/`;
+* works even when the local branch has no upstream.
+
+`local_ff` keeps the existing bounded pre-pull semantics unchanged.
+
+All surfaces enforce:
+
+* no `shell=True`; every git command is an explicit argument list;
+* `GIT_TERMINAL_PROMPT=0` for all git calls;
+* git subprocess output decoded `encoding="utf-8", errors="surrogateescape"`;
+* remote URLs, stderr, exceptions and reports are credential-redacted;
+* snapshot extraction is hardened against path traversal and escaping
+  symlink/hardlink members.
+
+## Ref resolution
+
+Precedence inside `resolve_remote_ref`:
+
+1. Explicit `remote_ref` wins. Accepts `origin/main`, `refs/heads/main`,
+   `refs/remotes/origin/main`, or a commit SHA.
+2. `remote_ref_policy="upstream"` uses the configured `@{u}` of the local repo;
+   missing upstream → `missing_ref` (no guessing).
+3. `remote_ref_policy="same_branch"` uses `refs/remotes/origin/<current_branch>`;
+   detached/empty branch → `missing_ref`.
+4. `remote_ref_policy="default_branch"` prefers `git ls-remote --symref <url> HEAD`
+   (e.g. `refs/heads/main`); fallback `refs/remotes/origin/main` if present;
+   otherwise `missing_ref`.
+
+This is what solves the concrete case: `remote_snapshot + default_branch` scans
+the remote default branch regardless of the local branch's upstream state.
+
+## Provenance model
+
+The `source_acquisition_report` distinguishes, per repo, with no silent loss:
+
+* `original_path` — the local hub repo path.
+* `scan_path` — the snapshot path (remote_snapshot) or the local repo path.
+* `source_mode` — `local_current` / `local_ff` / `remote_snapshot`.
+* `resolved_ref` — the remote ref that was resolved.
+* `resolved_commit` — the commit SHA that was materialized.
+* `local_repo_mutated` — boolean; always `false` for remote_snapshot.
+
+## Materialization
+
+For `remote_snapshot`:
+
+1. Read `remote.origin.url` from the local repo (missing → `missing_remote`).
+2. Resolve the ref (above).
+3. Build a **bare** cache git dir under the job-bound snapshot root, add/refresh
+   the `origin` remote, `fetch --prune origin +refs/heads/*:refs/remotes/origin/*`.
+4. `rev-parse` the resolved ref to a commit.
+5. `git --git-dir … archive --format=tar <commit>` and extract safely in Python.
+
+Safe extraction rejects absolute paths, `..` traversal, and any symlink/hardlink
+target that resolves outside the snapshot directory.
+
+## Plan-only semantics
+
+`remote_snapshot + plan_only` is a **dry plan**: ref resolution via remote query
+is allowed, but there is no snapshot materialization, no scan, no local write and
+no bundle write. The job log records which ref/commit would have been used. The
+report status for the repo is `planned`.
+
+## Job hash / reuse
+
+`repo_source_mode`, `remote_ref` and `remote_ref_policy` are part of the job
+content hash. Because moving ref names are not content-stable, a *succeeded*
+`remote_snapshot` job is never reused (`/api/jobs` refuses reuse, like an
+effective pre-pull). Active identical jobs are still reused.
+
+## Known limits
+
+* Submodules are **not** recursively materialized in v1. A `.gitmodules` file in
+  the snapshot raises the report warning `submodules_not_expanded`.
+* Git-LFS is **not** automatically smudged in v1. LFS filters in `.gitattributes`
+  or detected LFS pointer files raise `lfs_not_smudged`.
+* A snapshot is *committed* content; it is not guaranteed identical to artifacts
+  generated from a locally-modified tree.
+* Job-bound snapshots remain under `merges_dir` for the life of the job output;
+  no persistence/cleanup optimization is in scope for this PR.
+
+## Non-goals
+
+* No auto-upstream as a default.
+* No `reset` / `rebase` / `stash` / `checkout` / `switch` / `clean` in the user repo.
+* No `git pull` in product code.
+* No "clone missing repos into the hub" feature.
+* No parallelization, no omnipull build-out, no self-restart.

@@ -1,13 +1,16 @@
-// Tests for the "Repo vor Merge aktualisieren" (pre_pull) checkbox.
+// Tests for the rLens "Quelle" (source mode) dropdown and the legacy pre_pull
+// payload it now drives.
 //
 // Loads app.js into a VM context with a mock DOM (same approach as
 // test_artifact_fallback.js) and drives the real startJob() / saveConfig() /
 // getEffectiveMergeFormDefaults() code paths, asserting:
-//   - the payload POSTed to /api/jobs carries pre_pull (true when checked,
-//     false when unchecked),
-//   - reset-after-submit restores the checkbox to checked,
-//   - Save/Load Defaults round-trips the field,
-//   - index.html ships the checkbox, checked by default.
+//   - the source dropdown is the leading semantics; it derives the legacy
+//     pre_pull flag (local_ff => true, local_current/remote_snapshot => false),
+//   - remote_snapshot adds repo_source_mode / remote_ref_policy / remote_ref,
+//   - plan-only forces pre_pull false,
+//   - Save/Load Defaults round-trips the source mode (and legacy pre_pull),
+//   - index.html ships the (hidden, derived) #prePull checkbox + #sourceMode,
+//   - the Source Acquisition artifact link is wired in app.js.
 
 const fs = require('fs');
 const path = require('path');
@@ -23,11 +26,17 @@ function assert(condition, message) {
     }
 }
 
-// --- Static check: index.html ships a checked #prePull checkbox -------------
+// --- Static checks on index.html / app.js -----------------------------------
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 const inputMatch = html.match(/<input[^>]*id="prePull"[^>]*>/);
 assert(!!inputMatch, 'index.html contains an input with id="prePull"');
 assert(!!inputMatch && /\schecked(\s|>|=)/.test(inputMatch[0]), 'pre_pull checkbox is checked by default in index.html');
+assert(/id="sourceMode"/.test(html), 'index.html contains the #sourceMode dropdown');
+assert(/id="remoteRefPolicy"/.test(html), 'index.html contains the #remoteRefPolicy dropdown');
+assert(/id="remoteRef"/.test(html), 'index.html contains the #remoteRef input');
+
+const appJsSrc = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+assert(/source_acquisition_report/.test(appJsSrc), 'app.js wires a source_acquisition_report artifact link');
 
 // --- Mock DOM + VM context --------------------------------------------------
 function makeEl(overrides = {}) {
@@ -67,6 +76,10 @@ function makeStorage(seed = {}) {
 // Element registry shared between Node and the VM so mutations are visible both ways.
 const els = {
     prePull: makeEl({ checked: true }),
+    sourceMode: makeEl({ value: 'local_ff' }),
+    remoteRefPolicy: makeEl({ value: 'upstream' }),
+    remoteRef: makeEl({ value: '' }),
+    remoteSnapshotFields: makeEl(),
     planOnly: makeEl({ checked: false }),
     codeOnly: makeEl({ checked: false }),
     hubPath: makeEl({ value: '/hub' }),
@@ -142,59 +155,83 @@ const context = {
 };
 
 vm.createContext(context);
-vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8'), context);
+vm.runInContext(appJsSrc, context);
 
 const submitEvent = () => ({ preventDefault() {}, submitter: makeEl({ innerText: 'Start Job' }) });
 
 async function run() {
-    // 1. Checked → pre_pull true
-    els.prePull.checked = true;
+    // 1. local_ff (default) → pre_pull true, repo_source_mode local_ff.
+    els.sourceMode.value = 'local_ff';
+    els.planOnly.checked = false;
     await context.startJob(submitEvent());
-    assert(captured.body && captured.body.pre_pull === true, 'commonPayload.pre_pull === true when checkbox checked');
+    assert(captured.body && captured.body.pre_pull === true, 'local_ff derives pre_pull === true');
+    assert(captured.body.repo_source_mode === 'local_ff', 'local_ff sends repo_source_mode=local_ff');
     assert(captured.body.repos && captured.body.repos[0] === 'repoA', 'payload still carries the selected repo');
 
-    // 2. Reset-after-submit restored the checkbox to its default (checked).
-    assert(els.prePull.checked === true, 'reset after successful submit restores pre_pull to checked');
+    // 2. Reset-after-submit restores the source mode to its default (local_ff).
+    assert(els.sourceMode.value === 'local_ff', 'reset after submit restores sourceMode to local_ff');
 
-    // 3. Unchecked → pre_pull false
+    // 3. local_current → pre_pull false.
     captured.body = null;
-    els.prePull.checked = false;
+    els.sourceMode.value = 'local_current';
     await context.startJob(submitEvent());
-    assert(captured.body && captured.body.pre_pull === false, 'commonPayload.pre_pull === false when checkbox unchecked');
+    assert(captured.body && captured.body.pre_pull === false, 'local_current derives pre_pull === false');
+    assert(captured.body.repo_source_mode === 'local_current', 'local_current sends repo_source_mode=local_current');
 
-    // 4. Save Defaults persists the field; Load Defaults reads it back.
-    els.prePull.checked = false;
-    context.saveConfig();
-    const saved = JSON.parse(localStorageMock.getItem('rlens_config'));
-    assert(saved.prePull === false, 'saveConfig persists prePull=false');
-    let defaults = context.getEffectiveMergeFormDefaults();
-    assert(defaults.prePull === false, 'getEffectiveMergeFormDefaults loads prePull=false');
-
-    els.prePull.checked = true;
-    context.saveConfig();
-    defaults = context.getEffectiveMergeFormDefaults();
-    assert(defaults.prePull === true, 'getEffectiveMergeFormDefaults loads prePull=true after re-save');
-
-    // 5. Default when nothing is stored is true (factory default).
-    localStorageMock.removeItem('rlens_config');
-    defaults = context.getEffectiveMergeFormDefaults();
-    assert(defaults.prePull === true, 'factory default prePull is true when no config stored');
-
-    // 6. plan-only forces effective pre_pull === false even if checkbox is checked.
+    // 4. remote_snapshot → pre_pull false + ref policy; remote_ref sent when set.
     captured.body = null;
+    els.sourceMode.value = 'remote_snapshot';
+    els.remoteRefPolicy.value = 'default_branch';
+    els.remoteRef.value = '';
+    await context.startJob(submitEvent());
+    assert(captured.body && captured.body.pre_pull === false, 'remote_snapshot derives pre_pull === false');
+    assert(captured.body.repo_source_mode === 'remote_snapshot', 'remote_snapshot sends repo_source_mode=remote_snapshot');
+    assert(captured.body.remote_ref_policy === 'default_branch', 'remote_snapshot sends remote_ref_policy=default_branch');
+    assert(!('remote_ref' in captured.body), 'remote_ref omitted when empty');
+
+    captured.body = null;
+    els.sourceMode.value = 'remote_snapshot';
+    els.remoteRefPolicy.value = 'upstream';
+    els.remoteRef.value = 'origin/main';
+    await context.startJob(submitEvent());
+    assert(captured.body.remote_ref === 'origin/main', 'remote_ref sent when set');
+
+    // 5. plan-only forces pre_pull false even for local_ff.
+    captured.body = null;
+    els.sourceMode.value = 'local_ff';
     els.planOnly.checked = true;
-    els.prePull.checked = true;
     await context.startJob(submitEvent());
     assert(captured.body && captured.body.pre_pull === false, 'plan-only forces pre_pull === false in payload');
     els.planOnly.checked = false;
 
-    // 7. UI coupling: syncPrePullWithPlanOnly disables the checkbox under plan-only.
+    // 6. Save/Load Defaults round-trips the source mode + legacy pre_pull.
+    els.sourceMode.value = 'remote_snapshot';
+    els.prePull.checked = false;
+    context.saveConfig();
+    const saved = JSON.parse(localStorageMock.getItem('rlens_config'));
+    assert(saved.sourceMode === 'remote_snapshot', 'saveConfig persists sourceMode=remote_snapshot');
+    assert(saved.prePull === false, 'saveConfig still persists legacy prePull=false');
+    let defaults = context.getEffectiveMergeFormDefaults();
+    assert(defaults.sourceMode === 'remote_snapshot', 'getEffectiveMergeFormDefaults loads sourceMode=remote_snapshot');
+
+    // 7. Factory default sourceMode is local_ff when nothing is stored.
+    localStorageMock.removeItem('rlens_config');
+    defaults = context.getEffectiveMergeFormDefaults();
+    assert(defaults.sourceMode === 'local_ff', 'factory default sourceMode is local_ff');
+    assert(defaults.prePull === true, 'factory default prePull is true when no config stored');
+
+    // 8. Legacy migration: a stored prePull=false (no sourceMode) maps to local_current.
+    localStorageMock.setItem('rlens_config', JSON.stringify({ prePull: false }));
+    defaults = context.getEffectiveMergeFormDefaults();
+    assert(defaults.sourceMode === 'local_current', 'legacy prePull=false migrates to sourceMode=local_current');
+    localStorageMock.removeItem('rlens_config');
+
+    // 9. UI coupling: plan-only disables the pre_pull checkbox.
     if (typeof context.syncPrePullWithPlanOnly === 'function') {
         els.prePull.disabled = false;
         els.planOnly.checked = true;
         context.syncPrePullWithPlanOnly();
         assert(els.prePull.disabled === true, 'plan-only disables the pre_pull checkbox');
-
         els.planOnly.checked = false;
         context.syncPrePullWithPlanOnly();
         assert(els.prePull.disabled === false, 'clearing plan-only re-enables the pre_pull checkbox');
@@ -202,11 +239,25 @@ async function run() {
         assert(false, 'syncPrePullWithPlanOnly should be defined');
     }
 
+    // 10. UI coupling: remote-snapshot reveals the ref fields.
+    if (typeof context.syncSourceModeFields === 'function') {
+        let hidden = null;
+        els.remoteSnapshotFields.classList = { toggle(_c, v) { hidden = v; }, add() {}, remove() {}, contains() { return false; } };
+        els.sourceMode.value = 'remote_snapshot';
+        context.syncSourceModeFields();
+        assert(hidden === false, 'remote_snapshot reveals the remote ref fields');
+        els.sourceMode.value = 'local_ff';
+        context.syncSourceModeFields();
+        assert(hidden === true, 'non-remote modes hide the remote ref fields');
+    } else {
+        assert(false, 'syncSourceModeFields should be defined');
+    }
+
     if (failed > 0) {
         console.error(`\n${failed} test(s) failed!`);
         process.exit(1);
     }
-    console.log('\nAll pre_pull payload tests passed successfully!');
+    console.log('\nAll source-mode payload tests passed successfully!');
     process.exit(0);
 }
 
