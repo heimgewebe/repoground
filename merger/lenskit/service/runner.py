@@ -253,8 +253,9 @@ class JobRunner:
                     # Update request object so Artifact reflects reality (absolute canonical path)
                     req.merges_dir = str(merges_dir.resolve())
                 except SecurityViolationError as e:
-                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {e}")
-                    raise ValueError(f"SECURITY: merges_dir not allowed: {e}")
+                    safe_security_error = _safe_text(e) or "unknown security error"
+                    log(f"Security Warning: merges_dir '{merges_dir}' validation failed: {safe_security_error}")
+                    raise ValueError(f"SECURITY: merges_dir not allowed: {safe_security_error}") from e
 
                 merges_dir.mkdir(parents=True, exist_ok=True)
             else:

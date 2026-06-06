@@ -140,13 +140,18 @@ def test_pre_pull_report_custom_merges_dir_validates_before_mkdir(mock_job_store
          patch("merger.lenskit.service.runner.get_security_config") as mock_sec:
 
         security = MagicMock()
-        security.validate_path.side_effect = SecurityViolationError("blocked merges_dir")
+        security.validate_path.side_effect = SecurityViolationError("blocked merges_dir https://secret-token@host/repo")
         mock_sec.return_value = security
 
         runner._run_job(job.id)
 
     assert job.status == "failed"
     assert "blocked" in (job.error or "").lower() or "security" in (job.error or "").lower()
+    assert "secret-token" not in (job.error or "")
+    assert "[REDACTED]" in (job.error or "")
+    for line in job.logs:
+        assert "secret-token" not in line
+
     assert not blocked_dir.exists()
     plan.assert_not_called()
     apply.assert_not_called()
