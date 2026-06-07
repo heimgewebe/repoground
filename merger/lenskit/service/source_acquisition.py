@@ -372,43 +372,6 @@ def resolve_remote_ref(
     return make(SourceStatus.RESOLVED, f"resolved to {display}",
                 resolved_ref=display, resolved_commit=sha, remote_url=remote_url, remote_name=remote_name)
 
-    # 2/3/4. Policy-driven.
-    if remote_ref_policy == "upstream":
-        up = _run_git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-                      repo_path=repo_path, timeout=timeout_seconds)
-        if up.returncode != 0 or not up.stdout.strip():
-            return make(SourceStatus.MISSING_REF,
-                        f"{repo_name} has no upstream tracking branch (policy=upstream)",
-                        stderr=up.stderr, remote_url=remote_url)
-        branch = _branch_from_remote_tracking(up.stdout.strip())
-        if not branch:
-            return make(SourceStatus.MISSING_REF,
-                        f"{repo_name} upstream '{up.stdout.strip()}' is not an origin branch",
-                        remote_url=remote_url)
-    elif remote_ref_policy == "same_branch":
-        cur = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], repo_path=repo_path, timeout=timeout_seconds)
-        branch = cur.stdout.strip() if cur.returncode == 0 else ""
-        if not branch or branch == "HEAD":
-            return make(SourceStatus.MISSING_REF,
-                        f"{repo_name} is detached or has no current branch (policy=same_branch)",
-                        stderr=cur.stderr, remote_url=remote_url)
-    elif remote_ref_policy == "default_branch":
-        branch = _resolve_default_branch(remote_url, timeout_seconds)
-        if not branch:
-            return make(SourceStatus.MISSING_REF,
-                        f"could not determine origin default branch for {repo_name}",
-                        remote_url=remote_url)
-    else:
-        return make(SourceStatus.ERROR, f"unknown remote_ref_policy '{remote_ref_policy}'",
-                    remote_url=remote_url)
-
-    sha, ls = _ls_remote_commit(remote_url, branch, timeout_seconds)
-    if not sha:
-        return make(SourceStatus.MISSING_REF,
-                    f"origin/{branch} not found on remote for {repo_name}",
-                    stderr=ls.stderr, remote_url=remote_url)
-    return make(SourceStatus.RESOLVED, f"resolved to origin/{branch}",
-                resolved_ref=f"origin/{branch}", resolved_commit=sha, remote_url=remote_url)
 
 
 def _resolve_default_branch(remote_url: str, timeout: int) -> Optional[str]:

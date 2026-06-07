@@ -485,3 +485,28 @@ def test_redact_credentials_in_non_http_remote_urls():
     assert sa._redact("https://token@example.com/repo.git") == "https://[REDACTED]@example.com/repo.git"
     assert sa._redact("https://user:token@example.com/repo.git") == "https://[REDACTED]@example.com/repo.git"
     assert sa._redact("git@github.com:owner/repo.git") == "git@github.com:owner/repo.git"
+
+def test_remote_snapshot_explicit_sha_missing_fails_cleanly(tmp_path):
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+
+    temp = tmp_path / "temp"
+    _git("init", "-b", "main", str(temp), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=temp)
+    _commit_file(temp, "file.txt", "1\n", "first")
+    _git("push", "origin", "main", cwd=temp)
+
+    local = tmp_path / "local"
+    _git("init", "-b", "main", str(local), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=local)
+
+    missing_sha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+    result = materialize_remote_snapshot(
+        local,
+        remote_ref=missing_sha,
+        remote_ref_policy="upstream",
+        cache_root=tmp_path / "cache",
+        job_id="job_sha_missing",
+    )
+    assert result.status == SourceStatus.MISSING_REF, result.stderr
+    assert result.snapshot_path is None
