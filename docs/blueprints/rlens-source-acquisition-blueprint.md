@@ -112,8 +112,8 @@ target that resolves outside the snapshot directory.
 ## Plan-only semantics
 
 `remote_snapshot + plan_only` is a **dry plan**: ref resolution via remote query
-is allowed, but there is no snapshot materialization, no scan, no local write and
-no bundle write. The job log records which ref/commit would have been used. The
+is allowed, but there is no snapshot materialization, no scan, no local repository mutation and
+no bundle content write. A diagnostic `source_acquisition_report` artifact is still written so the planned ref/commit is inspectable. The
 report status for the repo is `planned`.
 
 ## Job hash / reuse

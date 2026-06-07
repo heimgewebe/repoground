@@ -953,11 +953,12 @@ def create_job(request: JobRequest):
         # names are not content-stable, so the cached result may no longer match
         # the current remote. (See rlens-source-acquisition-blueprint.md.)
         if existing.status == "succeeded":
-            effective_pre_pull = request.pre_pull and not request.plan_only
-            effective_remote_snapshot = resolve_effective_source_mode(request) == "remote_snapshot"
-            if effective_pre_pull:
+            effective_source_mode = resolve_effective_source_mode(request)
+            effective_local_ff = effective_source_mode == "local_ff"
+            effective_remote_snapshot = effective_source_mode == "remote_snapshot"
+            if effective_local_ff:
                 logger.info(
-                    "Not reusing succeeded job %s because pre_pull=True requires a fresh repo-sync check.",
+                    "Not reusing succeeded job %s because local_ff requires a fresh repo-sync check.",
                     existing.id,
                 )
             elif effective_remote_snapshot:

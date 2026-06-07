@@ -222,3 +222,50 @@ def test_plan_only_pre_pull_uses_effective_hash():
 
     assert calculate_job_hash(plan_pre, hub, version) == calculate_job_hash(plan_no_pre, hub, version)
     assert calculate_job_hash(real_pre, hub, version) != calculate_job_hash(real_no_pre, hub, version)
+
+
+def test_succeeded_job_not_reused_when_source_mode_local_ff_even_if_pre_pull_false(service_client):
+    """repo_source_mode='local_ff' enforces a fresh check even if legacy pre_pull is False."""
+    ctx = service_client
+    # Initial job, say it was a local_current run that succeeded
+    req = {"repos": ["repo-test"], "level": "summary", "repo_source_mode": "local_current"}
+    resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp1.status_code == 200
+    job1_id = resp1.json()["id"]
+    _force_status(ctx, job1_id, "succeeded")
+
+    # New request with local_ff, pre_pull=False
+    req2 = {"repos": ["repo-test"], "level": "summary", "repo_source_mode": "local_ff", "pre_pull": False}
+    resp2 = ctx.client.post("/api/jobs", json=req2, headers=ctx.headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["id"] != job1_id
+
+
+def test_succeeded_job_reused_when_source_mode_local_current_even_if_pre_pull_true(service_client):
+    """repo_source_mode='local_current' prevents fresh check even if legacy pre_pull is True."""
+    ctx = service_client
+    req = {"repos": ["repo-test"], "level": "summary", "repo_source_mode": "local_current", "pre_pull": True}
+    resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp1.status_code == 200
+    job1_id = resp1.json()["id"]
+    _force_status(ctx, job1_id, "succeeded")
+
+    # Repeat exact request
+    resp2 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["id"] == job1_id
+
+
+def test_succeeded_job_not_reused_when_source_mode_remote_snapshot(service_client):
+    """repo_source_mode='remote_snapshot' never reuses succeeded jobs (remote ref might have moved)."""
+    ctx = service_client
+    req = {"repos": ["repo-test"], "level": "summary", "repo_source_mode": "remote_snapshot"}
+    resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp1.status_code == 200
+    job1_id = resp1.json()["id"]
+    _force_status(ctx, job1_id, "succeeded")
+
+    # Repeat exact request
+    resp2 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["id"] != job1_id

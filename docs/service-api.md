@@ -390,9 +390,7 @@ argument list with `GIT_TERMINAL_PROMPT=0`; remote URLs, stderr and reports are
 credential-redacted; tar extraction is hardened against path traversal and
 escaping symlink/hardlink members.
 
-**Plan-only:** `remote_snapshot + plan_only` is a dry-plan — ref resolution only,
-no snapshot materialization, no scan, no local write, no bundle write. The job
-log and report record the planned ref/commit.
+**Plan-only:** `remote_snapshot + plan_only` is a dry-plan: remote ref resolution only, no snapshot materialization, no scan, no local repository mutation and no bundle content write. A diagnostic `source_acquisition_report` artifact is still written so the planned ref/commit is inspectable.
 
 **Job reuse:** `repo_source_mode`, `remote_ref` and `remote_ref_policy` are part
 of the job content hash. A *succeeded* `remote_snapshot` job is never reused
