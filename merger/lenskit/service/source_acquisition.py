@@ -29,6 +29,7 @@ import io
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tarfile
 from dataclasses import dataclass, field
@@ -233,11 +234,28 @@ def _parse_remote_tracking_ref(ref: str, *, default_remote: str = "origin") -> O
 
 def _ls_remote_commit(remote_url: str, ref: str, timeout: int) -> "tuple[Optional[str], subprocess.CompletedProcess]":
     """Return the commit a remote ref points at via ls-remote (no fetch)."""
-    proc = _run_git(["ls-remote", remote_url, ref], timeout=timeout)
-    sha = None
-    if proc.returncode == 0 and proc.stdout.strip():
-        sha = proc.stdout.split()[0].strip() or None
-    return sha, proc
+    if ref.startswith("refs/tags/"):
+        proc = _run_git(["ls-remote", remote_url, ref, f"{ref}^{{}}"], timeout=timeout)
+        sha = None
+        fallback_sha = None
+        if proc.returncode == 0 and proc.stdout.strip():
+            for line in proc.stdout.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    if parts[1] == f"{ref}^{{}}":
+                        sha = parts[0]
+                        break
+                    if parts[1] == ref:
+                        fallback_sha = parts[0]
+            if not sha:
+                sha = fallback_sha
+        return sha, proc
+    else:
+        proc = _run_git(["ls-remote", remote_url, ref], timeout=timeout)
+        sha = None
+        if proc.returncode == 0 and proc.stdout.strip():
+            sha = proc.stdout.split()[0].strip() or None
+        return sha, proc
 
 
 def resolve_remote_ref(
@@ -287,7 +305,9 @@ def resolve_remote_ref(
         parsed = _parse_remote_tracking_ref(remote_ref)
         if parsed is None:
             remote_url, _ = _read_remote_url(repo_path, "origin", timeout_seconds)
-            return make(SourceStatus.RESOLVED, f"using explicit ref {remote_ref}",
+            if not remote_url:
+                return make(SourceStatus.MISSING_REMOTE, f"{repo_name} has no 'origin' remote configured", remote_url=remote_url)
+            return make(SourceStatus.RESOLVED, f"using explicit commit SHA; availability will be verified during fetch/materialization",
                         resolved_ref=remote_ref,
                         resolved_commit=remote_ref if _HEX_SHA_RE.match(remote_ref.strip()) else None,
                         remote_url=remote_url, remote_name="origin")
@@ -444,6 +464,11 @@ def materialize_remote_snapshot(
     snapshot_dir = base / repo_name
     try:
         cache_git_dir.mkdir(parents=True, exist_ok=True)
+        base_resolved = base.resolve()
+        snapshot_resolved = snapshot_dir.resolve() if snapshot_dir.exists() else None
+        if snapshot_resolved:
+            if snapshot_resolved == base_resolved / repo_name or base_resolved in snapshot_resolved.parents:
+                shutil.rmtree(snapshot_dir)
         snapshot_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         return make(SourceStatus.ERROR, f"could not create snapshot dirs for {repo_name}",

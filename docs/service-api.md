@@ -378,10 +378,9 @@ Modes:
   `remote_snapshot + default_branch` scans `origin/HEAD` (fallback `origin/main`)
   regardless of the local branch's upstream.
 
-Ref resolution precedence: explicit `remote_ref` → `upstream` (`@{u}`) →
-`same_branch` (`origin/<current_branch>`) → `default_branch`
-(`origin/HEAD`, fallback `origin/main`). A missing remote yields `missing_remote`;
-an unresolvable ref yields `missing_ref` (never guessed).
+Ref selection: explicit `remote_ref` wins. Otherwise exactly `remote_ref_policy` is used. Missing upstream remains `missing_ref`; rLens does not guess `default_branch` unless that policy is selected.
+For `upstream`, the configured tracking remote is used, not implicitly `origin`.
+An explicit commit SHA works if the commit is reachable via fetched heads/tags or if the remote server allows direct SHA fetches.
 
 **Security invariants (`remote_snapshot`):** never mutates local hub repos,
 never sets an upstream, never switches branches; uses a job-bound cache under

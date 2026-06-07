@@ -79,7 +79,7 @@ Precedence inside `resolve_remote_ref`:
 3. `remote_ref_policy="same_branch"` uses `refs/remotes/origin/<current_branch>`;
    detached/empty branch → `missing_ref`.
 4. `remote_ref_policy="default_branch"` prefers `git ls-remote --symref <url> HEAD`
-   (e.g. `refs/heads/main`); fallback `refs/remotes/origin/main` if present;
+   (e.g. `refs/heads/main`); fallback `refs/heads/main` on the remote if present;
    otherwise `missing_ref`.
 
 This is what solves the concrete case: `remote_snapshot + default_branch` scans
@@ -100,7 +100,7 @@ The `source_acquisition_report` distinguishes, per repo, with no silent loss:
 
 For `remote_snapshot`:
 
-1. Read `remote.origin.url` from the local repo (missing → `missing_remote`).
+1. Determine the target remote (from the ref policy or tracking branch). Read its URL from the local repo (missing → `missing_remote`).
 2. Resolve the ref (above).
 3. Build a bare cache git dir under the job-bound snapshot root. The cache does not
    store the remote URL as `remote.origin.url`. Heads and tags are fetched directly from the selected remote URL without storing it as cache config:

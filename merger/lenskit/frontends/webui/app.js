@@ -765,10 +765,12 @@ function syncSourceModeFields() {
             try {
                 const raw = localStorage.getItem(CONFIG_KEY);
                 const saved = raw ? JSON.parse(raw) : {};
-                if (!saved.remoteRefPolicy) {
+                if (!saved.remoteRefPolicy || saved.sourceMode !== 'remote_snapshot') {
                     policyEl.value = 'default_branch';
                 }
-            } catch (e) {}
+            } catch (e) {
+                // Ignore malformed saved config; factory defaults remain authoritative.
+            }
         }
     }
 }
