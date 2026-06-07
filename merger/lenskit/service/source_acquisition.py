@@ -273,6 +273,7 @@ def resolve_remote_ref(
     repo_path = Path(repo_path)
     repo_name = repo_path.name
     path_str = str(repo_path)
+    remote_ref = remote_ref.strip() if remote_ref else None
 
     def make(status: str, message: str, *, resolved_ref=None, resolved_commit=None,
              stderr=None, remote_url=None, remote_name="origin") -> RemoteRefResolution:
@@ -459,16 +460,45 @@ def materialize_remote_snapshot(
 
     # The snapshot tree dir is named after the repo so the scanner labels the
     # bundle with the original repo name (scan_repo derives the name from path).
-    base = Path(cache_root) / SNAPSHOT_DIR_NAME / job_id
+    # Validate the job-bound snapshot root before any mkdir that could follow a
+    # symlink. The service normally creates safe job ids, but this helper also
+    # defends itself when called directly from tests/headless clients.
+    job_id_text = str(job_id)
+    if not job_id_text or job_id_text in {".", ".."} or "/" in job_id_text or "\\" in job_id_text:
+        return make(SourceStatus.ERROR, f"invalid snapshot job_id for {repo_name}", resolution=resolution)
+
+    snapshots_root = Path(cache_root) / SNAPSHOT_DIR_NAME
+    base = snapshots_root / job_id_text
     cache_git_dir = base / f"{repo_name}.git"
     snapshot_dir = base / repo_name
     try:
-        cache_git_dir.mkdir(parents=True, exist_ok=True)
-        base_resolved = base.resolve()
-        snapshot_parent_resolved = snapshot_dir.parent.resolve()
+        if snapshots_root.is_symlink():
+            return make(SourceStatus.ERROR, f"snapshot root is a symlink for {repo_name}", resolution=resolution)
+        snapshots_root.mkdir(parents=True, exist_ok=True)
+        snapshots_root_resolved = snapshots_root.resolve()
 
-        if snapshot_parent_resolved != base_resolved:
-            return make(SourceStatus.ERROR, f"snapshot directory parent escaped job cache for {repo_name}", resolution=resolution)
+        if base.exists() or base.is_symlink():
+            if base.is_symlink():
+                return make(SourceStatus.ERROR, f"snapshot job directory is a symlink for {repo_name}", resolution=resolution)
+            if not base.is_dir():
+                return make(SourceStatus.ERROR, f"snapshot job path exists but is not a directory for {repo_name}", resolution=resolution)
+        else:
+            base.mkdir(parents=False, exist_ok=False)
+
+        base_resolved = base.resolve()
+        if base_resolved.parent != snapshots_root_resolved:
+            return make(SourceStatus.ERROR, f"snapshot job directory escaped snapshot root for {repo_name}", resolution=resolution)
+
+        if cache_git_dir.exists() or cache_git_dir.is_symlink():
+            if cache_git_dir.is_symlink():
+                return make(SourceStatus.ERROR, f"snapshot git cache is a symlink for {repo_name}", resolution=resolution)
+            if not cache_git_dir.is_dir():
+                return make(SourceStatus.ERROR, f"snapshot git cache path exists but is not a directory for {repo_name}", resolution=resolution)
+
+        cache_git_dir.mkdir(parents=True, exist_ok=True)
+        cache_git_resolved = cache_git_dir.resolve()
+        if cache_git_resolved.parent != base_resolved:
+            return make(SourceStatus.ERROR, f"snapshot git cache escaped job cache for {repo_name}", resolution=resolution)
 
         if snapshot_dir.exists() or snapshot_dir.is_symlink():
             if snapshot_dir.is_symlink():
@@ -597,6 +627,9 @@ def safe_extract_tar(data: bytes, dest: Path) -> None:
             # Resolve without following the (not-yet-created) member itself.
             if not _within(dest / name):
                 raise SnapshotExtractionError(f"path traversal member: {name!r}")
+
+            if member.isdev():
+                raise SnapshotExtractionError(f"unsupported special member: {name!r}")
 
             if member.issym() or member.islnk():
                 link = member.linkname

@@ -66,7 +66,9 @@ All surfaces enforce:
 * git subprocess output decoded `encoding="utf-8", errors="surrogateescape"`;
 * remote URLs, stderr, exceptions and reports are credential-redacted;
 * snapshot extraction is hardened against path traversal and escaping
-  symlink/hardlink members.
+  symlink/hardlink members;
+* job-bound snapshot roots/worktree dirs are rejected when symlinked or escaped,
+  and stale worktree files are removed before each extraction.
 
 ## Ref resolution
 

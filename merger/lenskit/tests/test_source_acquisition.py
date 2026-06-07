@@ -649,3 +649,97 @@ def test_remote_snapshot_plan_only_explicit_sha_missing_remote_is_not_planned(tm
     assert resolution.status == SourceStatus.MISSING_REMOTE
     assert resolution.status != SourceStatus.RESOLVED
     assert resolution.resolved_commit is None
+
+# --- 20. Optimal hardening: snapshot base/root + blank ref ------------------
+
+def test_remote_snapshot_rejects_symlink_job_snapshot_base_before_extract(tmp_path):
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+
+    temp = tmp_path / "temp"
+    _git("init", "-b", "main", str(temp), cwd=tmp_path)
+    _commit_file(temp, "file.txt", "1\n", "first")
+    _git("remote", "add", "origin", str(remote), cwd=temp)
+    _git("push", "origin", "main", cwd=temp)
+
+    local = tmp_path / "local"
+    _git("init", "-b", "main", str(local), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=local)
+
+    cache = tmp_path / "cache"
+    snapshots_root = cache / sa.SNAPSHOT_DIR_NAME
+    snapshots_root.mkdir(parents=True, exist_ok=True)
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    job_id = "job_base_symlink"
+    os.symlink(str(outside), str(snapshots_root / job_id))
+
+    result = materialize_remote_snapshot(
+        local,
+        remote_ref=None,
+        remote_ref_policy="default_branch",
+        cache_root=cache,
+        job_id=job_id,
+    )
+
+    assert result.status == SourceStatus.ERROR
+    assert result.snapshot_path is None
+    assert "symlink" in (result.message or "")
+    assert not (outside / "local.git").exists()
+    assert not (outside / "local").exists()
+
+
+def test_remote_snapshot_rejects_job_id_path_separator(tmp_path):
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+
+    temp = tmp_path / "temp"
+    _git("init", "-b", "main", str(temp), cwd=tmp_path)
+    _commit_file(temp, "file.txt", "1\n", "first")
+    _git("remote", "add", "origin", str(remote), cwd=temp)
+    _git("push", "origin", "main", cwd=temp)
+
+    local = tmp_path / "local"
+    _git("init", "-b", "main", str(local), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=local)
+
+    result = materialize_remote_snapshot(
+        local,
+        remote_ref=None,
+        remote_ref_policy="default_branch",
+        cache_root=tmp_path / "cache",
+        job_id="../escape",
+    )
+
+    assert result.status == SourceStatus.ERROR
+    assert result.snapshot_path is None
+    assert "invalid snapshot job_id" in (result.message or "")
+
+
+def test_remote_snapshot_blank_remote_ref_uses_policy_not_sha_path(remote_and_local):
+    result = materialize_remote_snapshot(
+        remote_and_local["local"],
+        remote_ref="   ",
+        remote_ref_policy="default_branch",
+        cache_root=remote_and_local["cache"],
+        job_id="job_blank_ref",
+    )
+
+    assert result.status == SourceStatus.SNAPSHOT_CREATED, result.stderr
+    assert result.resolved_ref == "origin/main"
+    assert result.resolved_commit
+
+
+def test_safe_extract_tar_rejects_special_device_member(tmp_path):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        info = tarfile.TarInfo(name="devnode")
+        info.type = tarfile.CHRTYPE
+        info.devmajor = 1
+        info.devminor = 3
+        tar.addfile(info)
+
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(buf.getvalue(), tmp_path / "out")
