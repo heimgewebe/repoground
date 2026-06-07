@@ -465,10 +465,21 @@ def materialize_remote_snapshot(
     try:
         cache_git_dir.mkdir(parents=True, exist_ok=True)
         base_resolved = base.resolve()
-        snapshot_resolved = snapshot_dir.resolve() if snapshot_dir.exists() else None
-        if snapshot_resolved:
-            if snapshot_resolved == base_resolved / repo_name or base_resolved in snapshot_resolved.parents:
-                shutil.rmtree(snapshot_dir)
+        snapshot_parent_resolved = snapshot_dir.parent.resolve()
+
+        if snapshot_parent_resolved != base_resolved:
+            return make(SourceStatus.ERROR, f"snapshot directory parent escaped job cache for {repo_name}", resolution=resolution)
+
+        if snapshot_dir.exists() or snapshot_dir.is_symlink():
+            if snapshot_dir.is_symlink():
+                return make(SourceStatus.ERROR, f"snapshot directory is a symlink for {repo_name}", resolution=resolution)
+            if not snapshot_dir.is_dir():
+                return make(SourceStatus.ERROR, f"snapshot path exists but is not a directory for {repo_name}", resolution=resolution)
+            snapshot_resolved = snapshot_dir.resolve()
+            if snapshot_resolved != (base_resolved / repo_name):
+                return make(SourceStatus.ERROR, f"snapshot directory escaped job cache for {repo_name}", resolution=resolution)
+            shutil.rmtree(snapshot_dir)
+
         snapshot_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
         return make(SourceStatus.ERROR, f"could not create snapshot dirs for {repo_name}",
@@ -510,6 +521,7 @@ def materialize_remote_snapshot(
 
     rev = _run_git(["rev-parse", "--verify", f"{rev_target}^{{commit}}"], git_dir=cache_git_dir, timeout=timeout_seconds)
 
+    direct_fetch_stderr = None
     if rev.returncode != 0 and resolution.resolved_ref and _HEX_SHA_RE.match(resolution.resolved_ref):
         direct_fetch = _run_git(
             ["fetch", "--prune", remote_url, resolution.resolved_ref],
@@ -518,11 +530,14 @@ def materialize_remote_snapshot(
         )
         if direct_fetch.returncode == 0:
             rev = _run_git(["rev-parse", "--verify", f"{rev_target}^{{commit}}"], git_dir=cache_git_dir, timeout=timeout_seconds)
+        else:
+            direct_fetch_stderr = direct_fetch.stderr
 
     if rev.returncode != 0:
+        stderr_to_use = direct_fetch_stderr or rev.stderr
         return make(SourceStatus.MISSING_REF,
                     f"could not resolve {resolution.resolved_ref} to a commit in {repo_name} cache",
-                    resolution=resolution, stderr=rev.stderr)
+                    resolution=resolution, stderr=stderr_to_use)
     commit = rev.stdout.strip()
     resolution.resolved_commit = commit
 

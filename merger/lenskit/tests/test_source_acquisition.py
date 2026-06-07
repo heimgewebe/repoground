@@ -510,3 +510,130 @@ def test_remote_snapshot_explicit_sha_missing_fails_cleanly(tmp_path):
     )
     assert result.status == SourceStatus.MISSING_REF, result.stderr
     assert result.snapshot_path is None
+
+
+# --- 16. Fix 1: Symlink snapshot reject ---
+
+def test_remote_snapshot_rejects_symlink_snapshot_dir_before_extract(tmp_path):
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+    
+    temp = tmp_path / "temp"
+    _git("init", "-b", "main", str(temp), cwd=tmp_path)
+    _commit_file(temp, "file.txt", "1\n", "first")
+    _git("remote", "add", "origin", str(remote), cwd=temp)
+    _git("push", "origin", "main", cwd=temp)
+
+    local = tmp_path / "local"
+    _git("init", "-b", "main", str(local), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=local)
+
+    cache = tmp_path / "cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    
+    job_id = "job_symlink"
+    snapshot_base = cache / sa.SNAPSHOT_DIR_NAME / job_id
+    snapshot_base.mkdir(parents=True, exist_ok=True)
+    
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    
+    snapshot_dir = snapshot_base / "local"
+    os.symlink(str(outside), str(snapshot_dir))
+
+    result = materialize_remote_snapshot(
+        local,
+        remote_ref=None,
+        remote_ref_policy="default_branch",
+        cache_root=cache,
+        job_id=job_id,
+    )
+    assert result.status == SourceStatus.ERROR
+    assert result.snapshot_path is None
+    assert "symlink" in (result.stderr or "") or "symlink" in (result.message or "")
+
+
+# --- 17. Fix 2: Stale file cleanup ---
+
+def test_remote_snapshot_cleans_existing_snapshot_dir_before_extract(tmp_path):
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+    
+    temp = tmp_path / "temp"
+    _git("init", "-b", "main", str(temp), cwd=tmp_path)
+    _commit_file(temp, "old.txt", "old\n", "init")
+    _commit_file(temp, "file.txt", "A\n", "a")
+    _git("remote", "add", "origin", str(remote), cwd=temp)
+    _git("push", "origin", "main", cwd=temp)
+
+    local = tmp_path / "local"
+    _git("init", "-b", "main", str(local), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=local)
+
+    cache = tmp_path / "cache"
+    job_id = "job-clean"
+    
+    # First materialization
+    result1 = materialize_remote_snapshot(local, None, "default_branch", cache, job_id)
+    assert result1.status == SourceStatus.SNAPSHOT_CREATED
+    assert (Path(result1.snapshot_path) / "old.txt").exists()
+    
+    # Update remote: remove old.txt, change file.txt
+    _git("rm", "old.txt", cwd=temp)
+    _commit_file(temp, "file.txt", "B\n", "b")
+    _git("push", "origin", "main", cwd=temp)
+    
+    # Second materialization with same job_id
+    result2 = materialize_remote_snapshot(local, None, "default_branch", cache, job_id)
+    assert result2.status == SourceStatus.SNAPSHOT_CREATED
+    assert not (Path(result2.snapshot_path) / "old.txt").exists()
+    assert (Path(result2.snapshot_path) / "file.txt").read_text() == "B\n"
+
+
+# --- 18. Fix 3: Annotated tags ---
+
+def test_remote_snapshot_explicit_annotated_tag_ref_resolves_commit(tmp_path):
+    remote = tmp_path / "remote.git"
+    _git("init", "--bare", "-b", "main", str(remote), cwd=tmp_path)
+
+    temp = tmp_path / "temp"
+    _git("init", "-b", "main", str(temp), cwd=tmp_path)
+    _commit_file(temp, "tagged.txt", "annotated\n", "init")
+    commit_sha = _git("rev-parse", "HEAD", cwd=temp).stdout.strip()
+    
+    _git("tag", "-a", "v1", "-m", "version 1", cwd=temp)
+    _git("remote", "add", "origin", str(remote), cwd=temp)
+    _git("push", "origin", "main", "--tags", cwd=temp)
+
+    local = tmp_path / "local"
+    _git("init", "-b", "main", str(local), cwd=tmp_path)
+    _git("remote", "add", "origin", str(remote), cwd=local)
+
+    result = materialize_remote_snapshot(
+        local,
+        remote_ref="refs/tags/v1",
+        remote_ref_policy="upstream",
+        cache_root=tmp_path / "cache",
+        job_id="job_annotated_tag",
+    )
+    assert result.status == SourceStatus.SNAPSHOT_CREATED, result.stderr
+    assert result.resolved_ref == "refs/tags/v1"
+    assert result.resolved_commit == commit_sha
+
+
+# --- 19. Fix 4: Explicit SHA missing remote ---
+
+def test_remote_snapshot_plan_only_explicit_sha_missing_remote_is_not_planned(tmp_path):
+    repo = tmp_path / "no-remote"
+    _git("init", "-b", "main", str(repo), cwd=tmp_path)
+    _commit_file(repo, "a.txt", "a\n", "init")
+    sha = _git("rev-parse", "HEAD", cwd=repo).stdout.strip()
+
+    # The issue was that a missing remote with a valid explicit SHA
+    # would still return RESOLVED instead of MISSING_REMOTE.
+    resolution = resolve_remote_ref(
+        repo, remote_ref=sha, remote_ref_policy="upstream", timeout_seconds=10
+    )
+    assert resolution.status == SourceStatus.MISSING_REMOTE
+    assert resolution.status != SourceStatus.RESOLVED
+    assert resolution.resolved_commit is None

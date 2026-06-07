@@ -70,17 +70,16 @@ All surfaces enforce:
 
 ## Ref resolution
 
-Precedence inside `resolve_remote_ref`:
+### Ref selection
 
-1. Explicit `remote_ref` wins. Accepts `origin/main`, `refs/heads/main`,
-   `refs/remotes/origin/main`, or a commit SHA.
-2. `remote_ref_policy="upstream"` uses the configured `@{u}` of the local repo;
-   missing upstream → `missing_ref` (no guessing).
-3. `remote_ref_policy="same_branch"` uses `refs/remotes/origin/<current_branch>`;
-   detached/empty branch → `missing_ref`.
-4. `remote_ref_policy="default_branch"` prefers `git ls-remote --symref <url> HEAD`
-   (e.g. `refs/heads/main`); fallback `refs/heads/main` on the remote if present;
-   otherwise `missing_ref`.
+- Explicit `remote_ref` wins.
+- Otherwise exactly `remote_ref_policy` is used.
+- Missing `upstream` remains `missing_ref`; rLens does not guess `default_branch` unless that policy is selected.
+- `upstream` uses the configured tracking remote and branch, not implicitly `origin`.
+- `default_branch` uses `origin/HEAD` by default.
+- Explicit tags: `refs/tags/<tag>` supported.
+- Explicit commit SHA works if reachable through fetched heads/tags or if the server permits direct SHA fetch.
+- Branch names with slash should be passed as `refs/heads/<branch>` if they are not intended as `<remote>/<branch>`.
 
 This is what solves the concrete case: `remote_snapshot + default_branch` scans
 the remote default branch regardless of the local branch's upstream state.
