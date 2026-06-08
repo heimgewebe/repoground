@@ -88,6 +88,7 @@
       "properties": {
         "id": {
           "type": "string",
+          "pattern": "^[0-9a-f]{16}$",
           "description": "Stable, line-number-independent finding id (sha256(code\\0path\\0kind)[:16])."
         },
         "code": {"type": "string"},

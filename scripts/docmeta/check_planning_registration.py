@@ -616,8 +616,9 @@ def main(argv=None):
         except BaselineError as exc:
             print(f"Error: {exc}", file=sys.stderr)
             return 2
+        ratchetable = [f for f in findings if f["code"] not in _INVALID_EXCEPTION_CODES]
         new_findings, known_findings, resolved_findings = partition_ratchet(
-            findings, baseline.get("entries", []))
+            ratchetable, baseline.get("entries", []))
         report = build_report("ratchet", findings, args.baseline, True,
                               new_findings, known_findings, resolved_findings)
         invalid = report["invalid_exceptions"]

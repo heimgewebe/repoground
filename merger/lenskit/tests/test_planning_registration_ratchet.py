@@ -18,6 +18,10 @@ SCHEMA_PATH = (
     REPO_ROOT
     / "merger/lenskit/contracts/planning-registration-report.v1.schema.json"
 )
+BASELINE_SCHEMA_PATH = (
+    REPO_ROOT
+    / "merger/lenskit/contracts/planning-registration-baseline.v1.schema.json"
+)
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/task-index.yml"
 BASELINE_PATH = REPO_ROOT / "docs/tasks/planning-registration-baseline.json"
 
@@ -333,3 +337,50 @@ def test_committed_baseline_is_valid():
     # Deterministic order invariant.
     keys = [(e["path"], e["code"], e["id"]) for e in data["entries"]]
     assert keys == sorted(keys)
+
+
+# --------------------------------------------------------------------------- #
+# 9. invalid_exceptions are a separate blocking class, not new_findings
+# --------------------------------------------------------------------------- #
+
+
+def test_invalid_exception_is_blocking_but_not_new_finding(fake_repo, tmp_path, capsys):
+    write(
+        fake_repo,
+        "docs/blueprints/bad-exempt.md",
+        "---\nstatus: active\nplanning_registration:\n"
+        "  status: exempt\n  reason: just because\n---\nBody",
+    )
+    baseline_file = tmp_path / "baseline.json"
+    write_baseline(baseline_file, [])
+
+    exit_code = check_plan.main(
+        ["--ratchet", "--baseline", str(baseline_file), "--format", "json"]
+    )
+    out = capsys.readouterr().out
+    report = json.loads(out)
+
+    assert exit_code == 1
+    assert report["summary"]["new_findings"] == 0
+    assert report["summary"]["invalid_exceptions"] == 1
+    assert report["new_findings"] == []
+    assert len(report["invalid_exceptions"]) == 1
+    assert report["invalid_exceptions"][0]["code"] == check_plan.CODE_INVALID_EXCEPTION
+
+
+# --------------------------------------------------------------------------- #
+# 10. Committed baseline validates against the baseline contract schema
+# --------------------------------------------------------------------------- #
+
+
+def test_committed_baseline_validates_against_schema():
+    import re as _re
+    data = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    schema = json.loads(BASELINE_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=data, schema=schema)
+    assert data["schema"] == check_plan.BASELINE_SCHEMA
+    keys = [(e["path"], e["code"], e["id"]) for e in data["entries"]]
+    assert keys == sorted(keys)
+    id_re = _re.compile(r"^[0-9a-f]{16}$")
+    for e in data["entries"]:
+        assert id_re.match(e["id"]), f"id {e['id']!r} does not match pattern"

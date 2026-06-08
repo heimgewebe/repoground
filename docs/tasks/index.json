@@ -24,6 +24,7 @@
         "scripts/docmeta/tests/test_check_planning_registration.py",
         "merger/lenskit/tests/test_planning_registration_ratchet.py",
         "merger/lenskit/contracts/planning-registration-report.v1.schema.json",
+        "merger/lenskit/contracts/planning-registration-baseline.v1.schema.json",
         "docs/tasks/planning-registration-baseline.json",
         ".github/workflows/task-index.yml",
         "docs/proofs/planning-registration-ratchet-proof.md"

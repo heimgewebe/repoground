@@ -64,10 +64,12 @@ Rules:
   findings, so the committed baseline is empty.
 - `--ratchet` partitions the current scan against the baseline:
   - `known_findings`: id present in baseline → tolerated.
-  - `new_findings`: id absent from baseline → **blocking**.
+  - `new_findings`: genuine new drift, id absent from baseline → **blocking**.
+    `invalid_exceptions` are **not** counted here; they are a separate blocking class.
   - `resolved_findings`: baseline id absent from the current scan → stale,
     **non-blocking** (surfaced for later baseline pruning).
-  - `invalid_exceptions`: always **blocking**, regardless of baseline.
+  - `invalid_exceptions`: kaputte/abgelaufene Frontmatter-Ausnahmen, always
+    **blocking**, regardless of baseline, **never** in `new_findings`.
 - CI does not enforce "all registered". It enforces **no new drift**.
 
 ## CI behavior
@@ -116,17 +118,20 @@ python3 -m json.tool /tmp/planning-registration-report.json >/dev/null
 
 ## Test evidence
 
-- `merger/lenskit/tests/test_planning_registration_ratchet.py` (20 tests):
+- `merger/lenskit/tests/test_planning_registration_ratchet.py` (22 tests):
   scanner detection, line-number-independent ids, baseline toleration, new-drift
-  blocking, resolved/stale handling, invalid/expired exemptions blocking, valid
-  exemption suppression, JSON report schema validation (scan/ratchet/
-  update_baseline modes), workflow static wiring, and exit-code-2 config errors.
+  blocking, resolved/stale handling, invalid/expired exemptions blocking (including
+  the key invariant that `invalid_exceptions` do **not** appear in `new_findings`),
+  valid exemption suppression, JSON report schema validation (scan/ratchet/
+  update_baseline modes), committed-baseline validated against the baseline
+  contract schema, workflow static wiring, and exit-code-2 config errors.
 - `scripts/docmeta/tests/test_check_planning_registration.py` (27 tests): the
   pre-existing scanner contract, unchanged and still green.
 - Real-repo ratchet run: exit 0, report validates against
   `merger/lenskit/contracts/planning-registration-report.v1.schema.json`.
-- `governance lint`: 42 contracts scanned, 0 errors (new report contract
-  included).
+- Committed baseline validates against
+  `merger/lenskit/contracts/planning-registration-baseline.v1.schema.json`.
+- `governance lint`: 43 contracts scanned, 0 errors (both new contracts included).
 
 ## Known limits
 
