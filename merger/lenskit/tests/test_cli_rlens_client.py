@@ -862,6 +862,118 @@ def test_rlens_client_run_repeated_repo_force_new_and_plan_only(
     assert payload["mode"] == "gesamt"
 
 
+# ---------------------------------------------------------------------------
+# run --source-mode (rLens source acquisition)
+# ---------------------------------------------------------------------------
+
+
+def test_rlens_client_run_remote_snapshot_payload(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-rs", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "run", "--repo", "weltgewebe", "--source-mode", "remote-snapshot", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["repo_source_mode"] == "remote_snapshot"
+    assert payload["remote_ref_policy"] == "upstream"
+    assert payload["pre_pull"] is False
+    assert "remote_ref" not in payload
+
+
+def test_rlens_client_run_remote_snapshot_default_branch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-db", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main([
+        "rlens-client", "run", "--repo", "weltgewebe",
+        "--source-mode", "remote-snapshot", "--remote-ref-policy", "default-branch", "--json",
+    ])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["repo_source_mode"] == "remote_snapshot"
+    assert payload["remote_ref_policy"] == "default_branch"
+
+
+def test_rlens_client_run_remote_snapshot_explicit_ref(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-er", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main([
+        "rlens-client", "run", "--repo", "weltgewebe",
+        "--source-mode", "remote-snapshot", "--remote-ref", "origin/main", "--json",
+    ])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["remote_ref"] == "origin/main"
+
+
+def test_rlens_client_run_local_current_payload(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-lc", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main(["rlens-client", "run", "--repo", "lenskit", "--source-mode", "local-current", "--json"])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["repo_source_mode"] == "local_current"
+    assert payload["pre_pull"] is False
+    assert "remote_ref_policy" not in payload
+
+
+def test_rlens_client_run_plan_only_remote_snapshot_allowed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    captured, opener = _make_opener({"id": "job-po-rs", "status": "queued"})
+    monkeypatch.setattr(urllib.request, "urlopen", opener)
+
+    rc = main([
+        "rlens-client", "run", "--repo", "weltgewebe",
+        "--source-mode", "remote-snapshot", "--plan-only", "--json",
+    ])
+    capsys.readouterr()
+
+    assert rc == 0
+    payload = _decode_request_json(captured["req"])
+    assert payload["plan_only"] is True
+    assert payload["repo_source_mode"] == "remote_snapshot"
+    assert payload["pre_pull"] is False
+
+
+def test_rlens_client_run_source_mode_pre_pull_conflicts(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
+        raise AssertionError("Network must not be called on a source-mode conflict")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    for argv in (
+        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-current", "--pre-pull", "--json"],
+        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-ff", "--no-pre-pull", "--json"],
+        ["rlens-client", "run", "--repo", "r", "--source-mode", "remote-snapshot", "--pre-pull", "--json"],
+    ):
+        rc = main(argv)
+        out, _ = capsys.readouterr()
+        assert rc == 2, argv
+        parsed = json.loads(out)
+        assert parsed["error_kind"] == "config_error"
+
+
 def test_rlens_client_run_text_output(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:

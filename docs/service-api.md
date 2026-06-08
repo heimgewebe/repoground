@@ -352,3 +352,65 @@ digest summary of this report.
   the report captures the failure with `phase="plan_exception"` or `phase="apply_exception"`.
 - **Skip:** No `pre_pull_report` artifact is produced when effective pre-pull is false
   (`plan_only=true` or `pre_pull=false`).
+
+### Source Acquisition (`repo_source_mode`)
+
+rLens Source Acquisition v1 makes *how the content to scan is acquired* explicit.
+See `docs/blueprints/rlens-source-acquisition-blueprint.md` for the full design.
+
+New `JobRequest` fields:
+
+- `repo_source_mode` (`"local_current" | "local_ff" | "remote_snapshot" | null`,
+  default `null`). When `null`, behaviour is derived from the legacy
+  `pre_pull`/`plan_only` flags (`pre_pull and not plan_only` ⇒ `local_ff`, else
+  `local_current`), so existing clients are unaffected.
+- `remote_ref` (`string | null`): explicit ref for `remote_snapshot`; wins over the policy.
+- `remote_ref_policy` (`"upstream" | "same_branch" | "default_branch"`, default `"upstream"`).
+
+Modes:
+
+- **`local_current`** — scan the current local working tree; no git mutation.
+- **`local_ff`** — the existing bounded fast-forward-only pre-pull, then scan
+  the local tree (classified as `bounded repo-sync mutation`).
+- **`remote_snapshot`** — scan an isolated materialization of a remote commit
+  (classified as `local artifact generation`: it only writes under the snapshot
+  cache and never touches the local repo). Solves the no-upstream case:
+  `remote_snapshot + default_branch` scans `origin/HEAD` (fallback `origin/main`)
+  regardless of the local branch's upstream.
+
+Ref selection: explicit `remote_ref` wins. Otherwise exactly `remote_ref_policy` is used. Missing upstream remains `missing_ref`; rLens does not guess `default_branch` unless that policy is selected.
+For `upstream`, the configured tracking remote is used, not implicitly `origin`.
+An explicit commit SHA works if the commit is reachable via fetched heads/tags or if the remote server allows direct SHA fetches.
+
+**Security invariants (`remote_snapshot`):** never mutates local hub repos,
+never sets an upstream, never switches branches; uses a job-bound cache under
+`<merges_dir>/.rlens-source-snapshots/<job_id>/`; every git call is an explicit
+argument list with `GIT_TERMINAL_PROMPT=0`; remote URLs, stderr and reports are
+credential-redacted; fetch uses `--no-write-fetch-head` so credential-bearing
+URLs are not written to `FETCH_HEAD`; tar extraction is hardened against path
+traversal and escaping symlink/hardlink members.
+
+**Plan-only:** `remote_snapshot + plan_only` is a dry-plan: remote ref resolution only, no snapshot materialization, no scan, no local repository mutation and no bundle content write. A diagnostic `source_acquisition_report` artifact is still written so the planned ref/commit is inspectable.
+
+**Job reuse:** `repo_source_mode`, `remote_ref` and `remote_ref_policy` are part
+of the job content hash. A *succeeded* `remote_snapshot` job is never reused
+(moving ref names are not content-stable); active identical jobs still are.
+
+**Source Acquisition Report Artifact:** `remote_snapshot` jobs produce a
+`source_acquisition_report` JSON artifact (schema
+`lenskit.source_acquisition_report.v1`, file
+`rlens-job-{id}_source_acquisition_report.json`). It distinguishes provenance per
+repo: `original_path`, `scan_path`, `source_mode`, `resolved_ref`,
+`resolved_commit`, `local_repo_mutated`, plus credential-redacted `remote_url_redacted`,
+`message`, `stderr` and `warnings`. On failure it is registered as an
+early-diagnostic artifact.
+
+**v1 limits:** submodules are not recursively materialized (warning
+`submodules_not_expanded` when `.gitmodules` is present); Git-LFS content is not
+smudged (warning `lfs_not_smudged` when LFS filters/pointers are detected).
+
+**Surfaces:** CLI `lenskit rlens-client run --source-mode {local-current,local-ff,remote-snapshot}`
+with `--remote-ref` / `--remote-ref-policy`; WebUI "Quelle" dropdown (+ ref
+policy/ref fields for remote-snapshot); repoLens headless `--source-mode` /
+`--remote-ref` / `--remote-ref-policy`. Contradictory `--source-mode`/`--pre-pull`
+combinations are rejected before any network access.

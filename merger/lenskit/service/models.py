@@ -77,6 +77,14 @@ def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> st
         # can produce a different dump than the stale one. plan_only never mutates
         # repos, so plan_only/pre_pull=True hashes like plan_only/pre_pull=False.
         "pre_pull": req.pre_pull and not req.plan_only,
+        # rLens source acquisition (v1). These select how the on-disk content to
+        # scan is acquired and therefore change the meaning of a job. Stored raw
+        # (not "effective") so an explicit mode never collides with the legacy
+        # pre_pull-derived default. remote_snapshot succeeded-job reuse is refused
+        # separately in app.create_job because moving ref names are not stable.
+        "repo_source_mode": req.repo_source_mode,
+        "remote_ref": req.remote_ref,
+        "remote_ref_policy": req.remote_ref_policy,
         # Merges dir excluded from content hash:
         # Same content, different output path = same logical job.
         # Client must check returned artifact for actual path.
@@ -121,6 +129,16 @@ class JobRequest(BaseModel):
     output_mode: Literal["archive", "retrieval", "dual"] = "dual"
     redact_secrets: bool = False
     include_hidden: bool = Field(default=True, description="Whether to include hidden files/directories (starting with .)")
+    # rLens Source Acquisition v1. Selects how the content to scan is acquired:
+    #   local_current   — scan the current local working tree, no git mutation.
+    #   local_ff        — bounded fast-forward-only pre-pull, then scan (legacy pre_pull=True).
+    #   remote_snapshot — scan an isolated remote materialization; never mutates the local repo.
+    # None preserves legacy behaviour derived from pre_pull/plan_only (see
+    # docs/blueprints/rlens-source-acquisition-blueprint.md and resolve_effective_source_mode).
+    repo_source_mode: Optional[Literal["local_current", "local_ff", "remote_snapshot"]] = None
+    # remote_snapshot ref selection. Explicit remote_ref wins over the policy.
+    remote_ref: Optional[str] = None
+    remote_ref_policy: Literal["upstream", "same_branch", "default_branch"] = "upstream"
 
 class AtlasEffective(BaseModel):
     max_depth: int

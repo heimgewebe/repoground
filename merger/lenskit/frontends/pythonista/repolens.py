@@ -28,6 +28,7 @@ import json
 import re
 import traceback
 import datetime
+import uuid
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
@@ -275,6 +276,45 @@ except ImportError:
         PrePullStatus = None
         HARD_FAIL_STATUSES = []
         WARN_STATUSES = []
+
+try:
+    from merger.lenskit.service.source_acquisition import (
+        resolve_remote_ref,
+        materialize_remote_snapshot,
+        SourceStatus,
+    )
+except ImportError:
+    try:
+        from lenskit.service.source_acquisition import (
+            resolve_remote_ref,
+            materialize_remote_snapshot,
+            SourceStatus,
+        )
+    except ImportError:
+        resolve_remote_ref = None
+        materialize_remote_snapshot = None
+        SourceStatus = None
+
+
+def resolve_headless_source_mode(args) -> str:
+    """Map parsed headless CLI args onto the effective source mode.
+
+    Explicit ``--source-mode`` wins; otherwise derive from the legacy
+    ``--pre-pull``/``--plan-only`` flags. ``local-ff`` degrades to
+    ``local_current`` under ``--plan-only`` (plan-only never mutates).
+    """
+    sm = getattr(args, "source_mode", None)
+    plan_only = bool(getattr(args, "plan_only", False))
+    if sm == "remote-snapshot":
+        return "remote_snapshot"
+    if sm == "local-current":
+        return "local_current"
+    if sm == "local-ff":
+        return "local_current" if plan_only else "local_ff"
+    requested = getattr(args, "pre_pull", None)
+    if requested is None:
+        requested = not plan_only
+    return "local_ff" if (requested and not plan_only) else "local_current"
 
 
 def resolve_pre_pull_switch_value(pre_pull_switch) -> bool:
@@ -3545,6 +3585,23 @@ def main_cli():
     parser.add_argument("--meta-density", choices=["min", "standard", "full", "auto"], default="auto", help="Control metadata verbosity")
     parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"], default="dual", help="Output mode: archive (MD only), retrieval (Chunk Index), or dual (both)")
     parser.add_argument("--redact-secrets", action="store_true", help="Enable heuristic secret redaction")
+    parser.add_argument(
+        "--source-mode",
+        choices=["local-current", "local-ff", "remote-snapshot"],
+        default=None,
+        help="rLens source acquisition mode (local-current / local-ff / remote-snapshot)",
+    )
+    parser.add_argument(
+        "--remote-ref",
+        default=None,
+        help="Explicit remote ref for remote-snapshot (e.g. origin/main or a commit SHA)",
+    )
+    parser.add_argument(
+        "--remote-ref-policy",
+        choices=["upstream", "same-branch", "default-branch"],
+        default="upstream",
+        help="remote-snapshot ref policy when --remote-ref is absent (default: upstream)",
+    )
 
     args = parser.parse_args()
 
@@ -3555,6 +3612,17 @@ def main_cli():
             "(plan_only never mutates local repos).",
             file=sys.stderr,
         )
+        sys.exit(2)
+
+    # Reject contradictory --source-mode / --pre-pull combinations.
+    if args.source_mode == "local-current" and getattr(args, "pre_pull", None) is True:
+        print("Error: --source-mode local-current does not fast-forward; remove --pre-pull.", file=sys.stderr)
+        sys.exit(2)
+    if args.source_mode == "local-ff" and getattr(args, "pre_pull", None) is False:
+        print("Error: --source-mode local-ff implies a fast-forward pre-pull; remove --no-pre-pull.", file=sys.stderr)
+        sys.exit(2)
+    if args.source_mode == "remote-snapshot" and getattr(args, "pre_pull", None) is True:
+        print("Error: --source-mode remote-snapshot never mutates the local repo; remove --pre-pull.", file=sys.stderr)
         sys.exit(2)
 
     try:
@@ -3586,13 +3654,58 @@ def main_cli():
     print(f"Hub: {hub}")
     print(f"Sources: {[s.name for s in sources]}")
 
-    # Effective pre-pull: explicit flag wins; otherwise default on unless plan_only.
-    # plan_only never mutates local repos. Two-phase (plan all → apply all).
-    requested_pre_pull = getattr(args, "pre_pull", None)
-    if requested_pre_pull is None:
-        requested_pre_pull = not args.plan_only
-    effective_pre_pull = requested_pre_pull and not args.plan_only
-    if effective_pre_pull:
+    # rLens source acquisition: the effective source mode decides how the content
+    # to scan is acquired. local_ff keeps the bounded pre-pull; local_current
+    # scans the tree as-is; remote_snapshot scans an isolated remote materialization
+    # without ever mutating the local repo.
+    effective_source_mode = resolve_headless_source_mode(args)
+    remote_ref_policy = (args.remote_ref_policy or "upstream").replace("-", "_")
+
+    if effective_source_mode == "remote_snapshot":
+        if materialize_remote_snapshot is None or resolve_remote_ref is None:
+            print(
+                "Error: remote_snapshot requested but source_acquisition module is unavailable.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        merges_dir = get_merges_dir(hub)
+        job_id = "headless-" + uuid.uuid4().hex[:12]
+        if args.plan_only:
+            # Dry-plan: resolve refs only, never materialize or scan.
+            ok = True
+            for src in sources:
+                resolution = resolve_remote_ref(
+                    src, remote_ref=args.remote_ref, remote_ref_policy=remote_ref_policy
+                )
+                if resolution.status == SourceStatus.RESOLVED:
+                    commit_short = (resolution.resolved_commit or "")[:12]
+                    print(f"remote_snapshot plan {resolution.repo}: would scan {resolution.resolved_ref} ({commit_short})")
+                else:
+                    ok = False
+                    print(f"Error: remote_snapshot plan {resolution.repo}: {resolution.status} - {resolution.message}", file=sys.stderr)
+            if not ok:
+                sys.exit(1)
+            print("remote_snapshot plan_only: ref resolution complete; skipping scan and bundle write.")
+            return
+        snapshot_sources = []
+        for src in sources:
+            result = materialize_remote_snapshot(
+                src,
+                remote_ref=args.remote_ref,
+                remote_ref_policy=remote_ref_policy,
+                cache_root=merges_dir,
+                job_id=job_id,
+            )
+            if result.status != SourceStatus.SNAPSHOT_CREATED or not result.snapshot_path:
+                print(f"Error: remote_snapshot {result.repo}: {result.status} - {result.message}", file=sys.stderr)
+                sys.exit(1)
+            for w in result.warnings:
+                print(f"Warning: {result.repo}: {w}")
+            commit_short = (result.resolved_commit or "")[:12]
+            print(f"remote_snapshot {result.repo}: scanning {result.resolved_ref} ({commit_short}); local repo not mutated")
+            snapshot_sources.append(Path(result.snapshot_path))
+        sources = snapshot_sources
+    elif effective_source_mode == "local_ff":
         try:
             run_pre_pull_two_phase(sources, log=print)
         except Exception as e:
@@ -3600,7 +3713,7 @@ def main_cli():
             # requested pre-pull — fail loudly and do not scan.
             print(f"Error: {e}", file=sys.stderr)
             sys.exit(1)
-    elif requested_pre_pull and args.plan_only:
+    elif args.plan_only and getattr(args, "pre_pull", None) is not False:
         print("Pre-pull skipped because plan_only=True.")
 
     max_bytes = parse_human_size(str(args.max_bytes))

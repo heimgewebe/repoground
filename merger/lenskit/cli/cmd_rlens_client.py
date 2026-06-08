@@ -364,6 +364,27 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
     )
     run_parser.add_argument("--force-new", action="store_true", help="Do not reuse matching existing jobs")
     run_parser.add_argument("--plan-only", action="store_true", help="Plan only; do not write bundle artifacts")
+    run_parser.add_argument(
+        "--source-mode",
+        choices=("local-current", "local-ff", "remote-snapshot"),
+        default=None,
+        help=(
+            "rLens source acquisition mode. local-current scans the working tree as-is; "
+            "local-ff fast-forwards first (legacy pre-pull); remote-snapshot scans an "
+            "isolated remote materialization without mutating the local repo."
+        ),
+    )
+    run_parser.add_argument(
+        "--remote-ref",
+        default=None,
+        help="Explicit remote ref for remote-snapshot (e.g. origin/main or a commit SHA); wins over the policy",
+    )
+    run_parser.add_argument(
+        "--remote-ref-policy",
+        choices=("upstream", "same-branch", "default-branch"),
+        default="upstream",
+        help="remote-snapshot ref policy when --remote-ref is not given (default: upstream)",
+    )
     pre_pull_group = run_parser.add_mutually_exclusive_group()
     pre_pull_group.add_argument(
         "--pre-pull",
@@ -584,12 +605,41 @@ def _cmd_job(args: argparse.Namespace) -> int:
     return 0
 
 
+_SOURCE_MODE_PAYLOAD = {
+    "local-current": "local_current",
+    "local-ff": "local_ff",
+    "remote-snapshot": "remote_snapshot",
+}
+_REMOTE_REF_POLICY_PAYLOAD = {
+    "upstream": "upstream",
+    "same-branch": "same_branch",
+    "default-branch": "default_branch",
+}
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     # plan_only never mutates local repos; an explicit --pre-pull contradicts it.
     # Reject before any network/config work so no HTTP request is made.
     if args.plan_only and args.pre_pull is True:
         return _exit_config_error(
             args, "--plan-only and --pre-pull are mutually exclusive (plan_only never mutates local repos)."
+        )
+
+    source_mode = getattr(args, "source_mode", None)
+    # Reject contradictory --source-mode / --pre-pull combinations before any
+    # network access. --no-pre-pull is redundant (but consistent) for the
+    # non-fast-forward modes, so it is accepted silently there.
+    if source_mode == "local-current" and args.pre_pull is True:
+        return _exit_config_error(
+            args, "--source-mode local-current does not fast-forward; remove --pre-pull."
+        )
+    if source_mode == "local-ff" and args.pre_pull is False:
+        return _exit_config_error(
+            args, "--source-mode local-ff implies a fast-forward pre-pull; remove --no-pre-pull."
+        )
+    if source_mode == "remote-snapshot" and args.pre_pull is True:
+        return _exit_config_error(
+            args, "--source-mode remote-snapshot never mutates the local repo; remove --pre-pull."
         )
 
     try:
@@ -615,9 +665,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
         payload["plan_only"] = True
     # Effective pre_pull: explicit flag wins; otherwise default true unless plan_only.
     # Always sent explicitly so behavior is unambiguous and easy to assert in tests.
-    effective_pre_pull = args.pre_pull
-    if effective_pre_pull is None:
-        effective_pre_pull = not args.plan_only
+    # When a source mode is selected, the mode determines pre_pull for legacy
+    # compatibility (local-ff => true, local-current/remote-snapshot => false).
+    if source_mode is not None:
+        payload["repo_source_mode"] = _SOURCE_MODE_PAYLOAD[source_mode]
+        effective_pre_pull = source_mode == "local-ff" and not args.plan_only
+        if source_mode == "remote-snapshot":
+            payload["remote_ref_policy"] = _REMOTE_REF_POLICY_PAYLOAD[args.remote_ref_policy]
+            if args.remote_ref:
+                payload["remote_ref"] = args.remote_ref
+    else:
+        effective_pre_pull = args.pre_pull
+        if effective_pre_pull is None:
+            effective_pre_pull = not args.plan_only
     payload["pre_pull"] = effective_pre_pull
 
     url = f"{base_url}/api/jobs"

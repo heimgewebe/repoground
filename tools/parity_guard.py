@@ -94,6 +94,30 @@ FEATURES = {
         "html_id": "prePull",
         "js_key": "pre_pull",
         "repolens_usage": "args.pre_pull"
+    },
+    # rLens Source Acquisition v1. Surface-parity only: the guard checks that the
+    # --source-mode/--remote-ref/--remote-ref-policy flags, the WebUI elements,
+    # the payload keys and repoLens' args all exist across surfaces. The shared
+    # semantics (effective source mode, remote_snapshot non-mutation, ref policy,
+    # dry-plan) are covered by test_source_acquisition.py and the service/CLI/UI
+    # tests, not by this guard.
+    "repo_source_mode": {
+        "cli_arg": "--source-mode",
+        "html_id": "sourceMode",
+        "js_key": "repo_source_mode",
+        "repolens_usage": "args.source_mode"
+    },
+    "remote_ref": {
+        "cli_arg": "--remote-ref",
+        "html_id": "remoteRef",
+        "js_key": "remote_ref",
+        "repolens_usage": "args.remote_ref"
+    },
+    "remote_ref_policy": {
+        "cli_arg": "--remote-ref-policy",
+        "html_id": "remoteRefPolicy",
+        "js_key": "remote_ref_policy",
+        "repolens_usage": "args.remote_ref_policy"
     }
 }
 
@@ -281,9 +305,13 @@ class ParityChecker:
             js_key = config.get("js_key")
 
             if js_key:
-                # Look for payload key assignment: "key:"
-                # Strict check: key followed by optional whitespace and a colon.
-                if re.search(rf'\b{js_key}\s*:', payload_block):
+                # Look for payload key assignment: "key:" inside the payload block,
+                # OR a conditional assignment to the payload object elsewhere
+                # (e.g. commonPayload.repo_source_mode = ...), which is how the
+                # optional source-acquisition keys are attached.
+                in_block = re.search(rf'\b{js_key}\s*:', payload_block)
+                as_assignment = re.search(rf'\.{js_key}\s*=', clean_content)
+                if in_block or as_assignment:
                     self.log_pass(f"WebUI JS: Payload key '{js_key}' found.")
                 else:
                     self.log_error(f"WebUI JS: Payload key '{js_key}' missing for feature '{feature}'.")

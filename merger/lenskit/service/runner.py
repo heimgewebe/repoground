@@ -21,6 +21,13 @@ from .repo_sync import (
     WARN_STATUSES,
     _redact as _redact_git_stderr,
 )
+from .source_acquisition import (
+    resolve_effective_source_mode,
+    resolve_remote_ref,
+    materialize_remote_snapshot,
+    RemoteSnapshotResult,
+    SourceStatus,
+)
 from ..adapters.security import validate_source_dir, get_security_config, SecurityViolationError
 
 logger = logging.getLogger(__name__)
@@ -141,6 +148,57 @@ def _register_pre_pull_report_artifact_once(
         )
         return False
 
+# Source-acquisition statuses that mean the job cannot scan that repo.
+_SOURCE_FAILURE_STATUSES = frozenset(
+    {
+        SourceStatus.MISSING_REMOTE,
+        SourceStatus.MISSING_REF,
+        SourceStatus.FETCH_FAILED,
+        SourceStatus.ARCHIVE_FAILED,
+        SourceStatus.EXTRACT_FAILED,
+        SourceStatus.ERROR,
+    }
+)
+
+
+def _register_source_acquisition_report_artifact_once(
+    *,
+    job_store: JobStore,
+    job: Job,
+    report_path: Path | None,
+    already_registered: bool,
+    repos: List[str] | None = None,
+) -> bool:
+    if report_path is None or not report_path.exists():
+        return False
+    if already_registered:
+        return True
+    try:
+        artifact_id = str(uuid.uuid4())
+        art = Artifact(
+            id=artifact_id,
+            job_id=job.id,
+            hub=job.hub_resolved or "",
+            repos=repos if repos is not None else (job.request.repos or []),
+            created_at=datetime.now(timezone.utc).isoformat(),
+            paths={"source_acquisition_report": report_path.name},
+            params=job.request,
+            merges_dir=str(report_path.parent.resolve()),
+        )
+        job_store.add_artifact(art)
+        job.artifact_ids.append(artifact_id)
+        job_store.update_job(job)
+        return True
+    except Exception as artifact_error:
+        safe_artifact_error = _safe_text(artifact_error) or "unknown error"
+        logger.warning(
+            "Job %s: failed to register source-acquisition report artifact: %s",
+            job.id,
+            safe_artifact_error,
+        )
+        return False
+
+
 def _json_status(value: object | None) -> object | None:
     if value is None:
         return None
@@ -204,6 +262,11 @@ class JobRunner:
             repo_names = list(job.request.repos or [])
             pre_pull_report_path: Path | None = None
             pre_pull_report_artifact_registered = False
+            source_acq_report_path: Path | None = None
+            source_acq_report_artifact_registered = False
+            # Paths that will actually be scanned. For local modes these are the
+            # local sources; for remote_snapshot they are the materialized trees.
+            scan_sources: list[Path] = []
 
             # 1. Use resolved Hub from job
             if not job.hub_resolved:
@@ -277,7 +340,14 @@ class JobRunner:
             # when another repo's plan hard-fails. Strictly fast-forward-only
             # (see service/repo_sync.py) — no shell, pull, reset, rebase, stash,
             # checkout, switch or clean.
-            effective_pre_pull = req.pre_pull and not req.plan_only
+            #
+            # rLens Source Acquisition v1: the effective source mode decides how the
+            # content to scan is acquired. local_ff keeps the bounded pre-pull;
+            # local_current scans the local tree as-is; remote_snapshot scans an
+            # isolated remote materialization without touching the local repo.
+            effective_source_mode = resolve_effective_source_mode(req)
+            effective_pre_pull = effective_source_mode == "local_ff"
+            log(f"Source mode: {effective_source_mode}")
 
             # Helper to write report and log digest
             def _write_pre_pull_report(phase: str, plans: list = None, results: list = None) -> Path | None:
@@ -384,7 +454,150 @@ class JobRunner:
                     log(f"... and {len(hf_repos) - 3} more hard failures; see {report_path.name}")
 
                 return report_path
-            if effective_pre_pull:
+
+            def _write_source_acquisition_report(results: list, mode_label: str) -> Path | None:
+                summary = {
+                    "repos_total": len(results),
+                    "remote_snapshot_created": sum(1 for r in results if r.status == SourceStatus.SNAPSHOT_CREATED),
+                    "planned": sum(1 for r in results if r.status == SourceStatus.PLANNED),
+                    "warnings": sum(len(r.warnings) for r in results),
+                    "failures": sum(1 for r in results if r.status in _SOURCE_FAILURE_STATUSES),
+                }
+                repos_list = []
+                for r in results:
+                    repos_list.append({
+                        "repo": r.repo,
+                        "original_path": r.original_path,
+                        "scan_path": r.snapshot_path,
+                        "source_mode": r.source_mode,
+                        "status": r.status,
+                        "remote_ref_policy": r.remote_ref_policy,
+                        "requested_remote_ref": r.requested_remote_ref,
+                        "resolved_ref": r.resolved_ref,
+                        "resolved_commit": r.resolved_commit,
+                        "remote_url_redacted": r.remote_url_redacted,
+                        "local_repo_mutated": r.local_repo_mutated,
+                        "message": _safe_text(r.message),
+                        "stderr": _safe_text(r.stderr),
+                        "warnings": list(r.warnings),
+                    })
+                report = {
+                    "schema": "lenskit.source_acquisition_report.v1",
+                    "job_id": job.id,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "hub": str(hub),
+                    "mode": mode_label,
+                    "plan_only": req.plan_only,
+                    "remote_ref_policy": req.remote_ref_policy,
+                    "requested_remote_ref": req.remote_ref,
+                    "summary": summary,
+                    "repos": repos_list,
+                }
+                report_path = merges_dir / f"rlens-job-{job.id}_source_acquisition_report.json"
+                try:
+                    with open(report_path, "w", encoding="utf-8") as f:
+                        json.dump(report, f, indent=2, ensure_ascii=False, default=str)
+                except Exception as exc:
+                    safe_exc = _safe_text(exc) or "unknown error"
+                    log(f"ERROR: Failed to write source_acquisition_report: {safe_exc}")
+                    raise RuntimeError(f"failed to write source_acquisition_report: {safe_exc}") from exc
+
+                # Live-Log digest (one compact line) + at most 3 failure details.
+                log(
+                    f"Source acquisition: mode={mode_label}, repos={summary['repos_total']}, "
+                    f"snapshots={summary['remote_snapshot_created']}, failures={summary['failures']}"
+                )
+                failed = [r for r in results if r.status in _SOURCE_FAILURE_STATUSES]
+                for r in failed[:3]:
+                    log(f"Source acquisition failed: {r.repo}: {r.status} - {_safe_text(r.message)}")
+                if len(failed) > 3:
+                    log(f"... and {len(failed) - 3} more source failures; see {report_path.name}")
+                return report_path
+
+            scan_sources = list(sources)
+
+            if effective_source_mode == "remote_snapshot":
+                # NEVER calls plan_pre_pull_repos / apply_pre_pull_plans and never
+                # mutates the local repo. Each repo is materialized in isolation.
+                log(
+                    f"remote_snapshot: acquiring remote content "
+                    f"(policy={req.remote_ref_policy}, ref={req.remote_ref or 'auto'})..."
+                )
+                source_results: list[RemoteSnapshotResult] = []
+                for src in sources:
+                    if req.plan_only:
+                        resolution = resolve_remote_ref(
+                            src,
+                            remote_ref=req.remote_ref,
+                            remote_ref_policy=req.remote_ref_policy,
+                        )
+                        if resolution.status == SourceStatus.RESOLVED:
+                            status = SourceStatus.PLANNED
+                            commit_short = (resolution.resolved_commit or "")[:12]
+                            msg = f"planned {resolution.resolved_ref} ({commit_short})"
+                        else:
+                            status = resolution.status
+                            msg = resolution.message
+                        source_results.append(RemoteSnapshotResult(
+                            repo=src.name,
+                            original_path=str(src),
+                            snapshot_path=None,
+                            source_mode="remote_snapshot",
+                            status=status,
+                            remote_ref_policy=req.remote_ref_policy,
+                            requested_remote_ref=req.remote_ref,
+                            resolved_ref=resolution.resolved_ref,
+                            resolved_commit=resolution.resolved_commit,
+                            remote_url_redacted=resolution.remote_url_redacted,
+                            local_repo_mutated=False,
+                            message=msg,
+                            stderr=resolution.stderr,
+                            warnings=[],
+                        ))
+                    else:
+                        result = materialize_remote_snapshot(
+                            src,
+                            remote_ref=req.remote_ref,
+                            remote_ref_policy=req.remote_ref_policy,
+                            cache_root=merges_dir,
+                            job_id=job.id,
+                        )
+                        source_results.append(result)
+                        if result.warnings:
+                            for w in result.warnings:
+                                job.warnings.append(f"Source acquisition {result.repo}: {w}")
+                            self.job_store.update_job(job)
+
+                source_acq_report_path = _write_source_acquisition_report(source_results, "remote_snapshot")
+
+                source_acq_report_artifact_registered = _register_source_acquisition_report_artifact_once(
+                    job_store=self.job_store,
+                    job=job,
+                    report_path=source_acq_report_path,
+                    already_registered=source_acq_report_artifact_registered,
+                    repos=repo_names,
+                )
+
+                failures = [r for r in source_results if r.status in _SOURCE_FAILURE_STATUSES]
+                if failures:
+                    detail = "; ".join(
+                        f"{r.repo}: {r.status} - {_safe_text(r.message)}" for r in failures
+                    )
+                    raise ValueError(f"Source acquisition failed (no local repo was mutated): {detail}")
+
+                if req.plan_only:
+                    # Dry-plan: ref resolution only. No snapshot, no scan, no local
+                    # write, no bundle write. The report records the planned refs.
+                    log("remote_snapshot plan_only: ref resolution complete; skipping scan and bundle write.")
+                    job.status = "succeeded"
+                    job.finished_at = datetime.now(timezone.utc).isoformat()
+                    log("Job completed successfully.")
+                    self.job_store.update_job(job)
+                    return
+
+                # Scan the materialized snapshots, not the local working trees.
+                scan_sources = [Path(r.snapshot_path) for r in source_results if r.snapshot_path]
+            elif effective_pre_pull:
                 log("Pre-pull enabled: planning updates for all repositories (fast-forward only)...")
                 try:
                     plans = plan_pre_pull_repos(sources)
@@ -499,8 +712,11 @@ class JobRunner:
                     repos=repo_names,
                 )
             else:
+                # local_current: scan the current local working tree, no git mutation.
                 if req.pre_pull and req.plan_only:
                     log("Pre-pull skipped because plan_only=True.")
+                elif effective_source_mode == "local_current":
+                    log("Source mode local_current: scanning current local working tree (no git mutation).")
                 else:
                     log("Pre-pull disabled by request.")
 
@@ -511,9 +727,9 @@ class JobRunner:
             include_paths = req.include_paths
 
             summaries = []
-            total_sources = len(sources)
+            total_sources = len(scan_sources)
             warnings_dirty = False
-            for i, src in enumerate(sources, 1):
+            for i, src in enumerate(scan_sources, 1):
                 # Refresh job status from store to detect external cancel
                 current_job = self.job_store.get_job(job_id)
                 if current_job and current_job.status in ("canceled", "canceling"):
@@ -661,6 +877,9 @@ class JobRunner:
             if pre_pull_report_path and pre_pull_report_path.exists() and not pre_pull_report_artifact_registered:
                 path_map["pre_pull_report"] = pre_pull_report_path.name
 
+            if source_acq_report_path and source_acq_report_path.exists() and not source_acq_report_artifact_registered:
+                path_map["source_acquisition_report"] = source_acq_report_path.name
+
             artifact_id = str(uuid.uuid4())
 
             art = Artifact(
@@ -678,6 +897,8 @@ class JobRunner:
             job.artifact_ids.append(artifact_id)
             if "pre_pull_report" in path_map:
                 pre_pull_report_artifact_registered = True
+            if "source_acquisition_report" in path_map:
+                source_acq_report_artifact_registered = True
 
             job.status = "succeeded"
             job.finished_at = datetime.now(timezone.utc).isoformat()
@@ -691,6 +912,14 @@ class JobRunner:
                 job=job,
                 report_path=pre_pull_report_path,
                 already_registered=pre_pull_report_artifact_registered,
+                repos=repo_names,
+            )
+            # Same for the source-acquisition report (early-diagnostic artifact).
+            _register_source_acquisition_report_artifact_once(
+                job_store=self.job_store,
+                job=job,
+                report_path=source_acq_report_path,
+                already_registered=source_acq_report_artifact_registered,
                 repos=repo_names,
             )
 

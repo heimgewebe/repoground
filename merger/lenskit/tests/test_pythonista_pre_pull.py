@@ -91,6 +91,40 @@ def test_headless_pre_pull_and_no_pre_pull_argparse_error(monkeypatch):
     assert exc.value.code == 2
 
 
+# --- headless source mode ---------------------------------------------------
+
+class _Args:
+    def __init__(self, **kw):
+        self.source_mode = kw.get("source_mode")
+        self.pre_pull = kw.get("pre_pull")
+        self.plan_only = kw.get("plan_only", False)
+
+
+def test_resolve_headless_source_mode_mapping():
+    r = repolens.resolve_headless_source_mode
+    assert r(_Args(source_mode="remote-snapshot")) == "remote_snapshot"
+    assert r(_Args(source_mode="local-current")) == "local_current"
+    assert r(_Args(source_mode="local-ff")) == "local_ff"
+    # local-ff under plan_only must not mutate → local_current.
+    assert r(_Args(source_mode="local-ff", plan_only=True)) == "local_current"
+    # Legacy derivation.
+    assert r(_Args(pre_pull=True)) == "local_ff"
+    assert r(_Args(pre_pull=False)) == "local_current"
+    assert r(_Args(pre_pull=None, plan_only=True)) == "local_current"
+
+
+@pytest.mark.parametrize("argv", [
+    ["repolens.py", "--source-mode", "local-current", "--pre-pull", "--headless"],
+    ["repolens.py", "--source-mode", "local-ff", "--no-pre-pull", "--headless"],
+    ["repolens.py", "--source-mode", "remote-snapshot", "--pre-pull", "--headless"],
+])
+def test_headless_source_mode_pre_pull_conflicts(monkeypatch, argv):
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exc:
+        repolens.main_cli()
+    assert exc.value.code == 2
+
+
 # --- resolve_pre_pull_switch_value helper -----------------------------------
 
 def test_resolve_pre_pull_switch_value_none_returns_true():
