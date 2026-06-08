@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/planning-registration-report.v1.schema.json",
+  "title": "Planning Registration Report (planning-registration-report v1.0)",
+  "description": "Machine-readable report of the planning-drift ratchet. This artifact is a diagnostic signal: it describes whether planning artifacts are registered or baseline-tolerated. It is not a truth verdict and does not by itself authorize merging.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "created_at",
+    "mode",
+    "summary",
+    "findings",
+    "baseline",
+    "new_findings",
+    "known_findings",
+    "resolved_findings",
+    "invalid_exceptions"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "lenskit.planning_registration_report.v1"
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp of report creation."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["scan", "ratchet", "update_baseline"]
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "current_findings",
+        "baseline_findings",
+        "new_findings",
+        "known_findings",
+        "resolved_findings",
+        "invalid_exceptions"
+      ],
+      "properties": {
+        "current_findings": {"type": "integer", "minimum": 0},
+        "baseline_findings": {"type": "integer", "minimum": 0},
+        "new_findings": {"type": "integer", "minimum": 0},
+        "known_findings": {"type": "integer", "minimum": 0},
+        "resolved_findings": {"type": "integer", "minimum": 0},
+        "invalid_exceptions": {"type": "integer", "minimum": 0}
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "loaded"],
+      "properties": {
+        "path": {"type": ["string", "null"]},
+        "loaded": {"type": "boolean"}
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/finding"}
+    },
+    "new_findings": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/finding"}
+    },
+    "known_findings": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/finding"}
+    },
+    "resolved_findings": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/finding"}
+    },
+    "invalid_exceptions": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/finding"}
+    }
+  },
+  "definitions": {
+    "finding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "code", "path", "kind"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable, line-number-independent finding id (sha256(code\\0path\\0kind)[:16])."
+        },
+        "code": {"type": "string"},
+        "path": {"type": "string"},
+        "kind": {"type": "string"},
+        "reason": {"type": "string"},
+        "suggestion": {"type": "string"},
+        "source": {"type": "string"}
+      }
+    }
+  }
+}

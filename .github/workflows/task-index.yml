@@ -24,5 +24,65 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check planning registration drift (report-only)
-        run: python3 -m scripts.docmeta.check_planning_registration
+      - name: Planning registration ratchet (blocks only on new drift)
+        id: ratchet
+        run: |
+          set -uo pipefail
+          # Capture the exit code without aborting the job, so we can still
+          # publish the report artifact and step summary before failing.
+          python3 scripts/docmeta/check_planning_registration.py \
+            --ratchet \
+            --baseline docs/tasks/planning-registration-baseline.json \
+            --format json \
+            > planning-registration-report.json
+          code=$?
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          echo "Ratchet exit code: ${code}"
+
+      - name: Write step summary
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, os
+          path = "planning-registration-report.json"
+          print("## Planning Registration Ratchet\n")
+          try:
+              with open(path, encoding="utf-8") as fh:
+                  report = json.load(fh)
+          except Exception as exc:  # noqa: BLE001 - summary must never crash the job
+              print(f"Report unavailable: `{exc}`")
+              raise SystemExit(0)
+          s = report.get("summary", {})
+          print(f"- mode: `{report.get('mode')}`")
+          print(f"- current findings: **{s.get('current_findings', 0)}**")
+          print(f"- baseline findings: **{s.get('baseline_findings', 0)}**")
+          print(f"- known findings: **{s.get('known_findings', 0)}**")
+          print(f"- new findings: **{s.get('new_findings', 0)}**")
+          print(f"- resolved findings: **{s.get('resolved_findings', 0)}**")
+          print(f"- invalid exceptions: **{s.get('invalid_exceptions', 0)}**")
+          new = report.get("new_findings", [])
+          inv = report.get("invalid_exceptions", [])
+          if new:
+              print("\n### New findings (blocking)\n")
+              for f in new:
+                  print(f"- `{f.get('code')}` `{f.get('path')}` — {f.get('reason', '')}")
+          if inv:
+              print("\n### Invalid exceptions (blocking)\n")
+              for f in inv:
+                  print(f"- `{f.get('code')}` `{f.get('path')}` — {f.get('reason', '')}")
+          if not new and not inv:
+              print("\n_No new drift. Known drift is tolerated via the baseline._")
+          PY
+
+      - name: Upload planning registration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-registration-report
+          path: planning-registration-report.json
+          if-no-files-found: warn
+
+      - name: Enforce ratchet result
+        if: always()
+        run: exit ${{ steps.ratchet.outputs.exit_code }}

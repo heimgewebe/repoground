@@ -1,0 +1,6 @@
+{
+  "schema": "lenskit.planning_registration_baseline.v1",
+  "generated_at": "2026-06-08T17:17:12Z",
+  "generator": "scripts/docmeta/check_planning_registration.py",
+  "entries": []
+}
