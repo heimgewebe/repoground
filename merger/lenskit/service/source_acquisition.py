@@ -273,7 +273,7 @@ def resolve_remote_ref(
     repo_path = Path(repo_path)
     repo_name = repo_path.name
     path_str = str(repo_path)
-    remote_ref = remote_ref.strip() if remote_ref else None
+    remote_ref = (remote_ref.strip() or None) if remote_ref else None
 
     def make(status: str, message: str, *, resolved_ref=None, resolved_commit=None,
              stderr=None, remote_url=None, remote_name="origin") -> RemoteRefResolution:
@@ -428,6 +428,7 @@ def materialize_remote_snapshot(
     repo_path = Path(repo_path)
     repo_name = repo_path.name
     original_path = str(repo_path)
+    remote_ref = (remote_ref.strip() or None) if remote_ref else None
 
     def make(status: str, message: str, *, resolution: Optional[RemoteRefResolution] = None,
              snapshot_path=None, stderr=None, warnings=None) -> RemoteSnapshotResult:
@@ -531,6 +532,7 @@ def materialize_remote_snapshot(
     fetch = _run_git(
         [
             "fetch",
+            "--no-write-fetch-head",
             "--prune",
             remote_url,
             f"+refs/heads/*:refs/remotes/{remote_name}/*",
@@ -554,7 +556,7 @@ def materialize_remote_snapshot(
     direct_fetch_stderr = None
     if rev.returncode != 0 and resolution.resolved_ref and _HEX_SHA_RE.match(resolution.resolved_ref):
         direct_fetch = _run_git(
-            ["fetch", "--prune", remote_url, resolution.resolved_ref],
+            ["fetch", "--no-write-fetch-head", "--prune", remote_url, resolution.resolved_ref],
             git_dir=cache_git_dir,
             timeout=timeout_seconds,
         )

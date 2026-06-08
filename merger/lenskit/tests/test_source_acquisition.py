@@ -362,6 +362,11 @@ def test_remote_snapshot_does_not_persist_remote_url_credentials_in_cache(tmp_pa
     assert secret not in (result.stderr or "")
     assert secret not in (result.message or "")
 
+    fetch_calls = [call_args for call_args in run_git_calls if call_args and call_args[0] == "fetch"]
+    assert fetch_calls, "expected at least one direct fetch call"
+    for call_args in fetch_calls:
+        assert "--no-write-fetch-head" in call_args
+
     for call_args in run_git_calls:
         if call_args[0] == "remote":
             assert "add" not in call_args
@@ -373,6 +378,12 @@ def test_remote_snapshot_does_not_persist_remote_url_credentials_in_cache(tmp_pa
         content = config_file.read_text(encoding="utf-8")
         assert secret not in content
         assert 'remote "origin"' not in content
+
+    if cache_git_dir.exists():
+        secret_bytes = secret.encode("utf-8")
+        for path in cache_git_dir.rglob("*"):
+            if path.is_file():
+                assert secret_bytes not in path.read_bytes(), f"secret leaked into cache file: {path}"
 
 # --- 12. Fix 1: Non-origin upstream ---
 
@@ -728,6 +739,7 @@ def test_remote_snapshot_blank_remote_ref_uses_policy_not_sha_path(remote_and_lo
     )
 
     assert result.status == SourceStatus.SNAPSHOT_CREATED, result.stderr
+    assert result.requested_remote_ref is None
     assert result.resolved_ref == "origin/main"
     assert result.resolved_commit
 
