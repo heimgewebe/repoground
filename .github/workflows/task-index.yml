@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Planning registration ratchet (blocks only on new drift)
+      - name: Planning registration ratchet
         id: ratchet
         shell: bash
         run: |
@@ -52,7 +52,7 @@ jobs:
               with open(path, encoding="utf-8") as fh:
                   report = json.load(fh)
           except Exception as exc:  # noqa: BLE001 - summary must never crash the job
-              print(f"Report unavailable: `{exc}`")
+              print(f"::warning::Planning registration report unavailable: {exc}")
               raise SystemExit(0)
           s = report.get("summary", {})
           print(f"- mode: `{report.get('mode')}`")
@@ -89,6 +89,7 @@ jobs:
           name: planning-registration-report
           path: planning-registration-report.json
           if-no-files-found: warn
+          retention-days: 7
 
       - name: Enforce ratchet result
         if: always()

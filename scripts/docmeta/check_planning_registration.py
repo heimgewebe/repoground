@@ -87,8 +87,8 @@ _EXCLUDED_PREFIXES = (
 
 
 def _today():
-    """Return today's date. Indirected for testability."""
-    return datetime.date.today()
+    """Return today's date in UTC. Indirected for testability."""
+    return datetime.datetime.now(datetime.timezone.utc).date()
 
 
 def _now_iso():
@@ -101,44 +101,6 @@ def _normalize_ref(raw):
     ref = ref.rstrip(".,);:]")
     ref = ref.strip().strip("`'\"")
     return ref
-
-
-def _strip_inline_comment(value: str) -> str:
-    """Remove inline comment from a YAML scalar value.
-
-    An inline comment is '#' outside of quoted strings, preceded by whitespace.
-    '#' inside single or double quotes is preserved. The value is then stripped
-    and outer matching quotes are removed.
-
-    Examples:
-        'archived # old'        -> 'archived'
-        '"archived" # old'      -> 'archived'
-        '"archived # old"'      -> 'archived # old'
-        'ops#team'              -> 'ops#team'
-    """
-    in_single = False
-    in_double = False
-    for i, ch in enumerate(value):
-        if ch == "'" and not in_double:
-            in_single = not in_single
-        elif ch == '"' and not in_single:
-            in_double = not in_double
-        elif (
-            ch == "#"
-            and not in_single
-            and not in_double
-            and (i == 0 or value[i - 1] in (" ", "\t"))
-        ):
-            value = value[:i].rstrip()
-            break
-    result = value.strip()
-    if (
-        len(result) >= 2
-        and result[0] == result[-1]
-        and result[0] in ('"', "'")
-    ):
-        result = result[1:-1]
-    return result
 
 
 def _extract_path_refs(text):
