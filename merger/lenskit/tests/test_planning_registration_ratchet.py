@@ -276,12 +276,8 @@ def test_scan_and_update_reports_validate_against_schema(fake_repo, tmp_path, ca
 
 def test_workflow_wires_ratchet():
     text = WORKFLOW_PATH.read_text(encoding="utf-8")
-    # Ratchet may be invoked as either scripts.docmeta.check_planning_registration
-    # (via python3 -m) or check_planning_registration.py (direct script path).
-    assert (
-        "scripts.docmeta.check_planning_registration" in text
-        or "check_planning_registration.py" in text
-    )
+    # Must use python3 -m module form, not direct script path.
+    assert "python3 -m scripts.docmeta.check_planning_registration" in text
     assert "--ratchet" in text
     assert "--baseline docs/tasks/planning-registration-baseline.json" in text
     assert "--format json" in text
@@ -639,34 +635,49 @@ def test_baseline_schema_rejects_control_file_code():
 # --------------------------------------------------------------------------- #
 
 
+def _get_workflow_step_run(step_name_prefix):
+    """Return the run script of a named step from task-index.yml."""
+    import yaml
+    wf = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    for job_data in wf.get("jobs", {}).values():
+        for step in job_data.get("steps", []):
+            if step.get("name", "").startswith(step_name_prefix):
+                return step.get("run", "")
+    raise ValueError(f"Step starting with {step_name_prefix!r} not found")
+
+
 def test_workflow_ratchet_step_captures_exit_code_under_errexit():
-    """The ratchet step must use || code=$? to capture the exit code."""
-    text = WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "|| code=$?" in text, (
-        "Ratchet step must use '|| code=$?' to capture exit code "
-        "without breaking under 'set -uo pipefail'"
-    )
+    """Ratchet step must use || code=$? to safely capture exit code under errexit."""
+    run = _get_workflow_step_run("Planning registration ratchet")
+    assert "python3 -m scripts.docmeta.check_planning_registration" in run, \
+        "Ratchet step must invoke the module form, not a direct script path"
+    assert "code=0" in run, \
+        "Ratchet step must initialise code=0 before the Python call"
+    assert "|| code=$?" in run, \
+        "Ratchet step must use '|| code=$?' to capture exit code without breaking under set -uo pipefail"
+    assert 'echo "exit_code=${code}" >> "$GITHUB_OUTPUT"' in run, \
+        "Ratchet step must write exit_code to GITHUB_OUTPUT"
 
 
 def test_workflow_enforce_step_is_fail_closed():
-    """Enforce step must validate that exit_code output is present before using it."""
-    text = WORKFLOW_PATH.read_text(encoding="utf-8")
-    # Enforce step must:
-    # 1. Assign the output to a variable
-    assert 'code="${{ steps.ratchet.outputs.exit_code }}"' in text
-    # 2. Check if it's empty
-    assert '[ -z "${code}" ]' in text or 'if [ -z' in text
-    # 3. Fail with exit 2 on missing output
-    assert 'exit 2' in text
+    """Enforce step must be fail-closed: missing exit_code output → exit 2."""
+    run = _get_workflow_step_run("Enforce ratchet result")
+    assert 'code="${{ steps.ratchet.outputs.exit_code }}"' in run, \
+        "Enforce step must read exit_code from ratchet step output"
+    assert '[ -z "${code}" ]' in run, \
+        "Enforce step must check for empty/missing exit_code"
+    assert 'exit 2' in run, \
+        "Enforce step must exit 2 when exit_code is missing"
+    assert 'exit "${code}"' in run, \
+        "Enforce step must propagate the ratchet exit code"
 
 
 def test_bash_errexit_semantics_with_code_variable():
-    """Prove that code=0; cmd || code=$? correctly captures exit codes under errexit."""
+    """Prove that code=0; cmd || code=$? captures non-zero exit under set -euo pipefail."""
     import subprocess
-    import tempfile
 
     script = """
-    set -uo pipefail
+    set -euo pipefail
     code=0
     false || code=$?
     echo "${code}"
@@ -677,8 +688,9 @@ def test_bash_errexit_semantics_with_code_variable():
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, f"Script failed: {result.stderr}"
-    assert result.stdout.strip() == "1", f"Expected exit code 1, got {result.stdout.strip()}"
+    assert result.returncode == 0, f"Script aborted unexpectedly: {result.stderr}"
+    assert result.stdout.strip() == "1", \
+        f"Expected captured code 1, got {result.stdout.strip()!r}"
 
 
 def test_bash_enforce_fail_closed_with_missing_output():
@@ -702,3 +714,31 @@ def test_bash_enforce_fail_closed_with_missing_output():
     )
     assert result.returncode == 2, f"Expected exit 2, got {result.returncode}"
     assert "Missing ratchet exit_code output" in result.stderr
+
+
+@pytest.mark.parametrize("code,expected_exit", [
+    ("0", 0),
+    ("1", 1),
+    ("2", 2),
+])
+def test_bash_enforce_propagates_exit_code(code, expected_exit):
+    """Enforce step must propagate the ratchet exit code unchanged when output is present."""
+    import subprocess
+
+    script = f"""
+    set -euo pipefail
+    code="{code}"
+    if [ -z "${{code}}" ]; then
+      echo "ERROR: Missing ratchet exit_code output" >&2
+      exit 2
+    fi
+    exit "${{code}}"
+    """
+
+    result = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == expected_exit, \
+        f"code={code!r}: expected exit {expected_exit}, got {result.returncode}"
