@@ -3,17 +3,35 @@
     {
       "id": "TASK-CTL-004",
       "title": "Planning Registration Guard",
-      "status": "partial",
-      "description": "Introduce a foundational guard that checks whether active planning artifacts (blueprints, roadmap docs, planning specs, status reports) are registered in task-control or roadmap. CI runs report-only; blocking/ratchet remains deliberately deferred.",
+      "status": "done",
+      "description": "Introduce a foundational guard that checks whether active planning artifacts (blueprints, roadmap docs, planning specs, status reports) are registered in task-control or roadmap. The originally deferred ratchet/baseline/frontmatter-contract layer was delivered by TASK-OPS-CTL-005, which promoted the guard from report-only to a baseline-backed ratchet.",
       "evidence": [
         "scripts/docmeta/check_planning_registration.py",
         "scripts/docmeta/tests/test_check_planning_registration.py",
         ".github/workflows/task-index.yml"
       ],
       "missing_evidence": [
-        "Ratchet/Baseline-Modus für neue Findings fehlt noch.",
-        "Frontmatter-Ausnahmefluss ist noch nicht schema-/contract-stabil.",
-        "CI ist report-only angebunden; blocking/ratchet bleibt bewusst ausstehend."
+        "Superseded by TASK-OPS-CTL-005 (ratchet/baseline/frontmatter contract now implemented)."
+      ]
+    },
+    {
+      "id": "TASK-OPS-CTL-005",
+      "title": "Planning Drift Ratchet Control Plane",
+      "status": "done",
+      "description": "Promote the planning-registration guard from report-only to a baseline-backed ratchet control plane. Known legacy drift is tolerated via a deterministic baseline (stable, line-number-independent finding ids); new unregistered planning artifacts and invalid/expired frontmatter exemptions block CI with exit 1. Resolved baseline entries surface as resolved/stale (non-blocking). A finding is identified by sha256(code\\0normalized_path\\0kind)[:16] so ids do not move when documents are reordered. The scanner gained --format human|json, --baseline, --ratchet and --update-baseline; JSON is emitted on stdout only, human text on stderr. A draft-07 report contract (lenskit.planning_registration_report.v1) validates the machine-readable report. CI runs the ratchet, uploads the JSON report as an artifact, writes a GitHub step summary (current/baseline/known/new/resolved/invalid counts), and blocks on new findings, invalid exceptions, or control/config errors (exit 2). Invalid exemptions are never written into the baseline.",
+      "evidence": [
+        "scripts/docmeta/check_planning_registration.py",
+        "scripts/docmeta/tests/test_check_planning_registration.py",
+        "merger/lenskit/tests/test_planning_registration_ratchet.py",
+        "merger/lenskit/contracts/planning-registration-report.v1.schema.json",
+        "merger/lenskit/contracts/planning-registration-baseline.v1.schema.json",
+        "docs/tasks/planning-registration-baseline.json",
+        ".github/workflows/task-index.yml",
+        "docs/proofs/planning-registration-ratchet-proof.md"
+      ],
+      "missing_evidence": [
+        "Auto-remediation (baseline pruning of resolved entries, GitHub PR comments) remains a deliberate follow-up.",
+        "Scanner scope stays heuristic (explicit globs + doc_type filter); no full content-classification of planning artifacts."
       ]
     },
     {

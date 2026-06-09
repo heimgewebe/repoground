@@ -1,10 +1,18 @@
+import argparse
+import datetime
+import glob
+import hashlib
 import json
 import os
+import posixpath
 import re
 import sys
-import glob
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+GENERATOR = "scripts/docmeta/check_planning_registration.py"
+REPORT_SCHEMA = "lenskit.planning_registration_report.v1"
+BASELINE_SCHEMA = "lenskit.planning_registration_baseline.v1"
 
 _PATH_REF_RE = re.compile(r"(?:docs|scripts)/[A-Za-z0-9_./-]+")
 
@@ -13,6 +21,45 @@ _PLANNING_DOC_TYPES = {"roadmap", "plan", "status", "status-matrix"}
 
 # Terminal status values that are excluded from checks
 _TERMINAL_STATUSES = {"deprecated", "superseded", "archived", "deferred"}
+
+# Finding codes
+CODE_UNREGISTERED = "UNREGISTERED_PLANNING_ARTIFACT"
+CODE_INVALID_EXCEPTION = "INVALID_PLANNING_EXCEPTION"
+CODE_CONTROL_FILE_MISSING = "CONTROL_FILE_MISSING"
+CODE_CONTROL_FILE_PARSE_ERROR = "CONTROL_FILE_PARSE_ERROR"
+
+# Codes that count as "invalid exceptions" (always blocking in ratchet mode,
+# never tolerated via baseline).
+_INVALID_EXCEPTION_CODES = {CODE_INVALID_EXCEPTION}
+
+# Control-file errors: the tool cannot read/parse its own control structure.
+# These always block hard (exit 2) and are never baseline-eligible.
+_CONTROL_FILE_CODES = {CODE_CONTROL_FILE_MISSING, CODE_CONTROL_FILE_PARSE_ERROR}
+
+# Codes excluded from the ratchet partition (new/known): each is handled by its
+# own dedicated blocking class, never mixed into ordinary drift.
+_NON_RATCHETABLE_CODES = _INVALID_EXCEPTION_CODES | _CONTROL_FILE_CODES
+
+# Only UNREGISTERED_PLANNING_ARTIFACT findings may be written to or loaded from
+# a baseline. Control-file errors signal a broken governance structure and must
+# never be grandfathered; invalid exceptions are handled separately above.
+_BASELINE_ELIGIBLE_CODES = {CODE_UNREGISTERED}
+
+# Allowed top-level / per-entry fields, mirroring the baseline contract's
+# additionalProperties:false. Enforced at runtime because the CI runner does not
+# install jsonschema; the contract schema is validated in tests instead.
+_BASELINE_TOP_FIELDS = {"schema", "generated_at", "generator", "entries"}
+_BASELINE_ENTRY_FIELDS = {"id", "code", "path", "kind", "reason"}
+
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ISO_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_BASELINE_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+
+# YAML block-scalar fold/literal indicators.  A planning_registration field
+# whose value reduces to one of these after inline-comment stripping is a
+# multiline/block scalar that the parser cannot interpret; it must be rejected
+# rather than silently treated as a one-character value.
+_BLOCK_SCALAR_INDICATORS = frozenset({">", "|", ">-", ">+", "|-", "|+"})
 
 # Explicit scan patterns: (glob_pattern, extra_filter_fn_or_None)
 # extra_filter_fn receives (rel_path, meta) and returns True if the file should be checked
@@ -37,6 +84,15 @@ _EXCLUDED_PREFIXES = (
     "docs/process/",
     "docs/claims/",
 )
+
+
+def _today():
+    """Return today's date in UTC. Indirected for testability."""
+    return datetime.datetime.now(datetime.timezone.utc).date()
+
+
+def _now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _normalize_ref(raw):
@@ -67,6 +123,27 @@ def _read_text(rel_path):
         return f.read(), None
 
 
+def _validate_index_json_structure(data):
+    """Return an error string if docs/tasks/index.json has unexpected structure, else None."""
+    if not isinstance(data, dict):
+        return f"Root must be an object, got {type(data).__name__}."
+    if "tasks" not in data:
+        return "Missing required 'tasks' field."
+    tasks = data.get("tasks")
+    if not isinstance(tasks, list):
+        return f"'tasks' must be a list, got {type(tasks).__name__}."
+    for i, task in enumerate(tasks or []):
+        if not isinstance(task, dict):
+            return f"tasks[{i}] must be an object, got {type(task).__name__}."
+        evidence = task.get("evidence")
+        if evidence is not None and not isinstance(evidence, list):
+            return f"tasks[{i}].evidence must be a list, got {type(evidence).__name__}."
+        for j, ev in enumerate(evidence or []):
+            if not isinstance(ev, str):
+                return f"tasks[{i}].evidence[{j}] must be a string, got {type(ev).__name__}."
+    return None
+
+
 def get_registered_paths():
     registered = set()
     findings = []
@@ -75,8 +152,9 @@ def get_registered_paths():
     index_text, err = _read_text("docs/tasks/index.json")
     if err:
         findings.append({
-            "code": "CONTROL_FILE_MISSING",
+            "code": CODE_CONTROL_FILE_MISSING,
             "path": "docs/tasks/index.json",
+            "kind": "control_file_missing",
             "reason": err,
             "suggestion": "Create docs/tasks/index.json with a tasks array.",
             "source": "planning-registration",
@@ -84,26 +162,41 @@ def get_registered_paths():
     else:
         try:
             data = json.loads(index_text)
-            for task in data.get("tasks", []):
-                for path in task.get("evidence", []) or []:
-                    ref = _normalize_ref(path)
-                    if ref:
-                        registered.add(ref)
         except json.JSONDecodeError as e:
             findings.append({
-                "code": "CONTROL_FILE_PARSE_ERROR",
+                "code": CODE_CONTROL_FILE_PARSE_ERROR,
                 "path": "docs/tasks/index.json",
+                "kind": "control_file_parse_error",
                 "reason": f"Invalid JSON: {e}",
                 "suggestion": "Fix the JSON syntax in docs/tasks/index.json.",
                 "source": "planning-registration",
             })
+            data = None
+        if data is not None:
+            struct_err = _validate_index_json_structure(data)
+            if struct_err:
+                findings.append({
+                    "code": CODE_CONTROL_FILE_PARSE_ERROR,
+                    "path": "docs/tasks/index.json",
+                    "kind": "control_file_parse_error",
+                    "reason": f"Structural error: {struct_err}",
+                    "suggestion": "Fix the structure of docs/tasks/index.json.",
+                    "source": "planning-registration",
+                })
+            else:
+                for task in (data.get("tasks") or []):
+                    for path in (task.get("evidence") or []):
+                        ref = _normalize_ref(path)
+                        if ref:
+                            registered.add(ref)
 
     # 2. docs/tasks/board.md
     board_text, err = _read_text("docs/tasks/board.md")
     if err:
         findings.append({
-            "code": "CONTROL_FILE_MISSING",
+            "code": CODE_CONTROL_FILE_MISSING,
             "path": "docs/tasks/board.md",
+            "kind": "control_file_missing",
             "reason": err,
             "suggestion": "Create docs/tasks/board.md as the task board.",
             "source": "planning-registration",
@@ -115,8 +208,9 @@ def get_registered_paths():
     roadmap_text, err = _read_text("docs/roadmap.md")
     if err:
         findings.append({
-            "code": "CONTROL_FILE_MISSING",
+            "code": CODE_CONTROL_FILE_MISSING,
             "path": "docs/roadmap.md",
+            "kind": "control_file_missing",
             "reason": err,
             "suggestion": "Create docs/roadmap.md as the project roadmap.",
             "source": "planning-registration",
@@ -170,10 +264,15 @@ def parse_markdown_meta(filepath):
                 for i in range(1, len(lines)):
                     if lines[i].strip() == "---":
                         break
+                    # Only consider top-level keys (no leading whitespace) so
+                    # nested blocks like planning_registration do not pollute the
+                    # flat meta map.
+                    if lines[i] != lines[i].lstrip():
+                        continue
                     if ":" in lines[i]:
                         parts = lines[i].split(":", 1)
                         key = parts[0].strip()
-                        val = parts[1].strip().strip('"\'')
+                        val = _strip_inline_comment(parts[1])
                         if val.startswith("[") and val.endswith("]"):
                             meta[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
                         else:
@@ -187,19 +286,161 @@ def parse_markdown_meta(filepath):
     return meta
 
 
-def _collect_scan_targets():
-    """Collect (rel_path, extra_filter_name) tuples to scan."""
-    targets = []
-    for pattern, extra_filter in _SCAN_PATTERNS:
-        full_pattern = os.path.join(REPO_ROOT, pattern)
-        for full_path in glob.glob(full_pattern):
-            rel_path = os.path.relpath(full_path, REPO_ROOT)
-            if not _is_excluded(rel_path):
-                targets.append((rel_path, extra_filter))
-    return targets
+def _strip_inline_comment(value: str) -> str:
+    """Remove a trailing inline comment and outer quotes from a YAML scalar string.
+
+    '#' is treated as a comment start only when it appears outside of single or
+    double quoted strings.  '#' inside quotes is part of the value.  Outer
+    matching single/double quotes are stripped from the returned value.
+
+    Examples::
+
+        'abc # comment'          -> 'abc'
+        '"abc" # comment'        -> 'abc'
+        '"abc # not comment"'    -> 'abc # not comment'
+        'ops#team'               -> 'ops#team'
+    """
+    in_single = False
+    in_double = False
+    for i, ch in enumerate(value):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif ch == "#" and not in_single and not in_double:
+            # In YAML, an inline comment requires whitespace before '#'.
+            if i == 0 or value[i - 1] in (" ", "\t"):
+                value = value[:i].rstrip()
+                break
+    result = value.strip()
+    if (
+        len(result) >= 2
+        and result[0] == result[-1]
+        and result[0] in ('"', "'")
+    ):
+        result = result[1:-1]
+    return result
 
 
-def run_checks():
+def parse_planning_registration_block(filepath):
+    """Extract the nested `planning_registration:` frontmatter mapping.
+
+    Returns a dict of scalar key->value if the block is present, otherwise None.
+    Only single-level nesting is supported (status/reason/owner/expires).
+    Multiline/block scalar values (YAML '>' and '|' indicators) are not
+    supported; validate_exemption() will reject them as exempt_unsupported_scalar.
+    """
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"Warning: failed to read {filepath}: {exc}", file=sys.stderr)
+        return None
+
+    if not lines or lines[0].strip() != "---":
+        return None
+
+    # Locate frontmatter bounds.
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        return None
+
+    block = None
+    base_indent = None
+    for i in range(1, end):
+        raw = lines[i].rstrip("\n")
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if block is None:
+            # Check for planning_registration: block header, allowing inline comments.
+            # Strip comments first, then check if it's the header.
+            stripped_without_comment = _strip_inline_comment(stripped)
+            if indent == 0 and stripped_without_comment == "planning_registration:":
+                block = {}
+            continue
+        # Inside the block: collect more-indented key: value lines.
+        if indent == 0:
+            # A new top-level key ends the block.
+            break
+        if base_indent is None:
+            base_indent = indent
+        if indent < base_indent:
+            break
+        if ":" in stripped:
+            k, v = stripped.split(":", 1)
+            block[k.strip()] = _strip_inline_comment(v)
+    return block
+
+
+def validate_exemption(block, today=None):
+    """Validate a planning_registration exemption block.
+
+    Returns (is_valid_exempt, invalid_kind):
+      - (True, None): a complete, unexpired exemption.
+      - (False, "<kind>"): the block declares an exemption that is invalid;
+        <kind> describes why (stable, used in finding id).
+      - (False, None): the block does not assert an exemption at all.
+    """
+    if today is None:
+        today = _today()
+    status = (block.get("status") or "").strip().strip('"\'')
+    if status != "exempt":
+        # Any declared planning_registration block that is not a clean exempt
+        # assertion is treated as an invalid exception, except a fully empty one.
+        if not block:
+            return (False, None)
+        return (False, "exempt_unknown_status")
+
+    missing = [k for k in ("reason", "owner", "expires") if not (block.get(k) or "").strip()]
+    if missing:
+        return (False, "exempt_missing_fields")
+
+    # Block-scalar fold/literal indicators are not supported as field values.
+    # Detect them here so they produce a stable, distinct kind rather than
+    # falling through to a misleading exempt_bad_date or exempt_missing_fields.
+    if any(
+        (block.get(f) or "").strip() in _BLOCK_SCALAR_INDICATORS
+        for f in ("reason", "owner", "expires")
+    ):
+        return (False, "exempt_unsupported_scalar")
+
+    expires = block["expires"].strip().strip('"\'')
+    if not _ISO_DATE_RE.match(expires):
+        return (False, "exempt_bad_date")
+    try:
+        exp_date = datetime.date.fromisoformat(expires)
+    except ValueError:
+        return (False, "exempt_bad_date")
+
+    if exp_date < today:
+        return (False, "exempt_expired")
+
+    return (True, None)
+
+
+def compute_finding_id(code, path, kind):
+    """Deterministic, line-number-independent finding id."""
+    norm_path = str(path).replace("\\", "/")
+    payload = f"{code}\0{norm_path}\0{kind}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()[:16]
+
+
+def _finalize_findings(findings):
+    """Assign stable ids and sort deterministically by (path, code, id)."""
+    for f in findings:
+        f.setdefault("kind", f["code"].lower())
+        f["id"] = compute_finding_id(f["code"], f["path"], f["kind"])
+    findings.sort(key=lambda f: (f["path"], f["code"], f["id"]))
+    return findings
+
+
+def run_checks(today=None):
     registered_paths, findings = get_registered_paths()
 
     for rel_path, extra_filter_name in _collect_scan_targets():
@@ -219,25 +460,348 @@ def run_checks():
             if not _is_planning_spec(rel_path, meta):
                 continue
 
+        # Explicit frontmatter exemption flow.
+        block = parse_planning_registration_block(full_path)
+        if block is not None:
+            is_valid_exempt, invalid_kind = validate_exemption(block, today=today)
+            if is_valid_exempt:
+                continue
+            if invalid_kind is not None:
+                findings.append({
+                    "code": CODE_INVALID_EXCEPTION,
+                    "path": rel_path,
+                    "kind": invalid_kind,
+                    "reason": f"Invalid planning_registration exemption ({invalid_kind}).",
+                    "suggestion": (
+                        "An exempt block requires status: exempt with non-empty "
+                        "reason, owner and an unexpired ISO expires (YYYY-MM-DD). "
+                        "planning_registration supports simple single-line scalar "
+                        "values only; multiline/block scalar values are not supported."
+                    ),
+                    "source": "planning-registration",
+                })
+                continue
+            # block present but asserts nothing meaningful -> fall through
+
         if not is_registered(rel_path, registered_paths):
             findings.append({
-                "code": "UNREGISTERED_PLANNING_ARTIFACT",
+                "code": CODE_UNREGISTERED,
                 "path": rel_path,
+                "kind": "unregistered",
                 "reason": "Planning artifact is active but not registered in task-control or roadmap.",
                 "suggestion": "Add the path to docs/tasks/index.json evidence, docs/tasks/board.md, or docs/roadmap.md.",
                 "source": "planning-registration",
             })
 
-    return findings
+    return _finalize_findings(findings)
 
 
-def main(argv=None):
-    import argparse
-    parser = argparse.ArgumentParser(description="Check registration of planning artifacts.")
-    parser.add_argument("--strict", action="store_true", help="Fail if unregistered artifacts are found.")
-    args = parser.parse_args(argv)
+def _collect_scan_targets():
+    """Collect (rel_path, extra_filter_name) tuples to scan."""
+    targets = []
+    for pattern, extra_filter in _SCAN_PATTERNS:
+        full_pattern = os.path.join(REPO_ROOT, pattern)
+        for full_path in glob.glob(full_pattern):
+            rel_path = os.path.relpath(full_path, REPO_ROOT)
+            if not _is_excluded(rel_path):
+                targets.append((rel_path, extra_filter))
+    return targets
 
-    findings = run_checks()
+
+# --------------------------------------------------------------------------- #
+# Baseline / ratchet
+# --------------------------------------------------------------------------- #
+
+
+class BaselineError(Exception):
+    """Raised for malformed/unreadable baseline files."""
+
+
+def _baseline_entry(finding):
+    return {
+        "id": finding["id"],
+        "code": finding["code"],
+        "path": finding["path"],
+        "kind": finding["kind"],
+        "reason": finding.get("reason", ""),
+    }
+
+
+def build_baseline(findings):
+    """Build a deterministic baseline document from current findings.
+
+    Only UNREGISTERED_PLANNING_ARTIFACT findings are eligible. Control-file
+    errors (CONTROL_FILE_MISSING, CONTROL_FILE_PARSE_ERROR) mean the governance
+    structure itself is broken and must be fixed, not tolerated. Invalid
+    exceptions (INVALID_PLANNING_EXCEPTION) must always be fixed, never
+    grandfathered.
+    """
+    entries = [
+        _baseline_entry(f)
+        for f in findings
+        if f["code"] in _BASELINE_ELIGIBLE_CODES
+    ]
+    entries.sort(key=lambda e: (e["path"], e["code"], e["id"]))
+    return {
+        "schema": BASELINE_SCHEMA,
+        "generated_at": _now_iso(),
+        "generator": GENERATOR,
+        "entries": entries,
+    }
+
+
+def _validate_baseline_path(path_str, index):
+    """Reject unsafe, non-canonical, or absolute baseline entry paths."""
+    if not path_str or path_str == ".":
+        raise BaselineError(
+            f"Baseline entry [{index}] path must be a non-empty, non-dot string."
+        )
+    if posixpath.isabs(path_str):
+        raise BaselineError(
+            f"Baseline entry [{index}] path must be repo-relative (not absolute): {path_str!r}."
+        )
+    if "\\" in path_str:
+        raise BaselineError(
+            f"Baseline entry [{index}] path contains a backslash: {path_str!r}."
+        )
+    normalized = posixpath.normpath(path_str)
+    if normalized != path_str:
+        raise BaselineError(
+            f"Baseline entry [{index}] path is not canonical: "
+            f"{path_str!r} normalizes to {normalized!r}."
+        )
+    if normalized.startswith(".."):
+        raise BaselineError(
+            f"Baseline entry [{index}] path escapes repo root via traversal: {path_str!r}."
+        )
+
+
+def _validate_baseline_entry(entry, index):
+    """Validate a single baseline entry dict. Raises BaselineError on violation."""
+    if not isinstance(entry, dict):
+        raise BaselineError(f"Baseline entry [{index}] must be an object.")
+
+    for field in ("id", "code", "path", "kind", "reason"):
+        if field not in entry:
+            raise BaselineError(
+                f"Baseline entry [{index}] missing required field '{field}'."
+            )
+
+    extra = set(entry) - _BASELINE_ENTRY_FIELDS
+    if extra:
+        raise BaselineError(
+            f"Baseline entry [{index}] has unexpected field(s): {sorted(extra)}."
+        )
+
+    eid = entry["id"]
+    if not isinstance(eid, str) or not _BASELINE_ID_RE.match(eid):
+        raise BaselineError(
+            f"Baseline entry [{index}] has invalid id {eid!r}; "
+            "expected 16 lowercase hex chars."
+        )
+
+    for field in ("code", "path", "kind"):
+        val = entry[field]
+        if not isinstance(val, str) or not val.strip():
+            raise BaselineError(
+                f"Baseline entry [{index}] field '{field}' must be a non-empty string."
+            )
+
+    _validate_baseline_path(entry["path"], index)
+
+    if not isinstance(entry["reason"], str):
+        raise BaselineError(
+            f"Baseline entry [{index}] field 'reason' must be a string."
+        )
+
+    if entry["code"] not in _BASELINE_ELIGIBLE_CODES:
+        raise BaselineError(
+            f"Baseline entry [{index}] has code {entry['code']!r}; "
+            "only UNREGISTERED_PLANNING_ARTIFACT is permitted in a baseline."
+        )
+
+    # ID integrity: the id must be reconstructible from code/path/kind. A formally
+    # well-formed but computationally wrong id would let a finding be tolerated
+    # under a foreign identity — a hand-edited or forged baseline must be rejected.
+    expected = compute_finding_id(entry["code"], entry["path"], entry["kind"])
+    if eid != expected:
+        raise BaselineError(
+            f"Baseline entry [{index}] id {eid!r} does not match the id computed "
+            f"from its code/path/kind ({expected!r}); baseline is hand-edited or corrupt."
+        )
+
+
+def load_baseline(path):
+    """Load and validate a baseline file. Raises BaselineError on problems."""
+    full = path if os.path.isabs(path) else os.path.join(REPO_ROOT, path)
+    if not os.path.exists(full):
+        raise BaselineError(f"Baseline file not found: {path}")
+    try:
+        with open(full, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except json.JSONDecodeError as exc:
+        raise BaselineError(f"Invalid baseline JSON: {exc}") from exc
+    except OSError as exc:
+        raise BaselineError(f"Cannot read baseline: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise BaselineError("Baseline root must be an object.")
+
+    extra = set(data) - _BASELINE_TOP_FIELDS
+    if extra:
+        raise BaselineError(
+            f"Baseline has unexpected top-level field(s): {sorted(extra)}."
+        )
+
+    if data.get("schema") != BASELINE_SCHEMA:
+        raise BaselineError(
+            f"Baseline schema mismatch: expected {BASELINE_SCHEMA!r}, got {data.get('schema')!r}."
+        )
+    if data.get("generator") != GENERATOR:
+        raise BaselineError(
+            f"Baseline generator mismatch: expected {GENERATOR!r}, got {data.get('generator')!r}."
+        )
+    gen_at = data.get("generated_at")
+    if not isinstance(gen_at, str) or not _ISO_DATETIME_RE.match(gen_at):
+        raise BaselineError(
+            "Baseline 'generated_at' must be an ISO-8601 UTC timestamp "
+            f"(YYYY-MM-DDThh:mm:ssZ); got {gen_at!r}."
+        )
+    try:
+        datetime.datetime.strptime(gen_at, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise BaselineError(
+            f"Baseline 'generated_at' has an invalid calendar date/time: {gen_at!r}."
+        )
+
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        raise BaselineError("Baseline 'entries' must be a list.")
+    for i, e in enumerate(entries):
+        _validate_baseline_entry(e, i)
+
+    ids = [e["id"] for e in entries]
+    seen = set()
+    dupes = sorted({i for i in ids if i in seen or seen.add(i)})
+    if dupes:
+        raise BaselineError(f"Baseline contains duplicate entry id(s): {dupes}.")
+
+    keys = [(e["path"], e["code"], e["id"]) for e in entries]
+    if keys != sorted(keys):
+        raise BaselineError(
+            "Baseline entries are not in canonical order (path, code, id); "
+            "regenerate with --update-baseline."
+        )
+    return data
+
+
+def partition_ratchet(current_findings, baseline_entries):
+    """Split current findings into known/new and compute resolved baseline entries.
+
+    INVALID_PLANNING_EXCEPTION and CONTROL_FILE_* findings are excluded from
+    new/known: each is a separate blocking class (handled via _invalid_exceptions()
+    / _control_errors()), never baselined and never counted as ordinary drift.
+    """
+    ratchetable = [
+        f for f in current_findings
+        if f.get("code") not in _NON_RATCHETABLE_CODES
+    ]
+    baseline_ids = {e["id"] for e in baseline_entries}
+    current_ids = {f["id"] for f in ratchetable}
+
+    new_findings = [f for f in ratchetable if f["id"] not in baseline_ids]
+    known_findings = [f for f in ratchetable if f["id"] in baseline_ids]
+    resolved_findings = [
+        dict(e) for e in baseline_entries if e["id"] not in current_ids
+    ]
+    resolved_findings.sort(key=lambda e: (e["path"], e["code"], e["id"]))
+    return new_findings, known_findings, resolved_findings
+
+
+def _invalid_exceptions(findings):
+    return [f for f in findings if f["code"] in _INVALID_EXCEPTION_CODES]
+
+
+def _control_errors(findings):
+    return [f for f in findings if f["code"] in _CONTROL_FILE_CODES]
+
+
+def build_report(mode, findings, baseline_path, baseline_loaded,
+                 new_findings, known_findings, resolved_findings,
+                 written_baseline_entries=None):
+    invalid = _invalid_exceptions(findings)
+    control = _control_errors(findings)
+    baseline_count = len(known_findings) + len(resolved_findings)
+    summary = {
+        "current_findings": len(findings),
+        "baseline_findings": baseline_count,
+        "new_findings": len(new_findings),
+        "known_findings": len(known_findings),
+        "resolved_findings": len(resolved_findings),
+        "invalid_exceptions": len(invalid),
+        "control_errors": len(control),
+    }
+    if written_baseline_entries is not None:
+        summary["written_baseline_entries"] = written_baseline_entries
+    return {
+        "schema": REPORT_SCHEMA,
+        "created_at": _now_iso(),
+        "mode": mode,
+        "summary": summary,
+        "findings": findings,
+        "baseline": {
+            "path": baseline_path,
+            "loaded": baseline_loaded,
+        },
+        "new_findings": new_findings,
+        "known_findings": known_findings,
+        "resolved_findings": resolved_findings,
+        "invalid_exceptions": invalid,
+        "control_errors": control,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Rendering
+# --------------------------------------------------------------------------- #
+
+
+def _render_human(report, stream):
+    s = report["summary"]
+    print("Planning Registration Report", file=stream)
+    print(f"  mode:                {report['mode']}", file=stream)
+    print(f"  current findings:    {s['current_findings']}", file=stream)
+    print(f"  baseline findings:   {s['baseline_findings']}", file=stream)
+    print(f"  known findings:      {s['known_findings']}", file=stream)
+    print(f"  new findings:        {s['new_findings']}", file=stream)
+    print(f"  resolved findings:   {s['resolved_findings']}", file=stream)
+    print(f"  invalid exceptions:  {s['invalid_exceptions']}", file=stream)
+    print(f"  control errors:      {s.get('control_errors', 0)}", file=stream)
+    if report.get("control_errors"):
+        print("Control-file errors (blocking, exit 2):", file=stream)
+        for f in report["control_errors"]:
+            print(f"  x {f['code']} {f['path']} [{f['id']}]: {f['reason']}", file=stream)
+    if report["new_findings"]:
+        print("New findings (blocking):", file=stream)
+        for f in report["new_findings"]:
+            print(f"  + {f['code']} {f['path']} [{f['id']}]: {f['reason']}", file=stream)
+    if report["invalid_exceptions"]:
+        print("Invalid exceptions (blocking):", file=stream)
+        for f in report["invalid_exceptions"]:
+            print(f"  ! {f['code']} {f['path']} [{f['id']}]: {f['reason']}", file=stream)
+    if report["resolved_findings"]:
+        print("Resolved/stale baseline entries (non-blocking):", file=stream)
+        for f in report["resolved_findings"]:
+            print(f"  - {f['code']} {f['path']} [{f['id']}]", file=stream)
+
+
+# --------------------------------------------------------------------------- #
+# CLI
+# --------------------------------------------------------------------------- #
+
+
+def _legacy_scan(findings, args):
+    """Preserve the original report-only / --strict scan behavior."""
     if not findings:
         print("All planning artifacts are registered.")
         return 0
@@ -251,6 +815,127 @@ def main(argv=None):
         return 1
     print("Report-only mode: findings do not fail CI. Use --strict to fail.", file=sys.stderr)
     return 0
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Check registration of planning artifacts.")
+    parser.add_argument("--strict", action="store_true",
+                        help="Scan mode: fail if unregistered artifacts are found.")
+    parser.add_argument("--format", choices=["human", "json"], default="human",
+                        help="Output format. JSON is emitted on stdout only.")
+    parser.add_argument("--baseline", metavar="PATH",
+                        help="Path to the planning-registration baseline file.")
+    parser.add_argument("--ratchet", action="store_true",
+                        help="Compare current findings against the baseline.")
+    parser.add_argument("--update-baseline", action="store_true",
+                        help="Write a fresh baseline from current findings and exit 0.")
+    args = parser.parse_args(argv)
+
+    # Usage validation.
+    if args.ratchet and args.update_baseline:
+        print("Usage error: --ratchet and --update-baseline are mutually exclusive.",
+              file=sys.stderr)
+        return 2
+    if args.update_baseline and not args.baseline:
+        print("Usage error: --update-baseline requires --baseline <path>.", file=sys.stderr)
+        return 2
+    if args.ratchet and not args.baseline:
+        print("Usage error: --ratchet requires --baseline <path>.", file=sys.stderr)
+        return 2
+
+    findings = run_checks()
+
+    # --- update-baseline mode ---
+    if args.update_baseline:
+        # Refuse to write a baseline over a broken governance structure. A control
+        # error (exit 2) means findings are unreliable; an invalid exception (exit 1)
+        # must be fixed, never grandfathered. In both cases NO baseline is written,
+        # so a defective state can never be silently stamped "resolved".
+        control = _control_errors(findings)
+        invalid = _invalid_exceptions(findings)
+        if control or invalid:
+            report = build_report("update_baseline", findings, args.baseline, False,
+                                  new_findings=[], known_findings=[], resolved_findings=[])
+            if args.format == "json":
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+                _render_human(report, sys.stderr)
+            else:
+                _render_human(report, sys.stdout)
+            if control:
+                print("update-baseline: control-file error(s) present; baseline not written.",
+                      file=sys.stderr)
+                return 2
+            print("update-baseline: invalid exception(s) present; baseline not written.",
+                  file=sys.stderr)
+            return 1
+
+        baseline = build_baseline(findings)
+        full = (args.baseline if os.path.isabs(args.baseline)
+                else os.path.join(REPO_ROOT, args.baseline))
+        try:
+            os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
+            with open(full, "w", encoding="utf-8") as f:
+                json.dump(baseline, f, indent=2, ensure_ascii=False)
+                f.write("\n")
+        except OSError as exc:
+            print(f"Error: cannot write baseline: {exc}", file=sys.stderr)
+            return 2
+        report = build_report("update_baseline", findings, args.baseline, True,
+                              new_findings=[], known_findings=[], resolved_findings=[],
+                              written_baseline_entries=len(baseline["entries"]))
+        if args.format == "json":
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        else:
+            _render_human(report, sys.stdout)
+            print(f"Baseline written: {args.baseline} ({len(baseline['entries'])} entries)",
+                  file=sys.stderr)
+        return 0
+
+    # --- ratchet mode ---
+    if args.ratchet:
+        try:
+            baseline = load_baseline(args.baseline)
+        except BaselineError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        new_findings, known_findings, resolved_findings = partition_ratchet(
+            findings, baseline.get("entries", []))
+        report = build_report("ratchet", findings, args.baseline, True,
+                              new_findings, known_findings, resolved_findings)
+        invalid = report["invalid_exceptions"]
+        control = report["control_errors"]
+        if args.format == "json":
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+            _render_human(report, sys.stderr)
+        else:
+            _render_human(report, sys.stdout)
+
+        # Control-file errors mean the tool cannot trust its own control structure,
+        # so the ratchet comparison is unreliable: fail config-style (exit 2).
+        if control:
+            print("Ratchet: control-file error(s) — cannot read control structure; "
+                  "treating as config error.", file=sys.stderr)
+            return 2
+        should_block = bool(new_findings) or bool(invalid)
+        if should_block:
+            print("Ratchet: blocking — new findings or invalid exceptions present.",
+                  file=sys.stderr)
+            return 1
+        print("Ratchet: no new drift. Known findings tolerated via baseline.",
+              file=sys.stderr)
+        return 0
+
+    # --- scan mode ---
+    if args.format == "json":
+        report = build_report("scan", findings, args.baseline,
+                              False,
+                              new_findings=[], known_findings=[], resolved_findings=[])
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        if findings and args.strict:
+            return 1
+        return 0
+
+    return _legacy_scan(findings, args)
 
 
 if __name__ == "__main__":
