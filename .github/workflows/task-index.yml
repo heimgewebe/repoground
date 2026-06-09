@@ -26,16 +26,17 @@ jobs:
 
       - name: Planning registration ratchet (blocks only on new drift)
         id: ratchet
+        shell: bash
         run: |
           set -uo pipefail
           # Capture the exit code without aborting the job, so we can still
           # publish the report artifact and step summary before failing.
-          python3 scripts/docmeta/check_planning_registration.py \
+          code=0
+          python3 -m scripts.docmeta.check_planning_registration \
             --ratchet \
             --baseline docs/tasks/planning-registration-baseline.json \
             --format json \
-            > planning-registration-report.json
-          code=$?
+            > planning-registration-report.json || code=$?
           echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
           echo "Ratchet exit code: ${code}"
 
@@ -85,4 +86,12 @@ jobs:
 
       - name: Enforce ratchet result
         if: always()
-        run: exit ${{ steps.ratchet.outputs.exit_code }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="${{ steps.ratchet.outputs.exit_code }}"
+          if [ -z "${code}" ]; then
+            echo "ERROR: Missing ratchet exit_code output; failing closed." >&2
+            exit 2
+          fi
+          exit "${code}"

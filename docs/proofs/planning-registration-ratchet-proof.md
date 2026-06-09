@@ -84,14 +84,26 @@ Rules:
 
 `.github/workflows/task-index.yml` (job `planning-registration`):
 
-1. Runs the ratchet:
-   `check_planning_registration.py --ratchet --baseline docs/tasks/planning-registration-baseline.json --format json`,
-   capturing the exit code without aborting the job.
-2. Writes a GitHub step summary with current / baseline / known / new / resolved
-   findings and invalid exceptions.
-3. Uploads `planning-registration-report.json` as a build artifact.
-4. Re-exits with the captured ratchet code, so the report/summary are always
-   published even when the gate fails.
+1. **Ratchet step** (`id: ratchet`): Runs the ratchet via `python3 -m scripts.docmeta.check_planning_registration --ratchet --baseline docs/tasks/planning-registration-baseline.json --format json`.
+   - Redirects JSON to `planning-registration-report.json`.
+   - Uses `|| code=$?` to capture the exit code (0, 1, or 2) without breaking
+     under `set -uo pipefail`. Writes `exit_code=${code}` to `$GITHUB_OUTPUT`.
+   - Does not `exit` or `set -e` immediately; allows downstream steps to run.
+2. **Step summary** (`if: always()`): Writes a human-readable summary to
+   `$GITHUB_STEP_SUMMARY` with current / baseline / known / new / resolved
+   findings and invalid exceptions (or "no new drift" if clean).
+3. **Upload artifact** (`if: always()`): Uploads `planning-registration-report.json`
+   to GitHub Artifacts, even if ratchet found findings.
+4. **Enforce step** (`if: always()`):
+   - Reads `steps.ratchet.outputs.exit_code` from the ratchet step.
+   - **Fail-closed**: If the output is missing or empty, exits with code 2
+     (config error, workflow problem).
+   - Otherwise, exits with the captured ratchet code (0, 1, or 2).
+   - This ensures the workflow only passes when ratchet code is 0; blocks on
+     code 1 (new drift) or code 2 (config error).
+
+Result: Report and summary are always published; the gate blocks iff the ratchet
+produced new drift or a config error.
 
 No network or GitHub-API dependency; no time-of-day logic in the gate.
 
@@ -106,17 +118,17 @@ No network or GitHub-API dependency; no time-of-day logic in the gate.
 JSON (`--format json`) is emitted on **stdout only**; human-readable output goes
 to **stderr** in JSON mode so stdout stays parseable.
 
-## Local commands
+# Local commands
 
 ```bash
 # Refresh the baseline from the current tree (deterministic, exit 0)
-python3 scripts/docmeta/check_planning_registration.py \
+python3 -m scripts.docmeta.check_planning_registration \
   --update-baseline \
   --baseline docs/tasks/planning-registration-baseline.json \
   --format json
 
 # Run the ratchet exactly like CI
-python3 scripts/docmeta/check_planning_registration.py \
+python3 -m scripts.docmeta.check_planning_registration \
   --ratchet \
   --baseline docs/tasks/planning-registration-baseline.json \
   --format json \
@@ -126,21 +138,23 @@ python3 -m json.tool /tmp/planning-registration-report.json >/dev/null
 
 ## Test evidence
 
-- `merger/lenskit/tests/test_planning_registration_ratchet.py` (43 tests):
+- `merger/lenskit/tests/test_planning_registration_ratchet.py` (47 tests):
   scanner detection, line-number-independent ids, baseline toleration, new-drift
   blocking, resolved/stale handling, invalid/expired exemptions blocking (including
   the key invariant that `invalid_exceptions` do **not** appear in `new_findings`),
   direct `partition_ratchet()` invariant test with unfiltered `run_checks()` output,
   valid exemption suppression, JSON report schema validation (scan/ratchet/
   update_baseline modes), committed-baseline validated against the baseline
-  contract schema, workflow static wiring, exit-code-2 config errors,
+  contract schema, baseline eligibility enforcement (`build_baseline()` retains only
+  `UNREGISTERED_PLANNING_ARTIFACT`; control-file codes and invalid exceptions
+  excluded at write time and rejected at load time; baseline schema `const`
+  rejects non-eligible codes), workflow static wiring (ratchet step uses `|| code=$?`
+  to capture exit code under GitHub Actions errexit semantics; enforce step is
+  fail-closed with explicit missing-output detection), exit-code-2 config errors,
   `load_baseline()` runtime validation (empty code/path/kind → exit 2, invalid id
-  pattern → exit 2, missing required field → exit 2, non-eligible code in baseline
-  → exit 2), and baseline eligibility enforcement (`build_baseline()` retains only
-  `UNREGISTERED_PLANNING_ARTIFACT`; `CONTROL_FILE_MISSING`,
-  `CONTROL_FILE_PARSE_ERROR`, and `INVALID_PLANNING_EXCEPTION` are excluded at
-  write time and rejected at load time; baseline schema `const` rejects
-  non-eligible codes).
+  pattern → exit 2, missing required field → exit 2, non-eligible code → exit 2),
+  and Bash-semantics tests (prove that `|| code=$?` correctly captures exit codes
+  and that enforce step exits 2 on missing output).
 - `scripts/docmeta/tests/test_check_planning_registration.py` (27 tests): the
   pre-existing scanner contract, unchanged and still green.
 - Real-repo ratchet run: exit 0, report validates against
