@@ -48,7 +48,8 @@
         "known_findings": {"type": "integer", "minimum": 0},
         "resolved_findings": {"type": "integer", "minimum": 0},
         "invalid_exceptions": {"type": "integer", "minimum": 0},
-        "control_errors": {"type": "integer", "minimum": 0}
+        "control_errors": {"type": "integer", "minimum": 0},
+        "written_baseline_entries": {"type": "integer", "minimum": 0}
       }
     },
     "baseline": {

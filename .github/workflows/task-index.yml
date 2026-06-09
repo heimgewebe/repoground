@@ -62,8 +62,14 @@ jobs:
           print(f"- new findings: **{s.get('new_findings', 0)}**")
           print(f"- resolved findings: **{s.get('resolved_findings', 0)}**")
           print(f"- invalid exceptions: **{s.get('invalid_exceptions', 0)}**")
+          print(f"- control errors: **{s.get('control_errors', 0)}**")
           new = report.get("new_findings", [])
           inv = report.get("invalid_exceptions", [])
+          ctrl = report.get("control_errors", [])
+          if ctrl:
+              print("\n### Control-file errors (blocking, exit 2)\n")
+              for f in ctrl:
+                  print(f"- `{f.get('code')}` `{f.get('path')}` — {f.get('reason', '')}")
           if new:
               print("\n### New findings (blocking)\n")
               for f in new:
@@ -72,7 +78,7 @@ jobs:
               print("\n### Invalid exceptions (blocking)\n")
               for f in inv:
                   print(f"- `{f.get('code')}` `{f.get('path')}` — {f.get('reason', '')}")
-          if not new and not inv:
+          if not new and not inv and not ctrl:
               print("\n_No new drift. Known drift is tolerated via the baseline._")
           PY
 

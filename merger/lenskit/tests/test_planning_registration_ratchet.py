@@ -936,3 +936,196 @@ def test_ratchet_report_with_control_errors_validates_against_schema(fake_repo, 
     report = json.loads(capsys.readouterr().out)
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.validate(instance=report, schema=schema)
+
+
+# --------------------------------------------------------------------------- #
+# 19. Fix A — generated_at calendar validation (strptime, not just regex)
+# --------------------------------------------------------------------------- #
+
+
+def test_baseline_calendar_invalid_date_blocks(fake_repo, tmp_path):
+    """A regex-matching but calendar-invalid timestamp (e.g. month 99) must fail."""
+    bl = tmp_path / "baseline.json"
+    bl.write_text(_raw_baseline([], generated_at="2026-99-99T99:99:99Z"), encoding="utf-8")
+    assert check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    ) == 2
+
+
+# --------------------------------------------------------------------------- #
+# 20. Fix B — baseline path canonicality enforcement
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("bad_path", [
+    "/absolute/path.md",
+    "/docs/blueprints/x.md",
+])
+def test_baseline_path_absolute_blocks(fake_repo, tmp_path, bad_path):
+    entry = {
+        "id": "abcdef0123456789",
+        "code": check_plan.CODE_UNREGISTERED,
+        "path": bad_path,
+        "kind": "unregistered",
+        "reason": "test",
+    }
+    bl = tmp_path / "baseline.json"
+    bl.write_text(_raw_baseline([entry]), encoding="utf-8")
+    assert check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    ) == 2
+
+
+def test_baseline_path_traversal_blocks(fake_repo, tmp_path):
+    entry = {
+        "id": "abcdef0123456789",
+        "code": check_plan.CODE_UNREGISTERED,
+        "path": "../etc/passwd",
+        "kind": "unregistered",
+        "reason": "test",
+    }
+    bl = tmp_path / "baseline.json"
+    bl.write_text(_raw_baseline([entry]), encoding="utf-8")
+    assert check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    ) == 2
+
+
+def test_baseline_path_backslash_blocks(fake_repo, tmp_path):
+    entry = {
+        "id": "abcdef0123456789",
+        "code": check_plan.CODE_UNREGISTERED,
+        "path": "docs\\blueprints\\x.md",
+        "kind": "unregistered",
+        "reason": "test",
+    }
+    bl = tmp_path / "baseline.json"
+    bl.write_text(_raw_baseline([entry]), encoding="utf-8")
+    assert check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    ) == 2
+
+
+@pytest.mark.parametrize("bad_path", [
+    "docs//blueprints/x.md",
+    "./docs/blueprints/x.md",
+    "docs/blueprints/../x.md",
+])
+def test_baseline_path_non_canonical_blocks(fake_repo, tmp_path, bad_path):
+    entry = {
+        "id": "abcdef0123456789",
+        "code": check_plan.CODE_UNREGISTERED,
+        "path": bad_path,
+        "kind": "unregistered",
+        "reason": "test",
+    }
+    bl = tmp_path / "baseline.json"
+    bl.write_text(_raw_baseline([entry]), encoding="utf-8")
+    assert check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    ) == 2
+
+
+def test_baseline_path_dot_blocks(fake_repo, tmp_path):
+    entry = {
+        "id": "abcdef0123456789",
+        "code": check_plan.CODE_UNREGISTERED,
+        "path": ".",
+        "kind": "unregistered",
+        "reason": "test",
+    }
+    bl = tmp_path / "baseline.json"
+    bl.write_text(_raw_baseline([entry]), encoding="utf-8")
+    assert check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    ) == 2
+
+
+# --------------------------------------------------------------------------- #
+# 21. Fix C — docs/tasks/index.json structural validation
+# --------------------------------------------------------------------------- #
+
+
+def test_index_json_structural_root_not_object(fake_repo, tmp_path):
+    (fake_repo / "docs/tasks/index.json").write_text('["not", "an", "object"]',
+                                                      encoding="utf-8")
+    bl = tmp_path / "baseline.json"
+    write_baseline(bl, [])
+    exit_code = check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    )
+    assert exit_code == 2
+
+
+def test_index_json_structural_tasks_not_list(fake_repo, tmp_path):
+    (fake_repo / "docs/tasks/index.json").write_text('{"tasks": "not-a-list"}',
+                                                      encoding="utf-8")
+    bl = tmp_path / "baseline.json"
+    write_baseline(bl, [])
+    exit_code = check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    )
+    assert exit_code == 2
+
+
+def test_index_json_structural_task_not_object(fake_repo, tmp_path):
+    (fake_repo / "docs/tasks/index.json").write_text('{"tasks": ["not-an-object"]}',
+                                                      encoding="utf-8")
+    bl = tmp_path / "baseline.json"
+    write_baseline(bl, [])
+    exit_code = check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    )
+    assert exit_code == 2
+
+
+def test_index_json_structural_evidence_entry_not_string(fake_repo, tmp_path):
+    (fake_repo / "docs/tasks/index.json").write_text(
+        '{"tasks": [{"id": "T-1", "evidence": [42]}]}', encoding="utf-8"
+    )
+    bl = tmp_path / "baseline.json"
+    write_baseline(bl, [])
+    exit_code = check_plan.main(
+        ["--ratchet", "--baseline", str(bl), "--format", "json"]
+    )
+    assert exit_code == 2
+
+
+# --------------------------------------------------------------------------- #
+# 22. Fix D — workflow summary step surfaces control_errors
+# --------------------------------------------------------------------------- #
+
+
+def test_workflow_summary_step_shows_control_errors():
+    """Step summary must display control_errors count and list."""
+    run = _get_workflow_step_run("Write step summary")
+    assert "control_errors" in run, \
+        "Summary step must reference control_errors from the report"
+
+
+def test_workflow_summary_no_new_drift_excludes_control_errors():
+    """'No new drift' message must not appear when control errors are present."""
+    run = _get_workflow_step_run("Write step summary")
+    assert "ctrl" in run, \
+        "No-new-drift condition must reference ctrl (control errors)"
+
+
+# --------------------------------------------------------------------------- #
+# 23. Fix E — --update-baseline report includes written_baseline_entries
+# --------------------------------------------------------------------------- #
+
+
+def test_update_baseline_report_contains_written_baseline_entries(fake_repo, tmp_path, capsys):
+    write(fake_repo, "docs/blueprints/legacy.md", "---\nstatus: active\n---\nBody")
+    bl = tmp_path / "baseline.json"
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    exit_code = check_plan.main(
+        ["--update-baseline", "--baseline", str(bl), "--format", "json"]
+    )
+    out = capsys.readouterr().out
+    report = json.loads(out)
+
+    assert exit_code == 0
+    assert report["summary"]["written_baseline_entries"] == 1
+    jsonschema.validate(instance=report, schema=schema)

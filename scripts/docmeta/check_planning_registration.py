@@ -4,6 +4,7 @@ import glob
 import hashlib
 import json
 import os
+import posixpath
 import re
 import sys
 
@@ -116,6 +117,25 @@ def _read_text(rel_path):
         return f.read(), None
 
 
+def _validate_index_json_structure(data):
+    """Return an error string if docs/tasks/index.json has unexpected structure, else None."""
+    if not isinstance(data, dict):
+        return f"Root must be an object, got {type(data).__name__}."
+    tasks = data.get("tasks")
+    if tasks is not None and not isinstance(tasks, list):
+        return f"'tasks' must be a list, got {type(tasks).__name__}."
+    for i, task in enumerate(tasks or []):
+        if not isinstance(task, dict):
+            return f"tasks[{i}] must be an object, got {type(task).__name__}."
+        evidence = task.get("evidence")
+        if evidence is not None and not isinstance(evidence, list):
+            return f"tasks[{i}].evidence must be a list, got {type(evidence).__name__}."
+        for j, ev in enumerate(evidence or []):
+            if not isinstance(ev, str):
+                return f"tasks[{i}].evidence[{j}] must be a string, got {type(ev).__name__}."
+    return None
+
+
 def get_registered_paths():
     registered = set()
     findings = []
@@ -134,11 +154,6 @@ def get_registered_paths():
     else:
         try:
             data = json.loads(index_text)
-            for task in data.get("tasks", []):
-                for path in task.get("evidence", []) or []:
-                    ref = _normalize_ref(path)
-                    if ref:
-                        registered.add(ref)
         except json.JSONDecodeError as e:
             findings.append({
                 "code": CODE_CONTROL_FILE_PARSE_ERROR,
@@ -148,6 +163,24 @@ def get_registered_paths():
                 "suggestion": "Fix the JSON syntax in docs/tasks/index.json.",
                 "source": "planning-registration",
             })
+            data = None
+        if data is not None:
+            struct_err = _validate_index_json_structure(data)
+            if struct_err:
+                findings.append({
+                    "code": CODE_CONTROL_FILE_PARSE_ERROR,
+                    "path": "docs/tasks/index.json",
+                    "kind": "control_file_parse_error",
+                    "reason": f"Structural error: {struct_err}",
+                    "suggestion": "Fix the structure of docs/tasks/index.json.",
+                    "source": "planning-registration",
+                })
+            else:
+                for task in (data.get("tasks") or []):
+                    for path in (task.get("evidence") or []):
+                        ref = _normalize_ref(path)
+                        if ref:
+                            registered.add(ref)
 
     # 2. docs/tasks/board.md
     board_text, err = _read_text("docs/tasks/board.md")
@@ -457,6 +490,32 @@ def build_baseline(findings):
     }
 
 
+def _validate_baseline_path(path_str, index):
+    """Reject unsafe, non-canonical, or absolute baseline entry paths."""
+    if not path_str or path_str == ".":
+        raise BaselineError(
+            f"Baseline entry [{index}] path must be a non-empty, non-dot string."
+        )
+    if posixpath.isabs(path_str):
+        raise BaselineError(
+            f"Baseline entry [{index}] path must be repo-relative (not absolute): {path_str!r}."
+        )
+    if "\\" in path_str:
+        raise BaselineError(
+            f"Baseline entry [{index}] path contains a backslash: {path_str!r}."
+        )
+    normalized = posixpath.normpath(path_str)
+    if normalized != path_str:
+        raise BaselineError(
+            f"Baseline entry [{index}] path is not canonical: "
+            f"{path_str!r} normalizes to {normalized!r}."
+        )
+    if normalized.startswith(".."):
+        raise BaselineError(
+            f"Baseline entry [{index}] path escapes repo root via traversal: {path_str!r}."
+        )
+
+
 def _validate_baseline_entry(entry, index):
     """Validate a single baseline entry dict. Raises BaselineError on violation."""
     if not isinstance(entry, dict):
@@ -487,6 +546,8 @@ def _validate_baseline_entry(entry, index):
             raise BaselineError(
                 f"Baseline entry [{index}] field '{field}' must be a non-empty string."
             )
+
+    _validate_baseline_path(entry["path"], index)
 
     if not isinstance(entry["reason"], str):
         raise BaselineError(
@@ -546,6 +607,12 @@ def load_baseline(path):
             "Baseline 'generated_at' must be an ISO-8601 UTC timestamp "
             f"(YYYY-MM-DDThh:mm:ssZ); got {gen_at!r}."
         )
+    try:
+        datetime.datetime.strptime(gen_at, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        raise BaselineError(
+            f"Baseline 'generated_at' has an invalid calendar date/time: {gen_at!r}."
+        )
 
     entries = data.get("entries")
     if not isinstance(entries, list):
@@ -600,23 +667,27 @@ def _control_errors(findings):
 
 
 def build_report(mode, findings, baseline_path, baseline_loaded,
-                 new_findings, known_findings, resolved_findings):
+                 new_findings, known_findings, resolved_findings,
+                 written_baseline_entries=None):
     invalid = _invalid_exceptions(findings)
     control = _control_errors(findings)
     baseline_count = len(known_findings) + len(resolved_findings)
+    summary = {
+        "current_findings": len(findings),
+        "baseline_findings": baseline_count,
+        "new_findings": len(new_findings),
+        "known_findings": len(known_findings),
+        "resolved_findings": len(resolved_findings),
+        "invalid_exceptions": len(invalid),
+        "control_errors": len(control),
+    }
+    if written_baseline_entries is not None:
+        summary["written_baseline_entries"] = written_baseline_entries
     return {
         "schema": REPORT_SCHEMA,
         "created_at": _now_iso(),
         "mode": mode,
-        "summary": {
-            "current_findings": len(findings),
-            "baseline_findings": baseline_count,
-            "new_findings": len(new_findings),
-            "known_findings": len(known_findings),
-            "resolved_findings": len(resolved_findings),
-            "invalid_exceptions": len(invalid),
-            "control_errors": len(control),
-        },
+        "summary": summary,
         "findings": findings,
         "baseline": {
             "path": baseline_path,
@@ -750,7 +821,8 @@ def main(argv=None):
             print(f"Error: cannot write baseline: {exc}", file=sys.stderr)
             return 2
         report = build_report("update_baseline", findings, args.baseline, True,
-                              new_findings=[], known_findings=[], resolved_findings=[])
+                              new_findings=[], known_findings=[], resolved_findings=[],
+                              written_baseline_entries=len(baseline["entries"]))
         if args.format == "json":
             print(json.dumps(report, indent=2, ensure_ascii=False))
         else:
