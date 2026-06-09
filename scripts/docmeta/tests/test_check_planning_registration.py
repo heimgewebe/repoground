@@ -217,6 +217,95 @@ class TestCheckPlanningRegistration(unittest.TestCase):
         check_plan.main([])
         self.assertIn("Report-only mode: findings do not fail CI", mock_stderr.getvalue())
 
+    # --- JSON scan report with baseline parameter should have loaded=false ---
+
+    @patch('sys.stdout', new_callable=io.StringIO)
+    def test_scan_json_baseline_parameter_loaded_is_false(self, mock_stdout):
+        """Scan mode should report baseline.loaded=false even if --baseline is provided."""
+        baseline_file = os.path.join(self.test_dir, "baseline.json")
+        with open(baseline_file, "w") as f:
+            json.dump({"schema": "lenskit.planning_registration_baseline.v1", "entries": []}, f)
+
+        check_plan.main([
+            "--format", "json",
+            "--baseline", baseline_file,
+        ])
+        output = mock_stdout.getvalue()
+        report = json.loads(output)
+        self.assertFalse(
+            report["baseline"]["loaded"],
+            "Scan mode should report baseline.loaded=false even with --baseline argument"
+        )
+
+    # --- Inline comment in top-level frontmatter (status: archived # comment) ---
+
+    def test_inline_comment_in_terminal_status(self):
+        """status: archived # comment should be recognized as archived."""
+        self.write_file(
+            "docs/blueprints/archived-with-comment.md",
+            "---\nstatus: archived # intentionally old\n---\nBody"
+        )
+        findings = check_plan.run_checks()
+        # Archived should be excluded from planning checks
+        self.assertEqual(
+            [f for f in findings if "archived-with-comment" in f.get("path", "")],
+            []
+        )
+
+    def test_inline_comment_in_doc_type(self):
+        """doc_type: plan # temporary should be recognized as plan."""
+        self.write_file(
+            "docs/specs/test-plan.md",
+            '---\nstatus: active\ndoc_type: plan # temporary spec\n---\nBody'
+        )
+        findings = check_plan.run_checks()
+        unregistered = [f for f in findings if f["code"] == "UNREGISTERED_PLANNING_ARTIFACT"]
+        paths = [f["path"] for f in unregistered]
+        self.assertIn("docs/specs/test-plan.md", paths)
+
+    # --- Inline comment at planning_registration: header ---
+
+    def test_planning_registration_header_with_inline_comment(self):
+        """planning_registration: # comment should be recognized as block start."""
+        self.write_file(
+            "docs/blueprints/exempt-with-header-comment.md",
+            "---\nstatus: active\n"
+            "planning_registration: # temporary exemption\n"
+            "  status: exempt\n"
+            "  reason: test\n"
+            "  owner: ops\n"
+            "  expires: 2999-12-31\n"
+            "---\nBody"
+        )
+        findings = check_plan.run_checks()
+        # Should be accepted as valid exemption, not raise invalid exception
+        invalid = [f for f in findings if f["code"] == check_plan.CODE_INVALID_EXCEPTION]
+        self.assertEqual(invalid, [], "Valid exemption with inline comment at header should not be invalid")
+
+    # --- Mandatory 'tasks' field in docs/tasks/index.json ---
+
+    def test_index_json_missing_tasks_field_is_control_error(self):
+        """index.json without 'tasks' field should produce CONTROL_FILE_PARSE_ERROR."""
+        self.write_file("docs/tasks/index.json", "{}")
+        findings = check_plan.run_checks()
+        parse_errors = [
+            f for f in findings
+            if f["code"] == "CONTROL_FILE_PARSE_ERROR" and "index.json" in f["path"]
+        ]
+        self.assertEqual(len(parse_errors), 1, "Missing 'tasks' field should produce exactly one parse error")
+        self.assertIn("tasks", parse_errors[0]["reason"].lower())
+
+    def test_index_json_tasks_not_list_is_control_error(self):
+        """index.json with 'tasks' as non-list should produce CONTROL_FILE_PARSE_ERROR."""
+        self.write_file("docs/tasks/index.json", '{"tasks": "not-a-list"}')
+        findings = check_plan.run_checks()
+        parse_errors = [
+            f for f in findings
+            if f["code"] == "CONTROL_FILE_PARSE_ERROR" and "index.json" in f["path"]
+        ]
+        self.assertEqual(len(parse_errors), 1)
+        self.assertIn("list", parse_errors[0]["reason"].lower())
+
 
     # --- Inline comment stripping (unit) ---
 

@@ -14,8 +14,9 @@ specs, status reports) that were not registered in a canonical planning register
 — but it ran **report-only**: findings never failed CI, so nothing stopped a new
 unregistered blueprint from accumulating as silent planning drift. The missing
 pieces were (a) a way to tolerate known legacy drift while (b) blocking *new*
-drift, plus (c) a contract-stable frontmatter exemption flow. This task delivers
-that control plane without forcing "everything must be perfect".
+drift and control-file errors, plus (c) a contract-stable frontmatter exemption
+flow. This task delivers that control plane without forcing "everything must be
+perfect".
 
 ## Policy
 
@@ -103,7 +104,8 @@ Rules:
   scan contains control errors it exits **2** and writes nothing; if it contains
   invalid exceptions it exits **1** and writes nothing. A baseline is written
   only from a clean scan, so a broken structure can never be stamped "resolved".
-- CI does not enforce "all registered". It enforces **no new drift**.
+- CI does not enforce "all registered". It enforces **no new drift, no invalid
+  exemptions, and no control-file errors**.
 
 ## CI behavior
 
@@ -136,9 +138,9 @@ No network or GitHub-API dependency; no time-of-day logic in the gate.
 
 | Code | Meaning |
 | ---- | ------- |
-| 0 | No new blocking findings (ratchet), or scan/update-baseline success. |
-| 1 | Ratchet: new findings or invalid exceptions present. `--update-baseline`: invalid exceptions present (baseline not written). |
-| 2 | Usage/config error: invalid baseline (schema/generator/timestamp mismatch, unexpected fields, bad/forged entry id, duplicate ids, non-canonical order), broken input, mutually exclusive flags, missing `--baseline`, **or control-file errors** (the tool cannot read its own control structure) in ratchet/update-baseline. |
+| 0 | No new blocking findings, invalid exceptions, or control errors (ratchet); or scan/update-baseline success. |
+| 1 | Ratchet: new findings or invalid exceptions present. |
+| 2 | Config/control error: invalid baseline, control-file errors (missing/unparseable control files), schema mismatch, broken input, mutually exclusive flags, missing `--baseline`, or `--ratchet`/`--update-baseline` without `--baseline`. |
 
 JSON (`--format json`) is emitted on **stdout only**; human-readable output goes
 to **stderr** in JSON mode so stdout stays parseable.
@@ -163,7 +165,7 @@ python3 -m json.tool /tmp/planning-registration-report.json >/dev/null
 
 ## Test evidence
 
-- `merger/lenskit/tests/test_planning_registration_ratchet.py` (67 tests):
+- `merger/lenskit/tests/test_planning_registration_ratchet.py`:
   scanner detection, line-number-independent ids, baseline toleration, new-drift
   blocking, resolved/stale handling, invalid/expired exemptions blocking (including
   the key invariant that `invalid_exceptions` do **not** appear in `new_findings`),

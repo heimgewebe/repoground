@@ -103,6 +103,44 @@ def _normalize_ref(raw):
     return ref
 
 
+def _strip_inline_comment(value: str) -> str:
+    """Remove inline comment from a YAML scalar value.
+
+    An inline comment is '#' outside of quoted strings, preceded by whitespace.
+    '#' inside single or double quotes is preserved. The value is then stripped
+    and outer matching quotes are removed.
+
+    Examples:
+        'archived # old'        -> 'archived'
+        '"archived" # old'      -> 'archived'
+        '"archived # old"'      -> 'archived # old'
+        'ops#team'              -> 'ops#team'
+    """
+    in_single = False
+    in_double = False
+    for i, ch in enumerate(value):
+        if ch == "'" and not in_double:
+            in_single = not in_single
+        elif ch == '"' and not in_single:
+            in_double = not in_double
+        elif (
+            ch == "#"
+            and not in_single
+            and not in_double
+            and (i == 0 or value[i - 1] in (" ", "\t"))
+        ):
+            value = value[:i].rstrip()
+            break
+    result = value.strip()
+    if (
+        len(result) >= 2
+        and result[0] == result[-1]
+        and result[0] in ('"', "'")
+    ):
+        result = result[1:-1]
+    return result
+
+
 def _extract_path_refs(text):
     """Extract normalized docs/ and scripts/ references from free text."""
     refs = set()
@@ -127,8 +165,10 @@ def _validate_index_json_structure(data):
     """Return an error string if docs/tasks/index.json has unexpected structure, else None."""
     if not isinstance(data, dict):
         return f"Root must be an object, got {type(data).__name__}."
+    if "tasks" not in data:
+        return "Missing required 'tasks' field."
     tasks = data.get("tasks")
-    if tasks is not None and not isinstance(tasks, list):
+    if not isinstance(tasks, list):
         return f"'tasks' must be a list, got {type(tasks).__name__}."
     for i, task in enumerate(tasks or []):
         if not isinstance(task, dict):
@@ -270,7 +310,7 @@ def parse_markdown_meta(filepath):
                     if ":" in lines[i]:
                         parts = lines[i].split(":", 1)
                         key = parts[0].strip()
-                        val = parts[1].strip().strip('"\'')
+                        val = _strip_inline_comment(parts[1])
                         if val.startswith("[") and val.endswith("]"):
                             meta[key] = [v.strip().strip("'\"") for v in val[1:-1].split(",") if v.strip()]
                         else:
@@ -356,7 +396,10 @@ def parse_planning_registration_block(filepath):
             continue
         indent = len(raw) - len(raw.lstrip())
         if block is None:
-            if indent == 0 and stripped.rstrip() == "planning_registration:":
+            # Check for planning_registration: block header, allowing inline comments.
+            # Strip comments first, then check if it's the header.
+            stripped_without_comment = _strip_inline_comment(stripped)
+            if indent == 0 and stripped_without_comment == "planning_registration:":
                 block = {}
             continue
         # Inside the block: collect more-indented key: value lines.
@@ -923,7 +966,7 @@ def main(argv=None):
     # --- scan mode ---
     if args.format == "json":
         report = build_report("scan", findings, args.baseline,
-                              args.baseline is not None,
+                              False,
                               new_findings=[], known_findings=[], resolved_findings=[])
         print(json.dumps(report, indent=2, ensure_ascii=False))
         if findings and args.strict:
