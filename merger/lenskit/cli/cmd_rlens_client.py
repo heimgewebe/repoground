@@ -390,7 +390,7 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
         default=None,
         help=(
             "remote-snapshot ref policy when --remote-ref is not given (default: upstream). "
-            "Only valid with --source-mode remote-snapshot."
+            "Non-default policies require --source-mode remote-snapshot."
         ),
     )
     pre_pull_group = run_parser.add_mutually_exclusive_group()

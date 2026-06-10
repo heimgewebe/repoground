@@ -715,7 +715,7 @@ def safe_extract_tar(data: bytes, dest: Path) -> None:
     * Only regular files and ordinary directories are extracted. Symlinks,
       hardlinks, FIFOs, character/block devices and any other special member type
       are rejected outright (a ``git archive --format=tar`` of normal source code
-      contains none of these except, possibly, symlinks which we deliberately drop).
+      contains none of these except, possibly, symlinks which v1 deliberately rejects).
     * No absolute member paths and no ``..`` traversal — the destination path of
       every member must stay under ``dest``.
     * No member is written through an existing symlink: every path component of

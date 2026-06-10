@@ -3674,7 +3674,7 @@ def main_cli():
         default=None,
         help=(
             "remote-snapshot ref policy when --remote-ref is absent (default: upstream). "
-            "Only valid with --source-mode remote-snapshot."
+            "Non-default policies require --source-mode remote-snapshot."
         ),
     )
 
