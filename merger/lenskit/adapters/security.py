@@ -6,115 +6,31 @@ from typing import List, Optional
 import os
 import re
 
-
 class SecurityViolationError(Exception):
     """Base class for security and path validation errors."""
     pass
-
 
 class InvalidPathError(SecurityViolationError):
     """Raised when a path is malformed or invalid (400)."""
     pass
 
-
 class AccessDeniedError(SecurityViolationError):
     """Raised when access to a path is denied (403)."""
     pass
-
 
 @dataclass
 class SecurityConfig:
     # Absolute, normalized roots only. Anything else is rejected at registration.
     allowlist_roots: List[Path] = field(default_factory=list)
     token: str | None = None
-    # Root policy: "default" (backward-compatible) or "restricted" (tailnet-safe)
-    root_policy: str = "default"
-
-    # Forbidden paths in restricted mode (exact absolute paths or prefixes)
-    RESTRICTED_FORBIDDEN_PATHS: tuple = (
-        "/", "/home", "/etc", "/var", "/proc", "/sys", "/dev", "/run", "/tmp"
-    )
-
-    # Forbidden component names in restricted mode (checked in path parts)
-    RESTRICTED_FORBIDDEN_COMPONENTS: tuple = (
-        ".ssh", ".gnupg", ".env"
-    )
-
-    # Forbidden file suffixes in restricted mode
-    RESTRICTED_FORBIDDEN_SUFFIXES: tuple = (
-        ".pem", ".key"
-    )
 
     def set_token(self, token: Optional[str]):
         self.token = token
-
-    def set_root_policy(self, policy: str) -> None:
-        """Set root policy: 'default' or 'restricted'."""
-        valid = ("default", "restricted")
-        if policy not in valid:
-            raise ValueError(f"Invalid root_policy '{policy}'; expected one of {valid}")
-        self.root_policy = policy
-
-    def _check_restricted_root(self, root: Path) -> None:
-        """
-        Validate a root path against the restricted policy's forbidden list.
-        Called only when root_policy == 'restricted'.
-        Raises ValueError if the root is forbidden.
-        """
-        resolved = str(root.resolve())
-
-        # Check exact forbidden paths first (e.g., '/', '/etc')
-        if resolved in self.RESTRICTED_FORBIDDEN_PATHS:
-            raise ValueError(
-                f"Root '{root}' is forbidden in restricted mode (exact match)"
-            )
-
-        # Check forbidden prefixes (e.g., /etc/xxx)
-        # NOTE: '/' and '/tmp' are exact-match only, not prefix, because
-        # '/tmp' is commonly used as a base for temporary directories.
-        for forbidden in self.RESTRICTED_FORBIDDEN_PATHS:
-            if forbidden in ("/", "/tmp"):
-                continue  # exact-match only
-            prefix = forbidden.rstrip("/") + "/"
-            if resolved.startswith(prefix):
-                raise ValueError(
-                    f"Root '{root}' is forbidden in restricted mode "
-                    f"(under forbidden path '{forbidden}')"
-                )
-
-        # Check forbidden component names in path parts
-        parts = Path(resolved).parts
-        for component in self.RESTRICTED_FORBIDDEN_COMPONENTS:
-            if component in parts:
-                raise ValueError(
-                    f"Root '{root}' contains forbidden component "
-                    f"'{component}' in restricted mode"
-                )
-
-        # Check forbidden file suffixes
-        for suffix in self.RESTRICTED_FORBIDDEN_SUFFIXES:
-            if resolved.endswith(suffix):
-                raise ValueError(
-                    f"Root '{root}' has forbidden suffix '{suffix}' "
-                    f"in restricted mode"
-                )
-
-        # Check $HOME specifically (resolved home directory)
-        try:
-            home = str(Path.home().resolve())
-            if resolved == home:
-                raise ValueError(
-                    f"Root '{root}' is the home directory, "
-                    f"forbidden in restricted mode"
-                )
-        except Exception:
-            pass
 
     def add_allowlist_root(self, path: Path) -> None:
         """
         Register a trusted root directory for filesystem access.
         This must NOT accept tainted/relative inputs, otherwise it can widen the jail.
-        In restricted mode, validates against forbidden paths.
         """
         s = str(path)
         if not s.strip():
@@ -123,16 +39,14 @@ class SecurityConfig:
             raise ValueError("Invalid root (NUL byte)")
 
         try:
+            # Normalize without requiring existence (strict=False) to handle setup flexibility
+            # resolving allows us to store canonical roots
             root = path.expanduser().resolve()
         except Exception:
             raise ValueError("Invalid root resolution")
 
         if not root.is_absolute():
             raise ValueError("Invalid root (not absolute)")
-
-        # Restricted mode: validate against forbidden paths
-        if self.root_policy == "restricted":
-            self._check_restricted_root(root)
 
         if root not in self.allowlist_roots:
             self.allowlist_roots.append(root)
@@ -156,6 +70,7 @@ class SecurityConfig:
             )
 
         # --- Stage 1: pre-check without resolve() ---
+        # Expand ~ and normalize purely as a string.
         expanded = os.path.expanduser(raw)
         normalized = os.path.normpath(expanded)
 
@@ -165,24 +80,32 @@ class SecurityConfig:
         allowed_by_prefix = False
         for root in self.allowlist_roots:
             root_norm = os.path.normpath(str(root))
+            # commonpath is robust vs "../" tricks after normpath
             try:
+                # commonpath returns the longest common sub-path
                 if os.path.commonpath([root_norm, normalized]) == root_norm:
                     allowed_by_prefix = True
                     break
             except Exception:
+                # If commonpath fails (mixed drives etc.), treat as not allowed.
                 continue
 
         if not allowed_by_prefix:
+            # This early exit helps CodeQL see the barrier before resolve()
             raise AccessDeniedError("Access denied: Path is not allowed (prefix check)")
 
         # --- Stage 2: canonicalize + enforce with Path semantics ---
         try:
+            # Now safe to resolve (canonicalize symlinks etc)
             resolved = Path(normalized).resolve()
         except Exception:
             raise InvalidPathError("Invalid path resolution")
 
+        # Post-check: resolved path must still lie within allowlist roots.
+        # This prevents symlink escapes that passed string check.
         for root in self.allowlist_roots:
             try:
+                # Resolve root too to be sure (it should be already, but robustness)
                 resolved_root = root.resolve()
                 resolved.relative_to(resolved_root)
                 return resolved
@@ -194,17 +117,20 @@ class SecurityConfig:
 
 _security_config = SecurityConfig()
 
-
 def get_security_config() -> SecurityConfig:
     return _security_config
 
 
 def validate_hub_path(path_str: str) -> Path:
-    """Validate a user-supplied hub path against the allowlist."""
+    """
+    Validate a user-supplied hub path against the allowlist and ensure it exists/is a directory.
+    Returns a canonical Path that is safe to use for filesystem operations.
+    """
     if "\0" in path_str:
         raise InvalidPathError("Invalid path (NUL byte)")
 
     p = Path(path_str)
+    # Use resolved path for checks
     resolved = get_security_config().validate_path(p)
 
     if not resolved.exists():
@@ -215,30 +141,38 @@ def validate_hub_path(path_str: str) -> Path:
 
 
 def validate_source_dir(path: Path) -> Path:
+    # Ensure source is within allowlist roots (hub) and use ONLY the validated path.
     resolved = get_security_config().validate_path(path)
     if not resolved.exists() or not resolved.is_dir():
         raise InvalidPathError("Invalid repo path")
     return resolved
-
 
 def validate_repo_name(name: str) -> str:
     _REPO_RE = re.compile(r"^[A-Za-z0-9._-]+$")
     n = (name or "").strip()
     if not n:
         raise InvalidPathError("Invalid repo name: empty")
+
+    # Specific block for "." and ".." strictly
     if n == "." or n == "..":
         raise InvalidPathError(f"Invalid repo name: {n}")
+
     if "/" in n or "\\" in n or ".." in n:
         raise InvalidPathError("Invalid repo name: contains slash, backslash, or double-dot")
+
     if not _REPO_RE.match(n):
         raise InvalidPathError(f"Invalid repo name: {n}")
-    return n
 
+    return n
 
 def resolve_any_path(root: Path, requested: Optional[str]) -> Path:
     if not requested or requested.strip() == "":
         return root.resolve()
+
+    # If absolute, validate against roots
     if os.path.isabs(requested):
         return get_security_config().validate_path(Path(requested))
+
+    # If relative, join and validate
     joined = root / requested
     return get_security_config().validate_path(joined)
