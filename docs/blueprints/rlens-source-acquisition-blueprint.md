@@ -1,7 +1,10 @@
 # rLens Source Acquisition v1 — Blueprint
 
-Status: implemented (`task/rlens-source-acquisition-v1`).
-Schema: `lenskit.source_acquisition_report.v1`.
+Status: implemented (`task/rlens-source-acquisition-v1`); control plane hardened
+(TASK-SERVICE-003B): central source-mode validation enforced at `/api/jobs` and
+all surfaces, schema-validated report contract, manual link-rejecting tar writer.
+Schema: `lenskit.source_acquisition_report.v1`
+(`merger/lenskit/contracts/source-acquisition-report.v1.schema.json`).
 
 ## Problem
 
@@ -45,6 +48,35 @@ from the legacy `pre_pull`/`plan_only` flags:
 
 When `repo_source_mode` is set explicitly it wins.
 
+## Source-mode control plane (validation)
+
+The source-mode rules live in one place — `validate_source_mode_request()` in
+`merger/lenskit/service/source_acquisition.py` — and are enforced identically by
+every surface so a client can never out-permit the API:
+
+* **`/api/jobs` is the hard boundary.** `JobRequest` runs the validator and
+  FastAPI maps a contradictory body to **HTTP 422** *before* any job hash, reuse
+  check, git or network access. The CLI, repoLens/Pythonista headless and the
+  WebUI run the same rules locally (CLI/headless: exit 2; WebUI: blocked submit
+  with a visible error) but they are surfaces, not the control instance.
+
+Rejected combinations (explicit `pre_pull` only; a bare `repo_source_mode` with
+the default `pre_pull` is accepted):
+
+| Combination | Reason |
+| ----------- | ------ |
+| `remote_snapshot` + `pre_pull=true` | `remote_snapshot` never mutates the local repo. |
+| `local_current` + `pre_pull=true` | `local_current` scans as-is; it never fast-forwards. |
+| `local_ff` + `pre_pull=false` | `local_ff` *is* a fast-forward pre-pull. |
+| `local_ff` + `plan_only=true` | `local_ff` would mutate; `plan_only` forbids mutation. Use `local_current` (plan-only) or `remote_snapshot` (non-mutating remote check). |
+| `remote_ref` on any non-`remote_snapshot` mode | the ref only means something for `remote_snapshot`. |
+| explicit non-default `remote_ref_policy` on any non-`remote_snapshot` mode | the policy only means something for `remote_snapshot`. |
+
+`local_ff` + `plan_only` is **never** silently smoothed to `local_current`: a
+silent coercion would hide a contradictory intent. The default policy
+(`upstream`) is inert on local modes and therefore tolerated, so no inert field
+drifts the job hash.
+
 ## Security invariants
 
 `remote_snapshot`:
@@ -65,8 +97,10 @@ All surfaces enforce:
 * `GIT_TERMINAL_PROMPT=0` for all git calls;
 * git subprocess output decoded `encoding="utf-8", errors="surrogateescape"`;
 * remote URLs, stderr, exceptions and reports are credential-redacted;
-* snapshot extraction is hardened against path traversal and escaping
-  symlink/hardlink members;
+* snapshot extraction is hardened by a manual writer (never `tarfile.extract`):
+  it extracts only regular files and ordinary directories and **rejects** every
+  symlink, hardlink, FIFO and device member, plus absolute paths, `..` traversal
+  and any write through an existing symlinked path component;
 * job-bound snapshot roots/worktree dirs are rejected when symlinked or escaped,
   and stale worktree files are removed before each extraction.
 
@@ -95,7 +129,7 @@ The `source_acquisition_report` distinguishes, per repo, with no silent loss:
 * `source_mode` — `local_current` / `local_ff` / `remote_snapshot`.
 * `resolved_ref` — the remote ref that was resolved.
 * `resolved_commit` — the commit SHA that was materialized.
-* `local_repo_mutated` — boolean; always `false` for remote_snapshot.
+* `local_repo_mutated` — `const: false` (schema-enforced, not merely conventional) for remote_snapshot.
 
 ## Materialization
 
@@ -111,8 +145,11 @@ For `remote_snapshot`:
 4. `rev-parse` the resolved ref to a commit.
 5. `git --git-dir … archive --format=tar <commit>` and extract safely in Python.
 
-Safe extraction rejects absolute paths, `..` traversal, and any symlink/hardlink
-target that resolves outside the snapshot directory.
+Safe extraction is a hand-rolled writer: it extracts only regular files and
+ordinary directories, and rejects absolute paths, `..` traversal, any write
+through an existing symlinked path component, and every symlink, hardlink, FIFO
+or device member outright (v1: security before convenience — links are rejected,
+not followed). `tarfile.extract` is never used.
 
 ## Plan-only semantics
 
@@ -134,8 +171,17 @@ effective pre-pull). Active identical jobs are still reused.
   the snapshot raises the report warning `submodules_not_expanded`.
 * Git-LFS is **not** automatically smudged in v1. LFS filters in `.gitattributes`
   or detected LFS pointer files raise `lfs_not_smudged`.
+* Symlinks and hardlinks committed in the source are **not** reproduced in the
+  snapshot in v1: such tar members are rejected, so a repo that relies on
+  committed symlinks will fail extraction (`extract_failed`) rather than be
+  silently rewritten. This is a deliberate security-over-convenience choice.
 * A snapshot is *committed* content; it is not guaranteed identical to artifacts
   generated from a locally-modified tree.
+* The `source_acquisition_report` is a provenance/diagnostic signal (structure),
+  not a truth verdict: it does not prove the snapshot is byte-identical to a
+  locally generated bundle. Reports and logs are credential-redacted via explicit
+  redaction gates with tests; this reduces leakage, it is not an absolute
+  guarantee that credentials can *never* appear.
 * Job-bound snapshots remain under `merges_dir` for the life of the job output;
   no persistence/cleanup optimization is in scope for this PR.
 

@@ -363,8 +363,11 @@ def test_run_merge_plan_only_omits_force_new(page_with_static: Page):
         });
     """)
 
-    # Check Plan Only
+    # Check Plan Only. plan_only requires a non-mutating source mode (the factory
+    # default local_ff would be a control-plane conflict — see TASK-SERVICE-003B),
+    # so pick local_current explicitly before submitting.
     page_with_static.check("#planOnly")
+    page_with_static.select_option("#sourceMode", "local_current")
 
     def handle_jobs(route: Route):
         if route.request.method == "POST":
@@ -421,6 +424,8 @@ def test_run_merge_resets_form_to_factory_defaults_when_none_saved(page_with_sta
     page_with_static.fill("#extFilter", ".py,.md")
     page_with_static.check("#planOnly")
     page_with_static.check("#codeOnly")
+    # plan_only needs a non-mutating source mode (local_ff + plan_only is rejected).
+    page_with_static.select_option("#sourceMode", "local_current")
 
     payloads = []
 
@@ -541,6 +546,8 @@ def test_run_merge_respects_saved_defaults_after_success(page_with_static: Page)
     page_with_static.fill("#extFilter", ".py,.md")
     page_with_static.check("#planOnly")
     page_with_static.check("#codeOnly")
+    # plan_only needs a non-mutating source mode (local_ff + plan_only is rejected).
+    page_with_static.select_option("#sourceMode", "local_current")
 
     payloads = []
 
@@ -695,3 +702,48 @@ def test_query_tab_submits_payload(page_with_static: Page):
 
     # Check for explain block
     expect(page_with_static.locator("#queryResults").get_by_text("Explain", exact=True)).to_be_visible()
+
+
+def test_run_merge_local_ff_plus_plan_only_is_blocked(page_with_static: Page):
+    """Control plane (TASK-SERVICE-003B): local_ff + plan_only must be blocked in the
+    UI with a visible error and NO /api/jobs request — never silently coerced to
+    local_current.
+    """
+    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.goto("http://localhost:8000/")
+    page_with_static.wait_for_selector("#repoList input[name='repos']")
+
+    page_with_static.evaluate("""
+        const boxes = document.querySelectorAll('input[name="repos"]');
+        boxes.forEach(b => { if (b.value === 'repoA') b.checked = true; });
+    """)
+
+    # Explicit local_ff (also the factory default) + plan-only is the conflict.
+    page_with_static.select_option("#sourceMode", "local_ff")
+    page_with_static.check("#planOnly")
+
+    payloads = []
+    def handle_jobs(route: Route):
+        if route.request.method == "POST":
+            payloads.append(route.request.post_data)
+            route.fulfill(json={})
+        else:
+            route.continue_()
+    page_with_static.route("**/api/jobs", handle_jobs)
+
+    dialog_message = []
+    def handle_dialog(dialog):
+        dialog_message.append(dialog.message)
+        dialog.accept()
+    page_with_static.on("dialog", handle_dialog)
+
+    page_with_static.click("#jobForm button[type='submit']")
+
+    # Wait a bit to ensure no network request happens.
+    page_with_static.wait_for_timeout(500)
+
+    assert len(payloads) == 0, "local_ff + plan_only must not POST a job"
+    assert len(dialog_message) > 0, "a visible error must be surfaced"
+    assert "plan-only" in dialog_message[0].lower() or "plan-only" in dialog_message[0]
+    # No silent coercion: the dropdown still says local_ff.
+    assert page_with_static.locator("#sourceMode").evaluate("(el) => el.value") == "local_ff"

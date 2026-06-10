@@ -10,6 +10,11 @@ import urllib.parse
 import urllib.request
 from typing import Any, Optional, Tuple
 
+from merger.lenskit.service.source_acquisition import (
+    SourceModeConflictError,
+    validate_source_mode_request,
+)
+
 DEFAULT_BASE_URL = "http://127.0.0.1:8787"
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_SSE_TIMEOUT_SECONDS = 300
@@ -382,8 +387,11 @@ def register_rlens_client_commands(subparsers: argparse._SubParsersAction) -> No
     run_parser.add_argument(
         "--remote-ref-policy",
         choices=("upstream", "same-branch", "default-branch"),
-        default="upstream",
-        help="remote-snapshot ref policy when --remote-ref is not given (default: upstream)",
+        default=None,
+        help=(
+            "remote-snapshot ref policy when --remote-ref is not given (default: upstream). "
+            "Non-default policies require --source-mode remote-snapshot."
+        ),
     )
     pre_pull_group = run_parser.add_mutually_exclusive_group()
     pre_pull_group.add_argument(
@@ -642,6 +650,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
             args, "--source-mode remote-snapshot never mutates the local repo; remove --pre-pull."
         )
 
+    # Central control plane: the same rules /api/jobs enforces, applied locally so
+    # no contradictory payload ever reaches the network. local_ff+plan_only,
+    # remote_ref / non-default policy on a local mode, etc. all fail here (exit 2).
+    repo_source_mode = _SOURCE_MODE_PAYLOAD.get(source_mode) if source_mode else None
+    policy_canonical = _REMOTE_REF_POLICY_PAYLOAD.get(args.remote_ref_policy) if args.remote_ref_policy else None
+    try:
+        validate_source_mode_request(
+            repo_source_mode=repo_source_mode,
+            pre_pull=args.pre_pull,
+            plan_only=bool(args.plan_only),
+            remote_ref=args.remote_ref,
+            remote_ref_policy=policy_canonical,
+        )
+    except SourceModeConflictError as exc:
+        return _exit_config_error(args, str(exc))
+
     try:
         _ensure_profile_config_valid_if_present(args)
         token = _resolve_token(args)
@@ -671,7 +695,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         payload["repo_source_mode"] = _SOURCE_MODE_PAYLOAD[source_mode]
         effective_pre_pull = source_mode == "local-ff" and not args.plan_only
         if source_mode == "remote-snapshot":
-            payload["remote_ref_policy"] = _REMOTE_REF_POLICY_PAYLOAD[args.remote_ref_policy]
+            # Only remote-snapshot carries a ref policy; default to "upstream" when
+            # the (now optional) flag is absent. Local modes never send it, so no
+            # inert field drifts the job hash.
+            payload["remote_ref_policy"] = policy_canonical or "upstream"
             if args.remote_ref:
                 payload["remote_ref"] = args.remote_ref
     else:

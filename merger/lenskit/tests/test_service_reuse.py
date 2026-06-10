@@ -1,5 +1,7 @@
 import time
 
+import pytest
+
 
 def _wait_terminal(ctx, job_id, timeout_s=5.0):
     """Wait for the background runner to reach a terminal state so a later manual
@@ -224,14 +226,18 @@ def test_plan_only_pre_pull_uses_effective_hash():
     assert calculate_job_hash(real_pre, hub, version) != calculate_job_hash(real_no_pre, hub, version)
 
 
-def test_succeeded_job_not_reused_when_source_mode_local_ff_even_if_pre_pull_false(service_client):
-    """repo_source_mode='local_ff' enforces a fresh check even if legacy pre_pull is False."""
+def test_succeeded_job_not_reused_when_source_mode_local_ff(service_client):
+    """repo_source_mode='local_ff' enforces a fresh fast-forward check on reuse.
+
+    (The previously-tested local_ff + pre_pull=False combination is now a hard
+    422 conflict — see test_source_mode_conflicts_rejected_by_api — so the reuse
+    semantics are exercised with the coherent bare local_ff request.)
+    """
     ctx = service_client
     req = {
         "repos": ["repo-test"],
         "level": "summary",
         "repo_source_mode": "local_ff",
-        "pre_pull": False,
     }
     resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
     assert resp1.status_code == 200
@@ -244,10 +250,14 @@ def test_succeeded_job_not_reused_when_source_mode_local_ff_even_if_pre_pull_fal
     assert resp2.json()["id"] != job1_id
 
 
-def test_succeeded_job_reused_when_source_mode_local_current_even_if_pre_pull_true(service_client):
-    """repo_source_mode='local_current' prevents fresh check even if legacy pre_pull is True."""
+def test_succeeded_job_reused_when_source_mode_local_current(service_client):
+    """repo_source_mode='local_current' (no mutation) allows reuse of a succeeded job.
+
+    (local_current + pre_pull=True is now a hard 422 conflict, so reuse is
+    exercised with the coherent local_current + pre_pull=False request.)
+    """
     ctx = service_client
-    req = {"repos": ["repo-test"], "level": "summary", "repo_source_mode": "local_current", "pre_pull": True}
+    req = {"repos": ["repo-test"], "level": "summary", "repo_source_mode": "local_current", "pre_pull": False}
     resp1 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
     assert resp1.status_code == 200
     job1_id = resp1.json()["id"]
@@ -272,3 +282,52 @@ def test_succeeded_job_not_reused_when_source_mode_remote_snapshot(service_clien
     resp2 = ctx.client.post("/api/jobs", json=req, headers=ctx.headers)
     assert resp2.status_code == 200
     assert resp2.json()["id"] != job1_id
+
+
+# ---------------------------------------------------------------------------
+# Source-mode control plane: /api/jobs is the hard boundary (TASK-SERVICE-003B)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "req",
+    [
+        # remote_snapshot must never carry a local fast-forward.
+        {"repo_source_mode": "remote_snapshot", "pre_pull": True},
+        # local_current never fast-forwards.
+        {"repo_source_mode": "local_current", "pre_pull": True},
+        # local_ff requires a fast-forward; pre_pull=False contradicts it.
+        {"repo_source_mode": "local_ff", "pre_pull": False},
+        # local_ff would mutate; plan_only forbids mutation.
+        {"repo_source_mode": "local_ff", "plan_only": True},
+        # remote_ref / non-default policy only mean something for remote_snapshot.
+        {"repo_source_mode": "local_current", "remote_ref": "origin/main"},
+        {"repo_source_mode": "local_ff", "remote_ref": "origin/main"},
+        {"remote_ref": "origin/main"},
+        {"repo_source_mode": "local_current", "remote_ref_policy": "default_branch"},
+    ],
+)
+def test_source_mode_conflicts_rejected_by_api(service_client, req):
+    """/api/jobs hard-rejects contradictory source-mode payloads with 422.
+
+    No job is created, no git/network access happens, nothing is mutated; the
+    API is the control plane, not just the CLI/WebUI surfaces.
+    """
+    ctx = service_client
+    before = len(ctx.store.get_all_jobs())
+    payload = {"repos": ["repo-test"], "level": "summary", **req}
+    resp = ctx.client.post("/api/jobs", json=payload, headers=ctx.headers)
+    assert resp.status_code == 422, (req, resp.text)
+    # No job was created for the rejected request.
+    assert len(ctx.store.get_all_jobs()) == before
+
+
+def test_source_mode_bare_local_current_is_accepted(service_client):
+    """A bare repo_source_mode (no explicit pre_pull) is coherent and accepted."""
+    ctx = service_client
+    resp = ctx.client.post(
+        "/api/jobs",
+        json={"repos": ["repo-test"], "level": "summary", "repo_source_mode": "local_current"},
+        headers=ctx.headers,
+    )
+    assert resp.status_code == 200, resp.text

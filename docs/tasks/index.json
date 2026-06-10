@@ -1,6 +1,33 @@
 {
   "tasks": [
     {
+      "id": "TASK-SERVICE-003B",
+      "title": "rLens Source Acquisition Control-Plane Hardening",
+      "status": "done",
+      "description": "Harden the rLens source-acquisition control plane: a single source-mode validator (validate_source_mode_request) is enforced at /api/jobs (HTTP 422 before job hash, reuse and any git/network) and identically on the CLI, repoLens headless (exit 2) and the WebUI (blocked submit with a visible error). local_ff+plan_only is rejected (never silently coerced to local_current); remote_ref and an explicit non-default remote_ref_policy are rejected on non-remote_snapshot modes (no job-hash drift). The source_acquisition_report now has a real JSON-Schema contract validated against written reports in tests, and tar extraction uses a manual, link-rejecting writer (no tarfile.extract).",
+      "evidence": [
+        "merger/lenskit/service/source_acquisition.py",
+        "merger/lenskit/service/models.py",
+        "merger/lenskit/contracts/source-acquisition-report.v1.schema.json",
+        "merger/lenskit/cli/cmd_rlens_client.py",
+        "merger/lenskit/frontends/pythonista/repolens.py",
+        "merger/lenskit/frontends/webui/app.js",
+        "merger/lenskit/tests/test_source_acquisition.py",
+        "merger/lenskit/tests/test_service_runner_pre_pull.py",
+        "merger/lenskit/tests/test_service_reuse.py",
+        "merger/lenskit/tests/test_cli_rlens_client.py",
+        "merger/lenskit/tests/test_pythonista_pre_pull.py",
+        "merger/lenskit/tests/test_webui_payload.py",
+        "merger/lenskit/frontends/webui/tests/test_pre_pull_payload.js",
+        "docs/blueprints/rlens-source-acquisition-blueprint.md",
+        "docs/blueprints/rlens-cli-client-blueprint.md",
+        "docs/service-api.md",
+        "docs/contracts/contracts-matrix.md",
+        "docs/architecture/artifact-inventory.md",
+        "docs/testing/test-matrix.md"
+      ]
+    },
+    {
       "id": "TASK-CTL-004",
       "title": "Planning Registration Guard",
       "status": "done",

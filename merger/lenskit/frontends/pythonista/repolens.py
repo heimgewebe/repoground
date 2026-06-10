@@ -282,6 +282,8 @@ try:
         resolve_remote_ref,
         materialize_remote_snapshot,
         SourceStatus,
+        validate_source_mode_request,
+        SourceModeConflictError,
     )
 except ImportError:
     try:
@@ -289,11 +291,81 @@ except ImportError:
             resolve_remote_ref,
             materialize_remote_snapshot,
             SourceStatus,
+            validate_source_mode_request,
+            SourceModeConflictError,
         )
     except ImportError:
+        # The remote-snapshot machinery needs the service package (git/network),
+        # so it stays unavailable here. The source-mode *control plane*, however,
+        # is pure logic with no dependencies — so we ship a local fallback rather
+        # than fail open. repoLens must never skip source-mode validation just
+        # because the service package is not importable.
         resolve_remote_ref = None
         materialize_remote_snapshot = None
         SourceStatus = None
+
+        class SourceModeConflictError(ValueError):  # type: ignore[no-redef]
+            """Local fallback mirroring service.source_acquisition.SourceModeConflictError."""
+
+        def validate_source_mode_request(  # type: ignore[no-redef]
+            *,
+            repo_source_mode,
+            pre_pull,
+            plan_only,
+            remote_ref,
+            remote_ref_policy,
+        ):
+            """Local mirror of the central validator (kept in lockstep with it).
+
+            Pure logic, no I/O. Rejects the same contradictions /api/jobs does so a
+            headless repoLens run without the service package still fails closed.
+            """
+            allowed_modes = {None, "local_current", "local_ff", "remote_snapshot"}
+            if repo_source_mode not in allowed_modes:
+                raise SourceModeConflictError(f"unknown repo_source_mode: {repo_source_mode!r}")
+
+            has_remote_ref = bool(remote_ref and str(remote_ref).strip())
+            non_default_policy = remote_ref_policy is not None and remote_ref_policy != "upstream"
+
+            if repo_source_mode == "remote_snapshot":
+                if pre_pull is True:
+                    raise SourceModeConflictError(
+                        "remote_snapshot never mutates the local repo; pre_pull must not be true."
+                    )
+                return None
+
+            if has_remote_ref:
+                raise SourceModeConflictError(
+                    "remote_ref is only valid with repo_source_mode='remote_snapshot'."
+                )
+            if non_default_policy:
+                raise SourceModeConflictError(
+                    "a non-default remote_ref_policy is only valid with "
+                    "repo_source_mode='remote_snapshot'."
+                )
+
+            if repo_source_mode == "local_current":
+                if pre_pull is True:
+                    raise SourceModeConflictError(
+                        "local_current scans the working tree as-is and does not fast-forward; "
+                        "pre_pull must not be true."
+                    )
+                return None
+
+            if repo_source_mode == "local_ff":
+                if pre_pull is False:
+                    raise SourceModeConflictError(
+                        "local_ff implies a fast-forward pre-pull; pre_pull must not be false."
+                    )
+                if plan_only:
+                    raise SourceModeConflictError(
+                        "local_ff cannot be combined with plan_only: local_ff would fast-forward "
+                        "the local repo, but plan_only must not cause any local mutation."
+                    )
+                return None
+
+            # repo_source_mode is None → legacy; nothing further to validate.
+            return None
 
 
 def resolve_headless_source_mode(args) -> str:
@@ -3599,8 +3671,11 @@ def main_cli():
     parser.add_argument(
         "--remote-ref-policy",
         choices=["upstream", "same-branch", "default-branch"],
-        default="upstream",
-        help="remote-snapshot ref policy when --remote-ref is absent (default: upstream)",
+        default=None,
+        help=(
+            "remote-snapshot ref policy when --remote-ref is absent (default: upstream). "
+            "Non-default policies require --source-mode remote-snapshot."
+        ),
     )
 
     args = parser.parse_args()
@@ -3624,6 +3699,24 @@ def main_cli():
     if args.source_mode == "remote-snapshot" and getattr(args, "pre_pull", None) is True:
         print("Error: --source-mode remote-snapshot never mutates the local repo; remove --pre-pull.", file=sys.stderr)
         sys.exit(2)
+
+    # Central control plane: the same rules /api/jobs enforces. Catches
+    # local-ff + plan-only, remote-ref / non-default policy on a local mode, etc.
+    # Runs before any hub detection or remote git access (headless: exit 2, no network).
+    if validate_source_mode_request is not None:
+        _canon_mode = args.source_mode.replace("-", "_") if args.source_mode else None
+        _canon_policy = args.remote_ref_policy.replace("-", "_") if args.remote_ref_policy else None
+        try:
+            validate_source_mode_request(
+                repo_source_mode=_canon_mode,
+                pre_pull=getattr(args, "pre_pull", None),
+                plan_only=bool(getattr(args, "plan_only", False)),
+                remote_ref=args.remote_ref,
+                remote_ref_policy=_canon_policy,
+            )
+        except SourceModeConflictError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(2)
 
     try:
         hub = detect_hub_dir(SCRIPT_PATH, args.hub)

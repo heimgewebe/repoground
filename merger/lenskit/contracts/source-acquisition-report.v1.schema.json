@@ -1,0 +1,168 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/source-acquisition-report.v1.schema.json",
+  "title": "rLens Source Acquisition Report (source-acquisition-report v1.0)",
+  "description": "Machine-readable provenance/diagnostic report for rLens source acquisition (remote_snapshot mode). It records how the scanned content was acquired and whether any local repo was mutated. This artifact is a provenance/diagnostic signal, not a truth verdict: it describes structure and provenance, not that the snapshot is byte-identical to a locally generated bundle. remote_snapshot never mutates the local repo, so every repo entry reports local_repo_mutated=false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "job_id",
+    "created_at",
+    "hub",
+    "mode",
+    "plan_only",
+    "remote_ref_policy",
+    "requested_remote_ref",
+    "summary",
+    "repos"
+  ],
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "lenskit.source_acquisition_report.v1"
+    },
+    "job_id": {
+      "type": "string",
+      "description": "Owning job id."
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp of report creation."
+    },
+    "hub": {
+      "type": "string",
+      "description": "Resolved hub path the job ran against."
+    },
+    "mode": {
+      "type": "string",
+      "description": "Source acquisition mode label for the report. v1 writes this report only for remote_snapshot.",
+      "enum": ["remote_snapshot"]
+    },
+    "plan_only": {
+      "type": "boolean",
+      "description": "Whether the job was a dry-plan (ref resolution only; no materialization or scan)."
+    },
+    "remote_ref_policy": {
+      "type": ["string", "null"],
+      "description": "Ref-selection policy applied when no explicit remote_ref was given.",
+      "enum": ["upstream", "same_branch", "default_branch", null]
+    },
+    "requested_remote_ref": {
+      "type": ["string", "null"],
+      "description": "Explicit remote_ref requested by the client, if any."
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repos_total",
+        "remote_snapshot_created",
+        "planned",
+        "warnings",
+        "failures"
+      ],
+      "properties": {
+        "repos_total": {"type": "integer", "minimum": 0},
+        "remote_snapshot_created": {"type": "integer", "minimum": 0},
+        "planned": {"type": "integer", "minimum": 0},
+        "warnings": {"type": "integer", "minimum": 0},
+        "failures": {"type": "integer", "minimum": 0}
+      }
+    },
+    "repos": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/repoEntry"}
+    }
+  },
+  "definitions": {
+    "repoEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repo",
+        "original_path",
+        "scan_path",
+        "source_mode",
+        "status",
+        "remote_ref_policy",
+        "requested_remote_ref",
+        "resolved_ref",
+        "resolved_commit",
+        "remote_url_redacted",
+        "local_repo_mutated",
+        "message",
+        "stderr",
+        "warnings"
+      ],
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Repository name (derived from the original local path)."
+        },
+        "original_path": {
+          "type": "string",
+          "description": "Original local repo path (provenance); never the scanned snapshot path."
+        },
+        "scan_path": {
+          "type": ["string", "null"],
+          "description": "Path actually scanned (the isolated snapshot dir), or null for plan-only/failed entries."
+        },
+        "source_mode": {
+          "type": "string",
+          "enum": ["remote_snapshot"]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "snapshot_created",
+            "planned",
+            "skipped",
+            "missing_remote",
+            "missing_ref",
+            "fetch_failed",
+            "archive_failed",
+            "extract_failed",
+            "error"
+          ]
+        },
+        "remote_ref_policy": {
+          "type": ["string", "null"],
+          "enum": ["upstream", "same_branch", "default_branch", null]
+        },
+        "requested_remote_ref": {
+          "type": ["string", "null"]
+        },
+        "resolved_ref": {
+          "type": ["string", "null"],
+          "description": "Display name of the resolved ref (e.g. origin/main, refs/tags/v1)."
+        },
+        "resolved_commit": {
+          "type": ["string", "null"],
+          "description": "Resolved commit SHA, if known."
+        },
+        "remote_url_redacted": {
+          "type": ["string", "null"],
+          "description": "Remote URL with embedded credentials redacted. Never contains userinfo secrets."
+        },
+        "local_repo_mutated": {
+          "const": false,
+          "description": "Always false for remote_snapshot: the local repo is never fetched into, merged, checked out, switched or reset."
+        },
+        "message": {
+          "type": ["string", "null"],
+          "description": "Human-readable, credential-redacted status message."
+        },
+        "stderr": {
+          "type": ["string", "null"],
+          "description": "Credential-redacted git stderr for failures, if any."
+        },
+        "warnings": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Known-limit warnings (e.g. submodules_not_expanded, lfs_not_smudged)."
+        }
+      }
+    }
+  }
+}

@@ -1,10 +1,12 @@
 from __future__ import annotations
 from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import uuid
 import hashlib
 import json
 from datetime import datetime, timezone
+
+from .source_acquisition import validate_source_mode_request
 
 def calculate_job_hash(req: "JobRequest", hub_resolved: str, version: str) -> str:
     """
@@ -139,6 +141,29 @@ class JobRequest(BaseModel):
     # remote_snapshot ref selection. Explicit remote_ref wins over the policy.
     remote_ref: Optional[str] = None
     remote_ref_policy: Literal["upstream", "same_branch", "default_branch"] = "upstream"
+
+    @model_validator(mode="after")
+    def _validate_source_mode(self) -> "JobRequest":
+        """Reject contradictory source-mode combinations at the API boundary.
+
+        This is the hard control plane: /api/jobs validates here (FastAPI maps the
+        raised ``ValueError`` to HTTP 422) before any job hash, reuse check, git or
+        network access. CLI/WebUI/headless surfaces enforce the *same* rules via
+        ``validate_source_mode_request`` so they can never out-permit the API.
+
+        ``pre_pull`` is only treated as an explicit choice when the caller set it;
+        otherwise it stays the legacy default and is passed as ``None`` so a bare
+        ``repo_source_mode`` (e.g. just ``local_current``) is still accepted.
+        """
+        pre_pull = self.pre_pull if "pre_pull" in self.model_fields_set else None
+        validate_source_mode_request(
+            repo_source_mode=self.repo_source_mode,
+            pre_pull=pre_pull,
+            plan_only=self.plan_only,
+            remote_ref=self.remote_ref,
+            remote_ref_policy=self.remote_ref_policy,
+        )
+        return self
 
 class AtlasEffective(BaseModel):
     max_depth: int

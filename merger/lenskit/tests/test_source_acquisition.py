@@ -17,6 +17,7 @@ import pytest
 
 from merger.lenskit.service import source_acquisition as sa
 from merger.lenskit.service.source_acquisition import (
+    SourceModeConflictError,
     SourceStatus,
     SnapshotExtractionError,
     materialize_remote_snapshot,
@@ -96,16 +97,42 @@ class _Req:
         self.remote_ref_policy = kw.get("remote_ref_policy", "upstream")
         self.pre_pull = kw.get("pre_pull", True)
         self.plan_only = kw.get("plan_only", False)
+        # Mirror pydantic's model_fields_set: only the kwargs the caller passed
+        # count as explicitly set, so the resolver can tell an explicit pre_pull
+        # from the inert default — exactly as it does for a real JobRequest.
+        self.model_fields_set = set(kw.keys())
 
 
 def test_effective_source_mode_legacy_and_explicit():
+    # Legacy (repo_source_mode unset): derived purely from pre_pull/plan_only.
     assert resolve_effective_source_mode(_Req(pre_pull=True, plan_only=False)) == "local_ff"
     assert resolve_effective_source_mode(_Req(pre_pull=False)) == "local_current"
     assert resolve_effective_source_mode(_Req(pre_pull=True, plan_only=True)) == "local_current"
-    assert resolve_effective_source_mode(_Req(repo_source_mode="local_current", pre_pull=True)) == "local_current"
+    # A bare explicit mode (no explicit pre_pull) is accepted as-is.
+    assert resolve_effective_source_mode(_Req(repo_source_mode="local_current")) == "local_current"
+    assert resolve_effective_source_mode(_Req(repo_source_mode="local_ff")) == "local_ff"
     assert resolve_effective_source_mode(_Req(repo_source_mode="remote_snapshot")) == "remote_snapshot"
-    # local_ff + plan_only must not mutate → degrades to local_current.
-    assert resolve_effective_source_mode(_Req(repo_source_mode="local_ff", plan_only=True)) == "local_current"
+
+
+def test_effective_source_mode_rejects_explicit_contradictions():
+    # The resolver re-runs the central validator, so an object that bypasses the
+    # /api/jobs model_validator (model_construct, stored jobs, test doubles) still
+    # cannot smuggle a contradictory explicit state past it.
+    # local_ff + plan_only: local_ff would mutate, plan_only forbids mutation.
+    with pytest.raises(SourceModeConflictError):
+        resolve_effective_source_mode(_Req(repo_source_mode="local_ff", plan_only=True))
+    # local_ff + explicit pre_pull=False: local_ff implies the fast-forward pre-pull.
+    with pytest.raises(SourceModeConflictError):
+        resolve_effective_source_mode(_Req(repo_source_mode="local_ff", pre_pull=False))
+    # local_current + explicit pre_pull=True: local_current scans as-is, never pre-pulls.
+    with pytest.raises(SourceModeConflictError):
+        resolve_effective_source_mode(_Req(repo_source_mode="local_current", pre_pull=True))
+    # remote_snapshot + explicit pre_pull=True: remote_snapshot never mutates the local repo.
+    with pytest.raises(SourceModeConflictError):
+        resolve_effective_source_mode(_Req(repo_source_mode="remote_snapshot", pre_pull=True))
+    # Unknown explicit mode must never fall through to a silent local default.
+    with pytest.raises(SourceModeConflictError):
+        resolve_effective_source_mode(_Req(repo_source_mode="wat"))
 
 
 # --- 1. default_branch on a no-upstream local branch -----------------------
@@ -755,3 +782,135 @@ def test_safe_extract_tar_rejects_special_device_member(tmp_path):
 
     with pytest.raises(SnapshotExtractionError):
         safe_extract_tar(buf.getvalue(), tmp_path / "out")
+
+
+# --- 21. Tar extraction hardening (v1: links/special members rejected) ------
+
+def _build_tar(members) -> bytes:
+    """Build a tar from a list of (TarInfo, optional payload-bytes)."""
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as tar:
+        for info, payload in members:
+            if payload is None:
+                tar.addfile(info)
+            else:
+                info.size = len(payload)
+                tar.addfile(info, io.BytesIO(payload))
+    return buf.getvalue()
+
+
+def _reg(name: str, payload: bytes = b"data") -> tuple:
+    info = tarfile.TarInfo(name=name)
+    info.type = tarfile.REGTYPE
+    return info, payload
+
+
+def _dir(name: str) -> tuple:
+    info = tarfile.TarInfo(name=name)
+    info.type = tarfile.DIRTYPE
+    return info, None
+
+
+def _sym(name: str, linkname: str) -> tuple:
+    info = tarfile.TarInfo(name=name)
+    info.type = tarfile.SYMTYPE
+    info.linkname = linkname
+    return info, None
+
+
+def _lnk(name: str, linkname: str) -> tuple:
+    info = tarfile.TarInfo(name=name)
+    info.type = tarfile.LNKTYPE
+    info.linkname = linkname
+    return info, None
+
+
+def _fifo(name: str) -> tuple:
+    info = tarfile.TarInfo(name=name)
+    info.type = tarfile.FIFOTYPE
+    return info, None
+
+
+def _blk(name: str) -> tuple:
+    info = tarfile.TarInfo(name=name)
+    info.type = tarfile.BLKTYPE
+    info.devmajor = 8
+    info.devminor = 0
+    return info, None
+
+
+def test_safe_extract_tar_rejects_dot_dot(tmp_path):
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar([_reg("../evil.txt")]), tmp_path / "out")
+
+
+def test_safe_extract_tar_rejects_absolute(tmp_path):
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar([_reg("/etc/evil.txt")]), tmp_path / "out")
+
+
+def test_safe_extract_tar_rejects_symlink_dir_then_file_under_it(tmp_path):
+    # Classic escalation: a symlink "dir" -> somewhere, then a later "dir/file".
+    # v1 rejects the symlink member outright, so the file can never be written
+    # through it. No file must escape the destination either.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    dest = tmp_path / "out"
+    members = [_sym("dir", str(outside)), _reg("dir/pwned.txt", b"x")]
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar(members), dest)
+    assert not (outside / "pwned.txt").exists()
+
+
+def test_safe_extract_tar_rejects_relative_symlink(tmp_path):
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar([_sym("link", "../escape")]), tmp_path / "out")
+
+
+def test_safe_extract_tar_rejects_hardlink(tmp_path):
+    members = [_reg("a.txt", b"a"), _lnk("b.txt", "a.txt")]
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar(members), tmp_path / "out")
+
+
+def test_safe_extract_tar_rejects_fifo(tmp_path):
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar([_fifo("pipe")]), tmp_path / "out")
+
+
+def test_safe_extract_tar_rejects_block_device(tmp_path):
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar([_blk("disk")]), tmp_path / "out")
+
+
+def test_safe_extract_tar_rejects_existing_symlink_parent_in_dest(tmp_path):
+    # A symlink already present in the destination must never be followed: the
+    # write must be rejected, not redirected outside the tree.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    dest = tmp_path / "out"
+    dest.mkdir()
+    os.symlink(str(outside), str(dest / "sub"))
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar([_reg("sub/file.txt", b"x")]), dest)
+    assert not (outside / "file.txt").exists()
+
+
+def test_safe_extract_tar_extracts_regular_files_and_dirs(tmp_path):
+    dest = tmp_path / "out"
+    members = [_dir("pkg"), _reg("pkg/mod.py", b"print(1)\n"), _reg("README.md", b"hi\n")]
+    safe_extract_tar(_build_tar(members), dest)
+    assert (dest / "pkg" / "mod.py").read_text() == "print(1)\n"
+    assert (dest / "README.md").read_text() == "hi\n"
+    # Nothing escaped the destination.
+    assert (dest / "pkg").is_dir() and not (dest / "pkg").is_symlink()
+
+
+def test_safe_extract_tar_wraps_fs_collision_as_extraction_error(tmp_path):
+    # A regular file "a" followed by "a/b.txt" makes the parent mkdir fail. The
+    # raw OSError must be wrapped as SnapshotExtractionError so the caller maps it
+    # onto a controlled extract_failed, not an uncaught FileExistsError.
+    dest = tmp_path / "out"
+    members = [_reg("a", b"i am a file"), _reg("a/b.txt", b"x")]
+    with pytest.raises(SnapshotExtractionError):
+        safe_extract_tar(_build_tar(members), dest)
