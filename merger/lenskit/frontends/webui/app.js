@@ -752,6 +752,24 @@ function syncPrePullWithPlanOnly() {
 
 // Show the remote-snapshot ref fields only when the Quelle dropdown selects it.
 // remote_snapshot supports a plan-only dry-plan, so plan-only does not disable it.
+// Source-mode control plane (mirrors merger/lenskit/service/source_acquisition.py
+// validate_source_mode_request). Returns a user-facing error string for a
+// contradictory selection, or null when the selection is coherent. The UI must
+// block the submit and surface the message — never silently coerce to another
+// mode or drop an inert field.
+function sourceModeSelectionError(sourceMode, planOnly, remoteRef) {
+    if (sourceMode === 'local_ff' && planOnly) {
+        return "local_ff kann nicht mit Plan-only kombiniert werden: local_ff würde das lokale Repo "
+            + "fast-forwarden, Plan-only darf keine lokale Mutation auslösen. Wähle local_current für "
+            + "Plan-only oder remote_snapshot für eine nicht-mutierende Remote-Prüfung.";
+    }
+    if (sourceMode && sourceMode !== 'remote_snapshot' && remoteRef) {
+        return "remote_ref ist nur mit der Quelle 'remote_snapshot' gültig. Entferne den Remote-Ref "
+            + "oder wechsle die Quelle auf remote_snapshot.";
+    }
+    return null;
+}
+
 function syncSourceModeFields() {
     const sourceModeEl = document.getElementById('sourceMode');
     const fields = document.getElementById('remoteSnapshotFields');
@@ -1235,6 +1253,23 @@ async function startJob(e) {
     else derivedPrePull = rawPrePull;
     // plan-only never mutates local repos, so it forces pre_pull false.
     const effectivePrePull = planOnlyChecked ? false : derivedPrePull;
+
+    // Control plane: block contradictory source-mode selections before building
+    // or sending any /api/jobs payload. The API would 422 these anyway; blocking
+    // here gives the user a clear message instead of a silent coercion.
+    const remoteRefForCheck = (() => {
+        const el = document.getElementById('remoteRef');
+        return el && el.value ? el.value.trim() : '';
+    })();
+    const sourceModeErr = sourceModeSelectionError(sourceMode, planOnlyChecked, remoteRefForCheck);
+    if (sourceModeErr) {
+        alert(sourceModeErr);
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "Start Job";
+        }
+        return;
+    }
 
     const commonPayload = {
         hub: document.getElementById('hubPath').value,

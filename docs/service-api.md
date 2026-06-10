@@ -364,8 +364,21 @@ New `JobRequest` fields:
   default `null`). When `null`, behaviour is derived from the legacy
   `pre_pull`/`plan_only` flags (`pre_pull and not plan_only` ⇒ `local_ff`, else
   `local_current`), so existing clients are unaffected.
-- `remote_ref` (`string | null`): explicit ref for `remote_snapshot`; wins over the policy.
-- `remote_ref_policy` (`"upstream" | "same_branch" | "default_branch"`, default `"upstream"`).
+- `remote_ref` (`string | null`): explicit ref for `remote_snapshot`; wins over the policy. Only valid with `remote_snapshot`.
+- `remote_ref_policy` (`"upstream" | "same_branch" | "default_branch"`, default `"upstream"`). A non-default value is only valid with `remote_snapshot`.
+
+**Source-mode control plane (HTTP 422).** `/api/jobs` is the hard boundary: it
+validates the source-mode combination *before* job hashing, reuse and any git or
+network access, and rejects contradictions with **422** (no job created, no
+mutation). The CLI, repoLens headless and the WebUI enforce the identical rules
+(`validate_source_mode_request`) so they cannot out-permit the API. Rejected
+(explicit `pre_pull` only; a bare `repo_source_mode` is accepted):
+
+- `remote_snapshot` + `pre_pull=true` (remote_snapshot never mutates locally);
+- `local_current` + `pre_pull=true` (local_current never fast-forwards);
+- `local_ff` + `pre_pull=false` (local_ff *is* a fast-forward pre-pull);
+- `local_ff` + `plan_only=true` (local_ff would mutate; plan_only forbids it — **never** silently smoothed to `local_current`);
+- `remote_ref` or an explicit non-default `remote_ref_policy` on any non-`remote_snapshot` mode (inert fields are rejected, so they cannot drift the job hash).
 
 Modes:
 
@@ -387,8 +400,10 @@ never sets an upstream, never switches branches; uses a job-bound cache under
 `<merges_dir>/.rlens-source-snapshots/<job_id>/`; every git call is an explicit
 argument list with `GIT_TERMINAL_PROMPT=0`; remote URLs, stderr and reports are
 credential-redacted; fetch uses `--no-write-fetch-head` so credential-bearing
-URLs are not written to `FETCH_HEAD`; tar extraction is hardened against path
-traversal and escaping symlink/hardlink members.
+URLs are not written to `FETCH_HEAD`; tar extraction uses a manual writer (never
+`tarfile.extract`) that extracts only regular files/dirs and rejects absolute
+paths, `..` traversal, writes through existing symlinked components, and every
+symlink/hardlink/FIFO/device member.
 
 **Plan-only:** `remote_snapshot + plan_only` is a dry-plan: remote ref resolution only, no snapshot materialization, no scan, no local repository mutation and no bundle content write. A diagnostic `source_acquisition_report` artifact is still written so the planned ref/commit is inspectable.
 
@@ -401,9 +416,13 @@ of the job content hash. A *succeeded* `remote_snapshot` job is never reused
 `lenskit.source_acquisition_report.v1`, file
 `rlens-job-{id}_source_acquisition_report.json`). It distinguishes provenance per
 repo: `original_path`, `scan_path`, `source_mode`, `resolved_ref`,
-`resolved_commit`, `local_repo_mutated`, plus credential-redacted `remote_url_redacted`,
+`resolved_commit`, `local_repo_mutated` (always `false`), plus credential-redacted `remote_url_redacted`,
 `message`, `stderr` and `warnings`. On failure it is registered as an
-early-diagnostic artifact.
+early-diagnostic artifact. The report shape is pinned by the JSON-Schema contract
+`merger/lenskit/contracts/source-acquisition-report.v1.schema.json`
+(`additionalProperties: false`); written reports are validated against it in
+tests. The report is a provenance/diagnostic signal (structure), not a proof that
+the snapshot equals a locally generated bundle.
 
 **v1 limits:** submodules are not recursively materialized (warning
 `submodules_not_expanded` when `.gitmodules` is present); Git-LFS content is not

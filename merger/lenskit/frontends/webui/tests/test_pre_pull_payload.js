@@ -99,6 +99,7 @@ const els = {
 // Controls + captures
 const state = { selectedRepos: [{ value: 'repoA' }] };
 const captured = {};
+const alerts = [];
 
 class FakeEventSource {
     constructor(url) { this.url = url; }
@@ -136,7 +137,7 @@ const context = {
     sessionStorage: makeStorage(),
     navigator: { serviceWorker: { getRegistrations: async () => [] } },
     console: { info() {}, warn() {}, log() {}, error: (...a) => console.error('VM ERROR:', ...a) },
-    alert() {},
+    alert(msg) { alerts.push(msg); },
     setTimeout() {},
     EventSource: FakeEventSource,
     Date, Object, Array, Set, Map, JSON, URL, String, Promise, encodeURIComponent,
@@ -196,13 +197,37 @@ async function run() {
     await context.startJob(submitEvent());
     assert(captured.body.remote_ref === 'origin/main', 'remote_ref sent when set');
 
-    // 5. plan-only forces pre_pull false even for local_ff.
+    // 5. Control plane: local_ff + plan-only is a conflict. The submit must be
+    //    blocked (no /api/jobs request) and a visible error surfaced — never a
+    //    silent coercion to local_current.
     captured.body = null;
+    alerts.length = 0;
     els.sourceMode.value = 'local_ff';
     els.planOnly.checked = true;
+    els.remoteRef.value = '';
     await context.startJob(submitEvent());
-    assert(captured.body && captured.body.pre_pull === false, 'plan-only forces pre_pull === false in payload');
+    assert(captured.body === null, 'local_ff + plan-only does NOT post an /api/jobs request');
+    assert(alerts.length === 1 && /plan-only/i.test(alerts[0]), 'local_ff + plan-only surfaces a visible error');
+
+    // 5b. plan-only with a non-mutating mode (local_current) still submits.
+    captured.body = null;
+    alerts.length = 0;
+    els.sourceMode.value = 'local_current';
+    els.planOnly.checked = true;
+    await context.startJob(submitEvent());
+    assert(captured.body && captured.body.pre_pull === false, 'plan-only + local_current posts pre_pull === false');
+    assert(alerts.length === 0, 'plan-only + local_current does not raise an error');
     els.planOnly.checked = false;
+
+    // 5c. remote_ref is blocked on a local source mode (no silent drop).
+    captured.body = null;
+    alerts.length = 0;
+    els.sourceMode.value = 'local_current';
+    els.remoteRef.value = 'origin/main';
+    await context.startJob(submitEvent());
+    assert(captured.body === null, 'remote_ref on a local mode does NOT post an /api/jobs request');
+    assert(alerts.length === 1 && /remote_ref/i.test(alerts[0]), 'remote_ref on a local mode surfaces a visible error');
+    els.remoteRef.value = '';
 
     // 6. Save/Load Defaults round-trips the source mode + legacy pre_pull.
     els.sourceMode.value = 'remote_snapshot';

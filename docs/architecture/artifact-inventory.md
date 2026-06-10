@@ -31,6 +31,7 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 | `<stem>.retrieval_eval.json` | `retrieval_eval_json` | `diagnostic_signal` | `diagnostic` | `retrieval.eval_core` | CI, Entwickler | `retrieval-eval.v1.schema.json` | Ja (wenn vorhanden) | Evaluierungsmetriken |
 | `pr-schau-delta.json` | `delta_json` | _(Schema-Zukunftsform: `diagnostic_signal`)_ | _(Schema-Zukunftsform: `diagnostic`)_ | `core.pr_schau_bundle` (separater pr-schau-Bundle, nicht `bundle-manifest.v1`) | PR-Schau Frontends, Agents | `pr-schau-delta.v1.schema.json` | Nein (nicht im `bundle-manifest.v1`) | Code-Review Differentials |
 | `<stem>.entrypoints.json` | - (Hilfs-/Zwischenartefakt) | _(Phase 1: nicht annotiert)_ | _(Phase 1: nicht annotiert)_ | `architecture.entrypoints` | `architecture.graph_index` | `entrypoints.v1.schema.json` | Nein | Berechnung des Graph-Boosts |
+| `rlens-job-{id}_source_acquisition_report.json` | `source_acquisition_report` (Job-Artefakt, via `_register_source_acquisition_report_artifact_once`) | `diagnostic_signal` | `diagnostic` | `service.runner` (`_write_source_acquisition_report`, nur `remote_snapshot`) | WebUI (Artifact-Link), Mensch, Agents | `source-acquisition-report.v1.schema.json` | Nein (Job-Artefakt, nicht im `bundle-manifest.v1`) | Provenienz/Diagnose der Remote-Snapshot-Akquise (`local_repo_mutated` immer `false`); **kein Wahrheitsbeweis** über Byte-Identität zum lokalen Bundle |
 
 ## Verwandte Architekturregeln
 

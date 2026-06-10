@@ -204,6 +204,85 @@ def resolve_effective_source_mode(req) -> str:
     return "local_current"
 
 
+class SourceModeConflictError(ValueError):
+    """Raised when a source-mode request describes a contradictory state.
+
+    Subclasses ``ValueError`` so a pydantic ``model_validator`` re-raises it as a
+    validation error (HTTP 422) and CLI/headless surfaces can map it onto exit 2.
+    """
+
+
+def validate_source_mode_request(
+    *,
+    repo_source_mode: Optional[str],
+    pre_pull: Optional[bool],
+    plan_only: bool,
+    remote_ref: Optional[str],
+    remote_ref_policy: Optional[str],
+) -> None:
+    """Central source-mode control plane shared by API, CLI, WebUI and headless.
+
+    ``pre_pull`` is tri-state: ``True``/``False`` for an *explicit* choice and
+    ``None`` when the caller did not set it (legacy default). Only explicit
+    contradictions are rejected so a bare ``repo_source_mode`` still works.
+
+    ``remote_ref`` and a non-default ``remote_ref_policy`` only carry meaning for
+    ``remote_snapshot``; on any other mode they would silently do nothing, so they
+    are rejected to prevent hash/semantic drift. The default policy (``upstream``
+    or ``None``) is inert on local modes and therefore tolerated.
+
+    Raises ``SourceModeConflictError`` on any contradiction; returns ``None`` when
+    the request is coherent. Never performs I/O.
+    """
+    has_remote_ref = bool(remote_ref and str(remote_ref).strip())
+    non_default_policy = remote_ref_policy is not None and remote_ref_policy != "upstream"
+
+    if repo_source_mode == "remote_snapshot":
+        if pre_pull is True:
+            raise SourceModeConflictError(
+                "remote_snapshot never mutates the local repo; pre_pull must not be true. "
+                "Use local_ff for a fast-forward pre-pull."
+            )
+        return
+
+    # Every non-remote mode (local_current, local_ff, or the legacy None default):
+    # remote ref selection must not be smuggled in where it has no effect.
+    if has_remote_ref:
+        raise SourceModeConflictError(
+            "remote_ref is only valid with repo_source_mode='remote_snapshot'."
+        )
+    if non_default_policy:
+        raise SourceModeConflictError(
+            "a non-default remote_ref_policy is only valid with "
+            "repo_source_mode='remote_snapshot'."
+        )
+
+    if repo_source_mode == "local_current":
+        if pre_pull is True:
+            raise SourceModeConflictError(
+                "local_current scans the working tree as-is and does not fast-forward; "
+                "pre_pull must not be true."
+            )
+        return
+
+    if repo_source_mode == "local_ff":
+        if pre_pull is False:
+            raise SourceModeConflictError(
+                "local_ff implies a fast-forward pre-pull; pre_pull must not be false."
+            )
+        if plan_only:
+            raise SourceModeConflictError(
+                "local_ff cannot be combined with plan_only: local_ff would fast-forward "
+                "the local repo, but plan_only must not cause any local mutation. "
+                "Use local_current for plan-only, or remote_snapshot for a non-mutating remote check."
+            )
+        return
+
+    # repo_source_mode is None → legacy behaviour derived from pre_pull/plan_only.
+    # Nothing further to validate (remote_ref / non-default policy already rejected).
+    return
+
+
 
 def _read_remote_url(repo_path: Path, remote_name: str, timeout: int) -> "tuple[Optional[str], subprocess.CompletedProcess]":
     proc = _run_git(["config", "--get", f"remote.{remote_name}.url"], repo_path=repo_path, timeout=timeout)
@@ -603,53 +682,90 @@ class SnapshotExtractionError(Exception):
 
 
 def safe_extract_tar(data: bytes, dest: Path) -> None:
-    """Extract a tar byte stream into ``dest``, rejecting any escaping member.
+    """Extract a tar byte stream into ``dest`` with a hardened, manual writer.
 
-    Defences:
-    * no absolute member paths;
-    * no ``..`` traversal (final resolved path must stay under ``dest``);
-    * symlink/hardlink members whose target resolves outside ``dest`` are rejected.
+    v1 policy — security before convenience (see the source-acquisition blueprint):
+
+    * Only regular files and ordinary directories are extracted. Symlinks,
+      hardlinks, FIFOs, character/block devices and any other special member type
+      are rejected outright (a ``git archive --format=tar`` of normal source code
+      contains none of these except, possibly, symlinks which we deliberately drop).
+    * No absolute member paths and no ``..`` traversal — the destination path of
+      every member must stay under ``dest``.
+    * No member is written through an existing symlink: every path component of
+      every member is checked, so a symlink already present in ``dest`` (or one
+      that an earlier member tried to introduce — impossible here, links are
+      rejected) can never be followed out of the tree.
+
+    ``tarfile.extract`` is never used: each regular file is streamed and written
+    by hand so member metadata can never redirect the write.
     """
     dest = Path(dest).resolve()
     dest.mkdir(parents=True, exist_ok=True)
 
-    def _within(target: Path) -> bool:
-        try:
-            resolved = target.resolve()
-        except OSError:
-            return False
-        return resolved == dest or dest in resolved.parents
+    def _normalized_parts(name: str) -> tuple:
+        # Reject absolute paths and any traversal; return the safe relative parts.
+        if not name or name.startswith("/") or os.path.isabs(name):
+            raise SnapshotExtractionError(f"absolute path member: {name!r}")
+        # Normalize separators (git archive emits POSIX paths).
+        parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".")]
+        if any(p == ".." for p in parts):
+            raise SnapshotExtractionError(f"path traversal member: {name!r}")
+        if not parts:
+            raise SnapshotExtractionError(f"empty member path: {name!r}")
+        # Defensive: the joined, normalized path must remain under dest.
+        joined = os.path.normpath(str(dest.joinpath(*parts)))
+        joined_path = Path(joined)
+        if joined_path != dest and dest not in joined_path.parents:
+            raise SnapshotExtractionError(f"path traversal member: {name!r}")
+        return tuple(parts)
+
+    def _assert_no_symlink_ancestor(parts: tuple) -> None:
+        # None of the on-disk path components leading to (and including, for dirs)
+        # the target may be an existing symlink we would otherwise write through.
+        cur = dest
+        for part in parts:
+            cur = cur / part
+            if cur.is_symlink():
+                raise SnapshotExtractionError(f"symlink in target path: {cur}")
 
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
         for member in tar.getmembers():
             name = member.name
-            if name.startswith("/") or os.path.isabs(name):
-                raise SnapshotExtractionError(f"absolute path member: {name!r}")
-            member_target = (dest / name)
-            # Resolve without following the (not-yet-created) member itself.
-            if not _within(dest / name):
-                raise SnapshotExtractionError(f"path traversal member: {name!r}")
-
-            if member.isdev():
-                raise SnapshotExtractionError(f"unsupported special member: {name!r}")
 
             if member.issym() or member.islnk():
-                link = member.linkname
-                if os.path.isabs(link):
-                    raise SnapshotExtractionError(f"absolute link target: {name!r} -> {link!r}")
-                # Hardlink targets are archive-relative; symlink targets are
-                # relative to the member's own directory.
-                if member.islnk():
-                    link_resolved = dest / link
-                else:
-                    link_resolved = member_target.parent / link
-                if not _within(link_resolved):
-                    raise SnapshotExtractionError(f"escaping link: {name!r} -> {link!r}")
+                raise SnapshotExtractionError(f"link member not allowed: {name!r}")
+            if member.isdev() or member.isfifo():
+                raise SnapshotExtractionError(f"special member not allowed: {name!r}")
+            if not (member.isfile() or member.isdir()):
+                raise SnapshotExtractionError(f"unsupported member type: {name!r}")
 
-        # Re-open for extraction (getmembers consumed the stream once).
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
-        for member in tar.getmembers():
-            tar.extract(member, path=dest)
+            parts = _normalized_parts(name)
+
+            if member.isdir():
+                _assert_no_symlink_ancestor(parts)
+                target = dest.joinpath(*parts)
+                if target.is_symlink():
+                    raise SnapshotExtractionError(f"symlink in target path: {target}")
+                target.mkdir(parents=True, exist_ok=True)
+                continue
+
+            # Regular file: validate the parent chain, create dirs, write by hand.
+            _assert_no_symlink_ancestor(parts[:-1])
+            parent = dest.joinpath(*parts[:-1]) if len(parts) > 1 else dest
+            parent.mkdir(parents=True, exist_ok=True)
+            target = dest.joinpath(*parts)
+            if target.is_symlink():
+                raise SnapshotExtractionError(f"symlink in target path: {target}")
+            extracted = tar.extractfile(member)
+            payload = extracted.read() if extracted is not None else b""
+            with open(target, "wb") as fh:
+                fh.write(payload)
+            # Preserve only the low permission bits; never setuid/setgid/sticky.
+            try:
+                os.chmod(target, member.mode & 0o777)
+            except OSError:
+                logger.debug("Could not chmod extracted snapshot file %s", target, exc_info=True)
 
 
 def _detect_snapshot_warnings(snapshot_dir: Path) -> List[str]:

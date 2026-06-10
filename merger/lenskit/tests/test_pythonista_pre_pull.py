@@ -125,6 +125,34 @@ def test_headless_source_mode_pre_pull_conflicts(monkeypatch, argv):
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize("argv", [
+    # local-ff + plan-only: local-ff would mutate, plan-only forbids mutation.
+    ["repolens.py", "--source-mode", "local-ff", "--plan-only", "--headless"],
+    # remote-ref without remote-snapshot.
+    ["repolens.py", "--remote-ref", "origin/main", "--headless"],
+    ["repolens.py", "--source-mode", "local-current", "--remote-ref", "origin/main", "--headless"],
+    ["repolens.py", "--source-mode", "local-ff", "--remote-ref", "origin/main", "--headless"],
+    # explicit non-default policy without remote-snapshot.
+    ["repolens.py", "--remote-ref-policy", "default-branch", "--headless"],
+])
+def test_headless_source_mode_control_plane_conflicts(monkeypatch, argv):
+    """The central control plane rejects contradictory headless invocations (exit 2).
+
+    Validation runs before hub detection / any remote git access, so no network
+    call happens: resolve_remote_ref / materialize_remote_snapshot are patched to
+    blow up if reached.
+    """
+    def _boom(*a, **k):
+        raise AssertionError("no remote git access on a local validation failure")
+
+    monkeypatch.setattr(repolens, "resolve_remote_ref", _boom)
+    monkeypatch.setattr(repolens, "materialize_remote_snapshot", _boom)
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exc:
+        repolens.main_cli()
+    assert exc.value.code == 2
+
+
 # --- resolve_pre_pull_switch_value helper -----------------------------------
 
 def test_resolve_pre_pull_switch_value_none_returns_true():

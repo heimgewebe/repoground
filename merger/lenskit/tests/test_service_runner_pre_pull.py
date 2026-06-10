@@ -16,11 +16,38 @@ from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 
+import jsonschema
+
 from merger.lenskit.service.runner import JobRunner, ARTIFACT_PATH_FIELDS
 from merger.lenskit.service.jobstore import JobStore
 from merger.lenskit.service.models import JobRequest, Job
 from merger.lenskit.service.repo_sync import PrePullPlan, PrePullResult, PrePullStatus
 from merger.lenskit.service.source_acquisition import RemoteSnapshotResult, RemoteRefResolution, SourceStatus
+
+_SOURCE_ACQ_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "contracts"
+    / "source-acquisition-report.v1.schema.json"
+)
+
+
+def _load_source_acquisition_schema() -> dict:
+    return json.loads(_SOURCE_ACQ_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+def _assert_source_acquisition_report_valid(report: dict) -> None:
+    """Validate a written report against the v1 contract and its hard invariants."""
+    schema = _load_source_acquisition_schema()
+    jsonschema.Draft7Validator.check_schema(schema)
+    jsonschema.validate(report, schema)
+    assert report["schema"] == "lenskit.source_acquisition_report.v1"
+    blob = json.dumps(report)
+    # No raw credential userinfo may survive in the report.
+    assert "secret" not in blob.lower() or "[REDACTED]" in blob
+    for repo in report["repos"]:
+        # remote_snapshot never mutates the local repo.
+        assert repo["local_repo_mutated"] is False
+        assert isinstance(repo["local_repo_mutated"], bool)
 
 
 def _fake_artifacts() -> MagicMock:
@@ -150,6 +177,8 @@ def test_remote_snapshot_scans_snapshot_and_skips_pre_pull(mock_job_store, temp_
         assert report["repos"][0]["scan_path"] == str(snap)
         assert report["repos"][0]["original_path"] != report["repos"][0]["scan_path"]
         assert report["repos"][0]["local_repo_mutated"] is False
+        # Success report validates against the v1 contract.
+        _assert_source_acquisition_report_valid(report)
 
 
 def test_remote_snapshot_plan_only_dry_plan(mock_job_store, temp_hub):
@@ -186,6 +215,9 @@ def test_remote_snapshot_plan_only_dry_plan(mock_job_store, temp_hub):
         report = json.loads((Path(art.merges_dir) / art.paths["source_acquisition_report"]).read_text())
         assert report["repos"][0]["status"] == SourceStatus.PLANNED
         assert report["repos"][0]["resolved_ref"] == "origin/main"
+        # Plan-only report validates against the v1 contract.
+        assert report["plan_only"] is True
+        _assert_source_acquisition_report_valid(report)
 
 
 def test_remote_snapshot_failure_fails_job_and_writes_report(mock_job_store, temp_hub):
@@ -208,6 +240,10 @@ def test_remote_snapshot_failure_fails_job_and_writes_report(mock_job_store, tem
         scan.assert_not_called()
         art = mock_job_store.add_artifact.call_args_list[0][0][0]
         assert "source_acquisition_report" in art.paths
+        report = json.loads((Path(art.merges_dir) / art.paths["source_acquisition_report"]).read_text())
+        # Failure report still validates against the v1 contract.
+        assert report["repos"][0]["status"] == SourceStatus.MISSING_REF
+        _assert_source_acquisition_report_valid(report)
 
 
 def test_remote_snapshot_report_registered_when_canceled_during_scan(mock_job_store, temp_hub):

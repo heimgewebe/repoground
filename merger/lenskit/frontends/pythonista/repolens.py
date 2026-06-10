@@ -282,6 +282,8 @@ try:
         resolve_remote_ref,
         materialize_remote_snapshot,
         SourceStatus,
+        validate_source_mode_request,
+        SourceModeConflictError,
     )
 except ImportError:
     try:
@@ -289,11 +291,15 @@ except ImportError:
             resolve_remote_ref,
             materialize_remote_snapshot,
             SourceStatus,
+            validate_source_mode_request,
+            SourceModeConflictError,
         )
     except ImportError:
         resolve_remote_ref = None
         materialize_remote_snapshot = None
         SourceStatus = None
+        validate_source_mode_request = None
+        SourceModeConflictError = None
 
 
 def resolve_headless_source_mode(args) -> str:
@@ -3599,8 +3605,11 @@ def main_cli():
     parser.add_argument(
         "--remote-ref-policy",
         choices=["upstream", "same-branch", "default-branch"],
-        default="upstream",
-        help="remote-snapshot ref policy when --remote-ref is absent (default: upstream)",
+        default=None,
+        help=(
+            "remote-snapshot ref policy when --remote-ref is absent (default: upstream). "
+            "Only valid with --source-mode remote-snapshot."
+        ),
     )
 
     args = parser.parse_args()
@@ -3624,6 +3633,24 @@ def main_cli():
     if args.source_mode == "remote-snapshot" and getattr(args, "pre_pull", None) is True:
         print("Error: --source-mode remote-snapshot never mutates the local repo; remove --pre-pull.", file=sys.stderr)
         sys.exit(2)
+
+    # Central control plane: the same rules /api/jobs enforces. Catches
+    # local-ff + plan-only, remote-ref / non-default policy on a local mode, etc.
+    # Runs before any hub detection or remote git access (headless: exit 2, no network).
+    if validate_source_mode_request is not None:
+        _canon_mode = args.source_mode.replace("-", "_") if args.source_mode else None
+        _canon_policy = args.remote_ref_policy.replace("-", "_") if args.remote_ref_policy else None
+        try:
+            validate_source_mode_request(
+                repo_source_mode=_canon_mode,
+                pre_pull=getattr(args, "pre_pull", None),
+                plan_only=bool(getattr(args, "plan_only", False)),
+                remote_ref=args.remote_ref,
+                remote_ref_policy=_canon_policy,
+            )
+        except SourceModeConflictError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(2)
 
     try:
         hub = detect_hub_dir(SCRIPT_PATH, args.hub)
