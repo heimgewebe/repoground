@@ -187,6 +187,12 @@ def resolve_effective_source_mode(req) -> str:
 
     Explicit ``repo_source_mode`` wins. Otherwise derive from the legacy flags:
     ``pre_pull and not plan_only`` → ``local_ff``; else ``local_current``.
+
+    Defensive: ``JobRequest`` already rejects contradictions at /api/jobs, but
+    internal objects, stored jobs, ``model_construct()`` and tests can bypass
+    pydantic. An *explicit* ``local_ff`` + ``plan_only`` therefore raises here
+    rather than being silently smoothed to ``local_current`` — a silent coercion
+    would hide a contradictory intent.
     """
     explicit = getattr(req, "repo_source_mode", None)
     plan_only = bool(getattr(req, "plan_only", False))
@@ -196,8 +202,13 @@ def resolve_effective_source_mode(req) -> str:
     if explicit == "local_current":
         return "local_current"
     if explicit == "local_ff":
-        # plan_only must never mutate local repos, so a fast-forward is suppressed.
-        return "local_current" if plan_only else "local_ff"
+        if plan_only:
+            raise SourceModeConflictError(
+                "local_ff cannot be combined with plan_only: local_ff would fast-forward "
+                "the local repo, but plan_only must not cause any local mutation."
+            )
+        return "local_ff"
+    # Legacy (repo_source_mode is None): derive from pre_pull/plan_only.
     pre_pull = bool(getattr(req, "pre_pull", True))
     if pre_pull and not plan_only:
         return "local_ff"
@@ -234,6 +245,10 @@ def validate_source_mode_request(
     Raises ``SourceModeConflictError`` on any contradiction; returns ``None`` when
     the request is coherent. Never performs I/O.
     """
+    allowed_modes = {None, "local_current", "local_ff", "remote_snapshot"}
+    if repo_source_mode not in allowed_modes:
+        raise SourceModeConflictError(f"unknown repo_source_mode: {repo_source_mode!r}")
+
     has_remote_ref = bool(remote_ref and str(remote_ref).strip())
     non_default_policy = remote_ref_policy is not None and remote_ref_policy != "upstream"
 

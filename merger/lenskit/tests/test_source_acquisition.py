@@ -17,6 +17,7 @@ import pytest
 
 from merger.lenskit.service import source_acquisition as sa
 from merger.lenskit.service.source_acquisition import (
+    SourceModeConflictError,
     SourceStatus,
     SnapshotExtractionError,
     materialize_remote_snapshot,
@@ -104,8 +105,11 @@ def test_effective_source_mode_legacy_and_explicit():
     assert resolve_effective_source_mode(_Req(pre_pull=True, plan_only=True)) == "local_current"
     assert resolve_effective_source_mode(_Req(repo_source_mode="local_current", pre_pull=True)) == "local_current"
     assert resolve_effective_source_mode(_Req(repo_source_mode="remote_snapshot")) == "remote_snapshot"
-    # local_ff + plan_only must not mutate → degrades to local_current.
-    assert resolve_effective_source_mode(_Req(repo_source_mode="local_ff", plan_only=True)) == "local_current"
+    # An *explicit* local_ff + plan_only is a contradiction: local_ff would mutate
+    # the local repo, plan_only forbids any mutation. It must not be silently
+    # smoothed to local_current — it raises so the conflicting intent surfaces.
+    with pytest.raises(SourceModeConflictError):
+        resolve_effective_source_mode(_Req(repo_source_mode="local_ff", plan_only=True))
 
 
 # --- 1. default_branch on a no-upstream local branch -----------------------

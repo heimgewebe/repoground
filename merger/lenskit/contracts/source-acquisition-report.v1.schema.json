@@ -9,7 +9,11 @@
     "schema",
     "job_id",
     "created_at",
+    "hub",
     "mode",
+    "plan_only",
+    "remote_ref_policy",
+    "requested_remote_ref",
     "summary",
     "repos"
   ],
@@ -142,7 +146,7 @@
           "description": "Remote URL with embedded credentials redacted. Never contains userinfo secrets."
         },
         "local_repo_mutated": {
-          "type": "boolean",
+          "const": false,
           "description": "Always false for remote_snapshot: the local repo is never fetched into, merged, checked out, switched or reset."
         },
         "message": {

@@ -299,7 +299,14 @@ except ImportError:
         materialize_remote_snapshot = None
         SourceStatus = None
         validate_source_mode_request = None
-        SourceModeConflictError = None
+
+        # Fallback must stay a real exception type, not None: the ``except
+        # SourceModeConflictError`` below is dead code in this branch (it is
+        # guarded by ``validate_source_mode_request is not None``), but a None
+        # here makes that ``except`` clause un-catchable and trips static
+        # analysis. A never-raised subclass keeps the symbol well-typed.
+        class SourceModeConflictError(Exception):  # type: ignore[no-redef]
+            """Unavailable-import fallback; never raised (control plane is absent)."""
 
 
 def resolve_headless_source_mode(args) -> str:
