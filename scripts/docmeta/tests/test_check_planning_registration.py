@@ -33,6 +33,23 @@ class TestCheckPlanningRegistration(unittest.TestCase):
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
 
+    def write_baseline(self, rel_path="baseline.json"):
+        findings = check_plan.run_checks()
+        baseline = check_plan.build_baseline(findings)
+        self.write_file(rel_path, json.dumps(baseline, indent=2) + "\n")
+        return os.path.join(self.test_dir, rel_path)
+
+    def run_cli(self, *args):
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with patch("sys.stdout", stdout), patch("sys.stderr", stderr):
+            code = check_plan.main(list(args))
+        return code, stdout.getvalue(), stderr.getvalue()
+
+    def run_json(self, *args):
+        code, stdout, stderr = self.run_cli(*args, "--format", "json")
+        return code, json.loads(stdout), stderr
+
     # --- Registration ---
 
     def test_blueprint_registered_via_index_evidence(self):
@@ -499,6 +516,255 @@ class TestCheckPlanningRegistration(unittest.TestCase):
         findings = check_plan.run_checks()
         baseline = check_plan.build_baseline(findings)
         assert baseline["entries"] == []
+
+    # --- Planning ratchet baseline pruning (TASK-OPS-CTL-006) ---
+
+    def test_write_requires_prune_baseline(self):
+        code, _, stderr = self.run_cli("--write")
+        self.assertEqual(code, 2)
+        self.assertIn("--write requires --prune-baseline", stderr)
+
+    def test_prune_baseline_and_ratchet_are_mutually_exclusive(self):
+        code, _, stderr = self.run_cli("--prune-baseline", "--ratchet")
+        self.assertEqual(code, 2)
+        self.assertIn("mutually exclusive", stderr)
+
+    def test_prune_baseline_and_update_are_mutually_exclusive(self):
+        code, _, stderr = self.run_cli("--prune-baseline", "--update-baseline")
+        self.assertEqual(code, 2)
+        self.assertIn("mutually exclusive", stderr)
+
+    def test_prune_baseline_requires_baseline_path(self):
+        code, _, stderr = self.run_cli("--prune-baseline")
+        self.assertEqual(code, 2)
+        self.assertIn("--prune-baseline requires --baseline", stderr)
+
+    def test_write_helper_empty_removal_is_noop_without_rewrite(self):
+        baseline_path = self.write_baseline()
+        baseline = check_plan.load_baseline(baseline_path)
+        before = open(baseline_path, encoding="utf-8").read()
+
+        written = check_plan._write_pruned_baseline(baseline_path, baseline, [])
+
+        self.assertFalse(written)
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_write_helper_rejects_removing_all_loaded_entries(self):
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        baseline = check_plan.load_baseline(baseline_path)
+        before = open(baseline_path, encoding="utf-8").read()
+
+        with self.assertRaisesRegex(
+            check_plan.BaselineError,
+            "remove the last remaining baseline entry",
+        ):
+            check_plan._write_pruned_baseline(
+                baseline_path, baseline, baseline["entries"]
+            )
+
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_write_helper_returns_true_only_after_resolved_only_write(self):
+        self.write_file("docs/blueprints/active.md", "---\nstatus: active\n---\n")
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        baseline = check_plan.load_baseline(baseline_path)
+        resolved = [
+            entry for entry in baseline["entries"]
+            if entry["path"] == "docs/blueprints/resolved.md"
+        ]
+
+        written = check_plan._write_pruned_baseline(
+            baseline_path, baseline, resolved
+        )
+
+        self.assertTrue(written)
+        reloaded = check_plan.load_baseline(baseline_path)
+        self.assertEqual(
+            [entry["path"] for entry in reloaded["entries"]],
+            ["docs/blueprints/active.md"],
+        )
+
+    def test_prune_dry_run_reports_resolved_without_changing_file(self):
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        before = open(baseline_path, encoding="utf-8").read()
+        self.write_file("docs/tasks/board.md", "docs/blueprints/resolved.md")
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(report["prune"]["dry_run"])
+        self.assertEqual(report["prune"]["removed_count"], 1)
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_prune_write_removes_only_resolved_entries(self):
+        self.write_file("docs/blueprints/active.md", "---\nstatus: active\n---\n")
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        self.write_file("docs/tasks/board.md", "docs/blueprints/resolved.md")
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 0)
+        self.assertFalse(report["prune"]["dry_run"])
+        data = json.loads(open(baseline_path, encoding="utf-8").read())
+        self.assertEqual([entry["path"] for entry in data["entries"]],
+                         ["docs/blueprints/active.md"])
+
+    def test_prune_never_adds_new_findings(self):
+        self.write_file("docs/blueprints/active.md", "---\nstatus: active\n---\n")
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        self.write_file("docs/tasks/board.md", "docs/blueprints/resolved.md")
+        self.write_file("docs/blueprints/new.md", "---\nstatus: active\n---\n")
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual([f["path"] for f in report["new_findings"]],
+                         ["docs/blueprints/new.md"])
+        data = json.loads(open(baseline_path, encoding="utf-8").read())
+        self.assertNotIn("docs/blueprints/new.md",
+                         [entry["path"] for entry in data["entries"]])
+
+    def test_invalid_exception_blocks_prune_without_file_change(self):
+        self.write_file("docs/blueprints/active.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        before = open(baseline_path, encoding="utf-8").read()
+        self.write_file(
+            "docs/blueprints/invalid.md",
+            "---\nstatus: active\nplanning_registration:\n  status: exempt\n"
+            "  reason: temporary\n  owner: ops\n  expires: invalid\n---\n",
+        )
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 2)
+        self.assertTrue(report["prune"]["blocked"])
+        self.assertIn("invalid_exceptions", report["prune"]["block_reasons"])
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_control_error_blocks_prune_without_file_change(self):
+        self.write_file("docs/blueprints/active.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        before = open(baseline_path, encoding="utf-8").read()
+        os.unlink(os.path.join(self.test_dir, "docs/tasks/index.json"))
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 2)
+        self.assertIn("control_errors", report["prune"]["block_reasons"])
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_missing_baseline_blocks_prune(self):
+        missing = os.path.join(self.test_dir, "missing.json")
+
+        code, report, stderr = self.run_json(
+            "--prune-baseline", "--baseline", missing
+        )
+
+        self.assertEqual(code, 2)
+        self.assertFalse(report["baseline"]["loaded"])
+        self.assertTrue(report["prune"]["blocked"])
+        self.assertIn("baseline_error:", report["prune"]["block_reasons"][0])
+        self.assertIn(
+            "Baseline partition unavailable because baseline failed to load.",
+            stderr,
+        )
+        self.assertEqual(report["new_findings"], [])
+        self.assertEqual(report["known_findings"], [])
+        self.assertEqual(report["resolved_findings"], [])
+
+    def test_invalid_baseline_structure_blocks_prune(self):
+        baseline_path = os.path.join(self.test_dir, "invalid-baseline.json")
+        self.write_file("invalid-baseline.json", '{"schema":"wrong","entries":[]}')
+        before = open(baseline_path, encoding="utf-8").read()
+
+        code, report, stderr = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 2)
+        self.assertTrue(report["prune"]["blocked"])
+        self.assertIn(
+            "Baseline partition unavailable because baseline failed to load.",
+            stderr,
+        )
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_prune_write_removing_last_remaining_entry_is_blocked(self):
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        before = open(baseline_path, encoding="utf-8").read()
+        self.write_file("docs/tasks/board.md", "docs/blueprints/resolved.md")
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 2)
+        self.assertIn("empty_baseline_write", report["prune"]["block_reasons"])
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_prune_write_with_already_empty_baseline_is_noop(self):
+        baseline_path = self.write_baseline()
+        before = open(baseline_path, encoding="utf-8").read()
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(report["prune"]["removed_count"], 0)
+        self.assertFalse(report["prune"]["blocked"])
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_prune_noop_is_stable(self):
+        self.write_file("docs/blueprints/active.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        before = open(baseline_path, encoding="utf-8").read()
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(report["prune"]["removed_count"], 0)
+        self.assertEqual(open(baseline_path, encoding="utf-8").read(), before)
+
+    def test_prune_write_is_deterministic_and_repeat_is_noop(self):
+        self.write_file("docs/blueprints/z-active.md", "---\nstatus: active\n---\n")
+        self.write_file("docs/blueprints/a-active.md", "---\nstatus: active\n---\n")
+        self.write_file("docs/blueprints/m-resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        self.write_file("docs/tasks/board.md", "docs/blueprints/m-resolved.md")
+
+        first_code, _, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+        first = open(baseline_path, encoding="utf-8").read()
+        second_code, second_report, _ = self.run_json(
+            "--prune-baseline", "--write", "--baseline", baseline_path
+        )
+        second = open(baseline_path, encoding="utf-8").read()
+
+        self.assertEqual((first_code, second_code), (0, 0))
+        self.assertEqual(second_report["prune"]["removed_count"], 0)
+        self.assertEqual(first, second)
+        paths = [entry["path"] for entry in json.loads(second)["entries"]]
+        self.assertEqual(paths, sorted(paths))
 
 
 if __name__ == '__main__':

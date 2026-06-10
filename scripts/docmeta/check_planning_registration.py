@@ -7,6 +7,7 @@ import os
 import posixpath
 import re
 import sys
+import tempfile
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -728,7 +729,7 @@ def _control_errors(findings):
 
 def build_report(mode, findings, baseline_path, baseline_loaded,
                  new_findings, known_findings, resolved_findings,
-                 written_baseline_entries=None):
+                 written_baseline_entries=None, prune=None):
     invalid = _invalid_exceptions(findings)
     control = _control_errors(findings)
     baseline_count = len(known_findings) + len(resolved_findings)
@@ -758,7 +759,98 @@ def build_report(mode, findings, baseline_path, baseline_loaded,
         "resolved_findings": resolved_findings,
         "invalid_exceptions": invalid,
         "control_errors": control,
+        "prune": prune or {
+            "enabled": False,
+            "dry_run": False,
+            "write": False,
+            "removed_count": 0,
+            "removed": [],
+            "blocked": False,
+            "block_reasons": [],
+        },
     }
+
+
+def _prune_report(write, resolved_findings, block_reasons=None):
+    """Describe a prune attempt without mutating the baseline."""
+    removed = [entry["id"] for entry in resolved_findings]
+    return {
+        "enabled": True,
+        "dry_run": not write,
+        "write": bool(write),
+        "removed_count": len(removed),
+        "removed": removed,
+        "blocked": bool(block_reasons),
+        "block_reasons": list(block_reasons or []),
+    }
+
+
+def _write_pruned_baseline(path, baseline, resolved_findings):
+    """Remove exactly resolved entries, returning whether the baseline changed.
+
+    An empty removal set is always a no-op, including for an already-empty
+    baseline. Any mutating write that would remove every loaded entry fails
+    closed, even if a caller omitted its own preflight check.
+    """
+    resolved_ids = [entry["id"] for entry in resolved_findings]
+    if not resolved_ids:
+        return False
+    if len(resolved_ids) != len(set(resolved_ids)):
+        raise BaselineError("Resolved baseline entries do not map uniquely by id.")
+
+    existing_ids = {entry["id"] for entry in baseline["entries"]}
+    missing = sorted(set(resolved_ids) - existing_ids)
+    if missing:
+        raise BaselineError(
+            f"Resolved baseline entries are not present in the loaded baseline: {missing}."
+        )
+
+    resolved_id_set = set(resolved_ids)
+    retained = [
+        dict(entry) for entry in baseline["entries"]
+        if entry["id"] not in resolved_id_set
+    ]
+    if not retained:
+        raise BaselineError(
+            "Prune write would remove the last remaining baseline entry; "
+            "refusing to write."
+        )
+
+    pruned = dict(baseline)
+    pruned["generated_at"] = _now_iso()
+    pruned["entries"] = retained
+
+    full = path if os.path.isabs(path) else os.path.join(REPO_ROOT, path)
+    fd = None
+    temp_path = None
+    try:
+        fd, temp_path = tempfile.mkstemp(
+            prefix=f".{os.path.basename(full)}.",
+            suffix=".tmp",
+            dir=os.path.dirname(full) or ".",
+            text=True,
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            fd = None  # os.fdopen() owns and closes the descriptor.
+            json.dump(pruned, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        # Validate the exact serialized document before replacing the baseline.
+        load_baseline(temp_path)
+        os.replace(temp_path, full)
+    except OSError as exc:
+        raise BaselineError(f"Cannot write pruned baseline: {exc}") from exc
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -770,6 +862,11 @@ def _render_human(report, stream):
     s = report["summary"]
     print("Planning Registration Report", file=stream)
     print(f"  mode:                {report['mode']}", file=stream)
+    if report["mode"] == "prune_baseline" and not report["baseline"]["loaded"]:
+        print(
+            "Baseline partition unavailable because baseline failed to load.",
+            file=stream,
+        )
     print(f"  current findings:    {s['current_findings']}", file=stream)
     print(f"  baseline findings:   {s['baseline_findings']}", file=stream)
     print(f"  known findings:      {s['known_findings']}", file=stream)
@@ -782,7 +879,12 @@ def _render_human(report, stream):
         for f in report["control_errors"]:
             print(f"  x {f['code']} {f['path']} [{f['id']}]: {f['reason']}", file=stream)
     if report["new_findings"]:
-        print("New findings (blocking):", file=stream)
+        new_label = (
+            "New findings (visible; not accepted by prune):"
+            if report["mode"] == "prune_baseline"
+            else "New findings (blocking):"
+        )
+        print(new_label, file=stream)
         for f in report["new_findings"]:
             print(f"  + {f['code']} {f['path']} [{f['id']}]: {f['reason']}", file=stream)
     if report["invalid_exceptions"]:
@@ -793,6 +895,17 @@ def _render_human(report, stream):
         print("Resolved/stale baseline entries (non-blocking):", file=stream)
         for f in report["resolved_findings"]:
             print(f"  - {f['code']} {f['path']} [{f['id']}]", file=stream)
+    prune = report.get("prune", {})
+    if prune.get("enabled"):
+        action = "dry-run" if prune.get("dry_run") else "write"
+        print(f"Baseline prune: {action}", file=stream)
+        print(f"  removable entries:  {prune.get('removed_count', 0)}", file=stream)
+        for entry_id in prune.get("removed", []):
+            print(f"  - {entry_id}", file=stream)
+        if prune.get("blocked"):
+            print("  blocked:", file=stream)
+            for reason in prune.get("block_reasons", []):
+                print(f"    x {reason}", file=stream)
 
 
 # --------------------------------------------------------------------------- #
@@ -829,12 +942,22 @@ def main(argv=None):
                         help="Compare current findings against the baseline.")
     parser.add_argument("--update-baseline", action="store_true",
                         help="Write a fresh baseline from current findings and exit 0.")
+    parser.add_argument("--prune-baseline", action="store_true",
+                        help="Report resolved baseline entries eligible for safe pruning.")
+    parser.add_argument("--write", action="store_true",
+                        help="With --prune-baseline, write the pruned baseline (default: dry-run).")
     args = parser.parse_args(argv)
 
     # Usage validation.
-    if args.ratchet and args.update_baseline:
-        print("Usage error: --ratchet and --update-baseline are mutually exclusive.",
-              file=sys.stderr)
+    selected_modes = sum(bool(mode) for mode in (
+        args.ratchet, args.update_baseline, args.prune_baseline
+    ))
+    if selected_modes > 1:
+        print("Usage error: --ratchet, --update-baseline, and --prune-baseline "
+              "are mutually exclusive.", file=sys.stderr)
+        return 2
+    if args.write and not args.prune_baseline:
+        print("Usage error: --write requires --prune-baseline.", file=sys.stderr)
         return 2
     if args.update_baseline and not args.baseline:
         print("Usage error: --update-baseline requires --baseline <path>.", file=sys.stderr)
@@ -842,8 +965,77 @@ def main(argv=None):
     if args.ratchet and not args.baseline:
         print("Usage error: --ratchet requires --baseline <path>.", file=sys.stderr)
         return 2
+    if args.prune_baseline and not args.baseline:
+        print("Usage error: --prune-baseline requires --baseline <path>.", file=sys.stderr)
+        return 2
 
     findings = run_checks()
+
+    # --- prune-baseline mode ---
+    if args.prune_baseline:
+        try:
+            baseline = load_baseline(args.baseline)
+        except BaselineError as exc:
+            prune = _prune_report(args.write, [], [f"baseline_error: {exc}"])
+            report = build_report(
+                "prune_baseline", findings, args.baseline, False, [], [], [], prune=prune
+            )
+            if args.format == "json":
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+                _render_human(report, sys.stderr)
+            else:
+                _render_human(report, sys.stdout)
+            return 2
+
+        new_findings, known_findings, resolved_findings = partition_ratchet(
+            findings, baseline.get("entries", [])
+        )
+        block_reasons = []
+        if _control_errors(findings):
+            block_reasons.append("control_errors")
+        if _invalid_exceptions(findings):
+            block_reasons.append("invalid_exceptions")
+        # An already-empty baseline is a valid no-op. Block only a mutating
+        # write that would remove every entry that existed at load time.
+        if (
+            args.write
+            and baseline["entries"]
+            and len(resolved_findings) == len(baseline["entries"])
+        ):
+            block_reasons.append("empty_baseline_write")
+
+        prune = _prune_report(args.write, resolved_findings, block_reasons)
+        report = build_report(
+            "prune_baseline", findings, args.baseline, True,
+            new_findings, known_findings, resolved_findings, prune=prune
+        )
+        if block_reasons:
+            if args.format == "json":
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+                _render_human(report, sys.stderr)
+            else:
+                _render_human(report, sys.stdout)
+            print("prune-baseline: blocked; baseline not written.", file=sys.stderr)
+            return 2
+
+        if args.write:
+            try:
+                _write_pruned_baseline(args.baseline, baseline, resolved_findings)
+            except BaselineError as exc:
+                prune["blocked"] = True
+                prune["block_reasons"].append(f"write_error: {exc}")
+                if args.format == "json":
+                    print(json.dumps(report, indent=2, ensure_ascii=False))
+                    _render_human(report, sys.stderr)
+                else:
+                    _render_human(report, sys.stdout)
+                return 2
+
+        if args.format == "json":
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+        else:
+            _render_human(report, sys.stdout)
+        return 0
 
     # --- update-baseline mode ---
     if args.update_baseline:

@@ -67,6 +67,7 @@ jobs:
           new = report.get("new_findings", [])
           inv = report.get("invalid_exceptions", [])
           ctrl = report.get("control_errors", [])
+          resolved = report.get("resolved_findings", [])
           if ctrl:
               print("\n### Control-file errors (blocking, exit 2)\n")
               for f in ctrl:
@@ -79,6 +80,15 @@ jobs:
               print("\n### Invalid exceptions (blocking)\n")
               for f in inv:
                   print(f"- `{f.get('code')}` `{f.get('path')}` — {f.get('reason', '')}")
+          if resolved:
+              print("\n### Resolved/stale baseline entries\n")
+              for f in resolved:
+                  print(f"- `{f.get('id')}` `{f.get('path')}`")
+              print("\nDry-run locally before pruning:")
+              print("```bash")
+              print("python3 -m scripts.docmeta.check_planning_registration --prune-baseline --baseline docs/tasks/planning-registration-baseline.json --format human")
+              print("```")
+              print("Write is explicit and fails closed if it would remove the last remaining baseline entry.")
           if not new and not inv and not ctrl:
               print("\n_No new drift. Known drift is tolerated via the baseline._")
           PY

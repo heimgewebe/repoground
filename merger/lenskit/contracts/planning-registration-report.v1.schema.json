@@ -28,7 +28,7 @@
     },
     "mode": {
       "type": "string",
-      "enum": ["scan", "ratchet", "update_baseline"]
+      "enum": ["scan", "ratchet", "update_baseline", "prune_baseline"]
     },
     "summary": {
       "type": "object",
@@ -85,6 +85,29 @@
       "type": "array",
       "description": "Control-file errors (missing/unparseable task-control files). Always blocking (exit 2); never baseline-eligible.",
       "items": {"$ref": "#/definitions/finding"}
+    },
+    "prune": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled", "dry_run", "write", "removed_count", "removed",
+        "blocked", "block_reasons"
+      ],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "dry_run": {"type": "boolean"},
+        "write": {"type": "boolean"},
+        "removed_count": {"type": "integer", "minimum": 0},
+        "removed": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[0-9a-f]{16}$"}
+        },
+        "blocked": {"type": "boolean"},
+        "block_reasons": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
     }
   },
   "definitions": {
