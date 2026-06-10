@@ -281,6 +281,34 @@ def test_v1_schema_accepts_legacy_reports_without_prune(mode):
     jsonschema.validate(instance=report, schema=schema)
 
 
+def test_v1_schema_accepts_literal_legacy_report():
+    """Verify legacy v1 reports without a prune block remain valid, completely independent of the producer."""
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = {
+        "schema": "lenskit.planning_registration_report.v1",
+        "created_at": "2026-06-10T00:00:00Z",
+        "mode": "ratchet",
+        "summary": {
+            "current_findings": 0,
+            "baseline_findings": 0,
+            "new_findings": 0,
+            "known_findings": 0,
+            "resolved_findings": 0,
+            "invalid_exceptions": 0
+        },
+        "findings": [],
+        "baseline": {
+            "path": "docs/tasks/planning-registration-baseline.json",
+            "loaded": True
+        },
+        "new_findings": [],
+        "known_findings": [],
+        "resolved_findings": [],
+        "invalid_exceptions": []
+    }
+    jsonschema.validate(instance=report, schema=schema)
+
+
 @pytest.mark.parametrize("mode", ["scan", "ratchet", "update_baseline"])
 def test_v1_schema_rejects_non_prune_modes_with_prune_enabled(mode):
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))

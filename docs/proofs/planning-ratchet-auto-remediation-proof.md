@@ -36,9 +36,23 @@ The original ratchet (TASK-OPS-CTL-005) tolerated known findings via a baseline 
 The v1 report contract uses an additive extension strategy:
 - The `mode` enum adds `prune_baseline`.
 - The schema includes a strict `allOf`/`if-then` block: `prune` is required and `enabled` must be `true` if `mode == "prune_baseline"`; otherwise, if `prune` is present, `enabled` must be `false`.
-- This ensures legacy `scan`, `ratchet`, and `update_baseline` reports without `prune` still validate perfectly.
+- This ensures legacy scan/ratchet/update_baseline reports without prune remain schema-valid in the tested in-repo compatibility scope.
 
-To verify consumer compatibility, a focused in-repo search (`grep`) was performed for the report schema and `prune_baseline` mode. The search found only the producer (`scripts/docmeta/check_planning_registration.py`), schema-validation tests, and planning documentation/task metadata. A separate search for the emitted report filename found the read-only workflow summary. No hard-coded consumer was found that requires a new contract version, ensuring that the additive schema change is perfectly backward-compatible.
+To verify consumer compatibility, a focused in-repo search was performed:
+
+```bash
+grep -RIn \
+  -e "planning_registration_report.v1" \
+  -e "planning-registration-report.v1.schema.json" \
+  -e "prune_baseline" \
+  merger scripts docs .github
+
+grep -RIn \
+  -e "planning-registration-report.json" \
+  merger scripts docs .github
+```
+
+The search found only the producer (`scripts/docmeta/check_planning_registration.py`), schema-validation tests, and planning documentation/task metadata. A separate search for the emitted report filename found the read-only workflow summary. No hard-coded incompatible consumer was identified in the reviewed in-repo search scope.
 
 ## Follow-up
 

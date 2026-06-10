@@ -843,6 +843,8 @@ def _write_pruned_baseline(path, baseline, resolved_findings):
         # Validate the exact serialized document before replacing the baseline.
         load_baseline(temp_path)
         os.replace(temp_path, full)
+        # Immediate re-validation: prove the final replaced file is readable and valid
+        load_baseline(full)
     except OSError as exc:
         raise BaselineError(f"Cannot write pruned baseline: {exc}") from exc
     finally:
