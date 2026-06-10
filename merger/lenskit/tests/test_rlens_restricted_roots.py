@@ -33,12 +33,22 @@ def _make_client_and_hub(root_policy="default", token="test-token",
     sec.root_policy = "default"
     sec.allowlist_roots = []
     sec.token = None
-    service_app.init_service(
-        hub_path=hub_dir, token=token, host="127.0.0.1",
-        root_policy=root_policy, allowed_roots=allowed_roots,
-    )
-    with TestClient(service_app.app) as client:
-        yield client, str(hub_dir.resolve())
+    # Set env so FS token generation works (used by /api/fs/roots)
+    import os
+    old_token = os.environ.get("RLENS_TOKEN")
+    os.environ["RLENS_TOKEN"] = token
+    try:
+        service_app.init_service(
+            hub_path=hub_dir, token=token, host="127.0.0.1",
+            root_policy=root_policy, allowed_roots=allowed_roots,
+        )
+        with TestClient(service_app.app) as client:
+            yield client, str(hub_dir.resolve())
+    finally:
+        if old_token is None:
+            os.environ.pop("RLENS_TOKEN", None)
+        else:
+            os.environ["RLENS_TOKEN"] = old_token
 
 
 class TestRestrictedRootPolicy:
