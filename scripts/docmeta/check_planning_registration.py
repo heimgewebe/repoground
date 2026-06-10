@@ -767,11 +767,13 @@ def build_report(mode, findings, baseline_path, baseline_loaded,
             "removed": [],
             "blocked": False,
             "block_reasons": [],
+            "write_would_block": False,
+            "write_block_reasons": [],
         },
     }
 
 
-def _prune_report(write, resolved_findings, block_reasons=None):
+def _prune_report(write, resolved_findings, block_reasons=None, write_would_block=False, write_block_reasons=None):
     """Describe a prune attempt without mutating the baseline."""
     removed = [entry["id"] for entry in resolved_findings]
     return {
@@ -782,6 +784,8 @@ def _prune_report(write, resolved_findings, block_reasons=None):
         "removed": removed,
         "blocked": bool(block_reasons),
         "block_reasons": list(block_reasons or []),
+        "write_would_block": bool(write_would_block),
+        "write_block_reasons": list(write_block_reasons or []),
     }
 
 
@@ -815,6 +819,8 @@ def _write_pruned_baseline(path, baseline, resolved_findings):
             "Prune write would remove the last remaining baseline entry; "
             "refusing to write."
         )
+
+    retained.sort(key=lambda e: (e["path"], e["code"], e["id"]))
 
     pruned = dict(baseline)
     pruned["generated_at"] = _now_iso()
@@ -906,6 +912,10 @@ def _render_human(report, stream):
             print("  blocked:", file=stream)
             for reason in prune.get("block_reasons", []):
                 print(f"    x {reason}", file=stream)
+        if prune.get("write_would_block"):
+            print("  Write would block:", file=stream)
+            for reason in prune.get("write_block_reasons", []):
+                print(f"    x {reason}", file=stream)
 
 
 # --------------------------------------------------------------------------- #
@@ -995,16 +1005,21 @@ def main(argv=None):
             block_reasons.append("control_errors")
         if _invalid_exceptions(findings):
             block_reasons.append("invalid_exceptions")
-        # An already-empty baseline is a valid no-op. Block only a mutating
-        # write that would remove every entry that existed at load time.
-        if (
-            args.write
-            and baseline["entries"]
-            and len(resolved_findings) == len(baseline["entries"])
-        ):
-            block_reasons.append("empty_baseline_write")
 
-        prune = _prune_report(args.write, resolved_findings, block_reasons)
+        write_would_block = False
+        write_block_reasons = []
+
+        resolved_ids = {f["id"] for f in resolved_findings}
+        baseline_ids = {e["id"] for e in baseline.get("entries", [])}
+        would_remove_all_loaded_entries = bool(baseline_ids) and resolved_ids == baseline_ids
+
+        if would_remove_all_loaded_entries:
+            write_would_block = True
+            write_block_reasons.append("empty_baseline_write")
+            if args.write:
+                block_reasons.append("empty_baseline_write")
+
+        prune = _prune_report(args.write, resolved_findings, block_reasons, write_would_block, write_block_reasons)
         report = build_report(
             "prune_baseline", findings, args.baseline, True,
             new_findings, known_findings, resolved_findings, prune=prune

@@ -1,14 +1,10 @@
 ---
 doc_type: proof
 status: active
-task: TASK-OPS-CTL-006
+task: TASK-OPS-CTL-005
 ---
 
-# Proof: Planning Drift Ratchet Control Plane (TASK-OPS-CTL-005/006)
-
-This TASK-OPS-CTL-006 proof extends the existing TASK-OPS-CTL-005 ratchet proof
-with controlled baseline pruning; it does not replace the original ratchet
-semantics.
+# Proof: Planning Drift Ratchet Control Plane (TASK-OPS-CTL-005)
 
 ## Problem
 
@@ -111,42 +107,6 @@ Rules:
 - CI does not enforce "all registered". It enforces **no new drift, no invalid
   exemptions, and no control-file errors**.
 
-## Controlled baseline pruning (TASK-OPS-CTL-006)
-
-- `--prune-baseline --baseline PATH` compares the current scan with the loaded
-  baseline and reports only `resolved_findings` as removable. It is a dry-run
-  unless `--write` is supplied.
-- `--write` removes exactly those resolved ids, preserves active known entries,
-  never adds `new_findings`, validates the serialized candidate, and replaces
-  the baseline atomically. `_write_pruned_baseline()` enforces the same invariant
-  independently of caller preflight: it returns `False` without writing for an
-  empty removal set, returns `True` only after replacement, and rejects removal
-  of every loaded entry. A repeated write with no resolved entries is a no-op.
-- Pruning fails closed with exit 2 and no baseline change for unreadable or
-  invalid baselines, control errors, invalid exceptions, ambiguous resolved-id
-  mapping, write failures, or a mutating write that would remove the last
-  remaining baseline entry. An already-empty baseline is a valid write no-op:
-  it exits 0, removes nothing, and is not rewritten.
-- New drift remains visible in the report but does not prevent removal of an
-  independently resolved baseline entry; pruning is not an acceptance path for
-  that drift.
-- The current producer emits a `prune` block for every report (`dry_run`, `write`,
-  `removed_count`, removed ids, `blocked`, and explicit `block_reasons`); human
-  output exposes the same action and blocker state. The v1 schema keeps `prune`
-  optional so older v1 reports remain valid. If baseline loading fails,
-  `baseline.loaded` is
-  false and `block_reasons` carries `baseline_error: ...`; the human report states
-  that partitioning is unavailable. In that case empty `new`/`known`/`resolved`
-  arrays are placeholders and are not evidence that drift is absent. Existing
-  `--update-baseline` semantics are unchanged.
-- The v1 report contract remains an additive local extension: the mode enum adds
-  `prune_baseline`, while legacy `scan`, `ratchet`, and `update_baseline` reports
-  without `prune` still validate. A focused in-repo search for the report schema,
-  schema id, and prune mode found the producer, schema-validation tests, and
-  planning documentation/task metadata. A separate search for the emitted report
-  filename found the read-only workflow summary. No hard-coded consumer requires
-  a new contract version.
-
 ## CI behavior
 
 `.github/workflows/task-index.yml` (job `planning-registration`):
@@ -158,9 +118,7 @@ Rules:
    - Does not `exit` or `set -e` immediately; allows downstream steps to run.
 2. **Step summary** (`if: always()`): Writes a human-readable summary to
    `$GITHUB_STEP_SUMMARY` with current / baseline / known / new / resolved
-   findings and invalid exceptions (or "no new drift" if clean). Resolved entries
-   include ids/paths plus a local prune dry-run command. Permissions remain
-   `contents: read`; no PR-comment write path was added.
+   findings and invalid exceptions (or "no new drift" if clean).
 3. **Upload artifact** (`if: always()`): Uploads `planning-registration-report.json`
    to GitHub Artifacts, even if ratchet found findings.
 4. **Enforce step** (`if: always()`):
@@ -180,9 +138,9 @@ No network or GitHub-API dependency; no time-of-day logic in the gate.
 
 | Code | Meaning |
 | ---- | ------- |
-| 0 | No new blocking findings, invalid exceptions, or control errors (ratchet); scan/update success; or prune dry-run/write/no-op success. |
+| 0 | No new blocking findings, invalid exceptions, or control errors (ratchet); or scan/update-baseline success. |
 | 1 | Ratchet: new findings or invalid exceptions present. |
-| 2 | Config/control error: invalid baseline, control-file errors, blocked prune, schema mismatch, broken input, mutually exclusive flags, missing `--baseline`, or a baseline mode without `--baseline`. |
+| 2 | Config/control error: invalid baseline, control-file errors (missing/unparseable control files), schema mismatch, broken input, mutually exclusive flags, missing `--baseline`, or `--ratchet`/`--update-baseline` without `--baseline`. |
 
 JSON (`--format json`) is emitted on **stdout only**; human-readable output goes
 to **stderr** in JSON mode so stdout stays parseable.
@@ -203,18 +161,6 @@ python3 -m scripts.docmeta.check_planning_registration \
   --format json \
   > /tmp/planning-registration-report.json
 python3 -m json.tool /tmp/planning-registration-report.json >/dev/null
-
-# Preview resolved-only pruning (does not write)
-python3 -m scripts.docmeta.check_planning_registration \
-  --prune-baseline \
-  --baseline docs/tasks/planning-registration-baseline.json \
-  --format human
-
-# Apply the exact reviewed removal set
-python3 -m scripts.docmeta.check_planning_registration \
-  --prune-baseline --write \
-  --baseline docs/tasks/planning-registration-baseline.json \
-  --format human
 ```
 
 ## Test evidence
@@ -225,8 +171,7 @@ python3 -m scripts.docmeta.check_planning_registration \
   the key invariant that `invalid_exceptions` do **not** appear in `new_findings`),
   direct `partition_ratchet()` invariant test with unfiltered `run_checks()` output,
   valid exemption suppression, JSON report schema validation (scan/ratchet/
-  update_baseline/prune_baseline modes), current-producer `prune` emission and
-  legacy-v1 reports without `prune`, committed-baseline validated against the baseline
+  update_baseline modes), committed-baseline validated against the baseline
   contract schema, baseline eligibility enforcement (`build_baseline()` retains only
   `UNREGISTERED_PLANNING_ARTIFACT`; control-file codes and invalid exceptions
   excluded at write time and rejected at load time; baseline schema `const`
@@ -246,12 +191,8 @@ python3 -m scripts.docmeta.check_planning_registration \
   missing required field, non-eligible code → exit 2), Bash-semantics tests under
   `set -euo pipefail` (prove `|| code=$?` captures exit codes without aborting;
   enforce step exits 2 on empty output; enforce step propagates codes 0/1/2 unchanged).
-- `scripts/docmeta/tests/test_check_planning_registration.py`: scanner contract
-  plus prune CLI usage validation, dry-run immutability, resolved-only write,
-  new-drift non-acceptance, invalid-exception/control-error blocking, baseline-load
-  diagnostics, direct write-helper return/no-mutation/last-entry invariants,
-  already-empty-baseline no-op, stable no-op, and deterministic repeated-write
-  coverage.
+- `scripts/docmeta/tests/test_check_planning_registration.py`: the
+  pre-existing scanner contract, unchanged and still green.
 - Real-repo ratchet run: exit 0, report validates against
   `merger/lenskit/contracts/planning-registration-report.v1.schema.json`.
 - Committed baseline validates against
@@ -263,8 +204,7 @@ python3 -m scripts.docmeta.check_planning_registration \
 - The scanner stays heuristic: explicit glob patterns plus a `doc_type` filter
   for `docs/specs/`. It does not perform full content classification, so a novel
   planning-doc location outside the known globs is out of scope until added.
-- Resolved/stale entries are only pruned by the explicit local `--write` flag; CI
-  reports them but does not mutate the repository.
+- Resolved/stale baseline entries are surfaced but not auto-pruned.
 - Invalid exemptions block but are not auto-fixed.
 - Tab characters in `planning_registration:` block indentation are not detected
   or rejected; YAML prohibits tabs in indentation, so this is an authoring error.
@@ -274,8 +214,8 @@ python3 -m scripts.docmeta.check_planning_registration \
 
 ## Follow-up
 
-- Optional PR-comment reporting remains deferred; it would require a separate,
-  explicitly permissioned workflow design.
+- Auto-remediation: prune resolved baseline entries and/or post a PR comment with
+  the report summary.
 - Optionally widen scan coverage as new planning-doc locations appear.
 - Promotion of additional planning-doc types into the `doc_type` filter set.
 

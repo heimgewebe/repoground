@@ -281,6 +281,41 @@ def test_v1_schema_accepts_legacy_reports_without_prune(mode):
     jsonschema.validate(instance=report, schema=schema)
 
 
+@pytest.mark.parametrize("mode", ["scan", "ratchet", "update_baseline"])
+def test_v1_schema_rejects_non_prune_modes_with_prune_enabled(mode):
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = check_plan.build_report(mode, [], None, False, [], [], [])
+    report["prune"] = {
+        "enabled": True,
+        "dry_run": False,
+        "write": False,
+        "removed_count": 0,
+        "removed": [],
+        "blocked": False,
+        "block_reasons": [],
+        "write_would_block": False,
+        "write_block_reasons": []
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
+def test_v1_schema_rejects_prune_baseline_without_prune_block():
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = check_plan.build_report("prune_baseline", [], None, False, [], [], [])
+    report.pop("prune")
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
+def test_v1_schema_rejects_prune_baseline_with_prune_disabled():
+    schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    report = check_plan.build_report("prune_baseline", [], None, False, [], [], [])
+    report["prune"]["enabled"] = False
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
 def test_prune_report_validates_against_schema(fake_repo, tmp_path, capsys):
     baseline_file = tmp_path / "baseline.json"
     write_baseline(baseline_file, [])

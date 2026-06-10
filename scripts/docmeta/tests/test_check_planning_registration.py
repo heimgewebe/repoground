@@ -594,6 +594,30 @@ class TestCheckPlanningRegistration(unittest.TestCase):
             ["docs/blueprints/active.md"],
         )
 
+    def test_write_helper_cleans_up_tempfile_on_oserror(self):
+        self.write_file("docs/blueprints/active.md", "---\nstatus: active\n---\n")
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        baseline = check_plan.load_baseline(baseline_path)
+        resolved = [
+            entry for entry in baseline["entries"]
+            if entry["path"] == "docs/blueprints/resolved.md"
+        ]
+        with open(baseline_path, encoding="utf-8") as f:
+            before = f.read()
+
+        with patch("os.replace", side_effect=OSError("mock error")):
+            with self.assertRaisesRegex(check_plan.BaselineError, "Cannot write pruned baseline: mock error"):
+                check_plan._write_pruned_baseline(baseline_path, baseline, resolved)
+
+        with open(baseline_path, encoding="utf-8") as f:
+            after = f.read()
+        self.assertEqual(after, before)
+
+        baseline_dir = os.path.dirname(baseline_path)
+        tempfiles = [f for f in os.listdir(baseline_dir) if f.endswith(".tmp")]
+        self.assertEqual(tempfiles, [])
+
     def test_prune_dry_run_reports_resolved_without_changing_file(self):
         self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
         baseline_path = self.write_baseline()
@@ -739,6 +763,27 @@ class TestCheckPlanningRegistration(unittest.TestCase):
 
         self.assertEqual(code, 2)
         self.assertIn("empty_baseline_write", report["prune"]["block_reasons"])
+        self.assertTrue(report["prune"]["write_would_block"])
+        with open(baseline_path, encoding="utf-8") as f:
+            after = f.read()
+        self.assertEqual(after, before)
+
+    def test_prune_dry_run_removing_last_remaining_entry_reports_write_would_block(self):
+        self.write_file("docs/blueprints/resolved.md", "---\nstatus: active\n---\n")
+        baseline_path = self.write_baseline()
+        with open(baseline_path, encoding="utf-8") as f:
+            before = f.read()
+        self.write_file("docs/tasks/board.md", "docs/blueprints/resolved.md")
+
+        code, report, _ = self.run_json(
+            "--prune-baseline", "--baseline", baseline_path
+        )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(report["prune"]["dry_run"])
+        self.assertFalse(report["prune"]["blocked"])
+        self.assertTrue(report["prune"]["write_would_block"])
+        self.assertIn("empty_baseline_write", report["prune"]["write_block_reasons"])
         with open(baseline_path, encoding="utf-8") as f:
             after = f.read()
         self.assertEqual(after, before)

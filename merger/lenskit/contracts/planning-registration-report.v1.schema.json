@@ -91,7 +91,7 @@
       "additionalProperties": false,
       "required": [
         "enabled", "dry_run", "write", "removed_count", "removed",
-        "blocked", "block_reasons"
+        "blocked", "block_reasons", "write_would_block", "write_block_reasons"
       ],
       "properties": {
         "enabled": {"type": "boolean"},
@@ -106,10 +106,52 @@
         "block_reasons": {
           "type": "array",
           "items": {"type": "string", "minLength": 1}
+        },
+        "write_would_block": {"type": "boolean"},
+        "write_block_reasons": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
         }
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {"const": "prune_baseline"}
+        }
+      },
+      "then": {
+        "required": ["prune"],
+        "properties": {
+          "prune": {
+            "properties": {
+              "enabled": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "properties": {
+            "mode": {"const": "prune_baseline"}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "prune": {
+            "properties": {
+              "enabled": {"const": false}
+            }
+          }
+        }
+      }
+    }
+  ],
   "definitions": {
     "finding": {
       "type": "object",
