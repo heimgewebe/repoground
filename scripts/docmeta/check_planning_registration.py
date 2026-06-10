@@ -730,6 +730,9 @@ def _control_errors(findings):
 def build_report(mode, findings, baseline_path, baseline_loaded,
                  new_findings, known_findings, resolved_findings,
                  written_baseline_entries=None, prune=None):
+    if mode == "prune_baseline" and prune is None:
+        raise ValueError("prune_baseline reports require an explicit prune block")
+
     invalid = _invalid_exceptions(findings)
     control = _control_errors(findings)
     baseline_count = len(known_findings) + len(resolved_findings)

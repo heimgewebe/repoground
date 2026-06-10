@@ -330,7 +330,8 @@ def test_v1_schema_rejects_non_prune_modes_with_prune_enabled(mode):
 
 def test_v1_schema_rejects_prune_baseline_without_prune_block():
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    report = check_plan.build_report("prune_baseline", [], None, False, [], [], [])
+    prune = check_plan._prune_report(write=False, resolved_findings=[])
+    report = check_plan.build_report("prune_baseline", [], None, False, [], [], [], prune=prune)
     report.pop("prune")
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=report, schema=schema)
@@ -338,10 +339,16 @@ def test_v1_schema_rejects_prune_baseline_without_prune_block():
 
 def test_v1_schema_rejects_prune_baseline_with_prune_disabled():
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-    report = check_plan.build_report("prune_baseline", [], None, False, [], [], [])
+    prune = check_plan._prune_report(write=False, resolved_findings=[])
+    report = check_plan.build_report("prune_baseline", [], None, False, [], [], [], prune=prune)
     report["prune"]["enabled"] = False
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=report, schema=schema)
+
+
+def test_build_report_requires_explicit_prune_for_prune_baseline():
+    with pytest.raises(ValueError, match="prune_baseline reports require an explicit prune block"):
+        check_plan.build_report("prune_baseline", [], None, False, [], [], [])
 
 
 def test_prune_report_validates_against_schema(fake_repo, tmp_path, capsys):
