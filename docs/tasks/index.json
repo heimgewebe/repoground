@@ -4,7 +4,7 @@
       "id": "TASK-AGENT-FRONTDOOR-001",
       "title": "Agent Reading Pack v1.1 Front-Door Hardening",
       "status": "open",
-      "description": "Implement the first bounded slice of the fully registered Lenskit agent front-door hardening roadmap: make task-specific required reading, canonical-only insufficiency, sidecar usage boundaries, answer-compliance prompts and prohibited claims visible in the existing Agent Reading Pack. The blueprint now specifies all 16 later slices, their dependencies, candidate deliverables, acceptance boundaries and stop rules: usage smoke, a repository-backed retrieval review goldset, Markdown-first protocol stabilization, optional consumption contracts, primary-lens audit, facets/cards/relations and only then deterministic retrieval v2. This task remains limited to Slice 1; no pipeline, schema, health, runtime, service or frontend change belongs to the planning PR.",
+      "description": "Track the first implementation slice following the registered Lenskit agent front-door hardening blueprint: update the existing Agent Reading Pack with task-specific required reading, canonical-only insufficiency boundaries, sidecar usage rules, answer-compliance prompts and prohibited claims. The current planning PR only registers the blueprint and roadmap/task references; the task remains open and implementation must follow in a separate PR. Slice 1 must not include new sidecars, schemas, health/surface promotion, pipeline mutation or retrieval-v2 work.",
       "evidence": [
         "docs/blueprints/lenskit-agent-front-door-hardening.md",
         "docs/roadmap/lenskit-master-roadmap.md"
