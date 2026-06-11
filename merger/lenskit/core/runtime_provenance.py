@@ -45,13 +45,22 @@ def _package_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _supports_git_subprocess_probe() -> bool:
+    """Return whether this runtime can safely attempt git subprocess probes."""
+    return sys.platform != "ios"
+
+
 def _git_state(package_root: Path) -> Tuple[Optional[str], Optional[bool]]:
     """Return ``(git_commit, git_dirty)`` for the generator working tree.
 
-    Returns ``(None, None)`` when the package root is not a git working tree or
-    git is unavailable — a service installed from a wheel legitimately has no
+    Returns ``(None, None)`` when the package root is not a git working tree,
+    git is unavailable, or subprocess execution is unsupported by the runtime —
+    a service installed from a wheel or a sandboxed runtime legitimately has no
     git state, which is itself a useful drift signal.
     """
+    if not _supports_git_subprocess_probe():
+        return None, None
+
     def _git(*args: str) -> Optional[str]:
         try:
             out = subprocess.run(
@@ -61,7 +70,7 @@ def _git_state(package_root: Path) -> Tuple[Optional[str], Optional[bool]]:
                 timeout=5,
                 check=False,
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, RuntimeError, subprocess.SubprocessError):
             return None
         if out.returncode != 0:
             return None

@@ -65,6 +65,37 @@ def test_build_runtime_provenance_has_drift_fields():
     assert "git_dirty" in rt
 
 
+def test_runtime_provenance_skips_git_subprocess_probe_on_ios(monkeypatch):
+    from merger.lenskit.core import runtime_provenance as rp
+
+    def fail_run(*args, **kwargs):
+        raise AssertionError("subprocess.run must not be called on iOS")
+
+    monkeypatch.setattr(rp.sys, "platform", "ios")
+    monkeypatch.setattr(rp.subprocess, "run", fail_run)
+
+    runtime = rp.build_runtime_provenance(redact=False)
+
+    assert runtime["module"] == "merger.lenskit.core.merge"
+    assert runtime["python_version"]
+    assert "git_commit" in runtime
+    assert "git_dirty" in runtime
+    assert runtime["git_commit"] is None
+    assert runtime["git_dirty"] is None
+
+
+def test_git_state_treats_runtimeerror_as_git_unavailable(monkeypatch, tmp_path):
+    from merger.lenskit.core import runtime_provenance as rp
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("Subprocesses are not supported in this runtime")
+
+    monkeypatch.setattr(rp.sys, "platform", "linux")
+    monkeypatch.setattr(rp.subprocess, "run", boom)
+
+    assert rp._git_state(tmp_path) == (None, None)
+
+
 def test_generator_runtime_provenance_redacts_absolute_paths_when_redaction_enabled():
     rt = build_runtime_provenance(redact=True)
     # Absolute filesystem paths must be nulled in redacted/export mode.
