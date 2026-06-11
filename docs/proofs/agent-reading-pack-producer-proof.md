@@ -116,6 +116,30 @@ python -m pytest merger/lenskit/tests/test_agent_reading_pack.py merger/lenskit/
 Result: **50 passed**. The environment also reported one non-failing pytest
 configuration warning for the unknown `asyncio_mode` option.
 
+## Bundle-emission consistency guard
+
+Producer and CLI tests prove that the v1.1 producer can render the expected front-door
+surface. They do not, by themselves, prove that the tested bundle-emission path loaded
+that producer. The manifest integration test therefore resolves the
+`agent_reading_pack` artifact from a freshly emitted bundle manifest, reads the emitted
+file, and requires the exact `VERSION:v1.1` sentinel, all five v1.1 front-door sections,
+`change_impact`, and the boundary that relation or path proximity alone does not prove
+change impact. A legacy `VERSION:v1` pack now fails this emission-level check.
+
+`post_emit_health=pass` and `bundle_surface_validation=pass` remain artifact-integrity
+and surface-coherence diagnoses. They do not automatically establish that the current
+semantic Agent Reading Pack version was emitted, and they do not prove repo
+understanding, claim truth, or answer safety. The emission-consistency assertion closes
+that regression gap in the test process without promoting either diagnostic to a truth
+gate. It does not prove that an already-running rLens service loaded the merged code;
+that requires a fresh service load and a new real-dump check.
+
+Targeted emission verification:
+
+```bash
+python -m pytest merger/lenskit/tests/test_bundle_manifest_integration.py::test_agent_reading_pack_emitted_schema_valid_and_hashed
+```
+
 ## Tests
 
 - `merger/lenskit/tests/test_agent_reading_pack.py` — 46 Tests (Producer, Determinismus, Härtung, Output-Kollisionsschutz, Soft-invalid-Rendering, pure Funktionen).

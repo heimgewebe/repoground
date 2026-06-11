@@ -755,7 +755,17 @@ def test_agent_reading_pack_emitted_schema_valid_and_hashed(tmp_path):
     assert pack_entry["sha256"] == _sha256_file(pack_path)
 
     body = pack_path.read_text(encoding="utf-8")
-    assert body.startswith("<!-- ARTIFACT:agent_reading_pack VERSION:v1")
+    assert body.startswith("<!-- ARTIFACT:agent_reading_pack VERSION:v1.1 ")
+    for marker in (
+        "## REQUIRED_READING_BY_TASK",
+        "## WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT",
+        "## SIDECAR_USAGE_RULES",
+        "## ANSWER_COMPLIANCE_CHECKLIST",
+        "## DO_NOT_CLAIM",
+        "`change_impact`",
+        "relation or path proximity alone does not prove change impact",
+    ):
+        assert marker in body, f"emitted agent_reading_pack missing v1.1 marker: {marker}"
     assert "NAVIGATION, NOT TRUTH" in body
     assert data["run_id"] in body
     # The pack must never list its own role as bundle content.
