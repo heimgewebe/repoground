@@ -22,7 +22,7 @@ finalisierte Manifest re-produziert.
 python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.json --json
 ```
 
-## Befund (frischer Lauf, dump stem `proofrepo-max-…_merge`)
+## Befund (producer and contract verification)
 
 ### Manifest-Integration
 - `manifest_schema_valid` (gegen `bundle-manifest.v1.schema.json`): **PASS**
@@ -30,8 +30,8 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
 - `content_type`: `text/markdown`
 - `authority` / `canonicality` / `interpretation.mode`: `navigation_index` / `derived` / `role_only`
 - `regenerable` / `staleness_sensitive`: `true` / `true`
-- `bytes` (Manifest) == Dateigröße: **true** (3990 == 3990)
-- `sha256` (Manifest) == `sha256(Datei)`: **true**
+- `bytes` (Manifest) == Dateigröße: **PASS** (covered by producer/manifest integration tests)
+- `sha256` (Manifest) == `sha256(Datei)`: **PASS** (covered by producer/manifest integration tests)
 
 ### Determinismus / Idempotenz
 - Zwei aufeinanderfolgende Produktionen über dasselbe Manifest: gleiches `output_sha256` → **PASS**
@@ -40,11 +40,13 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
   bereits im Manifest eingetragener Pack die Ausgabe nicht.
 - `| agent_reading_pack |` erscheint nie als Tabellenzeile im Pack (`self_role_not_listed=true`).
 
-### Inhaltliche Kernsektionen (v1)
-- Sentinel: `<!-- ARTIFACT:agent_reading_pack VERSION:v1 AUTHORITY:navigation_index CANONICALITY:derived -->`
+### Inhaltliche Kernsektionen (v1.1)
+- Sentinel: `<!-- ARTIFACT:agent_reading_pack VERSION:v1.1 AUTHORITY:navigation_index CANONICALITY:derived -->`
 - Banner: `NAVIGATION, NOT TRUTH`
 - `## BUNDLE_IDENTITY`, `## READING_POLICY`, `## ARTIFACT_ROLES`, `## OUTPUT_HEALTH_SUMMARY`,
-  `## HOW_TO_SEARCH`, `## TOP_CHUNK_SPANS`, `## EPISTEMIC_EMPTINESS`
+  `## HOW_TO_SEARCH`, `## REQUIRED_READING_BY_TASK`, `## WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT`,
+  `## SIDECAR_USAGE_RULES`, `## ANSWER_COMPLIANCE_CHECKLIST`, `## DO_NOT_CLAIM`,
+  `## TOP_CHUNK_SPANS`, `## EPISTEMIC_EMPTINESS`
 - Governance-Block in `## TOP_CHUNK_SPANS`: maschinenlesbares JSON mit `applies_to: TOP_CHUNK_SPANS`,
   `risk_class: navigation`, `may_cite: false`, `must_resolve_to: role_specific_authority`,
   `does_not_prove: [semantic_importance, architecture_truth, complete_context]`
@@ -75,7 +77,7 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
 - `HOW_TO_SEARCH` rendert `range get --manifest "<…>.bundle.manifest.json"` (nicht `dump_index`/`canonical_md`),
   da der Pack aus dem Bundle-Manifest erzeugt wird und dieses die natürliche Auflösungsbasis ist
   (Test `test_how_to_search_resolves_range_against_bundle_manifest`).
-- `OUTPUT_HEALTH_SUMMARY` weist transparent aus, dass `agent_pack_present` in v1 `skipped` sein kann.
+- `OUTPUT_HEALTH_SUMMARY` weist transparent aus, dass `agent_pack_present` in v1.1 `skipped` sein kann.
   Grund: In der Pipeline wird `output_health` **vor** der Pack-Emission berechnet — der In-Pipeline-Health-Report
   kann das Artefakt, das er zeitlich vorausläuft, strukturell **nicht** belegen (kein Hellsehen über noch nicht
   geschriebene Dateien). `pass`/`warning`/`fail` für `agent_pack_present` kann nur ein **Post-hoc-Lauf** liefern:
@@ -86,9 +88,32 @@ python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.jso
 - `agent-pack produce … --json` Exit-Code: **0**, `status=ok`.
 - Fehlendes Manifest: Exit-Code **2**, `error_kind=path_read_error`.
 
+## Front-Door Hardening v1.1
+
+This slice adds task-specific required reading, canonical-md-only insufficiency
+boundaries, sidecar usage rules, an answer-compliance declaration checklist and
+prohibited claim classes to the existing Agent Reading Pack.
+
+The Agent Reading Pack remains navigation only (`authority=navigation_index`,
+`canonicality=derived`). `canonical_md` remains the only content truth. This
+slice does not add schemas, sidecars, health gates, retrieval ranking,
+consumption tracing or LLM/embedding dependencies.
+
+Does not establish: answer correctness, repo understanding, claim truth, test
+sufficiency, runtime correctness, review completeness or forensic readiness.
+
+Targeted verification for this slice:
+
+```bash
+python -m pytest merger/lenskit/tests/test_agent_reading_pack.py merger/lenskit/tests/test_cli_agent_pack.py
+```
+
+Result: **50 passed**. The environment also reported one non-failing pytest
+configuration warning for the unknown `asyncio_mode` option.
+
 ## Tests
 
-- `merger/lenskit/tests/test_agent_reading_pack.py` — 24 Tests (Producer, Determinismus, Härtung, Output-Kollisionsschutz, Soft-invalid-Rendering, pure Funktionen).
+- `merger/lenskit/tests/test_agent_reading_pack.py` — 46 Tests (Producer, Determinismus, Härtung, Output-Kollisionsschutz, Soft-invalid-Rendering, pure Funktionen).
 - `merger/lenskit/tests/test_cli_agent_pack.py` — CLI-Smoke.
 - `merger/lenskit/tests/test_bundle_manifest_integration.py::test_agent_reading_pack_emitted_schema_valid_and_hashed` — Pipeline-Emission + Schema + Hash.
 - `merger/lenskit/tests/test_output_health.py` — `agent_pack_present` Parametrisierung (skipped/pass/warning).

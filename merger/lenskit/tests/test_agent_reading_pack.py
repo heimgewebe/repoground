@@ -25,6 +25,16 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _section(body: str, heading: str) -> str:
+    match = re.search(
+        rf"^## {re.escape(heading)}\n(.*?)(?=^## |\Z)",
+        body,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, f"missing section {heading}"
+    return match.group(1)
+
+
 _CANONICAL = (
     b"<!-- merge -->\n"
     b"# repo: demo\n\n"
@@ -258,11 +268,16 @@ def test_pack_has_governance_and_sentinel(tmp_path):
     report = produce_agent_reading_pack(str(manifest))
     body = Path(report["output_path"]).read_text(encoding="utf-8")
 
-    assert body.startswith("<!-- ARTIFACT:agent_reading_pack VERSION:v1")
+    assert body.startswith("<!-- ARTIFACT:agent_reading_pack VERSION:v1.1")
     assert "NAVIGATION, NOT TRUTH" in body
     for section in (
         "## BUNDLE_IDENTITY",
         "## READING_POLICY",
+        "## REQUIRED_READING_BY_TASK",
+        "## WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT",
+        "## SIDECAR_USAGE_RULES",
+        "## ANSWER_COMPLIANCE_CHECKLIST",
+        "## DO_NOT_CLAIM",
         "## ARTIFACT_ROLES",
         "## OUTPUT_HEALTH_SUMMARY",
         "## HOW_TO_SEARCH",
@@ -270,6 +285,88 @@ def test_pack_has_governance_and_sentinel(tmp_path):
         "## EPISTEMIC_EMPTINESS",
     ):
         assert section in body, f"missing section {section}"
+
+
+def test_pack_front_door_task_profiles_and_artifact_roles(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+
+    for task_profile in (
+        "basic_repo_question",
+        "pr_review",
+        "roadmap_status_claim",
+        "artifact_surface_review",
+        "retrieval_quality_review",
+    ):
+        assert f"`{task_profile}`" in body
+
+    for role in (
+        "canonical_md",
+        "citation_map_jsonl",
+        "claim_evidence_map_json",
+        "post_emit_health",
+        "bundle_surface_validation",
+        "output_health",
+        "retrieval_eval_json",
+        "chunk_index_jsonl",
+        "sqlite_index",
+    ):
+        assert f"`{role}`" in body
+
+
+def test_pack_front_door_preserves_authority_boundaries(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+
+    assert "The only source of truth is `canonical_md`" in body
+    assert "authority=navigation_index" in body
+    assert "canonicality=derived" in body
+    assert "`claim_evidence_map_json` is an evidence-navigation index, not truth" in body
+    assert "`post_emit_health` is post-emit surface diagnosis, not repo understanding" in body
+    assert "`bundle_surface_validation` is surface coherence validation, not claim truth" in body
+    assert "`output_health` is a pre-/emit diagnostic signal" in body
+    assert "`sqlite_index` is runtime cache/search support, not authority" in body
+
+
+def test_pack_do_not_claim_lists_prohibited_claim_classes(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    section = _section(body, "DO_NOT_CLAIM")
+
+    for claim_class in (
+        "repo_understood",
+        "claims_true",
+        "answer_safe_without_citations",
+        "test_sufficiency",
+        "runtime_correctness",
+        "review_complete",
+        "forensic_ready",
+        "all_relevant_context_used",
+        "regression_absence",
+    ):
+        assert f"`{claim_class}`" in section
+
+    assert "health reports" in section
+    assert "surface validation" in section
+    assert "sidecars do not prove" in section
+
+
+def test_pack_answer_compliance_checklist_is_declarative(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+
+    assert "Lenskit consumption:" in body
+    for field in (
+        "task_profile",
+        "required_artifacts_checked",
+        "sidecars_used",
+        "canonical_ranges_or_citations_used",
+        "sidecars_not_used_and_why",
+        "epistemic_gaps",
+        "does_not_establish",
+    ):
+        assert f"- {field}:" in body
+    assert "declaration aid, not proof" in body
 
 
 def test_pack_lists_present_artifact_roles(tmp_path):

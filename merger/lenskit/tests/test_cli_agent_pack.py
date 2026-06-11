@@ -67,7 +67,17 @@ def test_cli_agent_pack_json_ok(tmp_path, capsys):
     assert rc == 0
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "ok"
-    assert Path(report["output_path"]).exists()
+    output_path = Path(report["output_path"])
+    assert output_path.exists()
+    body = output_path.read_text(encoding="utf-8")
+    for section in (
+        "## REQUIRED_READING_BY_TASK",
+        "## WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT",
+        "## SIDECAR_USAGE_RULES",
+        "## ANSWER_COMPLIANCE_CHECKLIST",
+        "## DO_NOT_CLAIM",
+    ):
+        assert section in body
 
 
 def test_cli_agent_pack_human_ok(tmp_path, capsys):

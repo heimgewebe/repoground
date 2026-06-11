@@ -44,7 +44,7 @@ from .constants import ArtifactRole
 from .path_security import resolve_secure_path
 
 PRODUCED_BY = "agent_reading_pack_producer/v1"
-PACK_VERSION = "v1"
+PACK_VERSION = "v1.1"
 TOP_CHUNK_SPAN_LIMIT = 30
 
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -429,6 +429,107 @@ def render_agent_reading_pack(model: PackModel) -> str:
     for role in present_roles:
         guide = _ROLE_GUIDE.get(role, "see artifact role table below")
         lines.append(f"- `{role}` — {guide}")
+    lines.append("")
+
+    # ── REQUIRED_READING_BY_TASK ─────────────────────────────────────────
+    lines.append("## REQUIRED_READING_BY_TASK")
+    lines.append(
+        "Choose the task profile that matches the claim. Required artifacts are "
+        "profile-specific; sidecars remain navigation or diagnosis, not content truth."
+    )
+    lines.append("| task_profile | required | recommended | insufficient |")
+    lines.append("| --- | --- | --- | --- |")
+    lines.append(
+        "| `basic_repo_question` | `agent_reading_pack`, `canonical_md` | "
+        "`citation_map_jsonl` when making specific cited claims | "
+        "sidecar-only claims without canonical verification |"
+    )
+    lines.append(
+        "| `pr_review` | `agent_reading_pack`, `canonical_md`, `citation_map_jsonl`, "
+        "`post_emit_health` | `claim_evidence_map_json` when roadmap/status claims are "
+        "involved; `bundle_surface_validation` when bundle/surface claims are involved | "
+        "only reading `canonical_md` linearly; relying on a health pass as review completeness |"
+    )
+    lines.append(
+        "| `roadmap_status_claim` | `agent_reading_pack`, `canonical_md`, "
+        "`claim_evidence_map_json` | `citation_map_jsonl` | roadmap status without the "
+        "Claim Evidence Map or a canonical check |"
+    )
+    lines.append(
+        "| `artifact_surface_review` | `bundle_manifest`, `post_emit_health`, "
+        "`bundle_surface_validation`, `canonical_md` | `output_health` | "
+        "`output_health` alone; any health pass treated as claim truth |"
+    )
+    lines.append(
+        "| `retrieval_quality_review` | `retrieval_eval_json`, `chunk_index_jsonl`, "
+        "`sqlite_index`, `canonical_md` | `docs/retrieval/*` | impressionistic retrieval "
+        "claims without metrics |"
+    )
+    lines.append("")
+
+    # ── WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT ───────────────────────────
+    lines.append("## WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT")
+    lines.append(
+        "`canonical_md` contains the content truth, but some tasks require sidecars to "
+        "locate, validate or diagnose the relevant evidence surface."
+    )
+    lines.append("Additional role-appropriate artifacts are needed for:")
+    lines.append("- PR review with evidence requirements.")
+    lines.append("- Roadmap or status claims.")
+    lines.append("- Bundle or surface health assessment.")
+    lines.append("- Retrieval quality assessment.")
+    lines.append("- Citation or range readiness claims.")
+    lines.append("- Claims about present or missing sidecars.")
+    lines.append("- Claims about artifact authority, canonicality or risk class.")
+    lines.append("")
+
+    # ── SIDECAR_USAGE_RULES ──────────────────────────────────────────────
+    lines.append("## SIDECAR_USAGE_RULES")
+    lines.append("- Sidecars are navigation, diagnostic signals, indexes or caches; they are not content truth.")
+    lines.append("- Content claims must resolve back to `canonical_md`, the only content truth.")
+    lines.append("- `citation_map_jsonl` maps stable citation IDs to canonical ranges.")
+    lines.append("- `claim_evidence_map_json` is an evidence-navigation index, not truth.")
+    lines.append("- `post_emit_health` is post-emit surface diagnosis, not repo understanding.")
+    lines.append("- `bundle_surface_validation` is surface coherence validation, not claim truth.")
+    lines.append(
+        "- `output_health` is a pre-/emit diagnostic signal and must not be read as "
+        "forensic readiness."
+    )
+    lines.append("- `sqlite_index` is runtime cache/search support, not authority.")
+    lines.append("")
+
+    # ── ANSWER_COMPLIANCE_CHECKLIST ──────────────────────────────────────
+    lines.append("## ANSWER_COMPLIANCE_CHECKLIST")
+    lines.append("```text")
+    lines.append("Lenskit consumption:")
+    lines.append("- task_profile:")
+    lines.append("- required_artifacts_checked:")
+    lines.append("- sidecars_used:")
+    lines.append("- canonical_ranges_or_citations_used:")
+    lines.append("- sidecars_not_used_and_why:")
+    lines.append("- epistemic_gaps:")
+    lines.append("- does_not_establish:")
+    lines.append("```")
+    lines.append(
+        "This checklist is a declaration aid, not proof that the agent actually read or "
+        "understood the artifacts."
+    )
+    lines.append("")
+
+    # ── DO_NOT_CLAIM ─────────────────────────────────────────────────────
+    lines.append("## DO_NOT_CLAIM")
+    lines.append("The Agent Reading Pack, health reports, surface validation and sidecars do not prove:")
+    lines.append("- `repo_understood` — navigation or a health pass does not prove repo understanding.")
+    lines.append("- `claims_true` — indexes and surface checks do not prove content claims true.")
+    lines.append(
+        "- `answer_safe_without_citations` — artifact presence does not make citations unnecessary."
+    )
+    lines.append("- `test_sufficiency` — located tests do not prove sufficient coverage.")
+    lines.append("- `runtime_correctness` — static artifacts do not prove runtime behavior.")
+    lines.append("- `review_complete` — reading guidance or health passes do not complete a review.")
+    lines.append("- `forensic_ready` — diagnostic passes do not establish forensic readiness.")
+    lines.append("- `all_relevant_context_used` — sidecar use does not prove complete context use.")
+    lines.append("- `regression_absence` — these artifacts do not prove that regressions are absent.")
     lines.append("")
 
     # ── ARTIFACT_ROLES ───────────────────────────────────────────────────
