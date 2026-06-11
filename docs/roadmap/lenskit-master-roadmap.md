@@ -133,6 +133,11 @@ Spätere PRs:
   (`pass|warn|blocked|fail`) und bleibt bewusst ohne CI-Promotion; F2c
   kalibriert diese Diagnose nicht-blockierend gegen reale lokale Bundle-Läufe
   (`docs/proofs/forensic-preflight-calibration-proof.md`)
+- Agent Front-Door Hardening ist als gestufter, docs-first Pfad registriert:
+  `docs/blueprints/lenskit-agent-front-door-hardening.md`. Zuerst wird das bestehende
+  Agent Reading Pack aufgabenspezifisch gehärtet; Consumption-Contracts, zusätzliche
+  Sidecars und deterministisches Retrieval v2 bleiben spätere, bedingte Slices.
+  Nächster Umsetzungsslice: `TASK-AGENT-FRONTDOOR-001` — Agent Reading Pack v1.1.
 Gate:
 - Evidence refs validierbar
 - Unsicherheit und Provenance sichtbar

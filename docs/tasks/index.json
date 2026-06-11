@@ -1,6 +1,16 @@
 {
   "tasks": [
     {
+      "id": "TASK-AGENT-FRONTDOOR-001",
+      "title": "Agent Reading Pack v1.1 Front-Door Hardening",
+      "status": "open",
+      "description": "Plan and implement the first bounded slice of the Lenskit agent front-door hardening roadmap: make task-specific required reading, canonical-only insufficiency, sidecar usage boundaries, answer-compliance prompts and prohibited claims visible in the existing Agent Reading Pack. The registered blueprint sequences later usage smoke, retrieval goldset, optional contracts, lens/facet/card work and deterministic retrieval v2 without promoting sidecars or health results to truth. This task is currently planning-only; no producer, pipeline, schema, health or runtime change is part of the blueprint PR.",
+      "evidence": [
+        "docs/blueprints/lenskit-agent-front-door-hardening.md",
+        "docs/roadmap/lenskit-master-roadmap.md"
+      ]
+    },
+    {
       "id": "TASK-SERVICE-003B",
       "title": "rLens Source Acquisition Control-Plane Hardening",
       "status": "done",
