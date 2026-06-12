@@ -3,11 +3,23 @@
     {
       "id": "TASK-AGENT-FRONTDOOR-001",
       "title": "Agent Reading Pack v1.1 Front-Door Hardening",
-      "status": "open",
-      "description": "Track the first implementation slice following the registered Lenskit agent front-door hardening blueprint: update the existing Agent Reading Pack with task-specific required reading, canonical-only insufficiency boundaries, sidecar usage rules, answer-compliance prompts and prohibited claims. The current planning PR only registers the blueprint and roadmap/task references; the task remains open and implementation must follow in a separate PR. Slice 1 must not include new sidecars, schemas, health/surface promotion, pipeline mutation or retrieval-v2 work.",
+      "status": "done",
+      "description": "Implement Agent Reading Pack v1.1 front-door hardening with task-specific required reading, canonical-only insufficiency boundaries, sidecar usage rules, answer-compliance prompts and prohibited claims. The pack remains a derived navigation index; canonical_md remains the only content truth.",
       "evidence": [
-        "docs/blueprints/lenskit-agent-front-door-hardening.md",
-        "docs/roadmap/lenskit-master-roadmap.md"
+        "merger/lenskit/core/agent_reading_pack.py",
+        "merger/lenskit/tests/test_agent_reading_pack.py",
+        "merger/lenskit/tests/test_bundle_surface_validate.py",
+        "docs/proofs/agent-reading-pack-producer-proof.md"
+      ]
+    },
+    {
+      "id": "TASK-AGENT-FRONTDOOR-002",
+      "title": "Agent-Pack-Usage Smoke",
+      "status": "done",
+      "description": "Added a deterministic producer-level smoke test for the Agent Reading Pack v1.1 task-to-artifact usage matrix, canonical-only insufficiency rules and sidecar authority boundaries. No schema, CLI command or producer behavior was added.",
+      "evidence": [
+        "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py",
+        "docs/blueprints/lenskit-agent-front-door-hardening.md"
       ]
     },
     {
