@@ -195,13 +195,14 @@ def _range_ref_check(
     chunk_index_path: Optional[Path],
 ) -> Tuple[Optional[bool], List[str], str, Dict[str, str]]:
     """
-    Find one chunk with content_range_ref and attempt resolution.
+    Find one chunk with canonical_range (or legacy content_range_ref) and attempt
+    resolution.
 
     Returns (ok, messages, status, validation) where:
       ok=True,  status="ok"               — at least one ref resolved successfully
       ok=False, status="fail"             — real semantic / structural failure
       ok=None,  status="environment_error"— jsonschema not installed; check not executable
-      ok=None,  status="no_range_ref"     — no content_range_ref found (inline-only bundle)
+      ok=None,  status="no_range_ref"     — no range reference found (inline-only bundle)
       ok=None,  status="unavailable"      — required input file missing
 
     messages go to errors when ok=False, to warnings otherwise.
@@ -226,7 +227,9 @@ def _range_ref_check(
                     continue
                 if not isinstance(chunk, dict):
                     continue
-                raw_ref = chunk.get("content_range_ref")
+                raw_ref = chunk.get("canonical_range")
+                if raw_ref is None:
+                    raw_ref = chunk.get("content_range_ref")
                 if raw_ref is not None:
                     if isinstance(raw_ref, str):
                         try:
@@ -234,7 +237,7 @@ def _range_ref_check(
                         except json.JSONDecodeError as e:
                             return (
                                 False,
-                                [f"invalid content_range_ref JSON string: {e}"],
+                                [f"invalid range reference JSON string: {e}"],
                                 "fail",
                                 _range_ref_validation(
                                     "structural_precheck", "malformed_range_ref"
@@ -243,7 +246,7 @@ def _range_ref_check(
                     if not isinstance(raw_ref, dict):
                         return (
                             False,
-                            [f"content_range_ref must be an object, got {type(raw_ref).__name__}"],
+                            [f"range reference must be an object, got {type(raw_ref).__name__}"],
                             "fail",
                             _range_ref_validation(
                                 "structural_precheck", "malformed_range_ref"
@@ -257,7 +260,7 @@ def _range_ref_check(
     if sample_ref is None:
         # No range_ref present in any chunk; this is normal for inline-only bundles
         # but should be flagged as a non-blocking issue
-        return None, ["no content_range_ref found; range_ref check skipped"], "no_range_ref", not_applicable
+        return None, ["no range reference found; range_ref check skipped"], "no_range_ref", not_applicable
 
     try:
         from .range_resolver import resolve_range_ref
