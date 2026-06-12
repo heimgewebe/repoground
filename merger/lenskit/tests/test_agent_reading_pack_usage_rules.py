@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 from merger.lenskit.core.agent_reading_pack import produce_agent_reading_pack
 from merger.lenskit.tests.test_agent_reading_pack import _make_bundle
 
@@ -40,25 +42,33 @@ def _row_for_profile(body: str, profile: str) -> dict[str, str]:
     raise AssertionError(f"missing task profile row: {profile}")
 
 
-def _pack_text(tmp_path: Path) -> str:
+def _assert_meaningful_cell(value: str, *, field: str, profile: str) -> None:
+    normalized = value.strip().lower()
+    assert normalized not in {"", "-", "n/a", "none", "false", "0"}, (
+        f"{profile}.{field} is not meaningful: {value!r}"
+    )
+
+
+@pytest.fixture(scope="module")
+def pack_text(tmp_path_factory: pytest.TempPathFactory) -> str:
+    tmp_path = tmp_path_factory.mktemp("agent-pack-usage-smoke")
     manifest = _make_bundle(tmp_path)
     report = produce_agent_reading_pack(str(manifest))
     assert report["status"] == "ok"
     return Path(report["output_path"]).read_text(encoding="utf-8")
 
 
-def test_agent_pack_usage_profiles_are_complete(tmp_path):
-    body = _pack_text(tmp_path)
+def test_agent_pack_usage_profiles_are_complete(pack_text: str) -> None:
+    body = pack_text
 
     for profile in _TASK_PROFILES:
         row = _row_for_profile(body, profile)
-        assert row["required"]
-        assert row["recommended"]
-        assert row["insufficient"]
+        for field in ("required", "recommended", "insufficient"):
+            _assert_meaningful_cell(row[field], field=field, profile=profile)
 
 
-def test_agent_pack_usage_profiles_require_expected_sidecars(tmp_path):
-    body = _pack_text(tmp_path)
+def test_agent_pack_usage_profiles_require_expected_sidecars(pack_text: str) -> None:
+    body = pack_text
 
     expected_required = {
         "pr_review": {"citation_map_jsonl"},
@@ -72,8 +82,10 @@ def test_agent_pack_usage_profiles_require_expected_sidecars(tmp_path):
             assert f"`{role}`" in required
 
 
-def test_canonical_only_insufficiency_is_explicit_for_heavy_profiles(tmp_path):
-    body = _pack_text(tmp_path)
+def test_canonical_only_insufficiency_is_explicit_for_heavy_profiles(
+    pack_text: str,
+) -> None:
+    body = pack_text
     section = _section(body, "WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT")
 
     assert "`canonical_md` contains the content truth, but some tasks require sidecars" in section
@@ -86,11 +98,15 @@ def test_canonical_only_insufficiency_is_explicit_for_heavy_profiles(tmp_path):
         assert task_boundary in section
 
     for profile in _TASK_PROFILES[1:]:
-        assert _row_for_profile(body, profile)["insufficient"]
+        _assert_meaningful_cell(
+            _row_for_profile(body, profile)["insufficient"],
+            field="insufficient",
+            profile=profile,
+        )
 
 
-def test_agent_pack_usage_rules_preserve_authority_boundaries(tmp_path):
-    body = _pack_text(tmp_path)
+def test_agent_pack_usage_rules_preserve_authority_boundaries(pack_text: str) -> None:
+    body = pack_text
     section = _section(body, "SIDECAR_USAGE_RULES")
 
     assert "Sidecars are navigation, diagnostic signals, indexes or caches" in section
@@ -104,8 +120,8 @@ def test_agent_pack_usage_rules_preserve_authority_boundaries(tmp_path):
     assert "`bundle_surface_validation` is surface coherence validation, not claim truth" in section
 
 
-def test_basic_repo_question_stays_lightweight(tmp_path):
-    body = _pack_text(tmp_path)
+def test_basic_repo_question_stays_lightweight(pack_text: str) -> None:
+    body = pack_text
     row = _row_for_profile(body, "basic_repo_question")
 
     assert "`canonical_md`" in row["required"]
