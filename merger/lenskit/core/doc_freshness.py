@@ -484,9 +484,183 @@ def load_registry(path: Path) -> dict:
     return data
 
 
+_REGISTRY_TOP_LEVEL_KEYS = frozenset(
+    {"kind", "version", "authority", "risk_class", "does_not_prove", "entries"}
+)
+_REGISTRY_ENTRY_KEYS = frozenset(
+    {
+        "id",
+        "doc",
+        "locator",
+        "claim",
+        "status",
+        "normative",
+        "owner",
+        "last_verified",
+        "evidence",
+        "notes",
+    }
+)
+_REGISTRY_EVIDENCE_KEYS = frozenset({"kind", "target", "implies"})
+_REGISTRY_ENTRY_REQUIRED = frozenset(
+    {"id", "doc", "claim", "status", "owner", "last_verified", "evidence"}
+)
+_REGISTRY_EVIDENCE_REQUIRED = frozenset({"kind", "target"})
+_REGISTRY_STATUSES = frozenset({"none", "partial", "done", "stale", "historical"})
+_REGISTRY_EVIDENCE_KINDS = frozenset(
+    {"symbol", "file", "text", "absent_text", "proof", "test"}
+)
+_REGISTRY_EVIDENCE_IMPLIES = frozenset({"done", "open"})
+_REGISTRY_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_REGISTRY_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_registry_minimal(data: dict) -> list[str]:
+    """Return structural registry errors when ``jsonschema`` is unavailable.
+
+    This dependency-free fallback covers the contract structure required to
+    produce a claim-evidence map in constrained runtimes such as Pythonista/iOS.
+    It intentionally is not a complete JSON Schema implementation; runtimes
+    with ``jsonschema`` installed continue to perform full Draft 7 validation.
+    """
+    errors: list[str] = []
+    if not isinstance(data, dict):
+        return ["[<root>] must be an object"]
+
+    for key in sorted(set(data) - _REGISTRY_TOP_LEVEL_KEYS):
+        errors.append(f"[<root>] unknown field: {key}")
+
+    for field_name in ("kind", "version", "entries"):
+        if field_name not in data:
+            errors.append(f"[<root>] missing required field: {field_name}")
+
+    if "kind" in data and data["kind"] != "lenskit.doc_freshness_registry":
+        errors.append("[kind] must equal lenskit.doc_freshness_registry")
+    if "version" in data and data["version"] != "1.0":
+        errors.append("[version] must equal 1.0")
+    if "authority" in data and data["authority"] != "diagnostic_signal":
+        errors.append("[authority] must equal diagnostic_signal")
+    if "risk_class" in data and data["risk_class"] != "diagnostic":
+        errors.append("[risk_class] must equal diagnostic")
+
+    if "does_not_prove" in data:
+        does_not_prove = data["does_not_prove"]
+        if not isinstance(does_not_prove, list) or not all(
+            isinstance(item, str) for item in does_not_prove
+        ):
+            errors.append("[does_not_prove] must be a list of strings")
+
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        if "entries" in data:
+            errors.append("[entries] must be a list")
+        return errors
+
+    for entry_index, entry in enumerate(entries):
+        entry_path = f"entries.{entry_index}"
+        if not isinstance(entry, dict):
+            errors.append(f"[{entry_path}] must be an object")
+            continue
+
+        for key in sorted(set(entry) - _REGISTRY_ENTRY_KEYS):
+            errors.append(f"[{entry_path}] unknown field: {key}")
+        for field_name in sorted(_REGISTRY_ENTRY_REQUIRED - set(entry)):
+            errors.append(f"[{entry_path}] missing required field: {field_name}")
+
+        entry_id = entry.get("id")
+        if "id" in entry and (
+            not isinstance(entry_id, str)
+            or _REGISTRY_ID_PATTERN.fullmatch(entry_id) is None
+        ):
+            errors.append(f"[{entry_path}.id] must match ^[a-z0-9][a-z0-9-]*$")
+
+        for field_name in ("doc", "claim", "owner"):
+            if field_name in entry and (
+                not isinstance(entry[field_name], str) or not entry[field_name]
+            ):
+                errors.append(
+                    f"[{entry_path}.{field_name}] must be a non-empty string"
+                )
+
+        status = entry.get("status")
+        if "status" in entry:
+            if not isinstance(status, str):
+                errors.append(f"[{entry_path}.status] must be a string")
+            elif status not in _REGISTRY_STATUSES:
+                errors.append(f"[{entry_path}.status] invalid status: {status}")
+
+        last_verified = entry.get("last_verified")
+        if "last_verified" in entry and (
+            not isinstance(last_verified, str)
+            or _REGISTRY_DATE_PATTERN.fullmatch(last_verified) is None
+        ):
+            errors.append(f"[{entry_path}.last_verified] must match YYYY-MM-DD")
+
+        if "normative" in entry and not isinstance(entry["normative"], bool):
+            errors.append(f"[{entry_path}.normative] must be a boolean")
+        for field_name in ("locator", "notes"):
+            if field_name in entry and not isinstance(entry[field_name], str):
+                errors.append(f"[{entry_path}.{field_name}] must be a string")
+
+        evidence = entry.get("evidence")
+        if not isinstance(evidence, list):
+            if "evidence" in entry:
+                errors.append(f"[{entry_path}.evidence] must be a list")
+            continue
+        if not evidence:
+            errors.append(f"[{entry_path}.evidence] must not be empty")
+
+        for evidence_index, evidence_item in enumerate(evidence):
+            evidence_path = f"{entry_path}.evidence.{evidence_index}"
+            if not isinstance(evidence_item, dict):
+                errors.append(f"[{evidence_path}] must be an object")
+                continue
+
+            for key in sorted(set(evidence_item) - _REGISTRY_EVIDENCE_KEYS):
+                errors.append(f"[{evidence_path}] unknown field: {key}")
+            for field_name in sorted(
+                _REGISTRY_EVIDENCE_REQUIRED - set(evidence_item)
+            ):
+                errors.append(
+                    f"[{evidence_path}] missing required field: {field_name}"
+                )
+
+            kind = evidence_item.get("kind")
+            if "kind" in evidence_item:
+                if not isinstance(kind, str):
+                    errors.append(f"[{evidence_path}.kind] must be a string")
+                elif kind not in _REGISTRY_EVIDENCE_KINDS:
+                    errors.append(f"[{evidence_path}.kind] invalid kind: {kind}")
+
+            target = evidence_item.get("target")
+            if "target" in evidence_item and (
+                not isinstance(target, str) or not target
+            ):
+                errors.append(f"[{evidence_path}.target] must be a non-empty string")
+
+            implies = evidence_item.get("implies")
+            if "implies" in evidence_item:
+                if not isinstance(implies, str):
+                    errors.append(f"[{evidence_path}.implies] must be a string")
+                elif implies not in _REGISTRY_EVIDENCE_IMPLIES:
+                    errors.append(f"[{evidence_path}.implies] invalid implies: {implies}")
+
+    return errors
+
+
 def validate_registry(data: dict, schema_path: Path) -> list[str]:
-    """Return schema-validation errors (empty == valid)."""
-    import jsonschema
+    """Return registry-validation errors (empty means valid).
+
+    Full Draft 7 validation is used when ``jsonschema`` is available. Constrained
+    runtimes without that optional dependency use a deliberately limited,
+    dependency-free structural validator instead.
+    """
+    try:
+        import jsonschema
+    except ModuleNotFoundError as exc:
+        if exc.name != "jsonschema":
+            raise
+        return _validate_registry_minimal(data)
 
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     validator = jsonschema.Draft7Validator(schema)

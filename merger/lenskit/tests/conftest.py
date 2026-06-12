@@ -1,8 +1,16 @@
+from pathlib import Path
+import shutil
+import sys
+import tempfile
 
 import pytest
-import shutil
-import tempfile
-from pathlib import Path
+
+
+@pytest.fixture
+def no_jsonschema(monkeypatch):
+    """Simulate an environment where importing jsonschema fails."""
+    monkeypatch.setitem(sys.modules, "jsonschema", None)
+
 
 @pytest.fixture
 def service_client():
