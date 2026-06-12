@@ -1,0 +1,262 @@
+[
+  {
+    "query": "Find the Agent Reading Pack producer and its primary tests",
+    "category": "agent_pack",
+    "expected_patterns": [
+      "merger/lenskit/core/agent_reading_pack.py",
+      "merger/lenskit/tests/test_agent_reading_pack.py",
+      "produce_agent_reading_pack"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the Agent Reading Pack task-profile usage rules",
+    "category": "agent_pack",
+    "expected_patterns": [
+      "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py",
+      "REQUIRED_READING_BY_TASK"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find claim-to-evidence map production, tests, and contract",
+    "category": "claim_evidence",
+    "expected_patterns": [
+      "merger/lenskit/core/claim_evidence_map.py",
+      "merger/lenskit/tests/test_claim_evidence_map.py",
+      "merger/lenskit/contracts/claim-evidence-map.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find citation map production, producer tests, and schema",
+    "category": "citation_map",
+    "expected_patterns": [
+      "merger/lenskit/core/citation_map.py",
+      "merger/lenskit/tests/test_citation_map_producer.py",
+      "merger/lenskit/contracts/citation-map.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find post-emit health checks, tests, and contract",
+    "category": "post_emit_health",
+    "expected_patterns": [
+      "merger/lenskit/core/post_emit_health.py",
+      "merger/lenskit/tests/test_post_emit_health.py",
+      "merger/lenskit/contracts/post-emit-health.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find bundle surface validation implementation, tests, and contract",
+    "category": "bundle_surface",
+    "expected_patterns": [
+      "merger/lenskit/core/bundle_surface_validate.py",
+      "merger/lenskit/tests/test_bundle_surface_validate.py",
+      "merger/lenskit/contracts/bundle-surface-validation.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the bundle manifest contract and its integration and schema tests",
+    "category": "bundle_manifest",
+    "expected_patterns": [
+      "merger/lenskit/contracts/bundle-manifest.v1.schema.json",
+      "merger/lenskit/tests/test_bundle_manifest_integration.py",
+      "merger/lenskit/tests/test_bundle_manifest_schema.py"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval evaluation metrics implementation, tests, and output contract",
+    "category": "retrieval",
+    "expected_patterns": [
+      "merger/lenskit/retrieval/eval_core.py",
+      "merger/lenskit/tests/test_retrieval_eval.py",
+      "merger/lenskit/contracts/retrieval-eval.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval miss diagnostics implementation and tests",
+    "category": "retrieval",
+    "expected_patterns": [
+      "merger/lenskit/retrieval/eval_diagnostics.py",
+      "merger/lenskit/tests/test_retrieval_eval_diagnostics.py",
+      "miss_taxonomy"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval router selection logic and router tests",
+    "category": "router",
+    "expected_patterns": [
+      "merger/lenskit/retrieval/router.py",
+      "merger/lenskit/tests/test_router.py",
+      "route_query"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the Lenskit query CLI command and its registration",
+    "category": "cli",
+    "expected_patterns": [
+      "merger/lenskit/cli/cmd_query.py",
+      "merger/lenskit/cli/main.py",
+      "run_query"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the Lenskit retrieval eval CLI command and its registration",
+    "category": "cli",
+    "expected_patterns": [
+      "merger/lenskit/cli/cmd_eval.py",
+      "merger/lenskit/cli/main.py",
+      "run_eval"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the contracts inventory and contracts matrix documentation",
+    "category": "contracts",
+    "expected_patterns": [
+      "merger/lenskit/contracts/",
+      "docs/contracts/contracts-matrix.md"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval and evidence JSON contracts used during review",
+    "category": "contracts",
+    "expected_patterns": [
+      "merger/lenskit/contracts/retrieval-eval.v1.schema.json",
+      "merger/lenskit/contracts/claim-evidence-map.v1.schema.json",
+      "merger/lenskit/contracts/citation-map.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find repository path security enforcement and merge security tests",
+    "category": "security",
+    "expected_patterns": [
+      "merger/lenskit/core/path_security.py",
+      "merger/lenskit/tests/test_merge_security.py",
+      "safe_join"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find service artifact path security coverage",
+    "category": "security",
+    "expected_patterns": [
+      "merger/lenskit/tests/test_service_artifact_security.py",
+      "artifact_path"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find source acquisition implementation, tests, and report contract",
+    "category": "source_acquisition",
+    "expected_patterns": [
+      "merger/lenskit/service/source_acquisition.py",
+      "merger/lenskit/tests/test_source_acquisition.py",
+      "merger/lenskit/contracts/source-acquisition-report.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find PR-Schau bundle production, verification, tests, and contract",
+    "category": "pr_schau",
+    "expected_patterns": [
+      "merger/lenskit/core/pr_schau_bundle.py",
+      "merger/lenskit/cli/pr_schau_verify.py",
+      "merger/lenskit/tests/test_pr_schau_verify_units.py",
+      "merger/lenskit/contracts/pr-schau.v1.schema.json"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find range reference resolution, tests, and both contract versions",
+    "category": "range_ref",
+    "expected_patterns": [
+      "merger/lenskit/core/range_resolver.py",
+      "merger/lenskit/tests/test_range_resolver.py",
+      "merger/lenskit/contracts/range-ref.v1.schema.json",
+      "merger/lenskit/contracts/range-ref.v2.schema.json",
+      "range_ref_resolution"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find lens selection implementation and tests",
+    "category": "lenses",
+    "expected_patterns": [
+      "merger/lenskit/core/lenses.py",
+      "merger/lenskit/tests/test_lenses.py",
+      "infer_lens"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  }
+]

@@ -23,6 +23,31 @@
       ]
     },
     {
+      "id": "TASK-AGENT-FRONTDOOR-003",
+      "title": "Retrieval Review Structural Goldset v1",
+      "status": "done",
+      "description": "Completed the structural review retrieval goldset subtask with 20 versioned queries, all 15 blueprint categories, loader-compatible metadata, and static structure and target validation. The reproducible metric baseline, expected-target hit reporting, and miss diagnostics required by the full blueprint slice remain open in TASK-AGENT-FRONTDOOR-004.",
+      "evidence": [
+        "docs/retrieval/review_queries.v1.json",
+        "merger/lenskit/tests/test_review_retrieval_goldset.py",
+        "docs/diagnostics/review-retrieval-baseline.md"
+      ]
+    },
+    {
+      "id": "TASK-AGENT-FRONTDOOR-004",
+      "title": "Retrieval Review Metric Baseline + Miss Diagnostics",
+      "status": "open",
+      "description": "Wire the structural review retrieval goldset into reproducible baseline metrics and miss diagnostics. Expected outputs include recall@10, MRR, category recall, zero-hit-rate, expected-target hit reporting, and a miss taxonomy/reporting path reconciled with the existing retrieval taxonomy. This follows TASK-AGENT-FRONTDOOR-003, which only completed the structural goldset baseline; ranking improvements remain a separate later slice.",
+      "evidence": [
+        "docs/retrieval/review_queries.v1.json",
+        "docs/diagnostics/review-retrieval-baseline.md",
+        "merger/lenskit/retrieval/eval_core.py",
+        "merger/lenskit/retrieval/eval_diagnostics.py",
+        "merger/lenskit/tests/test_retrieval_eval.py",
+        "merger/lenskit/tests/test_retrieval_eval_diagnostics.py"
+      ]
+    },
+    {
       "id": "TASK-SERVICE-003B",
       "title": "rLens Source Acquisition Control-Plane Hardening",
       "status": "done",
