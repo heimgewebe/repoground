@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-import jsonschema
 import pytest
 
 from merger.lenskit.core.claim_evidence_map import (
@@ -72,6 +71,7 @@ def _collect_field_names(value):
 
 
 def test_claim_evidence_map_schema_accepts_minimal_valid_document():
+    jsonschema = pytest.importorskip("jsonschema")
     doc = {
         "kind": "lenskit.claim_evidence_map",
         "version": "1.0",
@@ -176,6 +176,7 @@ def test_claim_evidence_map_has_no_truth_verdict_fields():
 
 
 def test_produce_claim_evidence_map_from_doc_freshness_registry(tmp_path):
+    jsonschema = pytest.importorskip("jsonschema")
     registry_path = tmp_path / "docs" / "doc-freshness-registry.yml"
     registry_path.parent.mkdir(parents=True)
     registry_path.write_text(
@@ -340,9 +341,12 @@ entries:
     )
 
     out = tmp_path / "out" / "bundle.claim_evidence_map.json"
-    with pytest.raises(ValueError, match="validation failed.*invalid status: banana"):
+    with pytest.raises(ValueError) as excinfo:
         produce_claim_evidence_map(registry_path, out)
 
+    message = str(excinfo.value)
+    assert "validation failed" in message
+    assert "invalid status: banana" in message
     assert not out.exists()
 
 
