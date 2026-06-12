@@ -351,6 +351,42 @@ def test_post_emit_health_range_ref_legacy_content_range_ref(tmp_path):
     assert report["range_ref_resolution_status"] == "ok"
 
 
+def test_post_emit_health_range_ref_precheck_reports_actual_provenance(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    chunk_bytes = (
+        json.dumps(
+            {
+                "chunk_id": "c0",
+                "path": "a.py",
+                "canonical_range": ["not", "an", "object"],
+            }
+        )
+        + "\n"
+    ).encode("utf-8")
+    (tmp_path / "demo.chunk_index.jsonl").write_bytes(chunk_bytes)
+
+    manifest_doc = json.loads(manifest.read_text(encoding="utf-8"))
+    for artifact in manifest_doc["artifacts"]:
+        if artifact.get("role") == "chunk_index_jsonl":
+            artifact["bytes"] = len(chunk_bytes)
+            artifact["sha256"] = _sha256(chunk_bytes)
+            break
+    manifest.write_text(json.dumps(manifest_doc, indent=2), encoding="utf-8")
+
+    report = compute_post_emit_health(str(manifest))
+
+    assert report["status"] == "fail"
+    assert report["range_ref_resolution_status"] == "fail"
+    by_name = {item["name"]: item for item in report["checks"]}
+    assert by_name["range_ref_resolution"]["validation"] == {
+        "mode": "structural_precheck",
+        "engine": "range_resolver",
+        "reason": "malformed_range_ref",
+    }
+    schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
 def test_post_emit_health_output_health_must_be_validated_not_declared(tmp_path):
     """A declared but tampered output_health must not be trusted nor boost coverage."""
     manifest = _make_bundle(tmp_path)  # includes a declared, hash-valid output_health

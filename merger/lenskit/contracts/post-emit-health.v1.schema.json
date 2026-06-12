@@ -100,7 +100,7 @@
             "properties": {
               "mode": {
                 "type": "string",
-                "enum": ["jsonschema", "minimal_fallback", "skipped_unavailable"]
+                "enum": ["jsonschema", "minimal_fallback", "skipped_unavailable", "structural_precheck"]
               },
               "engine": {
                 "type": "string",
@@ -114,7 +114,8 @@
                   "jsonschema_unavailable",
                   "schema_missing",
                   "check_not_applicable",
-                  "unsupported_runtime"
+                  "unsupported_runtime",
+                  "malformed_range_ref"
                 ]
               }
             }

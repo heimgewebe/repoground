@@ -504,9 +504,17 @@ def test_verdict_fail_content_range_ref_wrong_type(tmp_path):
 
     assert result["verdict"] == "fail"
     assert result["checks"]["range_ref_resolution_ok"] is False
+    assert result["checks"]["range_ref_resolution_status"] == "fail"
+    assert result["checks"]["range_ref_resolution"]["validation"] == {
+        "mode": "structural_precheck",
+        "engine": "range_resolver",
+        "reason": "malformed_range_ref",
+    }
     assert any(
         "content_range_ref" in e and "object" in e for e in result["errors"]
     )
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=result, schema=schema)
 
 
 def test_no_content_range_ref_is_warn_not_pass(tmp_path):

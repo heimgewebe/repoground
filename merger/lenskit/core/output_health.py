@@ -186,14 +186,18 @@ def _is_jsonschema_unavailable_error(exc: Exception) -> bool:
     return isinstance(exc, RuntimeError) and any(m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS)
 
 
+def _range_ref_validation(mode: str, reason: str) -> Dict[str, str]:
+    return {"mode": mode, "engine": "range_resolver", "reason": reason}
+
+
 def _range_ref_check(
     dump_index_path: Optional[Path],
     chunk_index_path: Optional[Path],
-) -> Tuple[Optional[bool], List[str], str]:
+) -> Tuple[Optional[bool], List[str], str, Dict[str, str]]:
     """
     Find one chunk with content_range_ref and attempt resolution.
 
-    Returns (ok, messages, status) where:
+    Returns (ok, messages, status, validation) where:
       ok=True,  status="ok"               — at least one ref resolved successfully
       ok=False, status="fail"             — real semantic / structural failure
       ok=None,  status="environment_error"— jsonschema not installed; check not executable
@@ -202,10 +206,13 @@ def _range_ref_check(
 
     messages go to errors when ok=False, to warnings otherwise.
     """
+    not_applicable = _range_ref_validation(
+        "skipped_unavailable", "check_not_applicable"
+    )
     if not chunk_index_path or not chunk_index_path.exists():
-        return None, ["chunk_index not available for range_ref check"], "unavailable"
+        return None, ["chunk_index not available for range_ref check"], "unavailable", not_applicable
     if not dump_index_path or not dump_index_path.exists():
-        return None, ["dump_index not available for range_ref check"], "unavailable"
+        return None, ["dump_index not available for range_ref check"], "unavailable", not_applicable
 
     sample_ref = None
     try:
@@ -225,31 +232,62 @@ def _range_ref_check(
                         try:
                             raw_ref = json.loads(raw_ref)
                         except json.JSONDecodeError as e:
-                            return False, [f"invalid content_range_ref JSON string: {e}"], "fail"
+                            return (
+                                False,
+                                [f"invalid content_range_ref JSON string: {e}"],
+                                "fail",
+                                _range_ref_validation(
+                                    "structural_precheck", "malformed_range_ref"
+                                ),
+                            )
                     if not isinstance(raw_ref, dict):
-                        return False, [
-                            f"content_range_ref must be an object, got {type(raw_ref).__name__}"
-                        ], "fail"
+                        return (
+                            False,
+                            [f"content_range_ref must be an object, got {type(raw_ref).__name__}"],
+                            "fail",
+                            _range_ref_validation(
+                                "structural_precheck", "malformed_range_ref"
+                            ),
+                        )
                     sample_ref = raw_ref
                     break
     except (OSError, UnicodeError) as e:
-        return None, [f"Could not read chunk_index: {e}"], "unavailable"
+        return None, [f"Could not read chunk_index: {e}"], "unavailable", not_applicable
 
     if sample_ref is None:
         # No range_ref present in any chunk; this is normal for inline-only bundles
         # but should be flagged as a non-blocking issue
-        return None, ["no content_range_ref found; range_ref check skipped"], "no_range_ref"
+        return None, ["no content_range_ref found; range_ref check skipped"], "no_range_ref", not_applicable
 
     try:
         from .range_resolver import resolve_range_ref
         resolve_range_ref(dump_index_path, sample_ref)
-        return True, [], "ok"
+        return True, [], "ok", _range_ref_validation("jsonschema", "available")
     except Exception as e:
         if _is_jsonschema_unavailable_error(e):
             # jsonschema is an optional runtime dependency; its absence means the check
             # cannot be executed — this is epistemic emptiness, not proof of broken data.
-            return None, ["range_ref schema validation skipped: jsonschema unavailable"], "environment_error"
-        return False, [f"range_ref resolution failed: {e}"], "fail"
+            return (
+                None,
+                ["range_ref schema validation skipped: jsonschema unavailable"],
+                "environment_error",
+                _range_ref_validation(
+                    "skipped_unavailable", "dependency_unavailable"
+                ),
+            )
+        if "schema file not found" in str(e).lower():
+            return (
+                False,
+                [f"range_ref resolution failed: {e}"],
+                "fail",
+                _range_ref_validation("skipped_unavailable", "schema_missing"),
+            )
+        return (
+            False,
+            [f"range_ref resolution failed: {e}"],
+            "fail",
+            _range_ref_validation("jsonschema", "available"),
+        )
 
 
 def compute_output_health(
@@ -403,29 +441,11 @@ def compute_output_health(
 
     # ── range_ref_resolution_ok ─────────────────────────────────────────────
     if chunk_index_required:
-        rr_ok, rr_msgs, rr_status = _range_ref_check(dump_index_path, chunk_index_path)
+        rr_ok, rr_msgs, rr_status, rr_validation = _range_ref_check(
+            dump_index_path, chunk_index_path
+        )
         checks["range_ref_resolution_ok"] = rr_ok
         checks["range_ref_resolution_status"] = rr_status
-        # mode names the validation capability used by this check; engine names
-        # the local component consuming that capability, not a schema engine.
-        if rr_status == "environment_error":
-            rr_validation = {
-                "mode": "skipped_unavailable",
-                "engine": "range_resolver",
-                "reason": "dependency_unavailable",
-            }
-        elif rr_status in {"ok", "fail"}:
-            rr_validation = {
-                "mode": "jsonschema",
-                "engine": "range_resolver",
-                "reason": "available",
-            }
-        else:
-            rr_validation = {
-                "mode": "skipped_unavailable",
-                "engine": "range_resolver",
-                "reason": "check_not_applicable",
-            }
         checks["range_ref_resolution"] = {
             "status": rr_status,
             "required": True,

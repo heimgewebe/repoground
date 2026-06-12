@@ -175,15 +175,19 @@ def derive_post_health_path(manifest_path: Path) -> Path:
 
 def _range_ref_status(
     manifest_path: Path, chunk_index_path: Optional[Path]
-) -> Tuple[str, str]:
+) -> Tuple[str, str, Dict[str, str]]:
     """
     Resolve one range reference from the chunk index against the final bundle
     manifest. Prefers the current ``canonical_range`` field and falls back to the
-    legacy ``content_range_ref``. Returns (status, message) where status is one
-    of: ``ok``, ``fail``, ``environment_error``, ``no_range_ref``, ``unavailable``.
+    legacy ``content_range_ref``. Returns (status, message, validation) where
+    status is one of: ``ok``, ``fail``, ``environment_error``, ``no_range_ref``,
+    ``unavailable``.
     """
+    not_applicable = _validation(
+        "skipped_unavailable", "range_resolver", "check_not_applicable"
+    )
     if chunk_index_path is None or not chunk_index_path.exists():
-        return "unavailable", "chunk_index not available for range_ref check"
+        return "unavailable", "chunk_index not available for range_ref check", not_applicable
 
     sample_ref: Optional[Dict[str, Any]] = None
     try:
@@ -206,26 +210,62 @@ def _range_ref_status(
                     try:
                         raw = json.loads(raw)
                     except json.JSONDecodeError as e:
-                        return "fail", f"invalid range reference JSON string: {e}"
+                        return (
+                            "fail",
+                            f"invalid range reference JSON string: {e}",
+                            _validation(
+                                "structural_precheck",
+                                "range_resolver",
+                                "malformed_range_ref",
+                            ),
+                        )
                 if not isinstance(raw, dict):
-                    return "fail", "range reference must be an object"
+                    return (
+                        "fail",
+                        "range reference must be an object",
+                        _validation(
+                            "structural_precheck",
+                            "range_resolver",
+                            "malformed_range_ref",
+                        ),
+                    )
                 sample_ref = raw
                 break
     except (OSError, UnicodeError) as e:
-        return "unavailable", f"could not read chunk_index: {e}"
+        return "unavailable", f"could not read chunk_index: {e}", not_applicable
 
     if sample_ref is None:
-        return "no_range_ref", "no range reference found; range_ref check skipped"
+        return "no_range_ref", "no range reference found; range_ref check skipped", not_applicable
 
     try:
         from .range_resolver import resolve_range_ref
 
         resolve_range_ref(manifest_path, sample_ref)
-        return "ok", "range reference resolved against bundle manifest"
+        return (
+            "ok",
+            "range reference resolved against bundle manifest",
+            _validation("jsonschema", "range_resolver", "available"),
+        )
     except Exception as e:  # noqa: BLE001 - classify below
         if _is_jsonschema_unavailable_error(e):
-            return "environment_error", "range_ref validation skipped: jsonschema unavailable"
-        return "fail", f"range_ref resolution failed: {e}"
+            return (
+                "environment_error",
+                "range_ref validation skipped: jsonschema unavailable",
+                _validation(
+                    "skipped_unavailable", "range_resolver", "dependency_unavailable"
+                ),
+            )
+        if "schema file not found" in str(e).lower():
+            return (
+                "fail",
+                f"range_ref resolution failed: {e}",
+                _validation("skipped_unavailable", "range_resolver", "schema_missing"),
+            )
+        return (
+            "fail",
+            f"range_ref resolution failed: {e}",
+            _validation("jsonschema", "range_resolver", "available"),
+        )
 
 
 def _compute_evidence(
@@ -588,14 +628,16 @@ def compute_post_emit_health(
         except ValueError:
             chunk_index_path = None
 
-    rr_status, rr_msg = _range_ref_status(manifest_path, chunk_index_path)
+    rr_status, rr_msg, rr_validation = _range_ref_status(
+        manifest_path, chunk_index_path
+    )
     if rr_status == "ok":
         checks.append(
             _check(
                 "range_ref_resolution",
                 "pass",
                 detail=rr_msg,
-                validation=_validation("jsonschema", "range_resolver", "available"),
+                validation=rr_validation,
             )
         )
     elif rr_status == "fail":
@@ -604,7 +646,7 @@ def compute_post_emit_health(
                 "range_ref_resolution",
                 "fail",
                 detail=rr_msg,
-                validation=_validation("jsonschema", "range_resolver", "available"),
+                validation=rr_validation,
             )
         )
         errors.append(rr_msg)
@@ -614,9 +656,7 @@ def compute_post_emit_health(
                 "range_ref_resolution",
                 "skipped",
                 detail=rr_msg,
-                validation=_validation(
-                    "skipped_unavailable", "range_resolver", "dependency_unavailable"
-                ),
+                validation=rr_validation,
             )
         )
         warnings.append(rr_msg)
@@ -626,9 +666,7 @@ def compute_post_emit_health(
                 "range_ref_resolution",
                 "skipped",
                 detail=rr_msg,
-                validation=_validation(
-                    "skipped_unavailable", "range_resolver", "check_not_applicable"
-                ),
+                validation=rr_validation,
             )
         )
 
