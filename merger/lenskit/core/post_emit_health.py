@@ -130,11 +130,30 @@ def _now_iso() -> str:
     return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _check(name: str, status: str, detail: Optional[str] = None) -> Dict[str, Any]:
+def _check(
+    name: str,
+    status: str,
+    detail: Optional[str] = None,
+    validation: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     out: Dict[str, Any] = {"name": name, "status": status}
     if detail:
         out["detail"] = detail
+    if validation is not None:
+        out["validation"] = validation
     return out
+
+
+def _validation(mode: str, engine: str, reason: str) -> Dict[str, str]:
+    return {"mode": mode, "engine": engine, "reason": reason}
+
+
+def _schema_skip_reason(message: str) -> str:
+    if "schema not found" in message:
+        return "schema_missing"
+    if "jsonschema unavailable" in message:
+        return "dependency_unavailable"
+    return "unsupported_runtime"
 
 
 def _resolve_manifest_path(manifest_path_str: str) -> Path:
@@ -156,15 +175,19 @@ def derive_post_health_path(manifest_path: Path) -> Path:
 
 def _range_ref_status(
     manifest_path: Path, chunk_index_path: Optional[Path]
-) -> Tuple[str, str]:
+) -> Tuple[str, str, Dict[str, str]]:
     """
     Resolve one range reference from the chunk index against the final bundle
     manifest. Prefers the current ``canonical_range`` field and falls back to the
-    legacy ``content_range_ref``. Returns (status, message) where status is one
-    of: ``ok``, ``fail``, ``environment_error``, ``no_range_ref``, ``unavailable``.
+    legacy ``content_range_ref``. Returns (status, message, validation) where
+    status is one of: ``ok``, ``fail``, ``environment_error``, ``no_range_ref``,
+    ``unavailable``.
     """
+    not_applicable = _validation(
+        "skipped_unavailable", "range_resolver", "check_not_applicable"
+    )
     if chunk_index_path is None or not chunk_index_path.exists():
-        return "unavailable", "chunk_index not available for range_ref check"
+        return "unavailable", "chunk_index not available for range_ref check", not_applicable
 
     sample_ref: Optional[Dict[str, Any]] = None
     try:
@@ -187,26 +210,62 @@ def _range_ref_status(
                     try:
                         raw = json.loads(raw)
                     except json.JSONDecodeError as e:
-                        return "fail", f"invalid range reference JSON string: {e}"
+                        return (
+                            "fail",
+                            f"invalid range reference JSON string: {e}",
+                            _validation(
+                                "structural_precheck",
+                                "range_resolver",
+                                "malformed_range_ref",
+                            ),
+                        )
                 if not isinstance(raw, dict):
-                    return "fail", "range reference must be an object"
+                    return (
+                        "fail",
+                        "range reference must be an object",
+                        _validation(
+                            "structural_precheck",
+                            "range_resolver",
+                            "malformed_range_ref",
+                        ),
+                    )
                 sample_ref = raw
                 break
     except (OSError, UnicodeError) as e:
-        return "unavailable", f"could not read chunk_index: {e}"
+        return "unavailable", f"could not read chunk_index: {e}", not_applicable
 
     if sample_ref is None:
-        return "no_range_ref", "no range reference found; range_ref check skipped"
+        return "no_range_ref", "no range reference found; range_ref check skipped", not_applicable
 
     try:
         from .range_resolver import resolve_range_ref
 
         resolve_range_ref(manifest_path, sample_ref)
-        return "ok", "range reference resolved against bundle manifest"
+        return (
+            "ok",
+            "range reference resolved against bundle manifest",
+            _validation("jsonschema", "range_resolver", "available"),
+        )
     except Exception as e:  # noqa: BLE001 - classify below
         if _is_jsonschema_unavailable_error(e):
-            return "environment_error", "range_ref validation skipped: jsonschema unavailable"
-        return "fail", f"range_ref resolution failed: {e}"
+            return (
+                "environment_error",
+                "range_ref validation skipped: jsonschema unavailable",
+                _validation(
+                    "skipped_unavailable", "range_resolver", "dependency_unavailable"
+                ),
+            )
+        if "schema file not found" in str(e).lower():
+            return (
+                "fail",
+                f"range_ref resolution failed: {e}",
+                _validation("skipped_unavailable", "range_resolver", "schema_missing"),
+            )
+        return (
+            "fail",
+            f"range_ref resolution failed: {e}",
+            _validation("jsonschema", "range_resolver", "available"),
+        )
 
 
 def _compute_evidence(
@@ -418,12 +477,34 @@ def compute_post_emit_health(
     # ── manifest schema ──────────────────────────────────────────────────────
     schema_status, schema_msg = _validate_manifest_schema(manifest)
     if schema_status == "pass":
-        checks.append(_check("manifest_schema_valid", "pass"))
+        checks.append(
+            _check(
+                "manifest_schema_valid",
+                "pass",
+                validation=_validation("jsonschema", "jsonschema", "available"),
+            )
+        )
     elif schema_status == "fail":
-        checks.append(_check("manifest_schema_valid", "fail", schema_msg))
+        checks.append(
+            _check(
+                "manifest_schema_valid",
+                "fail",
+                detail=schema_msg,
+                validation=_validation("jsonschema", "jsonschema", "available"),
+            )
+        )
         errors.append(schema_msg)
     else:  # environment_error
-        checks.append(_check("manifest_schema_valid", "skipped", schema_msg))
+        checks.append(
+            _check(
+                "manifest_schema_valid",
+                "skipped",
+                detail=schema_msg,
+                validation=_validation(
+                    "skipped_unavailable", "jsonschema", _schema_skip_reason(schema_msg)
+                ),
+            )
+        )
         warnings.append(schema_msg)
 
     # ── per-artifact existence + hash ────────────────────────────────────────
@@ -547,17 +628,47 @@ def compute_post_emit_health(
         except ValueError:
             chunk_index_path = None
 
-    rr_status, rr_msg = _range_ref_status(manifest_path, chunk_index_path)
+    rr_status, rr_msg, rr_validation = _range_ref_status(
+        manifest_path, chunk_index_path
+    )
     if rr_status == "ok":
-        checks.append(_check("range_ref_resolution", "pass", rr_msg))
+        checks.append(
+            _check(
+                "range_ref_resolution",
+                "pass",
+                detail=rr_msg,
+                validation=rr_validation,
+            )
+        )
     elif rr_status == "fail":
-        checks.append(_check("range_ref_resolution", "fail", rr_msg))
+        checks.append(
+            _check(
+                "range_ref_resolution",
+                "fail",
+                detail=rr_msg,
+                validation=rr_validation,
+            )
+        )
         errors.append(rr_msg)
     elif rr_status == "environment_error":
-        checks.append(_check("range_ref_resolution", "skipped", rr_msg))
+        checks.append(
+            _check(
+                "range_ref_resolution",
+                "skipped",
+                detail=rr_msg,
+                validation=rr_validation,
+            )
+        )
         warnings.append(rr_msg)
     else:  # no_range_ref / unavailable — nothing to certify, non-blocking
-        checks.append(_check("range_ref_resolution", "skipped", rr_msg))
+        checks.append(
+            _check(
+                "range_ref_resolution",
+                "skipped",
+                detail=rr_msg,
+                validation=rr_validation,
+            )
+        )
 
     # ── claim_evidence_map: optional globally, required for forensic_strict preflight ──
     claim_entry = by_role.get(_CLAIM_EVIDENCE_MAP)
@@ -588,7 +699,10 @@ def compute_post_emit_health(
             _check(
                 "claim_evidence_map_schema_valid",
                 "skipped",
-                "claim_evidence_map_json absent" + reason_suffix,
+                detail="claim_evidence_map_json absent" + reason_suffix,
+                validation=_validation(
+                    "skipped_unavailable", "jsonschema", "check_not_applicable"
+                ),
             )
         )
     else:
@@ -606,7 +720,10 @@ def compute_post_emit_health(
                 _check(
                     "claim_evidence_map_schema_valid",
                     "skipped",
-                    "schema validation skipped because claim_evidence_map_json hash is unverified",
+                    detail="schema validation skipped because claim_evidence_map_json hash is unverified",
+                    validation=_validation(
+                        "skipped_unavailable", "jsonschema", "check_not_applicable"
+                    ),
                 )
             )
             errors.append("claim_evidence_map_json is declared but hash is missing/invalid")
@@ -629,12 +746,40 @@ def compute_post_emit_health(
                 else:
                     claim_schema_status, claim_schema_msg = _validate_claim_evidence_map_schema(claim_doc)
                     if claim_schema_status == "pass":
-                        checks.append(_check("claim_evidence_map_schema_valid", "pass"))
+                        checks.append(
+                            _check(
+                                "claim_evidence_map_schema_valid",
+                                "pass",
+                                validation=_validation(
+                                    "jsonschema", "jsonschema", "available"
+                                ),
+                            )
+                        )
                     elif claim_schema_status == "fail":
-                        checks.append(_check("claim_evidence_map_schema_valid", "fail", claim_schema_msg))
+                        checks.append(
+                            _check(
+                                "claim_evidence_map_schema_valid",
+                                "fail",
+                                detail=claim_schema_msg,
+                                validation=_validation(
+                                    "jsonschema", "jsonschema", "available"
+                                ),
+                            )
+                        )
                         errors.append(claim_schema_msg)
                     else:
-                        checks.append(_check("claim_evidence_map_schema_valid", "skipped", claim_schema_msg))
+                        checks.append(
+                            _check(
+                                "claim_evidence_map_schema_valid",
+                                "skipped",
+                                detail=claim_schema_msg,
+                                validation=_validation(
+                                    "skipped_unavailable",
+                                    "jsonschema",
+                                    _schema_skip_reason(claim_schema_msg),
+                                ),
+                            )
+                        )
                         warnings.append(claim_schema_msg)
 
     # ── redaction: reported, never enforced (enforcement is PR A5) ───────────

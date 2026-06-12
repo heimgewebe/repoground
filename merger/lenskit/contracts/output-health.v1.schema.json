@@ -122,6 +122,50 @@
           "enum": ["ok", "fail", "environment_error", "no_range_ref", "unavailable", "skipped"],
           "description": "Fine-grained status for the range_ref check. 'environment_error' means jsonschema is unavailable — the check could not run, not that data is broken. 'fail' means a real semantic/structural error was detected."
         },
+        "range_ref_resolution": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "required", "reason", "validation"],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["ok", "fail", "environment_error", "no_range_ref", "unavailable", "skipped"]
+            },
+            "required": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "validation": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mode", "engine", "reason"],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": ["jsonschema", "minimal_fallback", "skipped_unavailable", "structural_precheck"]
+                },
+                "engine": {
+                  "type": "string",
+                  "enum": ["jsonschema", "range_resolver", "doc_freshness_minimal"]
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "available",
+                    "dependency_unavailable",
+                    "jsonschema_unavailable",
+                    "schema_missing",
+                    "check_not_applicable",
+                    "unsupported_runtime",
+                    "malformed_range_ref"
+                  ]
+                }
+              }
+            }
+          }
+        },
         "sample_query_content_hit": {
           "type": "object",
           "required": ["status", "required"],

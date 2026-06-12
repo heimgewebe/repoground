@@ -92,6 +92,33 @@
           },
           "detail": {
             "type": "string"
+          },
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["mode", "engine", "reason"],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": ["jsonschema", "minimal_fallback", "skipped_unavailable", "structural_precheck"]
+              },
+              "engine": {
+                "type": "string",
+                "enum": ["jsonschema", "range_resolver", "doc_freshness_minimal"]
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "available",
+                  "dependency_unavailable",
+                  "jsonschema_unavailable",
+                  "schema_missing",
+                  "check_not_applicable",
+                  "unsupported_runtime",
+                  "malformed_range_ref"
+                ]
+              }
+            }
           }
         }
       }

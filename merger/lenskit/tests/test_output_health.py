@@ -473,7 +473,15 @@ def test_verdict_fail_invalid_content_range_ref_json_string(tmp_path):
 
     assert result["verdict"] == "fail"
     assert result["checks"]["range_ref_resolution_ok"] is False
-    assert any("invalid content_range_ref json" in e.lower() for e in result["errors"])
+    assert result["checks"]["range_ref_resolution_status"] == "fail"
+    assert result["checks"]["range_ref_resolution"]["validation"] == {
+        "mode": "structural_precheck",
+        "engine": "range_resolver",
+        "reason": "malformed_range_ref",
+    }
+    assert any("invalid range reference json" in e.lower() for e in result["errors"])
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=result, schema=schema)
 
 
 def test_verdict_fail_content_range_ref_wrong_type(tmp_path):
@@ -504,12 +512,63 @@ def test_verdict_fail_content_range_ref_wrong_type(tmp_path):
 
     assert result["verdict"] == "fail"
     assert result["checks"]["range_ref_resolution_ok"] is False
+    assert result["checks"]["range_ref_resolution_status"] == "fail"
+    assert result["checks"]["range_ref_resolution"]["validation"] == {
+        "mode": "structural_precheck",
+        "engine": "range_resolver",
+        "reason": "malformed_range_ref",
+    }
     assert any(
-        "content_range_ref" in e and "object" in e for e in result["errors"]
+        "range reference" in e.lower() and "object" in e for e in result["errors"]
+    )
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=result, schema=schema)
+
+
+def test_range_ref_precheck_prefers_malformed_canonical_range(tmp_path):
+    canonical_md_path, canonical_md_sha = _make_canonical_md(tmp_path)
+    valid_legacy_ref = _build_range_ref_for_canonical(canonical_md_path, 0, 8)
+    chunks = [
+        {
+            "id": "c1",
+            "content": "x",
+            "path": "a.md",
+            "canonical_range": ["not", "an", "object"],
+            "content_range_ref": valid_legacy_ref,
+        }
+    ]
+    chunk_index_path, chunk_sha = _make_chunk_jsonl(tmp_path, chunks)
+    dump_index_path = _make_dump_index(
+        tmp_path, canonical_md_path.name, chunk_index_path.name
     )
 
+    result = compute_output_health(
+        run_id="run-malformed-canonical-range",
+        stem="test",
+        primary_manifest_path=dump_index_path,
+        canonical_md_path=canonical_md_path,
+        chunk_index_path=chunk_index_path,
+        dump_index_path=dump_index_path,
+        sqlite_index_path=None,
+        sqlite_index_required=False,
+        redact_secrets=False,
+        expected_canonical_md_sha256=canonical_md_sha,
+        expected_chunk_index_sha256=chunk_sha,
+    )
 
-def test_no_content_range_ref_is_warn_not_pass(tmp_path):
+    assert result["verdict"] == "fail"
+    assert result["checks"]["range_ref_resolution_ok"] is False
+    assert result["checks"]["range_ref_resolution_status"] == "fail"
+    assert result["checks"]["range_ref_resolution"]["validation"] == {
+        "mode": "structural_precheck",
+        "engine": "range_resolver",
+        "reason": "malformed_range_ref",
+    }
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=result, schema=schema)
+
+
+def test_no_range_reference_is_warn_not_pass(tmp_path):
     kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
     result = compute_output_health(**kwargs)
 
@@ -931,6 +990,14 @@ def test_range_ref_jsonschema_unavailable_is_warn_not_fail(tmp_path):
     )
     assert result["checks"]["range_ref_resolution_ok"] is None
     assert result["checks"]["range_ref_resolution_status"] == "environment_error"
+    assert result["checks"]["range_ref_resolution"]["status"] == "environment_error"
+    assert result["checks"]["range_ref_resolution"]["validation"] == {
+        "mode": "skipped_unavailable",
+        "engine": "range_resolver",
+        "reason": "dependency_unavailable",
+    }
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=result, schema=schema)
     assert any("jsonschema" in w.lower() for w in result["warnings"])
     assert not any("jsonschema" in e.lower() for e in result["errors"])
 
@@ -990,7 +1057,56 @@ def test_range_ref_status_ok_on_intact_path(tmp_path):
 
     assert result["checks"]["range_ref_resolution_ok"] is True
     assert result["checks"]["range_ref_resolution_status"] == "ok"
+    assert result["checks"]["range_ref_resolution"]["validation"] == {
+        "mode": "jsonschema",
+        "engine": "range_resolver",
+        "reason": "available",
+    }
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=result, schema=schema)
     assert result["verdict"] == "pass"
+
+
+def test_range_ref_status_ok_on_canonical_range_without_legacy_ref(tmp_path):
+    canonical_md_path, canonical_md_sha = _make_canonical_md(tmp_path)
+    rr = _build_range_ref_for_canonical(canonical_md_path, 0, 8)
+    chunks = [
+        {
+            "id": "c1",
+            "content": "hello world",
+            "path": "test/a.md",
+            "canonical_range": rr,
+        }
+    ]
+    chunk_index_path, chunk_sha = _make_chunk_jsonl(tmp_path, chunks)
+    dump_index_path = _make_dump_index(
+        tmp_path, canonical_md_path.name, chunk_index_path.name
+    )
+
+    result = compute_output_health(
+        run_id="run-canonical-range-only",
+        stem="test",
+        primary_manifest_path=dump_index_path,
+        canonical_md_path=canonical_md_path,
+        chunk_index_path=chunk_index_path,
+        dump_index_path=dump_index_path,
+        sqlite_index_path=None,
+        sqlite_index_required=False,
+        redact_secrets=False,
+        expected_canonical_md_sha256=canonical_md_sha,
+        expected_chunk_index_sha256=chunk_sha,
+    )
+
+    assert result["checks"]["range_ref_resolution_ok"] is True
+    assert result["checks"]["range_ref_resolution_status"] == "ok"
+    assert result["checks"]["range_ref_resolution"]["validation"] == {
+        "mode": "jsonschema",
+        "engine": "range_resolver",
+        "reason": "available",
+    }
+    assert result["verdict"] == "pass"
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=result, schema=schema)
 
 
 def test_range_ref_status_fail_on_real_semantic_error(tmp_path):

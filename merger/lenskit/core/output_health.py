@@ -186,26 +186,34 @@ def _is_jsonschema_unavailable_error(exc: Exception) -> bool:
     return isinstance(exc, RuntimeError) and any(m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS)
 
 
+def _range_ref_validation(mode: str, reason: str) -> Dict[str, str]:
+    return {"mode": mode, "engine": "range_resolver", "reason": reason}
+
+
 def _range_ref_check(
     dump_index_path: Optional[Path],
     chunk_index_path: Optional[Path],
-) -> Tuple[Optional[bool], List[str], str]:
+) -> Tuple[Optional[bool], List[str], str, Dict[str, str]]:
     """
-    Find one chunk with content_range_ref and attempt resolution.
+    Find one chunk with canonical_range (or legacy content_range_ref) and attempt
+    resolution.
 
-    Returns (ok, messages, status) where:
+    Returns (ok, messages, status, validation) where:
       ok=True,  status="ok"               — at least one ref resolved successfully
       ok=False, status="fail"             — real semantic / structural failure
       ok=None,  status="environment_error"— jsonschema not installed; check not executable
-      ok=None,  status="no_range_ref"     — no content_range_ref found (inline-only bundle)
+      ok=None,  status="no_range_ref"     — no range reference found (inline-only bundle)
       ok=None,  status="unavailable"      — required input file missing
 
     messages go to errors when ok=False, to warnings otherwise.
     """
+    not_applicable = _range_ref_validation(
+        "skipped_unavailable", "check_not_applicable"
+    )
     if not chunk_index_path or not chunk_index_path.exists():
-        return None, ["chunk_index not available for range_ref check"], "unavailable"
+        return None, ["chunk_index not available for range_ref check"], "unavailable", not_applicable
     if not dump_index_path or not dump_index_path.exists():
-        return None, ["dump_index not available for range_ref check"], "unavailable"
+        return None, ["dump_index not available for range_ref check"], "unavailable", not_applicable
 
     sample_ref = None
     try:
@@ -219,37 +227,70 @@ def _range_ref_check(
                     continue
                 if not isinstance(chunk, dict):
                     continue
-                raw_ref = chunk.get("content_range_ref")
+                raw_ref = chunk.get("canonical_range")
+                if raw_ref is None:
+                    raw_ref = chunk.get("content_range_ref")
                 if raw_ref is not None:
                     if isinstance(raw_ref, str):
                         try:
                             raw_ref = json.loads(raw_ref)
                         except json.JSONDecodeError as e:
-                            return False, [f"invalid content_range_ref JSON string: {e}"], "fail"
+                            return (
+                                False,
+                                [f"invalid range reference JSON string: {e}"],
+                                "fail",
+                                _range_ref_validation(
+                                    "structural_precheck", "malformed_range_ref"
+                                ),
+                            )
                     if not isinstance(raw_ref, dict):
-                        return False, [
-                            f"content_range_ref must be an object, got {type(raw_ref).__name__}"
-                        ], "fail"
+                        return (
+                            False,
+                            [f"range reference must be an object, got {type(raw_ref).__name__}"],
+                            "fail",
+                            _range_ref_validation(
+                                "structural_precheck", "malformed_range_ref"
+                            ),
+                        )
                     sample_ref = raw_ref
                     break
     except (OSError, UnicodeError) as e:
-        return None, [f"Could not read chunk_index: {e}"], "unavailable"
+        return None, [f"Could not read chunk_index: {e}"], "unavailable", not_applicable
 
     if sample_ref is None:
         # No range_ref present in any chunk; this is normal for inline-only bundles
         # but should be flagged as a non-blocking issue
-        return None, ["no content_range_ref found; range_ref check skipped"], "no_range_ref"
+        return None, ["no range reference found; range_ref check skipped"], "no_range_ref", not_applicable
 
     try:
         from .range_resolver import resolve_range_ref
         resolve_range_ref(dump_index_path, sample_ref)
-        return True, [], "ok"
+        return True, [], "ok", _range_ref_validation("jsonschema", "available")
     except Exception as e:
         if _is_jsonschema_unavailable_error(e):
             # jsonschema is an optional runtime dependency; its absence means the check
             # cannot be executed — this is epistemic emptiness, not proof of broken data.
-            return None, ["range_ref schema validation skipped: jsonschema unavailable"], "environment_error"
-        return False, [f"range_ref resolution failed: {e}"], "fail"
+            return (
+                None,
+                ["range_ref schema validation skipped: jsonschema unavailable"],
+                "environment_error",
+                _range_ref_validation(
+                    "skipped_unavailable", "dependency_unavailable"
+                ),
+            )
+        if "schema file not found" in str(e).lower():
+            return (
+                False,
+                [f"range_ref resolution failed: {e}"],
+                "fail",
+                _range_ref_validation("skipped_unavailable", "schema_missing"),
+            )
+        return (
+            False,
+            [f"range_ref resolution failed: {e}"],
+            "fail",
+            _range_ref_validation("jsonschema", "available"),
+        )
 
 
 def compute_output_health(
@@ -403,9 +444,17 @@ def compute_output_health(
 
     # ── range_ref_resolution_ok ─────────────────────────────────────────────
     if chunk_index_required:
-        rr_ok, rr_msgs, rr_status = _range_ref_check(dump_index_path, chunk_index_path)
+        rr_ok, rr_msgs, rr_status, rr_validation = _range_ref_check(
+            dump_index_path, chunk_index_path
+        )
         checks["range_ref_resolution_ok"] = rr_ok
         checks["range_ref_resolution_status"] = rr_status
+        checks["range_ref_resolution"] = {
+            "status": rr_status,
+            "required": True,
+            "reason": rr_msgs[0] if rr_msgs else "range_ref validation completed",
+            "validation": rr_validation,
+        }
         if rr_ok is False:
             errors.extend(rr_msgs)
         else:
@@ -414,6 +463,16 @@ def compute_output_health(
     else:
         checks["range_ref_resolution_ok"] = None
         checks["range_ref_resolution_status"] = "skipped"
+        checks["range_ref_resolution"] = {
+            "status": "skipped",
+            "required": False,
+            "reason": "chunk_index not required; range_ref check not applicable",
+            "validation": {
+                "mode": "skipped_unavailable",
+                "engine": "range_resolver",
+                "reason": "check_not_applicable",
+            },
+        }
 
     # ── non-blocking optional checks ────────────────────────────────────────
     checks["sample_query_content_hit"] = {
