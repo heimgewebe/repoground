@@ -583,8 +583,11 @@ def _validate_registry_minimal(data: dict) -> list[str]:
                 )
 
         status = entry.get("status")
-        if "status" in entry and status not in _REGISTRY_STATUSES:
-            errors.append(f"[{entry_path}.status] invalid status: {status}")
+        if "status" in entry:
+            if not isinstance(status, str):
+                errors.append(f"[{entry_path}.status] must be a string")
+            elif status not in _REGISTRY_STATUSES:
+                errors.append(f"[{entry_path}.status] invalid status: {status}")
 
         last_verified = entry.get("last_verified")
         if "last_verified" in entry and (
@@ -623,8 +626,11 @@ def _validate_registry_minimal(data: dict) -> list[str]:
                 )
 
             kind = evidence_item.get("kind")
-            if "kind" in evidence_item and kind not in _REGISTRY_EVIDENCE_KINDS:
-                errors.append(f"[{evidence_path}.kind] invalid kind: {kind}")
+            if "kind" in evidence_item:
+                if not isinstance(kind, str):
+                    errors.append(f"[{evidence_path}.kind] must be a string")
+                elif kind not in _REGISTRY_EVIDENCE_KINDS:
+                    errors.append(f"[{evidence_path}.kind] invalid kind: {kind}")
 
             target = evidence_item.get("target")
             if "target" in evidence_item and (
@@ -633,8 +639,11 @@ def _validate_registry_minimal(data: dict) -> list[str]:
                 errors.append(f"[{evidence_path}.target] must be a non-empty string")
 
             implies = evidence_item.get("implies")
-            if "implies" in evidence_item and implies not in _REGISTRY_EVIDENCE_IMPLIES:
-                errors.append(f"[{evidence_path}.implies] invalid implies: {implies}")
+            if "implies" in evidence_item:
+                if not isinstance(implies, str):
+                    errors.append(f"[{evidence_path}.implies] must be a string")
+                elif implies not in _REGISTRY_EVIDENCE_IMPLIES:
+                    errors.append(f"[{evidence_path}.implies] invalid implies: {implies}")
 
     return errors
 

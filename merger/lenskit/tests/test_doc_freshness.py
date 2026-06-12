@@ -613,6 +613,38 @@ def test_validate_registry_fallback_reports_structural_errors(
     assert "[entries.0.evidence.0.target] must be a non-empty string" in errors
 
 
+def test_validate_registry_fallback_reports_type_errors_for_enum_fields(
+    no_jsonschema, tmp_path
+):
+    invalid = {
+        "kind": "lenskit.doc_freshness_registry",
+        "version": "1.0",
+        "entries": [
+            {
+                "id": "sample-claim",
+                "doc": "docs/sample.md",
+                "claim": "sample claim",
+                "status": ["done"],
+                "owner": "tests",
+                "last_verified": "2026-06-11",
+                "evidence": [
+                    {
+                        "kind": {"bad": "value"},
+                        "target": "docs/proofs/sample.md",
+                        "implies": ["open"],
+                    }
+                ],
+            }
+        ],
+    }
+
+    errors = validate_registry(invalid, tmp_path / "unused.schema.json")
+
+    assert "[entries.0.status] must be a string" in errors
+    assert "[entries.0.evidence.0.kind] must be a string" in errors
+    assert "[entries.0.evidence.0.implies] must be a string" in errors
+
+
 # --- the REAL checked-in registry --------------------------------------------
 
 
