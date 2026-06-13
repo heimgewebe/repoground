@@ -170,11 +170,12 @@ def _service_restart_enabled_for_request() -> bool:
 
 
 def _schedule_service_restart(unit: str) -> None:
-    if shutil.which("systemd-run") is None:
+    systemd_run = shutil.which("systemd-run")
+    if systemd_run is None:
         raise RuntimeError("systemd-run is not available")
 
     command = [
-        "systemd-run",
+        systemd_run,
         "--user",
         "--on-active=1s",
         "systemctl",
@@ -188,7 +189,10 @@ def _schedule_service_restart(unit: str) -> None:
             check=True,
             capture_output=True,
             text=True,
+            timeout=5,
         )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("systemd-run timed out") from exc
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "").strip() or "systemd-run failed"
         raise RuntimeError(detail) from exc

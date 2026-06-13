@@ -1,8 +1,6 @@
 import pytest
-from fastapi.testclient import TestClient
 
 import merger.lenskit.service.app as service_app
-from merger.lenskit.service.app import app, init_service
 from merger.lenskit.service.models import Job, JobRequest
 
 
@@ -107,29 +105,19 @@ def test_admin_restart_returns_scheduler_error_without_traceback(service_client,
         "reason": "scheduler_failed",
     }
 
-
-def test_admin_restart_forbidden_when_service_is_not_loopback(tmp_path, monkeypatch):
+def test_admin_restart_forbidden_when_service_is_not_loopback(service_client, monkeypatch):
     monkeypatch.setenv("RLENS_ENABLE_SERVICE_RESTART", "1")
     monkeypatch.setenv("RLENS_SERVICE_UNIT", "rlens")
+    monkeypatch.setattr(service_app.state, "host", "0.0.0.0")
     called = []
     monkeypatch.setattr(service_app, "_schedule_service_restart", lambda unit: called.append(unit))
 
-    hub = tmp_path / "hub"
-    hub.mkdir()
-    (hub / "repo-test").mkdir()
+    caps = service_client.client.get("/api/admin/capabilities", headers=service_client.headers)
+    assert caps.status_code == 200
+    assert caps.json() == {"service_restart_enabled": False}
 
-    app.middleware_stack = None
-    init_service(hub, token="test-token", host="0.0.0.0")
-
-    with TestClient(app) as client:
-        headers = {"Authorization": "Bearer test-token"}
-
-        caps = client.get("/api/admin/capabilities", headers=headers)
-        assert caps.status_code == 200
-        assert caps.json() == {"service_restart_enabled": False}
-
-        resp = client.post("/api/admin/restart", headers=headers)
-        assert resp.status_code == 403
-        assert resp.json()["detail"] == "Service restart is disabled"
-
+    resp = service_client.client.post("/api/admin/restart", headers=service_client.headers)
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Service restart is disabled"
     assert called == []
+
