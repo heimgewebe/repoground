@@ -666,7 +666,10 @@ def test_agent_pack_check_schema_conformance(tmp_path):
 
 
 def test_write_output_health_writes_file(tmp_path):
-    kwargs = _base_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    canonical_md_path, canonical_md_sha = _make_canonical_md(tmp_path)
+    rr = _build_range_ref_for_canonical(canonical_md_path, 0, 8)
+    chunks = [{"id": "c1", "content": "hello world", "path": "test/a.md", "content_range_ref": rr}]
+    kwargs = _base_kwargs(tmp_path=tmp_path, chunks=chunks, with_sqlite=False)
     out_path = tmp_path / "test.output_health.json"
     returned = write_output_health(out_path, **kwargs)
 
@@ -675,6 +678,10 @@ def test_write_output_health_writes_file(tmp_path):
     data = json.loads(out_path.read_text(encoding="utf-8"))
     assert data["kind"] == "lenskit.output_health"
     assert data["verdict"] in {"pass", "warn", "fail"}
+
+    output_checks = data["checks"]
+    assert "validation" in output_checks["range_ref_resolution"]
+    assert output_checks["range_ref_resolution"]["validation"]["mode"] == "jsonschema"
 
 
 def test_redact_secrets_flag_visible_in_checks(tmp_path):
