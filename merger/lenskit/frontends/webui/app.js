@@ -94,6 +94,8 @@ const PRESCAN_SAVED_KEY = "lenskit.prescan.savedSelections.v1";
 let currentPickerTarget = null;
 let currentPickerPath = null;
 let currentPickerToken = null; // For token-based navigation
+let lastServerStartedAt = null;
+let serviceRestartEnabled = false;
 
 // Guard: strictly prevent merge when prescan is open
 window.__prescanOpen = false;
@@ -329,6 +331,38 @@ async function apiFetch(url, options = {}) {
 
     options.headers = headers;
     return fetch(url, options);
+}
+
+function setRestartButtonEnabled(enabled) {
+    serviceRestartEnabled = !!enabled;
+    const button = document.getElementById('restartServiceBtn');
+    if (!button) return;
+    button.classList.toggle('hidden', !serviceRestartEnabled);
+    button.disabled = !serviceRestartEnabled;
+}
+
+async function fetchAdminCapabilities() {
+    try {
+        const res = await apiFetch(`${API_BASE}/admin/capabilities`);
+        if (!res.ok) {
+            setRestartButtonEnabled(false);
+            return { service_restart_enabled: false };
+        }
+        const data = await res.json();
+        setRestartButtonEnabled(!!data.service_restart_enabled);
+        return data;
+    } catch (e) {
+        setRestartButtonEnabled(false);
+        return { service_restart_enabled: false };
+    }
+}
+
+async function getVersionInfo() {
+    const res = await apiFetch('/api/version');
+    if (!res.ok) {
+        throw new Error(`HTTP Error ${res.status}`);
+    }
+    return res.json();
 }
 
 async function fetchHealth() {
@@ -1521,9 +1555,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('authToken').value = savedToken;
     }
 
+    fetchAdminCapabilities();
+
     // Listen for token changes
     document.getElementById('authToken').addEventListener('input', (e) => {
         setToken(e.target.value);
+        fetchAdminCapabilities();
         // Retry loading data
         loadArtifacts();
         fetchHealth().then(hub => {
@@ -2656,28 +2693,29 @@ async function applyPrescanSelection() {
 
 async function fetchVersion() {
     try {
-        const res = await apiFetch('/api/version');
-        if (res.ok) {
-            const data = await res.json();
-            const verEl = document.getElementById('verLabel');
-            const originEl = document.getElementById('originLabel');
+        const data = await getVersionInfo();
+        const verEl = document.getElementById('verLabel');
+        const originEl = document.getElementById('originLabel');
 
-            // Format: S: <ver> | B: <build_ts>
-            // Build ID format: ver-timestamp. We split and take last part.
-            const buildTs = data.build_id ? data.build_id.split('-').pop() : '?';
+        // Format: S: <ver> | B: <build_ts>
+        // Build ID format: ver-timestamp. We split and take last part.
+        const buildTs = data.build_id ? data.build_id.split('-').pop() : '?';
 
-            if (verEl) verEl.textContent = `S: ${data.version} | B: ${buildTs}`;
-            if (originEl) originEl.textContent = `Origin: ${window.location.host}`; // user requested origin
+        lastServerStartedAt = data.started_at || null;
 
-            console.info(`[rLens] Server Version: ${data.version}, Build: ${data.build_id}`);
-        }
+        if (verEl) verEl.textContent = `S: ${data.version} | B: ${buildTs}`;
+        if (originEl) originEl.textContent = `Origin: ${window.location.host}`; // user requested origin
+
+        console.info(`[rLens] Server Version: ${data.version}, Build: ${data.build_id}`);
+        return data;
     } catch (e) {
         console.error("Version check failed", e);
+        return null;
     }
 }
 
 async function hardRefresh() {
-    if (!confirm("Clear all caches and reload?")) return;
+    if (!confirm("Clear browser cache/storage and reload the UI? This does not restart the rLens service.")) return;
 
     // 1. Unregister Service Workers (Critical for Brave/PWA)
     if ('serviceWorker' in navigator) {
@@ -2709,4 +2747,96 @@ async function hardRefresh() {
     const url = new URL(window.location.href);
     url.searchParams.set('t', Date.now());
     window.location.replace(url.toString());
+}
+
+async function waitForServiceRestart(previousStartedAt, attempts = 30, delayMs = 1000, initialDelayMs = 1500) {
+    if (!previousStartedAt) {
+        return false;
+    }
+
+    if (initialDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, initialDelayMs));
+    }
+
+    for (let i = 0; i < attempts; i++) {
+        try {
+            const data = await getVersionInfo();
+            if (data.started_at && data.started_at !== previousStartedAt) {
+                lastServerStartedAt = data.started_at;
+                return true;
+            }
+        } catch (e) {
+            // Restart window: temporary disconnect is expected.
+        }
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+    return false;
+}
+
+async function restartService() {
+    const button = document.getElementById('restartServiceBtn');
+    if (!button || !serviceRestartEnabled) return;
+
+    if (!confirm("Restart the local rLens backend service? Use this after git pull/merge. This does not clear browser cache/storage.")) {
+        return;
+    }
+
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Restarting...';
+
+    let previousStartedAt = lastServerStartedAt;
+    if (!previousStartedAt) {
+        try {
+            const versionInfo = await getVersionInfo();
+            previousStartedAt = versionInfo.started_at || null;
+            lastServerStartedAt = previousStartedAt;
+        } catch (e) {
+            previousStartedAt = null;
+        }
+    }
+
+    try {
+        if (!previousStartedAt) {
+            throw new Error('Cannot verify rLens restart because /api/version did not provide started_at');
+        }
+
+        const res = await apiFetch(`${API_BASE}/admin/restart`, { method: 'POST' });
+
+        if (res.status === 403) {
+            showNotification('rLens service restart is disabled on this host.', 'warning');
+            return;
+        }
+        if (res.status === 409) {
+            showNotification('Restart blocked: jobs are still running.', 'warning');
+            return;
+        }
+        if (!res.ok) {
+            throw new Error(`HTTP Error ${res.status}`);
+        }
+
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            statusEl.innerText = 'Restart scheduled. Reconnecting...';
+        }
+        showNotification('Restart scheduled. Reconnecting...', 'info');
+
+        const restarted = await waitForServiceRestart(previousStartedAt);
+        if (!restarted) {
+            throw new Error('Timed out while waiting for the rLens service to come back');
+        }
+
+        await fetchVersion();
+        const hub = await fetchHealth();
+        if (hub) {
+            fetchRepos(document.getElementById('hubPath').value || hub);
+        }
+        loadArtifacts();
+        showNotification('rLens service restarted.', 'success');
+    } catch (e) {
+        showNotification(`Failed to restart rLens: ${e.message}`, 'error');
+    } finally {
+        button.textContent = originalText;
+        button.disabled = !serviceRestartEnabled;
+    }
 }

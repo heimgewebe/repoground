@@ -20,6 +20,9 @@ Environment=RLENS_HUB=%h/repos
 Environment=RLENS_MERGES=%h/lenskit-out
 Environment=RLENS_HOST=127.0.0.1
 Environment=RLENS_PORT=8787
+# Optional local admin control (default off):
+# Environment=RLENS_ENABLE_SERVICE_RESTART=1
+# Environment=RLENS_SERVICE_UNIT=rlens
 # Required local file; do not commit secrets.
 # RLENS_TOKEN is required for API auth.
 # RLENS_FS_TOKEN_SECRET is separate and optional for filesystem-token signing.
