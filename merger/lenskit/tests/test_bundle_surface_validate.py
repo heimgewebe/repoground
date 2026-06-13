@@ -661,3 +661,25 @@ def test_bundle_surface_validation_schema_rejects_incomplete_validation():
     }
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=incomplete_val, schema=_SURFACE_SCHEMA)
+
+
+
+def test_bundle_surface_validation_schema_rejects_bad_validation_reason():
+    # 5. Invalid validation.reason is rejected by the schema.
+    bad_reason = {
+        "kind": "lenskit.bundle_surface_validation", "version": "1.0",
+        "run_id": "r", "bundle_run_id": "b", "checked_at": "2026-06-02T00:00:00Z",
+        "bundle_manifest_path": "/x", "require_claim_evidence_map": True,
+        "status": "pass",
+        "checks": [{
+            "name": "manifest_present", "status": "pass", "detail": "loaded",
+            "validation": {
+                "mode": "structural_precheck",
+                "engine": "bundle_surface_validate",
+                "reason": "banana_protocol"
+            }
+        }],
+        "does_not_mean": ["claims_true", "forensic_ready"],
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=bad_reason, schema=_SURFACE_SCHEMA)

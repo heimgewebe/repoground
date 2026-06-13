@@ -117,7 +117,14 @@
                 "type": "string"
               },
               "reason": {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "available",
+                  "dependency_missing",
+                  "dependency_unavailable",
+                  "check_not_applicable",
+                  "surface_coherence_check"
+                ]
               }
             }
           }
