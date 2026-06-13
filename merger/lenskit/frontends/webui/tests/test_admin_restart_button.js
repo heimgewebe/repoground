@@ -80,7 +80,7 @@ assert(
 
 const appJsSrc = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 
-function createContext() {
+function createContext(options = {}) {
     const fetchLog = [];
     const notifications = [];
     let confirmMessage = null;
@@ -110,6 +110,10 @@ function createContext() {
         originLabel: makeEl(),
     };
 
+    if (Object.prototype.hasOwnProperty.call(options, 'statusElement')) {
+        elements.status = options.statusElement;
+    }
+
     const context = {
         window: {
             __RLENS_UI_VERSION__: 'test',
@@ -123,6 +127,9 @@ function createContext() {
             body: { appendChild() {}, removeChild() {}, prepend() {} },
             createElement() { return makeEl(); },
             getElementById(id) {
+                if (options.nullElementIds && options.nullElementIds.has(id)) {
+                    return null;
+                }
                 if (!elements[id]) elements[id] = makeEl();
                 return elements[id];
             },
@@ -201,6 +208,23 @@ async function run() {
 
     {
         const ctx = createContext();
+        let versionCalls = 0;
+        ctx.setFetchImpl(async (url) => {
+            if (url.includes('/api/version')) {
+                versionCalls += 1;
+                return makeResponse(200, { version: 'abc', build_id: 'abc', started_at: 'after' });
+            }
+            return makeResponse(404, {});
+        });
+
+        const restarted = await ctx.context.waitForServiceRestart(null, 1, 0, 0);
+
+        assert(restarted === false, 'waitForServiceRestart(null, ...) does not report a successful restart');
+        assert(versionCalls === 0, 'waitForServiceRestart(null, ...) returns before polling');
+    }
+
+    {
+        const ctx = createContext();
         const observed = {};
         ctx.setFetchImpl(async (url, options = {}) => {
             if (url.includes('/api/admin/capabilities')) {
@@ -247,6 +271,34 @@ async function run() {
 
     {
         const ctx = createContext();
+        const observed = { method: null };
+        ctx.setFetchImpl(async (url, options = {}) => {
+            if (url.includes('/api/admin/capabilities')) {
+                return makeResponse(200, { service_restart_enabled: true });
+            }
+            if (url.includes('/api/version')) {
+                return makeResponse(200, { version: 'abc', build_id: 'abc' });
+            }
+            if (url.includes('/api/admin/restart')) {
+                observed.method = options.method || 'GET';
+                return makeResponse(202, { status: 'scheduled' });
+            }
+            return makeResponse(404, {});
+        });
+        await ctx.context.fetchAdminCapabilities();
+        await ctx.context.restartService();
+
+        assert(observed.method === null, 'restartService without started_at does not post /api/admin/restart');
+        assert(
+            ctx.notifications.some(n => n.message.includes('did not provide started_at') && n.type === 'error'),
+            'restartService without started_at surfaces a verification error'
+        );
+        assert(ctx.elements.restartServiceBtn.textContent === 'Restart rLens', 'restart button text is restored after verification failure');
+        assert(ctx.elements.restartServiceBtn.disabled === false, 'restart button is re-enabled after verification failure');
+    }
+
+    {
+        const ctx = createContext();
         ctx.setFetchImpl(async (url) => {
             if (url.includes('/api/admin/capabilities')) {
                 return makeResponse(200, { service_restart_enabled: true });
@@ -287,6 +339,50 @@ async function run() {
             ctx.notifications.some(n => n.message.includes('jobs are still running') && n.type === 'warning'),
             '409 restart response is surfaced as a jobs-running warning'
         );
+    }
+
+    {
+        const ctx = createContext({ nullElementIds: new Set(['status']) });
+        const observed = {};
+        ctx.setFetchImpl(async (url, options = {}) => {
+            if (url.includes('/api/admin/capabilities')) {
+                return makeResponse(200, { service_restart_enabled: true });
+            }
+            if (url.includes('/api/version')) {
+                return makeResponse(200, { version: 'abc', build_id: 'abc', started_at: 'before' });
+            }
+            if (url.includes('/api/admin/restart')) {
+                observed.method = options.method || 'GET';
+                return makeResponse(202, { status: 'scheduled' });
+            }
+            return makeResponse(404, {});
+        });
+        await ctx.context.fetchAdminCapabilities();
+        ctx.context.waitForServiceRestart = async (startedAt) => {
+            observed.startedAt = startedAt;
+            return true;
+        };
+        ctx.context.fetchVersion = async () => {
+            observed.fetchVersionCalled = true;
+            return { started_at: 'after' };
+        };
+        ctx.context.fetchHealth = async () => {
+            observed.fetchHealthCalled = true;
+            return '/hub';
+        };
+        ctx.context.fetchRepos = () => {
+            observed.fetchReposCalled = true;
+        };
+        ctx.context.loadArtifacts = () => {
+            observed.loadArtifactsCalled = true;
+        };
+
+        await ctx.context.restartService();
+
+        assert(observed.method === 'POST', 'missing status element does not block restart POST');
+        assert(observed.startedAt === 'before', 'missing status element still passes the previous started_at into polling');
+        assert(observed.fetchVersionCalled === true, 'missing status element still allows restart success flow');
+        assert(observed.loadArtifactsCalled === true, 'missing status element still reaches artifact reload');
     }
 
     if (failed > 0) {

@@ -2749,12 +2749,20 @@ async function hardRefresh() {
     window.location.replace(url.toString());
 }
 
-async function waitForServiceRestart(previousStartedAt, attempts = 30, delayMs = 1000) {
+async function waitForServiceRestart(previousStartedAt, attempts = 30, delayMs = 1000, initialDelayMs = 1500) {
+    if (!previousStartedAt) {
+        return false;
+    }
+
+    if (initialDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, initialDelayMs));
+    }
+
     for (let i = 0; i < attempts; i++) {
         try {
             const data = await getVersionInfo();
-            if (!previousStartedAt || (data.started_at && data.started_at !== previousStartedAt)) {
-                lastServerStartedAt = data.started_at || null;
+            if (data.started_at && data.started_at !== previousStartedAt) {
+                lastServerStartedAt = data.started_at;
                 return true;
             }
         } catch (e) {
@@ -2789,6 +2797,10 @@ async function restartService() {
     }
 
     try {
+        if (!previousStartedAt) {
+            throw new Error('Cannot verify rLens restart because /api/version did not provide started_at');
+        }
+
         const res = await apiFetch(`${API_BASE}/admin/restart`, { method: 'POST' });
 
         if (res.status === 403) {
@@ -2803,7 +2815,10 @@ async function restartService() {
             throw new Error(`HTTP Error ${res.status}`);
         }
 
-        document.getElementById('status').innerText = 'Restart scheduled. Reconnecting...';
+        const statusEl = document.getElementById('status');
+        if (statusEl) {
+            statusEl.innerText = 'Restart scheduled. Reconnecting...';
+        }
         showNotification('Restart scheduled. Reconnecting...', 'info');
 
         const restarted = await waitForServiceRestart(previousStartedAt);
