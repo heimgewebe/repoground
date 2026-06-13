@@ -624,6 +624,13 @@ def test_write_post_emit_health_persists_unregistered_artifact(tmp_path):
     written = json.loads(out.read_text(encoding="utf-8"))
     assert written["status"] == report["status"] == "pass"
 
+    def _check_by_name(rep: dict, name: str) -> dict:
+        return next(c for c in rep["checks"] if c["name"] == name)
+
+    assert "validation" in _check_by_name(written, "manifest_schema_valid")
+    assert "validation" in _check_by_name(written, "range_ref_resolution")
+    assert "validation" in _check_by_name(written, "claim_evidence_map_schema_valid")
+
     # Persistence must NOT mutate the bundle manifest (no registration).
     assert manifest.read_text(encoding="utf-8") == manifest_before
     data = json.loads(manifest_before)
