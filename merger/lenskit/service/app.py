@@ -9,6 +9,8 @@ import os
 import asyncio
 import json
 import time
+import shutil
+import subprocess
 from pydantic import BaseModel
 import ipaddress
 import logging
@@ -91,6 +93,7 @@ else:
     BUILD_ID = f"dev-{int(time.time())}"
 
 ACTIVE_JOB_STATUSES = {"queued", "running", "canceling"}
+SERVICE_UNIT_NAME_RE = re.compile(r"^[A-Za-z0-9_.@-]+$")
 
 
 def _parse_iso_utc(value: Any) -> Optional[datetime]:
@@ -132,6 +135,63 @@ def _mark_persisted_active_jobs_terminal(job_store: JobStore) -> int:
         reconciled += 1
 
     return reconciled
+
+
+def _count_active_jobs() -> int:
+    if not state.job_store:
+        return 0
+    return sum(1 for job in state.job_store.get_all_jobs() if job.status in ACTIVE_JOB_STATUSES)
+
+
+def _service_restart_feature_flag_enabled() -> bool:
+    return os.getenv("RLENS_ENABLE_SERVICE_RESTART") == "1"
+
+
+def _service_restart_unit() -> Optional[str]:
+    raw = (os.getenv("RLENS_SERVICE_UNIT") or "rlens").strip()
+    if not raw:
+        return None
+    if not SERVICE_UNIT_NAME_RE.fullmatch(raw):
+        logger.warning("Refusing invalid RLENS_SERVICE_UNIT=%r", raw)
+        return None
+    return raw
+
+
+def _service_restart_trusted_local_admin() -> bool:
+    return _is_loopback_host(getattr(state, "host", "")) and bool(get_security_config().token)
+
+
+def _service_restart_enabled_for_request() -> bool:
+    return (
+        _service_restart_feature_flag_enabled()
+        and _service_restart_trusted_local_admin()
+        and _service_restart_unit() is not None
+    )
+
+
+def _schedule_service_restart(unit: str) -> None:
+    if shutil.which("systemd-run") is None:
+        raise RuntimeError("systemd-run is not available")
+
+    command = [
+        "systemd-run",
+        "--user",
+        "--on-active=1s",
+        "systemctl",
+        "--user",
+        "restart",
+        unit,
+    ]
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or exc.stdout or "").strip() or "systemd-run failed"
+        raise RuntimeError(detail) from exc
 
 app = FastAPI(title="rLens", version=SERVER_VERSION)
 
@@ -194,12 +254,14 @@ class ServiceState:
     query_artifact_store: QueryArtifactStore = None
     runner: JobRunner = None
     log_provider: LogProvider = None
+    host: str = "127.0.0.1"
 
 state = ServiceState()
 
 def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0.0.1", merges_dir: Optional[Path] = None):
     state.hub = hub_path
     state.merges_dir = merges_dir
+    state.host = host
     state.job_store = JobStore(hub_path)
     reconciled_jobs = _mark_persisted_active_jobs_terminal(state.job_store)
     if reconciled_jobs:
@@ -519,11 +581,57 @@ def health():
         "hub": str(state.hub),
         "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),
-        "running_jobs": sum(
-            1 for j in state.job_store.get_all_jobs()
-            if j.status in ACTIVE_JOB_STATUSES
-        ) if state.job_store else 0
+        "running_jobs": _count_active_jobs(),
     }
+
+
+@app.get("/api/admin/capabilities", dependencies=[Depends(verify_token)])
+def admin_capabilities():
+    return {
+        "service_restart_enabled": _service_restart_enabled_for_request(),
+    }
+
+
+@app.post("/api/admin/restart", dependencies=[Depends(verify_token)])
+def api_admin_restart():
+    if not _service_restart_enabled_for_request():
+        raise HTTPException(status_code=403, detail="Service restart is disabled")
+
+    active_jobs = _count_active_jobs()
+    if active_jobs:
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status": "blocked",
+                "reason": "jobs_running",
+                "running_jobs": active_jobs,
+            },
+        )
+
+    unit = _service_restart_unit()
+    if unit is None:
+        raise HTTPException(status_code=403, detail="Service restart is disabled")
+
+    try:
+        _schedule_service_restart(unit)
+    except RuntimeError as exc:
+        logger.warning("Failed to schedule rLens service restart for %s: %s", unit, exc)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "reason": "scheduler_failed",
+            },
+        )
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "scheduled",
+            "unit": unit,
+            "message": "rLens restart scheduled",
+        },
+    )
 
 @app.get("/api/repos", dependencies=[Depends(verify_token)])
 def list_repos(hub: Optional[str] = None):

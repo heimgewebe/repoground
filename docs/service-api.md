@@ -238,6 +238,81 @@ All runtime artifacts stored in the `QueryArtifactStore` (`query_trace`, `contex
 - Legacy entries missing these fields are transparently backfilled on read.
 - These fields are groundwork for future Retention, MCP, and Agent-Orchestration logic.
 
+## Admin Restart
+
+The WebUI hard-refresh control is **browser-only**. It clears browser cache and
+storage, then reloads the UI; it does **not** restart the backend service.
+
+### `GET /api/admin/capabilities`
+
+Authenticated capability probe for small admin controls.
+
+**Auth:** `Authorization: Bearer <token>` required.
+
+**Response:**
+```json
+{
+  "service_restart_enabled": true
+}
+```
+
+`service_restart_enabled` is `true` only when all of the following are true:
+
+- `RLENS_ENABLE_SERVICE_RESTART=1`
+- `RLENS_SERVICE_UNIT` is absent or matches `^[A-Za-z0-9_.@-]+$`
+- the service is running in the existing local-trust mode (loopback-bound with auth configured)
+
+### `POST /api/admin/restart`
+
+Feature-flagged local admin control that schedules a restart of the configured
+rLens systemd user unit. It does **not** pull git changes, rebuild diagnostics,
+or restart unrelated services.
+
+**Auth:** `Authorization: Bearer <token>` required.
+
+**Environment:**
+
+- `RLENS_ENABLE_SERVICE_RESTART=1` enables the endpoint and WebUI button.
+- `RLENS_SERVICE_UNIT=rlens` selects the systemd user unit (default `rlens`).
+
+**Success (`202 Accepted`):**
+```json
+{
+  "status": "scheduled",
+  "unit": "rlens",
+  "message": "rLens restart scheduled"
+}
+```
+
+**Blocked (`409 Conflict`):**
+```json
+{
+  "status": "blocked",
+  "reason": "jobs_running",
+  "running_jobs": 1
+}
+```
+
+**Disabled / fail-closed (`403 Forbidden`):**
+- feature flag is off
+- unit name is invalid
+- service is not in the existing loopback+auth local-trust mode
+
+**Scheduler failure (`503 Service Unavailable`):**
+```json
+{
+  "status": "error",
+  "reason": "scheduler_failed"
+}
+```
+
+**Operational notes:**
+
+- Restarts are scheduled via `systemd-run --user --on-active=1s ...`, so the
+  HTTP handler schedules the restart before the service is replaced.
+- Active jobs block the restart.
+- Default is off.
+
 ## Mutation Boundary Classification
 
 Lenskit API documentation distinguishes four classes for mutation-near buttons or paths. This is a contract boundary, not an implementation of new endpoints:
