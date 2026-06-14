@@ -27,6 +27,7 @@ Observed diagnostic surfaces:
 - `post_emit_health.checks[].validation` for schema/range validation checks
 - `bundle_surface_validation.checks[].validation`
 This proof documents emitted diagnostic semantics. It does not change producer code, schemas, or runtime dependency behavior.
+The evidence baseline covers currently emitted diagnostics. Reserved vocabulary such as `minimal_fallback` is documented separately and must not be read as observed emission unless a producer emits it.
 
 ## Diagnostic object shape
 ```json
@@ -70,7 +71,7 @@ Schema validity proves structure, not claim truth.
 ### skipped_unavailable
 
 Meaning:
-A relevant validation could not run because a runtime dependency was unavailable.
+A relevant validation was not performed. The `reason` field identifies why it was skipped, for example because a dependency was unavailable, the schema was missing, or the check was not applicable to the emitted inputs.
 
 Example:
 ```json
@@ -94,9 +95,32 @@ Range-ref example:
 }
 ```
 
+Non-applicable example:
+```json
+{
+  "validation": {
+    "mode": "skipped_unavailable",
+    "engine": "range_resolver",
+    "reason": "check_not_applicable"
+  }
+}
+```
+
+Missing-schema example:
+```json
+{
+  "validation": {
+    "mode": "skipped_unavailable",
+    "engine": "jsonschema",
+    "reason": "schema_missing"
+  }
+}
+```
+
 Limits:
 This is not a successful validation.
-It is a machine-readable degradation signal.
+It is a machine-readable non-execution/degradation signal.
+Consumers must inspect `reason` before classifying the cause.
 Portable/degraded runtimes may still emit sidecars.
 
 ### minimal_fallback
@@ -104,19 +128,12 @@ Portable/degraded runtimes may still emit sidecars.
 Meaning:
 A limited structural fallback check ran instead of full schema validation.
 
-Example:
-```json
-{
-  "validation": {
-    "mode": "minimal_fallback",
-    "engine": "range_ref_minimal",
-    "reason": "dependency_unavailable"
-  }
-}
-```
+Current emission status:
+This mode is part of the shared diagnostic vocabulary, but this proof does not claim a currently emitted `minimal_fallback` example for the checked sidecars.
 
 Limit:
 This is not full JSON Schema validation.
+Do not infer this mode from `skipped_unavailable`; they are separate diagnostic modes.
 
 ### structural_precheck
 
