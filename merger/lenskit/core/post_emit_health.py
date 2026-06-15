@@ -50,6 +50,8 @@ from .claim_evidence_diagnostics import (
 from .constants import ArtifactRole
 from .output_health import _is_jsonschema_unavailable_error
 from .path_security import resolve_secure_path
+
+
 from .dependency_diagnostics import jsonschema_dependency
 
 
@@ -113,7 +115,6 @@ _DEBUG_ROLES = frozenset(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _sha256_file(path: Path) -> Optional[str]:
     h = hashlib.sha256()
@@ -190,11 +191,7 @@ def _range_ref_status(
         "skipped_unavailable", "range_resolver", "check_not_applicable"
     )
     if chunk_index_path is None or not chunk_index_path.exists():
-        return (
-            "unavailable",
-            "chunk_index not available for range_ref check",
-            not_applicable,
-        )
+        return "unavailable", "chunk_index not available for range_ref check", not_applicable
 
     sample_ref: Optional[Dict[str, Any]] = None
     try:
@@ -242,11 +239,7 @@ def _range_ref_status(
         return "unavailable", f"could not read chunk_index: {e}", not_applicable
 
     if sample_ref is None:
-        return (
-            "no_range_ref",
-            "no range reference found; range_ref check skipped",
-            not_applicable,
-        )
+        return "no_range_ref", "no range reference found; range_ref check skipped", not_applicable
 
     try:
         from .range_resolver import resolve_range_ref
@@ -328,19 +321,11 @@ def _compute_evidence(
 def _validate_claim_evidence_map_schema(doc: Dict[str, Any]) -> Tuple[str, str]:
     """Returns (status, message): pass | fail | environment_error."""
     if jsonschema is None:
-        return (
-            "environment_error",
-            "claim_evidence_map schema validation skipped: jsonschema unavailable",
-        )
+        return "environment_error", "claim_evidence_map schema validation skipped: jsonschema unavailable"
 
-    schema_path = (
-        Path(__file__).parent.parent / "contracts" / "claim-evidence-map.v1.schema.json"
-    )
+    schema_path = Path(__file__).parent.parent / "contracts" / "claim-evidence-map.v1.schema.json"
     if not schema_path.exists():
-        return (
-            "environment_error",
-            f"claim_evidence_map schema not found: {schema_path.name}",
-        )
+        return "environment_error", f"claim_evidence_map schema not found: {schema_path.name}"
 
     try:
         with schema_path.open("r", encoding="utf-8") as f:
@@ -385,6 +370,7 @@ def _assemble(
                 "claim_evidence_map_schema",
             ],
         ),
+
         "run_id": run_id,
         "bundle_run_id": bundle_run_id,
         "checked_at": _now_iso(),
@@ -410,19 +396,11 @@ def _assemble(
 
 def _validate_manifest_schema(manifest: Dict[str, Any]) -> Tuple[str, str]:
     """Returns (status, message): pass | fail | environment_error."""
-    schema_path = (
-        Path(__file__).parent.parent / "contracts" / "bundle-manifest.v1.schema.json"
-    )
+    schema_path = Path(__file__).parent.parent / "contracts" / "bundle-manifest.v1.schema.json"
     if jsonschema is None:
-        return (
-            "environment_error",
-            "manifest schema validation skipped: jsonschema unavailable",
-        )
+        return "environment_error", "manifest schema validation skipped: jsonschema unavailable"
     if not schema_path.exists():
-        return (
-            "environment_error",
-            f"bundle manifest schema not found: {schema_path.name}",
-        )
+        return "environment_error", f"bundle manifest schema not found: {schema_path.name}"
     try:
         with schema_path.open("r", encoding="utf-8") as f:
             schema = json.load(f)
@@ -437,7 +415,6 @@ def _validate_manifest_schema(manifest: Dict[str, Any]) -> Tuple[str, str]:
 # ---------------------------------------------------------------------------
 # Core
 # ---------------------------------------------------------------------------
-
 
 def compute_post_emit_health(
     manifest_path_str: str,
@@ -477,9 +454,7 @@ def compute_post_emit_health(
             run_id=run_id,
             bundle_run_id=None,
             manifest_path_str=manifest_path_str,
-            checks=[
-                _check("manifest_present", "blocked", f"cannot read manifest: {e}")
-            ],
+            checks=[_check("manifest_present", "blocked", f"cannot read manifest: {e}")],
             errors=[f"cannot read bundle manifest: {e}"],
             warnings=[],
             jsonschema_available=jsonschema is not None,
@@ -493,12 +468,8 @@ def compute_post_emit_health(
             run_id=run_id,
             bundle_run_id=bundle_run_id,
             manifest_path_str=manifest_path_str,
-            checks=[
-                _check("manifest_present", "blocked", "not a repolens.bundle.manifest")
-            ],
-            errors=[
-                "manifest is not a repolens.bundle.manifest; cannot certify bundle surface"
-            ],
+            checks=[_check("manifest_present", "blocked", "not a repolens.bundle.manifest")],
+            errors=["manifest is not a repolens.bundle.manifest; cannot certify bundle surface"],
             warnings=[],
             jsonschema_available=jsonschema is not None,
         )
@@ -510,14 +481,8 @@ def compute_post_emit_health(
             run_id=run_id,
             bundle_run_id=bundle_run_id,
             manifest_path_str=manifest_path_str,
-            checks=[
-                _check(
-                    "manifest_present", "blocked", "manifest 'artifacts' is not a list"
-                )
-            ],
-            errors=[
-                "manifest 'artifacts' is not a list; no inspectable artifact surface"
-            ],
+            checks=[_check("manifest_present", "blocked", "manifest 'artifacts' is not a list")],
+            errors=["manifest 'artifacts' is not a list; no inspectable artifact surface"],
             warnings=[],
             jsonschema_available=jsonschema is not None,
         )
@@ -572,9 +537,7 @@ def compute_post_emit_health(
             errors.append(f"artifact at index {index} is not an object")
             continue
         artifact_count_checked += 1
-        role = (
-            art.get("role") if isinstance(art.get("role"), str) else f"<index {index}>"
-        )
+        role = art.get("role") if isinstance(art.get("role"), str) else f"<index {index}>"
         if isinstance(art.get("role"), str):
             by_role.setdefault(art["role"], art)
         raw_path = art.get("path")
@@ -591,16 +554,12 @@ def compute_post_emit_health(
 
         if not target.exists() or not target.is_file():
             missing_artifact_count += 1
-            errors.append(
-                f"artifact '{role}' is declared in the manifest but the file is missing: {raw_path}"
-            )
+            errors.append(f"artifact '{role}' is declared in the manifest but the file is missing: {raw_path}")
             continue
 
         actual = _sha256_file(target)
         if actual is None:
-            errors.append(
-                f"artifact '{role}' could not be read for hashing: {raw_path}"
-            )
+            errors.append(f"artifact '{role}' could not be read for hashing: {raw_path}")
             continue
         if isinstance(expected_sha, str) and _SHA256_RE.fullmatch(expected_sha):
             if actual != expected_sha:
@@ -611,9 +570,7 @@ def compute_post_emit_health(
                 continue
             valid_roles.add(art["role"]) if isinstance(art.get("role"), str) else None
         else:
-            warnings.append(
-                f"artifact '{role}' has no usable sha256 in manifest; integrity unverified"
-            )
+            warnings.append(f"artifact '{role}' has no usable sha256 in manifest; integrity unverified")
 
     checks.append(
         _check(
@@ -632,49 +589,25 @@ def compute_post_emit_health(
 
     # ── canonical_md must be declared (truth-source surface) ─────────────────
     if _CANONICAL_MD not in by_role:
-        blocking.append(
-            "canonical_md is not declared in the manifest; cannot certify a truth source"
-        )
-        checks.append(
-            _check(
-                "canonical_md_present", "blocked", "canonical_md absent from manifest"
-            )
-        )
+        blocking.append("canonical_md is not declared in the manifest; cannot certify a truth source")
+        checks.append(_check("canonical_md_present", "blocked", "canonical_md absent from manifest"))
     else:
         checks.append(_check("canonical_md_present", "pass"))
 
     # ── agent_reading_pack: the defining post-emission certification surface ──
     pack_entry = by_role.get(_AGENT_PACK)
     pack_present = pack_entry is not None
-    pack_authority = (
-        pack_entry.get("authority") if isinstance(pack_entry, dict) else None
-    )
-    pack_canonicality = (
-        pack_entry.get("canonicality") if isinstance(pack_entry, dict) else None
-    )
+    pack_authority = pack_entry.get("authority") if isinstance(pack_entry, dict) else None
+    pack_canonicality = pack_entry.get("canonicality") if isinstance(pack_entry, dict) else None
     pack_hash_ok: Optional[bool] = _AGENT_PACK in valid_roles if pack_present else None
     pack_self_role_ok: Optional[bool] = None
 
     if not pack_present:
         if agent_pack_required:
-            blocking.append(
-                "agent_reading_pack is not declared in the manifest; agent surface cannot be certified"
-            )
-            checks.append(
-                _check(
-                    "agent_pack_present",
-                    "blocked",
-                    "agent_reading_pack absent from manifest",
-                )
-            )
+            blocking.append("agent_reading_pack is not declared in the manifest; agent surface cannot be certified")
+            checks.append(_check("agent_pack_present", "blocked", "agent_reading_pack absent from manifest"))
         else:
-            checks.append(
-                _check(
-                    "agent_pack_present",
-                    "skipped",
-                    "agent_reading_pack not required for this run",
-                )
-            )
+            checks.append(_check("agent_pack_present", "skipped", "agent_reading_pack not required for this run"))
     else:
         checks.append(_check("agent_pack_present", "pass"))
         # The pack is navigation, never content/canonical truth. A mis-declared
@@ -682,8 +615,7 @@ def compute_post_emit_health(
         # of truth). This is the manifest-level form of "the pack does not list
         # itself as a canonical/content source incorrectly".
         mis_declared = (
-            pack_authority == "canonical_content"
-            or pack_canonicality == "content_source"
+            pack_authority == "canonical_content" or pack_canonicality == "content_source"
         )
         if mis_declared:
             pack_self_role_ok = False
@@ -691,20 +623,10 @@ def compute_post_emit_health(
                 "agent_reading_pack mis-declares itself as a canonical/content source "
                 f"(authority={pack_authority!r}, canonicality={pack_canonicality!r})"
             )
-            checks.append(
-                _check(
-                    "agent_pack_self_role", "fail", "pack declared as canonical/content"
-                )
-            )
+            checks.append(_check("agent_pack_self_role", "fail", "pack declared as canonical/content"))
         else:
             pack_self_role_ok = True
-            checks.append(
-                _check(
-                    "agent_pack_self_role",
-                    "pass",
-                    "pack declared as navigation/derived",
-                )
-            )
+            checks.append(_check("agent_pack_self_role", "pass", "pack declared as navigation/derived"))
 
     agent_pack = {
         "present": pack_present,
@@ -822,20 +744,12 @@ def compute_post_emit_health(
                     ),
                 )
             )
-            errors.append(
-                "claim_evidence_map_json is declared but hash is missing/invalid"
-            )
+            errors.append("claim_evidence_map_json is declared but hash is missing/invalid")
         else:
             checks.append(_check("claim_evidence_map_hash_ok", "pass"))
             claim_path_raw = claim_entry.get("path")
             if not isinstance(claim_path_raw, str) or not claim_path_raw:
-                checks.append(
-                    _check(
-                        "claim_evidence_map_schema_valid",
-                        "fail",
-                        "claim_evidence_map_json path missing",
-                    )
-                )
+                checks.append(_check("claim_evidence_map_schema_valid", "fail", "claim_evidence_map_json path missing"))
                 errors.append("claim_evidence_map_json path missing")
             else:
                 try:
@@ -843,22 +757,12 @@ def compute_post_emit_health(
                     with claim_path.open("r", encoding="utf-8") as f:
                         claim_doc = json.load(f)
                     if not isinstance(claim_doc, dict):
-                        raise ValueError(
-                            "claim_evidence_map_json root must be an object"
-                        )
+                        raise ValueError("claim_evidence_map_json root must be an object")
                 except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as e:
-                    checks.append(
-                        _check(
-                            "claim_evidence_map_schema_valid",
-                            "fail",
-                            f"cannot parse claim_evidence_map_json: {e}",
-                        )
-                    )
+                    checks.append(_check("claim_evidence_map_schema_valid", "fail", f"cannot parse claim_evidence_map_json: {e}"))
                     errors.append(f"cannot parse claim_evidence_map_json: {e}")
                 else:
-                    claim_schema_status, claim_schema_msg = (
-                        _validate_claim_evidence_map_schema(claim_doc)
-                    )
+                    claim_schema_status, claim_schema_msg = _validate_claim_evidence_map_schema(claim_doc)
                     if claim_schema_status == "pass":
                         checks.append(
                             _check(
@@ -897,17 +801,11 @@ def compute_post_emit_health(
                         warnings.append(claim_schema_msg)
 
     # ── redaction: reported, never enforced (enforcement is PR A5) ───────────
-    capabilities = (
-        manifest.get("capabilities")
-        if isinstance(manifest.get("capabilities"), dict)
-        else {}
-    )
+    capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     redact_value = capabilities.get("redaction")
     redaction_status = {
         "available": isinstance(redact_value, bool),
-        "redact_secrets_enabled": redact_value
-        if isinstance(redact_value, bool)
-        else None,
+        "redact_secrets_enabled": redact_value if isinstance(redact_value, bool) else None,
         "enforced": False,
     }
     checks.append(
@@ -926,18 +824,10 @@ def compute_post_emit_health(
     output_health_declared = _OUTPUT_HEALTH in by_role
     output_health_valid = _OUTPUT_HEALTH in valid_roles
     sqlite_ok: Optional[bool] = None
-    noise_hygiene: Dict[str, Any] = {
-        "available": False,
-        "excluded_noise_count": None,
-        "source": None,
-    }
+    noise_hygiene: Dict[str, Any] = {"available": False, "excluded_noise_count": None, "source": None}
 
     oh_entry = by_role.get(_OUTPUT_HEALTH)
-    if (
-        output_health_valid
-        and isinstance(oh_entry, dict)
-        and isinstance(oh_entry.get("path"), str)
-    ):
+    if output_health_valid and isinstance(oh_entry, dict) and isinstance(oh_entry.get("path"), str):
         try:
             oh_path = resolve_secure_path(manifest_dir, oh_entry["path"])
         except ValueError:
@@ -951,11 +841,7 @@ def compute_post_emit_health(
             if isinstance(oh_doc, dict):
                 v = oh_doc.get("verdict")
                 output_health_verdict = v if isinstance(v, str) else None
-                oh_checks = (
-                    oh_doc.get("checks")
-                    if isinstance(oh_doc.get("checks"), dict)
-                    else {}
-                )
+                oh_checks = oh_doc.get("checks") if isinstance(oh_doc.get("checks"), dict) else {}
                 rc_match = oh_checks.get("sqlite_row_count_matches_chunk_count")
                 fts_ok = oh_checks.get("fts_content_non_empty")
                 if rc_match is not None or fts_ok is not None:
@@ -968,9 +854,7 @@ def compute_post_emit_health(
                 hygiene = oh_checks.get("noise_hygiene")
                 if not isinstance(hygiene, dict):
                     hygiene = oh_doc.get("noise_hygiene")
-                hygiene_available = (
-                    isinstance(hygiene, dict) and hygiene.get("available") is True
-                )
+                hygiene_available = isinstance(hygiene, dict) and hygiene.get("available") is True
                 excluded_count: Optional[int] = None
                 legacy_available = False
                 if isinstance(excluded, list):
@@ -982,9 +866,7 @@ def compute_post_emit_health(
                 if excluded_count is None and hygiene_available:
                     raw_count = hygiene.get("excluded_noise_count")
                     excluded_count = raw_count if isinstance(raw_count, int) else None
-                if excluded_count is not None and (
-                    hygiene_available or legacy_available
-                ):
+                if excluded_count is not None and (hygiene_available or legacy_available):
                     noise_hygiene = {
                         "available": True,
                         "excluded_noise_count": excluded_count,
@@ -992,23 +874,16 @@ def compute_post_emit_health(
                     }
 
     if output_health_valid:
-        oh_obs_status, oh_obs_detail = (
-            "pass",
-            (
-                f"output_health.verdict={output_health_verdict!r} (observation only; "
-                "does not imply post_emit_health.status=pass)"
-            ),
+        oh_obs_status, oh_obs_detail = "pass", (
+            f"output_health.verdict={output_health_verdict!r} (observation only; "
+            "does not imply post_emit_health.status=pass)"
         )
     elif output_health_declared:
-        oh_obs_status, oh_obs_detail = (
-            "skipped",
-            ("output_health is declared but not hash-validated; verdict not trusted"),
+        oh_obs_status, oh_obs_detail = "skipped", (
+            "output_health is declared but not hash-validated; verdict not trusted"
         )
     else:
-        oh_obs_status, oh_obs_detail = (
-            "skipped",
-            "output_health not declared in manifest",
-        )
+        oh_obs_status, oh_obs_detail = "skipped", "output_health not declared in manifest"
     checks.append(_check("output_health_observed", oh_obs_status, oh_obs_detail))
 
     # ── evidence level (existing vocabulary; not an understanding verdict) ────
