@@ -70,7 +70,10 @@
           "description": "True when canonical_md is expected for this output mode or caller expectation."
         },
         "canonical_md_hash_ok": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Null means not checked because canonical_md is not required in this output mode."
         },
         "chunk_index_required": {
@@ -78,7 +81,10 @@
           "description": "True when chunk_index_jsonl is expected for this output mode or caller expectation."
         },
         "chunk_index_hash_ok": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "Null means not checked because chunk_index_jsonl is not required in this output mode."
         },
         "chunk_count": {
@@ -93,43 +99,83 @@
           "description": "True iff SQLite checks are required for this run. In the current implementation this is true when a sqlite artifact was materialized; this does not by itself prove sqlite generation was expected in every runtime environment."
         },
         "sqlite_row_count": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "sqlite_row_count_matches_chunk_count": {
-          "type": ["boolean", "null"]
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "sqlite_fts_row_count": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "sqlite_fts_row_count_matches_chunk_count": {
-          "type": ["boolean", "null"]
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "fts_content_non_empty": {
-          "type": ["boolean", "null"]
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "fts_empty_row_count": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 0
         },
         "range_ref_resolution_ok": {
-          "type": ["boolean", "null"],
+          "type": [
+            "boolean",
+            "null"
+          ],
           "description": "True=resolved ok, False=semantic failure (hard fail), null=check not executed (see range_ref_resolution_status)."
         },
         "range_ref_resolution_status": {
           "type": "string",
-          "enum": ["ok", "fail", "environment_error", "no_range_ref", "unavailable", "skipped"],
-          "description": "Fine-grained status for the range_ref check. 'environment_error' means jsonschema is unavailable — the check could not run, not that data is broken. 'fail' means a real semantic/structural error was detected."
+          "enum": [
+            "ok",
+            "fail",
+            "environment_error",
+            "no_range_ref",
+            "unavailable",
+            "skipped"
+          ],
+          "description": "Fine-grained status for the range_ref check. 'environment_error' means jsonschema is unavailable \u2014 the check could not run, not that data is broken. 'fail' means a real semantic/structural error was detected."
         },
         "range_ref_resolution": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["status", "required", "reason", "validation"],
+          "required": [
+            "status",
+            "required",
+            "reason",
+            "validation"
+          ],
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["ok", "fail", "environment_error", "no_range_ref", "unavailable", "skipped"]
+              "enum": [
+                "ok",
+                "fail",
+                "environment_error",
+                "no_range_ref",
+                "unavailable",
+                "skipped"
+              ]
             },
             "required": {
               "type": "boolean"
@@ -140,15 +186,28 @@
             "validation": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["mode", "engine", "reason"],
+              "required": [
+                "mode",
+                "engine",
+                "reason"
+              ],
               "properties": {
                 "mode": {
                   "type": "string",
-                  "enum": ["jsonschema", "minimal_fallback", "skipped_unavailable", "structural_precheck"]
+                  "enum": [
+                    "jsonschema",
+                    "minimal_fallback",
+                    "skipped_unavailable",
+                    "structural_precheck"
+                  ]
                 },
                 "engine": {
                   "type": "string",
-                  "enum": ["jsonschema", "range_resolver", "doc_freshness_minimal"]
+                  "enum": [
+                    "jsonschema",
+                    "range_resolver",
+                    "doc_freshness_minimal"
+                  ]
                 },
                 "reason": {
                   "type": "string",
@@ -168,11 +227,19 @@
         },
         "sample_query_content_hit": {
           "type": "object",
-          "required": ["status", "required"],
+          "required": [
+            "status",
+            "required"
+          ],
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["pass", "warning", "fail", "skipped"]
+              "enum": [
+                "pass",
+                "warning",
+                "fail",
+                "skipped"
+              ]
             },
             "required": {
               "type": "boolean"
@@ -184,11 +251,19 @@
         },
         "agent_pack_present": {
           "type": "object",
-          "required": ["status", "required"],
+          "required": [
+            "status",
+            "required"
+          ],
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["pass", "warning", "fail", "skipped"]
+              "enum": [
+                "pass",
+                "warning",
+                "fail",
+                "skipped"
+              ]
             },
             "required": {
               "type": "boolean"
@@ -241,7 +316,48 @@
     },
     "verdict": {
       "type": "string",
-      "enum": ["pass", "warn", "fail"]
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jsonschema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "required_for",
+            "effect"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "required_for": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "range_ref_schema"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "effect": {
+              "type": "string",
+              "enum": [
+                "full_validation_available",
+                "validation_degraded"
+              ]
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": false

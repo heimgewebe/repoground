@@ -24,6 +24,34 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .clock import now_utc
 
+
+try:
+    import jsonschema  # noqa: F401
+    _jsonschema_available = True
+except ImportError:
+    _jsonschema_available = False
+
+_JSONSCHEMA_EFFECT_AVAILABLE = "full_validation_available"
+_JSONSCHEMA_EFFECT_DEGRADED = "validation_degraded"
+
+def _jsonschema_dependency(
+    *,
+    available: bool,
+    required_for: List[str],
+) -> Dict[str, object]:
+    return {
+        "jsonschema": {
+            "available": available,
+            "required_for": required_for,
+            "effect": (
+                _JSONSCHEMA_EFFECT_AVAILABLE
+                if available
+                else _JSONSCHEMA_EFFECT_DEGRADED
+            ),
+        }
+    }
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -599,6 +627,11 @@ def compute_output_health(
         "diagnostic_artifacts": diagnostic_artifacts,
         "warnings": warnings,
         "errors": errors,
+        "dependencies": _jsonschema_dependency(
+            available=_jsonschema_available and not (rr_status == "environment_error" and rr_validation.get("reason") == "dependency_unavailable") if chunk_index_required else _jsonschema_available,
+            required_for=["range_ref_schema"],
+        ),
+
         "verdict": verdict,
     }
 

@@ -60,7 +60,10 @@
       "description": "Unique id for this post-emit validation run (not the bundle run)."
     },
     "bundle_run_id": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "run_id of the validated bundle manifest, when available."
     },
     "checked_at": {
@@ -73,7 +76,12 @@
     },
     "status": {
       "type": "string",
-      "enum": ["pass", "warn", "fail", "blocked"],
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "blocked"
+      ],
       "description": "blocked = certification could not complete (required surface absent). fail = certification completed but found defects. warn = usable but degraded. pass = all required checks satisfied."
     },
     "checks": {
@@ -81,14 +89,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "status"],
+        "required": [
+          "name",
+          "status"
+        ],
         "properties": {
           "name": {
             "type": "string"
           },
           "status": {
             "type": "string",
-            "enum": ["pass", "warn", "fail", "blocked", "skipped"]
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "blocked",
+              "skipped"
+            ]
           },
           "detail": {
             "type": "string"
@@ -96,15 +113,28 @@
           "validation": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["mode", "engine", "reason"],
+            "required": [
+              "mode",
+              "engine",
+              "reason"
+            ],
             "properties": {
               "mode": {
                 "type": "string",
-                "enum": ["jsonschema", "minimal_fallback", "skipped_unavailable", "structural_precheck"]
+                "enum": [
+                  "jsonschema",
+                  "minimal_fallback",
+                  "skipped_unavailable",
+                  "structural_precheck"
+                ]
               },
               "engine": {
                 "type": "string",
-                "enum": ["jsonschema", "range_resolver", "doc_freshness_minimal"]
+                "enum": [
+                  "jsonschema",
+                  "range_resolver",
+                  "doc_freshness_minimal"
+                ]
               },
               "reason": {
                 "type": "string",
@@ -143,8 +173,16 @@
       "minItems": 2,
       "description": "Disclaimers of what a post-emit pass deliberately does NOT establish. Always includes 'repo_understood' and 'answer_safe_without_citations'. These are NOT claim verdicts.",
       "allOf": [
-        { "contains": { "const": "repo_understood" } },
-        { "contains": { "const": "answer_safe_without_citations" } }
+        {
+          "contains": {
+            "const": "repo_understood"
+          }
+        },
+        {
+          "contains": {
+            "const": "answer_safe_without_citations"
+          }
+        }
       ]
     },
     "independence_note": {
@@ -152,7 +190,10 @@
       "description": "Explicit statement that output_health.verdict=pass does not imply post_emit_health.status=pass."
     },
     "evidence_level": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
         "readable",
         "navigable",
@@ -182,15 +223,28 @@
       "description": "Full honest set of evidence levels reached (searchable/diagnostic_full may hold without the full core ladder)."
     },
     "output_health_verdict": {
-      "type": ["string", "null"],
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Observed output_health verdict (input/observation only; never gates post-emit status)."
     },
     "redaction_status": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
       "properties": {
-        "available": { "type": "boolean" },
-        "redact_secrets_enabled": { "type": ["boolean", "null"] },
+        "available": {
+          "type": "boolean"
+        },
+        "redact_secrets_enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "enforced": {
           "type": "boolean",
           "description": "Always false in v1: post_emit_health reports redaction, it does not enforce it (enforcement is roadmap PR A5)."
@@ -198,12 +252,28 @@
       }
     },
     "noise_hygiene": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
       "properties": {
-        "available": { "type": "boolean" },
-        "excluded_noise_count": { "type": ["integer", "null"], "minimum": 0 },
-        "source": { "type": ["string", "null"] }
+        "available": {
+          "type": "boolean"
+        },
+        "excluded_noise_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "artifact_count_checked": {
@@ -219,19 +289,95 @@
       "minimum": 0
     },
     "range_ref_resolution_status": {
-      "type": ["string", "null"],
-      "enum": ["ok", "fail", "environment_error", "no_range_ref", "unavailable", null]
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "ok",
+        "fail",
+        "environment_error",
+        "no_range_ref",
+        "unavailable",
+        null
+      ]
     },
     "agent_pack": {
-      "type": ["object", "null"],
+      "type": [
+        "object",
+        "null"
+      ],
       "additionalProperties": false,
       "properties": {
-        "present": { "type": "boolean" },
-        "required": { "type": "boolean" },
-        "hash_ok": { "type": ["boolean", "null"] },
-        "authority_declared": { "type": ["string", "null"] },
-        "canonicality_declared": { "type": ["string", "null"] },
-        "self_role_ok": { "type": ["boolean", "null"] }
+        "present": {
+          "type": "boolean"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "hash_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "authority_declared": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "canonicality_declared": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "self_role_ok": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jsonschema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "required_for",
+            "effect"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "required_for": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "manifest_schema",
+                  "range_ref_schema",
+                  "claim_evidence_map_schema"
+                ]
+              },
+              "uniqueItems": true
+            },
+            "effect": {
+              "type": "string",
+              "enum": [
+                "full_validation_available",
+                "validation_degraded"
+              ]
+            }
+          }
+        }
       }
     }
   }
