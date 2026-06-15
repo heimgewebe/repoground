@@ -25,8 +25,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .clock import now_utc
 
-
 from .dependency_diagnostics import jsonschema_dependency
+
 
 def _probe_jsonschema_available() -> bool:
     try:
@@ -37,7 +37,6 @@ def _probe_jsonschema_available() -> bool:
 
 
 _JSONSCHEMA_AVAILABLE = _probe_jsonschema_available()
-
 
 logger = logging.getLogger(__name__)
 
@@ -618,7 +617,6 @@ def compute_output_health(
             available=_JSONSCHEMA_AVAILABLE,
             required_for=["range_ref_schema"],
         ),
-
         "verdict": verdict,
     }
 

@@ -51,9 +51,7 @@ from .constants import ArtifactRole
 from .output_health import _is_jsonschema_unavailable_error
 from .path_security import resolve_secure_path
 
-
 from .dependency_diagnostics import jsonschema_dependency
-
 
 try:
     import jsonschema
@@ -370,7 +368,6 @@ def _assemble(
                 "claim_evidence_map_schema",
             ],
         ),
-
         "run_id": run_id,
         "bundle_run_id": bundle_run_id,
         "checked_at": _now_iso(),
