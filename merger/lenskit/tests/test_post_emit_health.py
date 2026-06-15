@@ -794,9 +794,9 @@ def test_write_post_emit_health_persists_claim_map_schema_validation(tmp_path):
     }
 
 
-
 def _get_base_peh_report():
     from merger.lenskit.core.post_emit_health import _assemble
+
     return _assemble(
         status="pass",
         run_id="test-run",
@@ -808,6 +808,7 @@ def _get_base_peh_report():
         jsonschema_available=True,
     )
 
+
 def test_post_emit_health_schema_accepts_dependencies():
     report = _get_base_peh_report()
     report["dependencies"] = {
@@ -816,13 +817,14 @@ def test_post_emit_health_schema_accepts_dependencies():
             "required_for": [
                 "manifest_schema",
                 "range_ref_schema",
-                "claim_evidence_map_schema"
+                "claim_evidence_map_schema",
             ],
-            "effect": "full_validation_available"
+            "effect": "full_validation_available",
         }
     }
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.validate(instance=report, schema=schema)
+
 
 def test_post_emit_health_schema_accepts_legacy_report_without_dependencies():
     report = _get_base_peh_report()
@@ -831,18 +833,24 @@ def test_post_emit_health_schema_accepts_legacy_report_without_dependencies():
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.validate(instance=report, schema=schema)
 
+
 def test_post_emit_health_schema_rejects_invalid_dependency_effect():
     report = _get_base_peh_report()
     report["dependencies"] = {
         "jsonschema": {
             "available": True,
-            "required_for": ["manifest_schema", "range_ref_schema", "claim_evidence_map_schema"],
-            "effect": "invalid_effect"
+            "required_for": [
+                "manifest_schema",
+                "range_ref_schema",
+                "claim_evidence_map_schema",
+            ],
+            "effect": "invalid_effect",
         }
     }
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=report, schema=schema)
+
 
 def test_post_emit_health_schema_rejects_invalid_required_for():
     report = _get_base_peh_report()
@@ -850,52 +858,59 @@ def test_post_emit_health_schema_rejects_invalid_required_for():
         "jsonschema": {
             "available": True,
             "required_for": ["unknown_schema"],
-            "effect": "full_validation_available"
+            "effect": "full_validation_available",
         }
     }
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=report, schema=schema)
+
 
 def test_post_emit_health_schema_rejects_non_boolean_dependency_available():
     report = _get_base_peh_report()
     report["dependencies"] = {
         "jsonschema": {
             "available": "true",
-            "required_for": ["manifest_schema", "range_ref_schema", "claim_evidence_map_schema"],
-            "effect": "full_validation_available"
+            "required_for": [
+                "manifest_schema",
+                "range_ref_schema",
+                "claim_evidence_map_schema",
+            ],
+            "effect": "full_validation_available",
         }
     }
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=report, schema=schema)
+
 
 def test_post_emit_health_schema_rejects_extra_dependency_name():
     report = _get_base_peh_report()
     report["dependencies"] = {
         "jsonschema": {
             "available": True,
-            "required_for": ["manifest_schema", "range_ref_schema", "claim_evidence_map_schema"],
-            "effect": "full_validation_available"
+            "required_for": [
+                "manifest_schema",
+                "range_ref_schema",
+                "claim_evidence_map_schema",
+            ],
+            "effect": "full_validation_available",
         },
         "yaml": {
             "available": True,
             "required_for": [],
-            "effect": "full_validation_available"
-        }
+            "effect": "full_validation_available",
+        },
     }
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=report, schema=schema)
 
 
-
 def test_post_emit_health_dependencies_reports_jsonschema_unavailable(
     tmp_path,
     monkeypatch,
 ):
-    import merger.lenskit.core.post_emit_health as post_emit_health
-
     monkeypatch.setattr(post_emit_health, "jsonschema", None)
 
     manifest = _make_bundle(tmp_path)

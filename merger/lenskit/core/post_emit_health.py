@@ -52,25 +52,7 @@ from .output_health import _is_jsonschema_unavailable_error
 from .path_security import resolve_secure_path
 
 
-_JSONSCHEMA_EFFECT_AVAILABLE = "full_validation_available"
-_JSONSCHEMA_EFFECT_DEGRADED = "validation_degraded"
-
-def _jsonschema_dependency(
-    *,
-    available: bool,
-    required_for: List[str],
-) -> Dict[str, object]:
-    return {
-        "jsonschema": {
-            "available": available,
-            "required_for": required_for,
-            "effect": (
-                _JSONSCHEMA_EFFECT_AVAILABLE
-                if available
-                else _JSONSCHEMA_EFFECT_DEGRADED
-            ),
-        }
-    }
+from .dependency_diagnostics import jsonschema_dependency
 
 
 try:
@@ -380,7 +362,7 @@ def _assemble(
     return {
         "kind": KIND,
         "version": VERSION,
-        "dependencies": _jsonschema_dependency(
+        "dependencies": jsonschema_dependency(
             available=jsonschema_available,
             required_for=[
                 "manifest_schema",

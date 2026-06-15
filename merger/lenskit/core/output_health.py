@@ -25,33 +25,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from .clock import now_utc
 
 
+from .dependency_diagnostics import jsonschema_dependency
+
 try:
     import jsonschema  # noqa: F401
-    _jsonschema_available = True
 except ImportError:
-    _jsonschema_available = False
-
-_JSONSCHEMA_EFFECT_AVAILABLE = "full_validation_available"
-_JSONSCHEMA_EFFECT_DEGRADED = "validation_degraded"
-
-def _jsonschema_dependency(
-    *,
-    available: Optional[bool] = None,
-    required_for: List[str],
-) -> Dict[str, object]:
-    if available is None:
-        available = _jsonschema_available
-    return {
-        "jsonschema": {
-            "available": available,
-            "required_for": required_for,
-            "effect": (
-                _JSONSCHEMA_EFFECT_AVAILABLE
-                if available
-                else _JSONSCHEMA_EFFECT_DEGRADED
-            ),
-        }
-    }
+    _JSONSCHEMA_AVAILABLE = False
+else:
+    _JSONSCHEMA_AVAILABLE = True
 
 
 logger = logging.getLogger(__name__)
@@ -629,8 +610,8 @@ def compute_output_health(
         "diagnostic_artifacts": diagnostic_artifacts,
         "warnings": warnings,
         "errors": errors,
-        "dependencies": _jsonschema_dependency(
-            available=getattr(__import__("merger.lenskit.core.range_resolver", fromlist=["jsonschema"]), "jsonschema", None) is not None,
+        "dependencies": jsonschema_dependency(
+            available=_JSONSCHEMA_AVAILABLE,
             required_for=["range_ref_schema"],
         ),
 
