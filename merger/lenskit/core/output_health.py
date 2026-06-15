@@ -36,9 +36,11 @@ _JSONSCHEMA_EFFECT_DEGRADED = "validation_degraded"
 
 def _jsonschema_dependency(
     *,
-    available: bool,
+    available: Optional[bool] = None,
     required_for: List[str],
 ) -> Dict[str, object]:
+    if available is None:
+        available = _jsonschema_available
     return {
         "jsonschema": {
             "available": available,
