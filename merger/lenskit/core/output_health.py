@@ -24,9 +24,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .clock import now_utc
-
-
 from .dependency_diagnostics import jsonschema_dependency
+
 
 def _probe_jsonschema_available() -> bool:
     try:
@@ -59,7 +58,7 @@ def _sha256_file(path: Path) -> Optional[str]:
 def _chunk_index_stats(chunk_index_path: Optional[Path]) -> Tuple[int, int, int, int]:
     """
     Validate chunk_index.jsonl and return (chunk_count, invalid_json_count, missing_id_count, empty_line_count).
-    
+
     A valid chunk line must be:
     - non-empty
     - valid JSON
@@ -68,12 +67,12 @@ def _chunk_index_stats(chunk_index_path: Optional[Path]) -> Tuple[int, int, int,
     """
     if not chunk_index_path or not chunk_index_path.exists():
         return 0, 0, 0, 0
-    
+
     chunk_count = 0
     invalid_json_count = 0
     missing_id_count = 0
     empty_line_count = 0
-    
+
     try:
         with chunk_index_path.open("r", encoding="utf-8") as f:
             for line in f:
@@ -81,13 +80,13 @@ def _chunk_index_stats(chunk_index_path: Optional[Path]) -> Tuple[int, int, int,
                 if not line_stripped:
                     empty_line_count += 1
                     continue
-                
+
                 try:
                     obj = json.loads(line_stripped)
                     if not isinstance(obj, dict):
                         invalid_json_count += 1
                         continue
-                    
+
                     # A chunk is valid when either chunk_id or id is present and non-empty.
                     has_valid_id = False
                     for key in ("chunk_id", "id"):
@@ -99,7 +98,7 @@ def _chunk_index_stats(chunk_index_path: Optional[Path]) -> Tuple[int, int, int,
                     if not has_valid_id:
                         missing_id_count += 1
                         continue
-                    
+
                     chunk_count += 1
                 except json.JSONDecodeError:
                     invalid_json_count += 1
@@ -108,11 +107,13 @@ def _chunk_index_stats(chunk_index_path: Optional[Path]) -> Tuple[int, int, int,
         invalid_json_count += 1
     except OSError:
         pass
-    
+
     return chunk_count, invalid_json_count, missing_id_count, empty_line_count
 
 
-def _check_file_hash(path: Optional[Path], expected_sha256: Optional[str]) -> Tuple[str, Optional[str]]:
+def _check_file_hash(
+    path: Optional[Path], expected_sha256: Optional[str]
+) -> Tuple[str, Optional[str]]:
     """
     Returns (status, actual_sha256).
     status is one of: ok, missing_file, missing_expected_hash, hash_mismatch, read_error.
@@ -159,7 +160,9 @@ def _sqlite_checks(
 
             fts_count = c.execute("SELECT count(*) FROM chunks_fts").fetchone()[0]
             result["sqlite_fts_row_count"] = fts_count
-            result["sqlite_fts_row_count_matches_chunk_count"] = fts_count == chunk_count
+            result["sqlite_fts_row_count_matches_chunk_count"] = (
+                fts_count == chunk_count
+            )
 
             fts_stats = c.execute(
                 "SELECT avg(length(content)), max(length(content)) FROM chunks_fts"
@@ -198,7 +201,9 @@ def _is_jsonschema_unavailable_error(exc: Exception) -> bool:
     msg = str(exc).lower()
     if isinstance(exc, (ImportError, ModuleNotFoundError)):
         return "jsonschema" in msg
-    return isinstance(exc, RuntimeError) and any(m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS)
+    return isinstance(exc, RuntimeError) and any(
+        m in msg for m in _JSONSCHEMA_UNAVAILABLE_MARKERS
+    )
 
 
 def _range_ref_validation(mode: str, reason: str) -> Dict[str, str]:
@@ -226,9 +231,19 @@ def _range_ref_check(
         "skipped_unavailable", "check_not_applicable"
     )
     if not chunk_index_path or not chunk_index_path.exists():
-        return None, ["chunk_index not available for range_ref check"], "unavailable", not_applicable
+        return (
+            None,
+            ["chunk_index not available for range_ref check"],
+            "unavailable",
+            not_applicable,
+        )
     if not dump_index_path or not dump_index_path.exists():
-        return None, ["dump_index not available for range_ref check"], "unavailable", not_applicable
+        return (
+            None,
+            ["dump_index not available for range_ref check"],
+            "unavailable",
+            not_applicable,
+        )
 
     sample_ref = None
     try:
@@ -261,7 +276,9 @@ def _range_ref_check(
                     if not isinstance(raw_ref, dict):
                         return (
                             False,
-                            [f"range reference must be an object, got {type(raw_ref).__name__}"],
+                            [
+                                f"range reference must be an object, got {type(raw_ref).__name__}"
+                            ],
                             "fail",
                             _range_ref_validation(
                                 "structural_precheck", "malformed_range_ref"
@@ -275,10 +292,16 @@ def _range_ref_check(
     if sample_ref is None:
         # No range_ref present in any chunk; this is normal for inline-only bundles
         # but should be flagged as a non-blocking issue
-        return None, ["no range reference found; range_ref check skipped"], "no_range_ref", not_applicable
+        return (
+            None,
+            ["no range reference found; range_ref check skipped"],
+            "no_range_ref",
+            not_applicable,
+        )
 
     try:
         from .range_resolver import resolve_range_ref
+
         resolve_range_ref(dump_index_path, sample_ref)
         return True, [], "ok", _range_ref_validation("jsonschema", "available")
     except Exception as e:
@@ -289,9 +312,7 @@ def _range_ref_check(
                 None,
                 ["range_ref schema validation skipped: jsonschema unavailable"],
                 "environment_error",
-                _range_ref_validation(
-                    "skipped_unavailable", "dependency_unavailable"
-                ),
+                _range_ref_validation("skipped_unavailable", "dependency_unavailable"),
             )
         if "schema file not found" in str(e).lower():
             return (
@@ -335,7 +356,7 @@ def compute_output_health(
     """
     Compute the output health report.  Does NOT write to disk.
     Returns a dict conforming to output-health.v1.schema.json.
-    
+
     Note: primary_manifest_path is the dump_index or primary artifact manifest,
     NOT the final bundle manifest (which is written after health is computed).
     This avoids self-referential circularity: output_health.json does not verify
@@ -362,7 +383,9 @@ def compute_output_health(
     # ── canonical_md_hash_ok ────────────────────────────────────────────────
     checks["canonical_md_required"] = bool(canonical_md_required)
     if canonical_md_required:
-        canonical_status, _ = _check_file_hash(canonical_md_path, expected_canonical_md_sha256)
+        canonical_status, _ = _check_file_hash(
+            canonical_md_path, expected_canonical_md_sha256
+        )
         checks["canonical_md_hash_ok"] = canonical_status == "ok"
         if canonical_status == "missing_file":
             errors.append("canonical_md hash check failed: file missing")
@@ -378,7 +401,9 @@ def compute_output_health(
     # ── chunk_index_hash_ok ─────────────────────────────────────────────────
     checks["chunk_index_required"] = bool(chunk_index_required)
     if chunk_index_required:
-        chunk_status, _ = _check_file_hash(chunk_index_path, expected_chunk_index_sha256)
+        chunk_status, _ = _check_file_hash(
+            chunk_index_path, expected_chunk_index_sha256
+        )
         checks["chunk_index_hash_ok"] = chunk_status == "ok"
         if chunk_status == "missing_file":
             errors.append("chunk_index hash check failed: file missing")
@@ -392,22 +417,32 @@ def compute_output_health(
         checks["chunk_index_hash_ok"] = None
 
     # ── chunk_count ─────────────────────────────────────────────────────────
-    chunk_count, chunk_invalid_json_count, chunk_missing_id_count, chunk_empty_line_count = _chunk_index_stats(
-        chunk_index_path
-    )
+    (
+        chunk_count,
+        chunk_invalid_json_count,
+        chunk_missing_id_count,
+        chunk_empty_line_count,
+    ) = _chunk_index_stats(chunk_index_path)
     checks["chunk_count"] = chunk_count
     checks["chunk_invalid_json_line_count"] = chunk_invalid_json_count
     checks["chunk_missing_id_line_count"] = chunk_missing_id_count
     checks["chunk_empty_line_count"] = chunk_empty_line_count
-    
+
     # Chunk validation errors are blocking
     if chunk_index_required and chunk_invalid_json_count > 0:
         errors.append(
             f"chunk_index.jsonl has {chunk_invalid_json_count} invalid or non-object JSON line(s)"
         )
     if chunk_index_required and chunk_missing_id_count > 0:
-        errors.append(f"chunk_index.jsonl has {chunk_missing_id_count} line(s) missing valid id/chunk_id")
-    if chunk_index_required and chunk_count == 0 and chunk_index_path and chunk_index_path.exists():
+        errors.append(
+            f"chunk_index.jsonl has {chunk_missing_id_count} line(s) missing valid id/chunk_id"
+        )
+    if (
+        chunk_index_required
+        and chunk_count == 0
+        and chunk_index_path
+        and chunk_index_path.exists()
+    ):
         errors.append("chunk_index.jsonl has no valid chunk entries")
 
     # ── sqlite ──────────────────────────────────────────────────────────────
@@ -618,7 +653,6 @@ def compute_output_health(
             available=_JSONSCHEMA_AVAILABLE,
             required_for=["range_ref_schema"],
         ),
-
         "verdict": verdict,
     }
 
@@ -631,7 +665,7 @@ def write_output_health(
     Compute and write the output health report to output_path.
     output_path must be the full destination file path, for example *.output_health.json;
     it is written exactly as provided.
-    
+
     Note: Pass primary_manifest_path (dump_index), NOT the final bundle manifest.
     This prevents self-referential circularity during health computation.
 
@@ -639,5 +673,7 @@ def write_output_health(
     """
     health = compute_output_health(**kwargs)
     output_path.write_text(json.dumps(health, indent=2), encoding="utf-8")
-    logger.debug("Output health written to %s (verdict=%s)", output_path, health["verdict"])
+    logger.debug(
+        "Output health written to %s (verdict=%s)", output_path, health["verdict"]
+    )
     return output_path
