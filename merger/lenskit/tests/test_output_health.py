@@ -1545,6 +1545,28 @@ def test_output_health_schema_rejects_extra_dependency_name():
         jsonschema.validate(instance=report, schema=schema)
 
 
+def test_output_health_schema_rejects_empty_dependencies_object():
+    report = _get_base_oh_report()
+    report["dependencies"] = {}
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
+def test_output_health_schema_rejects_dependency_available_effect_mismatch():
+    report = _get_base_oh_report()
+    report["dependencies"] = {
+        "jsonschema": {
+            "available": False,
+            "required_for": ["range_ref_schema"],
+            "effect": "full_validation_available",
+        }
+    }
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
 def test_output_health_dependencies_reports_jsonschema_available(monkeypatch):
     monkeypatch.setattr("merger.lenskit.core.output_health._JSONSCHEMA_AVAILABLE", True)
 
