@@ -210,6 +210,27 @@ This does not prove forensic readiness.
 * Degraded runtime must not be normalized into a silent pass.
 * (Pythonista/iPad environments are examples of a degraded runtime, not a special contract.)
 
+### Pythonista / iPad degraded runtime
+
+Pythonista/iPad environments may lack optional validation dependencies such as
+`jsonschema`. In that case Lenskit must not silently treat full schema validation as
+successful. The runtime is degraded, not necessarily broken.
+
+Expected machine-readable signals:
+- `dependencies.jsonschema.available=false`
+- `dependencies.jsonschema.effect=validation_degraded`
+- schema-bound checks use `validation.mode=skipped_unavailable` or a documented
+  `minimal_fallback`
+- `skipped_unavailable` is not a pass for schema validation
+- degraded validation does not establish `forensic_ready`
+
+Core distinctions:
+- degraded runtime != corrupted artifact
+- skipped_unavailable != schema valid
+- minimal_fallback != full validation
+- warn != claim truth
+- output_health pass/warn != forensic ready
+
 ## Non-claims
 
 Explicitly state:

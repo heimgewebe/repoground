@@ -190,6 +190,18 @@
         "Full .gitignore semantics remain out of scope.",
         "Noise ratchet or CI-blocking for new noise patterns remains a follow-up."
       ]
+    },
+    {
+      "id": "TASK-PYTHONISTA-DIAG-001",
+      "title": "Pythonista/iPad validation capability fixture",
+      "status": "done",
+      "description": "Adds a deterministic Pythonista/iPad-like degraded-runtime fixture for missing jsonschema, proving that validation degradation remains machine-readable and does not imply corrupted artifacts or forensic readiness.",
+      "evidence": [
+        "merger/lenskit/tests/test_pythonista_validation_capability.py",
+        "docs/proofs/portable-validation-diagnostics-proof.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ]
     }
   ]
 }
