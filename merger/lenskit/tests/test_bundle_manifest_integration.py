@@ -256,6 +256,10 @@ def test_output_health_broken_range_ref_is_fail_in_repo_near_flow(tmp_path):
     assert isinstance(first_chunk.get("content_range_ref"), dict)
     first_chunk["content_range_ref"]["file_path"] = "totally_missing_artifact.md"
     first_chunk["content_range_ref"]["content_sha256"] = "0" * _SHA256_HEX_LENGTH
+    if "canonical_range" in first_chunk:
+        assert isinstance(first_chunk.get("canonical_range"), dict)
+        first_chunk["canonical_range"]["file_path"] = "totally_missing_artifact.md"
+        first_chunk["canonical_range"]["content_sha256"] = "0" * _SHA256_HEX_LENGTH
     lines[0] = json.dumps(first_chunk, ensure_ascii=False)
     artifacts.chunk_index.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

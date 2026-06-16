@@ -21,7 +21,7 @@ Boundaries (see DOES_NOT_ESTABLISH):
 
 import json
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Optional, Tuple
 
 from .eval_core import do_eval
@@ -70,7 +70,7 @@ def classify_target_kind(target: str) -> str:
         return "unknown"
     if not _is_repo_path_pattern(target):
         return "symbol_or_text"
-    basename = target.rstrip("/").rsplit("/", 1)[-1]
+    basename = PurePosixPath(target.rstrip("/")).name
     if "/tests/" in target or basename.startswith("test_"):
         return "test_path"
     return "path"
@@ -152,6 +152,8 @@ def _find_target_rank(
     Mirrors the relevance match used by eval_core.evaluate_single_run. Returns
     (found, rank_1_indexed, matched_result).
     """
+    # Keep substring semantics aligned with eval_core.evaluate_single_run.
+    # Matcher calibration is a later slice; this adapter must not change retrieval semantics.
     for rank_idx, result_path in enumerate(top_results):
         if isinstance(result_path, str) and (
             target in result_path or result_path in target
@@ -222,13 +224,15 @@ def build_review_retrieval_baseline(
                 query_had_zero_hits=query_had_zero_hits,
             )
             diagnosis = record.primary_diagnosis
+            if diagnosis not in DiagnosticsRecord.PRIMARY_DIAGNOSES:
+                diagnosis = "diagnostic_inconclusive"
             taxonomy_summary[diagnosis] = taxonomy_summary.get(diagnosis, 0) + 1
 
             target_records.append(
                 {
                     "target": target,
                     "target_kind": classify_target_kind(target),
-                    "found": bool(in_top_k),
+                    "found": in_top_k,
                     "rank": rank if in_top_k else None,
                     "matched_result": matched if in_top_k else None,
                     "diagnosis": diagnosis,

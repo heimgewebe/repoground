@@ -140,6 +140,8 @@ def test_classify_target_kind():
     assert classify_target_kind("README.md") == "path"
     assert classify_target_kind("run_query") == "symbol_or_text"
     assert classify_target_kind("") == "unknown"
+    assert classify_target_kind("merger/lenskit/tests/") == "test_path"
+    assert classify_target_kind("merger/lenskit/core/") == "path"
 
 
 # --- baseline structure / metrics ------------------------------------------
@@ -320,3 +322,34 @@ def test_baseline_doc_states_boundaries():
     assert "does not establish review completeness" in text
     assert "A hit does not prove answer correctness." in text
     assert "A miss does not prove code absence." in text
+
+
+def test_unknown_diagnosis_fallback():
+    class _UnknownDiagnosisCalibrator:
+        def diagnose_miss(self, **kwargs):
+            class _Record:
+                primary_diagnosis = "new_unexpected_diagnosis"
+
+                def to_dict(self):
+                    return {
+                        "primary_diagnosis": self.primary_diagnosis,
+                        "query_id": kwargs.get("query_id"),
+                        "expected_target": kwargs.get("expected_target"),
+                    }
+
+            return _Record()
+
+    eval_res = _synthetic_eval_results()
+    baseline = build_review_retrieval_baseline(
+        eval_res,
+        k=10,
+        calibrator=_UnknownDiagnosisCalibrator(),  # type: ignore[arg-type]
+    )
+
+    assert "new_unexpected_diagnosis" not in baseline["miss_taxonomy_summary"]
+    assert baseline["miss_taxonomy_summary"]["diagnostic_inconclusive"] >= 1
+
+    # Check target records diagnosis field
+    q0 = baseline["queries"][0]
+    target_rec = q0["expected_targets"][0]
+    assert target_rec["diagnosis"] == "diagnostic_inconclusive"
