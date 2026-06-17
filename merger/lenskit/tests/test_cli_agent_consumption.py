@@ -1,6 +1,4 @@
 import json
-import pytest
-
 from merger.lenskit.cli.main import main
 
 
@@ -16,27 +14,7 @@ DOES_NOT_ESTABLISH = [
     "forensic_ready"
 ]
 
-@pytest.fixture
-def ac_pr_review(tmp_path):
-    p = tmp_path / "answer-compliance.json"
-    p.write_text(json.dumps({
-        "kind": "lenskit.answer_compliance",
-        "version": "1.0",
-        "task_profile": "pr_review",
-        "declared_artifacts": [
-            "agent_reading_pack",
-            "canonical_md",
-            "citation_map_jsonl",
-            "post_emit_health"
-        ],
-        "declared_citations": [],
-        "declared_ranges": [],
-        "unread_required_artifacts": [],
-        "unread_recommended_artifacts": [],
-        "epistemic_gaps": [],
-        "does_not_establish": DOES_NOT_ESTABLISH
-    }), encoding="utf-8")
-    return p
+
 
 
 def test_cli_required_stdout(capsys):
@@ -48,7 +26,9 @@ def test_cli_required_stdout(capsys):
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
     assert out["task_profile"] == "basic_repo_question"
-    assert out["status"] in ("pass", "warn")
+    assert out["status"] == "pass"
+    assert out["missing_required"] == []
+    assert out["missing_recommended"] == []
 
 
 def test_cli_required_out_file(tmp_path, capsys):
@@ -63,7 +43,9 @@ def test_cli_required_out_file(tmp_path, capsys):
     assert out_file.exists()
     out = json.loads(out_file.read_text(encoding="utf-8"))
     assert out["task_profile"] == "basic_repo_question"
-    assert out["status"] in ("pass", "warn")
+    assert out["status"] == "pass"
+    assert out["missing_required"] == []
+    assert out["missing_recommended"] == []
     assert capsys.readouterr().out == ""
 
 
@@ -124,18 +106,20 @@ def test_cli_validate_trace_pass(tmp_path, capsys):
 
 def test_cli_validate_trace_warn(tmp_path, capsys):
     rr_file = tmp_path / "rr.json"
-    rr_file.write_text(json.dumps({
+    rr_data = {
         "task_profile": "pr_review",
         "required": ["canonical_md"],
         "recommended": ["citation_map_jsonl"],
         "status": "warn"
-    }))
+    }
+    rr_file.write_text(json.dumps(rr_data), encoding="utf-8")
     ac_file = tmp_path / "ac.json"
-    ac_file.write_text(json.dumps({
+    ac_data = {
         "task_profile": "pr_review",
         "declared_artifacts": ["canonical_md"],
         "does_not_establish": DOES_NOT_ESTABLISH
-    }))
+    }
+    ac_file.write_text(json.dumps(ac_data), encoding="utf-8")
     rc = main([
         "agent-consumption", "validate-trace",
         "--required-reading", str(rr_file),
@@ -148,18 +132,20 @@ def test_cli_validate_trace_warn(tmp_path, capsys):
 
 def test_cli_validate_trace_warn_strict(tmp_path, capsys):
     rr_file = tmp_path / "rr.json"
-    rr_file.write_text(json.dumps({
+    rr_data = {
         "task_profile": "pr_review",
         "required": ["canonical_md"],
         "recommended": ["citation_map_jsonl"],
         "status": "warn"
-    }))
+    }
+    rr_file.write_text(json.dumps(rr_data), encoding="utf-8")
     ac_file = tmp_path / "ac.json"
-    ac_file.write_text(json.dumps({
+    ac_data = {
         "task_profile": "pr_review",
         "declared_artifacts": ["canonical_md"],
         "does_not_establish": DOES_NOT_ESTABLISH
-    }))
+    }
+    ac_file.write_text(json.dumps(ac_data), encoding="utf-8")
     rc = main([
         "agent-consumption", "validate-trace",
         "--required-reading", str(rr_file),
@@ -173,18 +159,20 @@ def test_cli_validate_trace_warn_strict(tmp_path, capsys):
 
 def test_cli_validate_trace_fail(tmp_path, capsys):
     rr_file = tmp_path / "rr.json"
-    rr_file.write_text(json.dumps({
+    rr_data = {
         "task_profile": "pr_review",
         "required": ["canonical_md"],
         "recommended": [],
         "status": "fail"
-    }))
+    }
+    rr_file.write_text(json.dumps(rr_data), encoding="utf-8")
     ac_file = tmp_path / "ac.json"
-    ac_file.write_text(json.dumps({
+    ac_data = {
         "task_profile": "pr_review",
         "declared_artifacts": [], 
         "does_not_establish": DOES_NOT_ESTABLISH
-    }))
+    }
+    ac_file.write_text(json.dumps(ac_data), encoding="utf-8")
     rc = main([
         "agent-consumption", "validate-trace",
         "--required-reading", str(rr_file),
@@ -197,18 +185,20 @@ def test_cli_validate_trace_fail(tmp_path, capsys):
 
 def test_cli_validate_trace_out_file(tmp_path, capsys):
     rr_file = tmp_path / "rr.json"
-    rr_file.write_text(json.dumps({
+    rr_data = {
         "task_profile": "pr_review",
         "required": ["canonical_md"],
         "recommended": [],
         "status": "pass"
-    }))
+    }
+    rr_file.write_text(json.dumps(rr_data), encoding="utf-8")
     ac_file = tmp_path / "ac.json"
-    ac_file.write_text(json.dumps({
+    ac_data = {
         "task_profile": "pr_review",
         "declared_artifacts": ["canonical_md"],
         "does_not_establish": DOES_NOT_ESTABLISH
-    }))
+    }
+    ac_file.write_text(json.dumps(ac_data), encoding="utf-8")
     out_file = tmp_path / "trace.json"
     rc = main([
         "agent-consumption", "validate-trace",
@@ -235,9 +225,9 @@ def test_cli_missing_input_path(capsys):
 
 def test_cli_invalid_json(tmp_path, capsys):
     rr_file = tmp_path / "rr.json"
-    rr_file.write_text("{invalid")
+    rr_file.write_text("{invalid", encoding="utf-8")
     ac_file = tmp_path / "ac.json"
-    ac_file.write_text("{}")
+    ac_file.write_text("{}", encoding="utf-8")
     
     rc = main([
         "agent-consumption", "validate-trace",
@@ -250,11 +240,12 @@ def test_cli_invalid_json(tmp_path, capsys):
 
 def test_cli_roles_file_list(tmp_path, capsys):
     roles_file = tmp_path / "roles.json"
-    roles_file.write_text(json.dumps([
+    roles_data = [
         "agent_reading_pack",
         "canonical_md",
         "citation_map_jsonl",
-    ]), encoding="utf-8")
+    ]
+    roles_file.write_text(json.dumps(roles_data), encoding="utf-8")
     rc = main([
         "agent-consumption", "required",
         "--task-profile", "basic_repo_question",
@@ -269,13 +260,14 @@ def test_cli_roles_file_list(tmp_path, capsys):
 
 def test_cli_roles_file_object(tmp_path, capsys):
     roles_file = tmp_path / "roles.json"
-    roles_file.write_text(json.dumps({
+    roles_data = {
         "available_roles": [
             "agent_reading_pack",
             "canonical_md",
             "citation_map_jsonl",
         ]
-    }), encoding="utf-8")
+    }
+    roles_file.write_text(json.dumps(roles_data), encoding="utf-8")
     rc = main([
         "agent-consumption", "required",
         "--task-profile", "basic_repo_question",
@@ -306,20 +298,22 @@ def test_cli_roles_union(tmp_path, capsys):
 
 def test_cli_roles_union_validate_trace(tmp_path, capsys):
     rr_file = tmp_path / "rr.json"
-    rr_file.write_text(json.dumps({
+    rr_data = {
         "task_profile": "pr_review",
         "required": ["canonical_md"],
         "recommended": [],
         "status": "pass"
-    }))
+    }
+    rr_file.write_text(json.dumps(rr_data), encoding="utf-8")
     ac_file = tmp_path / "ac.json"
-    ac_file.write_text(json.dumps({
+    ac_data = {
         "task_profile": "pr_review",
         "declared_artifacts": ["canonical_md", "mystery_from_file", "mystery_from_csv"],
         "does_not_establish": DOES_NOT_ESTABLISH
-    }))
+    }
+    ac_file.write_text(json.dumps(ac_data), encoding="utf-8")
     roles_file = tmp_path / "roles.json"
-    roles_file.write_text('["mystery_from_file"]')
+    roles_file.write_text('["mystery_from_file"]', encoding="utf-8")
     
     rc = main([
         "agent-consumption", "validate-trace",
@@ -357,16 +351,18 @@ def test_cli_invalid_roles_file_shape(tmp_path, capsys):
 
 def test_cli_validate_trace_missing_shape(tmp_path, capsys):
     rr_file = tmp_path / "rr.json"
-    rr_file.write_text(json.dumps({
+    rr_data = {
         "required": [],
         "recommended": [],
         "status": "pass",
-    }), encoding="utf-8")
+    }
+    rr_file.write_text(json.dumps(rr_data), encoding="utf-8")
     ac_file = tmp_path / "ac.json"
-    ac_file.write_text(json.dumps({
+    ac_data = {
         "declared_artifacts": [],
         "does_not_establish": DOES_NOT_ESTABLISH,
-    }), encoding="utf-8")
+    }
+    ac_file.write_text(json.dumps(ac_data), encoding="utf-8")
     
     rc = main([
         "agent-consumption", "validate-trace",
@@ -376,16 +372,18 @@ def test_cli_validate_trace_missing_shape(tmp_path, capsys):
     assert rc == 2
     assert "Required reading missing required keys" in capsys.readouterr().err
 
-    rr_file.write_text(json.dumps({
+    rr_data = {
         "task_profile": "pr_review",
         "required": [],
         "recommended": [],
         "status": "pass",
-    }), encoding="utf-8")
-    ac_file.write_text(json.dumps({
+    }
+    rr_file.write_text(json.dumps(rr_data), encoding="utf-8")
+    ac_data = {
         "declared_artifacts": [],
         "does_not_establish": DOES_NOT_ESTABLISH,
-    }), encoding="utf-8")
+    }
+    ac_file.write_text(json.dumps(ac_data), encoding="utf-8")
     
     rc = main([
         "agent-consumption", "validate-trace",

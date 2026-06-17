@@ -133,6 +133,7 @@ The `agent-consumption` CLI exposes the existing Required Reading Protocol resol
 and Agent Consumption Trace validator.
 
 Commands:
+
 - `agent-consumption required`
 - `agent-consumption validate-trace`
 

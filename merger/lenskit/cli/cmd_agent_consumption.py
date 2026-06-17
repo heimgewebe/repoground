@@ -58,7 +58,7 @@ def _read_json_object(path: Path) -> dict:
 def _write_json_or_stdout(payload: dict, out: Path | None) -> None:
     text = json.dumps(payload, indent=2, sort_keys=True)
     if out is None:
-        print(text)
+        sys.stdout.write(text + "\n")
     else:
         try:
             out.write_text(text + "\n", encoding="utf-8")
@@ -119,7 +119,9 @@ def run_agent_consumption_required(args: argparse.Namespace) -> int:
     )
 
     try:
-        roles_file_path = Path(args.available_roles_file) if args.available_roles_file else None
+        roles_file_path = (
+            Path(args.available_roles_file) if args.available_roles_file else None
+        )
         available_roles = _collect_available_roles(args.available_roles, roles_file_path)
 
         protocol = default_required_reading_protocol()
@@ -158,7 +160,9 @@ def run_agent_consumption_validate_trace(args: argparse.Namespace) -> int:
             label="Answer compliance"
         )
 
-        roles_file_path = Path(args.available_roles_file) if args.available_roles_file else None
+        roles_file_path = (
+            Path(args.available_roles_file) if args.available_roles_file else None
+        )
         available_roles = _collect_available_roles(args.available_roles, roles_file_path)
 
         explicit_roles = (
