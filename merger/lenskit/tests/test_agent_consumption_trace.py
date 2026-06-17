@@ -114,7 +114,6 @@ def test_core_boundaries_match_test_fixture():
     assert list(DOES_NOT_ESTABLISH) == _NINE
 
 
-
 # ── 1. Minimal pass trace is schema-valid ─────────────────────────────────────
 
 
@@ -509,7 +508,6 @@ def test_invalid_negative_semantics_not_applicable_output_is_schema_valid():
     assert "task_profile_not_applicable" in _codes(trace)
     assert "missing_negative_semantics" in _codes(trace)
     jsonschema.validate(instance=trace, schema=_load_schema())
-
 
 
 # ── Reuse of the real Required Reading resolver end-to-end ───────────────────
