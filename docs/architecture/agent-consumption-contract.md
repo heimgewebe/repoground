@@ -127,6 +127,20 @@ The Agent Consumption Trace validator compares Required Reading Protocol expecta
 
 ---
 
+## Agent Consumption CLI
+
+The `agent-consumption` CLI exposes the existing Required Reading Protocol resolver
+and Agent Consumption Trace validator.
+
+Commands:
+
+- `agent-consumption required`
+- `agent-consumption validate-trace`
+
+The CLI is a thin execution layer. It does not create an Agent Entry Manifest,
+mutate Bundle Manifest, update Output Health/Post-Emit Health, enforce Export
+Safety, or prove actual reading.
+
 ## Agent Consumption Trace
 
 The Agent Consumption Trace compares Required Reading expectations against Answer Compliance declarations.

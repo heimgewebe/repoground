@@ -54,6 +54,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_doc_freshness import register_doc_freshness_commands
     register_doc_freshness_commands(subparsers)
 
+    # Agent consumption command
+    from .cmd_agent_consumption import register_agent_consumption_commands
+    register_agent_consumption_commands(subparsers)
+
     # rLens client command
     from .cmd_rlens_client import register_rlens_client_commands
     register_rlens_client_commands(subparsers)
@@ -253,6 +257,9 @@ def main(args: Optional[List[str]] = None) -> int:
         else:
             parser.parse_args(["doc-freshness", "--help"])
             return 0
+    elif parsed_args.command == "agent-consumption":
+        from .cmd_agent_consumption import run_agent_consumption
+        return run_agent_consumption(parsed_args)
     elif parsed_args.command == "artifact":
         from . import cmd_artifact
         return cmd_artifact.run_artifact_lookup(parsed_args)
