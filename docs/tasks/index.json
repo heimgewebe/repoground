@@ -231,6 +231,23 @@
         "merger/lenskit/tests/test_post_emit_health.py",
         "merger/lenskit/tests/test_bundle_surface_validate.py"
       ]
+    },
+    {
+      "id": "TASK-VALIDATION-CHECKVIEW-001",
+      "title": "Additive Read-only CheckView",
+      "status": "done",
+      "description": "Additiver read-only Adapter für die drei checks-Surfaces (output_health Mapping, post_emit_health Liste, bundle_surface_validation Liste). CheckView ist eine frozen dataclass mit name, status, detail, validation, value, raw, container_shape. Scalars (z. B. chunk_count, manifest_present) werden nicht zu Status-Checks umgedeutet (status=None). Duplikat-Namen in Listen werden deterministisch behandelt (iter_check_views liefert alle in Reihenfolge, checks_by_name gibt letzten Eintrag zurück). Keine Producer-, Schema-, Contract- oder CLI-Migration; kein __init__.py-Export erforderlich.",
+      "evidence": [
+        "merger/lenskit/core/check_view.py",
+        "merger/lenskit/tests/test_validation_check_view.py",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "Consumer-Migration: bestehende OH/PEH/BSV-Consumer greifen weiterhin direkt auf die Raw-Shapes zu — CheckView ist Consumer-seitig opt-in.",
+        "Structured ValidationError Objects bleiben separater Slice.",
+        "Loader-Konsolidierung (safe_load_yaml/json) bleibt separater Slice."
+      ]
     }
   ]
 }
