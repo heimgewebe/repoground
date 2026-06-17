@@ -22,6 +22,7 @@ from merger.lenskit.core.post_emit_health import (
     derive_post_health_path,
     write_post_emit_health,
 )
+from merger.lenskit.tests.bundle_fixtures import make_post_emit_bundle as _make_bundle
 
 _CONTRACTS_DIR = Path(__file__).parent.parent / "contracts"
 _POST_HEALTH_SCHEMA_PATH = _CONTRACTS_DIR / "post-emit-health.v1.schema.json"
@@ -33,10 +34,6 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _make_bundle(tmp_path: Path, *args, **kwargs) -> Path:
-    """Build a synthetic bundle on disk and return the manifest path."""
-    from merger.lenskit.tests.bundle_fixtures import make_post_emit_bundle
-    return make_post_emit_bundle(tmp_path, *args, **kwargs)
 
 
 # ---------------------------------------------------------------------------

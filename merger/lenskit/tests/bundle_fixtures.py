@@ -5,12 +5,15 @@ post-emit health, and bundle surface validation tests. It replaces private cross
 between test modules while preserving exactly their established semantics.
 """
 
+import contextlib
 import hashlib
 import json
 import sqlite3
 from pathlib import Path
 
 import pytest
+
+from merger.lenskit.core.post_emit_health import derive_post_health_path
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -60,35 +63,33 @@ def make_sqlite(
     tmp_path: Path, chunks_rows: list[dict], fts_rows: list[dict] | None = None
 ) -> Path:
     db_path = tmp_path / "test.index.sqlite"
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
-    c.execute("CREATE TABLE chunks (id TEXT PRIMARY KEY, content TEXT, path TEXT)")
-    try:
-        c.execute(
-            "CREATE VIRTUAL TABLE chunks_fts USING fts5(chunk_id, content, path_tokens)"
-        )
-    except sqlite3.OperationalError as e:
-        conn.close()
-        if "no such module: fts5" in str(e).lower():
-            pytest.skip("SQLite FTS5 not available")
-        raise
+    with contextlib.closing(sqlite3.connect(str(db_path))) as conn:
+        c = conn.cursor()
+        c.execute("CREATE TABLE chunks (id TEXT PRIMARY KEY, content TEXT, path TEXT)")
+        try:
+            c.execute(
+                "CREATE VIRTUAL TABLE chunks_fts USING fts5(chunk_id, content, path_tokens)"
+            )
+        except sqlite3.OperationalError as e:
+            if "no such module: fts5" in str(e).lower():
+                pytest.skip("SQLite FTS5 not available")
+            raise
 
-    for row in chunks_rows:
-        c.execute(
-            "INSERT INTO chunks VALUES (?, ?, ?)",
-            (row["id"], row["content"], row["path"]),
-        )
+        for row in chunks_rows:
+            c.execute(
+                "INSERT INTO chunks VALUES (?, ?, ?)",
+                (row["id"], row["content"], row["path"]),
+            )
 
-    if fts_rows is None:
-        fts_rows = chunks_rows
-    for row in fts_rows:
-        c.execute(
-            "INSERT INTO chunks_fts VALUES (?, ?, ?)",
-            (row["id"], row["content"], row["path"]),
-        )
+        if fts_rows is None:
+            fts_rows = chunks_rows
+        for row in fts_rows:
+            c.execute(
+                "INSERT INTO chunks_fts VALUES (?, ?, ?)",
+                (row["id"], row["content"], row["path"]),
+            )
 
-    conn.commit()
-    conn.close()
+        conn.commit()
     return db_path
 
 
@@ -126,6 +127,7 @@ def make_output_health_kwargs(
 # --- Post-Emit Health Fixtures ---
 
 _CANONICAL = b"# repo: demo\n\n## file: a.py\nx = 1\n"
+
 
 def make_post_emit_bundle(
     tmp_path: Path,
@@ -224,7 +226,11 @@ def make_post_emit_bundle(
         )
 
     if include_pack:
-        pack_bytes = b"<!-- ARTIFACT:agent_reading_pack VERSION:v1 -->\n# Pack\nNAVIGATION, NOT TRUTH\n"
+        pack_bytes = (
+            b"<!-- ARTIFACT:agent_reading_pack VERSION:v1 -->\n"
+            b"# Pack\n"
+            b"NAVIGATION, NOT TRUTH\n"
+        )
         (tmp_path / "demo.agent_reading_pack.md").write_bytes(pack_bytes)
         artifacts.append(
             {
@@ -355,6 +361,7 @@ _PACK_SUMMARY_PRESENT = _PACK_V1_1_FRONT_DOOR + (
     "- claims: 3\n"
 )
 
+
 def make_surface_manifest(
     tmp_path: Path,
     *,
@@ -436,10 +443,13 @@ def make_surface_manifest(
 
     if include_post_health:
         # A persisted (unregistered) post_emit_health sidecar with a known status.
-        from merger.lenskit.core.post_emit_health import derive_post_health_path
         derive_post_health_path(manifest_path).write_text(
             json.dumps(
-                {"kind": "lenskit.post_emit_health", "version": "1.0", "status": post_health_status}
+                {
+                    "kind": "lenskit.post_emit_health",
+                    "version": "1.0",
+                    "status": post_health_status,
+                }
             ),
             encoding="utf-8",
         )

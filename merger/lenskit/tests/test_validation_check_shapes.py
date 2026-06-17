@@ -30,7 +30,9 @@ from merger.lenskit.tests.bundle_fixtures import (
 def test_output_health_checks_remains_mapping(tmp_path):
     """output_health['checks'] is a mapping keyed by check name; the range-ref
     diagnostic is a nested object at checks['range_ref_resolution']['validation']."""
-    report = compute_output_health(**make_output_health_kwargs(tmp_path=tmp_path, with_sqlite=False))
+    report = compute_output_health(
+        **make_output_health_kwargs(tmp_path=tmp_path, with_sqlite=False)
+    )
 
     checks = report["checks"]
     assert isinstance(checks, dict)

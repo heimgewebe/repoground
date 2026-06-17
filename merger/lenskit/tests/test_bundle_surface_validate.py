@@ -19,6 +19,7 @@ from merger.lenskit.core.constants import ArtifactRole
 from merger.lenskit.core.merge import scan_repo, write_reports_v2
 from merger.lenskit.core.post_emit_health import derive_post_health_path
 from merger.lenskit.tests._test_constants import make_generator_info
+from merger.lenskit.tests.bundle_fixtures import make_surface_manifest as _make_manifest
 
 
 def _write_post_health(manifest_path, status="pass"):
@@ -64,10 +65,6 @@ _PACK_LEGACY = (
 _DUMMY_SHA = "0" * 64
 
 
-def _make_manifest(tmp_path, *args, **kwargs):
-    """Write a synthetic but structurally valid bundle manifest + referenced files."""
-    from merger.lenskit.tests.bundle_fixtures import make_surface_manifest
-    return make_surface_manifest(tmp_path, *args, **kwargs)
 
 
 def _check(report, name):

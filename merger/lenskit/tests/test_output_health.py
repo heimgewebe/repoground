@@ -2,13 +2,19 @@
 
 import hashlib
 import json
-import sqlite3
 from pathlib import Path
 
 import jsonschema
 import pytest
 
 from merger.lenskit.core.output_health import compute_output_health, write_output_health
+from merger.lenskit.tests.bundle_fixtures import (
+    make_canonical_md as _make_canonical_md,
+    make_chunk_jsonl as _make_chunk_jsonl,
+    make_dump_index as _make_dump_index,
+    make_output_health_kwargs as _base_kwargs,
+    make_sqlite as _make_sqlite,
+)
 
 _SCHEMA_PATH = (
     Path(__file__).parent.parent / "contracts" / "output-health.v1.schema.json"
@@ -24,26 +30,6 @@ def _write_file(path: Path, data: bytes) -> str:
     return _sha256_bytes(data)
 
 
-def _make_chunk_jsonl(tmp_path: Path, chunks: list[dict]) -> tuple[Path, str]:
-    from merger.lenskit.tests.bundle_fixtures import make_chunk_jsonl
-    return make_chunk_jsonl(tmp_path, chunks)
-
-
-def _make_canonical_md(tmp_path: Path) -> tuple[Path, str]:
-    from merger.lenskit.tests.bundle_fixtures import make_canonical_md
-    return make_canonical_md(tmp_path)
-
-
-def _make_dump_index(tmp_path: Path, canonical_name: str, chunk_name: str) -> Path:
-    from merger.lenskit.tests.bundle_fixtures import make_dump_index
-    return make_dump_index(tmp_path, canonical_name, chunk_name)
-
-
-def _make_sqlite(
-    tmp_path: Path, chunks_rows: list[dict], fts_rows: list[dict] | None = None
-) -> Path:
-    from merger.lenskit.tests.bundle_fixtures import make_sqlite
-    return make_sqlite(tmp_path, chunks_rows, fts_rows)
 
 
 def _build_range_ref_for_canonical(
@@ -62,20 +48,6 @@ def _build_range_ref_for_canonical(
     }
 
 
-def _base_kwargs(
-    *,
-    tmp_path: Path,
-    chunks: list[dict] | None = None,
-    with_sqlite: bool = True,
-    with_manifest: bool = True,
-) -> dict:
-    from merger.lenskit.tests.bundle_fixtures import make_output_health_kwargs
-    return make_output_health_kwargs(
-        tmp_path=tmp_path,
-        chunks=chunks,
-        with_sqlite=with_sqlite,
-        with_manifest=with_manifest,
-    )
 
 
 def test_verdict_pass_when_blocking_checks_pass_and_optional_features_are_skipped(
