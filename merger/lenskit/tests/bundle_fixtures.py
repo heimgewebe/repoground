@@ -68,7 +68,8 @@ def make_sqlite(
         c.execute("CREATE TABLE chunks (id TEXT PRIMARY KEY, content TEXT, path TEXT)")
         try:
             c.execute(
-                "CREATE VIRTUAL TABLE chunks_fts USING fts5(chunk_id, content, path_tokens)"
+                "CREATE VIRTUAL TABLE chunks_fts USING fts5("
+                "chunk_id, content, path_tokens)"
             )
         except sqlite3.OperationalError as e:
             if "no such module: fts5" in str(e).lower():
@@ -146,7 +147,7 @@ def make_post_emit_bundle(
     claim_absence_reason: str | None = None,
 ) -> Path:
     """Build a synthetic bundle on disk and return the manifest path.
-    
+
     This exact semantics originated from test_post_emit_health.py's _make_bundle.
     """
     artifacts = []
@@ -353,7 +354,8 @@ _PACK_V1_1_FRONT_DOOR = (
     "## SIDECAR_USAGE_RULES\n"
     "## ANSWER_COMPLIANCE_CHECKLIST\n"
     "## DO_NOT_CLAIM\n"
-    "- `change_impact` — relation or path proximity alone does not prove change impact.\n"
+    "- `change_impact` — relation or path proximity alone does not "
+    "prove change impact.\n"
 )
 _PACK_SUMMARY_PRESENT = _PACK_V1_1_FRONT_DOOR + (
     "## CLAIM_EVIDENCE_MAP_SUMMARY\n"
@@ -375,7 +377,7 @@ def make_surface_manifest(
     include_output_health: bool = True,
 ) -> Path:
     """Write a synthetic but structurally valid bundle manifest + referenced files.
-    
+
     This exact semantics originated from test_bundle_surface_validate.py's _make_manifest.
     """
     manifest_path = tmp_path / "x.bundle.manifest.json"
