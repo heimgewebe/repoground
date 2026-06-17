@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/answer-compliance.v1.schema.json",
+  "title": "Answer Compliance Declaration (answer-compliance v1.0)",
+  "description": "Machine-readable declaration of what an answer claims to have used. Declaration layer only; does not prove actual reading, correctness, completeness, runtime behavior, test sufficiency, regression absence, or repo understanding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "task_profile",
+    "declared_artifacts",
+    "declared_citations",
+    "declared_ranges",
+    "unread_required_artifacts",
+    "unread_recommended_artifacts",
+    "epistemic_gaps",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.answer_compliance"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "task_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Task profile selected for the answer, e.g. basic_repo_question, pr_review, roadmap_status_claim, artifact_surface_review, retrieval_quality_review."
+    },
+    "declared_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Artifacts the answer declares as checked or used. Declaration only; not proof of actual reading."
+    },
+    "declared_citations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/citation_declaration" },
+      "description": "Citation IDs the answer declares it used."
+    },
+    "declared_ranges": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/range_declaration" },
+      "description": "Canonical or artifact ranges the answer declares it used."
+    },
+    "unread_required_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Required artifacts the answer declares were not read or not available."
+    },
+    "unread_recommended_artifacts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "description": "Recommended artifacts the answer declares were not read or not available."
+    },
+    "epistemic_gaps": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/epistemic_gap" },
+      "description": "Declared epistemic gaps relevant to the answer."
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish_array"
+    }
+  },
+  "definitions": {
+    "citation_declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["citation_id"],
+      "properties": {
+        "citation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string"
+        }
+      }
+    },
+    "range_declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact", "range_ref"],
+      "properties": {
+        "artifact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "range_ref": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "purpose": {
+          "type": "string"
+        }
+      }
+    },
+    "epistemic_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "detail"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "missing_artifact",
+            "unread_artifact",
+            "missing_citation",
+            "ambiguous_task_profile",
+            "insufficient_context",
+            "runtime_not_verified",
+            "test_not_run",
+            "not_forensic_ready",
+            "other"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 9,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      },
+      "allOf": [
+        { "contains": { "const": "actual_reading_proven" } },
+        { "contains": { "const": "answer_correct" } },
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "all_relevant_context_used" } },
+        { "contains": { "const": "claims_true" } },
+        { "contains": { "const": "test_sufficiency" } },
+        { "contains": { "const": "regression_absence" } },
+        { "contains": { "const": "runtime_behavior" } },
+        { "contains": { "const": "forensic_ready" } }
+      ],
+      "description": "Boundaries this declaration does not establish."
+    }
+  }
+}

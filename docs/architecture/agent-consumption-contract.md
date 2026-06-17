@@ -3,7 +3,8 @@
 ## Status
 
 PR 1 — Required Reading Protocol Core implemented.
-Later slices (agent-consumption-trace, agent-entry-manifest, Agent Reading Pack v2, Export Safety Report, Lens Cards, Relation Cards, Retrieval v2) are not yet implemented.
+Answer Compliance Contract v1 implemented.
+Agent Consumption Trace, Agent Entry Manifest, Agent Reading Pack v2, Export Safety Report, Lens Cards, Relation Cards, and Retrieval v2 are not yet implemented.
 
 ---
 
@@ -113,3 +114,12 @@ does_not_establish must include the five protocol invariants on both protocol an
 - Satisfying a profile does not mean claims are correct.
 - No LLMs, no embeddings, no review judgements, no patch automation.
 - No new Primary Lens IDs introduced.
+
+---
+
+## Answer Compliance
+
+The Answer Compliance Contract records what an answer declares it used.
+It is a declaration layer only. It does not prove actual reading, answer correctness, complete context use, runtime behavior, test sufficiency, regression absence, forensic readiness, or repo understanding.
+
+The later Agent Consumption Trace validator may compare Required Reading Protocol expectations against Answer Compliance declarations.
