@@ -202,6 +202,22 @@
         "docs/tasks/board.md",
         "docs/tasks/index.json"
       ]
+    },
+    {
+      "id": "TASK-VALIDATION-DIAG-003",
+      "title": "Check-Shape Consistency Audit",
+      "status": "done",
+      "description": "Inventarisiert und stabilisiert die aktuellen Check-Shapes von output_health (Dict/Mapping), post_emit_health (Liste von Check-Objekten) und bundle_surface_validation (Liste von Check-Objekten); dokumentiert die Consumer-Pfade, bewertet die Formdifferenz als bewusst/rollenbedingt (Summary vs. geordnetes Check-Log) statt als Drift und entscheidet ohne Producer-/Schema-Migration, dass spätere Normalisierung nur additiv erfolgen darf. Ergänzt einen fokussierten Regressionstest, der die aktuell akzeptierten Shapes festschreibt. Keine Producer-, Schema-/Contract-, CLI- oder Dependency-Änderung.",
+      "evidence": [
+        "docs/proofs/validation-check-shape-consistency-audit.md",
+        "merger/lenskit/tests/test_validation_check_shapes.py",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "Keine Producer-/Schema-/Contract-/CLI-Migration und keine checks-Shape-Vereinheitlichung in diesem Slice (bewusstes Nicht-Ziel).",
+        "Folge-Optionen bleiben additiv: read-only Normalisierungs-Helper bzw. gemeinsame CheckView; eine echte Schema-Migration nur mit explizitem Kompatibilitätsplan, der den isinstance(dict)-Silent-Degradation-Pfad aller fünf output_health-Dict-Consumer adressiert."
+      ]
     }
   ]
 }
