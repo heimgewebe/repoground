@@ -121,6 +121,8 @@ def iter_check_views(report: Mapping[str, Any]) -> Iterator[CheckView]:
             status_raw = item.get("status")
             status = status_raw if isinstance(status_raw, str) else None
             detail_raw = item.get("detail")
+            if not isinstance(detail_raw, str):
+                detail_raw = item.get("reason")
             detail = detail_raw if isinstance(detail_raw, str) else None
             validation_raw = item.get("validation")
             validation = (
@@ -150,5 +152,10 @@ def checks_by_name(report: Mapping[str, Any]) -> dict[str, CheckView]:
 
 
 def check_by_name(report: Mapping[str, Any], name: str) -> CheckView | None:
-    """Return the :class:`CheckView` for *name*, or ``None`` if not found."""
+    """Return the :class:`CheckView` for *name*, or ``None`` if not found.
+
+    This convenience helper builds a temporary name index for each call. For
+    multiple lookups against the same report, call :func:`checks_by_name`
+    once and reuse the returned mapping.
+    """
     return checks_by_name(report).get(name)

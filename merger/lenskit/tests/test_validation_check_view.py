@@ -5,6 +5,8 @@ and duplicate-name behaviour.  No producer, schema, contract, or CLI output is
 modified.
 """
 
+import pytest
+
 from merger.lenskit.core.bundle_surface_validate import validate_bundle_surface
 from merger.lenskit.core.check_view import (
     check_by_name,
@@ -119,7 +121,7 @@ def test_peh_range_ref_resolution_validation_triad_when_present(tmp_path):
     by_name = checks_by_name(report)
 
     if "range_ref_resolution" not in by_name:
-        return  # not all environments emit this; guard is "wenn vorhanden"
+        pytest.skip("range_ref_resolution not emitted in this environment")
     cv = by_name["range_ref_resolution"]
     assert cv.container_shape == "list"
     assert isinstance(cv.status, str)
@@ -274,3 +276,37 @@ def test_duplicate_names_checks_by_name_keeps_last():
     by_name = checks_by_name(report)
     # last entry wins
     assert by_name["alpha"].status == "pass"
+
+
+# ---------------------------------------------------------------------------
+# 6. List shape: reason fallback
+# ---------------------------------------------------------------------------
+
+
+def test_list_shape_reason_fallback_used_when_detail_missing():
+    """When a list entry has 'reason' but no 'detail', reason is used."""
+    report = {"checks": [{"name": "x", "status": "pass", "reason": "because"}]}
+    cv = check_by_name(report, "x")
+    assert cv is not None
+    assert cv.detail == "because"
+
+
+def test_list_shape_detail_wins_over_reason():
+    """detail takes precedence over reason in list entries.
+
+    When both 'detail' and 'reason' are present and both are strings,
+    'detail' is used and 'reason' is ignored.
+    """
+    report = {
+        "checks": [
+            {
+                "name": "x",
+                "status": "pass",
+                "detail": "detail text",
+                "reason": "reason text",
+            }
+        ]
+    }
+    cv = check_by_name(report, "x")
+    assert cv is not None
+    assert cv.detail == "detail text"
