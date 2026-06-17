@@ -41,12 +41,11 @@ def test_output_health_checks_remains_mapping(tmp_path):
     rr_check = checks["range_ref_resolution"]
     assert isinstance(rr_check, dict)
     assert "validation" in rr_check
-    assert isinstance(rr_check["validation"], dict)
-    assert {"mode", "engine", "reason"} <= set(rr_check["validation"])
-    assert all(
-        isinstance(rr_check["validation"][key], str)
-        for key in ("mode", "engine", "reason")
-    )
+    validation = rr_check["validation"]
+    assert isinstance(validation, dict)
+    assert {"mode", "engine", "reason"} <= validation.keys()
+    for key in ("mode", "engine", "reason"):
+        assert isinstance(validation[key], str)
 
 
 def test_post_emit_health_checks_remains_list_of_named_checks(tmp_path):
@@ -61,13 +60,14 @@ def test_post_emit_health_checks_remains_list_of_named_checks(tmp_path):
     checks = report["checks"]
     assert isinstance(checks, list)
     assert checks, "expected at least one check"
-    assert all(isinstance(check, dict) for check in checks)
-    assert all("name" in check for check in checks)
-    assert all("status" in check for check in checks)
     for check in checks:
+        assert isinstance(check, dict)
+        assert "name" in check
+        assert "status" in check
         if "validation" in check:
-            assert isinstance(check["validation"], dict)
-            assert {"mode", "engine", "reason"} <= set(check["validation"])
+            validation = check["validation"]
+            assert isinstance(validation, dict)
+            assert {"mode", "engine", "reason"} <= validation.keys()
 
 
 def test_bundle_surface_validation_checks_remains_list_of_named_checks(tmp_path):
@@ -79,9 +79,11 @@ def test_bundle_surface_validation_checks_remains_list_of_named_checks(tmp_path)
     checks = report["checks"]
     assert isinstance(checks, list)
     assert checks, "expected at least one check"
-    assert all("name" in check for check in checks)
-    assert all("status" in check for check in checks)
     for check in checks:
+        assert isinstance(check, dict)
+        assert "name" in check
+        assert "status" in check
         if "validation" in check:
-            assert isinstance(check["validation"], dict)
-            assert {"mode", "engine", "reason"} <= set(check["validation"])
+            validation = check["validation"]
+            assert isinstance(validation, dict)
+            assert {"mode", "engine", "reason"} <= validation.keys()
