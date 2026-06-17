@@ -1,0 +1,103 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/required-reading-protocol.v1.schema.json",
+  "title": "Required Reading Protocol (required-reading-protocol v1.0)",
+  "description": "Machine-readable contract for task-specific required reading. Protocol and navigation layer only — not content truth. canonical_md remains the sole content truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "default_profile",
+    "task_profiles",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.required_reading_protocol"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "default_profile": {
+      "type": "string",
+      "description": "Profile name used when no explicit task_profile is specified."
+    },
+    "task_profiles": {
+      "type": "object",
+      "description": "Map of task profile names to their reading requirements.",
+      "additionalProperties": {
+        "$ref": "#/definitions/task_profile"
+      }
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish_array"
+    }
+  },
+  "definitions": {
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      },
+      "allOf": [
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "answer_safe_without_citations" } },
+        { "contains": { "const": "claims_true" } },
+        { "contains": { "const": "all_relevant_context_used" } },
+        { "contains": { "const": "forensic_ready" } }
+      ],
+      "description": "Invariants this protocol/profile does not establish."
+    },
+    "task_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required",
+        "recommended",
+        "insufficient",
+        "citation_required",
+        "answer_checklist_required",
+        "does_not_establish"
+      ],
+      "properties": {
+        "required": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Artifact roles or surface aliases that must be present for this task profile. Includes both ArtifactRole values and protocol aliases such as post_emit_health, bundle_surface_validation, bundle_manifest, and docs/retrieval/*."
+        },
+        "recommended": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Artifact roles or surface aliases whose presence improves answer quality for this task."
+        },
+        "insufficient": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Anti-patterns: approaches or artifact subsets that are insufficient for this task."
+        },
+        "citation_required": {
+          "type": "boolean",
+          "description": "Whether this task requires citations to canonical ranges."
+        },
+        "answer_checklist_required": {
+          "type": "boolean",
+          "description": "Whether this task requires completing the ANSWER_COMPLIANCE_CHECKLIST."
+        },
+        "does_not_establish": {
+          "$ref": "#/definitions/does_not_establish_array"
+        }
+      }
+    }
+  }
+}
