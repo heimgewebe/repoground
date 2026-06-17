@@ -53,6 +53,8 @@ The protocol tells an agent *which artifacts to read* for a task; it does not au
 
 Note: `post_emit_health`, `bundle_surface_validation`, `bundle_manifest`, and `docs/retrieval/*` are protocol/surface aliases — they are not `ArtifactRole` enum values and the enum is not extended for PR 1.
 
+For basic_repo_question, citation_required is false by default; citation_map_jsonl is recommended when the answer makes specific cited claims.
+
 ---
 
 ### Resolver Status Values
@@ -65,6 +67,8 @@ Note: `post_emit_health`, `bundle_surface_validation`, `bundle_manifest`, and `d
 | `warn` | All required roles present; at least one recommended role missing |
 | `fail` | At least one required role missing |
 | `not_applicable` | task_profile not found in protocol |
+
+Resolver results preserve `citation_required`, `answer_checklist_required`, and `does_not_establish`.
 
 ### Example: pr_review
 
@@ -97,6 +101,8 @@ Each task profile carries a `does_not_establish` list.  These are invariants tha
 - `forensic_ready`
 
 The protocol-level `does_not_establish` field repeats these for the contract as a whole.
+
+does_not_establish must include the five protocol invariants on both protocol and task-profile level.
 
 ---
 

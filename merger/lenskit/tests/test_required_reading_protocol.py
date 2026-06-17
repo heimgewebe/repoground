@@ -56,7 +56,7 @@ def test_default_protocol_is_schema_valid():
 
 def test_all_agent_pack_profiles_present():
     protocol = default_required_reading_protocol()
-    assert _EXPECTED_PROFILES <= set(protocol["task_profiles"].keys())
+    assert set(protocol["task_profiles"].keys()) == _EXPECTED_PROFILES
 
 
 # ── 3. Each profile has the required keys ───────────────────────────────────
@@ -180,3 +180,111 @@ def test_schema_invalid_when_extra_field_in_profile():
     protocol["task_profiles"]["basic_repo_question"]["unexpected_field"] = "should_fail"
     with pytest.raises(ValidationError):
         jsonschema.validate(instance=protocol, schema=schema)
+
+
+# ── 12. Metadata Preservation and Neutral Defaults ─────────────────────────
+
+def test_resolver_preserves_profile_metadata():
+    protocol = default_required_reading_protocol()
+    result = resolve_required_reading(
+        protocol,
+        available_roles={"agent_reading_pack", "canonical_md", "citation_map_jsonl"},
+        task_profile="basic_repo_question",
+    )
+    profile = protocol["task_profiles"]["basic_repo_question"]
+
+    assert result["citation_required"] == profile["citation_required"]
+    assert result["answer_checklist_required"] == profile["answer_checklist_required"]
+    assert result["does_not_establish"] == sorted(profile["does_not_establish"])
+
+
+def test_unknown_task_profile_returns_neutral_metadata():
+    protocol = default_required_reading_protocol()
+    result = resolve_required_reading(
+        protocol,
+        available_roles={"canonical_md"},
+        task_profile="unknown",
+    )
+    assert result["status"] == "not_applicable"
+    assert result["citation_required"] is False
+    assert result["answer_checklist_required"] is False
+    assert result["does_not_establish"] == []
+
+
+# ── 13. Mutation Protection ──────────────────────────────────────────────────
+
+def test_default_protocol_returns_fresh_lists():
+    first = default_required_reading_protocol()
+    first["task_profiles"]["basic_repo_question"]["required"].append("mutated")
+    second = default_required_reading_protocol()
+    assert "mutated" not in second["task_profiles"]["basic_repo_question"]["required"]
+
+
+# ── 14. Schema Negative Tests for does_not_establish ─────────────────────────
+
+def test_schema_invalid_when_protocol_does_not_establish_empty():
+    _require_jsonschema()
+    schema = _load_schema()
+    protocol = default_required_reading_protocol()
+    protocol["does_not_establish"] = []
+    with pytest.raises(ValidationError):
+        jsonschema.validate(instance=protocol, schema=schema)
+
+
+def test_schema_invalid_when_profile_does_not_establish_empty():
+    _require_jsonschema()
+    schema = _load_schema()
+    protocol = default_required_reading_protocol()
+    protocol["task_profiles"]["basic_repo_question"]["does_not_establish"] = []
+    with pytest.raises(ValidationError):
+        jsonschema.validate(instance=protocol, schema=schema)
+
+
+def test_schema_invalid_when_does_not_establish_missing_required_invariant():
+    _require_jsonschema()
+    schema = _load_schema()
+    
+    # Missing 'repo_understood'
+    protocol = default_required_reading_protocol()
+    protocol["does_not_establish"] = [
+        "answer_safe_without_citations",
+        "claims_true",
+        "all_relevant_context_used",
+        "forensic_ready",
+    ]
+    with pytest.raises(ValidationError):
+        jsonschema.validate(instance=protocol, schema=schema)
+
+    # Profile missing 'claims_true'
+    protocol2 = default_required_reading_protocol()
+    protocol2["task_profiles"]["basic_repo_question"]["does_not_establish"] = [
+        "repo_understood",
+        "answer_safe_without_citations",
+        "all_relevant_context_used",
+        "forensic_ready",
+    ]
+    with pytest.raises(ValidationError):
+        jsonschema.validate(instance=protocol2, schema=schema)
+
+
+def test_schema_invalid_when_does_not_establish_has_duplicates():
+    _require_jsonschema()
+    schema = _load_schema()
+    protocol = default_required_reading_protocol()
+    protocol["does_not_establish"] = [
+        "repo_understood",
+        "answer_safe_without_citations",
+        "claims_true",
+        "all_relevant_context_used",
+        "forensic_ready",
+        "forensic_ready",  # Duplicate
+    ]
+    with pytest.raises(ValidationError):
+        jsonschema.validate(instance=protocol, schema=schema)
+
+
+# ── 15. basic_repo_question.citation_required default ───────────────────────
+
+def test_basic_repo_question_does_not_require_citation_by_default():
+    protocol = default_required_reading_protocol()
+    assert protocol["task_profiles"]["basic_repo_question"]["citation_required"] is False

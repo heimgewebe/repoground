@@ -7,75 +7,75 @@ navigation layer; canonical_md remains the sole content truth.
 from __future__ import annotations
 
 
-_DOES_NOT_ESTABLISH = [
+_DOES_NOT_ESTABLISH = (
     "all_relevant_context_used",
     "answer_safe_without_citations",
     "claims_true",
     "forensic_ready",
     "repo_understood",
-]
+)
 
 _PROFILES: dict[str, dict] = {
     "basic_repo_question": {
-        "required": ["agent_reading_pack", "canonical_md"],
-        "recommended": ["citation_map_jsonl"],
-        "insufficient": ["sidecar-only claims without canonical verification"],
-        "citation_required": True,
+        "required": ("agent_reading_pack", "canonical_md"),
+        "recommended": ("citation_map_jsonl",),
+        "insufficient": ("sidecar-only claims without canonical verification",),
+        "citation_required": False,
         "answer_checklist_required": True,
         "does_not_establish": _DOES_NOT_ESTABLISH,
     },
     "pr_review": {
-        "required": [
+        "required": (
             "agent_reading_pack",
             "canonical_md",
             "citation_map_jsonl",
             "post_emit_health",
-        ],
-        "recommended": ["bundle_surface_validation", "claim_evidence_map_json"],
-        "insufficient": [
+        ),
+        "recommended": ("bundle_surface_validation", "claim_evidence_map_json"),
+        "insufficient": (
             "only reading canonical_md linearly",
             "treating health pass as review completeness",
-        ],
+        ),
         "citation_required": True,
         "answer_checklist_required": True,
         "does_not_establish": _DOES_NOT_ESTABLISH,
     },
     "roadmap_status_claim": {
-        "required": ["agent_reading_pack", "canonical_md", "claim_evidence_map_json"],
-        "recommended": ["citation_map_jsonl"],
-        "insufficient": [
+        "required": ("agent_reading_pack", "canonical_md", "claim_evidence_map_json"),
+        "recommended": ("citation_map_jsonl",),
+        "insufficient": (
             "roadmap status without Claim Evidence Map",
             "roadmap status without canonical check",
-        ],
+        ),
         "citation_required": True,
         "answer_checklist_required": True,
         "does_not_establish": _DOES_NOT_ESTABLISH,
     },
     "artifact_surface_review": {
-        "required": [
+        "required": (
             "bundle_manifest",
             "bundle_surface_validation",
             "canonical_md",
             "post_emit_health",
-        ],
-        "recommended": ["output_health"],
-        "insufficient": [
+        ),
+        "recommended": ("output_health",),
+        "insufficient": (
             "output_health alone",
             "treating health pass as claim truth",
-        ],
+        ),
         "citation_required": True,
         "answer_checklist_required": True,
         "does_not_establish": _DOES_NOT_ESTABLISH,
     },
     "retrieval_quality_review": {
-        "required": [
+        "required": (
             "canonical_md",
             "chunk_index_jsonl",
             "retrieval_eval_json",
             "sqlite_index",
-        ],
-        "recommended": ["docs/retrieval/*"],
-        "insufficient": ["impressionistic retrieval claims without metrics"],
+        ),
+        "recommended": ("docs/retrieval/*",),
+        "insufficient": ("impressionistic retrieval claims without metrics",),
         "citation_required": True,
         "answer_checklist_required": True,
         "does_not_establish": _DOES_NOT_ESTABLISH,
@@ -133,17 +133,24 @@ def resolve_required_reading(
             "available_recommended": [],
             "missing_recommended": [],
             "status": "not_applicable",
+            "citation_required": False,
+            "answer_checklist_required": False,
+            "does_not_establish": [],
         }
 
     p = profiles[task_profile]
-    required = sorted(p.get("required", []))
-    recommended = sorted(p.get("recommended", []))
-    insufficient = sorted(p.get("insufficient", []))
+    required = sorted(str(x) for x in p.get("required", ()))
+    recommended = sorted(str(x) for x in p.get("recommended", ()))
+    insufficient = sorted(str(x) for x in p.get("insufficient", ()))
+    available = {str(x) for x in available_roles}
 
-    available_required = sorted(r for r in required if r in available_roles)
-    missing_required = sorted(r for r in required if r not in available_roles)
-    available_recommended = sorted(r for r in recommended if r in available_roles)
-    missing_recommended = sorted(r for r in recommended if r not in available_roles)
+    req_set = set(required)
+    rec_set = set(recommended)
+
+    available_required = sorted(req_set & available)
+    missing_required = sorted(req_set - available)
+    available_recommended = sorted(rec_set & available)
+    missing_recommended = sorted(rec_set - available)
 
     if missing_required:
         status = "fail"
@@ -162,4 +169,7 @@ def resolve_required_reading(
         "available_recommended": available_recommended,
         "missing_recommended": missing_recommended,
         "status": status,
+        "citation_required": bool(p.get("citation_required", False)),
+        "answer_checklist_required": bool(p.get("answer_checklist_required", False)),
+        "does_not_establish": sorted(str(x) for x in p.get("does_not_establish", ())),
     }

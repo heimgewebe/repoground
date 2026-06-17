@@ -33,14 +33,26 @@
       }
     },
     "does_not_establish": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "description": "Protocol-level invariants this contract does not establish, regardless of which profiles are satisfied."
+      "$ref": "#/definitions/does_not_establish_array"
     }
   },
   "definitions": {
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      },
+      "allOf": [
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "answer_safe_without_citations" } },
+        { "contains": { "const": "claims_true" } },
+        { "contains": { "const": "all_relevant_context_used" } },
+        { "contains": { "const": "forensic_ready" } }
+      ],
+      "description": "Invariants this protocol/profile does not establish."
+    },
     "task_profile": {
       "type": "object",
       "additionalProperties": false,
@@ -83,11 +95,7 @@
           "description": "Whether this task requires completing the ANSWER_COMPLIANCE_CHECKLIST."
         },
         "does_not_establish": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "description": "Invariants this profile does not establish even when all required roles are present."
+          "$ref": "#/definitions/does_not_establish_array"
         }
       }
     }
