@@ -96,7 +96,7 @@
         "range_ref": {
           "type": "object",
           "additionalProperties": true,
-          "oneOf": [
+          "anyOf": [
             {
               "required": ["file_path", "start_line", "end_line"],
               "properties": {

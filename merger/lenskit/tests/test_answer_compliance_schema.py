@@ -312,3 +312,28 @@ def test_range_declaration_empty_purpose_invalid():
     instance["declared_ranges"][0]["purpose"] = ""
     with pytest.raises(ValidationError):
         jsonschema.validate(instance=instance, schema=schema)
+
+def test_range_ref_full_v2_with_legacy_aliases_valid():
+    _require_jsonschema()
+    schema = _load_schema()
+    instance = _minimal_valid_answer_compliance()
+    instance["declared_ranges"][0]["range_ref"] = {
+        "range_ref_version": "2",
+        "artifact_role": "canonical_md",
+        "artifact_path": "lenskit-max-example_merge.md",
+        "artifact_byte_start": 0,
+        "artifact_byte_end": 42,
+        "artifact_line_start": 1,
+        "artifact_line_end": 3,
+        "source_file_path": "merger/lenskit/core/example.py",
+        "source_line_start": 10,
+        "source_line_end": 12,
+        "content_sha256": "a" * 64,
+        "range_content_sha256": "b" * 64,
+        "file_path": "lenskit-max-example_merge.md",
+        "start_byte": 0,
+        "end_byte": 42,
+        "start_line": 1,
+        "end_line": 3
+    }
+    jsonschema.validate(instance=instance, schema=schema)
