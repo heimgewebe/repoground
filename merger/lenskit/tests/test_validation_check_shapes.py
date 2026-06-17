@@ -68,6 +68,8 @@ def test_post_emit_health_checks_remains_list_of_named_checks(tmp_path):
             validation = check["validation"]
             assert isinstance(validation, dict)
             assert {"mode", "engine", "reason"} <= validation.keys()
+            for key in ("mode", "engine", "reason"):
+                assert isinstance(validation[key], str)
 
 
 def test_bundle_surface_validation_checks_remains_list_of_named_checks(tmp_path):
@@ -87,3 +89,5 @@ def test_bundle_surface_validation_checks_remains_list_of_named_checks(tmp_path)
             validation = check["validation"]
             assert isinstance(validation, dict)
             assert {"mode", "engine", "reason"} <= validation.keys()
+            for key in ("mode", "engine", "reason"):
+                assert isinstance(validation[key], str)
