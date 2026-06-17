@@ -110,6 +110,11 @@ def _codes(trace: dict) -> set[str]:
     return {d["code"] for d in trace["diagnostics"]}
 
 
+def test_core_boundaries_match_test_fixture():
+    assert list(DOES_NOT_ESTABLISH) == _NINE
+
+
+
 # ── 1. Minimal pass trace is schema-valid ─────────────────────────────────────
 
 
@@ -487,6 +492,26 @@ def test_validator_not_applicable_output_is_schema_valid():
     jsonschema.validate(instance=trace, schema=_load_schema())
 
 
+def test_invalid_negative_semantics_not_applicable_output_is_schema_valid():
+    _require_jsonschema()
+    protocol = default_required_reading_protocol()
+    rr = resolve_required_reading(
+        protocol,
+        available_roles=set(),
+        task_profile="does_not_exist",
+    )
+    ac = _answer_compliance(
+        task_profile="does_not_exist",
+        does_not_establish=_NINE[:-1],
+    )
+    trace = validate_agent_consumption(rr, ac)
+    assert trace["status"] == "fail"
+    assert "task_profile_not_applicable" in _codes(trace)
+    assert "missing_negative_semantics" in _codes(trace)
+    jsonschema.validate(instance=trace, schema=_load_schema())
+
+
+
 # ── Reuse of the real Required Reading resolver end-to-end ───────────────────
 
 
@@ -582,6 +607,21 @@ def test_diagnostic_code_unknown_invalid():
     ]
     with pytest.raises(ValidationError):
         jsonschema.validate(instance=instance, schema=_load_schema())
+
+
+def test_diagnostic_artifact_property_is_schema_valid():
+    _require_jsonschema()
+    instance = _minimal_pass_trace()
+    instance["status"] = "fail"
+    instance["diagnostics"] = [
+        {
+            "code": "missing_required_artifact",
+            "severity": "fail",
+            "detail": "Required artifact was not declared.",
+            "artifact": "canonical_md",
+        }
+    ]
+    jsonschema.validate(instance=instance, schema=_load_schema())
 
 
 @pytest.mark.parametrize(

@@ -41,7 +41,7 @@
     "status": {
       "type": "string",
       "enum": ["pass", "warn", "fail", "not_applicable"],
-      "description": "pass: required artifacts declared and no warn/fail condition. warn: recommended missing/unread or unknown declared artifacts. fail: required missing/unread, task profile mismatch, or required negative semantics missing or invalid. not_applicable: no applicable task profile could be resolved."
+      "description": "pass: required artifacts declared and no warn/fail condition. warn: recommended missing/unread or unknown declared artifacts. fail: required missing/unread, task profile mismatch, or required negative semantics missing or invalid. not_applicable: no applicable task profile could be resolved and no failing contract invariant was detected."
     },
     "required_artifacts": {
       "$ref": "#/definitions/role_array",

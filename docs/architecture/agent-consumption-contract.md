@@ -135,7 +135,7 @@ It may report:
 - pass: required artifacts are declared and no warning/failure condition was found.
 - warn: required artifacts are declared, but recommended artifacts are missing/unread or unknown declared artifacts were observed.
 - fail: required artifacts are missing/unread, task profiles mismatch, or required negative semantics are missing or invalid.
-- not_applicable: no applicable task profile could be resolved.
+- not_applicable: no applicable task profile could be resolved and no failing contract invariant was detected.
 
 The trace is a declaration-comparison artifact only. It does not prove actual reading, answer correctness, complete context use, runtime behavior, test sufficiency, regression absence, forensic readiness, or repo understanding.
 
