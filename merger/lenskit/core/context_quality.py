@@ -152,6 +152,17 @@ def _bool_or_none(value: Any) -> Optional[bool]:
     return value if isinstance(value, bool) else None
 
 
+def _string_list(value: Any) -> List[str]:
+    """Return only the string items of a JSON list; [] for any non-list value.
+
+    Defensive against untrusted/older JSON: a truthy non-list scalar (e.g. ``True``,
+    ``404``, ``"broken"``) or a dict must never raise or iterate unexpectedly.
+    """
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
 def derive_context_quality_path(manifest_path: Path) -> Path:
     """Derive ``<stem>.context_quality.json`` adjacent to the manifest."""
     name = manifest_path.name
@@ -284,31 +295,41 @@ def _project_miss_taxonomy(raw: Any) -> Dict[str, Any]:
     no new aggregation, no score, and no verdict. When the retrieval-eval document
     predates or omits ``miss_taxonomy`` the projection is marked unavailable WITHOUT
     a warning, so older eval files never degrade or fail the projection.
+
+    Defensive against untrusted/older JSON: list-typed fields (``does_not_prove``,
+    ``cases``, ``case.miss_types``) are read only when they are actually lists, so a
+    truthy non-list value never raises. Cases are validated as dicts BEFORE the
+    sample limit is applied, so leading malformed entries cannot starve later valid
+    cases out of the sample.
     """
-    if not isinstance(raw, dict):
+    if raw is None:
         return {"available": False, "reason": "missing_from_retrieval_eval"}
+    if not isinstance(raw, dict):
+        return {"available": False, "reason": "invalid_miss_taxonomy_shape"}
 
     aggregate = raw.get("aggregate")
     aggregate = aggregate if isinstance(aggregate, dict) else None
 
-    cases_sample: List[Dict[str, Any]] = []
     raw_cases = raw.get("cases")
-    if isinstance(raw_cases, list):
-        for case in raw_cases[:_MISS_TAXONOMY_CASE_SAMPLE_LIMIT]:
-            if not isinstance(case, dict):
-                continue
-            cases_sample.append({
-                "query_index": _int_or_none(case.get("query_index")),
-                "query": _str_or_none(case.get("query")),
-                "primary_miss_type": _str_or_none(case.get("primary_miss_type")),
-                "miss_types": [m for m in (case.get("miss_types") or []) if isinstance(m, str)],
-            })
+    cases = raw_cases if isinstance(raw_cases, list) else []
+    cases_sample: List[Dict[str, Any]] = []
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        if len(cases_sample) >= _MISS_TAXONOMY_CASE_SAMPLE_LIMIT:
+            break
+        cases_sample.append({
+            "query_index": _int_or_none(case.get("query_index")),
+            "query": _str_or_none(case.get("query")),
+            "primary_miss_type": _str_or_none(case.get("primary_miss_type")),
+            "miss_types": _string_list(case.get("miss_types")),
+        })
 
     return {
         "available": True,
         "aggregate": aggregate,
         "cases_sample": cases_sample,
-        "does_not_prove": [d for d in (raw.get("does_not_prove") or []) if isinstance(d, str)],
+        "does_not_prove": _string_list(raw.get("does_not_prove")),
     }
 
 

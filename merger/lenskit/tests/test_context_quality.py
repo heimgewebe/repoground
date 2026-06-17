@@ -484,8 +484,9 @@ def test_invalid_retrieval_json_warns_without_fabrication(tmp_path):
 
 def test_retrieval_eval_miss_taxonomy_projected_mechanically(tmp_path):
     manifest = _make_bundle(tmp_path)
+    expected_mt = _miss_taxonomy()
     doc = _retrieval_eval_doc()
-    doc["miss_taxonomy"] = _miss_taxonomy()
+    doc["miss_taxonomy"] = expected_mt
     re_path = tmp_path / "standalone.retrieval_eval.json"
     re_path.write_text(json.dumps(doc), encoding="utf-8")
 
@@ -496,10 +497,10 @@ def test_retrieval_eval_miss_taxonomy_projected_mechanically(tmp_path):
     mt = re_sig["miss_taxonomy"]
     assert mt["available"] is True
     # The aggregate block is copied verbatim — no new aggregation/score invented.
-    assert mt["aggregate"] == _miss_taxonomy()["aggregate"]
+    assert mt["aggregate"] == expected_mt["aggregate"]
     assert mt["aggregate"]["by_type"]["zero_results"] == 1
     # The does_not_prove boundary is preserved verbatim.
-    assert mt["does_not_prove"] == _miss_taxonomy()["does_not_prove"]
+    assert mt["does_not_prove"] == expected_mt["does_not_prove"]
     # A small navigational sample of cases is surfaced (not the full taxonomy).
     assert len(mt["cases_sample"]) == 2
     assert mt["cases_sample"][0]["primary_miss_type"] == "zero_results"
@@ -525,6 +526,107 @@ def test_retrieval_eval_miss_taxonomy_cases_sample_is_capped(tmp_path):
     assert len(mt["cases_sample"]) == 5
     # Aggregate counts still reflect the full set, copied verbatim.
     assert mt["aggregate"]["total_misses"] == 12
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# 5c. miss_taxonomy projection is robust against malformed / older JSON shapes
+# ---------------------------------------------------------------------------
+
+def _write_eval_with_miss_taxonomy(tmp_path: Path, miss_taxonomy: object) -> Path:
+    doc = _retrieval_eval_doc()
+    doc["miss_taxonomy"] = miss_taxonomy
+    re_path = tmp_path / "standalone.retrieval_eval.json"
+    re_path.write_text(json.dumps(doc), encoding="utf-8")
+    return re_path
+
+
+def test_retrieval_eval_miss_taxonomy_ignores_non_list_does_not_prove(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    mt["does_not_prove"] = True  # truthy non-list must not raise
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    projected = report["signals"]["retrieval_eval"]["miss_taxonomy"]
+    assert projected["available"] is True
+    assert projected["does_not_prove"] == []  # degrades to empty, no crash
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_ignores_non_list_case_miss_types(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    mt["cases"][0]["miss_types"] = 404  # truthy non-list must not raise
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    projected = report["signals"]["retrieval_eval"]["miss_taxonomy"]
+    assert projected["available"] is True
+    # The affected case is still projected; only miss_types degrades to [].
+    assert projected["cases_sample"][0]["primary_miss_type"] == "zero_results"
+    assert projected["cases_sample"][0]["miss_types"] == []
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_ignores_non_list_cases(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    mt["cases"] = True  # truthy non-list must not raise
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    projected = report["signals"]["retrieval_eval"]["miss_taxonomy"]
+    assert projected["available"] is True
+    assert projected["cases_sample"] == []
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_samples_valid_cases_after_invalid_entries(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    # Leading invalid entries must not starve later valid cases from the sample.
+    mt["cases"] = [
+        None,
+        "broken",
+        123,
+        {"query": "q1", "primary_miss_type": "zero_results", "miss_types": ["zero_results"]},
+        {"query": "q2", "primary_miss_type": "expected_not_in_top_k", "miss_types": ["expected_not_in_top_k"]},
+        {"query": "q3", "primary_miss_type": "unknown", "miss_types": ["unknown"]},
+    ]
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    sample = report["signals"]["retrieval_eval"]["miss_taxonomy"]["cases_sample"]
+    # All three valid dict cases are collected; the limit is applied AFTER filtering,
+    # so slicing the first N raw entries (3 of which are invalid) would have missed q3.
+    assert [c["query"] for c in sample] == ["q1", "q2", "q3"]
+    assert all(isinstance(c["miss_types"], list) for c in sample)
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_non_dict_shape_is_unavailable(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, "TODO")  # present but not an object
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    re_sig = report["signals"]["retrieval_eval"]
+    # retrieval_eval metrics stay available; only the taxonomy projection is unavailable.
+    assert re_sig["available"] is True
+    mt = re_sig["miss_taxonomy"]
+    assert mt["available"] is False
+    assert mt["reason"] == "invalid_miss_taxonomy_shape"
+    assert not any("miss_taxonomy" in w for w in report["warnings"])  # no warning inflation
 
     schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.validate(instance=report, schema=schema)
