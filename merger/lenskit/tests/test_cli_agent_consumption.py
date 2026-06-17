@@ -15,8 +15,6 @@ DOES_NOT_ESTABLISH = [
 ]
 
 
-
-
 def test_cli_required_stdout(capsys):
     rc = main([
         "agent-consumption", "required",
