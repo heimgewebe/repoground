@@ -2,9 +2,10 @@
 
 ## Status
 
-PR 1 — Required Reading Protocol Core implemented.
+Required Reading Protocol Core implemented.
 Answer Compliance Contract v1 implemented.
-Agent Consumption Trace, Agent Entry Manifest, Agent Reading Pack v2, Export Safety Report, Lens Cards, Relation Cards, and Retrieval v2 are not yet implemented.
+Agent Consumption Trace v1 implemented.
+Agent Entry Manifest, Agent Reading Pack v2, Export Safety Report, Lens Cards, Relation Cards, and Retrieval v2 are not yet implemented.
 
 ---
 
@@ -122,4 +123,32 @@ does_not_establish must include the five protocol invariants on both protocol an
 The Answer Compliance Contract records what an answer declares it used.
 It is a declaration layer only. It does not prove actual reading, answer correctness, complete context use, runtime behavior, test sufficiency, regression absence, forensic readiness, or repo understanding.
 
-The later Agent Consumption Trace validator may compare Required Reading Protocol expectations against Answer Compliance declarations.
+The Agent Consumption Trace validator compares Required Reading Protocol expectations against Answer Compliance declarations (see below).
+
+---
+
+## Agent Consumption Trace
+
+The Agent Consumption Trace compares Required Reading expectations against Answer Compliance declarations.
+It may report:
+
+- pass: required artifacts are declared and no warning/failure condition was found.
+- warn: required artifacts are declared, but recommended artifacts are missing/unread or unknown declared artifacts were observed.
+- fail: required artifacts are missing/unread, task profiles mismatch, or required negative semantics are missing or invalid.
+- not_applicable: no applicable task profile could be resolved and no failing contract invariant was detected.
+
+The trace is a declaration-comparison artifact only. It does not prove actual reading, answer correctness, complete context use, runtime behavior, test sufficiency, regression absence, forensic readiness, or repo understanding.
+
+### Files
+
+| File | Role |
+|------|------|
+| `merger/lenskit/contracts/agent-consumption-trace.v1.schema.json` | JSON Schema (Draft-07) for the trace contract |
+| `merger/lenskit/core/agent_consumption_validate.py` | Pure validator: `validate_agent_consumption(required_reading_result, answer_compliance, *, available_roles=None)` |
+| `merger/lenskit/tests/test_agent_consumption_trace.py` | Schema validation and validator behaviour tests |
+
+### Scope
+
+This slice ships the contract, the pure core validator, and tests only. A CLI, strict mode, exit-code policy, Agent Entry Manifest, Output Health / Post-Emit Health integration, Bundle Manifest mutation, and Export Safety wiring are intentionally deferred. The validator performs no I/O, holds no global state, and reuses the existing Required Reading resolution rather than re-deriving it.
+
+`available_roles` is supplied explicitly. When omitted, only required and recommended roles are treated as known, and any other declared role is conservatively warned. The trace does not infer roles from the Bundle Manifest; that is later CLI / Entry Manifest work, and the `ArtifactRole` enum is not extended here.

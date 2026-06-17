@@ -1,0 +1,178 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/agent-consumption-trace.v1.schema.json",
+  "title": "Agent Consumption Trace (agent-consumption-trace v1.0)",
+  "description": "Machine-readable comparison of Required Reading Protocol expectations (the should) against Answer Compliance declarations (the declared). Comparison layer only. It does not prove actual reading, answer correctness, complete context use, runtime behavior, test sufficiency, regression absence, forensic readiness, repo understanding, or claim truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "task_profile",
+    "status",
+    "required_artifacts",
+    "recommended_artifacts",
+    "declared_artifacts",
+    "missing_required_artifacts",
+    "missing_recommended_artifacts",
+    "unknown_declared_artifacts",
+    "unread_required_artifacts",
+    "unread_recommended_artifacts",
+    "declared_citations",
+    "declared_ranges",
+    "epistemic_gaps",
+    "diagnostics",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.agent_consumption_trace"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "task_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Task profile against which Required Reading expectations and Answer Compliance declarations were compared."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "warn", "fail", "not_applicable"],
+      "description": "pass: required artifacts declared and no warn/fail condition. warn: recommended missing/unread or unknown declared artifacts. fail: required missing/unread, task profile mismatch, or required negative semantics missing or invalid. not_applicable: no applicable task profile could be resolved and no failing contract invariant was detected."
+    },
+    "required_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Required reading expectation (the should): roles required for this task profile."
+    },
+    "recommended_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Required reading expectation (the should): roles recommended for this task profile."
+    },
+    "declared_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Answer Compliance declaration: roles the answer declares it checked or used. Declaration only; not proof of actual reading."
+    },
+    "missing_required_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Required roles that were neither declared nor declared-unread."
+    },
+    "missing_recommended_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Recommended roles that were neither declared nor declared-unread."
+    },
+    "unknown_declared_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Declared roles that are not required, recommended, or in the supplied available_roles set."
+    },
+    "unread_required_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Required roles the Answer Compliance declaration reports as unread or unavailable. Adopted from the declaration."
+    },
+    "unread_recommended_artifacts": {
+      "$ref": "#/definitions/role_array",
+      "description": "Recommended roles the Answer Compliance declaration reports as unread or unavailable. Adopted from the declaration."
+    },
+    "declared_citations": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "Citation declarations adopted verbatim from the Answer Compliance declaration. Not re-validated here."
+    },
+    "declared_ranges": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "Range declarations adopted verbatim from the Answer Compliance declaration. Not re-validated here."
+    },
+    "epistemic_gaps": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "Epistemic gaps adopted verbatim from the Answer Compliance declaration. Not re-validated here."
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/diagnostic" },
+      "description": "Deviations between required reading expectation and Answer Compliance declaration."
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish_array"
+    }
+  },
+  "definitions": {
+    "role_array": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "detail"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "task_profile_mismatch",
+            "task_profile_not_applicable",
+            "missing_required_artifact",
+            "unread_required_artifact",
+            "missing_recommended_artifact",
+            "unread_recommended_artifact",
+            "unknown_declared_artifact",
+            "missing_negative_semantics"
+          ],
+          "description": "Machine-readable diagnostic code."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warn", "fail"]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "artifact": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional role this diagnostic refers to."
+        }
+      }
+    },
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "actual_reading_proven",
+          "answer_correct",
+          "repo_understood",
+          "all_relevant_context_used",
+          "claims_true",
+          "test_sufficiency",
+          "regression_absence",
+          "runtime_behavior",
+          "forensic_ready"
+        ]
+      },
+      "allOf": [
+        { "contains": { "const": "actual_reading_proven" } },
+        { "contains": { "const": "answer_correct" } },
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "all_relevant_context_used" } },
+        { "contains": { "const": "claims_true" } },
+        { "contains": { "const": "test_sufficiency" } },
+        { "contains": { "const": "regression_absence" } },
+        { "contains": { "const": "runtime_behavior" } },
+        { "contains": { "const": "forensic_ready" } }
+      ],
+      "description": "Boundaries this trace does not establish. The trace is a declaration-comparison artifact only."
+    }
+  }
+}
