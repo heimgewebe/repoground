@@ -39,6 +39,17 @@
         },
         "lens_counts": {
           "type": "object",
+          "propertyNames": {
+            "enum": [
+              "entrypoints",
+              "core",
+              "interfaces",
+              "data_models",
+              "pipelines",
+              "ui",
+              "guards"
+            ]
+          },
           "additionalProperties": {
             "type": "integer",
             "minimum": 0

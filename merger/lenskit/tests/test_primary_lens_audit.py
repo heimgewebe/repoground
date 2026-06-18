@@ -45,6 +45,19 @@ def test_primary_lens_audit_schema_validates_minimal_report():
     jsonschema.validate(instance=report, schema=_schema())
 
 
+def test_primary_lens_audit_schema_validates_generated_report():
+    jsonschema = pytest.importorskip("jsonschema")
+    report = audit_primary_lenses(
+        [
+            ".github/workflows/main.yml",
+            "src/contracts/user.proto",
+            "src/core/engine.py",
+        ]
+    )
+
+    jsonschema.validate(instance=report, schema=_schema())
+
+
 def test_primary_lens_audit_empty_input_is_valid():
     jsonschema = pytest.importorskip("jsonschema")
     report = audit_primary_lenses([])
@@ -64,6 +77,25 @@ def test_primary_lens_audit_rejects_empty_paths():
         audit_primary_lenses([""])
     with pytest.raises(ValueError, match="path"):
         audit_primary_lenses(["   "])
+    with pytest.raises(ValueError, match="path"):
+        audit_primary_lenses(["."])
+
+
+def test_primary_lens_audit_rejects_absolute_paths():
+    with pytest.raises(ValueError, match="repo-relative"):
+        audit_primary_lenses(["/tmp/lenskit/merger/lenskit/core/lenses.py"])
+
+
+def test_primary_lens_audit_rejects_parent_traversal_paths():
+    with pytest.raises(ValueError, match="parent traversal"):
+        audit_primary_lenses(["../merger/lenskit/core/lenses.py"])
+    with pytest.raises(ValueError, match="parent traversal"):
+        audit_primary_lenses(["merger/../lenskit/core/lenses.py"])
+
+
+def test_primary_lens_audit_rejects_windows_separators():
+    with pytest.raises(ValueError, match="POSIX"):
+        audit_primary_lenses([r"merger\lenskit\core\lenses.py"])
 
 
 def test_primary_lens_audit_sorts_paths_deterministically():
@@ -152,6 +184,15 @@ def test_primary_lens_audit_counts_lenses():
     )
 
 
+def test_primary_lens_audit_schema_rejects_unknown_lens_count_key():
+    jsonschema = pytest.importorskip("jsonschema")
+    report = audit_primary_lenses(["src/core/engine.py"])
+    report["summary"]["lens_counts"]["bananen_lens"] = 7
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=_schema())
+
+
 def test_primary_lens_audit_includes_does_not_establish_top_level_and_items():
     report = audit_primary_lenses(["src/core/engine.py"])
 
@@ -213,3 +254,23 @@ def test_explain_primary_lens_matches_existing_precedence_examples(
     assert lens == expected_lens
     assert lens == infer_lens(Path(path))
     assert expected_rule_fragment in matched_rule
+
+
+def test_explain_primary_lens_never_overrides_infer_lens():
+    paths = [
+        ".github/workflows/main.yml",
+        "src/contracts/user.proto",
+        "src/pipelines/daily_sync.py",
+        "src/__main__.py",
+        "src/ui/button.tsx",
+        "src/api/v1/users.py",
+        "src/core/engine.py",
+        "src/core/service/logic.py",
+        "docs/README.md",
+        "misc/unknown_file.xyz",
+    ]
+
+    for path in paths:
+        explained_lens, matched_rule = explain_primary_lens(path)
+        assert explained_lens == infer_lens(Path(path))
+        assert matched_rule
