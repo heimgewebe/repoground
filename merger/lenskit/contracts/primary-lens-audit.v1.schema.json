@@ -76,7 +76,8 @@
       "properties": {
         "path": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "pattern": "^(?!/)(?!\\.\\.?$)(?!.*\\\\)(?!.*(^|/)\\.\\.(/|$)).+"
         },
         "primary_lens": {
           "type": "string",

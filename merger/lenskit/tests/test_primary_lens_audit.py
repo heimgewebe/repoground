@@ -193,6 +193,25 @@ def test_primary_lens_audit_schema_rejects_unknown_lens_count_key():
         jsonschema.validate(instance=report, schema=_schema())
 
 
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "/tmp/lenskit/merger/lenskit/core/lenses.py",
+        ".",
+        "../merger/lenskit/core/lenses.py",
+        "merger/../lenskit/core/lenses.py",
+        r"merger\lenskit\core\lenses.py",
+    ],
+)
+def test_primary_lens_audit_schema_rejects_invalid_paths(bad_path):
+    jsonschema = pytest.importorskip("jsonschema")
+    report = audit_primary_lenses(["src/core/engine.py"])
+    report["items"][0]["path"] = bad_path
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=_schema())
+
+
 def test_primary_lens_audit_includes_does_not_establish_top_level_and_items():
     report = audit_primary_lenses(["src/core/engine.py"])
 
