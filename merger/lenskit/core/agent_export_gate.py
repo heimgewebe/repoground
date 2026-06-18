@@ -205,6 +205,12 @@ def _read_text_artifact(
     return text, None
 
 
+def _has_markdown_heading(text: str, heading: str) -> bool:
+    """Return True when ``text`` contains a level-2 Markdown heading line matching ``heading``."""
+    target = f"## {heading}"
+    return any(line.strip() == target for line in text.splitlines())
+
+
 def _doc_forbidden_inferences(doc: Dict[str, Any]) -> set[str]:
     """Return the optional C2.3 ``forbidden_inferences`` strings of a diagnostic doc."""
     values = doc.get("forbidden_inferences")
@@ -487,17 +493,16 @@ def evaluate_agent_export_gate(
     # never changes status or errors. This adds no truth layer and no
     # strict-gate semantics; it only makes the agent-consumption strand visible.
     if agent_facing:
-        roles = _artifact_roles(manifest)
-        if "agent_entry_manifest" not in roles:
+        if _find_artifact_path(manifest, "agent_entry_manifest") is None:
             warnings.append("missing_agent_entry_manifest")
-        if "required_reading_protocol" not in roles:
+        if _find_artifact_path(manifest, "required_reading_protocol") is None:
             warnings.append("missing_required_reading_protocol")
         pack_text, _pack_read_error = _read_text_artifact(
             manifest, manifest_dir, "agent_reading_pack"
         )
         if pack_text is None:
             warnings.append("cannot_check_answer_compliance_checklist")
-        elif "ANSWER_COMPLIANCE_CHECKLIST" not in pack_text:
+        elif not _has_markdown_heading(pack_text, "ANSWER_COMPLIANCE_CHECKLIST"):
             warnings.append("missing_answer_compliance_checklist")
 
     return {

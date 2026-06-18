@@ -1014,3 +1014,83 @@ def test_agent_export_gate_warns_when_answer_compliance_checklist_cannot_be_chec
     assert "missing_answer_compliance_checklist" not in report["warnings"]
     assert report["status"] == "pass"
     assert report["errors"] == []
+
+
+def test_agent_export_gate_requires_answer_compliance_heading_not_plain_text(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    # Pack contains the token as plain text, not as a ## heading — must still warn.
+    _append_artifact(
+        manifest,
+        tmp_path,
+        role="agent_reading_pack",
+        filename="demo.agent_reading_pack.md",
+        content=b"# Agent Reading Pack\n\nANSWER_COMPLIANCE_CHECKLIST\n",
+    )
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "missing_answer_compliance_checklist" in report["warnings"]
+    assert "cannot_check_answer_compliance_checklist" not in report["warnings"]
+    assert report["status"] == "pass"
+    assert report["errors"] == []
+
+
+def test_agent_export_gate_warns_when_agent_entry_manifest_artifact_has_no_path(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    # Role is declared but path is empty: _find_artifact_path must return None.
+    doc = json.loads(manifest.read_text(encoding="utf-8"))
+    doc["artifacts"].append({
+        "role": "agent_entry_manifest",
+        "path": "",
+        "content_type": "application/json",
+        "bytes": 0,
+        "sha256": _sha256(b""),
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "interpretation": {"mode": "role_only"},
+    })
+    manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "missing_agent_entry_manifest" in report["warnings"]
+    assert report["status"] == "pass"
+    assert report["errors"] == []
+
+
+def test_agent_export_gate_warns_when_required_reading_protocol_artifact_has_no_path(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    # Role is declared but path is empty: _find_artifact_path must return None.
+    doc = json.loads(manifest.read_text(encoding="utf-8"))
+    doc["artifacts"].append({
+        "role": "required_reading_protocol",
+        "path": "",
+        "content_type": "application/json",
+        "bytes": 0,
+        "sha256": _sha256(b""),
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "interpretation": {"mode": "role_only"},
+    })
+    manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "missing_required_reading_protocol" in report["warnings"]
+    assert report["status"] == "pass"
+    assert report["errors"] == []
