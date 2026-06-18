@@ -198,6 +198,7 @@ def test_primary_lens_audit_schema_rejects_unknown_lens_count_key():
     [
         "/tmp/lenskit/merger/lenskit/core/lenses.py",
         ".",
+        "   ",
         "../merger/lenskit/core/lenses.py",
         "merger/../lenskit/core/lenses.py",
         r"merger\lenskit\core\lenses.py",
