@@ -1,0 +1,235 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/agent-entry-manifest.v1.schema.json",
+  "title": "Lenskit Agent Entry Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "bundle_run_id",
+    "created_at",
+    "authority",
+    "canonicality",
+    "risk_class",
+    "canonical_source",
+    "read_first",
+    "task_profiles_ref",
+    "available_surfaces",
+    "unavailable_surfaces",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.agent_entry_manifest"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "bundle_run_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "authority": {
+      "type": "string",
+      "const": "navigation_index"
+    },
+    "canonicality": {
+      "type": "string",
+      "const": "derived"
+    },
+    "risk_class": {
+      "type": "string",
+      "const": "navigation"
+    },
+    "canonical_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "path",
+        "sha256",
+        "authority",
+        "canonicality"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "const": "canonical_md"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authority": {
+          "type": "string",
+          "const": "canonical_content"
+        },
+        "canonicality": {
+          "type": "string",
+          "const": "content_source"
+        }
+      }
+    },
+    "read_first": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/surface_ref"
+      }
+    },
+    "task_profiles_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "source"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "lenskit.required_reading_protocol"
+        },
+        "version": {
+          "type": "string",
+          "const": "1.0"
+        },
+        "source": {
+          "type": "string"
+        }
+      }
+    },
+    "available_surfaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/surface_ref"
+      }
+    },
+    "unavailable_surfaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/unavailable_surface"
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "repo_understood"
+          }
+        },
+        {
+          "contains": {
+            "const": "answer_safe_without_citations"
+          }
+        },
+        {
+          "contains": {
+            "const": "claims_true"
+          }
+        },
+        {
+          "contains": {
+            "const": "forensic_ready"
+          }
+        },
+        {
+          "contains": {
+            "const": "all_relevant_context_used"
+          }
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "surface_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "path",
+        "authority",
+        "canonicality"
+      ],
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "authority": {
+          "type": "string"
+        },
+        "canonicality": {
+          "type": "string"
+        },
+        "risk_class": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recommended_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "unavailable_surface": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "reason"
+      ],
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "required_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recommended_for": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

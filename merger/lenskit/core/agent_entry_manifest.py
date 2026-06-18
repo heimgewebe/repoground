@@ -1,0 +1,187 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+
+_DOES_NOT_ESTABLISH = [
+    "repo_understood",
+    "answer_safe_without_citations",
+    "claims_true",
+    "forensic_ready",
+    "all_relevant_context_used",
+]
+
+_READ_FIRST_PRIORITY = [
+    "agent_reading_pack",
+    "post_emit_health",
+    "canonical_md",
+]
+
+_EXPECTED_SURFACES = [
+    "canonical_md",
+    "agent_reading_pack",
+    "post_emit_health",
+    "claim_evidence_map_json",
+    "citation_map_jsonl",
+    "bundle_surface_validation",
+    "output_health",
+    "export_safety_report",
+]
+
+
+def _as_dict(value: Any) -> Dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    return None
+
+
+def _as_list(value: Any) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    return []
+
+
+def _str_or_none(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _artifact_role(artifact: Dict[str, Any]) -> str | None:
+    return _str_or_none(artifact.get("role"))
+
+
+def _artifact_path(artifact: Dict[str, Any]) -> str | None:
+    return _str_or_none(artifact.get("path"))
+
+
+def _artifact_sha256(artifact: Dict[str, Any]) -> str | None:
+    return _str_or_none(artifact.get("sha256"))
+
+
+def _artifact_authority(artifact: Dict[str, Any]) -> str | None:
+    return _str_or_none(artifact.get("authority"))
+
+
+def _artifact_canonicality(artifact: Dict[str, Any]) -> str | None:
+    return _str_or_none(artifact.get("canonicality"))
+
+
+def build_agent_entry_manifest(
+    bundle_manifest: Dict[str, Any],
+    *,
+    created_at: Optional[str] = None,
+) -> Dict[str, Any]:
+    # Determine bundle run id
+    bundle_run_id = (
+        _str_or_none(bundle_manifest.get("run_id"))
+        or _str_or_none(bundle_manifest.get("bundle_run_id"))
+        or _str_or_none(bundle_manifest.get("id"))
+    )
+    if not bundle_run_id:
+        raise ValueError("bundle_run_id missing")
+
+    # Determine created at
+    if created_at is not None:
+        final_created_at = created_at
+    else:
+        manifest_created_at = _str_or_none(bundle_manifest.get("created_at"))
+        final_created_at = manifest_created_at if manifest_created_at else "unknown"
+
+    artifacts = _as_list(bundle_manifest.get("artifacts"))
+
+    canonical_source: Dict[str, Any] | None = None
+    available_surfaces: List[Dict[str, Any]] = []
+    available_roles: set[str] = set()
+
+    for artifact_raw in artifacts:
+        artifact = _as_dict(artifact_raw)
+        if not artifact:
+            continue
+
+        role = _artifact_role(artifact)
+        path = _artifact_path(artifact)
+
+        if role == "canonical_md" and not path:
+            raise ValueError("canonical_md path missing")
+
+        if not role or not path:
+            continue
+
+        authority = _artifact_authority(artifact) or "unknown"
+        canonicality = _artifact_canonicality(artifact) or "unknown"
+        sha256 = _artifact_sha256(artifact)
+        risk_class = _str_or_none(artifact.get("risk_class"))
+
+        surface_ref: Dict[str, Any] = {
+            "role": role,
+            "path": path,
+            "sha256": sha256,
+            "authority": authority,
+            "canonicality": canonicality,
+            "risk_class": risk_class,
+            "required_for": [],
+            "recommended_for": [],
+        }
+
+        available_surfaces.append(surface_ref)
+        available_roles.add(role)
+
+        if role == "canonical_md":
+            canonical_source = {
+                "role": role,
+                "path": path,
+                "sha256": sha256,
+                "authority": authority,
+                "canonicality": canonicality,
+            }
+
+    if not canonical_source:
+        raise ValueError("canonical_md artifact missing")
+
+    if canonical_source["authority"] != "canonical_content":
+        raise ValueError("canonical_md authority must be canonical_content")
+
+    if canonical_source["canonicality"] != "content_source":
+        raise ValueError("canonical_md canonicality must be content_source")
+
+    read_first: List[Dict[str, Any]] = []
+    for priority_role in _READ_FIRST_PRIORITY:
+        for surface in available_surfaces:
+            if surface["role"] == priority_role:
+                read_first.append(surface)
+                break
+
+    unavailable_surfaces: List[Dict[str, Any]] = []
+    for expected_role in _EXPECTED_SURFACES:
+        if expected_role not in available_roles:
+            unavailable_surfaces.append(
+                {
+                    "role": expected_role,
+                    "reason": "not_present_in_bundle_manifest",
+                    "required_for": [],
+                    "recommended_for": [],
+                }
+            )
+
+    task_profiles_ref = {
+        "kind": "lenskit.required_reading_protocol",
+        "version": "1.0",
+        "source": "merger.lenskit.core.required_reading",
+    }
+
+    return {
+        "kind": "lenskit.agent_entry_manifest",
+        "version": "1.0",
+        "bundle_run_id": bundle_run_id,
+        "created_at": final_created_at,
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+        "canonical_source": canonical_source,
+        "read_first": read_first,
+        "task_profiles_ref": task_profiles_ref,
+        "available_surfaces": available_surfaces,
+        "unavailable_surfaces": unavailable_surfaces,
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
