@@ -67,6 +67,47 @@ def _artifact_canonicality(artifact: Dict[str, Any]) -> str | None:
     return _str_or_none(artifact.get("canonicality"))
 
 
+def _links(bundle_manifest: Dict[str, Any]) -> Dict[str, Any]:
+    links = _as_dict(bundle_manifest.get("links"))
+    return links or {}
+
+
+def _linked_sidecar_surfaces(bundle_manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
+    links = _links(bundle_manifest)
+    surfaces: List[Dict[str, Any]] = []
+    
+    post_emit_path = _str_or_none(links.get("post_emit_health_path"))
+    if post_emit_path:
+        surfaces.append(
+            {
+                "role": "post_emit_health",
+                "path": post_emit_path,
+                "sha256": None,
+                "authority": "diagnostic_signal",
+                "canonicality": "diagnostic",
+                "risk_class": "diagnostic",
+                "required_for": [],
+                "recommended_for": [],
+            }
+        )
+        
+    surface_path = _str_or_none(links.get("bundle_surface_validation_path"))
+    if surface_path:
+        surfaces.append(
+            {
+                "role": "bundle_surface_validation",
+                "path": surface_path,
+                "sha256": None,
+                "authority": "diagnostic_signal",
+                "canonicality": "diagnostic",
+                "risk_class": "diagnostic",
+                "required_for": [],
+                "recommended_for": [],
+            }
+        )
+    return surfaces
+
+
 def build_agent_entry_manifest(
     bundle_manifest: Dict[str, Any],
     *,
@@ -108,8 +149,15 @@ def build_agent_entry_manifest(
         if not role or not path:
             continue
 
-        authority = _artifact_authority(artifact) or "unknown"
-        canonicality = _artifact_canonicality(artifact) or "unknown"
+        authority = _artifact_authority(artifact)
+        canonicality = _artifact_canonicality(artifact)
+
+        if role == "canonical_md":
+            authority = authority or "canonical_content"
+            canonicality = canonicality or "content_source"
+        else:
+            authority = authority or "unknown"
+            canonicality = canonicality or "unknown"
         sha256 = _artifact_sha256(artifact)
         risk_class = _str_or_none(artifact.get("risk_class"))
 
@@ -135,6 +183,11 @@ def build_agent_entry_manifest(
                 "authority": authority,
                 "canonicality": canonicality,
             }
+
+    for linked_surface in _linked_sidecar_surfaces(bundle_manifest):
+        if linked_surface["role"] not in available_roles:
+            available_surfaces.append(linked_surface)
+            available_roles.add(linked_surface["role"])
 
     if not canonical_source:
         raise ValueError("canonical_md artifact missing")
