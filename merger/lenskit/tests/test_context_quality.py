@@ -855,3 +855,62 @@ def test_unknown_evidence_levels_reached_are_dropped_with_warning(tmp_path):
     assert "another_bad" not in ev["evidence_levels_reached"]
     assert "navigable" in ev["evidence_levels_reached"]  # known value kept
     assert any("evidence_levels_reached" in w for w in report["warnings"])
+
+
+def _write_post_emit_sidecar_with_overrides(manifest_path: Path, overrides: dict) -> None:
+    _write_post_emit_sidecar(manifest_path)
+    out = derive_post_health_path(manifest_path.resolve())
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    doc.update(overrides)
+    out.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+
+def test_post_emit_health_ignores_non_list_does_not_mean(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    _write_post_emit_sidecar_with_overrides(manifest, {"does_not_mean": True})
+
+    report = compute_context_quality(str(manifest))
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+    pe = report["signals"]["post_emit_health"]
+    assert pe["available"] is True
+    assert pe["does_not_mean"] == []
+    # Ensure there's no new warning *just* because does_not_mean wasn't a list
+    assert not any("does_not_mean" in w for w in report["warnings"])
+
+
+def test_post_emit_health_ignores_non_list_evidence_levels_reached(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    _write_post_emit_sidecar_with_overrides(manifest, {"evidence_levels_reached": 404})
+
+    report = compute_context_quality(str(manifest))
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+    pe = report["signals"]["post_emit_health"]
+    assert pe["available"] is True
+    assert pe["evidence_levels_reached"] == []
+
+    ev = report["signals"]["evidence"]
+    assert ev["evidence_levels_reached"] == []
+
+
+def test_post_emit_health_filters_non_string_list_items(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    _write_post_emit_sidecar_with_overrides(manifest, {
+        "does_not_mean": ["repo_understood", 7, False, "claims_true"],
+        "evidence_levels_reached": ["readable", None, "range_strict"]
+    })
+
+    report = compute_context_quality(str(manifest))
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+    pe = report["signals"]["post_emit_health"]
+    assert pe["available"] is True
+    assert pe["does_not_mean"] == ["repo_understood", "claims_true"]
+    assert pe["evidence_levels_reached"] == ["readable", "range_strict"]
+
+    ev = report["signals"]["evidence"]
+    assert ev["evidence_levels_reached"] == ["readable", "range_strict"]

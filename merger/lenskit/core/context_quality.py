@@ -279,10 +279,8 @@ def _project_post_emit_health(
         "source": source,
         "status_observed": _str_or_none(doc.get("status")),
         "evidence_level": _str_or_none(doc.get("evidence_level")),
-        "evidence_levels_reached": [
-            lvl for lvl in (doc.get("evidence_levels_reached") or []) if isinstance(lvl, str)
-        ],
-        "does_not_mean": [d for d in (doc.get("does_not_mean") or []) if isinstance(d, str)],
+        "evidence_levels_reached": _string_list(doc.get("evidence_levels_reached")),
+        "does_not_mean": _string_list(doc.get("does_not_mean")),
     }
 
 
@@ -434,7 +432,7 @@ def _project_evidence(post_emit_signal: Dict[str, Any], warnings: List[str]) -> 
             )
             raw_level = None
 
-        raw_reached = list(post_emit_signal.get("evidence_levels_reached") or [])
+        raw_reached = _string_list(post_emit_signal.get("evidence_levels_reached"))
         known_reached = [lvl for lvl in raw_reached if lvl in _KNOWN_EVIDENCE_LEVELS]
         dropped = [lvl for lvl in raw_reached if lvl not in _KNOWN_EVIDENCE_LEVELS]
         if dropped:
