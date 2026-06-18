@@ -1,0 +1,172 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/primary-lens-audit.v1.schema.json",
+  "title": "Primary Lens Audit (primary-lens-audit v1.0)",
+  "description": "Deterministic navigation/diagnostic audit describing how existing infer_lens(path) classifications map repo paths to primary lenses. This artifact explains current heuristics only; it does not establish truth, correctness, completeness, or review priority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "items",
+    "summary",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "lenskit.primary_lens_audit"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/item"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_count",
+        "lens_counts"
+      ],
+      "properties": {
+        "item_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lens_counts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish"
+    }
+  },
+  "definitions": {
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "primary_lens",
+        "matched_rule",
+        "possible_facets",
+        "notes",
+        "does_not_establish"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "primary_lens": {
+          "type": "string",
+          "enum": [
+            "entrypoints",
+            "core",
+            "interfaces",
+            "data_models",
+            "pipelines",
+            "ui",
+            "guards"
+          ]
+        },
+        "matched_rule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "possible_facets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "does_not_establish": {
+          "$ref": "#/definitions/does_not_establish"
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "uniqueItems": true,
+      "minItems": 9,
+      "items": {
+        "type": "string",
+        "enum": [
+          "truth",
+          "correctness",
+          "completeness",
+          "runtime_behavior",
+          "test_sufficiency",
+          "regression_absence",
+          "semantic_importance",
+          "review_priority",
+          "change_impact"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "truth"
+          }
+        },
+        {
+          "contains": {
+            "const": "correctness"
+          }
+        },
+        {
+          "contains": {
+            "const": "completeness"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime_behavior"
+          }
+        },
+        {
+          "contains": {
+            "const": "test_sufficiency"
+          }
+        },
+        {
+          "contains": {
+            "const": "regression_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "semantic_importance"
+          }
+        },
+        {
+          "contains": {
+            "const": "review_priority"
+          }
+        },
+        {
+          "contains": {
+            "const": "change_impact"
+          }
+        }
+      ]
+    }
+  }
+}
