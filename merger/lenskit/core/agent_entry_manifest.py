@@ -1,23 +1,26 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Iterator
 
 
-_DOES_NOT_ESTABLISH = [
+_DOES_NOT_ESTABLISH = (
     "repo_understood",
     "answer_safe_without_citations",
     "claims_true",
     "forensic_ready",
     "all_relevant_context_used",
-]
+)
 
-_READ_FIRST_PRIORITY = [
+_READ_FIRST_PRIORITY = (
     "agent_reading_pack",
     "post_emit_health",
     "canonical_md",
-]
+)
 
-_EXPECTED_SURFACES = [
+# V1 agent-entry expected surfaces. Broader bundle inventory roles
+# (chunk indexes, sqlite index, retrieval eval, derived/dump indexes)
+# are surfaced when present but are not reported as unavailable in v1.
+_EXPECTED_SURFACES = (
     "canonical_md",
     "agent_reading_pack",
     "post_emit_health",
@@ -26,7 +29,7 @@ _EXPECTED_SURFACES = [
     "bundle_surface_validation",
     "output_health",
     "export_safety_report",
-]
+)
 
 
 def _as_dict(value: Any) -> Dict[str, Any] | None:
@@ -72,40 +75,34 @@ def _links(bundle_manifest: Dict[str, Any]) -> Dict[str, Any]:
     return links or {}
 
 
-def _linked_sidecar_surfaces(bundle_manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _linked_sidecar_surfaces(bundle_manifest: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
     links = _links(bundle_manifest)
-    surfaces: List[Dict[str, Any]] = []
     
     post_emit_path = _str_or_none(links.get("post_emit_health_path"))
     if post_emit_path:
-        surfaces.append(
-            {
-                "role": "post_emit_health",
-                "path": post_emit_path,
-                "sha256": None,
-                "authority": "diagnostic_signal",
-                "canonicality": "diagnostic",
-                "risk_class": "diagnostic",
-                "required_for": [],
-                "recommended_for": [],
-            }
-        )
+        yield {
+            "role": "post_emit_health",
+            "path": post_emit_path,
+            "sha256": None,
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "risk_class": "diagnostic",
+            "required_for": [],
+            "recommended_for": [],
+        }
         
     surface_path = _str_or_none(links.get("bundle_surface_validation_path"))
     if surface_path:
-        surfaces.append(
-            {
-                "role": "bundle_surface_validation",
-                "path": surface_path,
-                "sha256": None,
-                "authority": "diagnostic_signal",
-                "canonicality": "diagnostic",
-                "risk_class": "diagnostic",
-                "required_for": [],
-                "recommended_for": [],
-            }
-        )
-    return surfaces
+        yield {
+            "role": "bundle_surface_validation",
+            "path": surface_path,
+            "sha256": None,
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "risk_class": "diagnostic",
+            "required_for": [],
+            "recommended_for": [],
+        }
 
 
 def build_agent_entry_manifest(
@@ -176,6 +173,8 @@ def build_agent_entry_manifest(
         available_roles.add(role)
 
         if role == "canonical_md":
+            if canonical_source is not None:
+                raise ValueError("multiple canonical_md artifacts")
             canonical_source = {
                 "role": role,
                 "path": path,
@@ -198,24 +197,28 @@ def build_agent_entry_manifest(
     if canonical_source["canonicality"] != "content_source":
         raise ValueError("canonical_md canonicality must be content_source")
 
-    read_first: List[Dict[str, Any]] = []
-    for priority_role in _READ_FIRST_PRIORITY:
-        for surface in available_surfaces:
-            if surface["role"] == priority_role:
-                read_first.append(surface)
-                break
+    surfaces_by_role = {
+        surface["role"]: surface
+        for surface in available_surfaces
+        if isinstance(surface.get("role"), str)
+    }
 
-    unavailable_surfaces: List[Dict[str, Any]] = []
-    for expected_role in _EXPECTED_SURFACES:
-        if expected_role not in available_roles:
-            unavailable_surfaces.append(
-                {
-                    "role": expected_role,
-                    "reason": "not_present_in_bundle_manifest",
-                    "required_for": [],
-                    "recommended_for": [],
-                }
-            )
+    read_first = [
+        surfaces_by_role[role]
+        for role in _READ_FIRST_PRIORITY
+        if role in surfaces_by_role
+    ]
+
+    unavailable_surfaces = [
+        {
+            "role": expected_role,
+            "reason": "not_present_in_bundle_manifest",
+            "required_for": [],
+            "recommended_for": [],
+        }
+        for expected_role in _EXPECTED_SURFACES
+        if expected_role not in available_roles
+    ]
 
     task_profiles_ref = {
         "kind": "lenskit.required_reading_protocol",

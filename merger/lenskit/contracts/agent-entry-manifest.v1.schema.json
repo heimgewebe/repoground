@@ -122,8 +122,18 @@
     },
     "does_not_establish": {
       "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
       "items": {
-        "type": "string"
+        "type": "string",
+        "enum": [
+          "repo_understood",
+          "answer_safe_without_citations",
+          "claims_true",
+          "forensic_ready",
+          "all_relevant_context_used"
+        ]
       },
       "allOf": [
         {

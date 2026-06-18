@@ -438,3 +438,81 @@ def test_agent_entry_manifest_infers_canonical_md_authority_and_canonicality_whe
     assert report["canonical_source"]["canonicality"] == "content_source"
 
 
+def test_agent_entry_manifest_schema_rejects_extra_does_not_establish_value(schema):
+    report = build_agent_entry_manifest(valid_bundle_fixture(), created_at="2026-06-18T00:00:00Z")
+    report["does_not_establish"].append("invented_boundary")
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
+def test_agent_entry_manifest_schema_rejects_duplicate_does_not_establish_value(schema):
+    report = build_agent_entry_manifest(valid_bundle_fixture(), created_at="2026-06-18T00:00:00Z")
+    report["does_not_establish"] = [
+        "repo_understood",
+        "repo_understood",
+        "answer_safe_without_citations",
+        "claims_true",
+        "forensic_ready",
+    ]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=schema)
+
+
+def test_agent_entry_manifest_rejects_multiple_canonical_md_artifacts():
+    bundle = valid_bundle_fixture()
+    bundle["artifacts"].append(
+        {
+            "role": "canonical_md",
+            "path": "other.md",
+            "sha256": "other",
+            "authority": "canonical_content",
+            "canonicality": "content_source",
+        }
+    )
+    with pytest.raises(ValueError, match="multiple canonical_md artifacts"):
+        build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+
+
+def test_agent_entry_manifest_linked_sidecars_have_diagnostic_metadata(schema):
+    bundle = {
+        "run_id": "run-1",
+        "created_at": "2026-06-18T00:00:00Z",
+        "artifacts": [
+            {
+                "role": "canonical_md",
+                "path": "merge.md",
+                "sha256": "abc",
+                "authority": "canonical_content",
+                "canonicality": "content_source",
+            }
+        ],
+        "links": {
+            "post_emit_health_path": "merge.bundle_health.post.json",
+            "bundle_surface_validation_path": "merge.bundle_surface_validation.json",
+        },
+    }
+    report = build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+    jsonschema.validate(instance=report, schema=schema)
+    surfaces = {surface["role"]: surface for surface in report["available_surfaces"]}
+    assert surfaces["post_emit_health"]["authority"] == "diagnostic_signal"
+    assert surfaces["post_emit_health"]["canonicality"] == "diagnostic"
+    assert surfaces["bundle_surface_validation"]["authority"] == "diagnostic_signal"
+    assert surfaces["bundle_surface_validation"]["canonicality"] == "diagnostic"
+
+
+def test_agent_entry_manifest_ignores_non_string_link_paths(schema):
+    bundle = valid_bundle_fixture()
+    bundle["artifacts"] = [
+        artifact
+        for artifact in bundle["artifacts"]
+        if artifact["role"] != "post_emit_health"
+    ]
+    bundle["links"] = {
+        "post_emit_health_path": 123,
+        "bundle_surface_validation_path": [],
+    }
+    report = build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+    jsonschema.validate(instance=report, schema=schema)
+    unavailable = {surface["role"] for surface in report["unavailable_surfaces"]}
+    assert "post_emit_health" in unavailable
+    assert "bundle_surface_validation" in unavailable
