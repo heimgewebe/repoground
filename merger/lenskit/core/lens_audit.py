@@ -24,7 +24,13 @@ _KNOWN_LENS_IDS = frozenset(LENS_IDS)
 
 
 def _normalize_path(path: str | Path) -> str:
-    return Path(path).as_posix()
+    raw = str(path)
+    if not raw.strip():
+        raise ValueError("primary lens audit path must not be empty")
+    posix = Path(raw).as_posix()
+    if posix in {"", "."}:
+        raise ValueError("primary lens audit path must identify a repo path")
+    return posix
 
 
 def explain_primary_lens(path: str | Path) -> tuple[str, str]:

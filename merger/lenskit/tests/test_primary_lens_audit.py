@@ -59,6 +59,13 @@ def test_primary_lens_audit_empty_input_is_valid():
     jsonschema.validate(instance=report, schema=_schema())
 
 
+def test_primary_lens_audit_rejects_empty_paths():
+    with pytest.raises(ValueError, match="path"):
+        audit_primary_lenses([""])
+    with pytest.raises(ValueError, match="path"):
+        audit_primary_lenses(["   "])
+
+
 def test_primary_lens_audit_sorts_paths_deterministically():
     report = audit_primary_lenses(
         [
