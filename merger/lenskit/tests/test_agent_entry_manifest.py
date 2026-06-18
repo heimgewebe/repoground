@@ -1,7 +1,8 @@
-import pytest
-import jsonschema
 import json
 from pathlib import Path
+
+import jsonschema
+import pytest
 
 from merger.lenskit.core.agent_entry_manifest import build_agent_entry_manifest
 
@@ -41,6 +42,85 @@ def valid_bundle_fixture() -> dict:
                 "canonicality": "derived",
             },
         ],
+    }
+
+
+def realistic_bundle_manifest_fixture() -> dict:
+    return {
+        "run_id": "run-xyz",
+        "created_at": "2026-06-18T02:00:00Z",
+        "artifacts": [
+            {
+                "role": "canonical_md",
+                "path": "merge.md",
+                "content_type": "text/markdown",
+                "bytes": 100,
+                "sha256": "aaaa",
+                "authority": "canonical_content",
+                "canonicality": "content_source",
+                "risk_class": "content"
+            },
+            {
+                "role": "agent_reading_pack",
+                "path": "pack.md",
+                "content_type": "text/markdown",
+                "bytes": 200,
+                "sha256": "bbbb",
+                "authority": "navigation_index",
+                "canonicality": "derived",
+                "risk_class": "navigation"
+            },
+            {
+                "role": "post_emit_health",
+                "path": "health.json",
+                "content_type": "application/json",
+                "bytes": 300,
+                "sha256": "cccc",
+                "authority": "diagnostic",
+                "canonicality": "derived",
+                "risk_class": "diagnostic"
+            },
+            {
+                "role": "output_health",
+                "path": "out.json",
+                "content_type": "application/json",
+                "bytes": 400,
+                "sha256": "dddd",
+                "authority": "diagnostic_signal",
+                "canonicality": "diagnostic",
+                "risk_class": "diagnostic"
+            },
+            {
+                "role": "claim_evidence_map_json",
+                "path": "claim_evidence.json",
+                "content_type": "application/json",
+                "bytes": 500,
+                "sha256": "eeee",
+                "authority": "navigation_index",
+                "canonicality": "derived",
+                "risk_class": "evidence_index"
+            },
+            {
+                "role": "citation_map_jsonl",
+                "path": "citation.jsonl",
+                "content_type": "application/x-ndjson",
+                "bytes": 600,
+                "sha256": "ffff",
+                "authority": "navigation_index",
+                "canonicality": "derived",
+                "risk_class": "navigation"
+            },
+            {
+                "role": "bundle_surface_validation",
+                "path": "surface_valid.json",
+                "content_type": "application/json",
+                "bytes": 700,
+                "sha256": "gggg",
+                "authority": "diagnostic_signal",
+                "canonicality": "diagnostic",
+                "risk_class": "diagnostic"
+            }
+        ]
     }
 
 
@@ -211,3 +291,61 @@ def test_agent_entry_manifest_available_surfaces_include_manifest_artifacts(sche
     jsonschema.validate(instance=report, schema=schema)
     roles = {x["role"] for x in report["available_surfaces"]}
     assert {"canonical_md", "agent_reading_pack", "post_emit_health"}.issubset(roles)
+
+
+def test_agent_entry_manifest_accepts_realistic_bundle_manifest_shape(schema):
+    report = build_agent_entry_manifest(
+        realistic_bundle_manifest_fixture(),
+        created_at="2026-06-18T02:00:00Z",
+    )
+    jsonschema.validate(instance=report, schema=schema)
+    assert report["bundle_run_id"]
+    assert report["canonical_source"]["role"] == "canonical_md"
+    assert report["canonical_source"]["authority"] == "canonical_content"
+    assert report["canonical_source"]["canonicality"] == "content_source"
+    available_roles = {surface["role"] for surface in report["available_surfaces"]}
+    assert "canonical_md" in available_roles
+    assert "agent_reading_pack" in available_roles
+    assert "post_emit_health" in available_roles
+    read_first_roles = [surface["role"] for surface in report["read_first"]]
+    assert read_first_roles[:1] == ["agent_reading_pack"]
+
+
+def test_agent_entry_manifest_non_list_artifacts_raises_missing_canonical_md():
+    bundle = {
+        "run_id": "run-1",
+        "artifacts": {
+            "role": "canonical_md",
+            "path": "merge.md",
+            "sha256": "abc",
+            "authority": "canonical_content",
+            "canonicality": "content_source",
+        },
+    }
+    with pytest.raises(ValueError, match="canonical_md"):
+        build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+
+
+def test_agent_entry_manifest_ignores_non_dict_artifacts(schema):
+    bundle = valid_bundle_fixture()
+    bundle["artifacts"].append("bad")
+    bundle["artifacts"].append(123)
+    report = build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+    jsonschema.validate(instance=report, schema=schema)
+    roles = {surface["role"] for surface in report["available_surfaces"]}
+    assert "canonical_md" in roles
+
+
+def test_agent_entry_manifest_skips_artifacts_without_role_or_path(schema):
+    bundle = valid_bundle_fixture()
+    bundle["artifacts"].extend(
+        [
+            {"path": "no-role.json", "sha256": "x"},
+            {"role": "no_path", "sha256": "y"},
+        ]
+    )
+    report = build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+    jsonschema.validate(instance=report, schema=schema)
+    roles = {surface["role"] for surface in report["available_surfaces"]}
+    assert "no_path" not in roles
+
