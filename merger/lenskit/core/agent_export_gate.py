@@ -147,19 +147,6 @@ def _find_output_health_verdict(manifest: Dict[str, Any], manifest_dir: Path) ->
     return None
 
 
-def _artifact_roles(manifest: Dict[str, Any]) -> set[str]:
-    """Return the set of declared artifact ``role`` strings in the manifest."""
-    roles: set[str] = set()
-    artifacts = manifest.get("artifacts")
-    if isinstance(artifacts, list):
-        for art in artifacts:
-            if isinstance(art, dict):
-                role = art.get("role")
-                if isinstance(role, str):
-                    roles.add(role)
-    return roles
-
-
 def _find_artifact_path(manifest: Dict[str, Any], role: str) -> Optional[str]:
     """Return the relative path of the first artifact carrying ``role``.
 
