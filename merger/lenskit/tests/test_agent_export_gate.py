@@ -839,3 +839,178 @@ def test_c2_5_blocked_report_validates_against_schema(tmp_path):
     assert report["status"] == "fail"
     schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
     jsonschema.validate(instance=report, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# Agent-consumption surface advisory (non-blocking warnings)
+# ---------------------------------------------------------------------------
+
+def _append_artifact(
+    manifest_path: Path,
+    tmp_path: Path,
+    *,
+    role: str,
+    filename: str,
+    content: bytes,
+    authority: str = "navigation_index",
+    canonicality: str = "derived",
+    content_type: str = "text/markdown",
+) -> None:
+    """Write a file and append a manifest artifact entry referencing it."""
+    (tmp_path / filename).write_bytes(content)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].append(
+        {
+            "role": role,
+            "path": filename,
+            "content_type": content_type,
+            "bytes": len(content),
+            "sha256": _sha256(content),
+            "authority": authority,
+            "canonicality": canonicality,
+            "interpretation": {"mode": "role_only"},
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def test_agent_export_gate_warns_when_agent_entry_manifest_missing(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "missing_agent_entry_manifest" in report["warnings"]
+    assert report["status"] == "pass"
+    assert report["errors"] == []
+
+
+def test_agent_export_gate_warns_when_required_reading_protocol_missing(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "missing_required_reading_protocol" in report["warnings"]
+    assert report["status"] == "pass"
+    assert report["errors"] == []
+
+
+def test_agent_export_gate_warns_when_answer_compliance_checklist_missing(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    _append_artifact(
+        manifest,
+        tmp_path,
+        role="agent_reading_pack",
+        filename="demo.agent_reading_pack.md",
+        content=b"# Agent Reading Pack\n\nNo checklist section here.\n",
+    )
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "missing_answer_compliance_checklist" in report["warnings"]
+    assert "cannot_check_answer_compliance_checklist" not in report["warnings"]
+    assert report["status"] == "pass"
+    assert report["errors"] == []
+
+
+def test_agent_export_gate_consumption_warnings_do_not_block_agent_export(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert report["status"] == "pass"
+    assert report["errors"] == []
+    assert "missing_agent_entry_manifest" in report["warnings"]
+    assert "missing_required_reading_protocol" in report["warnings"]
+    assert "cannot_check_answer_compliance_checklist" in report["warnings"]
+
+
+def test_agent_export_gate_does_not_warn_when_consumption_surfaces_present(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    _append_artifact(
+        manifest,
+        tmp_path,
+        role="agent_entry_manifest",
+        filename="demo.agent_entry_manifest.json",
+        content=b"{}",
+        content_type="application/json",
+    )
+    _append_artifact(
+        manifest,
+        tmp_path,
+        role="required_reading_protocol",
+        filename="demo.required_reading_protocol.json",
+        content=b"{}",
+        content_type="application/json",
+    )
+    _append_artifact(
+        manifest,
+        tmp_path,
+        role="agent_reading_pack",
+        filename="demo.agent_reading_pack.md",
+        content=b"# Agent Reading Pack\n\n## ANSWER_COMPLIANCE_CHECKLIST\n",
+    )
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "missing_agent_entry_manifest" not in report["warnings"]
+    assert "missing_required_reading_protocol" not in report["warnings"]
+    assert "missing_answer_compliance_checklist" not in report["warnings"]
+    assert "cannot_check_answer_compliance_checklist" not in report["warnings"]
+    assert report["status"] == "pass"
+
+
+def test_agent_export_gate_warns_when_answer_compliance_checklist_cannot_be_checked(tmp_path):
+    manifest = _write_manifest(tmp_path, redaction=True)
+    _write_post_health(tmp_path, "pass")
+    # Declare an agent_reading_pack artifact whose file is absent: the gate must
+    # surface a cannot-check warning rather than guessing or blocking.
+    doc = json.loads(manifest.read_text(encoding="utf-8"))
+    doc["artifacts"].append(
+        {
+            "role": "agent_reading_pack",
+            "path": "missing.agent_reading_pack.md",
+            "content_type": "text/markdown",
+            "bytes": 0,
+            "sha256": _sha256(b""),
+            "authority": "navigation_index",
+            "canonicality": "derived",
+            "interpretation": {"mode": "role_only"},
+        }
+    )
+    manifest.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    report = evaluate_agent_export_gate(
+        manifest_path=str(manifest),
+        profile="agent_minimal",
+        require_redaction=True,
+    )
+
+    assert "cannot_check_answer_compliance_checklist" in report["warnings"]
+    assert "missing_answer_compliance_checklist" not in report["warnings"]
+    assert report["status"] == "pass"
+    assert report["errors"] == []

@@ -391,6 +391,67 @@ def test_pack_answer_compliance_checklist_is_declarative(tmp_path):
     assert "declaration aid, not proof" in body
 
 
+def test_agent_reading_pack_surfaces_agent_consumption_contract(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+
+    assert "## AGENT_CONSUMPTION_CONTRACT" in body
+    section = _section(body, "AGENT_CONSUMPTION_CONTRACT")
+    # Backtick-insensitive: surfaces are rendered as inline code spans.
+    flat = section.replace("`", "")
+    for needle in (
+        "agent_entry_manifest",
+        "lenskit.agent_entry_manifest",
+        "required_reading_protocol",
+        "lenskit.required_reading_protocol",
+        "agent_consumption_trace",
+        "lenskit.agent_consumption_trace",
+        "ANSWER_COMPLIANCE_CHECKLIST",
+        "export_safety_report",
+        "lenskit.export_safety_report",
+        "canonical_md remains the only content truth",
+    ):
+        assert needle in flat, f"missing {needle!r} in AGENT_CONSUMPTION_CONTRACT"
+
+
+def test_agent_reading_pack_consumption_contract_preserves_non_claims(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    section = _section(body, "AGENT_CONSUMPTION_CONTRACT")
+
+    assert "does not establish" in section
+    for token in (
+        "repo_understood",
+        "answer_safe_without_citations",
+        "claims_true",
+        "all_relevant_context_used",
+        "secret_absence",
+        "pii_absence",
+        "forensic_ready",
+    ):
+        assert token in section, f"non-claim {token!r} missing from consumption contract"
+
+
+def test_agent_reading_pack_consumption_contract_does_not_add_positive_truth_claims(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    section = _section(body, "AGENT_CONSUMPTION_CONTRACT")
+
+    # Only positive machine-readable assertions are forbidden; negated prose is fine.
+    for forbidden in (
+        "repo_understood: true",
+        "claims_true: true",
+        "forensic_ready: true",
+        "secret_absence: true",
+        "pii_absence: true",
+        "answer_safe_without_citations: true",
+        "verified: true",
+        "safe: true",
+        "complete: true",
+    ):
+        assert forbidden not in section, f"unexpected positive claim {forbidden!r}"
+
+
 def test_pack_lists_present_artifact_roles(tmp_path):
     manifest = _make_bundle(tmp_path)
     body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()

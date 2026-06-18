@@ -505,6 +505,48 @@ def render_agent_reading_pack(model: PackModel) -> str:
     )
     lines.append("")
 
+    # ── AGENT_CONSUMPTION_CONTRACT ───────────────────────────────────────
+    lines.append("## AGENT_CONSUMPTION_CONTRACT")
+    lines.append(
+        "Agent-consumption surfaces are navigation and accountability aids. "
+        "They do not replace `canonical_md`."
+    )
+    lines.append("Use them when present:")
+    lines.append(
+        "- `agent_entry_manifest` / `lenskit.agent_entry_manifest`: "
+        "machine-readable bundle entrypoint."
+    )
+    lines.append(
+        "- `required_reading_protocol` / `lenskit.required_reading_protocol`: "
+        "task-profile-specific required reading."
+    )
+    lines.append(
+        "- `agent_consumption_trace` / `lenskit.agent_consumption_trace`: "
+        "machine-readable declaration of consumed artifacts, ranges, and citations."
+    )
+    lines.append(
+        "- `answer_compliance` / `ANSWER_COMPLIANCE_CHECKLIST`: answer-side "
+        "obligations and non-claims; declaration only, not proof of actual reading."
+    )
+    lines.append(
+        "- `export_safety_report` / `lenskit.export_safety_report`: "
+        "export diagnostic only."
+    )
+    lines.append(
+        "This does not establish `repo_understood`, `answer_safe_without_citations`, "
+        "`claims_true`, `all_relevant_context_used`, `secret_absence`, `pii_absence`, "
+        "or `forensic_ready`."
+    )
+    lines.append("`canonical_md` remains the only content truth.")
+    lines.append(
+        "Sidecars remain navigation, diagnostics, index, evidence, or cache."
+    )
+    lines.append(
+        "Health passes do not prove repo understanding, answer safety, test "
+        "sufficiency, runtime correctness, regression absence, or forensic readiness."
+    )
+    lines.append("")
+
     # ── ANSWER_COMPLIANCE_CHECKLIST ──────────────────────────────────────
     lines.append("## ANSWER_COMPLIANCE_CHECKLIST")
     lines.append("```text")
