@@ -164,6 +164,81 @@ def _retrieval_eval_doc() -> dict:
     }
 
 
+def _miss_taxonomy(case_count: int = 2) -> dict:
+    """A retrieval-eval miss_taxonomy block, shaped like eval_core.build_miss_taxonomy."""
+    cases = [
+        {
+            "query_index": 0,
+            "query": "where is auth handled",
+            "expected": ["src/auth.py"],
+            "is_relevant": False,
+            "observed_top_k_count": 0,
+            "miss_types": ["zero_results"],
+            "primary_miss_type": "zero_results",
+            "classification_basis": ["retrieval_eval_expectations"],
+        },
+        {
+            "query_index": 1,
+            "query": "token refresh logic",
+            "expected": ["src/token.py"],
+            "is_relevant": False,
+            "observed_top_k_count": 5,
+            "miss_types": ["expected_not_in_top_k"],
+            "primary_miss_type": "expected_not_in_top_k",
+            "classification_basis": ["retrieval_eval_expectations", "returned_hit_paths"],
+        },
+    ]
+    # Synthesize extra padding cases when a larger sample is requested.
+    while len(cases) < case_count:
+        i = len(cases)
+        cases.append({
+            "query_index": i,
+            "query": f"padding query {i}",
+            "expected": [],
+            "is_relevant": False,
+            "observed_top_k_count": 0,
+            "miss_types": ["unknown"],
+            "primary_miss_type": "unknown",
+            "classification_basis": ["query_metadata"],
+        })
+    return {
+        "version": "1.0",
+        "authority": "diagnostic_signal",
+        "risk_class": "diagnostic",
+        "classification_basis": [
+            "retrieval_eval_expectations",
+            "returned_hit_paths",
+            "query_metadata",
+        ],
+        "does_not_prove": [
+            "absence_of_retrieval_hit_does_not_prove_absence_in_repository",
+            "miss_type_does_not_prove_claim_truth_or_falsehood",
+            "ranking_position_does_not_prove_semantic_importance",
+            "retrieval_eval_does_not_prove_retrieval_completeness",
+            "taxonomy_is_diagnostic_not_authoritative",
+        ],
+        "aggregate": {
+            "total_cases_classified": case_count + 1,
+            "total_misses": case_count,
+            "by_type": {
+                "zero_results": 1,
+                "expected_not_in_top_k": 1,
+                "expected_rank_below_k": 0,
+                "expected_path_not_indexed": 0,
+                "expected_symbol_not_indexed": 0,
+                "path_or_symbol_metadata_missing": 0,
+                "possible_query_vocabulary_gap": 0,
+                "possible_filter_scope_gap": 0,
+                "noise_or_fixture_hit": 0,
+                "stale_eval_input": 0,
+                "query_execution_error": 0,
+                "unknown": max(0, case_count - 2),
+            },
+        },
+        "cases": cases[:case_count],
+    }
+
+
 def _write_post_emit_sidecar(manifest_path: Path, status: str = "pass") -> Path:
     doc = {
         "kind": "lenskit.post_emit_health", "version": "1.0", "run_id": "pe-run",
@@ -398,8 +473,193 @@ def test_invalid_retrieval_json_warns_without_fabrication(tmp_path):
     re_sig = report["signals"]["retrieval_eval"]
     assert re_sig["available"] is False
     assert "metrics" not in re_sig  # nothing fabricated
+    assert "miss_taxonomy" not in re_sig  # nothing fabricated when eval is unavailable
     assert any("retrieval_eval unavailable" in w for w in report["warnings"])
     assert report["projection_status"] == "degraded"
+
+
+# ---------------------------------------------------------------------------
+# 5b. retrieval_eval miss_taxonomy projected mechanically (existing diagnostic)
+# ---------------------------------------------------------------------------
+
+def test_retrieval_eval_miss_taxonomy_projected_mechanically(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    expected_mt = _miss_taxonomy()
+    doc = _retrieval_eval_doc()
+    doc["miss_taxonomy"] = expected_mt
+    re_path = tmp_path / "standalone.retrieval_eval.json"
+    re_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    re_sig = report["signals"]["retrieval_eval"]
+    assert re_sig["available"] is True
+
+    mt = re_sig["miss_taxonomy"]
+    assert mt["available"] is True
+    # The aggregate block is copied verbatim — no new aggregation/score invented.
+    assert mt["aggregate"] == expected_mt["aggregate"]
+    assert mt["aggregate"]["by_type"]["zero_results"] == 1
+    # The does_not_prove boundary is preserved verbatim.
+    assert mt["does_not_prove"] == expected_mt["does_not_prove"]
+    # A small navigational sample of cases is surfaced (not the full taxonomy).
+    assert len(mt["cases_sample"]) == 2
+    assert mt["cases_sample"][0]["primary_miss_type"] == "zero_results"
+    assert mt["cases_sample"][0]["miss_types"] == ["zero_results"]
+    assert mt["cases_sample"][1]["primary_miss_type"] == "expected_not_in_top_k"
+    # The projection introduces no truth/completeness/score field of its own.
+    assert set(mt.keys()) == {"available", "aggregate", "cases_sample", "does_not_prove"}
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_cases_sample_is_capped(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    doc = _retrieval_eval_doc()
+    doc["miss_taxonomy"] = _miss_taxonomy(case_count=12)
+    re_path = tmp_path / "standalone.retrieval_eval.json"
+    re_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    mt = report["signals"]["retrieval_eval"]["miss_taxonomy"]
+    # Many cases collapse to a small capped navigational sample.
+    assert len(mt["cases_sample"]) == 5
+    # Aggregate counts still reflect the full set, copied verbatim.
+    assert mt["aggregate"]["total_misses"] == 12
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+# ---------------------------------------------------------------------------
+# 5c. miss_taxonomy projection is robust against malformed / older JSON shapes
+# ---------------------------------------------------------------------------
+
+def _write_eval_with_miss_taxonomy(tmp_path: Path, miss_taxonomy: object) -> Path:
+    doc = _retrieval_eval_doc()
+    doc["miss_taxonomy"] = miss_taxonomy
+    re_path = tmp_path / "standalone.retrieval_eval.json"
+    re_path.write_text(json.dumps(doc), encoding="utf-8")
+    return re_path
+
+
+def test_retrieval_eval_miss_taxonomy_ignores_non_list_does_not_prove(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    mt["does_not_prove"] = True  # truthy non-list must not raise
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    projected = report["signals"]["retrieval_eval"]["miss_taxonomy"]
+    assert projected["available"] is True
+    assert projected["does_not_prove"] == []  # degrades to empty, no crash
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_ignores_non_list_case_miss_types(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    mt["cases"][0]["miss_types"] = 404  # truthy non-list must not raise
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    projected = report["signals"]["retrieval_eval"]["miss_taxonomy"]
+    assert projected["available"] is True
+    # The affected case is still projected; only miss_types degrades to [].
+    assert projected["cases_sample"][0]["primary_miss_type"] == "zero_results"
+    assert projected["cases_sample"][0]["miss_types"] == []
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_ignores_non_list_cases(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    mt["cases"] = True  # truthy non-list must not raise
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    projected = report["signals"]["retrieval_eval"]["miss_taxonomy"]
+    assert projected["available"] is True
+    assert projected["cases_sample"] == []
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_samples_valid_cases_after_invalid_entries(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    mt = _miss_taxonomy()
+    # Leading invalid entries must not starve later valid cases from the sample.
+    mt["cases"] = [
+        None,
+        "broken",
+        123,
+        {"query": "q1", "primary_miss_type": "zero_results", "miss_types": ["zero_results"]},
+        {"query": "q2", "primary_miss_type": "expected_not_in_top_k", "miss_types": ["expected_not_in_top_k"]},
+        {"query": "q3", "primary_miss_type": "unknown", "miss_types": ["unknown"]},
+    ]
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, mt)
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    sample = report["signals"]["retrieval_eval"]["miss_taxonomy"]["cases_sample"]
+    # All three valid dict cases are collected; the limit is applied AFTER filtering,
+    # so slicing the first N raw entries (3 of which are invalid) would have missed q3.
+    assert [c["query"] for c in sample] == ["q1", "q2", "q3"]
+    assert all(isinstance(c["miss_types"], list) for c in sample)
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_miss_taxonomy_non_dict_shape_is_unavailable(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    re_path = _write_eval_with_miss_taxonomy(tmp_path, "TODO")  # present but not an object
+
+    report = compute_context_quality(str(manifest), retrieval_eval_path=str(re_path))
+    re_sig = report["signals"]["retrieval_eval"]
+    # retrieval_eval metrics stay available; only the taxonomy projection is unavailable.
+    assert re_sig["available"] is True
+    mt = re_sig["miss_taxonomy"]
+    assert mt["available"] is False
+    assert mt["reason"] == "invalid_miss_taxonomy_shape"
+    assert not any("miss_taxonomy" in w for w in report["warnings"])  # no warning inflation
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
+
+
+def test_retrieval_eval_without_miss_taxonomy_stays_valid(tmp_path):
+    # An older retrieval-eval document without miss_taxonomy must remain fully
+    # valid: it must not warn, must not degrade, and must not raise.
+    manifest = _make_bundle(tmp_path)
+    _write_post_emit_sidecar(manifest)
+    re_path = tmp_path / "standalone.retrieval_eval.json"
+    re_path.write_text(json.dumps(_retrieval_eval_doc()), encoding="utf-8")  # no miss_taxonomy
+    gate_path = _write_export_gate(tmp_path)
+
+    report = compute_context_quality(
+        str(manifest),
+        retrieval_eval_path=str(re_path),
+        agent_export_gate_path=str(gate_path),
+    )
+    # Missing miss_taxonomy is silent: no warning, projection still complete.
+    assert report["warnings"] == []
+    assert report["projection_status"] == "complete"
+    assert not any("miss_taxonomy" in w for w in report["warnings"])
+
+    re_sig = report["signals"]["retrieval_eval"]
+    assert re_sig["available"] is True
+    assert re_sig["metrics"]["total_queries"] == 10  # metrics still projected
+    mt = re_sig["miss_taxonomy"]
+    assert mt["available"] is False
+    assert mt["reason"] == "missing_from_retrieval_eval"
+
+    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=report, schema=schema)
 
 
 # ---------------------------------------------------------------------------

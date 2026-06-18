@@ -328,6 +328,25 @@ def test_pack_front_door_preserves_authority_boundaries(tmp_path):
     assert "`sqlite_index` is runtime cache/search support, not authority" in body
 
 
+def test_agent_pack_retrieval_quality_review_mentions_miss_taxonomy(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+
+    # The retrieval-quality-review profile and its required eval artifact stay intact.
+    assert "`retrieval_quality_review`" in body
+    required_section = _section(body, "REQUIRED_READING_BY_TASK")
+    assert "`retrieval_quality_review`" in required_section
+    assert "`retrieval_eval_json`" in required_section
+
+    # The pack now points reviewers at the existing miss_taxonomy diagnostic and
+    # keeps its boundary: the taxonomy is diagnostic only, not proof.
+    rules = _section(body, "SIDECAR_USAGE_RULES")
+    assert "`retrieval_eval_json`" in rules
+    assert "miss_taxonomy" in rules
+    assert "diagnostic only" in rules
+    assert "does not prove" in rules
+
+
 def test_pack_do_not_claim_lists_prohibited_claim_classes(tmp_path):
     manifest = _make_bundle(tmp_path)
     body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()

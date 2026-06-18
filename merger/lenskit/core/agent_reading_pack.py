@@ -496,6 +496,13 @@ def render_agent_reading_pack(model: PackModel) -> str:
         "forensic readiness."
     )
     lines.append("- `sqlite_index` is runtime cache/search support, not authority.")
+    lines.append(
+        "- `retrieval_eval_json` is a diagnostic retrieval-quality signal; for "
+        "retrieval quality reviews inspect its `miss_taxonomy` to see why expected "
+        "targets were missed. Miss taxonomy is diagnostic only and does not prove "
+        "retrieval completeness, target absence in the repository, semantic "
+        "irrelevance, claim truth or repo understanding."
+    )
     lines.append("")
 
     # ── ANSWER_COMPLIANCE_CHECKLIST ──────────────────────────────────────

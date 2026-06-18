@@ -25,7 +25,10 @@ Design contract (deliberately small and additive):
 - Signals are projected as observations only. output_health verdicts are never
   used to infer post-emit validity; post_emit_health is never used to infer
   answer safety; retrieval metrics are never treated as completeness; the export
-  gate is never reinterpreted as claim truth.
+  gate is never reinterpreted as claim truth. The retrieval-eval miss_taxonomy is
+  surfaced verbatim as an existing diagnostic classification, never as proof of
+  repository absence, semantic (ir)relevance, retrieval completeness, or claim
+  truth.
 """
 
 from __future__ import annotations
@@ -92,6 +95,11 @@ _KNOWN_EVIDENCE_LEVELS = frozenset({
     "forensic_strict",
 })
 
+# Cap on how many miss cases we surface in the projection. The full taxonomy
+# lives in retrieval_eval_json; the context-quality projection only carries a
+# small navigational sample so it stays compact.
+_MISS_TAXONOMY_CASE_SAMPLE_LIMIT = 5
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -142,6 +150,17 @@ def _str_or_none(value: Any) -> Optional[str]:
 
 def _bool_or_none(value: Any) -> Optional[bool]:
     return value if isinstance(value, bool) else None
+
+
+def _string_list(value: Any) -> List[str]:
+    """Return only the string items of a JSON list; [] for any non-list value.
+
+    Defensive against untrusted/older JSON: a truthy non-list scalar (e.g. ``True``,
+    ``404``, ``"broken"``) or a dict must never raise or iterate unexpectedly.
+    """
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 def derive_context_quality_path(manifest_path: Path) -> Path:
@@ -267,6 +286,53 @@ def _project_post_emit_health(
     }
 
 
+def _project_miss_taxonomy(raw: Any) -> Dict[str, Any]:
+    """
+    Mechanically project the existing retrieval-eval ``miss_taxonomy`` diagnostic.
+
+    The already-computed aggregate counts and the ``does_not_prove`` boundary are
+    copied verbatim, plus a small capped navigational sample of cases. This invents
+    no new aggregation, no score, and no verdict. When the retrieval-eval document
+    predates or omits ``miss_taxonomy`` the projection is marked unavailable WITHOUT
+    a warning, so older eval files never degrade or fail the projection.
+
+    Defensive against untrusted/older JSON: list-typed fields (``does_not_prove``,
+    ``cases``, ``case.miss_types``) are read only when they are actually lists, so a
+    truthy non-list value never raises. Cases are validated as dicts BEFORE the
+    sample limit is applied, so leading malformed entries cannot starve later valid
+    cases out of the sample.
+    """
+    if raw is None:
+        return {"available": False, "reason": "missing_from_retrieval_eval"}
+    if not isinstance(raw, dict):
+        return {"available": False, "reason": "invalid_miss_taxonomy_shape"}
+
+    aggregate = raw.get("aggregate")
+    aggregate = aggregate if isinstance(aggregate, dict) else None
+
+    raw_cases = raw.get("cases")
+    cases = raw_cases if isinstance(raw_cases, list) else []
+    cases_sample: List[Dict[str, Any]] = []
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        if len(cases_sample) >= _MISS_TAXONOMY_CASE_SAMPLE_LIMIT:
+            break
+        cases_sample.append({
+            "query_index": _int_or_none(case.get("query_index")),
+            "query": _str_or_none(case.get("query")),
+            "primary_miss_type": _str_or_none(case.get("primary_miss_type")),
+            "miss_types": _string_list(case.get("miss_types")),
+        })
+
+    return {
+        "available": True,
+        "aggregate": aggregate,
+        "cases_sample": cases_sample,
+        "does_not_prove": _string_list(raw.get("does_not_prove")),
+    }
+
+
 def _project_retrieval_eval(
     explicit_path: Optional[str],
     by_role: Dict[str, Dict[str, Any]],
@@ -323,6 +389,7 @@ def _project_retrieval_eval(
         "source": source,
         "metrics": projected_metrics,
         "categories": categories,
+        "miss_taxonomy": _project_miss_taxonomy(doc.get("miss_taxonomy")),
     }
 
 

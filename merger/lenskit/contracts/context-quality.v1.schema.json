@@ -209,6 +209,42 @@
                   "recall@10": { "type": ["number", "null"] }
                 }
               }
+            },
+            "miss_taxonomy": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["available"],
+              "description": "Optional, additive mechanical projection of the existing retrieval-eval miss_taxonomy diagnostic (see retrieval-eval.v1.schema.json). Surfaced for visibility only: diagnostic, never a truth layer. It does NOT prove repository absence, semantic irrelevance, retrieval completeness, or claim truth. Marked unavailable (without warning) when the retrieval-eval document predates or omits miss_taxonomy.",
+              "properties": {
+                "available": { "type": "boolean" },
+                "reason": {
+                  "type": "string",
+                  "description": "Machine-readable reason why the miss_taxonomy projection is unavailable, e.g. missing_from_retrieval_eval when the source retrieval_eval document omits miss_taxonomy, or invalid_miss_taxonomy_shape when miss_taxonomy is present but is not an object."
+                },
+                "aggregate": {
+                  "type": ["object", "null"],
+                  "description": "The source miss_taxonomy.aggregate block projected verbatim (existing counts only; no new aggregation and no score)."
+                },
+                "cases_sample": {
+                  "type": "array",
+                  "description": "A small, capped navigational sample of classified miss cases. Not exhaustive; read retrieval_eval_json for the full taxonomy.",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "query_index": { "type": ["integer", "null"] },
+                      "query": { "type": ["string", "null"] },
+                      "primary_miss_type": { "type": ["string", "null"] },
+                      "miss_types": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                },
+                "does_not_prove": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Copied verbatim from the source miss_taxonomy to preserve its diagnostic boundary."
+                }
+              }
             }
           }
         },
