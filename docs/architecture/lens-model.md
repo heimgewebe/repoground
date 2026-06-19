@@ -438,15 +438,29 @@ Facet Model v1 ist als Contract/Core/Test-Slice entschieden und umgesetzt
 
 - Taxonomie: kontrollierte v1-Facets `contract`, `test`, `retrieval`
   (bewusst unvollständig);
-- Zielidentität: normalisierter repo-relativer POSIX-Pfad;
-- Bericht versus Einzelzuordnung: aggregierter Report mit `(path, facet)`-Items;
-- Zuordnungsidentität: `(path, facet)`, deterministisch dedupliziert;
-- Ableitungsfeld: `derivation_type` mit `direct`/`derived`/`heuristic`
-  (v1 emittiert nur `direct`); kein Confidence Score;
+- Zielidentität: hostunabhängige kanonische repo-relative POSIX-Pfadidentität
+  (kein Windows-Drive-Präfix, kein führender/abschließender Slash, keine `./`-,
+  `..`- oder leeren Komponenten); nicht-kanonische Eingaben werden abgelehnt,
+  nicht still normalisiert; akzeptiert werden nur `str` und `PurePath`;
+- Report-Art: Zuordnungsreport, kein Evaluations-/Coverage-Report; facet-freie
+  Pfade erscheinen nicht als Items; `target_count` zählt nur Pfade mit
+  mindestens einem Facet;
+- Zuordnungsidentität: `(path, facet)`, deterministisch dedupliziert
+  (Producer-Invariante; das Schema setzt zusätzlich `uniqueItems`);
+- Ableitungsfeld: der v1-Contract erlaubt ausschließlich `direct` (`const`);
+  das allgemeine Modellvokabular `direct`/`derived`/`heuristic` (Abschnitt 5)
+  bleibt späteren, strukturell abgeleiteten Regeln vorbehalten; kein Confidence
+  Score;
 - Ableitungsregel: kontrolliertes `source_rule` je Zuordnung, genau eine Regel
   je Facet (keine Regelkollision in v1);
 - Evidence-Policy: keine Pflicht-Evidence in v1;
-- Negativsemantik: die Baseline aus Abschnitt 15 auf Report- und Item-Ebene;
+- Negativsemantik: die Baseline aus Abschnitt 15 in fester kanonischer
+  Reihenfolge auf Report- und Item-Ebene;
+- Summary-Kohärenz ist Producer-Invariante; das Schema prüft Typ und Shape,
+  nicht die rechnerische Übereinstimmung mit `items`;
+- Mehrfachzuordnung (mehrere Facets je Pfad) ist Producer-Capability und nicht
+  mit dem aktuellen realen Bestand gleichzusetzen (derzeit keine realen
+  Mehrfachzuordnungen);
 - unbekannte Facet-Namen werden abgelehnt; ein Pfad darf null Facets tragen.
 
 Weiterhin offen (nicht in v1 entschieden):

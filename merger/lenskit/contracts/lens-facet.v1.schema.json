@@ -21,6 +21,7 @@
     },
     "items": {
       "type": "array",
+      "uniqueItems": true,
       "items": {
         "$ref": "#/definitions/item"
       }
@@ -80,7 +81,8 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "pattern": "^(?!\\s*$)(?!/)(?!\\.\\.?$)(?!.*\\\\)(?!.*(^|/)\\.\\.(/|$)).+"
+          "description": "Host-independent canonical repo-relative POSIX path: no Windows drive prefix, no leading or trailing slash, no empty/'.'/'..' components, no backslash.",
+          "pattern": "^(?!\\s*$)(?![A-Za-z]:)(?!/)(?!.*//)(?!.*/$)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$)).+$"
         },
         "facet": {
           "type": "string",
@@ -99,13 +101,8 @@
           ]
         },
         "derivation_type": {
-          "type": "string",
-          "enum": [
-            "direct",
-            "derived",
-            "heuristic"
-          ],
-          "description": "How the assignment was produced. NOT a confidence/probability/quality score and carries no implicit ordering."
+          "const": "direct",
+          "description": "Facet Model v1 emits only 'direct'. The general lens model reserves 'derived' and 'heuristic' for later, structurally derived facet rules; they are not valid in a v1 report. Not a confidence/probability/quality score and carries no implicit ordering."
         },
         "does_not_establish": {
           "$ref": "#/definitions/does_not_establish"
@@ -164,68 +161,20 @@
     },
     "does_not_establish": {
       "type": "array",
-      "uniqueItems": true,
       "minItems": 9,
-      "items": {
-        "type": "string",
-        "enum": [
-          "truth",
-          "correctness",
-          "completeness",
-          "runtime_behavior",
-          "test_sufficiency",
-          "regression_absence",
-          "semantic_importance",
-          "review_priority",
-          "change_impact"
-        ]
-      },
-      "allOf": [
-        {
-          "contains": {
-            "const": "truth"
-          }
-        },
-        {
-          "contains": {
-            "const": "correctness"
-          }
-        },
-        {
-          "contains": {
-            "const": "completeness"
-          }
-        },
-        {
-          "contains": {
-            "const": "runtime_behavior"
-          }
-        },
-        {
-          "contains": {
-            "const": "test_sufficiency"
-          }
-        },
-        {
-          "contains": {
-            "const": "regression_absence"
-          }
-        },
-        {
-          "contains": {
-            "const": "semantic_importance"
-          }
-        },
-        {
-          "contains": {
-            "const": "review_priority"
-          }
-        },
-        {
-          "contains": {
-            "const": "change_impact"
-          }
-        }
+      "maxItems": 9,
+      "additionalItems": false,
+      "description": "Fixed canonical negative-semantics tuple: exactly these nine values in this exact order, matching the producer output. Reordered, missing or extra entries are rejected.",
+      "items": [
+        { "const": "truth" },
+        { "const": "correctness" },
+        { "const": "completeness" },
+        { "const": "runtime_behavior" },
+        { "const": "test_sufficiency" },
+        { "const": "regression_absence" },
+        { "const": "semantic_importance" },
+        { "const": "review_priority" },
+        { "const": "change_impact" }
       ]
     }
   }

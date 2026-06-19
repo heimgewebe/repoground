@@ -5,9 +5,11 @@ Status: implemented / contract-core-test slice proof.
 ## Purpose and scope
 
 This proof documents the smallest viable Facet Model v1 slice: a versioned JSON
-contract, a deterministic core producer and focused tests for additive lens
-facets. It records the diagnosis, the decisions taken, and the explicit limits
-of this slice.
+contract, a deterministic core producer, focused tests, and a path-scoped CI
+gate for additive lens facets. It records the diagnosis, the decisions taken,
+and the explicit limits of this slice. It reflects the state after the hardening
+pass that closed the dump-confirmed gaps (real test classification, fixture
+exclusion, host-independent path identity, v1 contract uniqueness, CI coverage).
 
 - Task: `TASK-LENS-FACET-001`
 - Branch: `claude/affectionate-hamilton-tvda1d`
@@ -22,9 +24,10 @@ Explicit non-goals (this slice does **not** do any of these):
 - no CLI, no bundle/manifest emission, no Artifact Role
 - no Lens Cards, Relations, States or Task Context
 - no retrieval ranking / graph / symbol integration
-- no shared rule engine
+- no shared rule engine; no general path-utility refactor
 - no review, security, impact, coverage or sufficiency verdicts
-- no LLM, embeddings, network, timestamps in factual output or hidden global state
+- no LLM, embeddings, content analysis, git-history analysis
+- no network, timestamps in factual output, or hidden global state
 
 ## Target proof (state before the patch)
 
@@ -33,170 +36,179 @@ lens model", PR #787), with the Primary Lens Audit landed in PR #786.
 
 - The normative lens model is present on `origin/main`
   (`docs/architecture/lens-model.md`).
-- The blueprint still names Facet Model v1 as the next unimplemented slice
+- The blueprint named Facet Model v1 as the next unimplemented slice
   (`docs/blueprints/lenskit-agent-front-door-hardening.md` §14 / Slice 11).
-- A facet contract was missing (`git ls-tree origin/main` matched no
-  `lens-facet`/`facet-model` file).
-- A facet producer was missing (no `merger/lenskit/core/lens_facets.py`).
-- Focused facet tests were missing (no `merger/lenskit/tests/test_lens_facets.py`).
+- A facet contract, producer and focused tests were all missing.
 - `possible_facets` was — and remains — only an empty placeholder emitted by the
   Primary Lens Audit (`merger/lenskit/core/lens_audit.py` emits `[]`).
-- No parallel facet PR exists: a PR search for `facet` returned only the merged
-  #786 and #787; no remote branch matches `facet`.
-- Task control held no equivalent running task (no `TASK-LENS-*` on the board or
-  in `index.json`).
+- No parallel facet PR existed; no `TASK-LENS-*` on the board or in `index.json`.
 
-All gate conditions held, so the slice proceeded.
+## Plan review
 
-## Plan review (critique of the previously sketched scope)
+What was right and is preserved: define the normative lens model first; keep
+Primary Lens single-label and facets strictly additive (0..n); build no Lens
+Cards / Relations / retrieval integration before the contract; defer open terms
+(`uncertainty`, `claim_boundary`, `security`); separate `derivation_type` from
+confidence language; keep the task `in-progress` during the draft.
 
-What was right in the earlier plan and is preserved:
+What was not ideal and was corrected in the hardening pass:
 
-- define the normative lens model first;
-- keep Primary Lens single-label and facets strictly additive;
-- build no Lens Cards / Relations / retrieval integration before the contract;
-- bound the task to a contract/core/test slice with a proof and task control.
-
-What was premature and was changed here:
-
-- **Taxonomy was treated as settled too early.** The blueprint candidate list
-  (`contract`, `artifact_surface`, `diagnostic`, `retrieval`, `claim_boundary`,
-  `security`, `test_guard`) is explicitly non-final in the lens model. v1 adopts
-  only the candidates that pass a controlled-signal test and defers the rest.
-- **`test_guard` was split.** The `guards` Primary Lens already absorbs tests,
-  validation, CI and guard surfaces; a `test_guard` facet would largely restate
-  the Primary Lens. v1 keeps a narrower, additive `test` facet (test modules
-  only) and defers the `guard` half.
-- **`security`, `claim_boundary`, `artifact_surface`, `diagnostic`,
-  `uncertainty` were deferred** rather than guessed (reasons in the matrix).
-- **Field names were verified against the repo** before being fixed: `path`,
-  `facet`, `source_rule`, `derivation_type`, `does_not_establish`.
-- The resulting scope is **smaller** (3 facets, all `direct`, one rule each)
-  and deliberately reversible/extensible.
+- **Tests used hypothetical paths**, missing real JavaScript test modules
+  (`test_*.js`). The goldset is now overwhelmingly real repo paths.
+- **The test rule was filename-only**, so a `fixtures/.../test_*.py` was a false
+  positive. A `fixtures` path-segment now excludes the `test` facet.
+- **Path normalization mirrored a private sibling helper** and the test even
+  imported `lens_audit._normalize_path`. The facet code now has its own explicit
+  canonical grammar, and the test no longer imports anything from `lens_audit`.
+- **The path grammar was not fully canonical or host-independent** (`./a`,
+  `a/./b`, `a//b`, trailing slash, Windows drive prefixes were not all covered).
+  It now is, in both core and schema.
+- **The contract allowed `derived`/`heuristic`** although the v1 producer only
+  emits `direct`. The v1 contract now pins `derivation_type` to `const: direct`.
+- **`(path, facet)` uniqueness and summary coherence were over-stated as contract
+  guarantees.** They are producer invariants; the schema enforces only what
+  draft-07 can (strict shape, `uniqueItems`, fixed field bindings).
+- **No CI gate ran the facet tests.** A path-scoped `lens-model.yml` gate now runs
+  them with `jsonschema` installed.
 
 ## Decision matrix
 
 | Decision | Value | Basis |
 | --- | --- | --- |
-| Normative sources | lens-model.md §4–§6, §15–§16; blueprint Slice 11 / §14; primary-lens-audit contract+core | documented |
 | v1 facet taxonomy | `contract`, `test`, `retrieval` | repo-derived from controlled signals |
 | Excluded candidates | `artifact_surface`, `diagnostic`, `claim_boundary`, `security`, `uncertainty`, `guard` (the guard half of `test_guard`) | new decision (deferred) |
-| Input model | repo-relative path (`str \| Path`) | repo-conventional (matches primary-lens-audit) |
-| Target identity | normalized repo-relative POSIX path | repo-conventional |
-| Report vs single assignment | aggregated report with per-`(path, facet)` items | repo-conventional (mirrors primary-lens-audit) |
+| Input model / types | repo-relative path; accepts only `str` or `PurePath`, else `TypeError` | repo-conventional + hardening |
+| Target identity | host-independent canonical repo-relative POSIX path | new decision (hardened grammar) |
+| Report vs single assignment | aggregated assignment report with per-`(path, facet)` items | repo-conventional (mirrors primary-lens-audit) |
 | Root kind / version | `lenskit.lens_facet_report` / `1.0` | repo-conventional |
-| Root fields | `kind`, `version`, `items`, `summary`, `does_not_establish` | repo-conventional |
 | Item fields | `path`, `facet`, `source_rule`, `derivation_type`, `does_not_establish` | blueprint Slice 11 + repo-conventional |
-| Facet field name | `facet` | blueprint sketch |
-| Derivation field | `derivation_type` (values `direct`/`derived`/`heuristic`; v1 emits only `direct`) | lens-model §5; field name a new decision |
-| Allowed derivation values | `direct`, `derived`, `heuristic` (no confidence/ordering) | lens-model §5 |
-| Assignment identity | `(path, facet)` | new decision (minimal) |
-| Sorting | stable by `(path, facet)`; `facet_counts` keys sorted | lens-model §16; repo-conventional |
-| Deduplication | by `(path, facet)`; deterministic | lens-model §16 |
-| Rule catalog | `contract_schema_suffix`, `test_module_marker`, `retrieval_surface_path` | new decision (controlled, one per facet) |
-| Rule collisions | structurally impossible (one rule per facet); no canonical-rule mechanism needed in v1 | new decision |
-| Unknown-facet behaviour | rejected by schema enum; no synthetic `unknown`/`other` facet; a path may carry 0 facets | lens-model §17 |
-| Evidence policy | none mandatory in v1; `path`+`source_rule`+`derivation_type` form the provenance | lens-model §6 (left open) → minimal |
-| Negative semantics | the 9-term lens-family baseline at report and item level | lens-model §15; primary-lens-audit |
-| Summary | `item_count`, `target_count`, `facet_counts` (mechanical only) | repo-conventional |
-| Task ID | `TASK-LENS-FACET-001` | free, matches `TASK-<DOMAIN>-NNN` |
-| Proof path | `docs/proofs/facet-model-v1-proof.md` | repo-conventional |
-| Non-scope | CLI, bundle emission, `possible_facets`, cards, relations, retrieval integration | lens-model §20; blueprint |
+| Derivation field (general model) | `direct` / `derived` / `heuristic` | lens-model §5 |
+| Derivation field (v1 contract + producer) | `const: direct` only | new decision (hardening) |
+| Assignment identity | `(path, facet)` (producer dedup) | new decision (minimal) |
+| Sorting | stable by `(path, facet)`; `facet_counts` keys sorted | lens-model §16 |
+| Rule catalog | `contract_schema_suffix`, `test_module_marker`, `retrieval_surface_path` | new decision (one rule per facet) |
+| `test` markers | `test_*.py`, `test_*.js` (real) + `*_test.py`, `*.test.ts`, `*.spec.ts` (infer_lens norm); `fixtures` segment excluded | repo inventory + norm |
+| `retrieval` scope | any `retrieval` path segment, incl. retrieval fixtures (Variant A) | new decision (documented) |
+| Rule collisions | structurally impossible (one rule per facet) | new decision |
+| Unknown-facet behaviour | rejected by schema enum; no synthetic `unknown`/`other`; a path may carry 0 facets | lens-model §17 |
+| Evidence policy | none mandatory in v1; `path`+`source_rule`+`derivation_type` form the provenance | lens-model §6 → minimal |
+| Negative semantics | the 9-term lens-family baseline, fixed canonical order, at report and item level | lens-model §15 |
+| Summary | `item_count`, `target_count`, `facet_counts` (producer-computed; schema checks shape only) | repo-conventional |
+| Report type | assignment report (not evaluation/coverage); facet-free paths are not emitted | new decision (documented) |
+| CI gate | `.github/workflows/lens-model.yml` (path-scoped, jsonschema required) | new decision |
 
-### Taxonomy rationale
+## Facet semantics
 
-Each v1 facet is derived from a single controlled path/suffix rule, has clear
-positive and negative examples, cross-cuts or refines the Primary Lens additively,
-and asserts nothing about importance, safety, effect or sufficiency.
-
-- **`contract`** ← `contract_schema_suffix`: path ends with `.schema.json`.
-  Narrower than the `data_models` Primary Lens (e.g. a `.proto` is `data_models`
-  but is *not* a v1 contract facet). `direct`.
-- **`test`** ← `test_module_marker`: filename is `test_*.py`, `*_test.py`,
-  `*.test.ts` or `*.spec.ts`. Narrower than the `guards` Primary Lens (a
-  `tests/` fixture helper that is not itself a test gets no facet). `direct`.
+- **`contract`** ← `contract_schema_suffix`: the path carries the controlled
+  `.schema.json` file extension (not a broader "versioned contract surface"
+  claim). A `.proto` is a `data_models` Primary Lens but is *not* a v1 contract
+  facet. `direct`.
+- **`test`** ← `test_module_marker`: the file is itself a test module by a
+  controlled filename marker (`test_*.py`, `test_*.js`, `*_test.py`, `*.test.ts`,
+  `*.spec.ts`), and is **not** under a `fixtures` path segment. The facet does
+  **not** mean the test was collected by a runner, executed, passed, is complete,
+  or is sufficient. Narrower than the broad `guards` Primary Lens. `direct`.
 - **`retrieval`** ← `retrieval_surface_path`: a `retrieval` path segment
-  (e.g. `merger/lenskit/retrieval/`, `docs/retrieval/`). Cross-cuts `core` and
-  `data_models`. `direct`.
+  (Variant A — includes retrieval fixtures such as
+  `merger/lenskit/tests/fixtures/retrieval/...`). The facet marks a
+  retrieval-related surface, not production status. `direct`.
 
-Deferred candidates and why:
+Deferred candidates: `artifact_surface` (no non-circular definition),
+`diagnostic` (boundary against health modules unresolved), `claim_boundary` and
+`uncertainty` (lens-model leaves their facet/state status open), `security` (a
+name-based facet would risk a safety verdict), and the `guard` half of
+`test_guard` (would restate the `guards` Primary Lens).
 
-- `artifact_surface` — no clear non-circular definition; "artifact"/"surface"
-  are repo-wide unspecific.
-- `diagnostic` — would need broad name matching (e.g. `*_health`) or a thin
-  doc-folder scope; the boundary against health modules is unresolved.
-- `claim_boundary` — lens-model leaves open whether this is a facet, a state or
-  a scope boundary.
-- `security` — a name-based security facet would risk implying risk/safety
-  verdicts; explicitly out.
-- `uncertainty` — lens-model leaves open whether this is a facet, a state
-  umbrella, or not a controlled term.
-- the `guard` half of `test_guard` — would duplicate the `guards` Primary Lens.
+## Path identity
 
-## Implementation evidence
+Accepted runtime types: `str` and `PurePath` (incl. `Path`); any other type
+raises `TypeError`. A valid path is the host-independent canonical
+repo-relative POSIX form. The grammar is enforced identically in core and schema
+and **never silently normalizes** — non-canonical input is rejected, not
+rewritten:
 
-- Contract: `merger/lenskit/contracts/lens-facet.v1.schema.json`
-  (draft-07, `additionalProperties:false`, const `kind`/`version`, controlled
-  `facet`/`source_rule`/`derivation_type` enums, per-facet `if/then` binding of
-  facet→rule, 9-term `does_not_establish` at report and item level, repo-relative
-  path pattern shared with primary-lens-audit).
-- Core: `merger/lenskit/core/lens_facets.py` — `infer_facets(path)` and
-  `produce_facet_report(paths)`. Pure: no I/O, env, git, network, timestamps,
-  randomness or hidden state. Stable sort and dedup. Normalizer mirrors
-  `lens_audit._normalize_path` (replicated locally rather than importing a
-  private symbol).
-- Tests: `merger/lenskit/tests/test_lens_facets.py` (61 tests).
-- Task control: `docs/tasks/board.md` and `docs/tasks/index.json`
-  (`TASK-LENS-FACET-001`, status `in-progress` — a draft PR is not a merged
-  completion).
-- Architecture alignment: `docs/architecture/lens-model.md` (§17 status, §19
-  open decisions narrowed to what v1 actually decided).
-- Blueprint alignment: `docs/blueprints/lenskit-agent-front-door-hardening.md`
-  (Slice 11 / §14 status).
+- rejected: empty/whitespace, leading `/`, trailing `/`, `./a`, `a/./b`,
+  `a//b`, `.`/`..` components, backslash, Windows drive prefix (`C:/`, `c:/`).
+- accepted: e.g. `.github/workflows/ci.yml`, `merger/lenskit/core/lenses.py`,
+  `a`, `a.b`, `a-b/c_d.schema.json`.
 
-## Rule goldset
+The facet test no longer imports the private `lens_audit._normalize_path`; both
+test surfaces verify their own baseline cases independently, and `lens_audit.py`
+is untouched.
 
-A hand-written table in the tests expresses business expectations (which facet
-applies, why others do not, which rule is expected) rather than echoing the
-producer:
+## Contract uniqueness and summary boundary
 
-- positive examples per facet: `contract` (3), `test` (5), `retrieval` (2);
-- multi-facet paths: `retrieval`+`test`, `retrieval`+`contract`;
-- a valid path with no facet: `merger/lenskit/core/lenses.py`;
-- negative refinements: `.proto` (data_models, no contract facet) and a
-  `tests/` fixture helper (no test facet).
+- `derivation_type` is `const: direct` in v1; `derived`/`heuristic` are invalid
+  in a v1 report (reserved by the general lens model for later rules).
+- `does_not_establish` is a fixed, positional tuple (`items` array of `const`s,
+  `minItems`/`maxItems` 9, `additionalItems: false`): reordered, missing or extra
+  entries are rejected.
+- Each facet binds to exactly one `source_rule` via `if/then`.
+- The root `items` array sets `uniqueItems: true`.
+- **Producer guarantee:** deduplication by `(path, facet)`; stable sort;
+  coherent summary counters.
+- **Schema guarantee:** strict shape, controlled vocabulary, fixed bindings, and
+  rejection of byte-identical duplicate items.
+- **Remaining draft-07 limit:** the schema does not (and cannot) recompute the
+  summary counters against `items`, nor prove arbitrary semantic key coherence;
+  that remains a producer invariant, asserted directly in the tests.
 
-Rule collisions cannot occur in v1: each facet has exactly one rule, so a
-`(path, facet)` pair is never produced by two competing rules. The
-multi-facet and dedup cases are covered by tests.
+## Report type
+
+Facet Model v1 is an **assignment report**, not an evaluation/coverage report.
+`items` contains only produced `(path, facet)` assignments; a checked path with
+no facet is not emitted and is indistinguishable from a path never passed in.
+`target_count` counts only distinct paths that carry at least one facet. No
+`evaluated_target_count` / `coverage` / `classification_rate` fields exist.
+
+## Repo projection (real, tracked tree via `git ls-files`)
+
+- tracked paths: 567
+- facet items: 273
+- facet targets: 273
+- facet counts: `contract` 51, `test` 200, `retrieval` 22
+- real multi-facet targets: **0**
+
+There are currently no real multi-facet paths in the repo. Multi-facet support
+is genuine producer capability, exercised only by clearly labelled **synthetic
+capability fixtures** in the tests (e.g. `merger/lenskit/retrieval/
+test_eval_capability.py`); the rules were not widened to manufacture overlaps.
+
+## CI gate
+
+`.github/workflows/lens-model.yml` is a path-scoped blocking gate that, on
+changes to the lens core/contracts/tests (and the lens-model doc), installs
+`merger/lenskit/requirements.txt` + `requirements-dev.txt`, asserts `jsonschema`
+is importable (so contract tests run rather than skip), meta-validates the
+contract, runs `test_lenses.py` + `test_primary_lens_audit.py` +
+`test_lens_facets.py`, and runs ruff on the facet code and tests.
 
 ## Validation
 
-Commands actually executed (Python 3.11, `jsonschema` 4.26 installed locally so
-the schema tests run rather than skip):
+Commands actually executed (Python 3.11 locally; `jsonschema` 4.26, `pytest`,
+`ruff` 0.15.8 installed):
 
-- `python -m pytest merger/lenskit/tests/test_lens_facets.py -q` → 61 passed
-- `python -m pytest merger/lenskit/tests/test_lenses.py merger/lenskit/tests/test_primary_lens_audit.py -q` → passed
-- `python -m pytest merger/lenskit/tests/test_contract_version_guards.py merger/lenskit/tests/test_link_integrity.py -q` → passed
-- `python -m pytest merger/lenskit/tests/test_planning_registration_ratchet.py -q` → passed
-- `python3 -m scripts.docmeta.check_planning_registration --ratchet --baseline docs/tasks/planning-registration-baseline.json --format human` → no new drift (0 findings)
+- `python -m pytest merger/lenskit/tests/test_lens_facets.py -q` → 110 passed
+- `python -m pytest test_lenses.py test_primary_lens_audit.py test_lens_facets.py -q` → passed
+- `python -m pytest test_contract_version_guards.py test_link_integrity.py -q` → passed
+- `python -m pytest test_anti_hallucination_lint.py -q` → passed (contracts dir green incl. hardened schema)
+- `python -m pytest test_planning_registration_ratchet.py -q` → passed
+- `python3 -m scripts.docmeta.check_planning_registration --ratchet --baseline docs/tasks/planning-registration-baseline.json --format human` → 0 findings
 - `python scripts/check_no_test_stubs.py` → OK
-- `ruff check` on the new Python files → All checks passed
+- `ruff check` (facet core + tests) → All checks passed
 - `Draft7Validator.check_schema(...)` on the contract → OK
+- real-repo projection over `git ls-files` → validates against the schema
 - `git diff --check` → clean
 
 ## Claim boundary
 
-This slice does **not** establish:
-
-- completeness of the facet taxonomy (3 of many candidates; the rest are
-  deferred by decision);
-- actual agent usefulness or improved retrieval quality;
-- review completeness, runtime correctness, test sufficiency, or
-  regression-freedom outside the checked surfaces;
-- that facets are consumed anywhere (no bundle emission, no CLI, no
-  `possible_facets` population, no Lens Cards).
+This slice does **not** establish: completeness of the facet taxonomy (3 of many
+candidates); actual agent usefulness or improved retrieval quality; review
+completeness, runtime correctness, test sufficiency, or regression-freedom
+outside the checked surfaces; or that facets are consumed anywhere (no bundle
+emission, no CLI, no `possible_facets` population, no Lens Cards). The `test`
+facet does not assert runner collection, execution, pass, or coverage.
 
 The draft PR presents the smallest evidenced Facet Model v1 slice for review.
-Merge approval, taxonomy completeness, consumer integration, bundle emission and
-Lens Cards are out of scope for this task.
+Merge approval, task completion, consumer integration and Lens Cards remain a
+separate review and reconciliation step.

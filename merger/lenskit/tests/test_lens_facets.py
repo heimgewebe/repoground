@@ -1,15 +1,16 @@
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
-from merger.lenskit.core.lens_audit import _normalize_path as _audit_normalize_path
 from merger.lenskit.core.lens_facets import (
     DERIVATION_TYPES,
     DOES_NOT_ESTABLISH,
     FACET_IDS,
+    FACET_SOURCE_RULES,
     KIND,
     SOURCE_RULES,
+    V1_DERIVATION_TYPE,
     VERSION,
     _normalize_path,
     infer_facets,
@@ -26,92 +27,87 @@ def _schema() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Rule goldset: representative paths with business expectations. This table is
-# intentionally written by hand (not derived from the producer) so it expresses
-# what each facet should mean, why other facets do NOT apply, and which rule is
-# expected.
+# Rule goldset over REAL tracked repo paths. Hand-written (not derived from the
+# producer) so it states what each facet should mean and why others do not.
 # --------------------------------------------------------------------------- #
 # (path, {facet: source_rule})
-_GOLDSET = [
-    # contract: only versioned JSON Schema contracts.
+_REAL_GOLDSET = [
+    # contract: the controlled `.schema.json` extension.
     ("merger/lenskit/contracts/lens-facet.v1.schema.json", {"contract": "contract_schema_suffix"}),
     ("merger/lenskit/contracts/primary-lens-audit.v1.schema.json", {"contract": "contract_schema_suffix"}),
     ("merger/lenskit/contracts/export-safety-report.v1.schema.json", {"contract": "contract_schema_suffix"}),
-    # test: the file is itself a test module.
+    # test: real Python and JavaScript test modules.
     ("merger/lenskit/tests/test_lens_facets.py", {"test": "test_module_marker"}),
     ("merger/lenskit/tests/test_primary_lens_audit.py", {"test": "test_module_marker"}),
-    ("merger/lenskit/frontends/webui/tests/app.test.ts", {"test": "test_module_marker"}),
-    ("merger/lenskit/frontends/webui/tests/app.spec.ts", {"test": "test_module_marker"}),
-    ("src/foo_test.py", {"test": "test_module_marker"}),
-    # retrieval: lives under a controlled `retrieval` directory.
+    ("merger/lenskit/frontends/webui/tests/test_materialize.js", {"test": "test_module_marker"}),
+    ("merger/lenskit/frontends/webui/tests/test_pre_pull_payload.js", {"test": "test_module_marker"}),
+    # retrieval: real controlled retrieval surfaces, including a retrieval fixture
+    # (Variant A: a retrieval-related surface, not a production-status claim).
     ("merger/lenskit/retrieval/review_eval.py", {"retrieval": "retrieval_surface_path"}),
     ("docs/retrieval/review_queries.v1.json", {"retrieval": "retrieval_surface_path"}),
-    # multi-facet: a single path can carry several additive facets.
-    (
-        "merger/lenskit/retrieval/test_review_eval.py",
-        {"test": "test_module_marker", "retrieval": "retrieval_surface_path"},
-    ),
+    ("merger/lenskit/tests/fixtures/retrieval/mini_chunk_index.jsonl", {"retrieval": "retrieval_surface_path"}),
+    # negative: a real fixture whose name matches a test marker -> NOT a test.
+    ("merger/lenskit/tests/fixtures/architecture_import_graph/test_c.py", {}),
+    # negative: real test-support helper that is not itself a test module.
+    ("merger/lenskit/tests/bundle_fixtures.py", {}),
+    # negative: ordinary core source -> no facet.
+    ("merger/lenskit/core/lenses.py", {}),
+]
+
+# Synthetic capability fixtures: these paths do NOT exist in the repo today.
+# They exist only to exercise multi-facet capability and the contract-facet
+# boundary; they are NOT evidence of real current multi-facet assignments.
+_SYNTHETIC_CAPABILITY = [
+    # synthetic: a schema living on the retrieval surface -> contract + retrieval.
     (
         "merger/lenskit/retrieval/retrieval-state.v1.schema.json",
         {"contract": "contract_schema_suffix", "retrieval": "retrieval_surface_path"},
     ),
-    # negative: matches no controlled rule -> no facet.
-    ("merger/lenskit/core/lenses.py", {}),
-    ("docs/architecture/lens-model.md", {}),
-    ("src/contracts/user.proto", {}),  # a contract concept, but not a .schema.json
-    ("merger/lenskit/tests/bundle_fixtures.py", {}),  # in tests/, but not a test module
+    # synthetic: a test module on the retrieval surface -> test + retrieval.
+    (
+        "merger/lenskit/retrieval/test_eval_capability.py",
+        {"test": "test_module_marker", "retrieval": "retrieval_surface_path"},
+    ),
+    # synthetic: a .proto is a contract concept but NOT a v1 `contract` facet.
+    ("src/contracts/user.proto", {}),
+]
+
+_ALL_GOLDSET = _REAL_GOLDSET + _SYNTHETIC_CAPABILITY
+
+
+# --------------------------------------------------------------------------- #
+# Canonical / non-canonical path tables (shared by core and schema tests).
+# --------------------------------------------------------------------------- #
+_INVALID_PATHS = [
+    "",
+    "   ",
+    ".",
+    "./a.schema.json",
+    "a/./b.schema.json",
+    "a//b.schema.json",
+    "a/",
+    "/absolute/path",
+    "../x",
+    "a/../b",
+    r"a\b",
+    "C:/foo.schema.json",
+    "c:/foo.schema.json",
+]
+
+_VALID_PATHS = [
+    ".github/workflows/ci.yml",
+    "merger/lenskit/core/lenses.py",
+    "docs/architecture/lens-model.md",
+    "a",
+    "a.b",
+    "a-b/c_d.schema.json",
 ]
 
 
 # --------------------------------------------------------------------------- #
-# Contract tests (schema validation; jsonschema is optional in CI/runtime).
+# Contract tests (schema validation; jsonschema is optional in portable
+# runtimes, but the reference CI installs it so these run there).
 # --------------------------------------------------------------------------- #
-def test_schema_validates_minimal_report():
-    jsonschema = pytest.importorskip("jsonschema")
-    report = {
-        "kind": KIND,
-        "version": VERSION,
-        "items": [
-            {
-                "path": "merger/lenskit/contracts/lens-facet.v1.schema.json",
-                "facet": "contract",
-                "source_rule": "contract_schema_suffix",
-                "derivation_type": "direct",
-                "does_not_establish": list(DOES_NOT_ESTABLISH),
-            }
-        ],
-        "summary": {
-            "item_count": 1,
-            "target_count": 1,
-            "facet_counts": {"contract": 1},
-        },
-        "does_not_establish": list(DOES_NOT_ESTABLISH),
-    }
-    jsonschema.validate(instance=report, schema=_schema())
-
-
-def test_schema_validates_empty_report():
-    jsonschema = pytest.importorskip("jsonschema")
-    report = produce_facet_report([])
-    assert report["items"] == []
-    assert report["summary"] == {"item_count": 0, "target_count": 0, "facet_counts": {}}
-    jsonschema.validate(instance=report, schema=_schema())
-
-
-def test_schema_validates_generated_report():
-    jsonschema = pytest.importorskip("jsonschema")
-    report = produce_facet_report([path for path, _ in _GOLDSET])
-    jsonschema.validate(instance=report, schema=_schema())
-
-
-def test_schema_validates_multi_facet_path():
-    jsonschema = pytest.importorskip("jsonschema")
-    report = produce_facet_report(["merger/lenskit/retrieval/test_review_eval.py"])
-    facets = {item["facet"] for item in report["items"]}
-    assert facets == {"test", "retrieval"}
-    jsonschema.validate(instance=report, schema=_schema())
-
-
 def _valid_item() -> dict:
     return {
         "path": "merger/lenskit/contracts/lens-facet.v1.schema.json",
@@ -132,6 +128,31 @@ def _report_with_item(item: dict) -> dict:
     }
 
 
+def test_schema_validates_minimal_report():
+    jsonschema = pytest.importorskip("jsonschema")
+    jsonschema.validate(instance=_report_with_item(_valid_item()), schema=_schema())
+
+
+def test_schema_validates_empty_report():
+    jsonschema = pytest.importorskip("jsonschema")
+    report = produce_facet_report([])
+    assert report["summary"] == {"item_count": 0, "target_count": 0, "facet_counts": {}}
+    jsonschema.validate(instance=report, schema=_schema())
+
+
+def test_schema_validates_generated_report():
+    jsonschema = pytest.importorskip("jsonschema")
+    report = produce_facet_report([path for path, _ in _ALL_GOLDSET])
+    jsonschema.validate(instance=report, schema=_schema())
+
+
+def test_schema_validates_multi_facet_capability():
+    jsonschema = pytest.importorskip("jsonschema")
+    report = produce_facet_report(["merger/lenskit/retrieval/test_eval_capability.py"])
+    assert {item["facet"] for item in report["items"]} == {"test", "retrieval"}
+    jsonschema.validate(instance=report, schema=_schema())
+
+
 def test_schema_rejects_unknown_facet():
     jsonschema = pytest.importorskip("jsonschema")
     item = _valid_item()
@@ -142,10 +163,18 @@ def test_schema_rejects_unknown_facet():
         jsonschema.validate(instance=report, schema=_schema())
 
 
-def test_schema_rejects_unknown_derivation_type():
+def test_schema_rejects_derived_in_v1():
     jsonschema = pytest.importorskip("jsonschema")
     item = _valid_item()
-    item["derivation_type"] = "confidence"
+    item["derivation_type"] = "derived"
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_report_with_item(item), schema=_schema())
+
+
+def test_schema_rejects_heuristic_in_v1():
+    jsonschema = pytest.importorskip("jsonschema")
+    item = _valid_item()
+    item["derivation_type"] = "heuristic"
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=_report_with_item(item), schema=_schema())
 
@@ -174,12 +203,37 @@ def test_schema_rejects_missing_does_not_establish():
         jsonschema.validate(instance=_report_with_item(item), schema=_schema())
 
 
-def test_schema_rejects_incomplete_does_not_establish():
+def test_schema_rejects_reordered_does_not_establish():
     jsonschema = pytest.importorskip("jsonschema")
     item = _valid_item()
-    item["does_not_establish"] = ["truth", "correctness"]
+    item["does_not_establish"] = list(reversed(DOES_NOT_ESTABLISH))
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=_report_with_item(item), schema=_schema())
+
+
+def test_schema_rejects_truncated_does_not_establish():
+    jsonschema = pytest.importorskip("jsonschema")
+    item = _valid_item()
+    item["does_not_establish"] = list(DOES_NOT_ESTABLISH)[:8]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_report_with_item(item), schema=_schema())
+
+
+def test_schema_rejects_extended_does_not_establish():
+    jsonschema = pytest.importorskip("jsonschema")
+    item = _valid_item()
+    item["does_not_establish"] = list(DOES_NOT_ESTABLISH) + ["extra"]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_report_with_item(item), schema=_schema())
+
+
+def test_schema_rejects_duplicate_items():
+    jsonschema = pytest.importorskip("jsonschema")
+    report = _report_with_item(_valid_item())
+    report["items"] = [_valid_item(), _valid_item()]
+    report["summary"] = {"item_count": 2, "target_count": 1, "facet_counts": {"contract": 2}}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=_schema())
 
 
 def test_schema_rejects_additional_item_field():
@@ -214,18 +268,8 @@ def test_schema_rejects_invalid_summary_key():
         jsonschema.validate(instance=report, schema=_schema())
 
 
-@pytest.mark.parametrize(
-    "bad_path",
-    [
-        "/abs/path/foo.schema.json",
-        ".",
-        "   ",
-        "../merger/lenskit/contracts/x.schema.json",
-        "merger/../lenskit/contracts/x.schema.json",
-        r"merger\lenskit\contracts\x.schema.json",
-    ],
-)
-def test_schema_rejects_invalid_item_paths(bad_path):
+@pytest.mark.parametrize("bad_path", _INVALID_PATHS)
+def test_schema_rejects_non_canonical_item_paths(bad_path):
     jsonschema = pytest.importorskip("jsonschema")
     item = _valid_item()
     item["path"] = bad_path
@@ -233,90 +277,149 @@ def test_schema_rejects_invalid_item_paths(bad_path):
         jsonschema.validate(instance=_report_with_item(item), schema=_schema())
 
 
+@pytest.mark.parametrize("good_path", _VALID_PATHS)
+def test_schema_accepts_canonical_item_paths(good_path):
+    jsonschema = pytest.importorskip("jsonschema")
+    item = _valid_item()
+    item["path"] = good_path
+    jsonschema.validate(instance=_report_with_item(item), schema=_schema())
+
+
 # --------------------------------------------------------------------------- #
-# Path normalization tests.
+# Python <-> schema vocabulary parity (catches core/schema drift).
 # --------------------------------------------------------------------------- #
-def test_accepts_valid_repo_relative_path():
-    report = produce_facet_report(["merger/lenskit/contracts/x.schema.json"])
-    assert report["items"][0]["path"] == "merger/lenskit/contracts/x.schema.json"
+def test_facet_enum_parity():
+    item = _schema()["definitions"]["item"]
+    assert item["properties"]["facet"]["enum"] == list(FACET_IDS)
 
 
-def test_rejects_empty_paths():
-    for bad in ("", "   "):
-        with pytest.raises(ValueError, match="path"):
-            produce_facet_report([bad])
+def test_source_rule_enum_parity():
+    item = _schema()["definitions"]["item"]
+    assert item["properties"]["source_rule"]["enum"] == list(SOURCE_RULES)
 
 
-def test_rejects_dot_path():
-    with pytest.raises(ValueError, match="path"):
-        produce_facet_report(["."])
+def test_facet_counts_enum_parity():
+    schema = _schema()
+    names = schema["properties"]["summary"]["properties"]["facet_counts"]["propertyNames"]
+    assert names["enum"] == list(FACET_IDS)
 
 
-def test_rejects_absolute_path():
-    with pytest.raises(ValueError, match="repo-relative"):
-        produce_facet_report(["/tmp/x.schema.json"])
+def test_derivation_type_const_parity():
+    item = _schema()["definitions"]["item"]
+    assert item["properties"]["derivation_type"]["const"] == V1_DERIVATION_TYPE
 
 
-def test_rejects_backslash_path():
-    with pytest.raises(ValueError, match="POSIX"):
-        produce_facet_report([r"merger\lenskit\x.schema.json"])
+def test_does_not_establish_canonical_parity():
+    dne = _schema()["definitions"]["does_not_establish"]
+    consts = [entry["const"] for entry in dne["items"]]
+    assert consts == list(DOES_NOT_ESTABLISH)
+    assert dne["minItems"] == dne["maxItems"] == len(DOES_NOT_ESTABLISH)
+    assert dne["additionalItems"] is False
 
 
-def test_rejects_parent_traversal_path():
-    with pytest.raises(ValueError, match="parent traversal"):
-        produce_facet_report(["../x.schema.json"])
-    with pytest.raises(ValueError, match="parent traversal"):
-        produce_facet_report(["merger/../x.schema.json"])
+def test_each_facet_binds_to_exactly_one_rule():
+    item = _schema()["definitions"]["item"]
+    bindings = {}
+    for clause in item["allOf"]:
+        facet = clause["if"]["properties"]["facet"]["const"]
+        rule = clause["then"]["properties"]["source_rule"]["const"]
+        bindings[facet] = rule
+    assert bindings == FACET_SOURCE_RULES
+    assert set(bindings) == set(FACET_IDS)
 
 
-def test_accepts_str_and_path_objects():
+# --------------------------------------------------------------------------- #
+# Path identity (core): canonical grammar, host-independent, type-gated.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("good_path", _VALID_PATHS)
+def test_core_accepts_canonical_paths(good_path):
+    assert _normalize_path(good_path) == good_path
+
+
+@pytest.mark.parametrize("bad_path", _INVALID_PATHS)
+def test_core_rejects_non_canonical_paths(bad_path):
+    with pytest.raises(ValueError):
+        _normalize_path(bad_path)
+
+
+def test_core_does_not_silently_normalize():
+    # These must FAIL, not be rewritten to a/b.
+    for noisy in ("./a.schema.json", "a//b.schema.json", "a/./b.schema.json"):
+        with pytest.raises(ValueError):
+            _normalize_path(noisy)
+
+
+def test_windows_drive_is_host_independent():
+    with pytest.raises(ValueError, match="drive"):
+        _normalize_path("C:/foo.schema.json")
+    with pytest.raises(ValueError, match="drive"):
+        _normalize_path("c:/foo.schema.json")
+
+
+@pytest.mark.parametrize("bad_type", [None, 123, 1.5, object(), ["a"], {"a": 1}])
+def test_core_rejects_non_path_types(bad_type):
+    with pytest.raises(TypeError):
+        _normalize_path(bad_type)
+
+
+def test_produce_report_rejects_non_path_types():
+    with pytest.raises(TypeError):
+        produce_facet_report([None])
+
+
+def test_accepts_str_and_purepath_objects():
     str_report = produce_facet_report(["merger/lenskit/retrieval/review_eval.py"])
     path_report = produce_facet_report([Path("merger/lenskit/retrieval/review_eval.py")])
-    assert str_report == path_report
+    pure_report = produce_facet_report([PurePosixPath("merger/lenskit/retrieval/review_eval.py")])
+    assert str_report == path_report == pure_report
 
 
-def test_normalization_matches_lens_audit():
-    """The locally mirrored normalizer must behave like lens_audit's."""
-    good = [
-        "merger/lenskit/core/lenses.py",
-        "docs/architecture/lens-model.md",
-        "merger/lenskit/retrieval/review_eval.py",
+def test_no_private_lens_audit_import():
+    # Guard: the facet test must not couple to lens_audit (esp. its private
+    # normalizer). Scan only real import lines so this assertion does not
+    # self-trip on the module name appearing in test prose.
+    source = Path(__file__).read_text(encoding="utf-8")
+    import_lines = [
+        line for line in source.splitlines()
+        if line.strip().startswith(("import ", "from "))
     ]
-    for path in good:
-        assert _normalize_path(path) == _audit_normalize_path(path)
-    bad = ["", "   ", ".", "/abs/x.py", r"a\b.py", "../x.py", "a/../b.py"]
-    for path in bad:
-        facet_err = None
-        audit_err = None
-        try:
-            _normalize_path(path)
-        except ValueError as exc:  # noqa: PERF203 - explicit per-case capture
-            facet_err = type(exc)
-        try:
-            _audit_normalize_path(path)
-        except ValueError as exc:
-            audit_err = type(exc)
-        assert facet_err is ValueError and audit_err is ValueError
+    assert not any("lens_audit" in line for line in import_lines)
 
 
 # --------------------------------------------------------------------------- #
-# Semantic tests: rule goldset, positives, negatives, multi-facet.
+# Semantic tests: rule goldset, positives, negatives, multi-facet capability.
 # --------------------------------------------------------------------------- #
-@pytest.mark.parametrize("path,expected", _GOLDSET)
+@pytest.mark.parametrize("path,expected", _ALL_GOLDSET)
 def test_goldset_facets_and_rules(path, expected):
     items = infer_facets(path)
     got = {item["facet"]: item["source_rule"] for item in items}
     assert got == expected
     for item in items:
         assert item["path"] == path
-        assert item["derivation_type"] == "direct"
+        assert item["derivation_type"] == V1_DERIVATION_TYPE
         assert item["does_not_establish"] == list(DOES_NOT_ESTABLISH)
 
 
-def test_each_v1_facet_has_a_positive_example():
+def test_real_js_test_module_is_detected():
+    items = infer_facets("merger/lenskit/frontends/webui/tests/test_materialize.js")
+    assert [item["facet"] for item in items] == ["test"]
+
+
+def test_fixture_test_marker_is_excluded():
+    # The classic false positive: a fixture named test_*.py must NOT be a test.
+    assert infer_facets("merger/lenskit/tests/fixtures/architecture_import_graph/test_c.py") == []
+
+
+def test_retrieval_fixture_is_a_retrieval_surface():
+    # Variant A: retrieval fixtures are a retrieval surface (not a test).
+    items = infer_facets("merger/lenskit/tests/fixtures/retrieval/mini_chunk_index.jsonl")
+    assert [item["facet"] for item in items] == ["retrieval"]
+
+
+def test_each_v1_facet_has_a_real_positive_example():
     produced = {
         facet
-        for path, _ in _GOLDSET
+        for path, _ in _REAL_GOLDSET
         for facet in (item["facet"] for item in infer_facets(path))
     }
     assert produced == set(FACET_IDS)
@@ -329,30 +432,29 @@ def test_path_without_facet_is_valid_and_empty():
     assert report["summary"]["target_count"] == 0
 
 
-def test_multi_facet_path_yields_distinct_facets():
-    items = infer_facets("merger/lenskit/retrieval/test_review_eval.py")
-    facets = [item["facet"] for item in items]
-    assert sorted(facets) == ["retrieval", "test"]
-    assert len(facets) == len(set(facets))  # no duplicate facet on one path
+def test_multi_facet_capability_is_synthetic():
+    items = infer_facets("merger/lenskit/retrieval/test_eval_capability.py")
+    facets = sorted(item["facet"] for item in items)
+    assert facets == ["retrieval", "test"]
+    assert len(facets) == len(set(facets))
 
 
 def test_contract_facet_is_narrower_than_data_models_lens():
-    # A .proto is a data_models primary lens but is NOT a v1 contract facet.
+    # A .proto is a data_models primary lens but NOT a v1 contract facet.
     assert infer_lens(Path("src/contracts/user.proto")) == "data_models"
     assert infer_facets("src/contracts/user.proto") == []
 
 
 def test_facets_do_not_restate_primary_lens():
-    report = produce_facet_report([path for path, _ in _GOLDSET])
+    report = produce_facet_report([path for path, _ in _ALL_GOLDSET])
     payload = json.dumps(report, sort_keys=True)
-    # Quoted token form so a path that merely contains "primary_lens"
-    # (e.g. test_primary_lens_audit.py) does not trip the field check.
+    # Quoted token form so a path that merely contains "primary_lens" does not trip.
     assert '"primary_lens"' not in payload
     assert '"matched_rule"' not in payload
 
 
 def test_only_controlled_vocabulary_is_emitted():
-    report = produce_facet_report([path for path, _ in _GOLDSET])
+    report = produce_facet_report([path for path, _ in _ALL_GOLDSET])
     for item in report["items"]:
         assert item["facet"] in FACET_IDS
         assert item["source_rule"] in SOURCE_RULES
@@ -360,9 +462,12 @@ def test_only_controlled_vocabulary_is_emitted():
 
 
 def test_no_excluded_or_authority_fields():
-    report = produce_facet_report([path for path, _ in _GOLDSET])
+    report = produce_facet_report([path for path, _ in _ALL_GOLDSET])
     payload = json.dumps(report, sort_keys=True)
-    forbidden_facets = ('"security"', '"claim_boundary"', '"artifact_surface"', '"diagnostic"', '"uncertainty"', '"unknown"', '"other"', '"unclassified"')
+    forbidden_facets = (
+        '"security"', '"claim_boundary"', '"artifact_surface"', '"diagnostic"',
+        '"uncertainty"', '"unknown"', '"other"', '"unclassified"',
+    )
     for fragment in forbidden_facets:
         assert fragment not in payload
     forbidden_claims = (
@@ -375,8 +480,8 @@ def test_no_excluded_or_authority_fields():
 
 
 def test_v1_producer_only_emits_direct():
-    report = produce_facet_report([path for path, _ in _GOLDSET])
-    assert {item["derivation_type"] for item in report["items"]} == {"direct"}
+    report = produce_facet_report([path for path, _ in _ALL_GOLDSET])
+    assert {item["derivation_type"] for item in report["items"]} == {V1_DERIVATION_TYPE}
 
 
 def test_primary_lens_surface_is_unchanged():
@@ -389,40 +494,42 @@ def test_primary_lens_surface_is_unchanged():
         "ui",
         "guards",
     ]
-    # infer_lens still classifies independently of any facet logic.
     assert infer_lens(Path("merger/lenskit/core/lenses.py")) == "core"
     assert infer_lens(Path("merger/lenskit/contracts/x.schema.json")) == "data_models"
 
 
 # --------------------------------------------------------------------------- #
-# Summary tests.
+# Summary tests (mechanical) + boundary note.
 # --------------------------------------------------------------------------- #
 def test_summary_counts_are_mechanical():
     report = produce_facet_report(
         [
             "merger/lenskit/contracts/a.schema.json",
             "merger/lenskit/contracts/b.schema.json",
-            "merger/lenskit/retrieval/test_x.py",  # test + retrieval (2 facets, 1 path)
+            "merger/lenskit/retrieval/test_x_capability.py",  # test + retrieval (2 facets, 1 path)
             "merger/lenskit/core/lenses.py",  # no facet
         ]
     )
     assert report["summary"]["item_count"] == 4
     assert report["summary"]["target_count"] == 3
-    assert report["summary"]["facet_counts"] == {
-        "contract": 2,
-        "retrieval": 1,
-        "test": 1,
-    }
-    assert list(report["summary"]["facet_counts"]) == sorted(
-        report["summary"]["facet_counts"]
-    )
+    assert report["summary"]["facet_counts"] == {"contract": 2, "retrieval": 1, "test": 1}
+    assert list(report["summary"]["facet_counts"]) == sorted(report["summary"]["facet_counts"])
+
+
+def test_summary_coherence_is_a_producer_invariant():
+    # The schema validates summary TYPE/SHAPE only; it does not (and JSON Schema
+    # draft-07 cannot) recompute the counters against items. Coherence is the
+    # producer's invariant, asserted here directly.
+    report = produce_facet_report([path for path, _ in _ALL_GOLDSET])
+    assert report["summary"]["item_count"] == len(report["items"])
+    assert report["summary"]["target_count"] == len({i["path"] for i in report["items"]})
 
 
 # --------------------------------------------------------------------------- #
 # Determinism tests.
 # --------------------------------------------------------------------------- #
 _DET_PATHS = [
-    "merger/lenskit/retrieval/test_review_eval.py",
+    "merger/lenskit/retrieval/test_eval_capability.py",
     "merger/lenskit/contracts/a.schema.json",
     "docs/retrieval/queries.json",
     "merger/lenskit/tests/test_x.py",
@@ -431,15 +538,11 @@ _DET_PATHS = [
 
 
 def test_input_order_does_not_change_output():
-    a = produce_facet_report(_DET_PATHS)
-    b = produce_facet_report(list(reversed(_DET_PATHS)))
-    assert a == b
+    assert produce_facet_report(_DET_PATHS) == produce_facet_report(list(reversed(_DET_PATHS)))
 
 
 def test_duplicate_paths_are_deduplicated():
-    a = produce_facet_report(_DET_PATHS)
-    b = produce_facet_report(_DET_PATHS + _DET_PATHS)
-    assert a == b
+    assert produce_facet_report(_DET_PATHS) == produce_facet_report(_DET_PATHS + _DET_PATHS)
 
 
 def test_repeated_runs_are_identical():

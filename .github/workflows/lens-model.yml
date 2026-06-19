@@ -1,0 +1,95 @@
+name: Lens Model
+
+# Path-scoped blocking gate for the deterministic lens model surfaces: the
+# Primary Lens (lenses.py), the Primary Lens Audit (lens_audit.py) and the
+# Facet Model (lens_facets.py) together with their contracts and tests. Runs
+# only when those surfaces change. jsonschema is installed so the contract
+# tests run here rather than skip (portable runtimes may still degrade).
+# Distinct from the ruff lint (lint.yml) and the contract lint
+# (anti-hallucination-lint.yml).
+
+on:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - "merger/lenskit/core/lenses.py"
+      - "merger/lenskit/core/lens_audit.py"
+      - "merger/lenskit/core/lens_facets.py"
+      - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
+      - "merger/lenskit/contracts/lens-facet.v1.schema.json"
+      - "merger/lenskit/tests/test_lenses.py"
+      - "merger/lenskit/tests/test_primary_lens_audit.py"
+      - "merger/lenskit/tests/test_lens_facets.py"
+      - "docs/architecture/lens-model.md"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - ".github/workflows/lens-model.yml"
+  pull_request:
+    branches: [ "main", "master" ]
+    paths:
+      - "merger/lenskit/core/lenses.py"
+      - "merger/lenskit/core/lens_audit.py"
+      - "merger/lenskit/core/lens_facets.py"
+      - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
+      - "merger/lenskit/contracts/lens-facet.v1.schema.json"
+      - "merger/lenskit/tests/test_lenses.py"
+      - "merger/lenskit/tests/test_primary_lens_audit.py"
+      - "merger/lenskit/tests/test_lens_facets.py"
+      - "docs/architecture/lens-model.md"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - ".github/workflows/lens-model.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  lens-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Log Python version
+        run: python --version
+
+      - name: Install dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Require jsonschema (contract tests must run, not skip)
+        run: python -c "import jsonschema; print('jsonschema', jsonschema.__version__)"
+
+      - name: Validate lens-facet schema (draft-07 meta)
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft7Validator
+
+          schema = json.loads(
+              Path("merger/lenskit/contracts/lens-facet.v1.schema.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          Draft7Validator.check_schema(schema)
+          print("lens-facet.v1 schema: meta-valid")
+          PY
+
+      - name: Run lens model tests (blocking)
+        run: |
+          python -m pytest -q \
+            merger/lenskit/tests/test_lenses.py \
+            merger/lenskit/tests/test_primary_lens_audit.py \
+            merger/lenskit/tests/test_lens_facets.py
+
+      - name: Ruff (facet core and tests)
+        run: |
+          ruff check \
+            merger/lenskit/core/lens_facets.py \
+            merger/lenskit/tests/test_lens_facets.py

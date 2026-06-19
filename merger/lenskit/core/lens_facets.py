@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any, Iterable
 
 KIND = "lenskit.lens_facet_report"
@@ -9,7 +10,8 @@ VERSION = "1.0"
 
 # Shared lens-family negative-semantics baseline. Identical to the Primary Lens
 # Audit baseline (docs/architecture/lens-model.md section 15): a facet is derived
-# navigation and establishes none of these.
+# navigation and establishes none of these. Emitted in this exact, fixed order;
+# the v1 contract pins both the values and the order.
 DOES_NOT_ESTABLISH = (
     "truth",
     "correctness",
@@ -29,11 +31,15 @@ DOES_NOT_ESTABLISH = (
 # deferred (see docs/proofs/facet-model-v1-proof.md).
 FACET_IDS = ("contract", "test", "retrieval")
 
-# Controlled derivation-type vocabulary. Describes HOW an assignment was
-# produced, not its confidence/probability/quality, and carries no implicit
-# ordering. The v1 producer only ever emits "direct"; "derived" and "heuristic"
-# stay reserved for later, structurally derived rules.
+# General lens-model derivation vocabulary (docs/architecture/lens-model.md
+# section 5). Future, structurally derived facet rules may use derived/heuristic.
+# This describes HOW an assignment was produced, not its confidence/quality, and
+# carries no implicit ordering.
 DERIVATION_TYPES = ("direct", "derived", "heuristic")
+
+# Facet Model v1 only ever emits — and its contract only permits — this single
+# derivation type. No synthetic derived/heuristic assignments are produced.
+V1_DERIVATION_TYPE = "direct"
 
 # Controlled source-rule vocabulary. Exactly one rule per facet in v1, so a
 # (path, facet) pair can never be produced by two competing rules; rule
@@ -44,69 +50,113 @@ SOURCE_RULES = (
     "retrieval_surface_path",
 )
 
-# Precise test-MODULE markers. Intentionally narrower than the broad "guards"
-# Primary Lens (which also absorbs validation, CI and guard surfaces): the
-# "test" facet marks a file that is itself a test module.
+# Bound facet -> its single v1 source rule.
+FACET_SOURCE_RULES = {
+    "contract": "contract_schema_suffix",
+    "test": "test_module_marker",
+    "retrieval": "retrieval_surface_path",
+}
+
+# Controlled test-MODULE markers, intentionally narrower than the broad "guards"
+# Primary Lens (which also absorbs validation, CI and guard surfaces).
+# - test_*.py and test_*.js are real, frequent repo conventions.
+# - *_test.py, *.test.ts and *.spec.ts mirror the existing infer_lens markers.
+_TEST_PREFIX_EXTENSIONS = (".py", ".js")
 _TEST_FILENAME_SUFFIXES = ("_test.py", ".test.ts", ".spec.ts")
 
-# Controlled path segment for the retrieval subsystem surface
-# (e.g. merger/lenskit/retrieval/, docs/retrieval/).
+# A path segment that, when present, marks fixture data: such files are never the
+# `test` facet even if their filename matches a test marker. Exact segment match
+# only — never a free substring like "fixture".
+_FIXTURE_SEGMENT = "fixtures"
+
+# Controlled path segment for the retrieval subsystem surface. v1 treats every
+# file on a controlled retrieval surface as `retrieval`, including retrieval
+# fixtures; the facet asserts a retrieval-related surface, not production status.
 _RETRIEVAL_SEGMENT = "retrieval"
 
+_WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
-def _normalize_path(path: str | Path) -> str:
-    """Normalize a repo-relative path to a stable POSIX form.
 
-    This mirrors merger/lenskit/core/lens_audit.py::_normalize_path. That helper
-    is private to lens_audit; rather than promote a foreign private symbol to a
-    public dependency we replicate the exact rules here and assert behavioural
-    consistency in the tests.
+def _normalize_path(path: str | PurePath) -> str:
+    """Return the host-independent canonical repo-relative POSIX path.
+
+    Accepts only ``str`` or ``PurePath`` (``Path`` is a ``PurePath``); any other
+    type raises ``TypeError``. The grammar is strict and never silently rewrites
+    its input: ``./a``, ``a/./b``, ``a//b``, a trailing slash, a leading slash,
+    a backslash, a Windows drive prefix, or ``.``/``..`` components are rejected
+    rather than normalized away.
     """
-    raw = str(path)
+    if isinstance(path, str):
+        raw = path
+    elif isinstance(path, PurePath):
+        raw = path.as_posix()
+    else:
+        raise TypeError(
+            f"lens facet path must be str or PurePath, got {type(path).__name__}"
+        )
+
     if not raw.strip():
         raise ValueError("lens facet path must not be empty")
     if "\\" in raw:
         raise ValueError("lens facet path must use POSIX separators")
-    candidate = Path(raw)
-    if candidate.is_absolute():
+    if _WINDOWS_DRIVE_RE.match(raw):
+        raise ValueError("lens facet path must not carry a Windows drive prefix")
+    if raw.startswith("/"):
         raise ValueError("lens facet path must be repo-relative")
-    posix = candidate.as_posix()
-    if posix in {"", "."}:
-        raise ValueError("lens facet path must identify a repo path")
-    if ".." in candidate.parts:
-        raise ValueError("lens facet path must not contain parent traversal")
-    return posix
+    if raw.endswith("/"):
+        raise ValueError("lens facet path must not end with a slash")
+
+    for component in raw.split("/"):
+        if component == "":
+            raise ValueError("lens facet path must not contain empty components")
+        if component in {".", ".."}:
+            raise ValueError(
+                "lens facet path must not contain '.' or '..' components"
+            )
+
+    return raw
 
 
 def _is_contract_schema(posix: str) -> bool:
-    """contract: the path is a versioned JSON Schema contract surface."""
+    """contract: the path carries the controlled `.schema.json` file extension."""
     return posix.endswith(".schema.json")
 
 
 def _is_test_module(posix: str) -> bool:
-    """test: the path is itself a test module by controlled filename marker."""
-    name = Path(posix).name
-    if name.startswith("test_") and name.endswith(".py"):
+    """test: the path is itself a test module by controlled filename marker.
+
+    Files under a `fixtures` path segment are excluded: a fixture that merely
+    happens to be named test_*.py is data, not a test module.
+    """
+    parts = Path(posix).parts
+    if _FIXTURE_SEGMENT in parts:
+        return False
+    name = parts[-1] if parts else ""
+    if name.startswith("test_") and name.endswith(_TEST_PREFIX_EXTENSIONS):
         return True
     return name.endswith(_TEST_FILENAME_SUFFIXES)
 
 
 def _is_retrieval_surface(posix: str) -> bool:
-    """retrieval: the path lives under a controlled `retrieval` directory."""
+    """retrieval: the path lives on a controlled `retrieval` surface.
+
+    Includes retrieval fixtures (Variant A): the facet marks a retrieval-related
+    surface and does not claim production status.
+    """
     return _RETRIEVAL_SEGMENT in Path(posix).parts
 
 
-def _facet_item(posix: str, facet: str, source_rule: str) -> dict[str, Any]:
+def _facet_item(posix: str, facet: str) -> dict[str, Any]:
     return {
         "path": posix,
         "facet": facet,
-        "source_rule": source_rule,
-        "derivation_type": "direct",
+        "source_rule": FACET_SOURCE_RULES[facet],
+        "derivation_type": V1_DERIVATION_TYPE,
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
 
 
-def infer_facets(path: str | Path) -> list[dict[str, Any]]:
+def infer_facets(path: str | PurePath) -> list[dict[str, Any]]:
     """Return the deterministic facet assignments for a single repo path.
 
     The result is a list of (path, facet) assignment dicts and may be empty: a
@@ -119,17 +169,23 @@ def infer_facets(path: str | Path) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
 
     if _is_contract_schema(posix):
-        items.append(_facet_item(posix, "contract", "contract_schema_suffix"))
+        items.append(_facet_item(posix, "contract"))
     if _is_test_module(posix):
-        items.append(_facet_item(posix, "test", "test_module_marker"))
+        items.append(_facet_item(posix, "test"))
     if _is_retrieval_surface(posix):
-        items.append(_facet_item(posix, "retrieval", "retrieval_surface_path"))
+        items.append(_facet_item(posix, "retrieval"))
 
     return items
 
 
-def produce_facet_report(paths: Iterable[str | Path]) -> dict[str, Any]:
+def produce_facet_report(paths: Iterable[str | PurePath]) -> dict[str, Any]:
     """Aggregate deterministic facet assignments over many repo paths.
+
+    This is an *assignment* report, not an evaluation/coverage report: only
+    actually produced (path, facet) assignments appear in ``items``. A checked
+    path that carries no facet does not appear and is indistinguishable from a
+    path that was never passed in. ``target_count`` counts only distinct paths
+    that carry at least one facet.
 
     Assignments are identified by ``(path, facet)``: duplicate inputs and
     repeated runs produce identical output. Items are stably sorted by
