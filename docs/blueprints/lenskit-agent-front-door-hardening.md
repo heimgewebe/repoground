@@ -136,16 +136,20 @@ Integration oder Runtime-Nutzung.
 - Relation Cards
 - Guard Relation Cards
 
-### 3.3 Retrieval-Baseline: bewusst offene Evidence-Lücke
-
-Die extern vorgeschlagenen Zahlen `recall@10 = 13.33`, `MRR = 0.0889` und zwei Hits bei
-15 Queries sind im Repository nicht als committetes Eval belegt; der bestehende
-Capability-Audit markiert diesen Befund als unklar. Dieser Blueprint verwendet die Zahlen
-daher **nicht** als Architekturbeweis oder Promotion-Baseline.
-
-Konsequenz: Slice 3 muss ein versioniertes Review-Goldset und eine reproduzierbare
-Baseline im Repo schaffen, bevor Retrieval-v2-Arbeit priorisiert, bewertet oder promoted
-werden darf.
+### 3.3 Review-Retrieval-Baseline
+Das versionierte Review-Goldset, der Metrikadapter, die reproduzierbaren
+Metriken und die Miss-Diagnostik sind implementiert.
+Belege:
+- `docs/retrieval/review_queries.v1.json`
+- `merger/lenskit/retrieval/review_eval.py`
+- `merger/lenskit/tests/test_review_retrieval_goldset.py`
+- `merger/lenskit/tests/test_review_retrieval_metrics.py`
+- `docs/diagnostics/review-retrieval-baseline.md`
+Konkrete Metrikwerte werden gegen einen gewählten Index reproduziert und
+nicht als zeitlose Leistungszahlen dieses Blueprints festgeschrieben.
+Die Baseline ist eine diagnostische Messfläche. Sie beweist weder
+ausreichende Retrieval-Qualität noch Review-Vollständigkeit oder
+semantische Abdeckung.
 
 ## 4. Problem
 
@@ -449,21 +453,20 @@ Tests erkannt.
 
 ### Slice 3 — Retrieval Review Goldset v1
 
-**Ziel:** Review-relevante Auffindbarkeit messen, bevor Retrieval verändert wird.
-
-**Geplante Deliverables, vor Umsetzung gegen bestehende Retrieval-Konventionen zu
-prüfen:**
-
-```text
-docs/retrieval/review_queries.v1.json
-merger/lenskit/contracts/review-retrieval-goldset.v1.schema.json
-merger/lenskit/tests/test_review_retrieval_goldset.py
-docs/diagnostics/review-retrieval-baseline.md
-```
-
-Der Schema-Pfad ist ein Planungskandidat, keine Vorentscheidung: Falls das vorhandene
-Query-Format `docs/retrieval/queries.v1.json` ohne neue Contract-Familie erweitert werden
-kann, ist Wiederverwendung vorzuziehen.
+**Status:** Structural Goldset sowie Metric Baseline und Miss Diagnostics
+sind implementiert.
+**Belege:**
+- `docs/retrieval/review_queries.v1.json`
+- `merger/lenskit/retrieval/review_eval.py`
+- `merger/lenskit/tests/test_review_retrieval_goldset.py`
+- `merger/lenskit/tests/test_review_retrieval_metrics.py`
+- `docs/diagnostics/review-retrieval-baseline.md`
+**Bewusst nicht Teil des abgeschlossenen Slices:**
+- kein neuer Goldset-Contract
+- kein neuer CLI-Befehl
+- kein Bundle-Sidecar
+- keine Ranking- oder Runtime-Änderung
+- keine Promotion der gemessenen Retrieval-Qualität
 
 **Mindestumfang:** mindestens 20 Queries aus den Kategorien:
 
@@ -576,23 +579,17 @@ der Slice gestoppt und neu geplant.
 
 ### Slice 6 — Required Reading Protocol v1 als JSON
 
-**Voraussetzung:** Slices 1 bis 5 sind stabil, und mindestens ein Maschinenconsumer
-benötigt die Regeln außerhalb des Markdown-Packs.
-
-**Planungskandidaten:**
-
-```text
-merger/lenskit/contracts/required-reading-protocol.v1.schema.json
-merger/lenskit/core/required_reading.py
-merger/lenskit/tests/test_required_reading_protocol.py
-```
-
-Optional, nur bei belegtem Operator-/Wrapper-Bedarf:
-
-```text
-merger/lenskit/cli/cmd_required_reading.py
-merger/lenskit/tests/test_cli_required_reading.py
-```
+**Status:** Required Reading Protocol, Resolver, fokussierte Tests und der
+CLI-Lesepfad sind implementiert.
+**Belege:**
+- `merger/lenskit/contracts/required-reading-protocol.v1.schema.json`
+- `merger/lenskit/core/required_reading.py`
+- `merger/lenskit/tests/test_required_reading_protocol.py`
+- tatsächlicher CLI-Pfad für `agent-consumption required`
+**Weiterhin offen:**
+- harte Durchsetzung in Consumer- oder Export-Gates
+- automatische Bundle-Integration
+- tatsächliche Adoption durch externe Agent-Wrapper
 
 **Contract-Inhalt:** versionierte Task-Profile mit `required`, `recommended`, `optional`
 und Negativsemantik. Ein Resolver darf Manifest-Verfügbarkeit gegen ein Task-Profil
@@ -608,81 +605,62 @@ Profile werden konservativ behandelt.
 
 ### Slice 7 — Answer Compliance Contract v1
 
-**Ziel:** Eine Antwort kann verwendete Artefakte, Zitate, epistemische Lücken und bewusst
-nicht gelesene Empfehlungen deklarieren.
-
-**Planungskandidaten:**
-
-```text
-merger/lenskit/contracts/answer-compliance.v1.schema.json
-docs/architecture/answer-compliance.md
-merger/lenskit/tests/test_answer_compliance_schema.py
-```
-
-**Mindestfelder:** Task-Profil, deklarierte Artefakte, deklarierte Zitate, epistemische
-Lücken, nicht gelesene Empfehlungen und `does_not_establish`.
-
-**Grenze:** Der Contract normiert eine Selbstauskunft. Er beweist weder tatsächliche
-Nutzung noch Antwortkorrektheit, vollständigen Kontext oder Repo-Verständnis.
-
-**Akzeptanz:** Der Contract kann unabhängig von einem konkreten LLM-Provider validiert
-werden und enthält keine Wahrheits- oder Review-Verdicts.
+**Status:** Answer Compliance Contract, Architekturgrenzen und fokussierte
+Tests sind implementiert.
+**Belege:**
+- `merger/lenskit/contracts/answer-compliance.v1.schema.json`
+- `docs/architecture/answer-compliance.md`
+- `merger/lenskit/tests/test_answer_compliance_schema.py`
+**Geltungsgrenze:**
+Answer Compliance ist eine deklarative Selbstauskunft über verwendete
+Artefakte, Citations, Ranges und epistemische Lücken.
+Sie beweist weder tatsächliches Lesen noch korrekte Nutzung, Vollständigkeit,
+Antwortkorrektheit oder Repo-Verständnis.
+**Bewusst nicht Teil:**
+- eigener Answer-Compliance-Producer
+- automatische Bundle-Emission
+- eigenständige Wahrheitsbewertung
 
 **Komplexität:** mittel.
 
 ### Slice 8 — Agent Consumption Trace v1
 
-**Voraussetzung:** Ein realer Wrapper oder Workflow erzeugt Answer Compliance und
-benötigt einen Vergleich mit Required Reading.
-
-**Planungskandidaten:**
-
-```text
-merger/lenskit/contracts/agent-consumption-trace.v1.schema.json
-merger/lenskit/core/agent_consumption_validate.py
-merger/lenskit/tests/test_agent_consumption_trace.py
-```
-
-Optionaler CLI-Pfad nur bei konkretem Consumer:
-
-```text
-merger/lenskit/cli/cmd_agent_consumption.py
-merger/lenskit/tests/test_cli_agent_consumption.py
-```
-
-**Validator-Grenzen:** fehlendes Required → `fail`; fehlendes Recommended → `warn`;
-unbekannte Rolle → konservative Warnung; fehlende Negativsemantik oder Truth-Claim →
-`fail`.
-
-**Pflichtgrenze:** Der Trace erklärt deklarierte Nutzung, beweist aber kein tatsächliches
-Lesen.
-
-**Akzeptanz:** Required-Reading-Abweichungen sind maschinenlesbar, ohne
-`actual_reading_proven`, `answer_correct` oder `repo_understood` zu behaupten.
+**Status:** Agent Consumption Trace Contract, Validator, Strict-Mode,
+Exit-Code-Policy, fokussierte Tests und CLI sind implementiert.
+**Belege:**
+- `merger/lenskit/contracts/agent-consumption-trace.v1.schema.json`
+- `merger/lenskit/core/agent_consumption_validate.py`
+- `merger/lenskit/tests/test_agent_consumption_trace.py`
+- tatsächlicher CLI-Pfad für `validate-trace`
+- `merger/lenskit/tests/test_cli_agent_consumption.py`
+**Weiterhin offen:**
+- automatische Bundle-Emission
+- Einbindung in Output Health oder Post-Emit Health
+- Export-Safety-Wiring
+- verbindliche Adoption durch externe Agent-Wrapper
+**Geltungsgrenze:**
+Der Trace vergleicht deklarierte Nutzung mit Required-Reading-Erwartungen.
+Er beweist kein tatsächliches Lesen, keine Antwortkorrektheit und kein
+Repo-Verständnis.
 
 **Komplexität:** mittel bis hoch.
 
 ### Slice 9 — Agent Entry Manifest v1
 
-**Voraussetzung:** Required Reading, Answer Compliance oder Consumption Trace existieren,
-oder die agent-facing Sidecar-Fläche ist nachweislich zu groß für einen stabilen Einstieg.
-
-**Planungskandidaten:**
-
-```text
-merger/lenskit/contracts/agent-entry-manifest.v1.schema.json
-merger/lenskit/core/agent_entry_manifest.py
-merger/lenskit/tests/test_agent_entry_manifest.py
-```
-
-**Inhalt:** kanonische Quelle, `read_first`, Verweis auf Task-Protokoll, verfügbare
-Flächen und Negativsemantik.
-
-**Nicht-Ziel:** kein zweites Bundle Manifest, keine neue Truth-Registry, keine Einführung
-nur zur Bequemlichkeit.
-
-**Akzeptanz:** ultrakleiner, deterministischer Index; die Existenz beweist weder
-Repo-Verständnis noch Antwortsicherheit.
+**Status:** Agent Entry Manifest Contract, Core-Producer und fokussierte
+Tests sind implementiert.
+**Belege:**
+- `merger/lenskit/contracts/agent-entry-manifest.v1.schema.json`
+- `merger/lenskit/core/agent_entry_manifest.py`
+- `merger/lenskit/tests/test_agent_entry_manifest.py`
+**Weiterhin offen:**
+- eigener CLI-Befehl
+- automatische Bundle-Emission
+- Bundle-Manifest-Rolle
+- stabile Consumer-Integration
+**Geltungsgrenze:**
+Der Core erzeugt einen abgeleiteten Agent-Einstiegsindex. Das beweist weder
+automatische Bereitstellung noch tatsächlichen Konsum oder Repo-Verständnis.
 
 **Komplexität:** mittel.
 
@@ -963,54 +941,34 @@ Authority-Promotion oder Antwortkorrektheitsbehauptung enthalten.
 
 ## 13. Open Questions
 
-1. Reicht Markdown-Front-Door-Härtung oder ist ein JSON-Contract nötig?
-2. Welcher reale Consumer rechtfertigt Agent Consumption Trace?
-3. Wie wird Sidecar-Nutzung gemessen, ohne tatsächliches Lesen vorzutäuschen?
-4. Welche Retrieval-Goldset-Kategorien sind für PR Review zuerst erforderlich?
-5. Lässt sich das bestehende Query-Format für das Goldset wiederverwenden?
-6. Wann ist die Sidecar-Fläche groß genug für ein Agent Entry Manifest?
-7. Wann dürfen Lens Cards eingeführt werden, ohne Primary-Lens- und Authority-Grenzen zu
-   verwischen?
-8. Welche Negativsemantik bleibt Markdown, welche wird später Contract-Pflicht?
-9. Wie werden capability-degradierte Hosts in Required Reading abgebildet?
-10. Welche konkrete Nichtregressionsschwelle promoted Retrieval v2?
+### Resolved
 
-## 14. Next Implementation Slice
+- Required Reading benötigt eine maschinenlesbare Contract-Fläche: ja
+- Answer Compliance benötigt JSON: ja
+- vorhandenes Review-Query-Format wird wiederverwendet: ja
+- neuer Goldset-Contract: nein
+- Review-Goldset-Kategorien: festgelegt
+- Agent Consumption Trace besitzt einen Validator und CLI: ja
+- Agent Entry Manifest Core: implementiert
+- Review-Goldset und Baseline: implementiert
 
-**TASK-AGENT-FRONTDOOR-001 — Agent Reading Pack v1.1: Required Reading and Compliance
-Front Door**
+### Still open
 
-### Erlaubter Scope
+- harte Required-Reading-Durchsetzung
+- Adoption durch externe Consumer-/Agent-Wrapper
+- automatische Entry-Manifest-Emission
+- Bundle-/Manifest-Integration des Entry Manifest
+- Consumption-Trace-Integration in Health-/Export-Gates
+- konkrete Promotion-Schwelle für Retrieval v2
+- Facet Model v1
 
-```text
-merger/lenskit/core/agent_reading_pack.py
-merger/lenskit/tests/test_agent_reading_pack.py
-merger/lenskit/tests/test_cli_agent_pack.py
-docs/proofs/agent-reading-pack-producer-proof.md
-```
+## 14. Next Unimplemented Architecture Slice
 
-Optional:
-
-```text
-merger/lenskit/tests/test_agent_reading_pack_usage_rules.py
-```
-
-### Nicht ändern
-
-```text
-merger/lenskit/core/post_emit_health.py
-merger/lenskit/core/bundle_surface_validate.py
-merger/lenskit/core/agent_export_gate.py
-merger/lenskit/core/merge.py
-merger/lenskit/contracts/*.schema.json
-```
-
-### Erfolgskriterium
-
-Ein lesender Agent sieht nach dem Pack explizit, dass für PR Review, Status-Claims,
-Surface Review und Retrieval-Qualitätsbewertung zusätzliche rollenadäquate Flächen nötig
-sind. Gleichzeitig bleibt klar, dass weder Pack noch Sidecars Wahrheit, Vollständigkeit,
-Review-Suffizienz oder Antwortkorrektheit beweisen.
+Der nächste noch nicht implementierte Architektur-Slice ist das
+Facet Model v1.
+Voraussetzung ist, dass das Deterministic Lens Model als normative
+Begriffs- und Schichtengrundlage akzeptiert ist.
+Dieser Blueprint erzeugt dafür keine neue Task-ID.
 
 ## 15. Nicht-normative Contract- und Output-Skizzen
 
@@ -1020,129 +978,32 @@ werden.
 
 ### 15.1 Review-Goldset-Query
 
-```json
-{
-  "id": "find-agent-reading-pack-producer",
-  "query": "agent reading pack producer",
-  "task_profile": "pr_review",
-  "expected_paths": [
-    "merger/lenskit/core/agent_reading_pack.py",
-    "merger/lenskit/tests/test_agent_reading_pack.py"
-  ],
-  "required_in_top_k": 10,
-  "does_not_establish": [
-    "semantic_completeness",
-    "review_sufficiency"
-  ]
-}
-```
+Exact shape: see `docs/retrieval/review_queries.v1.json`.
 
 ### 15.2 Required Reading Protocol
 
-```json
-{
-  "kind": "lenskit.required_reading_protocol",
-  "version": "1.0",
-  "task_profiles": {
-    "pr_review": {
-      "required": [
-        "agent_reading_pack",
-        "canonical_md",
-        "citation_map_jsonl",
-        "post_emit_health"
-      ],
-      "recommended": [
-        "claim_evidence_map_json",
-        "bundle_surface_validation"
-      ],
-      "optional": [
-        "retrieval_eval_json",
-        "sqlite_index"
-      ],
-      "does_not_establish": [
-        "answer_correct",
-        "repo_understood",
-        "review_complete",
-        "test_sufficiency"
-      ]
-    }
-  }
-}
-```
+Exact shape: see the canonical contract at
+`merger/lenskit/contracts/required-reading-protocol.v1.schema.json`.
 
 ### 15.3 Required Reading Resolver
 
-```json
-{
-  "task_profile": "pr_review",
-  "available_required": [],
-  "missing_required": [],
-  "available_recommended": [],
-  "missing_recommended": [],
-  "status": "pass|warn|fail|not_applicable",
-  "does_not_establish": []
-}
-```
+Exact shape: see the canonical contract at
+`merger/lenskit/contracts/required-reading-protocol.v1.schema.json`.
 
 ### 15.4 Answer Compliance
 
-```json
-{
-  "kind": "lenskit.answer_compliance",
-  "version": "1.0",
-  "task_profile": "pr_review",
-  "declared_used_artifacts": [],
-  "declared_citations": [],
-  "declared_epistemic_gaps": [],
-  "declared_unread_recommended": [],
-  "does_not_establish": [
-    "answer_correct",
-    "repo_understood",
-    "all_relevant_context_used"
-  ]
-}
-```
+Exact shape: see the canonical contract at
+`merger/lenskit/contracts/answer-compliance.v1.schema.json`.
 
 ### 15.5 Agent Consumption Trace
 
-```json
-{
-  "kind": "lenskit.agent_consumption_trace",
-  "version": "1.0",
-  "task_profile": "pr_review",
-  "used_artifacts": [
-    {"role": "agent_reading_pack", "usage": "read"},
-    {"role": "canonical_md", "usage": "cited"}
-  ],
-  "used_citation_ids": [],
-  "unread_required_artifacts": [],
-  "unread_recommended_artifacts": [],
-  "epistemic_gaps": [],
-  "does_not_establish": [
-    "actual_reading_proven",
-    "answer_correct",
-    "repo_understood"
-  ]
-}
-```
+Exact shape: see the canonical contract at
+`merger/lenskit/contracts/agent-consumption-trace.v1.schema.json`.
 
 ### 15.6 Agent Entry Manifest
 
-```json
-{
-  "kind": "lenskit.agent_entry_manifest",
-  "version": "1.0",
-  "canonical_source": "canonical_md",
-  "read_first": ["agent_reading_pack"],
-  "task_protocol": "required_reading_protocol",
-  "available_surfaces": [],
-  "does_not_establish": [
-    "repo_understood",
-    "answer_safe_without_citations",
-    "claims_true"
-  ]
-}
-```
+Exact shape: see the canonical contract at
+`merger/lenskit/contracts/agent-entry-manifest.v1.schema.json`.
 
 ### 15.7 Primary Lens Audit
 

@@ -93,7 +93,10 @@ Range declarations accept a minimal v1-like line range or a minimal v2-like arti
 }
 ```
 
-## Later Slices
+## Boundary to Agent Consumption Trace
 
-Agent Consumption Trace and Validator will compare Required Reading Protocol expectations against Answer Compliance declarations.
-This PR does not implement that comparison.
+The Agent Consumption Trace validator compares Required Reading Protocol
+expectations against Answer Compliance declarations.
+The comparison remains declaration-based. It does not prove actual reading,
+correct use of an artifact, answer correctness, completeness or repository
+understanding.

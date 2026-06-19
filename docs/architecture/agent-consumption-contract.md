@@ -5,7 +5,11 @@
 Required Reading Protocol Core implemented.
 Answer Compliance Contract v1 implemented.
 Agent Consumption Trace v1 implemented.
-Agent Entry Manifest, Agent Reading Pack v2, Export Safety Report, Lens Cards, Relation Cards, and Retrieval v2 are not yet implemented.
+The Agent Entry Manifest core is implemented with a contract, producer and
+focused tests.
+A dedicated CLI command, automatic bundle emission, bundle-manifest
+registration and stable consumer integration are not yet implemented.
+Agent Reading Pack v2, Export Safety Report, Lens Cards, Relation Cards, and Retrieval v2 are not yet implemented.
 
 ---
 
@@ -163,6 +167,21 @@ The trace is a declaration-comparison artifact only. It does not prove actual re
 
 ### Scope
 
-This slice ships the contract, the pure core validator, and tests only. A CLI, strict mode, exit-code policy, Agent Entry Manifest, Output Health / Post-Emit Health integration, Bundle Manifest mutation, and Export Safety wiring are intentionally deferred. The validator performs no I/O, holds no global state, and reuses the existing Required Reading resolution rather than re-deriving it.
+Implemented:
+- Agent Consumption Trace Contract
+- Core validator
+- strict-mode validation
+- deterministic exit-code policy
+- CLI commands for Required Reading resolution and trace validation
+- focused contract, validator and CLI tests
+
+Deferred:
+- automatic bundle emission
+- mutation of the bundle manifest
+- Output Health or Post-Emit Health integration
+- export-safety wiring
+- mandatory adoption by external agent wrappers
+
+The validator performs no I/O, holds no global state, and reuses the existing Required Reading resolution rather than re-deriving it.
 
 `available_roles` is supplied explicitly. When omitted, only required and recommended roles are treated as known, and any other declared role is conservatively warned. The trace does not infer roles from the Bundle Manifest; that is later CLI / Entry Manifest work, and the `ArtifactRole` enum is not extended here.
