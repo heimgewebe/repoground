@@ -151,8 +151,8 @@ Confidence Score.
   kontrollierten Eigenschaft abgelesen, beispielsweise aus einem Pfad,
   einem Dateisuffix, einem Contract-Typ, einem Manifestwert oder einer
   deklarierten Artifact Role.
-- `derived`: Die Zuordnung wird deterministisch aus mehreren strukturierten
-  Signalen abgeleitet.
+- `derived`: Die Zuordnung wird deterministisch aus vorhandenen
+  strukturierten Signalen abgeleitet.
 - `heuristic`: Die Zuordnung folgt einer dokumentierten deterministischen
   Regel ohne semantischen Wahrheits-, Vollständigkeits- oder
   Wichtigkeitsbeweis.
@@ -265,8 +265,9 @@ Verbotene unqualifizierte Card-Felder oder Claims:
 
 ## 11. Relation Card und Guard Relation
 
-Eine Relation Card ist eine spätere Spezialisierung: die kompakte Darstellung einer
-Relation mit Herkunft und Evidence-Grenze. Sie ist kein Kausalitäts- oder Impact-Beweis.
+Eine Relation Card ist eine spätere Spezialisierung: die kompakte Darstellung
+einer Relation einschließlich ihrer Ableitungs- und Evidence-Grenzen. Sie ist
+kein Kausalitäts- oder Impact-Beweis.
 
 Eine Guard Relation ist eine spätere Spezialisierung: eine Relation zwischen Ziel und
 Test-, Validator-, Guard- oder CI-Fläche. Sie dient Navigation.
@@ -343,7 +344,8 @@ jeden Contract.
 - `review_priority`
 - `change_impact`
 
-Artefaktspezifische Ergänzungen dürfen genannt werden, beispielsweise `causality`, `coverage_completeness` oder `guard_effectiveness`.
+Artefaktspezifische Grenzen dürfen diese Baseline ergänzen, beispielsweise
+`causality`, `coverage_completeness` oder `guard_effectiveness`.
 
 Bestehende Contracts verwenden dafür je nach Artefakt unter anderem
 `does_not_establish`, `does_not_mean`, `does_not_prove` oder
@@ -415,32 +417,41 @@ Primary Lens Audit v1 — Contract/Core/Tests umgesetzt
 
 Das Lens-Modell ist Voraussetzung für das Facet Model, aber kein Implementierungsbeweis.
 
-## 19. Open Decisions for Facet Model v1
+## 19. Open Decisions for Subsequent Slices
 
-Diese Punkte werden in diesem PR nicht entschieden, sofern kein bestehendes Repo-Dokument
-sie bereits eindeutig normiert:
+Die folgenden Fragen werden in diesem Dokument nicht entschieden. Sie sind
+dem jeweils genannten Folgeslice oder einer ausdrücklich übergreifenden
+Modellentscheidung zugeordnet.
+
+### Facet Model v1
 
 **Taxonomie und Semantik**
 - endgültige Facet-v1-Taxonomie
 - `uncertainty` als Facet, State-Oberbegriff oder kein eigener Bezeichner
 - Rolle von `claim_boundary`
-- kontrollierte State-Bezeichner
-- kontrollierte Relationstypen
 
 **Contract und Datenmodell**
-- Kardinalität und Identität von Lens Cards
 - JSON-Struktur des Facet Model v1
 - konkrete Feldnamen
 - Target-ID-Modell
 - Bericht versus einzelne Zuordnungen
-- Identität und Deduplizierung
+- Identität und Deduplizierung von Facet-Zuordnungen
 - Sortierregeln
 - Taxonomie der Ableitungsregeln
 - Evidence-Adressen Pflicht oder optional
 - Verhalten bei unbekannten Facet-Namen
 - konkrete Shape der Negativsemantik
 
-**Operationalisierung**
+### Lens Cards v1
+- Kardinalität und Identität von Lens Cards
+
+### Relation Cards und Guard Relation Cards
+- kontrollierte Relationstypen
+
+### Übergreifende Modellentscheidungen
+- kontrollierte State-Bezeichner
+
+### Operationalisierung
 - CLI
 - automatische Emission
 - Bundle-/Manifest-Sichtbarkeit
