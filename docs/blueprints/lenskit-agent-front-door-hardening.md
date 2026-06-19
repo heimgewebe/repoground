@@ -115,7 +115,7 @@ oder Patch-Automat zu werden.
 | Bundle Surface Validation | Surface-/Link-Konsistenzdiagnose | `pass` bedeutet weder `claims_true` noch `forensic_ready` |
 | Retrieval Eval / Miss Taxonomy | Retrieval-Diagnostik | beweist keine semantische Vollständigkeit |
 | Primary Lenses | `entrypoints`, `core`, `interfaces`, `data_models`, `pipelines`, `ui`, `guards` | Focus-Overlay; keine neuen IDs in diesem Plan |
-| Primary Lens Audit | deterministische Erklärung der bestehenden infer_lens-Heuristik | Contract/Core/Tests vorhanden; keine neue Primary Lens, keine semantische Wichtigkeit, keine automatische Review-Priorität |
+| Primary Lens Audit | deterministische Erklärung der bestehenden infer_lens-Heuristik | Contract/Core/Tests vorhanden; keine neue Primary Lens, keine semantische Wichtigkeit, keine automatische Review-Priorität, keine automatische Bundle-Emission |
 
 ### 3.2 Noch nicht als stabile Repo-Fläche vorhanden
 
@@ -715,10 +715,10 @@ zu verändern.
 ersetzen.
 
 **Regelwerk:** Der Facet-Contract muss die in `docs/architecture/lens-model.md`
-festgelegten Schichtengrenzen und Negativsemantiken einhalten.
+festgelegten Schichtengrenzen, Confidence Classes und Negativsemantiken einhalten.
 
-**Erste Kandidaten:** `contract`, `artifact_surface`, `diagnostic`, `retrieval`,
-`claim_boundary`, `security`, `test_guard`.
+**Erste Kandidaten, nicht finale Taxonomie:** `contract`, `artifact_surface`,
+`diagnostic`, `retrieval`, `claim_boundary`, `security`, `test_guard`.
 
 **Planungskandidaten:**
 
