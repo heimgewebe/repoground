@@ -693,13 +693,17 @@ prüfbar machen, ohne IDs oder Prioritäten zu ändern.
 - `merger/lenskit/tests/test_primary_lens_audit.py`
 
 **Bewusst nicht Teil des abgeschlossenen Slices:**
+
 - automatische Bundle-Emission
 - CLI-Anschluss
+
 Diese Anschlüsse werden durch den Status nicht als notwendige Folgearbeiten
 festgelegt.
-**Unveränderte Invarianten:**
-- `LENS_IDS` bleibt unverändert
-- `infer_lens()` und seine bestehende Prioritätslogik bleiben unverändert
+
+**Im abgeschlossenen Slice unverändert:**
+
+- `LENS_IDS`
+- `infer_lens()` und seine bestehende Prioritätslogik
 
 **Output-Grenze:** Pfad, Primary Lens, matched rule und Negativsemantik; keine Aussage zu
 semantischer Wichtigkeit, Review-Priorität oder vollständigem Kontext.
