@@ -184,4 +184,4 @@ Deferred:
 
 The validator performs no I/O, holds no global state, and reuses the existing Required Reading resolution rather than re-deriving it.
 
-`available_roles` is supplied explicitly. When omitted, only required and recommended roles are treated as known, and any other declared role is conservatively warned. The trace does not infer roles from the Bundle Manifest; that is later CLI / Entry Manifest work, and the `ArtifactRole` enum is not extended here.
+`available_roles` is supplied explicitly. When omitted, only required and recommended roles are treated as known, and any other declared role is conservatively warned. The trace does not infer roles from the Bundle Manifest. Bundle-aware CLI integration or Agent Entry Manifest consumption remains deferred, and the `ArtifactRole` enum is not extended here.

@@ -585,7 +585,8 @@ CLI-Lesepfad sind implementiert.
 - `merger/lenskit/contracts/required-reading-protocol.v1.schema.json`
 - `merger/lenskit/core/required_reading.py`
 - `merger/lenskit/tests/test_required_reading_protocol.py`
-- tatsächlicher CLI-Pfad für `agent-consumption required`
+- `merger/lenskit/cli/cmd_agent_consumption.py`
+- `merger/lenskit/cli/main.py`
 **Weiterhin offen:**
 - harte Durchsetzung in Consumer- oder Export-Gates
 - automatische Bundle-Integration
@@ -631,7 +632,8 @@ Exit-Code-Policy, fokussierte Tests und CLI sind implementiert.
 - `merger/lenskit/contracts/agent-consumption-trace.v1.schema.json`
 - `merger/lenskit/core/agent_consumption_validate.py`
 - `merger/lenskit/tests/test_agent_consumption_trace.py`
-- tatsächlicher CLI-Pfad für `validate-trace`
+- `merger/lenskit/cli/cmd_agent_consumption.py`
+- `merger/lenskit/cli/main.py`
 - `merger/lenskit/tests/test_cli_agent_consumption.py`
 **Weiterhin offen:**
 - automatische Bundle-Emission
@@ -721,7 +723,11 @@ merger/lenskit/tests/test_lens_facets.py
 ```
 
 **Regeln:** mehrere Facets pro Datei; genau eine Primary Lens; Facets sind Navigation;
-jedes Facet nennt `source_rule`, Confidence-Klasse und Negativsemantik.
+jedes Facet nennt `source_rule`, eine Ableitungsart und Negativsemantik.
+- jede Facet-Zuordnung drückt eine Ableitungsart aus: `direct`, `derived` oder `heuristic`.
+Die Ableitungsart beschreibt die Entstehungsweise der Zuordnung und keinen
+Confidence Score. Der konkrete JSON-Feldname bleibt dem
+Facet-Model-v1-Contract vorbehalten.
 
 **Akzeptanz:** Facets sind deterministisch aus repo-belegten Regeln ableitbar und werden
 nicht als semantische Wahrheit oder Review-Priorität behandelt.
@@ -987,8 +993,12 @@ Exact shape: see the canonical contract at
 
 ### 15.3 Required Reading Resolver
 
-Exact shape: see the canonical contract at
-`merger/lenskit/contracts/required-reading-protocol.v1.schema.json`.
+Für das Resolver-Ergebnis existiert derzeit kein eigener JSON-Contract.
+Die deterministische Output-Shape wird durch
+`merger/lenskit/core/required_reading.py::resolve_required_reading`
+erzeugt und durch
+`merger/lenskit/tests/test_required_reading_protocol.py`
+abgesichert.
 
 ### 15.4 Answer Compliance
 
