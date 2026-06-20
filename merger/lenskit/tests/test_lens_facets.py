@@ -1,5 +1,6 @@
+import ast
 import json
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -356,6 +357,45 @@ def test_windows_drive_is_host_independent():
         _normalize_path("c:/foo.schema.json")
 
 
+def test_rejects_pure_windows_relative_path():
+    # A PureWindowsPath must NOT be silently coerced to POSIX via as_posix().
+    with pytest.raises(TypeError):
+        _normalize_path(PureWindowsPath(r"a\b"))
+
+
+def test_rejects_pure_windows_drive_path():
+    with pytest.raises(TypeError):
+        _normalize_path(PureWindowsPath("C:/foo"))
+
+
+def test_accepts_pure_posix_path():
+    assert _normalize_path(PurePosixPath("a/b")) == "a/b"
+
+
+def test_windows_string_and_path_object_are_both_rejected():
+    # The string form trips the backslash rule (ValueError); the Windows path
+    # object trips the type gate (TypeError). Neither yields a coerced "a/b".
+    with pytest.raises(ValueError):
+        _normalize_path(r"a\b")
+    with pytest.raises(TypeError):
+        _normalize_path(PureWindowsPath(r"a\b"))
+
+
+def test_fixture_and_retrieval_segments_are_exact():
+    # Observable behavior: only the exact segment matches, not a substring.
+    assert infer_facets("myfixtures/test_x.py") == [
+        {
+            "path": "myfixtures/test_x.py",
+            "facet": "test",
+            "source_rule": "test_module_marker",
+            "derivation_type": V1_DERIVATION_TYPE,
+            "does_not_establish": list(DOES_NOT_ESTABLISH),
+        }
+    ]  # "myfixtures" is not "fixtures" -> still a test
+    assert infer_facets("src/myretrieval/data.json") == []  # not the retrieval segment
+    assert [i["facet"] for i in infer_facets("src/retrieval/data.json")] == ["retrieval"]
+
+
 @pytest.mark.parametrize("bad_type", [None, 123, 1.5, object(), ["a"], {"a": 1}])
 def test_core_rejects_non_path_types(bad_type):
     with pytest.raises(TypeError):
@@ -374,16 +414,25 @@ def test_accepts_str_and_purepath_objects():
     assert str_report == path_report == pure_report
 
 
-def test_no_private_lens_audit_import():
-    # Guard: the facet test must not couple to lens_audit (esp. its private
-    # normalizer). Scan only real import lines so this assertion does not
-    # self-trip on the module name appearing in test prose.
-    source = Path(__file__).read_text(encoding="utf-8")
-    import_lines = [
-        line for line in source.splitlines()
-        if line.strip().startswith(("import ", "from "))
-    ]
-    assert not any("lens_audit" in line for line in import_lines)
+def _imports_lens_audit(py_path: Path) -> bool:
+    """AST check: does the module import anything from/as lens_audit?"""
+    tree = ast.parse(py_path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            if any("lens_audit" in alias.name for alias in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module and "lens_audit" in node.module:
+                return True
+    return False
+
+
+def test_facet_module_does_not_import_lens_audit():
+    # AST guard (robust to multiline/aliased imports): neither the producer nor
+    # this test may couple to lens_audit, especially its private _normalize_path.
+    core = Path(__file__).parent.parent / "core" / "lens_facets.py"
+    assert not _imports_lens_audit(core)
+    assert not _imports_lens_audit(Path(__file__))
 
 
 # --------------------------------------------------------------------------- #

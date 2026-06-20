@@ -1,12 +1,13 @@
 name: Lens Model
 
-# Path-scoped blocking gate for the deterministic lens model surfaces: the
-# Primary Lens (lenses.py), the Primary Lens Audit (lens_audit.py) and the
-# Facet Model (lens_facets.py) together with their contracts and tests. Runs
-# only when those surfaces change. jsonschema is installed so the contract
-# tests run here rather than skip (portable runtimes may still degrade).
-# Distinct from the ruff lint (lint.yml) and the contract lint
-# (anti-hallucination-lint.yml).
+# Failure-enforcing, path-scoped CI gate for the deterministic lens model
+# surfaces: the Primary Lens (lenses.py), the Primary Lens Audit (lens_audit.py)
+# and the Facet Model (lens_facets.py) together with their contracts and tests.
+# The job fails the run on any failing step; whether that blocks merge depends on
+# branch-protection configuration, which this workflow does not assert. Runs only
+# when those surfaces change. jsonschema is installed so the contract tests run
+# here rather than skip (portable runtimes may still degrade). Distinct from the
+# ruff lint (lint.yml) and the contract lint (anti-hallucination-lint.yml).
 
 on:
   push:
@@ -23,6 +24,7 @@ on:
       - "docs/architecture/lens-model.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
+      - "pytest.ini"
       - ".github/workflows/lens-model.yml"
   pull_request:
     branches: [ "main", "master" ]
@@ -38,6 +40,7 @@ on:
       - "docs/architecture/lens-model.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
+      - "pytest.ini"
       - ".github/workflows/lens-model.yml"
 
 permissions:
@@ -81,7 +84,7 @@ jobs:
           print("lens-facet.v1 schema: meta-valid")
           PY
 
-      - name: Run lens model tests (blocking)
+      - name: Run lens model tests
         run: |
           python -m pytest -q \
             merger/lenskit/tests/test_lenses.py \

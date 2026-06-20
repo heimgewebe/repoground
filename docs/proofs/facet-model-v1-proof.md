@@ -77,7 +77,7 @@ What was not ideal and was corrected in the hardening pass:
 | --- | --- | --- |
 | v1 facet taxonomy | `contract`, `test`, `retrieval` | repo-derived from controlled signals |
 | Excluded candidates | `artifact_surface`, `diagnostic`, `claim_boundary`, `security`, `uncertainty`, `guard` (the guard half of `test_guard`) | new decision (deferred) |
-| Input model / types | repo-relative path; accepts only `str` or `PurePath`, else `TypeError` | repo-conventional + hardening |
+| Input model / types | repo-relative path; accepts only `str` or `PurePosixPath`, else `TypeError` (a `PureWindowsPath` is rejected, not coerced) | repo-conventional + hardening |
 | Target identity | host-independent canonical repo-relative POSIX path | new decision (hardened grammar) |
 | Report vs single assignment | aggregated assignment report with per-`(path, facet)` items | repo-conventional (mirrors primary-lens-audit) |
 | Root kind / version | `lenskit.lens_facet_report` / `1.0` | repo-conventional |
@@ -121,11 +121,13 @@ name-based facet would risk a safety verdict), and the `guard` half of
 
 ## Path identity
 
-Accepted runtime types: `str` and `PurePath` (incl. `Path`); any other type
-raises `TypeError`. A valid path is the host-independent canonical
-repo-relative POSIX form. The grammar is enforced identically in core and schema
-and **never silently normalizes** — non-canonical input is rejected, not
-rewritten:
+Accepted runtime types: `str` and `PurePosixPath` (on POSIX hosts `Path` is a
+`PurePosixPath`); any other type raises `TypeError`. In particular a
+`PureWindowsPath` is **rejected with `TypeError`**, not coerced to POSIX via
+`as_posix()` (which would silently turn `a\b` into `a/b`). A valid path is the
+host-independent canonical repo-relative POSIX form. The grammar is enforced
+identically in core and schema and **never silently normalizes** — non-canonical
+input is rejected, not rewritten:
 
 - rejected: empty/whitespace, leading `/`, trailing `/`, `./a`, `a/./b`,
   `a//b`, `.`/`..` components, backslash, Windows drive prefix (`C:/`, `c:/`).
@@ -142,7 +144,9 @@ is untouched.
   in a v1 report (reserved by the general lens model for later rules).
 - `does_not_establish` is a fixed, positional tuple (`items` array of `const`s,
   `minItems`/`maxItems` 9, `additionalItems: false`): reordered, missing or extra
-  entries are rejected.
+  entries are rejected. The fixed order is a **canonical serialization order for
+  deterministic output; it carries no rank, priority or importance meaning**
+  (consistent with lens-model §2: list order expresses no semantic priority).
 - Each facet binds to exactly one `source_rule` via `if/then`.
 - The root `items` array sets `uniqueItems: true`.
 - **Producer guarantee:** deduplication by `(path, facet)`; stable sort;
@@ -176,12 +180,15 @@ test_eval_capability.py`); the rules were not widened to manufacture overlaps.
 
 ## CI gate
 
-`.github/workflows/lens-model.yml` is a path-scoped blocking gate that, on
-changes to the lens core/contracts/tests (and the lens-model doc), installs
-`merger/lenskit/requirements.txt` + `requirements-dev.txt`, asserts `jsonschema`
-is importable (so contract tests run rather than skip), meta-validates the
-contract, runs `test_lenses.py` + `test_primary_lens_audit.py` +
-`test_lens_facets.py`, and runs ruff on the facet code and tests.
+`.github/workflows/lens-model.yml` is a failure-enforcing, path-scoped CI gate
+that, on changes to the lens core/contracts/tests, the lens-model doc, the
+requirements files or `pytest.ini`, installs `merger/lenskit/requirements.txt` +
+`requirements-dev.txt`, asserts `jsonschema` is importable (so contract tests run
+rather than skip), meta-validates the contract, runs `test_lenses.py` +
+`test_primary_lens_audit.py` + `test_lens_facets.py`, and runs ruff on the facet
+code and tests. The job fails the run on any failing step; whether that blocks
+merge depends on branch-protection configuration, which this proof does not
+assert (only `pytest.ini` is tracked — there is no nested test config).
 
 ## Validation
 

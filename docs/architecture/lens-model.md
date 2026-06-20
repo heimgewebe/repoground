@@ -441,7 +441,9 @@ Facet Model v1 ist als Contract/Core/Test-Slice entschieden und umgesetzt
 - Zielidentität: hostunabhängige kanonische repo-relative POSIX-Pfadidentität
   (kein Windows-Drive-Präfix, kein führender/abschließender Slash, keine `./`-,
   `..`- oder leeren Komponenten); nicht-kanonische Eingaben werden abgelehnt,
-  nicht still normalisiert; akzeptiert werden nur `str` und `PurePath`;
+  nicht still normalisiert; akzeptiert werden nur `str` und `PurePosixPath`
+  (ein `PureWindowsPath` wird mit `TypeError` abgelehnt, nicht still nach POSIX
+  umgeschrieben);
 - Report-Art: Zuordnungsreport, kein Evaluations-/Coverage-Report; facet-freie
   Pfade erscheinen nicht als Items; `target_count` zählt nur Pfade mit
   mindestens einem Facet;
@@ -455,7 +457,9 @@ Facet Model v1 ist als Contract/Core/Test-Slice entschieden und umgesetzt
   je Facet (keine Regelkollision in v1);
 - Evidence-Policy: keine Pflicht-Evidence in v1;
 - Negativsemantik: die Baseline aus Abschnitt 15 in fester kanonischer
-  Reihenfolge auf Report- und Item-Ebene;
+  Reihenfolge auf Report- und Item-Ebene; diese feste Reihenfolge ist eine
+  kanonische Serialisierungsreihenfolge für deterministische Ausgabe und trägt
+  keine Rang-, Prioritäts- oder Wichtigkeitssemantik (vgl. Abschnitt 2);
 - Summary-Kohärenz ist Producer-Invariante; das Schema prüft Typ und Shape,
   nicht die rechnerische Übereinstimmung mit `items`;
 - Mehrfachzuordnung (mehrere Facets je Pfad) ist Producer-Capability und nicht

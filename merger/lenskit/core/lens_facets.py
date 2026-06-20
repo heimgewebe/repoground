@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from pathlib import Path, PurePath
+from pathlib import PurePosixPath
 from typing import Any, Iterable
 
 KIND = "lenskit.lens_facet_report"
@@ -77,22 +77,24 @@ _RETRIEVAL_SEGMENT = "retrieval"
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
-def _normalize_path(path: str | PurePath) -> str:
+def _normalize_path(path: str | PurePosixPath) -> str:
     """Return the host-independent canonical repo-relative POSIX path.
 
-    Accepts only ``str`` or ``PurePath`` (``Path`` is a ``PurePath``); any other
-    type raises ``TypeError``. The grammar is strict and never silently rewrites
-    its input: ``./a``, ``a/./b``, ``a//b``, a trailing slash, a leading slash,
-    a backslash, a Windows drive prefix, or ``.``/``..`` components are rejected
-    rather than normalized away.
+    Accepts only ``str`` or ``PurePosixPath`` (on POSIX hosts ``Path`` is a
+    ``PurePosixPath``); any other type — notably ``PureWindowsPath`` — raises
+    ``TypeError`` rather than being silently coerced via ``as_posix()``. The
+    grammar is strict and never silently rewrites its input: ``./a``, ``a/./b``,
+    ``a//b``, a trailing slash, a leading slash, a backslash, a Windows drive
+    prefix, or ``.``/``..`` components are rejected rather than normalized away.
     """
     if isinstance(path, str):
         raw = path
-    elif isinstance(path, PurePath):
+    elif isinstance(path, PurePosixPath):
         raw = path.as_posix()
     else:
         raise TypeError(
-            f"lens facet path must be str or PurePath, got {type(path).__name__}"
+            "lens facet path must be str or PurePosixPath, "
+            f"got {type(path).__name__}"
         )
 
     if not raw.strip():
@@ -122,28 +124,26 @@ def _is_contract_schema(posix: str) -> bool:
     return posix.endswith(".schema.json")
 
 
-def _is_test_module(posix: str) -> bool:
+def _is_test_module(name: str, parts: tuple[str, ...]) -> bool:
     """test: the path is itself a test module by controlled filename marker.
 
     Files under a `fixtures` path segment are excluded: a fixture that merely
     happens to be named test_*.py is data, not a test module.
     """
-    parts = Path(posix).parts
     if _FIXTURE_SEGMENT in parts:
         return False
-    name = parts[-1] if parts else ""
     if name.startswith("test_") and name.endswith(_TEST_PREFIX_EXTENSIONS):
         return True
     return name.endswith(_TEST_FILENAME_SUFFIXES)
 
 
-def _is_retrieval_surface(posix: str) -> bool:
+def _is_retrieval_surface(parts: tuple[str, ...]) -> bool:
     """retrieval: the path lives on a controlled `retrieval` surface.
 
     Includes retrieval fixtures (Variant A): the facet marks a retrieval-related
     surface and does not claim production status.
     """
-    return _RETRIEVAL_SEGMENT in Path(posix).parts
+    return _RETRIEVAL_SEGMENT in parts
 
 
 def _facet_item(posix: str, facet: str) -> dict[str, Any]:
@@ -156,7 +156,27 @@ def _facet_item(posix: str, facet: str) -> dict[str, Any]:
     }
 
 
-def infer_facets(path: str | PurePath) -> list[dict[str, Any]]:
+def _infer_facets_normalized(posix: str) -> list[dict[str, Any]]:
+    """Facet assignments for an already-normalized canonical POSIX path.
+
+    POSIX components are derived directly from the canonical string (no
+    ``pathlib`` re-parsing), so classification is host-independent.
+    """
+    parts = tuple(posix.split("/"))
+    name = parts[-1]
+    items: list[dict[str, Any]] = []
+
+    if _is_contract_schema(posix):
+        items.append(_facet_item(posix, "contract"))
+    if _is_test_module(name, parts):
+        items.append(_facet_item(posix, "test"))
+    if _is_retrieval_surface(parts):
+        items.append(_facet_item(posix, "retrieval"))
+
+    return items
+
+
+def infer_facets(path: str | PurePosixPath) -> list[dict[str, Any]]:
     """Return the deterministic facet assignments for a single repo path.
 
     The result is a list of (path, facet) assignment dicts and may be empty: a
@@ -165,20 +185,10 @@ def infer_facets(path: str | PurePath) -> list[dict[str, Any]]:
     facets (cardinality 0..n). This function performs no I/O, reads no file
     content, and does not consult the environment, git or the network.
     """
-    posix = _normalize_path(path)
-    items: list[dict[str, Any]] = []
-
-    if _is_contract_schema(posix):
-        items.append(_facet_item(posix, "contract"))
-    if _is_test_module(posix):
-        items.append(_facet_item(posix, "test"))
-    if _is_retrieval_surface(posix):
-        items.append(_facet_item(posix, "retrieval"))
-
-    return items
+    return _infer_facets_normalized(_normalize_path(path))
 
 
-def produce_facet_report(paths: Iterable[str | PurePath]) -> dict[str, Any]:
+def produce_facet_report(paths: Iterable[str | PurePosixPath]) -> dict[str, Any]:
     """Aggregate deterministic facet assignments over many repo paths.
 
     This is an *assignment* report, not an evaluation/coverage report: only
