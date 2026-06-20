@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections import Counter
 from pathlib import PurePosixPath
@@ -76,13 +77,26 @@ _RETRIEVAL_SEGMENT = "retrieval"
 
 _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
+# ASCII C0 control characters (U+0000–U+001F) and DEL (U+007F). Rejected on the
+# Facet v1 path surface; this is an artifact-boundary decision, not a global
+# Lenskit filename policy (other subsystems handle odd filenames differently).
+_CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _contains_surrogate_code_point(value: str) -> bool:
+    """True if any character is a lone surrogate code point (U+D800–U+DFFF)."""
+    return any(0xD800 <= ord(character) <= 0xDFFF for character in value)
+
 
 def _normalize_path(path: str | PurePosixPath) -> str:
     """Return the host-independent canonical repo-relative POSIX path.
 
     Accepts only ``str`` or ``PurePosixPath``. String inputs are lexically strict
     and are never silently normalized: non-canonical spellings such as ``./a``,
-    ``a/./b`` or ``a//b`` are rejected.
+    ``a/./b`` or ``a//b`` are rejected. ASCII control characters
+    (U+0000–U+001F, U+007F) and lone surrogate code points (U+D800–U+DFFF) are
+    rejected on this Facet v1 path surface; this is an artifact-boundary
+    decision and does not change how other Lenskit subsystems handle filenames.
 
     A ``PurePosixPath`` has already been interpreted by ``pathlib`` before this
     function receives it. Only its ``as_posix()`` representation remains visible,
@@ -107,6 +121,14 @@ def _normalize_path(path: str | PurePosixPath) -> str:
 
     if not raw.strip():
         raise ValueError("lens facet path must not be empty")
+    if _CONTROL_CHARACTER_RE.search(raw):
+        raise ValueError(
+            "lens facet path must not contain ASCII control characters"
+        )
+    if _contains_surrogate_code_point(raw):
+        raise ValueError(
+            "lens facet path must not contain surrogate code points"
+        )
     if "\\" in raw:
         raise ValueError("lens facet path must use POSIX separators")
     if _WINDOWS_DRIVE_RE.match(raw):
@@ -208,7 +230,18 @@ def produce_facet_report(paths: Iterable[str | PurePosixPath]) -> dict[str, Any]
     Assignments are identified by ``(path, facet)``: duplicate inputs and
     repeated runs produce identical output. Items are stably sorted by
     ``(path, facet)``; the order carries no semantic priority.
+
+    ``paths`` must be an iterable of several path values. A single path-like
+    value (``str``, ``bytes``, ``bytearray`` or ``os.PathLike``) is rejected with
+    ``TypeError`` rather than being iterated element-wise — use
+    :func:`infer_facets` for a single path. Generators are supported.
     """
+    if isinstance(paths, (str, bytes, bytearray, os.PathLike)):
+        raise TypeError(
+            "paths must be an iterable of path values, not one path-like value; "
+            "use infer_facets() for a single path"
+        )
+
     seen: set[tuple[str, str]] = set()
     items: list[dict[str, Any]] = []
     for path in paths:

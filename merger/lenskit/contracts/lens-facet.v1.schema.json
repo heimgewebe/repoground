@@ -81,8 +81,8 @@
         "path": {
           "type": "string",
           "minLength": 1,
-          "description": "Host-independent canonical repo-relative POSIX path: no Windows drive prefix, no leading or trailing slash, no empty/'.'/'..' components, no backslash.",
-          "pattern": "^(?!\\s*$)(?![A-Za-z]:)(?!/)(?!.*//)(?!.*/$)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$)).+$"
+          "description": "Host-independent canonical repo-relative POSIX path: no ASCII control characters (U+0000-U+001F, U+007F), no lone surrogate code points (U+D800-U+DFFF), no Windows drive prefix, no leading or trailing slash, no empty/'.'/'..' components, no backslash.",
+          "pattern": "^(?![\\s\\S]*[\\u0000-\\u001F\\u007F\\uD800-\\uDFFF])(?!\\s*$)(?![A-Za-z]:)(?!/)(?!.*//)(?!.*/$)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$)).+$"
         },
         "facet": {
           "type": "string",

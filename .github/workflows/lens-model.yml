@@ -72,7 +72,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Require jsonschema (contract tests must run, not skip)
-        run: python -c "import jsonschema; print('jsonschema', jsonschema.__version__)"
+        run: python -c "import jsonschema; from importlib.metadata import version; print('jsonschema', version('jsonschema'))"
 
       - name: Validate lens-facet schema (draft-07 meta)
         run: |

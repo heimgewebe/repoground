@@ -446,7 +446,21 @@ Facet Model v1 ist als Contract/Core/Test-Slice entschieden und umgesetzt
   nicht rekonstruierbar. Natives `Path` wird auf POSIX nur durch seine
   Typverwandtschaft zu `PurePosixPath` akzeptiert (keine portable
   Cross-Platform-Garantie). `PureWindowsPath` wird weiterhin mit `TypeError`
-  abgelehnt. Das Schema prüft nur die emittierte Stringrepräsentation;
+  abgelehnt. ASCII-Steuerzeichen (U+0000–U+001F, U+007F) und einzelne
+  Surrogate-Codepunkte (U+D800–U+DFFF) werden auf dieser v1-Pfadfläche in Core
+  und Schema abgelehnt; gewöhnliche Nicht-ASCII-Unicode-Namen (z.B. `ü`, `é`,
+  CJK, Emoji) bleiben gültig. Das ist eine Artefakt-Grenzentscheidung der
+  Facet-v1-Fläche, keine globale Lenskit-Dateinamenpolitik: die
+  Source-Acquisition-/Atlas-Schicht dekodiert Git-Ausgaben und Dateinamen
+  bewusst mit `errors="surrogateescape"`
+  (`merger/lenskit/service/source_acquisition.py`,
+  `merger/lenskit/adapters/atlas.py`) und bewahrt dort gerade solche
+  surrogate-escaped Namen. Das Schema prüft nur die emittierte
+  Stringrepräsentation;
+- Aufrufgrenze: `produce_facet_report()` erwartet ein Iterable mehrerer
+  Pfadwerte; ein einzelner pfadartiger Wert (`str`, `bytes`, `bytearray`,
+  `os.PathLike`) wird mit `TypeError` abgelehnt statt zeichenweise iteriert
+  (für einen Einzelpfad: `infer_facets()`); Generatoren werden unterstützt;
 - Report-Art: Zuordnungsreport, kein Evaluations-/Coverage-Report; facet-freie
   Pfade erscheinen nicht als Items; `target_count` zählt nur Pfade mit
   mindestens einem Facet;

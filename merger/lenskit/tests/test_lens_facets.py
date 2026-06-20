@@ -28,8 +28,11 @@ def _schema() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Rule goldset over REAL tracked repo paths. Hand-written (not derived from the
-# producer) so it states what each facet should mean and why others do not.
+# Rule goldset over representative real repo paths (all tracked at authoring
+# time). Hand-maintained: not derived from the producer and not auto-verified
+# against the working tree here, so it states what each facet should mean and why
+# others do not. Real-tree coverage is checked separately by the `git ls-files`
+# projection in the proof, not by this table.
 # --------------------------------------------------------------------------- #
 # (path, {facet: source_rule})
 _REAL_GOLDSET = [
@@ -102,6 +105,36 @@ _VALID_PATHS = [
     "a",
     "a.b",
     "a-b/c_d.schema.json",
+]
+
+
+# Paths rejected for *content* reasons (not grammar): ASCII control characters
+# and lone surrogate code points. Kept in two tables so the failure cause stays
+# explicit and core <-> schema parity is asserted per cause. This is the Facet v1
+# artifact-boundary policy, not a global Lenskit filename policy.
+_ASCII_CONTROL_PATHS = [
+    "a\x00b",  # NUL
+    "a\tb",    # TAB  (U+0009)
+    "a\nb",    # LF   (U+000A)
+    "a\rb",    # CR   (U+000D)
+    "a\x1fb",  # US   (U+001F)
+    "a\x7fb",  # DEL  (U+007F)
+    "a\n",     # a final newline is still a control character
+]
+
+_SURROGATE_PATHS = [
+    "x_\ud800_y.txt",  # first high surrogate
+    "x_\udcff_y.txt",  # a low surrogate
+    "x_\udfff_y.txt",  # last surrogate
+]
+
+# Non-ASCII Unicode that MUST stay valid: the control/surrogate policy must not
+# over-reject ordinary international or emoji filenames.
+_VALID_UNICODE_PATHS = [
+    "docs/überblick.md",
+    "docs/évidence.md",
+    "docs/分析.md",
+    "docs/🔍.md",
 ]
 
 
@@ -391,6 +424,45 @@ def test_string_inputs_are_lexically_strict(raw):
         _normalize_path(raw)
 
 
+# --------------------------------------------------------------------------- #
+# Path content policy (Facet v1 artifact boundary): ASCII control characters and
+# lone surrogate code points are rejected by BOTH the core and the schema, while
+# ordinary non-ASCII Unicode stays valid. Parity is asserted per cause.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("bad_path", _ASCII_CONTROL_PATHS)
+def test_core_rejects_ascii_control_paths(bad_path):
+    with pytest.raises(ValueError, match="control"):
+        _normalize_path(bad_path)
+
+
+@pytest.mark.parametrize("bad_path", _SURROGATE_PATHS)
+def test_core_rejects_surrogate_paths(bad_path):
+    with pytest.raises(ValueError, match="surrogate"):
+        _normalize_path(bad_path)
+
+
+@pytest.mark.parametrize("bad_path", _ASCII_CONTROL_PATHS + _SURROGATE_PATHS)
+def test_schema_rejects_control_and_surrogate_item_paths(bad_path):
+    jsonschema = pytest.importorskip("jsonschema")
+    item = _valid_item()
+    item["path"] = bad_path
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=_report_with_item(item), schema=_schema())
+
+
+@pytest.mark.parametrize("good_path", _VALID_UNICODE_PATHS)
+def test_core_accepts_non_ascii_unicode_paths(good_path):
+    assert _normalize_path(good_path) == good_path
+
+
+@pytest.mark.parametrize("good_path", _VALID_UNICODE_PATHS)
+def test_schema_accepts_non_ascii_unicode_item_paths(good_path):
+    jsonschema = pytest.importorskip("jsonschema")
+    item = _valid_item()
+    item["path"] = good_path
+    jsonschema.validate(instance=_report_with_item(item), schema=_schema())
+
+
 def test_pure_posix_path_has_already_lost_redundant_lexical_spelling():
     # pathlib collapses these spellings while constructing PurePosixPath.
     # _normalize_path() no longer receives the original lexical representation.
@@ -474,6 +546,67 @@ def test_native_path_behavior_matches_host_path_flavor():
     else:
         with pytest.raises(TypeError):
             produce_facet_report([native])
+
+
+# --------------------------------------------------------------------------- #
+# Collection boundary: produce_facet_report() takes an iterable of MANY paths.
+# A single path-like value must be rejected with TypeError, not iterated
+# element-wise (iterating "a/b" would silently yield 'a','/','b', ...).
+# --------------------------------------------------------------------------- #
+class _CustomPathLike:
+    """Minimal os.PathLike that is not a str/bytes subclass."""
+
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def __fspath__(self) -> str:
+        return self._value
+
+
+@pytest.mark.parametrize(
+    "single",
+    [
+        "merger/lenskit/tests/test_lens_facets.py",
+        b"merger/lenskit/tests/test_lens_facets.py",
+        bytearray(b"merger/lenskit/tests/test_lens_facets.py"),
+        PurePosixPath("merger/lenskit/tests/test_lens_facets.py"),
+        Path("merger/lenskit/tests/test_lens_facets.py"),
+        PureWindowsPath("merger/lenskit/tests/test_lens_facets.py"),
+        _CustomPathLike("merger/lenskit/tests/test_lens_facets.py"),
+    ],
+)
+def test_produce_report_rejects_single_path_like_argument(single):
+    with pytest.raises(TypeError, match="iterable"):
+        produce_facet_report(single)
+
+
+def test_produce_report_accepts_generator_input():
+    paths = (
+        p
+        for p in [
+            "merger/lenskit/tests/test_lens_facets.py",
+            "merger/lenskit/retrieval/review_eval.py",
+        ]
+    )
+    report = produce_facet_report(paths)
+    assert report["summary"]["target_count"] == 2
+
+
+def test_produce_report_accepts_empty_iterable():
+    report = produce_facet_report([])
+    assert report["items"] == []
+    assert report["summary"] == {
+        "item_count": 0,
+        "target_count": 0,
+        "facet_counts": {},
+    }
+
+
+def test_produce_report_rejects_invalid_element_inside_iterable():
+    # The collection guard must not mask element-level type errors: a bad element
+    # inside a real iterable still raises from _normalize_path.
+    with pytest.raises(TypeError):
+        produce_facet_report(["merger/lenskit/core/lenses.py", b"bad-element"])
 
 
 def _imports_lens_audit(py_path: Path) -> bool:
