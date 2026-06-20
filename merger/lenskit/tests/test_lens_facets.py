@@ -237,6 +237,40 @@ def test_schema_rejects_duplicate_items():
         jsonschema.validate(instance=report, schema=_schema())
 
 
+def test_schema_rejects_json_equal_items_with_different_key_order():
+    jsonschema = pytest.importorskip("jsonschema")
+
+    first = {
+        "path": "merger/lenskit/contracts/lens-facet.v1.schema.json",
+        "facet": "contract",
+        "source_rule": "contract_schema_suffix",
+        "derivation_type": "direct",
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+    }
+
+    second = {
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+        "derivation_type": "direct",
+        "source_rule": "contract_schema_suffix",
+        "facet": "contract",
+        "path": "merger/lenskit/contracts/lens-facet.v1.schema.json",
+    }
+
+    assert first == second
+    assert list(first) != list(second)
+
+    report = _report_with_item(first)
+    report["items"] = [first, second]
+    report["summary"] = {
+        "item_count": 2,
+        "target_count": 1,
+        "facet_counts": {"contract": 2},
+    }
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=report, schema=_schema())
+
+
 def test_schema_rejects_additional_item_field():
     jsonschema = pytest.importorskip("jsonschema")
     item = _valid_item()
@@ -343,11 +377,28 @@ def test_core_rejects_non_canonical_paths(bad_path):
         _normalize_path(bad_path)
 
 
-def test_core_does_not_silently_normalize():
-    # These must FAIL, not be rewritten to a/b.
-    for noisy in ("./a.schema.json", "a//b.schema.json", "a/./b.schema.json"):
-        with pytest.raises(ValueError):
-            _normalize_path(noisy)
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "./a",
+        "a//b",
+        "a/./b",
+        "a/",
+    ],
+)
+def test_string_inputs_are_lexically_strict(raw):
+    with pytest.raises(ValueError):
+        _normalize_path(raw)
+
+
+def test_pure_posix_path_has_already_lost_redundant_lexical_spelling():
+    # Die Zusammenführung geschieht bereits beim Erzeugen des PurePosixPath.
+    # _normalize_path() erhält die ursprüngliche Zeichenfolge nicht mehr.
+    # Der Test dokumentiert eine Eingabegrenze, keine gewünschte stille Stringnormalisierung.
+    assert _normalize_path(PurePosixPath("./a")) == "a"
+    assert _normalize_path(PurePosixPath("a//b")) == "a/b"
+    assert _normalize_path(PurePosixPath("a/./b")) == "a/b"
+    assert _normalize_path(PurePosixPath("a/")) == "a"
 
 
 def test_windows_drive_is_host_independent():
@@ -407,11 +458,22 @@ def test_produce_report_rejects_non_path_types():
         produce_facet_report([None])
 
 
-def test_accepts_str_and_purepath_objects():
+def test_accepts_str_and_pure_posix_path():
     str_report = produce_facet_report(["merger/lenskit/retrieval/review_eval.py"])
-    path_report = produce_facet_report([Path("merger/lenskit/retrieval/review_eval.py")])
     pure_report = produce_facet_report([PurePosixPath("merger/lenskit/retrieval/review_eval.py")])
-    assert str_report == path_report == pure_report
+    assert str_report == pure_report
+
+
+def test_native_path_behavior_matches_host_path_flavor():
+    native = Path("merger/lenskit/retrieval/review_eval.py")
+
+    if isinstance(native, PurePosixPath):
+        assert produce_facet_report([native]) == produce_facet_report(
+            ["merger/lenskit/retrieval/review_eval.py"]
+        )
+    else:
+        with pytest.raises(TypeError):
+            produce_facet_report([native])
 
 
 def _imports_lens_audit(py_path: Path) -> bool:

@@ -438,17 +438,21 @@ Facet Model v1 ist als Contract/Core/Test-Slice entschieden und umgesetzt
 
 - Taxonomie: kontrollierte v1-Facets `contract`, `test`, `retrieval`
   (bewusst unvollständig);
-- Zielidentität: hostunabhängige kanonische repo-relative POSIX-Pfadidentität
-  (kein Windows-Drive-Präfix, kein führender/abschließender Slash, keine `./`-,
-  `..`- oder leeren Komponenten); nicht-kanonische Eingaben werden abgelehnt,
-  nicht still normalisiert; akzeptiert werden nur `str` und `PurePosixPath`
-  (ein `PureWindowsPath` wird mit `TypeError` abgelehnt, nicht still nach POSIX
-  umgeschrieben);
+- Zielidentität: hostunabhängige kanonische repo-relative POSIX-Pfadidentität.
+  Stringeingaben werden lexikalisch streng geprüft und nicht still normalisiert
+  (ungültig sind z.B. `./a`, `a/./b`, `a//b`, Backslashes, Windows-Drive-Präfixe).
+  Bei `PurePosixPath` ist nur die bereits von `pathlib` interpretierte
+  POSIX-Repräsentation sichtbar; ursprüngliche redundante Schreibweisen sind
+  nicht rekonstruierbar. Natives `Path` wird auf POSIX nur durch seine
+  Typverwandtschaft zu `PurePosixPath` akzeptiert (keine portable
+  Cross-Platform-Garantie). `PureWindowsPath` wird weiterhin mit `TypeError`
+  abgelehnt. Das Schema prüft nur die emittierte Stringrepräsentation;
 - Report-Art: Zuordnungsreport, kein Evaluations-/Coverage-Report; facet-freie
   Pfade erscheinen nicht als Items; `target_count` zählt nur Pfade mit
   mindestens einem Facet;
 - Zuordnungsidentität: `(path, facet)`, deterministisch dedupliziert
-  (Producer-Invariante; das Schema setzt zusätzlich `uniqueItems`);
+  (Producer-Invariante; das Schema setzt zusätzlich `uniqueItems` zur
+  Verhinderung JSON-wertgleicher Duplikate);
 - Ableitungsfeld: der v1-Contract erlaubt ausschließlich `direct` (`const`);
   das allgemeine Modellvokabular `direct`/`derived`/`heuristic` (Abschnitt 5)
   bleibt späteren, strukturell abgeleiteten Regeln vorbehalten; kein Confidence

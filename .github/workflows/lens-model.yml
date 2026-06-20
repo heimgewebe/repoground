@@ -3,6 +3,8 @@ name: Lens Model
 # Failure-enforcing, path-scoped CI gate for the deterministic lens model
 # surfaces: the Primary Lens (lenses.py), the Primary Lens Audit (lens_audit.py)
 # and the Facet Model (lens_facets.py) together with their contracts and tests.
+# Changes to documentation surfaces re-trigger these code and contract checks,
+# but the workflow does not semantically validate the proof or blueprint text.
 # The job fails the run on any failing step; whether that blocks merge depends on
 # branch-protection configuration, which this workflow does not assert. Runs only
 # when those surfaces change. jsonschema is installed so the contract tests run
@@ -22,6 +24,8 @@ on:
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
       - "docs/architecture/lens-model.md"
+      - "docs/proofs/facet-model-v1-proof.md"
+      - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
       - "pytest.ini"
@@ -38,6 +42,8 @@ on:
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
       - "docs/architecture/lens-model.md"
+      - "docs/proofs/facet-model-v1-proof.md"
+      - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
       - "pytest.ini"

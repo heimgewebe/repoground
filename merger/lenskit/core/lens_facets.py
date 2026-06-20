@@ -80,12 +80,13 @@ _WINDOWS_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 def _normalize_path(path: str | PurePosixPath) -> str:
     """Return the host-independent canonical repo-relative POSIX path.
 
-    Accepts only ``str`` or ``PurePosixPath`` (on POSIX hosts ``Path`` is a
-    ``PurePosixPath``); any other type — notably ``PureWindowsPath`` — raises
-    ``TypeError`` rather than being silently coerced via ``as_posix()``. The
-    grammar is strict and never silently rewrites its input: ``./a``, ``a/./b``,
-    ``a//b``, a trailing slash, a leading slash, a backslash, a Windows drive
-    prefix, or ``.``/``..`` components are rejected rather than normalized away.
+    Accepts only ``str`` or ``PurePosixPath``. String inputs are lexically strict
+    and never silently normalized (non-canonical inputs like ``./a``, ``a/./b``,
+    ``a//b``, backslashes, or Windows drive prefixes are rejected rather than
+    rewritten). Native ``Path`` on POSIX hosts is accepted merely due to its
+    type relationship to ``PurePosixPath``; it carries no portable cross-platform
+    guarantee. Any other type — notably ``PureWindowsPath`` — raises ``TypeError``
+    rather than being silently coerced.
     """
     if isinstance(path, str):
         raw = path

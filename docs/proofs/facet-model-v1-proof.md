@@ -121,13 +121,15 @@ name-based facet would risk a safety verdict), and the `guard` half of
 
 ## Path identity
 
-Accepted runtime types: `str` and `PurePosixPath` (on POSIX hosts `Path` is a
-`PurePosixPath`); any other type raises `TypeError`. In particular a
-`PureWindowsPath` is **rejected with `TypeError`**, not coerced to POSIX via
-`as_posix()` (which would silently turn `a\b` into `a/b`). A valid path is the
-host-independent canonical repo-relative POSIX form. The grammar is enforced
-identically in core and schema and **never silently normalizes** — non-canonical
-input is rejected, not rewritten:
+Accepted runtime types: `str` and `PurePosixPath`. String inputs are lexically
+strict and never silently normalized (non-canonical inputs like `./a` or `a//b`
+are rejected). For `PurePosixPath`, only the already-interpreted POSIX
+representation from `pathlib` is visible; earlier redundant spellings cannot be
+reconstructed. Native `Path` on POSIX hosts is accepted merely due to its type
+relationship to `PurePosixPath`; it carries no portable cross-platform guarantee.
+In particular, `PureWindowsPath` (and native `Path` on Windows) is
+**rejected with `TypeError`**. The grammar is enforced in core, while the
+schema checks only the emitted string representation:
 
 - rejected: empty/whitespace, leading `/`, trailing `/`, `./a`, `a/./b`,
   `a//b`, `.`/`..` components, backslash, Windows drive prefix (`C:/`, `c:/`).
@@ -152,7 +154,7 @@ is untouched.
 - **Producer guarantee:** deduplication by `(path, facet)`; stable sort;
   coherent summary counters.
 - **Schema guarantee:** strict shape, controlled vocabulary, fixed bindings, and
-  rejection of byte-identical duplicate items.
+  rejection of duplicate items according to JSON value equality (`uniqueItems`).
 - **Remaining draft-07 limit:** the schema does not (and cannot) recompute the
   summary counters against `items`, nor prove arbitrary semantic key coherence;
   that remains a producer invariant, asserted directly in the tests.
@@ -167,7 +169,7 @@ no facet is not emitted and is indistinguishable from a path never passed in.
 
 ## Repo projection (real, tracked tree via `git ls-files`)
 
-- tracked paths: 567
+- tracked paths: 568
 - facet items: 273
 - facet targets: 273
 - facet counts: `contract` 51, `test` 200, `retrieval` 22
@@ -195,7 +197,7 @@ assert (only `pytest.ini` is tracked — there is no nested test config).
 Commands actually executed (Python 3.11 locally; `jsonschema` 4.26, `pytest`,
 `ruff` 0.15.8 installed):
 
-- `python -m pytest merger/lenskit/tests/test_lens_facets.py -q` → 110 passed
+- `python -m pytest merger/lenskit/tests/test_lens_facets.py -q` → 121 passed
 - `python -m pytest test_lenses.py test_primary_lens_audit.py test_lens_facets.py -q` → passed
 - `python -m pytest test_contract_version_guards.py test_link_integrity.py -q` → passed
 - `python -m pytest test_anti_hallucination_lint.py -q` → passed (contracts dir green incl. hardened schema)
