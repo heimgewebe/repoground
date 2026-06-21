@@ -58,7 +58,7 @@ What was right and is preserved: define the normative lens model first; keep
 Primary Lens single-label and facets strictly additive (0..n); build no Lens
 Cards / Relations / retrieval integration before the contract; defer open terms
 (`uncertainty`, `claim_boundary`, `security`); separate `derivation_type` from
-confidence language; keep the task `in-progress` during the draft.
+confidence language; keep the task `in-progress` until merge and post-merge task reconciliation.
 
 What was not ideal and was corrected in the hardening pass:
 
@@ -325,6 +325,6 @@ outside the checked surfaces; or that facets are consumed anywhere (no bundle
 emission, no CLI, no `possible_facets` population, no Lens Cards). The `test`
 facet does not assert runner collection, execution, pass, or coverage.
 
-The draft PR presents the smallest evidenced Facet Model v1 slice for review.
+This PR presents the smallest evidenced Facet Model v1 slice for review.
 Merge approval, task completion, consumer integration and Lens Cards remain a
 separate review and reconciliation step.

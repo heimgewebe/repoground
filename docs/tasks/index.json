@@ -253,7 +253,7 @@
       "id": "TASK-LENS-FACET-001",
       "title": "Facet Model v1 (Contract/Core/Tests)",
       "status": "in-progress",
-      "description": "Add a deterministic, additive Facet Model v1 as a contract/core/test slice. Introduces three controlled v1 facets (contract, test, retrieval), each derived from a single controlled path/suffix source_rule with derivation_type direct only. Facets are additive navigation view-axes (cardinality 0..n): exactly one Primary Lens remains, LENS_IDS and infer_lens() are unchanged, and possible_facets stays an empty placeholder. The lens-family negative-semantics baseline is enforced at report and item level. The taxonomy is deliberately small; artifact_surface, diagnostic, claim_boundary, security, uncertainty and the guard half of test_guard are deferred with reasons. Non-goals: CLI, bundle/manifest emission, Lens Cards, Relations/States, retrieval integration, and any review/security/impact verdicts. Status is in-progress: a draft PR is not a merged completion.",
+      "description": "Add a deterministic, additive Facet Model v1 as a contract/core/test slice. Introduces three controlled v1 facets (contract, test, retrieval), each derived from a single controlled path/suffix source_rule with derivation_type direct only. Facets are additive navigation view-axes (cardinality 0..n): exactly one Primary Lens remains, LENS_IDS and infer_lens() are unchanged, and possible_facets stays an empty placeholder. The lens-family negative-semantics baseline is enforced at report and item level. The taxonomy is deliberately small; artifact_surface, diagnostic, claim_boundary, security, uncertainty and the guard half of test_guard are deferred with reasons. Non-goals: CLI, bundle/manifest emission, Lens Cards, Relations/States, retrieval integration, and any review/security/impact verdicts. Status remains in-progress until merge and post-merge task reconciliation.",
       "evidence": [
         "merger/lenskit/contracts/lens-facet.v1.schema.json",
         "merger/lenskit/core/lens_facets.py",
@@ -261,7 +261,7 @@
         "docs/proofs/facet-model-v1-proof.md"
       ],
       "missing_evidence": [
-        "Draft PR only; not merged. Merge approval and consumer integration are out of scope.",
+        "Merge confirmation and post-merge task reconciliation are pending; consumer integration remains out of scope.",
         "Taxonomy is intentionally partial (3 of the candidate facets); the rest are deferred by decision.",
         "No CLI, bundle emission, possible_facets population, Lens Cards, Relations or retrieval integration."
       ]
