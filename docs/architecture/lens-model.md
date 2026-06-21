@@ -511,8 +511,8 @@ Weiterhin offen (nicht in v1 entschieden):
 - keine neuen Primary Lenses
 - keine Änderung an `infer_lens()`
 - keine gemeinsame Rule Engine
-- kein Facet-Contract
-- kein Facet-Code
+- keine vollständige Facet-Taxonomie über die v1-Facets `contract`, `test` und `retrieval` hinaus
+- keine Befüllung von `possible_facets` und keine Consumer-Integration des Facet Reports
 - keine Lens Cards
 - keine Relationsimplementierung
 - kein CLI
