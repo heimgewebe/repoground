@@ -44,59 +44,96 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Verify 'uses:' pins for heimgewebe/contracts
+      - name: Verify 'uses:' pins for heimgewebe/contracts-mirror
         env:
-          REQUIRED_REPO: "heimgewebe/contracts/.github/workflows/contracts-ajv-reusable.yml"
-          REQUIRED_REF: "contracts-v1"
+          REQUIRED_REPO: "heimgewebe/contracts-mirror/.github/workflows/contracts-ajv-reusable.yml"
+          REQUIRED_REF: "6fd5c239d6fa1fb6b280fc4742b2007a8cd9f5c0"
         run: |
           set -euo pipefail
           shopt -s extglob
 
-          files=()
-          while IFS= read -r -d '' f; do files+=("$f"); done < \
-            <(git ls-files -z -- '.github/workflows/*.yml' '.github/workflows/*.yaml' || true)
+          WF_FILE=".github/workflows/contracts-validate.yml"
+          [[ -f "$WF_FILE" ]] || { echo "::error::Workflow file not found"; exit 1; }
 
-          [[ ${#files[@]} -gt 0 ]] || { echo "::notice::No workflow files"; exit 0; }
-
-          extract_pair() {
-            local line="$1"
-            line="${line%%#*}"
-            line="${line##+([[:space:]])}"
-            line="${line%%+([[:space:]])}"
-            if [[ "$line" =~ ^(-[[:space:]]*)?uses:[[:space:]]*'([^']+)' ]]; then
-              echo "${BASHREMATCH[2]}"; return 0
-            fi
-            if [[ "$line" =~ ^(-[[:space:]]*)?uses:[[:space:]]*\"([^\"]+)\" ]]; then
-              echo "${BASHREMATCH[2]}"; return 0
-            fi
-            if [[ "$line" =~ ^(-[[:space:]]*)?uses:[[:space:]]*([^[:space:]#]+) ]]; then
-              echo "${BASHREMATCH[2]}"; return 0
-            fi
-            return 1
-          }
-
-          check_pair() {
-            local wf="$1" repo="$2" ref="$3"
-            [[ "$repo" == "$REQUIRED_REPO" ]] || return 0
-            if [[ "$ref" =~ (\$\{|\$\(|\$[A-Za-z_]) ]]; then
-              echo "::error file=$wf::Dynamic ref not allowed: $ref"; return 1
-            fi
-            if [[ "$ref" != "$REQUIRED_REF" ]]; then
-              echo "::error file=$wf::Pin mismatch: expected '$REQUIRED_REF', got '$ref'"; return 1
-            fi
-            return 0
-          }
-
+          uses_count=0
+          contracts_ref_count=0
           mismatches=0
-          for wf in "${files[@]}"; do
-            while IFS= read -r line || [[ -n "$line" ]]; do
-              if pair="$(extract_pair "$line")"; then
-                [[ "$pair" == *"@"* ]] || continue
-                repo="${pair%@*}"; ref="${pair#*@}"
-                if ! check_pair "$wf" "$repo" "$ref"; then mismatches=1; fi
+
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            clean_line="${line%%#*}"
+            trimmed="${clean_line#"${clean_line%%[![:space:]]*}"}"
+
+            if [[ "$trimmed" == uses:* ]]; then
+              val="${trimmed#uses:}"
+              val="${val#"${val%%[![:space:]]*}"}"
+              val="${val%\"}"
+              val="${val#\"}"
+              val="${val%\'}"
+              val="${val#\'}"
+
+              if [[ "$val" == *"heimgewebe/contracts"* ]]; then
+                uses_count=$((uses_count + 1))
+
+                if [[ "$val" != *"@"* ]]; then
+                  echo "::error file=$WF_FILE::uses reference missing @ symbol"
+                  mismatches=1
+                  continue
+                fi
+
+                repo="${val%@*}"
+                ref="${val#*@}"
+
+                if [[ "$repo" != "$REQUIRED_REPO" ]]; then
+                  echo "::error file=$WF_FILE::Expected repository $REQUIRED_REPO but got $repo"
+                  mismatches=1
+                fi
+
+                if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+                  echo "::error file=$WF_FILE::uses ref must be a 40-character lowercase hex SHA, got $ref"
+                  mismatches=1
+                fi
+
+                if [[ "$ref" != "$REQUIRED_REF" ]]; then
+                  echo "::error file=$WF_FILE::uses ref mismatch. Expected $REQUIRED_REF, got $ref"
+                  mismatches=1
+                fi
               fi
-            done < "$wf"
-          done
+            fi
+
+            if [[ "$trimmed" == contracts_ref:* ]]; then
+              contracts_ref_count=$((contracts_ref_count + 1))
+              val="${trimmed#contracts_ref:}"
+              val="${val#"${val%%[![:space:]]*}"}"
+              val="${val%\"}"
+              val="${val#\"}"
+              val="${val%\'}"
+              val="${val#\'}"
+
+              if [[ ! "$val" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::error file=$WF_FILE::contracts_ref must be a 40-character lowercase hex SHA, got $val"
+                mismatches=1
+              fi
+
+              if [[ "$val" != "$REQUIRED_REF" ]]; then
+                echo "::error file=$WF_FILE::contracts_ref mismatch. Expected $REQUIRED_REF, got $val"
+                mismatches=1
+              fi
+            fi
+          done < "$WF_FILE"
+
+          if [[ $uses_count -ne 1 ]]; then
+            echo "::error file=$WF_FILE::Expected exactly 1 uses caller for mirror, found $uses_count"
+            mismatches=1
+          fi
+
+          if [[ $contracts_ref_count -ne 1 ]]; then
+            echo "::error file=$WF_FILE::Expected exactly 1 contracts_ref input, found $contracts_ref_count"
+            mismatches=1
+          fi
+
+          if [[ $mismatches -ne 0 ]]; then
+            exit 1
+          fi
 
           [[ $mismatches -eq 0 ]] || exit 1
           echo "::notice::✅ All version pins validated"
@@ -184,7 +221,8 @@ jobs:
   validate:
     name: "Validate fixtures via reusable workflow"
     needs: [version-sync-check, guard]
-    uses: heimgewebe/contracts/.github/workflows/contracts-ajv-reusable.yml@contracts-v1
+    uses: heimgewebe/contracts-mirror/.github/workflows/contracts-ajv-reusable.yml@6fd5c239d6fa1fb6b280fc4742b2007a8cd9f5c0
     secrets: inherit
     with:
       fixtures_glob: ${{ vars.FIXTURES_GLOB || 'fixtures/**/*.jsonl' }}
+      contracts_ref: 6fd5c239d6fa1fb6b280fc4742b2007a8cd9f5c0
