@@ -1,13 +1,14 @@
 "use strict";
 
-// ECMAScript Unicode-regex parity gate for the Facet v1 path pattern.
+// ECMAScript Unicode-regex parity gate for the Facet v1 and Lens Card v1 path
+// patterns.
 //
 // The JSON-Schema `pattern` is consumed by ECMAScript-based validators. The repo
 // runs Ajv (scripts/jsonl-validate.sh); Ajv compiles `pattern` with the `u` flag
 // by default (unicodeRegExp: true). This test compiles the *actual* schema
-// pattern with `new RegExp(pattern, "u")` — matching that default — and asserts
+// patterns with `new RegExp(pattern, "u")` — matching that default — and asserts
 // the agreed Facet v1 path policy. It does NOT execute Ajv and makes no claim
-// that Ajv validated the schema; it only checks the same regex semantics.
+// that Ajv validated either schema; it only checks the same regex semantics.
 //
 // Under `u`, the surrogate class `[\uD800-\uDFFF]` does not match a valid astral
 // scalar such as an emoji (one code point), but it still matches an unpaired
@@ -21,15 +22,33 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const schemaPath = path.resolve(
+const facetSchemaPath = path.resolve(
   __dirname,
   "../contracts/lens-facet.v1.schema.json",
 );
-const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
-const pattern = schema.definitions.item.properties.path.pattern;
+const cardSchemaPath = path.resolve(
+  __dirname,
+  "../contracts/lens-card.v1.schema.json",
+);
 
-const regex = new RegExp(pattern, "u");
-assert.equal(regex.unicode, true);
+const facetSchema = JSON.parse(fs.readFileSync(facetSchemaPath, "utf8"));
+const cardSchema = JSON.parse(fs.readFileSync(cardSchemaPath, "utf8"));
+const facetPattern = facetSchema.definitions.item.properties.path.pattern;
+const cardPattern = cardSchema.definitions.repo_path.pattern;
+
+assert.equal(
+  cardPattern,
+  facetPattern,
+  "lens-card path pattern must exactly match lens-facet path pattern",
+);
+
+const regexes = [
+  ["lens-facet", new RegExp(facetPattern, "u")],
+  ["lens-card", new RegExp(cardPattern, "u")],
+];
+for (const [, regex] of regexes) {
+  assert.equal(regex.unicode, true);
+}
 
 const cc = (n) => String.fromCharCode(n); // a single UTF-16 code unit
 const cpt = (n) => String.fromCodePoint(n); // a Unicode scalar
@@ -100,19 +119,21 @@ const rejected = [
   "c:/foo",
 ];
 
-for (const value of accepted) {
-  assert.equal(
-    regex.test(value),
-    true,
-    `expected ECMAScript pattern to accept ${JSON.stringify(value)}`,
-  );
-}
-for (const value of rejected) {
-  assert.equal(
-    regex.test(value),
-    false,
-    `expected ECMAScript pattern to reject ${JSON.stringify(value)}`,
-  );
+for (const [label, regex] of regexes) {
+  for (const value of accepted) {
+    assert.equal(
+      regex.test(value),
+      true,
+      `expected ${label} ECMAScript pattern to accept ${JSON.stringify(value)}`,
+    );
+  }
+  for (const value of rejected) {
+    assert.equal(
+      regex.test(value),
+      false,
+      `expected ${label} ECMAScript pattern to reject ${JSON.stringify(value)}`,
+    );
+  }
 }
 
-console.log("lens-facet path pattern: ECMAScript Unicode parity OK");
+console.log("lens-facet/lens-card path patterns: ECMAScript Unicode parity OK");

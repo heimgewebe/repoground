@@ -505,6 +505,31 @@ def render_agent_reading_pack(model: PackModel) -> str:
     )
     lines.append("")
 
+    # ── LENS_CARD_GUIDANCE ───────────────────────────────────────────────
+    lines.append("## LENS_CARD_GUIDANCE")
+    lines.append(
+        "Lens Cards, when available, are optional derived navigation indexes "
+        "(`authority=navigation_index`, `canonicality=derived`)."
+    )
+    lines.append(
+        "They project the existing Primary Lens and Facet Model for a repo path; "
+        "they do not introduce a new Primary Lens or Facet taxonomy."
+    )
+    lines.append(
+        "Lens Cards do not replace `canonical_md`, which remains the only content truth."
+    )
+    lines.append(
+        "A Lens Card does not prove truth, repo understanding, review completeness, "
+        "test sufficiency, runtime correctness, regression absence, safety or "
+        "change impact."
+    )
+    lines.append(
+        "This Reading Pack does not claim that any Lens Card artifact is present in "
+        "the bundle; automatic bundle, manifest or consumer integration is outside "
+        "the current Lens Card v1 slice."
+    )
+    lines.append("")
+
     # ── AGENT_CONSUMPTION_CONTRACT ───────────────────────────────────────
     lines.append("## AGENT_CONSUMPTION_CONTRACT")
     lines.append(

@@ -1,0 +1,196 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/lens-card.v1.schema.json",
+  "title": "Lens Card (lens-card v1.0)",
+  "description": "A single deterministic Lens Card for one accepted repo path. Lens Cards are derived navigation indexes that compose the existing Primary Lens and Facet Model v1. They establish no truth, correctness, completeness, runtime behavior, test sufficiency, regression absence, semantic importance, review priority or change impact.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "authority",
+    "canonicality",
+    "path",
+    "primary_lens",
+    "matched_rule",
+    "facets",
+    "navigation_refs",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "lenskit.lens_card"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "authority": {
+      "const": "navigation_index"
+    },
+    "canonicality": {
+      "const": "derived"
+    },
+    "path": {
+      "$ref": "#/definitions/repo_path"
+    },
+    "primary_lens": {
+      "type": "string",
+      "enum": [
+        "entrypoints",
+        "core",
+        "interfaces",
+        "data_models",
+        "pipelines",
+        "ui",
+        "guards"
+      ]
+    },
+    "matched_rule": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Controlled public explanation returned by the existing Primary Lens Audit API. This explains the current primary-lens projection; it is not a review, safety or impact judgement."
+    },
+    "facets": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/facet"
+      },
+      "description": "Facet Model v1 projection for the same path. Empty is valid when the path carries no controlled v1 facet."
+    },
+    "navigation_refs": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/definitions/navigation_ref"
+      }
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish"
+    }
+  },
+  "definitions": {
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Canonical repo-relative POSIX path using exactly the Facet v1 path pattern.",
+      "pattern": "^(?![\\s\\S]*[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029\\uFEFF])(?![\\s\\S]*[\\uD800-\\uDFFF])(?![\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]+$)(?![A-Za-z]:)(?!/)(?![\\s\\S]*//)(?![\\s\\S]*/$)(?![\\s\\S]*\\\\)(?![\\s\\S]*(?:^|/)\\.\\.?(?:/|$))[\\s\\S]+$"
+    },
+    "facet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facet",
+        "source_rule",
+        "derivation_type"
+      ],
+      "properties": {
+        "facet": {
+          "type": "string",
+          "enum": [
+            "contract",
+            "test",
+            "retrieval"
+          ]
+        },
+        "source_rule": {
+          "type": "string",
+          "enum": [
+            "contract_schema_suffix",
+            "test_module_marker",
+            "retrieval_surface_path"
+          ]
+        },
+        "derivation_type": {
+          "const": "direct",
+          "description": "Lens Card v1 only projects Facet Model v1 direct assignments."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "facet": {
+                "const": "contract"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source_rule": {
+                "const": "contract_schema_suffix"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "facet": {
+                "const": "test"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source_rule": {
+                "const": "test_module_marker"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "facet": {
+                "const": "retrieval"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source_rule": {
+                "const": "retrieval_surface_path"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "navigation_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "target"
+      ],
+      "properties": {
+        "kind": {
+          "const": "repo_path"
+        },
+        "target": {
+          "$ref": "#/definitions/repo_path"
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 9,
+      "maxItems": 9,
+      "additionalItems": false,
+      "description": "Fixed canonical negative-semantics tuple: exactly these nine values in this exact order.",
+      "items": [
+        { "const": "truth" },
+        { "const": "correctness" },
+        { "const": "completeness" },
+        { "const": "runtime_behavior" },
+        { "const": "test_sufficiency" },
+        { "const": "regression_absence" },
+        { "const": "semantic_importance" },
+        { "const": "review_priority" },
+        { "const": "change_impact" }
+      ]
+    }
+  }
+}

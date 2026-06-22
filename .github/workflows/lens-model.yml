@@ -1,53 +1,76 @@
+---
 name: Lens Model
 
 # Failure-enforcing, path-scoped CI gate for the deterministic lens model
-# surfaces: the Primary Lens (lenses.py), the Primary Lens Audit (lens_audit.py)
-# and the Facet Model (lens_facets.py) together with their contracts and tests.
+# surfaces: the Primary Lens (lenses.py), the Primary Lens Audit
+# (lens_audit.py),
+# the Facet Model (lens_facets.py), Lens Cards (lens_cards.py /
+# lens_card_validate.py) and static Lens-Card front-door guidance together with
+# their contracts and tests.
 # Changes to documentation surfaces re-trigger these code and contract checks,
 # but the workflow does not semantically validate the proof or blueprint text.
-# The job fails the run on any failing step; whether that blocks merge depends on
-# branch-protection configuration, which this workflow does not assert. Runs only
-# when those surfaces change. jsonschema is installed so the contract tests run
-# here rather than skip (portable runtimes may still degrade). Node validates the
-# actual schema path pattern with ECMAScript Unicode-regex semantics matching
-# Ajv's default pattern compilation mode (unicodeRegExp); it does not run Ajv.
+# The job fails the run on any failing step; whether that blocks merge depends
+# on branch-protection configuration, which this workflow does not assert. Runs
+# only when those surfaces change. jsonschema is installed so the contract
+# tests run here rather than skip (portable runtimes may still degrade). Node
+# validates the actual schema path pattern with ECMAScript Unicode-regex
+# semantics matching Ajv's default pattern compilation mode (unicodeRegExp); it
+# does not run Ajv.
 # This is the surface Python's re cannot observe. Distinct from the ruff lint
 # (lint.yml) and the contract lint (anti-hallucination-lint.yml).
 
-on:
+"on":
   push:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
     paths:
       - "merger/lenskit/core/lenses.py"
       - "merger/lenskit/core/lens_audit.py"
       - "merger/lenskit/core/lens_facets.py"
+      - "merger/lenskit/core/lens_cards.py"
+      - "merger/lenskit/core/lens_card_validate.py"
+      - "merger/lenskit/core/agent_reading_pack.py"
       - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
       - "merger/lenskit/contracts/lens-facet.v1.schema.json"
+      - "merger/lenskit/contracts/lens-card.v1.schema.json"
       - "merger/lenskit/tests/test_lenses.py"
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
+      - "merger/lenskit/tests/test_lens_cards.py"
+      - "merger/lenskit/tests/test_lens_card_validate.py"
       - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
+      - "merger/lenskit/tests/test_agent_reading_pack.py"
+      - "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py"
       - "docs/architecture/lens-model.md"
       - "docs/proofs/facet-model-v1-proof.md"
+      - "docs/proofs/lens-card-v1-proof.md"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
       - "pytest.ini"
       - ".github/workflows/lens-model.yml"
   pull_request:
-    branches: [ "main", "master" ]
+    branches: ["main", "master"]
     paths:
       - "merger/lenskit/core/lenses.py"
       - "merger/lenskit/core/lens_audit.py"
       - "merger/lenskit/core/lens_facets.py"
+      - "merger/lenskit/core/lens_cards.py"
+      - "merger/lenskit/core/lens_card_validate.py"
+      - "merger/lenskit/core/agent_reading_pack.py"
       - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
       - "merger/lenskit/contracts/lens-facet.v1.schema.json"
+      - "merger/lenskit/contracts/lens-card.v1.schema.json"
       - "merger/lenskit/tests/test_lenses.py"
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
+      - "merger/lenskit/tests/test_lens_cards.py"
+      - "merger/lenskit/tests/test_lens_card_validate.py"
       - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
+      - "merger/lenskit/tests/test_agent_reading_pack.py"
+      - "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py"
       - "docs/architecture/lens-model.md"
       - "docs/proofs/facet-model-v1-proof.md"
+      - "docs/proofs/lens-card-v1-proof.md"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
@@ -88,25 +111,33 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Require jsonschema (contract tests must run, not skip)
-        run: python -c "import jsonschema; from importlib.metadata import version; print('jsonschema', version('jsonschema'))"
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          import jsonschema
 
-      - name: Validate lens-facet schema (draft-07 meta)
+          print("jsonschema", version("jsonschema"))
+          PY
+
+      - name: Validate lens schemas (draft-07 meta)
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
           from jsonschema import Draft7Validator
 
-          schema = json.loads(
-              Path("merger/lenskit/contracts/lens-facet.v1.schema.json").read_text(
-                  encoding="utf-8"
+          for path in [
+              Path("merger/lenskit/contracts/lens-facet.v1.schema.json"),
+              Path("merger/lenskit/contracts/lens-card.v1.schema.json"),
+          ]:
+              schema = json.loads(
+                  path.read_text(encoding="utf-8")
               )
-          )
-          Draft7Validator.check_schema(schema)
-          print("lens-facet.v1 schema: meta-valid")
+              Draft7Validator.check_schema(schema)
+              print(f"{path.name}: meta-valid")
           PY
 
-      - name: Validate lens-facet path pattern in ECMAScript Unicode mode (Node)
+      - name: Validate lens path patterns in ECMAScript Unicode mode (Node)
         run: node merger/lenskit/tests/test_lens_facet_pattern_ecma.js
 
       - name: Run lens model tests
@@ -114,10 +145,21 @@ jobs:
           python -m pytest -q \
             merger/lenskit/tests/test_lenses.py \
             merger/lenskit/tests/test_primary_lens_audit.py \
-            merger/lenskit/tests/test_lens_facets.py
+            merger/lenskit/tests/test_lens_facets.py \
+            merger/lenskit/tests/test_lens_cards.py \
+            merger/lenskit/tests/test_lens_card_validate.py \
+            merger/lenskit/tests/test_agent_reading_pack.py \
+            merger/lenskit/tests/test_agent_reading_pack_usage_rules.py
 
-      - name: Ruff (facet core and tests)
+      - name: Ruff (lens model core and tests)
         run: |
           ruff check \
             merger/lenskit/core/lens_facets.py \
-            merger/lenskit/tests/test_lens_facets.py
+            merger/lenskit/core/lens_cards.py \
+            merger/lenskit/core/lens_card_validate.py \
+            merger/lenskit/core/agent_reading_pack.py \
+            merger/lenskit/tests/test_lens_facets.py \
+            merger/lenskit/tests/test_lens_cards.py \
+            merger/lenskit/tests/test_lens_card_validate.py \
+            merger/lenskit/tests/test_agent_reading_pack.py \
+            merger/lenskit/tests/test_agent_reading_pack_usage_rules.py

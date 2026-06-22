@@ -276,6 +276,7 @@ def test_pack_has_governance_and_sentinel(tmp_path):
         "## REQUIRED_READING_BY_TASK",
         "## WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT",
         "## SIDECAR_USAGE_RULES",
+        "## LENS_CARD_GUIDANCE",
         "## ANSWER_COMPLIANCE_CHECKLIST",
         "## DO_NOT_CLAIM",
         "## ARTIFACT_ROLES",
@@ -326,6 +327,25 @@ def test_pack_front_door_preserves_authority_boundaries(tmp_path):
     assert "`bundle_surface_validation` is surface coherence validation, not claim truth" in body
     assert "`output_health` is a pre-/emit diagnostic signal" in body
     assert "`sqlite_index` is runtime cache/search support, not authority" in body
+
+
+def test_agent_reading_pack_lens_card_guidance_is_static_and_bounded(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    section = _section(body, "LENS_CARD_GUIDANCE")
+
+    assert "optional derived navigation indexes" in section
+    assert "`authority=navigation_index`" in section
+    assert "`canonicality=derived`" in section
+    assert "project the existing Primary Lens and Facet Model" in section
+    assert "do not introduce a new Primary Lens or Facet taxonomy" in section
+    assert "do not replace `canonical_md`" in section
+    assert "does not prove truth" in section
+    assert "repo understanding" in section
+    assert "review completeness" in section
+    assert "change impact" in section
+    assert "does not claim that any Lens Card artifact is present" in section
+    assert "automatic bundle, manifest or consumer integration is outside" in section
 
 
 def test_agent_pack_retrieval_quality_review_mentions_miss_taxonomy(tmp_path):
