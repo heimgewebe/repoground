@@ -245,9 +245,23 @@ Task Context beantwortet:
 
 ## 10. Lens Card
 
-Eine Lens Card ist eine kleine abgeleitete Navigationseinheit. Sie kann später Primary
-Lens, Facets, States, Relations und Evidence-Adressen zusammenführen. Sie bleibt
-regenerierbar und ersetzt keine kanonischen Inhalte.
+Eine Lens Card ist eine kleine abgeleitete Navigationseinheit. Lens Card v1 ist
+als Contract/Core/Validation/Test-Slice umgesetzt und beschreibt genau eine Card
+für genau einen akzeptierten Repo-Pfad. `path` ist die v1-Identität; ein separater
+Card-ID-Begriff wird nicht eingeführt. Eine Batch-Ausgabe ist nur eine
+deterministisch sortierte In-Memory-Liste einzelner Cards, kein Reportcontainer
+und kein Persistenzformat.
+
+Lens Card v1 komponiert bestehende Flächen:
+- `primary_lens` und `matched_rule` stammen aus der öffentlichen Primary-Lens-
+  Erklärfunktion.
+- `facets` sind eine Projektion aus `infer_facets()` mit genau den Feldern
+  `facet`, `source_rule` und `derivation_type`.
+- facet-freie Pfade erzeugen gültige Cards mit `facets: []`.
+- `navigation_refs` enthält genau einen typisierten `repo_path`-Verweis auf
+  denselben `path`.
+
+Cards bleiben regenerierbar und ersetzen keine kanonischen Inhalte.
 
 Authority: `navigation_index`
 Canonicality: `derived`
@@ -255,6 +269,13 @@ Canonicality: `derived`
 Die Authority- und Canonicality-Achsen werden durch das Lens-Modell nicht neu
 definiert. Maßgeblich bleiben die bestehenden Authority-Risk- und
 Two-Layer-Regeln.
+
+Lens Card v1 trägt die feste neunteilige Lens-Familien-Negativsemantik in
+kanonischer Reihenfolge. Der semantische Validator prüft neben der
+Contract-Shape, ob eine Card aus ihrem `path` durch die kontrollierten Producer
+neu berechnet werden kann. Ein Validator-Pass beweist keine Wahrheit, kein
+Repo-Verständnis, keine Reviewvollständigkeit, keine Runtime-Korrektheit, keine
+Testausreichung und keinen Change Impact.
 
 Verbotene unqualifizierte Card-Felder oder Claims:
 - `verdict`
@@ -266,6 +287,18 @@ Verbotene unqualifizierte Card-Felder oder Claims:
 - `impact`
 - `breaks`
 - `requires_fix`
+
+Nicht Teil von Lens Card v1:
+- CLI
+- automatische Emission
+- Bundle-/Manifest-Sichtbarkeit
+- Artifact Role
+- Relations
+- States
+- Task Contexts
+- Evidence-Adressen
+- PR Delta Cards
+- Retrieval-Nutzung
 
 ## 11. Relation Card und Guard Relation
 
@@ -302,7 +335,7 @@ Er beweist kein tatsächliches Lesen und kein Repo-Verständnis.
 | Relation | 0..n | sichtbare Verbindung | keine Kausalität oder Bruchbehauptung |
 | State | 0..n | Evidenz-, Auflösungs- oder Adressierungszustand | kein automatisches Fehlerurteil |
 | Task Context | 0..n je Aufgabe | aufgabenspezifische Navigationsrelevanz | kein Review-Befund |
-| Lens Card | noch nicht festgelegt | kompakte Navigationsprojektion | keine Inhaltsautorität |
+| Lens Card | genau 1 je akzeptiertem Pfad | kompakte Primary-Lens-/Facet-Navigationsprojektion | keine Inhaltsautorität, keine Evidence, kein Review- oder Impact-Urteil |
 
 ## 14. Authority und Canonicality
 
@@ -394,11 +427,16 @@ Implementiert:
 - Facet Model v1: Contract (`lens-facet.v1.schema.json`), Core Producer
   (`lens_facets.py`) und fokussierte Tests, mit der bewusst kleinen Taxonomie
   `contract`/`test`/`retrieval`.
+- Lens Card v1: Single-Card-Contract (`lens-card.v1.schema.json`),
+  deterministischer Einzel-/Batch-Producer (`lens_cards.py`), semantischer
+  Validator (`lens_card_validate.py`) und fokussierte Tests. Eine Card steht für
+  genau einen akzeptierten Pfad und projiziert Primary Lens plus Facets.
 
 Nicht implementiert:
 - vollständige Facet-Taxonomie (v1 deckt nur drei kontrollierte Facets ab)
 - Befüllung von `possible_facets`
-- Lens Cards
+- automatische Lens-Card-Emission
+- Bundle-/Manifest-Sichtbarkeit von Lens Cards
 - Relation Cards
 - Guard Relation Cards
 - automatische Bundle-Emission
@@ -417,7 +455,7 @@ Sequenz:
 Primary Lens Audit v1 — Contract/Core/Tests umgesetzt
 → Lens Model — umgesetzt
 → Facet Model v1 — Contract/Core/Tests umgesetzt (Taxonomie bewusst klein)
-→ Lens Cards v1 — nächster Code-Slice
+→ Lens Cards v1 — Contract/Core/Validation/Tests umgesetzt
 → PR Delta Cards
 → Relation Cards
 → Guard Relation Cards
@@ -491,8 +529,33 @@ Weiterhin offen (nicht in v1 entschieden):
 - Rolle von `claim_boundary` (Facet, State oder Negativgrenze);
 - ob Evidence-Adressen für spätere, abgeleitete Facets Pflicht werden.
 
-### Lens Cards v1
-- Kardinalität und Identität von Lens Cards
+### Lens Cards v1 — entschieden
+
+Lens Card v1 ist als Contract/Core/Validation/Test-Slice entschieden und
+umgesetzt:
+
+- Contract-Einheit: genau eine Lens Card.
+- Kardinalität: genau eine Card pro akzeptiertem Repo-Pfad.
+- Identität: `path`.
+- zusätzliche Card-ID: keine.
+- Primary Lens: Projektion aus der bestehenden öffentlichen Erklärfunktion,
+  inklusive `matched_rule`.
+- Facets: Projektion aus `infer_facets()` mit `facet`, `source_rule` und
+  `derivation_type`; v1 ausschließlich `direct`.
+- facet-freier Pfad: gültige Card mit `facets: []`.
+- Navigation: genau ein `repo_path`-Verweis auf denselben `path`.
+- Authority/Canonicality: `navigation_index` / `derived`.
+- Persistenz, CLI und Bundle-Emission: keine.
+
+Weiterhin offen:
+- automatische Emission
+- Bundle-/Manifest-Sichtbarkeit
+- mögliche Artifact Role
+- Relations
+- States
+- Task Contexts
+- PR Delta Cards
+- Retrieval-Nutzung
 
 ### Relation Cards und Guard Relation Cards
 - kontrollierte Relationstypen
@@ -513,7 +576,7 @@ Weiterhin offen (nicht in v1 entschieden):
 - keine gemeinsame Rule Engine
 - keine vollständige Facet-Taxonomie über die v1-Facets `contract`, `test` und `retrieval` hinaus
 - keine Befüllung von `possible_facets` und keine Consumer-Integration des Facet Reports
-- keine Lens Cards
+- keine automatische Lens-Card-Emission und keine Lens-Card-Consumer-Integration
 - keine Relationsimplementierung
 - kein CLI
 - keine Bundle-Emission

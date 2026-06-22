@@ -121,6 +121,7 @@ Integration oder Runtime-Nutzung.
 | Review Retrieval Goldset / Eval / Miss Taxonomy | versioniertes Review-Messset mit reproduzierbaren Metriken, Baseline und Miss-Diagnostik | diagnostische Oberfläche; beweist weder Review-Vollständigkeit noch ausreichende Retrieval-Qualität |
 | Primary Lenses | `entrypoints`, `core`, `interfaces`, `data_models`, `pipelines`, `ui`, `guards` | Focus-Overlay; keine neuen IDs in diesem Plan |
 | Primary Lens Audit | aufrufbare Contract-/Core-Fläche zur deterministischen Erklärung von `infer_lens()` | Contract/Core/Tests vorhanden; kein CLI, keine automatische Bundle-Emission, keine neue Primary Lens und keine Review-Priorität |
+| Lens Cards v1 | optionale `navigation_index` / `derived` Cards, je genau ein akzeptierter Repo-Pfad | Contract/Core/Validation/Tests vorhanden; keine automatische Bundle-/Manifest-Emission, keine Artifact Role, keine Consumer-Integration, keine Review-/Safety-/Impact-Semantik |
 | Required Reading Protocol | deterministische Auflösung der Pflichtartefakte je Task-Profil | definiert Leseanforderungen; beweist weder tatsächliches Lesen noch Antwortkorrektheit oder Repo-Verständnis |
 | Answer Compliance Contract | maschinenlesbare Selbstdeklaration der für eine Antwort verwendeten Artefakte und Belege | beweist weder tatsächliches Lesen noch Antwortkorrektheit, Vollständigkeit oder Repo-Verständnis |
 | Agent Consumption Trace | deterministische Prüfung deklarierter Nutzung gegen Required-Reading-Erwartungen | beweist kein tatsächliches Lesen, keine Antwortkorrektheit und kein Repo-Verständnis |
@@ -131,7 +132,7 @@ Integration oder Runtime-Nutzung.
 - harte Durchsetzung des Required Reading Protocol in Consumer- oder Export-Gates
 - automatische Bundle-Emission und Consumer-Integration des Agent Entry Manifest
 - automatische Bundle-Emission und Consumer-Integration des Facet Model (v1 Contract/Core/Tests vorhanden)
-- Lens Cards
+- automatische Bundle-/Manifest-Emission und Consumer-Integration von Lens Cards
 - PR Delta Cards
 - Relation Cards
 - Guard Relation Cards
@@ -747,7 +748,18 @@ nicht als semantische Wahrheit oder Review-Priorität behandelt.
 
 ### Slice 12 — Lens Cards v1
 
+**Status:** Contract/Core/Validation/Tests umgesetzt
+(`merger/lenskit/contracts/lens-card.v1.schema.json`,
+`merger/lenskit/core/lens_cards.py`,
+`merger/lenskit/core/lens_card_validate.py`,
+`merger/lenskit/tests/test_lens_cards.py`,
+`merger/lenskit/tests/test_lens_card_validate.py`; Proof
+`docs/proofs/lens-card-v1-proof.md`, Task `TASK-LENS-CARD-001`).
+
 **Ziel:** Kleine agentenlesbare Navigationseinheiten aus Primary Lens und Facets erzeugen.
+Lens Card v1 beschreibt genau eine Card pro akzeptiertem Repo-Pfad; `path` ist
+die v1-Identität. Die Card ist `authority=navigation_index` und
+`canonicality=derived`.
 
 **Planungskandidaten:**
 
@@ -758,13 +770,29 @@ merger/lenskit/core/lens_card_validate.py
 merger/lenskit/tests/test_lens_cards.py
 ```
 
-**Mindestinhalt:** Pfad, Primary Lens, Facets, Navigation-Refs und Negativsemantik.
+**Umgesetzter Mindestinhalt:** Pfad, Primary Lens, `matched_rule`, Facets als
+Projektion aus `infer_facets()` (`facet`, `source_rule`, `derivation_type`),
+genau ein `repo_path`-`navigation_ref` auf denselben Pfad und feste
+neunteilige Negativsemantik.
+
+**Validator-Grenze:** Der Validator prüft Contract-Shape und
+Producer-Kohärenz durch Neuberechnung aus `path`. Er beweist keine Wahrheit,
+kein Repo-Verständnis, keine Reviewvollständigkeit, keine Runtime-Korrektheit,
+keine Testausreichung, keine Sicherheit und keinen Change Impact. Fehlendes
+`jsonschema` wird maschinenlesbar als degradierte Validierung ausgewiesen und
+führt nie zu `pass`.
 
 **Verbotene Verdict-Semantik:** `verdict`, `fix`, `safe`, `covered`, `complete`,
 `impact`, `breaks` dürfen nicht als unqualifizierte Card-Felder eingeführt werden.
 
-**Front-Door-Anschluss:** Sobald Lens Cards existieren, muss das Agent Reading Pack ihre
-Rolle und Authority-Grenze erklären.
+**Front-Door-Anschluss:** Das Agent Reading Pack erklärt statisch Rolle,
+Authority und Grenzen von Lens Cards. Es liest keine Card-Pfade aus einem
+Manifest, behauptet keine Card-Emission und macht Lens Cards nicht zu Required
+Reading.
+
+**Weiterhin offen:** automatische Emission, CLI, Bundle-/Manifest-Sichtbarkeit,
+Artifact Role, Consumer-Integration, Relations, States, Task Contexts, PR Delta
+Cards und Retrieval-Nutzung.
 
 **Akzeptanz:** Cards navigieren zu kanonischen Quellen; sie behaupten weder Bug-Präsenz
 noch Review-Priorität.
@@ -981,10 +1009,12 @@ Authority-Promotion oder Antwortkorrektheitsbehauptung enthalten.
 
 ## 14. Next Unimplemented Architecture Slice
 
-Facet Model v1 ist als Contract/Core/Test-Slice umgesetzt (siehe Slice 11),
+Facet Model v1 und Lens Cards v1 sind als Contract/Core/Test- bzw.
+Contract/Core/Validation/Test-Slices umgesetzt (siehe Slice 11 und Slice 12),
 auf der akzeptierten normativen Grundlage des Deterministic Lens Model.
-Der nächste noch nicht implementierte Architektur-Slice ist damit Lens Cards v1
-(Slice 12): kleine agentenlesbare Navigationskarten aus Primary Lens und Facets.
+Der nächste noch nicht implementierte Architektur-Slice ist damit PR Delta Cards
+v1 (Slice 13): Übersetzung vorhandener PR-Schau-/Delta-Daten in
+Lens-Card-Navigation.
 Dieser Blueprint erzeugt dafür keine neue Task-ID.
 
 ## 15. Nicht-normative Contract- und Output-Skizzen
@@ -1043,21 +1073,8 @@ Exact shape: see the canonical contract at
 
 ### 15.8 Lens Card
 
-```json
-{
-  "kind": "lenskit.lens_card",
-  "version": "1.0",
-  "path": "merger/lenskit/core/agent_reading_pack.py",
-  "primary_lens": "core",
-  "facets": ["artifact_surface", "claim_boundary"],
-  "navigation_refs": [],
-  "does_not_establish": [
-    "semantic_importance",
-    "bug_presence",
-    "review_priority"
-  ]
-}
-```
+Exact shape: see the canonical single-card contract at
+`merger/lenskit/contracts/lens-card.v1.schema.json`.
 
 ### 15.9 Relation Card Negativsemantik
 

@@ -264,6 +264,28 @@
         "Taxonomy is intentionally partial (3 of the candidate facets); the rest are deferred by decision.",
         "No CLI, bundle emission, possible_facets population, Lens Cards, Relations or retrieval integration."
       ]
+    },
+    {
+      "id": "TASK-LENS-CARD-001",
+      "title": "Lens Cards v1 (Contract/Core/Validation/Tests)",
+      "status": "in-progress",
+      "description": "Add deterministic Lens Cards v1 as a contract/core/validation/test slice. Defines one Card per accepted repo path, with path as the v1 identity, authority navigation_index and canonicality derived. Each Card projects the existing public Primary Lens explanation (including matched_rule) plus Facet Model v1 assignments from infer_facets(), with exactly one navigation-only repo_path reference to the same path and fixed Lens-family negative semantics. The semantic validator checks schema shape and producer coherence by recomputing the expected Card from path. Non-goals: review, safety or impact semantics; CLI, bundle, manifest or consumer integration; Relations, States, Task Contexts, PR Delta Cards, possible_facets population and retrieval ranking. Status remains in-progress until merge and post-merge reconciliation.",
+      "evidence": [
+        "merger/lenskit/contracts/lens-card.v1.schema.json",
+        "merger/lenskit/core/lens_cards.py",
+        "merger/lenskit/core/lens_card_validate.py",
+        "merger/lenskit/tests/test_lens_cards.py",
+        "docs/proofs/lens-card-v1-proof.md",
+        "merger/lenskit/tests/test_lens_card_validate.py",
+        "merger/lenskit/core/agent_reading_pack.py",
+        ".github/workflows/lens-model.yml"
+      ],
+      "missing_evidence": [
+        "Merge and post-merge reconciliation are still pending.",
+        "CLI, bundle, manifest and consumer integration are outside this task.",
+        "Relations, States and PR Delta Cards are outside this task.",
+        "Actual agent usefulness or retrieval usefulness is not established."
+      ]
     }
   ]
 }
