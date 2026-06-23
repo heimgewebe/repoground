@@ -1,5 +1,11 @@
 # PR Delta Cards v1 - Gap Report
 
+Status: Der in diesem Bericht definierte Contract/Core/Validation/Test-Slice
+ist inzwischen gemergt und post-merge verifiziert.
+Der historische Gap- und Entscheidungsinhalt bleibt erhalten.
+Der Post-Merge-Nachweis steht in
+docs/proofs/pr-delta-cards-v1-post-merge-proof.md.
+
 ## 1. Vorhandene Delta-Source
 delta.json wird durch die bestehende PR-Schau-Erzeugung produziert.
 Der PR-Delta-Card-Batchproducer akzeptiert ein bereits geladenes,
@@ -12,7 +18,7 @@ Contractvalidierung aus dem Contracts-Verzeichnis geladen.
 `merger/lenskit/core/lens_cards.py` bietet `produce_lens_card(path)`, welche einen gegebenen String-Pfad verarbeitet, den `Facet Model v1` Produzenten `infer_facets` aufruft, den Pfad validiert und eine normierte Lens-Card erstellt.
 
 ## 3. Fehlende Zielimplementierung
-Die zuvor fehlende Zielimplementierung wird in diesem Draft-PR als Contract/Core/Validation/Test-Slice bereitgestellt. Merge und Post-Merge-Reconciliation stehen aus.
+Die zuvor fehlende Zielimplementierung ist als Contract/Core/Validation/Test-Slice auf main vorhanden.
 
 ## 4. Source-Authority und Rollenbeschreibung
 Das Source-Delta ist ein diagnostisches Signal.
@@ -56,8 +62,6 @@ Vollständige Source-aware Producer-Kohärenz: Der Validator erzeugt die Card au
 - Contract-Paritätstests via Node/JS Parität für Pfadpattern.
 
 ## 12. Verbleibende Folgearbeiten
-- Merge ausstehend.
-- Post-Merge-Reconciliation ausstehend.
 - automatische Emission nicht vorhanden.
 - Bundle-/Manifest-Integration nicht vorhanden.
 - Consumer-/Frontend-Nutzung nicht belegt.

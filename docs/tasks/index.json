@@ -289,8 +289,8 @@
     {
       "id": "TASK-PR-DELTA-CARD-001",
       "title": "PR Delta Cards v1 (Contract/Core/Validation/Tests)",
-      "status": "in-progress",
-      "description": "PR Delta Cards v1 ist ein Contract/Core/Validation/Test-Slice. Es projiziert ein bestehendes PR-Schau-Delta kontrolliert auf die bestehende Lens-Card-Produktion. Es behauptet nicht: gemergt, post-merge verifiziert, GitHub-PR-Unterstützung, Commitidentität, Hunks, Symbole, Relationen, Impactanalyse, automatische Emission, Bundle-Integration oder tatsächlichen Agenten-/Retrievalnutzen.",
+      "status": "done",
+      "description": "PR Delta Cards v1 ist ein Contract/Core/Validation/Test-Slice. Belegt: definierter Slice gemergt, definierter Slice post-merge verifiziert. Nicht behauptet: GitHub-PR-Unterstützung als Cardidentität, Commitidentität, Hunks, Symbole, Relationen, Impactanalyse, automatische Emission, Bundle-Integration, tatsächlicher Agenten-/Retrievalnutzen.",
       "evidence": [
         "merger/lenskit/contracts/pr-delta-card.v1.schema.json",
         "merger/lenskit/core/pr_delta_cards.py",
@@ -300,11 +300,10 @@
         "merger/lenskit/core/anti_hallucination_lint.py",
         "merger/lenskit/tests/test_anti_hallucination_lint.py",
         "docs/proofs/pr-delta-cards-gap-report.md",
-        ".github/workflows/lens-model.yml"
+        ".github/workflows/lens-model.yml",
+        "docs/proofs/pr-delta-cards-v1-post-merge-proof.md"
       ],
       "missing_evidence": [
-        "Merge ausstehend",
-        "Post-Merge-Reconciliation ausstehend",
         "automatische Emission nicht vorhanden",
         "Bundle-/Manifest-Integration nicht vorhanden",
         "Consumer-/Frontend-Nutzung nicht belegt",

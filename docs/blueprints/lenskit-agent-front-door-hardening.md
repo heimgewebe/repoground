@@ -807,13 +807,13 @@ noch Review-Priorität.
 
 ### Slice 13 — PR Delta Cards v1
 
-**Status:** im Draft-PR implementiert; Merge und Post-Merge-Reconciliation ausstehend
+**Status:** umgesetzt, gemergt und post-merge verifiziert
 (`merger/lenskit/contracts/pr-delta-card.v1.schema.json`,
 `merger/lenskit/core/pr_delta_cards.py`,
 `merger/lenskit/core/pr_delta_card_validate.py`,
 `merger/lenskit/tests/test_pr_delta_cards.py`,
 `merger/lenskit/tests/test_pr_delta_card_validate.py`; Proof
-`docs/proofs/pr-delta-cards-gap-report.md`, Task `TASK-PR-DELTA-CARD-001`).
+`docs/proofs/pr-delta-cards-gap-report.md`, `docs/proofs/pr-delta-cards-v1-post-merge-proof.md`, Task `TASK-PR-DELTA-CARD-001`).
 
 **Ziel:** Bereits vorhandene PR-Schau-/Delta-Daten kontrolliert auf die Lens-Card-Produktion projizieren.
 

@@ -442,9 +442,7 @@ Implementiert:
   genau einen akzeptierten Pfad. `path` ist die Identität innerhalb eines einzelnen
   Repository-Kontexts. Die Card projiziert Primary Lens plus Facets. Ein akzeptierter
   Repo-Pfad beweist weder Dateiexistenz noch Git-Tracking.
-
-In Umsetzung:
-- PR Delta Cards v1 — im Draft-PR als Contract/Core/Validation/Test-Slice implementiert; Merge und Post-Merge-Reconciliation ausstehend.
+- PR Delta Cards v1 — umgesetzt. Der definierte Slice ist auf main gemergt und post-merge verifiziert.
 
 Nicht implementiert:
 - vollständige Facet-Taxonomie (v1 deckt nur drei kontrollierte Facets ab)
@@ -470,7 +468,7 @@ Primary Lens Audit v1 — Contract/Core/Tests umgesetzt
 → Lens Model — umgesetzt
 → Facet Model v1 — Contract/Core/Tests umgesetzt (Taxonomie bewusst klein)
 → Lens Cards v1 — Contract/Core/Validation/Tests umgesetzt
-→ PR Delta Cards v1 — in Umsetzung
+→ PR Delta Cards v1 — Contract/Core/Validation/Tests umgesetzt
 → Relation Cards
 → Guard Relation Cards
 ```
@@ -570,9 +568,9 @@ Weiterhin offen:
 - Task Contexts
 - Retrieval-Nutzung
 
-### PR Delta Cards v1 — in Umsetzung
+### PR Delta Cards v1 — umgesetzt
 
-PR Delta Cards v1 ist als Contract/Core/Validation/Test-Slice im Draft-PR implementiert:
+Der definierte Slice ist auf main gemergt und post-merge verifiziert.
 
 - Identität: `path` innerhalb eines expliziten Delta-Kontexts.
 - Keine GitHub-PR-Identität oder Commitidentität wird als Wahrheit behauptet.
@@ -582,9 +580,18 @@ PR Delta Cards v1 ist als Contract/Core/Validation/Test-Slice im Draft-PR implem
   noch zugesichert.
 - Flache Projektion der `produce_lens_card(path)`-Werte.
 - Change-Status ist strikt kontrolliert (`added`, `changed`, `removed`).
-- Keine Impact-, Risiko- oder Reviewbehauptungen.
-- Unterstützung bereits geladener pr-schau-delta.v1-konformer Mappings;
-  keine Delta-Datei-, CLI- oder Bundle-Integration.
+- keine automatische Emission.
+- keine Datei-/Bundle-Ladeintegration.
+- keine CLI.
+- kein Consumer.
+- keine Relations.
+- keine Impact-/Risiko-/Reviewaussagen.
+
+Die weiterhin offenen Punkte bleiben weiterhin offen:
+- Relations
+- States
+- Task Contexts
+- Retrieval-Nutzung
 
 ### Relation Cards und Guard Relation Cards
 - kontrollierte Relationstypen
