@@ -309,22 +309,27 @@ def validate_relation_card(
     #    controlled projection of the resolved edge.
     mismatches = [
         {"field": field, "expected": match.get(field), "actual": card.get(field)}
+    mismatches = [
+        {"field": field, "expected": match.get(field), "actual": card.get(field)}
         for field in _PRESERVED_FIELDS
         if card.get(field) != match.get(field)
     ]
-    if mismatches:
+    unexpected_fields = sorted(set(card) - set(match))
+    if mismatches or unexpected_fields:
         checks.append(
             _check(
                 "evidence_preservation",
                 "fail",
-                "Relation Card alters or upgrades the projected source evidence",
+                "Relation Card alters, upgrades or extends the projected source evidence",
                 mode="structural_precheck",
                 engine=ENGINE,
                 reason="evidence_preservation_check",
-                extra={"mismatches": mismatches},
+                extra={
+                    "mismatches": mismatches,
+                    "unexpected_fields": unexpected_fields,
+                },
             )
         )
-    else:
         checks.append(
             _check(
                 "evidence_preservation",
