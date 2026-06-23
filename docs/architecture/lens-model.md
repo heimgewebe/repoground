@@ -442,7 +442,9 @@ Implementiert:
   genau einen akzeptierten Pfad. `path` ist die Identität innerhalb eines einzelnen
   Repository-Kontexts. Die Card projiziert Primary Lens plus Facets. Ein akzeptierter
   Repo-Pfad beweist weder Dateiexistenz noch Git-Tracking.
-- PR Delta Cards v1: Contract/Core/Validation/Test-Slice. Projiziert bestehendes PR-Schau-Delta kontrolliert auf die bestehende Lens-Card-Produktion. Keine Behauptung von GitHub-PR-Identität, Commitidentität, Hunks, Symbole, Relationen, Risiko oder Impact.
+
+In Umsetzung:
+- PR Delta Cards v1 — im Draft-PR als Contract/Core/Validation/Test-Slice implementiert; Merge und Post-Merge-Reconciliation ausstehend.
 
 Nicht implementiert:
 - vollständige Facet-Taxonomie (v1 deckt nur drei kontrollierte Facets ab)
@@ -468,7 +470,7 @@ Primary Lens Audit v1 — Contract/Core/Tests umgesetzt
 → Lens Model — umgesetzt
 → Facet Model v1 — Contract/Core/Tests umgesetzt (Taxonomie bewusst klein)
 → Lens Cards v1 — Contract/Core/Validation/Tests umgesetzt
-→ PR Delta Cards v1 — Contract/Core/Validation/Tests umgesetzt
+→ PR Delta Cards v1 — in Umsetzung
 → Relation Cards
 → Guard Relation Cards
 ```
@@ -568,14 +570,13 @@ Weiterhin offen:
 - Task Contexts
 - Retrieval-Nutzung
 
-### PR Delta Cards v1 — entschieden
+### PR Delta Cards v1 — in Umsetzung
 
-PR Delta Cards v1 ist als Contract/Core/Validation/Test-Slice entschieden und
-umgesetzt:
+PR Delta Cards v1 ist als Contract/Core/Validation/Test-Slice im Draft-PR implementiert:
 
 - Identität: `path` innerhalb eines expliziten Delta-Kontexts.
 - Keine GitHub-PR-Identität oder Commitidentität wird als Wahrheit behauptet.
-- Optionaler Hash wird nur als Provenienz (`source_provenance`) übernommen.
+- Kein Hash als Identität oder Provenienz in v1.
 - Flache Projektion der `produce_lens_card(path)`-Werte.
 - Change-Status ist strikt kontrolliert (`added`, `changed`, `removed`).
 - Keine Impact-, Risiko- oder Reviewbehauptungen.

@@ -807,7 +807,7 @@ noch Review-Priorität.
 
 ### Slice 13 — PR Delta Cards v1
 
-**Status:** Contract/Core/Validation/Tests umgesetzt
+**Status:** im Draft-PR implementiert; Merge und Post-Merge-Reconciliation ausstehend
 (`merger/lenskit/contracts/pr-delta-card.v1.schema.json`,
 `merger/lenskit/core/pr_delta_cards.py`,
 `merger/lenskit/core/pr_delta_card_validate.py`,

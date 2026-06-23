@@ -21,24 +21,27 @@
   ],
   "properties": {
     "kind": {
-      "const": "repolens.pr_delta_card"
+      "const": "lenskit.pr_delta_card"
     },
     "version": {
       "const": "1.0"
     },
     "authority": {
-      "const": "navigation_index"
+      "const": "diagnostic_signal"
     },
     "canonicality": {
-      "const": "derived"
+      "const": "diagnostic"
     },
     "delta_context": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_kind", "repo", "generated_at"],
+      "required": ["source_kind", "source_version", "repo", "generated_at"],
       "properties": {
         "source_kind": {
           "const": "repolens.pr_schau.delta"
+        },
+        "source_version": {
+          "const": 1
         },
         "repo": {
           "type": "string",
@@ -50,46 +53,155 @@
         }
       }
     },
-    "source_provenance": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["source_delta_sha256"],
-      "properties": {
-        "source_delta_sha256": {
-          "type": "string",
-          "pattern": "^[a-f0-9]{64}$"
-        }
-      }
-    },
     "path": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/definitions/repo_path"
     },
     "change_status": {
       "type": "string",
       "enum": ["added", "changed", "removed"]
     },
     "primary_lens": {
-      "type": "string"
+      "type": "string",
+      "enum": [
+        "entrypoints",
+        "core",
+        "interfaces",
+        "data_models",
+        "pipelines",
+        "ui",
+        "guards"
+      ]
     },
     "matched_rule": {
       "type": "string",
       "minLength": 1
     },
     "facets": {
-      "type": "array"
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/definitions/facet"
+      }
     },
     "navigation_refs": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 1
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/definitions/navigation_ref"
+      }
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish"
+    }
+  },
+  "definitions": {
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![\\s\\S]*[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029\\uFEFF])(?![\\s\\S]*[\\uD800-\\uDFFF])(?![\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]+$)(?![A-Za-z]:)(?!/)(?![\\s\\S]*//)(?![\\s\\S]*/$)(?![\\s\\S]*\\\\)(?![\\s\\S]*(?:^|/)\\.\\.?(?:/|$))[\\s\\S]+$"
+    },
+    "facet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "facet",
+        "source_rule",
+        "derivation_type"
+      ],
+      "properties": {
+        "facet": {
+          "type": "string",
+          "enum": [
+            "contract",
+            "test",
+            "retrieval"
+          ]
+        },
+        "source_rule": {
+          "type": "string",
+          "enum": [
+            "contract_schema_suffix",
+            "test_module_marker",
+            "retrieval_surface_path"
+          ]
+        },
+        "derivation_type": {
+          "const": "direct"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "facet": {
+                "const": "contract"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source_rule": {
+                "const": "contract_schema_suffix"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "facet": {
+                "const": "test"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source_rule": {
+                "const": "test_module_marker"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "facet": {
+                "const": "retrieval"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source_rule": {
+                "const": "retrieval_surface_path"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "navigation_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "target"
+      ],
+      "properties": {
+        "kind": {
+          "const": "repo_path"
+        },
+        "target": {
+          "$ref": "#/definitions/repo_path"
+        }
+      }
     },
     "does_not_establish": {
       "type": "array",
-      "minItems": 9,
-      "maxItems": 9,
+      "minItems": 16,
+      "maxItems": 16,
       "additionalItems": false,
-      "description": "Fixed canonical negative-semantics tuple.",
       "items": [
         { "const": "truth" },
         { "const": "correctness" },
@@ -99,7 +211,14 @@
         { "const": "regression_absence" },
         { "const": "semantic_importance" },
         { "const": "review_priority" },
-        { "const": "change_impact" }
+        { "const": "change_impact" },
+        { "const": "github_pull_request_identity" },
+        { "const": "commit_identity" },
+        { "const": "rename_identity" },
+        { "const": "hunk_identity" },
+        { "const": "symbol_impact" },
+        { "const": "causality" },
+        { "const": "risk" }
       ]
     }
   }

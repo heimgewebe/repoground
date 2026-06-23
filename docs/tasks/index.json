@@ -299,6 +299,14 @@
         "merger/lenskit/tests/test_pr_delta_card_validate.py",
         "docs/proofs/pr-delta-cards-gap-report.md",
         ".github/workflows/lens-model.yml"
+      ],
+      "missing_evidence": [
+        "Merge ausstehend",
+        "Post-Merge-Reconciliation ausstehend",
+        "automatische Emission nicht vorhanden",
+        "Bundle-/Manifest-Integration nicht vorhanden",
+        "Consumer-/Frontend-Nutzung nicht belegt",
+        "tatsächlicher Agenten- oder Retrievalnutzen nicht belegt"
       ]
     }
   ]

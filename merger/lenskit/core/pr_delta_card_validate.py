@@ -7,9 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from merger.lenskit.core.dependency_diagnostics import jsonschema_dependency
-from merger.lenskit.core.lens_cards import produce_lens_card
+from merger.lenskit.core.pr_delta_cards import produce_pr_delta_card
 
-KIND = "repolens.pr_delta_card_validation"
+KIND = "lenskit.pr_delta_card_validation"
 VERSION = "1.0"
 ENGINE = "pr_delta_card_validate"
 
@@ -22,8 +22,9 @@ VALIDATOR_DOES_NOT_ESTABLISH = (
     "regression_absence",
     "change_impact",
     "safety",
-    "github_pr_identity",
-    "commit_identity"
+    "github_pull_request_identity",
+    "commit_identity",
+    "source_authenticity",
 )
 
 _SCHEMA_PATH = (
@@ -104,9 +105,11 @@ def _schema_errors(errors: list[Any]) -> list[dict[str, str]]:
 def validate_pr_delta_card(
     card: Mapping[str, Any],
     *,
+    delta_context: Mapping[str, Any],
+    file_entry: Mapping[str, Any],
     schema: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Validate one PR Delta Card formally and against controlled producers."""
+    """Validate one PR Delta Card formally and against concrete source evidence."""
     checks: list[dict[str, Any]] = []
     jsonschema, import_error = _load_jsonschema()
     jsonschema_available = jsonschema is not None
@@ -129,7 +132,7 @@ def validate_pr_delta_card(
     try:
         active_schema = schema if schema is not None else _load_default_schema()
         jsonschema.Draft7Validator.check_schema(active_schema)
-        validator = jsonschema.Draft7Validator(active_schema)
+        validator = jsonschema.Draft7Validator(active_schema, format_checker=jsonschema.FormatChecker())
         errors = list(validator.iter_errors(card))
     except Exception as exc:
         checks.append(
@@ -170,13 +173,13 @@ def validate_pr_delta_card(
     )
 
     try:
-        expected_lens_card = produce_lens_card(card["path"])
+        expected = produce_pr_delta_card(delta_context, file_entry)
     except Exception as exc:
         checks.append(
             _check(
-                "producer_coherence",
+                "source_producer_coherence",
                 "fail",
-                f"could not compute Lens Card from path: {type(exc).__name__}: {exc}",
+                f"could not compute PR Delta Card from source evidence: {type(exc).__name__}: {exc}",
                 mode="structural_precheck",
                 engine=ENGINE,
                 reason="producer_coherence_check",
@@ -185,7 +188,13 @@ def validate_pr_delta_card(
         return _assemble(checks, jsonschema_available=jsonschema_available)
 
     compared_fields = (
+        "kind",
+        "version",
+        "authority",
+        "canonicality",
+        "delta_context",
         "path",
+        "change_status",
         "primary_lens",
         "matched_rule",
         "facets",
@@ -195,18 +204,18 @@ def validate_pr_delta_card(
     mismatches = [
         {
             "field": field,
-            "expected": expected_lens_card[field],
+            "expected": expected[field],
             "actual": card.get(field),
         }
         for field in compared_fields
-        if card.get(field) != expected_lens_card[field]
+        if card.get(field) != expected[field]
     ]
     if mismatches:
         checks.append(
             _check(
-                "producer_coherence",
+                "source_producer_coherence",
                 "fail",
-                "PR Delta Card does not match the controlled Lens Card producer output",
+                "PR Delta Card does not match the controlled producer output from source evidence",
                 mode="structural_precheck",
                 engine=ENGINE,
                 reason="producer_coherence_check",
@@ -216,16 +225,14 @@ def validate_pr_delta_card(
     else:
         checks.append(
             _check(
-                "producer_coherence",
+                "source_producer_coherence",
                 "pass",
-                "PR Delta Card matches the controlled Lens Card producer output",
+                "PR Delta Card matches the controlled producer output from source evidence",
                 mode="structural_precheck",
                 engine=ENGINE,
                 reason="producer_coherence_check",
             )
         )
-
-
 
     return _assemble(checks, jsonschema_available=jsonschema_available)
 

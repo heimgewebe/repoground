@@ -30,21 +30,33 @@ const cardSchemaPath = path.resolve(
   __dirname,
   "../contracts/lens-card.v1.schema.json",
 );
+const deltaSchemaPath = path.resolve(
+  __dirname,
+  "../contracts/pr-delta-card.v1.schema.json",
+);
 
 const facetSchema = JSON.parse(fs.readFileSync(facetSchemaPath, "utf8"));
 const cardSchema = JSON.parse(fs.readFileSync(cardSchemaPath, "utf8"));
+const deltaSchema = JSON.parse(fs.readFileSync(deltaSchemaPath, "utf8"));
 const facetPattern = facetSchema.definitions.item.properties.path.pattern;
 const cardPattern = cardSchema.definitions.repo_path.pattern;
+const deltaPattern = deltaSchema.definitions.repo_path.pattern;
 
 assert.equal(
   cardPattern,
   facetPattern,
   "lens-card path pattern must exactly match lens-facet path pattern",
 );
+assert.equal(
+  deltaPattern,
+  facetPattern,
+  "pr-delta-card path pattern must exactly match lens-facet path pattern",
+);
 
 const regexes = [
   ["lens-facet", new RegExp(facetPattern, "u")],
   ["lens-card", new RegExp(cardPattern, "u")],
+  ["pr-delta-card", new RegExp(deltaPattern, "u")],
 ];
 for (const [, regex] of regexes) {
   assert.equal(regex.unicode, true);
