@@ -126,8 +126,45 @@ jobs:
           python - <<'PY'
           from importlib.metadata import version
           import jsonschema
+          from jsonschema import FormatChecker
+
+          checker = FormatChecker()
+          registered = getattr(checker, "checkers", {})
 
           print("jsonschema", version("jsonschema"))
+          print("date-time format registered:", "date-time" in registered)
+
+          if "date-time" not in registered:
+              raise SystemExit(
+                  "jsonschema date-time format validation is unavailable; "
+                  "install jsonschema[format-nongpl]"
+              )
+
+          probes = {
+              "valid_z": checker.conforms(
+                  "2026-06-21T10:00:00Z",
+                  "date-time",
+              ),
+              "invalid_literal": checker.conforms(
+                  "invalid",
+                  "date-time",
+              ),
+              "timezone_less": checker.conforms(
+                  "2026-06-21T10:00:00",
+                  "date-time",
+              ),
+          }
+
+          print(probes)
+
+          if probes != {
+              "valid_z": True,
+              "invalid_literal": False,
+              "timezone_less": False,
+          }:
+              raise SystemExit(
+                  f"unexpected date-time validation capability: {probes}"
+              )
           PY
 
       - name: Validate lens schemas (draft-07 meta)

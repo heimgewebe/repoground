@@ -163,6 +163,24 @@ class TestSourceContractValidation:
         with pytest.raises(SourceValidationError, match="jsonschema library is required"):
             produce_pr_delta_cards(_valid_source_delta())
 
+    def test_missing_datetime_format_capability_fails_closed(self, monkeypatch):
+        import jsonschema
+
+        class MissingDateTimeFormatChecker:
+            checkers: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            jsonschema,
+            "FormatChecker",
+            MissingDateTimeFormatChecker,
+        )
+
+        with pytest.raises(
+            SourceValidationError,
+            match="date-time format validation is unavailable",
+        ):
+            produce_pr_delta_cards(_valid_source_delta())
+
     def test_deterministic_error_order(self):
         delta = _valid_source_delta()
         del delta["kind"]

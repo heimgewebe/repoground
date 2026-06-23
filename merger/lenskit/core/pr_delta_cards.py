@@ -79,6 +79,18 @@ def _source_schema_errors(errors: list[Any]) -> list[dict[str, str]]:
         for e in ordered
     ]
 
+def _source_format_checker(jsonschema: Any) -> Any:
+    checker = jsonschema.FormatChecker()
+    registered = getattr(checker, "checkers", None)
+
+    if not isinstance(registered, Mapping) or "date-time" not in registered:
+        raise SourceValidationError(
+            "jsonschema date-time format validation is unavailable; "
+            "install jsonschema[format-nongpl]"
+        )
+
+    return checker
+
 def _validate_source_delta(source_delta: Mapping[str, Any]) -> None:
     jsonschema = _load_jsonschema()
     schema = _load_source_schema()
@@ -86,7 +98,10 @@ def _validate_source_delta(source_delta: Mapping[str, Any]) -> None:
     # Check schema itself
     jsonschema.Draft202012Validator.check_schema(schema)
 
-    validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
+    validator = jsonschema.Draft202012Validator(
+        schema,
+        format_checker=_source_format_checker(jsonschema),
+    )
     raw_errors = list(validator.iter_errors(source_delta))
 
     if raw_errors:

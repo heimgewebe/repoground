@@ -171,3 +171,26 @@ class TestPRDeltaCardValidate:
         assert paths == ["$", "$"]
         assert validators == ["required", "required"]
         assert "kind" in errors[0]["message"] or "version" in errors[0]["message"]
+
+    def test_missing_source_format_capability_fails_validation(self, monkeypatch):
+        import jsonschema
+        delta = _valid_source_delta()
+        card = produce_pr_delta_cards(delta)[0]
+
+        class MissingDateTimeFormatChecker:
+            checkers: dict[str, object] = {}
+
+        monkeypatch.setattr(
+            jsonschema,
+            "FormatChecker",
+            MissingDateTimeFormatChecker,
+        )
+
+        result = validate_pr_delta_card(card, source_delta=delta)
+
+        assert result["status"] == "fail"
+        assert any(
+            check["name"] == "source_producer_coherence"
+            and check["status"] == "fail"
+            for check in result["checks"]
+        )
