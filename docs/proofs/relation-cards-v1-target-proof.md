@@ -218,7 +218,7 @@ Ausgeführte Befehle und reale Ergebnisse (lokal, `jsonschema 4.26.0`,
 # 1) Fokussierte Relation-Card-Tests
 python3 -m pytest -q merger/lenskit/tests/test_relation_cards.py \
                      merger/lenskit/tests/test_relation_card_validate.py
-→ 77 passed
+→ 78 passed
 
 # 2) Graphregressionen
 python3 -m pytest -q merger/lenskit/tests/test_architecture_import_graph.py \
@@ -242,7 +242,7 @@ Job: lens-model
 Step: Run lens model tests
 
 Ergebnis:
-546 passed
+547 passed
 # 5) Schema-Metavalidierung (draft-07), inkl. relation-card.v1.schema.json
 → lens-facet/lens-card/pr-delta-card/relation-card: meta-valid
 

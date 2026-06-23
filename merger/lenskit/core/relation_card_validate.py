@@ -305,16 +305,19 @@ def validate_relation_card(
         )
     )
 
-    # 4. Evidence preservation: nothing was altered or upgraded relative to the
-    #    controlled projection of the resolved edge.
+    # 4. Evidence preservation: nothing was altered, upgraded or extended
+    #    relative to the controlled projection of the resolved edge.
     mismatches = [
-        {"field": field, "expected": match.get(field), "actual": card.get(field)}
-    mismatches = [
-        {"field": field, "expected": match.get(field), "actual": card.get(field)}
+        {
+            "field": field,
+            "expected": match.get(field),
+            "actual": card.get(field),
+        }
         for field in _PRESERVED_FIELDS
         if card.get(field) != match.get(field)
     ]
     unexpected_fields = sorted(set(card) - set(match))
+
     if mismatches or unexpected_fields:
         checks.append(
             _check(
@@ -330,6 +333,7 @@ def validate_relation_card(
                 },
             )
         )
+    else:
         checks.append(
             _check(
                 "evidence_preservation",

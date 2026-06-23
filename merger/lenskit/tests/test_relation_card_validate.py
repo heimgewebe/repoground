@@ -301,11 +301,16 @@ class TestEvidencePreservation:
 
         assert val["status"] == "fail"
         assert _check(val, "schema_validation")["status"] == "pass"
+        assert _check(val, "source_schema_validation")["status"] == "pass"
         assert _check(val, "source_producer_coherence")["status"] == "pass"
+
         preservation = _check(val, "evidence_preservation")
         assert preservation["status"] == "fail"
+        assert preservation["mismatches"] == []
         assert preservation["unexpected_fields"] == ["impact"]
 
+
+class TestDependencyLayer:
     def test_missing_jsonschema_fails_closed(self, monkeypatch):
         import sys
 
