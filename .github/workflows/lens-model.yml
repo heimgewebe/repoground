@@ -35,6 +35,7 @@ name: Lens Model
       - "merger/lenskit/contracts/lens-facet.v1.schema.json"
       - "merger/lenskit/contracts/lens-card.v1.schema.json"
       - "merger/lenskit/contracts/pr-delta-card.v1.schema.json"
+      - "merger/lenskit/contracts/pr-schau-delta.v1.schema.json"
       - "merger/lenskit/tests/test_lenses.py"
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
@@ -71,6 +72,7 @@ name: Lens Model
       - "merger/lenskit/contracts/lens-facet.v1.schema.json"
       - "merger/lenskit/contracts/lens-card.v1.schema.json"
       - "merger/lenskit/contracts/pr-delta-card.v1.schema.json"
+      - "merger/lenskit/contracts/pr-schau-delta.v1.schema.json"
       - "merger/lenskit/tests/test_lenses.py"
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
@@ -154,6 +156,19 @@ jobs:
               print(f"{path.name}: meta-valid")
           PY
 
+      - name: Validate source schema (draft-2020-12 meta)
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft202012Validator
+          
+          path = Path("merger/lenskit/contracts/pr-schau-delta.v1.schema.json")
+          schema = json.loads(path.read_text(encoding="utf-8"))
+          Draft202012Validator.check_schema(schema)
+          print(f"{path.name}: meta-valid")
+          PY
+
       - name: Validate lens path patterns in ECMAScript Unicode mode (Node)
         run: node merger/lenskit/tests/test_lens_facet_pattern_ecma.js
 
@@ -167,6 +182,7 @@ jobs:
             merger/lenskit/tests/test_lens_card_validate.py \
             merger/lenskit/tests/test_pr_delta_cards.py \
             merger/lenskit/tests/test_pr_delta_card_validate.py \
+            merger/lenskit/tests/test_pr_schau_delta_schema.py \
             merger/lenskit/tests/test_agent_reading_pack.py \
             merger/lenskit/tests/test_agent_reading_pack_usage_rules.py \
             merger/lenskit/tests/test_cli_agent_pack.py \

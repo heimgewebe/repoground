@@ -1,7 +1,10 @@
 # PR Delta Cards v1 - Gap Report
 
 ## 1. Vorhandene Delta-Source
-Die Delta-Quelle wird vom `pr_schau_bundle.py` Loader bereitgestellt oder existiert als `pr-schau-delta.v1.schema.json` konformes `delta.json`. Es beinhaltet `files[]` mit Dateipfaden, einem `status` (`added`, `changed`, `removed`), sowie Hash- und Lexikal-Heuristik-Werten.
+delta.json wird durch die bestehende PR-Schau-Erzeugung produziert.
+Der PR-Delta-Card-Batchproducer akzeptiert ein bereits geladenes,
+vollständig gegen pr-schau-delta.v1 validiertes Mapping.
+Dieser Slice lädt weder Dateien noch Bundles.
 
 ## 2. Vorhandene Lens-Card-Source
 `merger/lenskit/core/lens_cards.py` bietet `produce_lens_card(path)`, welche einen gegebenen String-Pfad verarbeitet, den `Facet Model v1` Produzenten `infer_facets` aufruft, den Pfad validiert und eine normierte Lens-Card erstellt.
@@ -20,7 +23,9 @@ Genau eine PR Delta Card pro Dateieintrag (`files[]`) in der Source-Delta-Strukt
 
 ## 6. Identitäts- und Provenienzentscheidung
 - **Identität**: `path` innerhalb eines expliziten Delta-Kontexts (`source_kind`, `source_version`, `repo`, `generated_at`). Es ist keine universelle Identität oder GitHub-PR-Identität.
-- **Provenienz**: Keine Hashprovenienz in v1. Es gibt keinen Bundleadapter und keinen verifizierten Bundle-Artefakthash. Ein beliebiger Hash darf nicht als Provenienz ausgegeben werden.
+- **Provenienz**: PR Delta Cards v1 enthalten keine Hashprovenienz.
+Verifizierte Artefakthash-Provenienz bleibt einer späteren
+Bundle-/Manifest-Integration vorbehalten.
 
 ## 7. Outputshape-Entscheidung
 Wir wählen eine flache kontrollierte Projektion.
@@ -28,7 +33,11 @@ Wir projizieren: `path`, `change_status`, `primary_lens`, `matched_rule`, `facet
 Ebenfalls verwenden wir eine eigene feste PR-Delta-Negativsemantik.
 
 ## 8. Inputgrenze
-`produce_pr_delta_cards` akzeptiert ein vollständig formatiertes Standalone-Mapping als Input (`delta.json` Struktur), ohne dabei selbst File-I/O oder Parsing durchzuführen.
+Unterstützung eines bereits geladenen delta.json-konformen Mappings.
+Keine Datei-, CLI- oder Bundle-Integration.
+Der Batchproducer akzeptiert nur vollständige pr-schau-delta.v1-Payloads.
+Die formale Source-Validierung ist Draft-2020-12-basiert.
+Summary-Kohärenz und eindeutige Pfade sind zusätzliche semantische Invarianten.
 
 ## 9. Bewusst ausgeschlossene Felder
 Ausgeschlossen sind alle Judgment- und Impact-Felder: GitHub-PR-Nummer, Base/Head-Commit, Merge-Base, Rename-Identität, Hunks, Zeilenbereiche, Symbole, Kausalität, Impact, `suspicious_patterns` und `affected_chunk_ids`.

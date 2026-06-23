@@ -105,8 +105,7 @@ def _schema_errors(errors: list[Any]) -> list[dict[str, str]]:
 def validate_pr_delta_card(
     card: Mapping[str, Any],
     *,
-    delta_context: Mapping[str, Any],
-    file_entry: Mapping[str, Any],
+    source_delta: Mapping[str, Any],
     schema: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate one PR Delta Card formally and against concrete source evidence."""
@@ -173,7 +172,7 @@ def validate_pr_delta_card(
     )
 
     try:
-        expected = produce_pr_delta_card(delta_context, file_entry)
+        expected = produce_pr_delta_card(source_delta, card.get("path", ""))
     except Exception as exc:
         checks.append(
             _check(
