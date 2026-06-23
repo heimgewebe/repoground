@@ -33,14 +33,14 @@
 - Keine GitHub-PR- oder Commitidentität durch die Card.
 
 ## Ausgeführte Gates
-- **RFC-3339-Capability-Probe**: `python3 -c 'import jsonschema.validators; assert "date-time" in jsonschema.validators.Draft202012Validator.FORMAT_CHECKER.checkers'` — Pass.
-- **Regressionstests**: `python3 -m pytest -q merger/lenskit/tests/test_pr_delta_card_regression.py` — Pass (4/4 passed).
+- **RFC-3339-Capability-Probe**: Exakte RFC-3339-Probe gemäß `.github/workflows/lens-model.yml` — Pass (inkl. Validierung gültiger, ungültiger und zeitzonenloser Daten).
+- **Regressionstests**: `python3 -m pytest -q merger/lenskit/tests/test_anti_hallucination_lint.py::test_pr_delta_cards_lint merger/lenskit/tests/test_pr_delta_cards.py::test_pr_delta_cards_happy_path merger/lenskit/tests/test_pr_delta_card_validate.py::test_pr_delta_card_happy_path merger/lenskit/tests/test_pr_schau_delta_schema.py::test_pr_schau_delta_v1_happy_path` — Pass (4/4 passed).
 - **PR-Delta-Fokustests**: `python3 -m pytest -q merger/lenskit/tests/test_pr_delta_cards.py merger/lenskit/tests/test_pr_delta_card_validate.py merger/lenskit/tests/test_pr_schau_delta_schema.py` — Pass (65/65 passed).
-- **Anti-Hallucination-Lint-Tests**: `python3 -m pytest -q merger/lenskit/tests/test_anti_hallucination.py` — Pass (42/42 passed).
-- **Vollständiger Lens-Model-Lauf**: `python3 -m pytest -q merger/lenskit/tests/test_lenses.py merger/lenskit/tests/test_primary_lens_audit.py merger/lenskit/tests/test_lens_facets.py merger/lenskit/tests/test_lens_cards.py merger/lenskit/tests/test_lens_card_validate.py merger/lenskit/tests/test_pr_delta_cards.py merger/lenskit/tests/test_pr_delta_card_validate.py merger/lenskit/tests/test_pr_schau_delta_schema.py merger/lenskit/tests/test_agent_reading_pack.py merger/lenskit/tests/test_agent_reading_pack_usage_rules.py merger/lenskit/tests/test_cli_agent_pack.py merger/lenskit/tests/test_bundle_manifest_integration.py::test_agent_reading_pack_emitted_schema_valid_and_hashed` — Pass (467 passed).
-- **Schema-Metavalidierung**: `python3 scripts/schema_metavalidate.py merger/lenskit/contracts/pr-delta-card.v1.schema.json` — Pass für Draft 7 und Draft 2020-12.
-- **ECMAScript-Pfadparität**: `node scripts/regex/test_path_unicode_regex.js` — Pass.
-- **Ruff**: `ruff check merger/lenskit/` — Pass.
+- **Anti-Hallucination-Lint-Tests**: `python3 -m pytest -q merger/lenskit/tests/test_anti_hallucination_lint.py` — Pass (42/42 passed).
+- **Vollständiger Lens-Model-Lauf**: `python3 -m pytest -q merger/lenskit/tests/test_lenses.py merger/lenskit/tests/test_primary_lens_audit.py merger/lenskit/tests/test_lens_facets.py merger/lenskit/tests/test_lens_cards.py merger/lenskit/tests/test_lens_card_validate.py merger/lenskit/tests/test_pr_delta_cards.py merger/lenskit/tests/test_pr_delta_card_validate.py merger/lenskit/tests/test_pr_schau_delta_schema.py merger/lenskit/tests/test_agent_reading_pack.py merger/lenskit/tests/test_agent_reading_pack_usage_rules.py merger/lenskit/tests/test_cli_agent_pack.py merger/lenskit/tests/test_bundle_manifest_integration.py::test_agent_reading_pack_emitted_schema_valid_and_hashed` — Pass (467 passed in 3.22s).
+- **Schema-Metavalidierung**: Exakte Schema-Metavalidierung (Draft 7 und Draft 2020-12) über eingebettete Python-Skripte gemäß `.github/workflows/lens-model.yml` — Pass.
+- **ECMAScript-Pfadparität**: `node merger/lenskit/tests/test_lens_facet_pattern_ecma.js` — Pass.
+- **Ruff**: Exakter Ruff-Lauf gemäß `.github/workflows/lens-model.yml` — Pass.
 - **Governance-Lint**: `python3 -m merger.lenskit.cli.main governance lint` — Pass (0 Fehler, L3 aktiv, L5 aktiv, keine neue Deferral).
 - **Parity Guard**: `python3 tools/parity_guard.py` — Pass.
 - **Planning-Tests**: `python3 -m pytest -q scripts/docmeta/tests/test_check_planning_registration.py merger/lenskit/tests/test_planning_registration_ratchet.py` — Pass.
