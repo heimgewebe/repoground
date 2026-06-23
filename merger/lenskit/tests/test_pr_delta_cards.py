@@ -340,4 +340,3 @@ class TestContractParity:
 
         # 7. Facet-/Source-Rule-Bindungen identisch (now fully covered by 3. Facet Definition Parity)
         assert pr_delta["properties"]["matched_rule"]["type"] == lens_card["properties"]["matched_rule"]["type"]
-

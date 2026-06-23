@@ -12,7 +12,7 @@ Contractvalidierung aus dem Contracts-Verzeichnis geladen.
 `merger/lenskit/core/lens_cards.py` bietet `produce_lens_card(path)`, welche einen gegebenen String-Pfad verarbeitet, den `Facet Model v1` Produzenten `infer_facets` aufruft, den Pfad validiert und eine normierte Lens-Card erstellt.
 
 ## 3. Fehlende Zielimplementierung
-Wir benötigen ein Artefakt ("PR Delta Card"), das für jeden geänderten Pfad in einem PR-Schau-Delta eine kontrolliert abgeleitete Lens-Einordnung bietet.
+Die zuvor fehlende Zielimplementierung wird in diesem Draft-PR als Contract/Core/Validation/Test-Slice bereitgestellt. Merge und Post-Merge-Reconciliation stehen aus.
 
 ## 4. Source-Authority und Rollenbeschreibung
 Das Source-Delta ist ein diagnostisches Signal.

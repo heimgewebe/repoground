@@ -297,6 +297,8 @@
         "merger/lenskit/core/pr_delta_card_validate.py",
         "merger/lenskit/tests/test_pr_delta_cards.py",
         "merger/lenskit/tests/test_pr_delta_card_validate.py",
+        "merger/lenskit/core/anti_hallucination_lint.py",
+        "merger/lenskit/tests/test_anti_hallucination_lint.py",
         "docs/proofs/pr-delta-cards-gap-report.md",
         ".github/workflows/lens-model.yml"
       ],

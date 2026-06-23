@@ -82,31 +82,31 @@ def _source_schema_errors(errors: list[Any]) -> list[dict[str, str]]:
 def _validate_source_delta(source_delta: Mapping[str, Any]) -> None:
     jsonschema = _load_jsonschema()
     schema = _load_source_schema()
-    
+
     # Check schema itself
     jsonschema.Draft202012Validator.check_schema(schema)
-    
+
     validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.FormatChecker())
     raw_errors = list(validator.iter_errors(source_delta))
-    
+
     if raw_errors:
         structured_errors = _source_schema_errors(raw_errors)
         raise SourceValidationError(
             f"Source delta validation failed with {len(structured_errors)} error(s)",
             errors=structured_errors
         )
-        
+
     summary = source_delta["summary"]
     counts = {"added": 0, "changed": 0, "removed": 0}
     seen_paths = set()
-    
+
     for f in source_delta["files"]:
         path = f["path"]
         if path in seen_paths:
             raise SourceValidationError(f"Duplicate path in delta: {path}")
         seen_paths.add(path)
         counts[f["status"]] += 1
-        
+
     for st in CHANGE_STATUSES:
         val = summary.get(st)
         if type(val) is not int or val != counts[st]:
@@ -156,22 +156,22 @@ def produce_pr_delta_card(
 ) -> dict[str, Any]:
     if not isinstance(source_delta, Mapping):
         raise TypeError("source_delta must be a mapping")
-        
+
     _validate_source_delta(source_delta)
-    
+
     matches = [f for f in source_delta["files"] if f["path"] == path]
     if not matches:
         raise ValueError(f"Path '{path}' not found in source delta")
     if len(matches) > 1:
         raise ValueError(f"Multiple entries found for path '{path}'")
-        
+
     delta_context = {
         "source_kind": source_delta["kind"],
         "source_version": source_delta["version"],
         "repo": source_delta.get("repo", ""),
         "generated_at": source_delta["generated_at"],
     }
-    
+
     return _project_pr_delta_card(delta_context, matches[0])
 
 def produce_pr_delta_cards(
@@ -179,20 +179,20 @@ def produce_pr_delta_cards(
 ) -> list[dict[str, Any]]:
     if not isinstance(source_delta, Mapping):
         raise TypeError("source_delta must be a mapping")
-        
+
     _validate_source_delta(source_delta)
-    
+
     delta_context = {
         "source_kind": source_delta["kind"],
         "source_version": source_delta["version"],
         "repo": source_delta.get("repo", ""),
         "generated_at": source_delta["generated_at"],
     }
-    
+
     cards = []
     for file_entry in source_delta["files"]:
         card = _project_pr_delta_card(delta_context, file_entry)
         cards.append(card)
-        
+
     cards.sort(key=lambda c: str(c["path"]))
     return cards

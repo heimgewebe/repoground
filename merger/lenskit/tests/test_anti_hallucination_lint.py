@@ -252,6 +252,112 @@ def test_l3_rejects_claim_boundaries_boundary_with_wrong_type():
     assert any(f.rule == "L3" and f.severity == "error" for f in findings)
 
 
+def test_l3_passes_with_valid_local_ref_boundary():
+    schema = {
+        "type": "object",
+        "definitions": {
+            "boundary": {
+                "type": "array",
+                "items": {"type": "string"},
+            }
+        },
+        "properties": {
+            "authority": {"type": "string", "const": "diagnostic_signal"},
+            "does_not_establish": {"$ref": "#/definitions/boundary"},
+        },
+    }
+    findings = lint_contract_schema(schema, contract_name="ok.schema.json")
+    assert [f for f in findings if f.rule == "L3"] == []
+
+
+def test_l3_rejects_missing_ref_target():
+    schema = {
+        "type": "object",
+        "definitions": {},
+        "properties": {
+            "authority": {"type": "string", "const": "diagnostic_signal"},
+            "does_not_establish": {"$ref": "#/definitions/missing"},
+        },
+    }
+    findings = lint_contract_schema(schema, contract_name="bad.schema.json")
+    assert any(f.rule == "L3" and f.severity == "error" for f in findings)
+
+
+def test_l3_rejects_non_textual_ref():
+    schema = {
+        "type": "object",
+        "properties": {
+            "authority": {"type": "string", "const": "diagnostic_signal"},
+            "does_not_establish": {"$ref": 123},
+        },
+    }
+    findings = lint_contract_schema(schema, contract_name="bad.schema.json")
+    assert any(f.rule == "L3" and f.severity == "error" for f in findings)
+
+
+def test_l3_rejects_definitions_with_wrong_type():
+    schema = {
+        "type": "object",
+        "definitions": [],
+        "properties": {
+            "authority": {"type": "string", "const": "diagnostic_signal"},
+            "does_not_establish": {"$ref": "#/definitions/boundary"},
+        },
+    }
+    findings = lint_contract_schema(schema, contract_name="bad.schema.json")
+    assert any(f.rule == "L3" and f.severity == "error" for f in findings)
+
+
+def test_l3_rejects_resolved_target_with_wrong_type():
+    schema = {
+        "type": "object",
+        "definitions": {
+            "boundary": {
+                "type": "string"
+            }
+        },
+        "properties": {
+            "authority": {"type": "string", "const": "diagnostic_signal"},
+            "does_not_establish": {"$ref": "#/definitions/boundary"},
+        },
+    }
+    findings = lint_contract_schema(schema, contract_name="bad.schema.json")
+    assert any(f.rule == "L3" and f.severity == "error" for f in findings)
+
+
+def test_l3_rejects_nested_local_path():
+    schema = {
+        "type": "object",
+        "definitions": {
+            "group/boundary": {
+                "type": "array"
+            },
+            "boundary": {
+                "type": "array"
+            }
+        },
+        "properties": {
+            "authority": {"type": "string", "const": "diagnostic_signal"},
+            "does_not_establish": {"$ref": "#/definitions/group/boundary"},
+        },
+    }
+    findings = lint_contract_schema(schema, contract_name="bad.schema.json")
+    assert any(f.rule == "L3" and f.severity == "error" for f in findings)
+
+
+def test_l3_rejects_external_or_other_ref():
+    for ref_val in ["https://example.invalid/schema.json#/boundary", "#/$defs/boundary"]:
+        schema = {
+            "type": "object",
+            "properties": {
+                "authority": {"type": "string", "const": "diagnostic_signal"},
+                "does_not_establish": {"$ref": ref_val},
+            },
+        }
+        findings = lint_contract_schema(schema, contract_name="bad.schema.json")
+        assert any(f.rule == "L3" and f.severity == "error" for f in findings)
+
+
 def test_l3_ignores_non_self_declaring_registry_schema():
     # bundle-manifest style: authority is a per-role nested enum, not a root const
     # self-declaration. Such a registry must NOT be governed by L3.

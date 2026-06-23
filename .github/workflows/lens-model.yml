@@ -2,22 +2,13 @@
 name: Lens Model
 
 # Failure-enforcing, path-scoped CI gate for the deterministic lens model
-# surfaces: the Primary Lens (lenses.py), the Primary Lens Audit
-# (lens_audit.py),
-# the Facet Model (lens_facets.py), Lens Cards (lens_cards.py /
-# lens_card_validate.py) and static Lens-Card front-door guidance together with
-# their contracts and tests.
-# Changes to documentation surfaces re-trigger these code and contract checks,
-# but the workflow does not semantically validate the proof or blueprint text.
-# The job fails the run on any failing step; whether that blocks merge depends
-# on branch-protection configuration, which this workflow does not assert. Runs
-# only when those surfaces change. jsonschema is installed so the contract
-# tests run here rather than skip (portable runtimes may still degrade). Node
-# validates the actual schema path pattern with ECMAScript Unicode-regex
-# semantics matching Ajv's default pattern compilation mode (unicodeRegExp); it
-# does not run Ajv.
-# This is the surface Python's re cannot observe. Distinct from the ruff lint
-# (lint.yml) and the contract lint (anti-hallucination-lint.yml).
+# surfaces:
+# - Primary Lens
+# - Primary Lens Audit
+# - Facet Model
+# - Lens Cards
+# - PR Delta Cards
+# - zugehörige Source-/Card-Contracts
 
 "on":
   push:
@@ -43,6 +34,7 @@ name: Lens Model
       - "merger/lenskit/tests/test_lens_card_validate.py"
       - "merger/lenskit/tests/test_pr_delta_cards.py"
       - "merger/lenskit/tests/test_pr_delta_card_validate.py"
+      - "merger/lenskit/tests/test_pr_schau_delta_schema.py"
       - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
       - "merger/lenskit/tests/test_agent_reading_pack.py"
       - "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py"
@@ -80,6 +72,7 @@ name: Lens Model
       - "merger/lenskit/tests/test_lens_card_validate.py"
       - "merger/lenskit/tests/test_pr_delta_cards.py"
       - "merger/lenskit/tests/test_pr_delta_card_validate.py"
+      - "merger/lenskit/tests/test_pr_schau_delta_schema.py"
       - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
       - "merger/lenskit/tests/test_agent_reading_pack.py"
       - "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py"
@@ -162,7 +155,7 @@ jobs:
           import json
           from pathlib import Path
           from jsonschema import Draft202012Validator
-          
+
           path = Path("merger/lenskit/contracts/pr-schau-delta.v1.schema.json")
           schema = json.loads(path.read_text(encoding="utf-8"))
           Draft202012Validator.check_schema(schema)
@@ -202,6 +195,7 @@ jobs:
             merger/lenskit/tests/test_lens_card_validate.py \
             merger/lenskit/tests/test_pr_delta_cards.py \
             merger/lenskit/tests/test_pr_delta_card_validate.py \
+            merger/lenskit/tests/test_pr_schau_delta_schema.py \
             merger/lenskit/tests/test_agent_reading_pack.py \
             merger/lenskit/tests/test_agent_reading_pack_usage_rules.py \
             merger/lenskit/tests/test_cli_agent_pack.py \

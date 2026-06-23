@@ -827,7 +827,7 @@ Dieser Slice enthält keinen Delta-Dateiloader und keinen Bundleadapter.
 
 **Nicht-Ziele:** Kein Review-Verdict, kein Patch-Vorschlag, keine Impact-Wahrheit. Keine Behauptung über GitHub-PR-Identität, Commitidentität, Hunks oder Relationen. Keine CLI- oder Bundle-Integration.
 
-**Akzeptanz:** PR-Deltas werden navigierbar, ohne automatische Findings zu erzeugen.
+**Akzeptanz:** Bereits geladene, pr-schau-delta.v1-konforme Mappings können deterministisch in PR Delta Cards projiziert werden, ohne automatische Findings zu erzeugen.
 
 **Komplexität:** mittel.
 

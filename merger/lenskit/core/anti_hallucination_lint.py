@@ -334,13 +334,35 @@ def _schema_declares_type(schema_node: object, expected_type: str) -> bool:
     )
 
 
+_LOCAL_DEFINITION_PREFIX = "#/definitions/"
+
+
 def _resolve_schema_node(schema: object, node: object) -> object:
-    if isinstance(node, dict) and "$ref" in node and isinstance(schema, dict):
-        ref_path = node["$ref"]
-        if ref_path.startswith("#/definitions/"):
-            def_name = ref_path.split("/")[-1]
-            return schema.get("definitions", {}).get(def_name, node)
-    return node
+    """Resolve one direct local Draft-07 definitions ref for boundary inspection.
+
+    Unsupported or malformed refs are returned unchanged so the normal
+    boundary-type check fails closed instead of crashing.
+    """
+    if not isinstance(schema, dict) or not isinstance(node, dict):
+        return node
+
+    ref_path = node.get("$ref")
+    if not isinstance(ref_path, str):
+        return node
+
+    if not ref_path.startswith(_LOCAL_DEFINITION_PREFIX):
+        return node
+
+    definition_name = ref_path[len(_LOCAL_DEFINITION_PREFIX) :]
+    if not definition_name or "/" in definition_name:
+        return node
+
+    definitions = schema.get("definitions")
+    if not isinstance(definitions, dict):
+        return node
+
+    resolved = definitions.get(definition_name)
+    return resolved if isinstance(resolved, dict) else node
 
 
 def _has_root_boundary(schema: object) -> bool:
