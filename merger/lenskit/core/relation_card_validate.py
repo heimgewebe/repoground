@@ -19,6 +19,7 @@ from typing import Any
 
 from merger.lenskit.core.dependency_diagnostics import jsonschema_dependency
 from merger.lenskit.core.relation_cards import (
+    SourceValidationError,
     card_identity,
     produce_relation_cards,
 )
@@ -246,6 +247,20 @@ def validate_relation_card(
     #    the controlled projection recomputed from the source graph.
     try:
         expected_cards = produce_relation_cards(source_graph)
+    except SourceValidationError as exc:
+        checks.append(
+            _check(
+                "source_producer_coherence",
+                "fail",
+                f"could not recompute Relation Cards from source graph: "
+                f"{type(exc).__name__}: {exc}",
+                mode="structural_precheck",
+                engine=ENGINE,
+                reason="producer_coherence_check",
+                extra={"errors": exc.errors} if exc.errors else None,
+            )
+        )
+        return _assemble(checks, jsonschema_available=jsonschema_available)
     except Exception as exc:
         checks.append(
             _check(

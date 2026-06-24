@@ -259,6 +259,26 @@ class TestCoherenceLayer:
         assert _check(val, "source_producer_coherence")["status"] == "fail"
         assert _check(val, "source_producer_coherence")["validation"]["reason"] == "producer_coherence_check"
 
+    def test_source_validation_error_preserves_diagnostics(self, monkeypatch):
+        from merger.lenskit.core.relation_cards import SourceValidationError
+
+        graph = _graph()
+        card = _card(graph)
+
+        def boom(*args, **kwargs):
+            raise SourceValidationError(
+                "structural failure", errors=[{"validator": "unique_node_id"}]
+            )
+
+        monkeypatch.setattr(
+            f"{validate_relation_card.__module__}.produce_relation_cards", boom
+        )
+        val = validate_relation_card(card, source_graph=graph)
+        assert val["status"] == "fail"
+        coherence = _check(val, "source_producer_coherence")
+        assert coherence["status"] == "fail"
+        assert coherence["errors"][0]["validator"] == "unique_node_id"
+
 
 class TestEvidencePreservation:
     def test_upgrade_caught_under_permissive_schema(self):
