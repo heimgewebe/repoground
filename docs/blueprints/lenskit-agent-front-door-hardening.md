@@ -874,6 +874,13 @@ Pfade/IDs auf.
 
 ### Slice 15 — Guard Relation Cards
 
+**Target-Proof `tests_by_name`:** diagnosis-only untersucht in
+`docs/proofs/guard-relation-cards-v1a-target-proof.md`.
+Ein persistierter Contract bleibt mangels eines aktuell implementierten
+oder verbindlich spezifizierten Consumers und eines semantisch bewerteten
+Goldsets zurückgestellt. Die übrigen Guard-Relation-Kandidaten wurden
+dadurch nicht bewertet.
+
 **Ziel:** Tests und Guards formal mit Code, Contracts und Surfaces verbinden.
 
 **Relation-Kandidaten:** `tests_by_name`, `tests_by_path`, `validates_schema`,
