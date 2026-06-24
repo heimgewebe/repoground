@@ -530,3 +530,15 @@ def test_load_contract_schemas_rejects_empty_contract_dir(tmp_path):
 
     with pytest.raises(ValueError, match=r"no \*\.schema\.json files found"):
         load_contract_schemas(empty_dir)
+
+
+def test_relation_card_contract_is_lint_clean():
+    # Relation Cards declare navigation_index authority (not boundary-requiring)
+    # and carry no forbidden truth-language property names or verdict-field
+    # values. The does_not_establish negative-boundary VALUES — including
+    # runtime_dependency, causality, change_impact and security_assessment — name
+    # the forbidden inferences as negatives and must never be flagged.
+    name = "relation-card.v1.schema.json"
+    schema = load_contract_schemas(_CONTRACTS_DIR)[name]
+    findings = lint_contract_schema(schema, contract_name=name)
+    assert findings == [], [f.to_dict() for f in findings]

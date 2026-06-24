@@ -309,6 +309,32 @@
         "Consumer-/Frontend-Nutzung nicht belegt",
         "tatsächlicher Agenten- oder Retrievalnutzen nicht belegt"
       ]
+    },
+    {
+      "id": "TASK-RELATION-CARD-001",
+      "title": "Relation Cards v1 (Contract/Core/Validation/Tests)",
+      "status": "in-progress",
+      "description": "Relation Cards v1 projizieren lokale import-/S1-/file->file-Kanten aus einem bereits geladenen architecture.graph.v1-Mapping in deterministische, schema-validierte Navigation Cards. Bewusst imports-only und lokal (file->file, edge_type=import, evidence_level=S1). Keine neue Relationserkennung, keine externen module:-Nodes, keine Guard Relations, keine Bundle-/CLI-/Retrieval-Integration und keine Impact-, Kausalitaets- oder Testsuffizienzaussagen. S1 und heuristic bleiben sichtbar und werden nicht aufgewertet. Status in-progress: nur als Draft-PR eroeffnet; bleibt in-progress bis Merge und Post-Merge-Reconciliation.",
+      "evidence": [
+        "merger/lenskit/contracts/relation-card.v1.schema.json",
+        "merger/lenskit/core/relation_cards.py",
+        "merger/lenskit/core/relation_card_validate.py",
+        "merger/lenskit/tests/test_relation_cards.py",
+        "merger/lenskit/tests/test_relation_card_validate.py",
+        "merger/lenskit/tests/test_anti_hallucination_lint.py",
+        ".github/workflows/lens-model.yml",
+        "docs/proofs/relation-cards-v1-target-proof.md"
+      ],
+      "missing_evidence": [
+        "Merge ausstehend",
+        "Post-Merge-Reconciliation ausstehend",
+        "automatische Emission nicht vorhanden",
+        "Bundle-/Manifest-Integration nicht vorhanden",
+        "Consumer-Nutzung nicht belegt",
+        "Retrieval-Nutzung nicht belegt",
+        "weitere Relationstypen (mentions/validates/tests/documents/produces/consumes/same_surface) nicht implementiert",
+        "Guard Relation Cards nicht implementiert"
+      ]
     }
   ]
 }

@@ -833,22 +833,39 @@ Dieser Slice enthält keinen Delta-Dateiloader und keinen Bundleadapter.
 
 ### Slice 14 — Relation Cards v1
 
+**Status:** Im Draft-PR als **imports-only** Contract/Core/Validation/Test-Slice
+(`TASK-RELATION-CARD-001`, `in-progress`). Umgesetzt und noch nicht gemergt;
+keine Guard-Relation-Arbeit (Slice 15) vorweggenommen.
+
 **Ziel:** Deterministisch beobachtbare Beziehungen sichtbar machen, ohne Kausalität zu
 behaupten.
 
-**Relation-Kandidaten:** `imports`, `mentions`, `validates`, `tests`, `documents`,
-`produces`, `consumes`, `same_surface`.
+**v1-Scope (umgesetzt):** ausschließlich `imports` — deterministische Projektion
+lokaler `file → file`-`import`-Kanten (`edge_type=import`,
+`evidence_level=S1`) aus einem bereits geladenen `architecture.graph.v1`-Mapping.
+Relation Cards erkennen keine Beziehungen selbst; externe `module:`-Nodes sind
+ausgeschlossen; `S1`/`heuristic` bleiben sichtbar. Eine Source-aware Validierung
+prüft Card-Schema, Source-Schema, Producer-Kohärenz und Evidence-Erhaltung
+fail-closed.
 
-**Planungskandidaten:**
+**Relation-Kandidaten:** `imports` (v1, umgesetzt). Zurückgestellt und **nicht**
+in v1: `mentions`, `validates`, `tests`, `documents`, `produces`, `consumes`,
+`same_surface` — `tests`/`validates` überschneiden sich mit Slice 15 (Guard
+Relation Cards) und bleiben dort.
+
+**Umgesetzte Dateien:**
 
 ```text
 merger/lenskit/contracts/relation-card.v1.schema.json
 merger/lenskit/core/relation_cards.py
+merger/lenskit/core/relation_card_validate.py
 merger/lenskit/tests/test_relation_cards.py
+merger/lenskit/tests/test_relation_card_validate.py
 ```
 
 **Pflichtgrenzen:** Relations etablieren keine Kausalität, Runtime-Abhängigkeit,
-Test-Suffizienz oder Change-Impact.
+Test-Suffizienz oder Change-Impact (siehe `does_not_establish` in
+`relation-card.v1.schema.json` und §15.9).
 
 **Akzeptanz:** Jede Relation nennt ihre deterministische Quelle und löst auf vorhandene
 Pfade/IDs auf.

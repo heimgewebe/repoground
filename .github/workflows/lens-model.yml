@@ -7,6 +7,7 @@ name: Lens Model
 # - Primary Lens Audit
 # - Facet Model
 # - Lens Cards
+# - Relation Cards
 # - PR Delta Cards
 # - zugehörige Source-/Card-Contracts
 
@@ -21,12 +22,17 @@ name: Lens Model
       - "merger/lenskit/core/lens_card_validate.py"
       - "merger/lenskit/core/pr_delta_cards.py"
       - "merger/lenskit/core/pr_delta_card_validate.py"
+      - "merger/lenskit/core/relation_cards.py"
+      - "merger/lenskit/core/relation_card_validate.py"
       - "merger/lenskit/core/agent_reading_pack.py"
+      - "merger/lenskit/architecture/import_graph.py"
       - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
       - "merger/lenskit/contracts/lens-facet.v1.schema.json"
       - "merger/lenskit/contracts/lens-card.v1.schema.json"
       - "merger/lenskit/contracts/pr-delta-card.v1.schema.json"
       - "merger/lenskit/contracts/pr-schau-delta.v1.schema.json"
+      - "merger/lenskit/contracts/relation-card.v1.schema.json"
+      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
       - "merger/lenskit/tests/test_lenses.py"
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
@@ -34,6 +40,10 @@ name: Lens Model
       - "merger/lenskit/tests/test_lens_card_validate.py"
       - "merger/lenskit/tests/test_pr_delta_cards.py"
       - "merger/lenskit/tests/test_pr_delta_card_validate.py"
+      - "merger/lenskit/tests/test_relation_cards.py"
+      - "merger/lenskit/tests/test_relation_card_validate.py"
+      - "merger/lenskit/tests/test_architecture_import_graph.py"
+      - "merger/lenskit/tests/fixtures/architecture_import_graph/expected.graph.json"
       - "merger/lenskit/tests/test_pr_schau_delta_schema.py"
       - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
       - "merger/lenskit/tests/test_agent_reading_pack.py"
@@ -44,6 +54,7 @@ name: Lens Model
       - "docs/proofs/facet-model-v1-proof.md"
       - "docs/proofs/lens-card-v1-proof.md"
       - "docs/proofs/pr-delta-cards-gap-report.md"
+      - "docs/proofs/relation-cards-v1-target-proof.md"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
@@ -59,12 +70,17 @@ name: Lens Model
       - "merger/lenskit/core/lens_card_validate.py"
       - "merger/lenskit/core/pr_delta_cards.py"
       - "merger/lenskit/core/pr_delta_card_validate.py"
+      - "merger/lenskit/core/relation_cards.py"
+      - "merger/lenskit/core/relation_card_validate.py"
       - "merger/lenskit/core/agent_reading_pack.py"
+      - "merger/lenskit/architecture/import_graph.py"
       - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
       - "merger/lenskit/contracts/lens-facet.v1.schema.json"
       - "merger/lenskit/contracts/lens-card.v1.schema.json"
       - "merger/lenskit/contracts/pr-delta-card.v1.schema.json"
       - "merger/lenskit/contracts/pr-schau-delta.v1.schema.json"
+      - "merger/lenskit/contracts/relation-card.v1.schema.json"
+      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
       - "merger/lenskit/tests/test_lenses.py"
       - "merger/lenskit/tests/test_primary_lens_audit.py"
       - "merger/lenskit/tests/test_lens_facets.py"
@@ -72,6 +88,10 @@ name: Lens Model
       - "merger/lenskit/tests/test_lens_card_validate.py"
       - "merger/lenskit/tests/test_pr_delta_cards.py"
       - "merger/lenskit/tests/test_pr_delta_card_validate.py"
+      - "merger/lenskit/tests/test_relation_cards.py"
+      - "merger/lenskit/tests/test_relation_card_validate.py"
+      - "merger/lenskit/tests/test_architecture_import_graph.py"
+      - "merger/lenskit/tests/fixtures/architecture_import_graph/expected.graph.json"
       - "merger/lenskit/tests/test_pr_schau_delta_schema.py"
       - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
       - "merger/lenskit/tests/test_agent_reading_pack.py"
@@ -82,6 +102,7 @@ name: Lens Model
       - "docs/proofs/facet-model-v1-proof.md"
       - "docs/proofs/lens-card-v1-proof.md"
       - "docs/proofs/pr-delta-cards-gap-report.md"
+      - "docs/proofs/relation-cards-v1-target-proof.md"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
@@ -178,6 +199,7 @@ jobs:
               Path("merger/lenskit/contracts/lens-facet.v1.schema.json"),
               Path("merger/lenskit/contracts/lens-card.v1.schema.json"),
               Path("merger/lenskit/contracts/pr-delta-card.v1.schema.json"),
+              Path("merger/lenskit/contracts/relation-card.v1.schema.json"),
           ]:
               schema = json.loads(
                   path.read_text(encoding="utf-8")
@@ -212,6 +234,9 @@ jobs:
             merger/lenskit/tests/test_lens_card_validate.py \
             merger/lenskit/tests/test_pr_delta_cards.py \
             merger/lenskit/tests/test_pr_delta_card_validate.py \
+            merger/lenskit/tests/test_relation_cards.py \
+            merger/lenskit/tests/test_relation_card_validate.py \
+            merger/lenskit/tests/test_architecture_import_graph.py \
             merger/lenskit/tests/test_pr_schau_delta_schema.py \
             merger/lenskit/tests/test_agent_reading_pack.py \
             merger/lenskit/tests/test_agent_reading_pack_usage_rules.py \
@@ -226,12 +251,18 @@ jobs:
             merger/lenskit/core/lens_card_validate.py \
             merger/lenskit/core/pr_delta_cards.py \
             merger/lenskit/core/pr_delta_card_validate.py \
+            merger/lenskit/core/relation_cards.py \
+            merger/lenskit/core/relation_card_validate.py \
             merger/lenskit/core/agent_reading_pack.py \
+            merger/lenskit/architecture/import_graph.py \
             merger/lenskit/tests/test_lens_facets.py \
             merger/lenskit/tests/test_lens_cards.py \
             merger/lenskit/tests/test_lens_card_validate.py \
             merger/lenskit/tests/test_pr_delta_cards.py \
             merger/lenskit/tests/test_pr_delta_card_validate.py \
+            merger/lenskit/tests/test_relation_cards.py \
+            merger/lenskit/tests/test_relation_card_validate.py \
+            merger/lenskit/tests/test_architecture_import_graph.py \
             merger/lenskit/tests/test_pr_schau_delta_schema.py \
             merger/lenskit/tests/test_agent_reading_pack.py \
             merger/lenskit/tests/test_agent_reading_pack_usage_rules.py \

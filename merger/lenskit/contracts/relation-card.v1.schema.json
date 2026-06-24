@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.tools/contracts/relation-card.v1.schema.json",
+  "title": "Relation Card v1",
+  "description": "A Relation Card is a single deterministic navigation projection of one already-detected local import edge taken from an architecture.graph.v1 mapping (edge_type=import, evidence_level=S1, file-to-file). Relation Cards are a derived navigation index over an existing graph; they do not detect relations themselves. A Relation Card establishes no truth, correctness, completeness, runtime behavior, test sufficiency, regression absence, semantic importance, review priority, change impact, runtime dependency, causality or security assessment. The static S1 heuristic derivation stays visible and is never upgraded to a proven runtime or causal dependency. External module nodes are not represented as cards.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "authority",
+    "canonicality",
+    "relation",
+    "source",
+    "target",
+    "source_rule",
+    "derivation_type",
+    "evidence_level",
+    "evidence",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "lenskit.relation_card"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "authority": {
+      "const": "navigation_index"
+    },
+    "canonicality": {
+      "const": "derived"
+    },
+    "relation": {
+      "const": "imports",
+      "description": "Relation Cards v1 support exactly one relation type: imports. The single-member constant pins the imports-only scope; other relation candidates (mentions, validates, tests, documents, produces, consumes, same_surface) are deferred to later, separately source-backed slices."
+    },
+    "source": {
+      "$ref": "#/definitions/endpoint",
+      "description": "Importing local repository file (the architecture.graph.v1 edge src file node)."
+    },
+    "target": {
+      "$ref": "#/definitions/endpoint",
+      "description": "Imported local repository file (the architecture.graph.v1 edge dst file node)."
+    },
+    "source_rule": {
+      "const": "architecture_graph_import_edge",
+      "description": "The source rule that produced the card: projection of a local import edge from the given architecture.graph.v1 mapping. The card consumes architecture.graph.v1 and does not itself prove which implementation produced that graph."
+    },
+    "derivation_type": {
+      "const": "heuristic",
+      "description": "The underlying architecture.graph.v1 import edge is a static S1 heuristic, not a runtime observation. The heuristic derivation is kept visible and is never silently upgraded."
+    },
+    "evidence_level": {
+      "const": "S1",
+      "description": "Source evidence level carried over unchanged from the architecture.graph.v1 edge. v1 only projects S1 edges."
+    },
+    "evidence": {
+      "$ref": "#/definitions/evidence"
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish"
+    }
+  },
+  "definitions": {
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "`path` is a repository-relative endpoint address within one explicit repository context. An accepted repo path is a path accepted by the controlled lexical path model. It does not establish file existence, tracked-file membership, readability, or successful resolution against a particular repository snapshot. Must use exactly the Facet v1 path pattern.",
+      "pattern": "^(?![\\s\\S]*[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029\\uFEFF])(?![\\s\\S]*[\\uD800-\\uDFFF])(?![\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]+$)(?![A-Za-z]:)(?!/)(?![\\s\\S]*//)(?![\\s\\S]*/$)(?![\\s\\S]*\\\\)(?![\\s\\S]*(?:^|/)\\.\\.?(?:/|$))[\\s\\S]+$"
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path"
+      ],
+      "description": "A navigation reference to one repository-relative file path, using the controlled lexical path model. It does not establish file existence, tracked-file membership or successful resolution against a particular repository snapshot. External module: nodes are never emitted as endpoints.",
+      "properties": {
+        "kind": {
+          "const": "repo_path"
+        },
+        "path": {
+          "$ref": "#/definitions/repo_path"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_path"
+      ],
+      "description": "Source evidence carried over verbatim from the architecture.graph.v1 edge. source_path is the importing (source) file; start_line/end_line locate the import statement. Evidence is never extended or upgraded.",
+      "properties": {
+        "source_path": {
+          "$ref": "#/definitions/repo_path"
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "additionalItems": false,
+      "description": "Fixed canonical negative-semantics tuple: exactly these twelve values in this exact order. The first nine are the shared lens-family baseline (docs/architecture/lens-model.md section 15); the final three are the relation-specific additions that prevent a static S1 import edge from being read as a runtime/causal dependency or a security judgement.",
+      "items": [
+        {
+          "const": "truth"
+        },
+        {
+          "const": "correctness"
+        },
+        {
+          "const": "completeness"
+        },
+        {
+          "const": "runtime_behavior"
+        },
+        {
+          "const": "test_sufficiency"
+        },
+        {
+          "const": "regression_absence"
+        },
+        {
+          "const": "semantic_importance"
+        },
+        {
+          "const": "review_priority"
+        },
+        {
+          "const": "change_impact"
+        },
+        {
+          "const": "runtime_dependency"
+        },
+        {
+          "const": "causality"
+        },
+        {
+          "const": "security_assessment"
+        }
+      ]
+    }
+  }
+}
