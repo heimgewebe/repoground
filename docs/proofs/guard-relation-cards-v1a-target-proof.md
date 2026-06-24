@@ -43,7 +43,7 @@ Als mögliche zusätzliche Treffer einer unspezifischen Substring-Suche wurden `
   - `*_test.py`: 0
   - `*.test.ts`: 0
   - `*.spec.ts`: 0
-- **Fixture-Ausschlüsse**: 19 Dateien besitzen das Segment `fixtures`, davon 1 Datei, die einen raw-Marker erfüllt und daher ausgeschlossen wurde. Der ausgeschlossene Pfad ist `merger/lenskit/tests/fixtures/architecture_import_graph/test_c.py`.
+- **Fixture-Ausschlüsse**: 18 Dateien besitzen das exakte Pfadsegment `fixtures`. Davon erfüllt genau eine Datei einen rohen Testmarker und wird von `infer_facets()` ausgeschlossen: `merger/lenskit/tests/fixtures/architecture_import_graph/test_c.py`.
 - **Markerüberschneidungen**: 0
 
 ## Exakte Resolveralgorithmen
@@ -91,7 +91,16 @@ Eine Registry speichert explizite Zuordnungen. Ihre semantische Qualität hängt
 | --- | --- | --- | --- |
 | A. Globaler Basename | 42 | 165 | 0 |
 | B. Kontrollierte Root-Paare | 30 | 177 | 0 |
-| C. Relativer Spiegel | 0 | 207 | 0 |
+| C. Relativer Spiegel | 3 | 204 | 0 |
+
+Die drei strukturellen Treffer von Variante C sind:
+
+1. `merger/lenskit/frontends/webui/tests/test_atlas_payload.js`
+   → `merger/lenskit/frontends/webui/atlas_payload.js`
+2. `merger/lenskit/frontends/webui/tests/test_materialize.js`
+   → `merger/lenskit/frontends/webui/materialize.js`
+3. `scripts/docmeta/tests/test_check_planning_registration.py`
+   → `scripts/docmeta/check_planning_registration.py`
 
 (Für jede Variante gilt: `matched` + `unmatched` + `ambiguous` == 207 kontrollierte Testpfade)
 
