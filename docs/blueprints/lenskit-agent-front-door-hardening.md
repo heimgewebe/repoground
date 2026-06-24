@@ -833,8 +833,8 @@ Dieser Slice enthält keinen Delta-Dateiloader und keinen Bundleadapter.
 
 ### Slice 14 — Relation Cards v1
 
-**Status:** Im Draft-PR als **imports-only** Contract/Core/Validation/Test-Slice
-(`TASK-RELATION-CARD-001`, `in-progress`). Umgesetzt und noch nicht gemergt;
+**Status:** **imports-only** Contract/Core/Validation/Test-Slice
+(`TASK-RELATION-CARD-001`, `done`). Gemergt und post-merge verifiziert;
 keine Guard-Relation-Arbeit (Slice 15) vorweggenommen.
 
 **Ziel:** Deterministisch beobachtbare Beziehungen sichtbar machen, ohne Kausalität zu

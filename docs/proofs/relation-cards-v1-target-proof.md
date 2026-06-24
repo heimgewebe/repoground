@@ -1,7 +1,6 @@
 # Relation Cards v1 — Target Proof
 
-Status: **in Umsetzung** (Draft-PR). Der Task `TASK-RELATION-CARD-001` bleibt
-`in-progress` bis Merge und Post-Merge-Reconciliation.
+Status: **abgeschlossen** (Post-Merge). Der Task `TASK-RELATION-CARD-001` ist abgeschlossen und post-merge verifiziert (PR #796, `f12d9e6d`).
 
 Dieser Slice führt eine bewusst kleine, imports-only Relation-Card-Projektion ein:
 
@@ -304,3 +303,23 @@ auf den bestehenden PR-Branch übertragen.
 
 Die abschließende Reparatur des Evidence-Preservation-Guards und die erneute
 Gate-Ausführung erfolgten in einem separaten Reparatur-Worktree für PR #796.
+
+## Post-Merge-Reconciliation
+Relation Cards v1 wurden mit PR #796 als Merge-Commit
+`f12d9e6d407d2ccc7ff95b29d823795bec24ba93` nach `main` übernommen.
+Die folgende fokussierte Regression wurde anschließend auf diesem
+`origin/main`-Stand ausgeführt:
+```text
+python3 -m pytest -q \
+  merger/lenskit/tests/test_relation_cards.py \
+  merger/lenskit/tests/test_relation_card_validate.py \
+  merger/lenskit/tests/test_architecture_import_graph.py
+81 passed
+```
+Zusätzlich bestanden Ruff, Schema-/Workflow-Gates, Planning Registration,
+Doc-Freshness und `git diff --check` im Reconciliation-Lauf.
+
+Dieser Nachweis bestätigt ausschließlich den definierten imports-only
+Contract/Core/Validation/Test-Slice. Er beweist keine automatische Emission,
+Bundle-, CLI- oder Retrieval-Integration, keine Guard Relations und keinen
+tatsächlichen Agenten- oder Retrievalnutzen.

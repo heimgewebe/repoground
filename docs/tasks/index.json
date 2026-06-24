@@ -313,8 +313,8 @@
     {
       "id": "TASK-RELATION-CARD-001",
       "title": "Relation Cards v1 (Contract/Core/Validation/Tests)",
-      "status": "in-progress",
-      "description": "Relation Cards v1 projizieren lokale import-/S1-/file->file-Kanten aus einem bereits geladenen architecture.graph.v1-Mapping in deterministische, schema-validierte Navigation Cards. Bewusst imports-only und lokal (file->file, edge_type=import, evidence_level=S1). Keine neue Relationserkennung, keine externen module:-Nodes, keine Guard Relations, keine Bundle-/CLI-/Retrieval-Integration und keine Impact-, Kausalitaets- oder Testsuffizienzaussagen. S1 und heuristic bleiben sichtbar und werden nicht aufgewertet. Status in-progress: nur als Draft-PR eroeffnet; bleibt in-progress bis Merge und Post-Merge-Reconciliation.",
+      "status": "done",
+      "description": "Relation Cards v1 projizieren lokale import-/S1-/file->file-Kanten aus einem bereits geladenen architecture.graph.v1-Mapping in deterministische, schema-validierte Navigation Cards. Bewusst imports-only und lokal (file->file, edge_type=import, evidence_level=S1). Keine neue Relationserkennung, keine externen module:-Nodes, keine Guard Relations, keine Bundle-/CLI-/Retrieval-Integration und keine Impact-, Kausalitaets- oder Testsuffizienzaussagen. S1 und heuristic bleiben sichtbar und werden nicht aufgewertet. Status done: Der definierte Contract/Core/Validation/Test-Slice ist gemergt (PR #796, f12d9e6d) und auf main post-merge verifiziert.",
       "evidence": [
         "merger/lenskit/contracts/relation-card.v1.schema.json",
         "merger/lenskit/core/relation_cards.py",

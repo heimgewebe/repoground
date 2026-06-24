@@ -444,14 +444,15 @@ Implementiert:
   Repo-Pfad beweist weder Dateiexistenz noch Git-Tracking.
 - PR Delta Cards v1 — umgesetzt. Der definierte Slice ist auf main gemergt und post-merge verifiziert.
 
-In Umsetzung (Draft-PR, nicht abgeschlossen):
-- Relation Cards v1 — bewusst begrenzter imports-only Slice: deterministische
-  Projektion lokaler `import`-Kanten (`file → file`, `edge_type=import`,
-  `evidence_level=S1`) aus einem bereits geladenen `architecture.graph.v1`-Mapping
-  in `relation-card.v1` Navigation Cards (Contract/Core/Validation/Tests). Relation
-  Cards erkennen keine Beziehungen selbst; externe `module:`-Nodes sind
-  ausgeschlossen; `S1` und `heuristic` bleiben sichtbar und werden nicht
-  aufgewertet. Nur als Draft-PR eröffnet (`TASK-RELATION-CARD-001`, `in-progress`).
+- Relation Cards v1 — bewusst begrenzter imports-only Slice:
+  deterministische Projektion lokaler `file → file`-`import`-Kanten mit
+  `evidence_level=S1` aus einem bereits geladenen
+  `architecture.graph.v1`-Mapping. Contract, Core, source-aware Validation
+  und fokussierte Tests sind gemergt und auf main post-merge verifiziert
+  (`TASK-RELATION-CARD-001`, `done`, PR #796, `f12d9e6d`).
+  Relation Cards erkennen keine Beziehungen selbst; externe `module:`-Nodes
+  sind ausgeschlossen; Guard Relations, Bundle-, CLI- und
+  Retrieval-Integration bleiben offen.
 
 Nicht implementiert:
 - vollständige Facet-Taxonomie (v1 deckt nur drei kontrollierte Facets ab)
@@ -478,7 +479,7 @@ Primary Lens Audit v1 — Contract/Core/Tests umgesetzt
 → Facet Model v1 — Contract/Core/Tests umgesetzt (Taxonomie bewusst klein)
 → Lens Cards v1 — Contract/Core/Validation/Tests umgesetzt
 → PR Delta Cards v1 — Contract/Core/Validation/Tests umgesetzt
-→ Relation Cards v1 — imports-only Contract/Core/Validation/Test-Slice im Draft-PR
+→ Relation Cards v1 — imports-only Contract/Core/Validation/Test-Slice gemergt und post-merge verifiziert
 → Guard Relation Cards
 ```
 
