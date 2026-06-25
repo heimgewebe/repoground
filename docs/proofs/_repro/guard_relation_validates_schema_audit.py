@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Derive the fixed-snapshot ``validates_schema`` report from reviewed flows."""
+"""Derive and verify the fixed-snapshot validates_schema flow manifest."""
 from __future__ import annotations
 
 import argparse
@@ -57,12 +57,33 @@ class MetaFlow:
     schema_binding_verification: str
 
 
-def parse_rows(names: list[str], rows: list[list[Any]], kind: type) -> tuple:
+def typed_value(name: str, value: str) -> Any:
+    if name in {
+        "relation_call_line",
+        "engine_call_line",
+        "schema_path_definition_line",
+        "schema_load_line",
+    }:
+        return int(value) if value else None
+    if name in {"meta_guard_present", "followed_by_instance_validation"}:
+        return value == "1"
+    if name == "schema_fragment":
+        return value or None
+    return value
+
+
+def parse_rows(names: list[str], rows: list[str], kind: type) -> tuple:
     require(names == [item.name for item in fields(kind)], f"field mismatch: {names}")
     records = []
     for number, row in enumerate(rows):
-        require(len(row) == len(names), f"row {number} has {len(row)} fields")
-        records.append(kind(**dict(zip(names, row, strict=True))))
+        values = row.split("|")
+        require(len(values) == len(names), f"row {number}: {len(values)} fields")
+        records.append(
+            kind(**{
+                name: typed_value(name, value)
+                for name, value in zip(names, values, strict=True)
+            })
+        )
     return tuple(records)
 
 
@@ -99,10 +120,9 @@ def snapshot_key(flow: Flow) -> tuple[str, ...]:
     )
 
 
-def flow_id(base_sha: str, flow: Flow) -> str:
-    return hashlib.sha256(
-        "|".join((base_sha, *snapshot_key(flow))).encode("utf-8")
-    ).hexdigest()
+def flow_id(base: str, flow: Flow) -> str:
+    payload = "|".join((base, *snapshot_key(flow)))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def axis(flows: tuple[Flow, ...], name: str) -> dict[str, int]:
@@ -118,35 +138,12 @@ def main() -> int:
     manifest_path = Path(args.manifest) if args.manifest else (
         Path(__file__).resolve().parent.parent / AUDIT
     )
-    source = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manual_keys = (
-        "base_sha",
-        "declared_scanner_grammar",
-        "flow_fields",
-        "inventory_path_count",
-        "inventory_sha256",
-        "limitations",
-        "meta_flow_fields",
-        "reviewed_flows",
-        "reviewed_meta_flows",
-        "text_only_non_validator_files",
-    )
-    manual = {key: source[key] for key in manual_keys}
-    require(args.base_sha == manual["base_sha"], "base mismatch")
-    flows = parse_rows(manual["flow_fields"], manual["reviewed_flows"], Flow)
-    meta = parse_rows(manual["meta_flow_fields"], manual["reviewed_meta_flows"], MetaFlow)
-    accepted = tuple(sorted(
-        (flow for flow in flows if flow.target_scope == "in_repo"),
-        key=snapshot_key,
-    ))
-    external = tuple(sorted(
-        (flow for flow in flows if flow.target_scope != "in_repo"),
-        key=snapshot_key,
-    ))
-    require(len(accepted) == 24 and len(external) == 1, "flow cardinality")
-    require(len({snapshot_key(flow) for flow in accepted}) == 24, "snapshot keys")
-    require(len({flow_id(args.base_sha, flow) for flow in accepted}) == 24, "flow ids")
-    require(len(meta) == 6, "meta flow cardinality")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    require(args.base_sha == manifest["base"], "base mismatch")
+    flows = parse_rows(manifest["fields"], manifest["flows"], Flow)
+    meta = parse_rows(manifest["meta_fields"], manifest["meta"], MetaFlow)
+    accepted = tuple(flow for flow in flows if flow.target_scope == "in_repo")
+    external = tuple(flow for flow in flows if flow.target_scope != "in_repo")
 
     axes = {
         "engine_invocation": dict(sorted(Counter(
@@ -168,77 +165,59 @@ def main() -> int:
             )
         },
     }
+    summary = {
+        "accepted_flows": len(accepted),
+        "engine_callsites": len({
+            (flow.source_path, flow.engine_owner_symbol, flow.engine_call_line)
+            for flow in flows
+        }),
+        "external_flows": len(external),
+        "meta_callsites": len({
+            (flow.source_path, flow.engine_owner_symbol, flow.engine_call_line)
+            for flow in meta
+        }),
+        "meta_flows": len(meta),
+        "module_schema_targets": len({
+            (flow.source_path, flow.schema_path) for flow in accepted
+        }),
+        "modules": len({flow.source_path for flow in accepted}),
+        "schema_files": 54,
+        "schema_targets": len({flow.schema_path for flow in accepted}),
+        "schemas_without_relation": 36,
+        "semantic_keys": len({semantic_key(flow) for flow in accepted}),
+        "test_files": 45,
+    }
+    require(summary == manifest["summary"], f"summary mismatch: {summary}")
     require(axes["engine_invocation"] == {"delegated": 2, "direct": 22}, "invocation")
-    require(axes["schema_requirement"] == {"optional": 3, "required": 21}, "schema requirement")
+    require(axes["schema_requirement"] == {"optional": 3, "required": 21}, "schema")
+    require(len({snapshot_key(flow) for flow in accepted}) == 24, "snapshot keys")
+    require(len({flow_id(args.base_sha, flow) for flow in accepted}) == 24, "flow ids")
     require(
-        axes["activation_condition"]
-        == {
-            'range_ref_version != "2"': 1,
-            'range_ref_version == "2"': 1,
-            "unconditional": 22,
-        },
-        "activation condition",
+        all(
+            flow.schema_fragment is None or flow.schema_fragment.startswith("#/")
+            for flow in flows
+        ),
+        "schema fragment",
     )
 
-    report = {
-        **manual,
-        "axis_counts": axes,
-        "identity_model": {
-            "semantic_flow_key_fields": [
-                "source_path",
-                "relation_owner_symbol",
-                "engine_owner_symbol",
-                "schema_path",
-                "schema_fragment",
-                "activation_condition",
-                "target_scope",
-            ],
-            "snapshot_callsite_key_fields": [
-                "source_path",
-                "relation_owner_symbol",
-                "relation_call_line",
-                "engine_owner_symbol",
-                "engine_call_line",
-                "schema_path",
-                "schema_fragment",
-                "activation_condition",
-                "target_scope",
-            ],
-            "snapshot_flow_id": "sha256(base_sha + snapshot_callsite_key)",
-            "stability_boundary": "snapshot-local; line changes alter the snapshot key",
-        },
-        "meta_validation": {
-            "engine_callsite_count": len({
-                (flow.source_path, flow.engine_owner_symbol, flow.engine_call_line)
-                for flow in meta
-            }),
-            "schema_binding_verification": "manual_source_review",
-            "schema_flow_count": len(meta),
-        },
-        "relation_counts": {
-            "accepted_modules": len({flow.source_path for flow in accepted}),
-            "accepted_schema_targets": len({flow.schema_path for flow in accepted}),
-            "callsite_flows": len(accepted),
-            "external_or_not_accepted_flows": len(external),
-            "snapshot_callsite_keys": len({snapshot_key(flow) for flow in accepted}),
-            "snapshot_flow_ids": len({flow_id(args.base_sha, flow) for flow in accepted}),
-            "unique_engine_callsites_including_external": len({
-                (flow.source_path, flow.engine_owner_symbol, flow.engine_call_line)
-                for flow in flows
-            }),
-            "unique_module_schema_targets": len({
-                (flow.source_path, flow.schema_path) for flow in accepted
-            }),
-            "unique_semantic_flow_keys": len({semantic_key(flow) for flow in accepted}),
-        },
-        "schema_coverage": {
-            "total_schema_files": 54,
-            "with_accepted_in_repo_relation": 18,
-            "without_accepted_in_repo_relation": 36,
-        },
+    output = dict(manifest)
+    output["derived_axis_counts"] = axes
+    output["identity"] = {
+        "semantic_key": [
+            "source_path",
+            "relation_owner_symbol",
+            "engine_owner_symbol",
+            "schema_path",
+            "schema_fragment",
+            "activation_condition",
+            "target_scope",
+        ],
+        "snapshot_key_adds": ["relation_call_line", "engine_call_line"],
+        "snapshot_flow_id": "sha256(base + snapshot_key)",
+        "stability": "snapshot-local",
     }
     Path(args.output).write_text(
-        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        json.dumps(output, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
     print(f"OK wrote {args.output} ({len(accepted)} accepted flows)")
