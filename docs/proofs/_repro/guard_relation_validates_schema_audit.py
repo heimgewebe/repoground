@@ -131,6 +131,7 @@ def axis(flows: tuple[Flow, ...], name: str) -> dict[str, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--repo")
     parser.add_argument("--base-sha", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--manifest")
@@ -200,24 +201,8 @@ def main() -> int:
         "schema fragment",
     )
 
-    output = dict(manifest)
-    output["derived_axis_counts"] = axes
-    output["identity"] = {
-        "semantic_key": [
-            "source_path",
-            "relation_owner_symbol",
-            "engine_owner_symbol",
-            "schema_path",
-            "schema_fragment",
-            "activation_condition",
-            "target_scope",
-        ],
-        "snapshot_key_adds": ["relation_call_line", "engine_call_line"],
-        "snapshot_flow_id": "sha256(base + snapshot_key)",
-        "stability": "snapshot-local",
-    }
     Path(args.output).write_text(
-        json.dumps(output, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
+        json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
     print(f"OK wrote {args.output} ({len(accepted)} accepted flows)")
