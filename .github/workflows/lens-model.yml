@@ -57,7 +57,8 @@ name: Lens Model
       - "docs/proofs/relation-cards-v1-target-proof.md"
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md"
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
-      - "docs/proofs/_repro/guard_relation_validates_schema_audit.py"
+      - "scripts/proofs/guard_relation_validates_schema_audit.py"
+      - "merger/lenskit/tests/test_guard_relation_validates_schema_audit.py"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
@@ -108,7 +109,8 @@ name: Lens Model
       - "docs/proofs/relation-cards-v1-target-proof.md"
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md"
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
-      - "docs/proofs/_repro/guard_relation_validates_schema_audit.py"
+      - "scripts/proofs/guard_relation_validates_schema_audit.py"
+      - "merger/lenskit/tests/test_guard_relation_validates_schema_audit.py"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
@@ -124,13 +126,75 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  lens-model:
+  validates-schema-target-proof:
+    # Dedicated job: only this one needs full history for the fixed base snapshot.
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint audit script and falsification tests
+        run: |
+          ruff check \
+            scripts/proofs/guard_relation_validates_schema_audit.py \
+            merger/lenskit/tests/test_guard_relation_validates_schema_audit.py
+
+      - name: Falsification tests (gate must reject tampered inputs)
+        run: |
+          python3 -m pytest -q \
+            merger/lenskit/tests/test_guard_relation_validates_schema_audit.py
+
+      - name: Regenerate audit from snapshot and compare (derive, not echo)
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          BASE_SHA="05bbd0d608afa8faf581887a455d4dcf6fa15ae9"
+          SCRIPT="scripts/proofs/guard_relation_validates_schema_audit.py"
+          COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
+          python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/vsa.json
+          if ! cmp /tmp/vsa.json "$COMMITTED"; then
+            echo "::error::regenerated audit differs from committed derived report"
+            diff <(python3 -m json.tool "$COMMITTED") <(python3 -m json.tool /tmp/vsa.json) || true
+            exit 1
+          fi
+
+      - name: Negative control (a tampered manifest must fail closed)
+        run: |
+          set -euo pipefail
+          BASE_SHA="05bbd0d608afa8faf581887a455d4dcf6fa15ae9"
+          SCRIPT="scripts/proofs/guard_relation_validates_schema_audit.py"
+          COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
+          python3 - "$COMMITTED" > /tmp/tampered.json <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          data["flows"][0] = data["flows"][0].replace("|39|", "|990|")
+          print(json.dumps(data))
+          PY
+          if python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \
+               --manifest /tmp/tampered.json --output /tmp/rejected.json; then
+            echo "::error::tampered manifest was accepted; gate is tautological"
+            exit 1
+          fi
+          echo "tampered manifest correctly rejected"
+
+  lens-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -149,45 +213,6 @@ jobs:
         run: |
           pip install -r merger/lenskit/requirements.txt
           pip install -r requirements-dev.txt
-
-      - name: Verify validates_schema target-proof audit
-        env:
-          PYTHONDONTWRITEBYTECODE: "1"
-        run: |
-          set -euo pipefail
-
-          BASE_SHA="05bbd0d608afa8faf581887a455d4dcf6fa15ae9"
-          SCRIPT="docs/proofs/_repro/guard_relation_validates_schema_audit.py"
-          COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
-
-          python3 "$SCRIPT" \
-            --repo "$PWD" \
-            --base-sha "$BASE_SHA" \
-            --output /tmp/validates-schema-a.json
-
-          python3 "$SCRIPT" \
-            --repo "$PWD" \
-            --base-sha "$BASE_SHA" \
-            --output /tmp/validates-schema-b.json
-
-          python3 -O "$SCRIPT" \
-            --repo "$PWD" \
-            --base-sha "$BASE_SHA" \
-            --output /tmp/validates-schema-optimized.json
-
-          cmp /tmp/validates-schema-a.json \
-              /tmp/validates-schema-b.json
-
-          cmp /tmp/validates-schema-a.json \
-              /tmp/validates-schema-optimized.json
-
-          cmp /tmp/validates-schema-a.json \
-              "$COMMITTED"
-
-      - name: Lint validates_schema audit
-        run: |
-          ruff check \
-            docs/proofs/_repro/guard_relation_validates_schema_audit.py
 
       - name: Require jsonschema (contract tests must run, not skip)
         run: |

@@ -349,11 +349,12 @@
       "id": "TASK-GUARD-RELATION-VALIDATES-SCHEMA-DESIGN-001",
       "title": "Guard Relation Cards v1b validates_schema Target Proof",
       "status": "in-progress",
-      "description": "Diagnosis-only Target-Proof für validates_schema. Reproduzierbare Callsite-Flow-Identität für Instanzvalidierungs-Beziehungen (24 Flows über 17 Module gegen 18 Schema-Ziele); trennt direkte/delegierte Engine-Aufrufe, Schema-Bindung, Schema-Metavalidierung, bedingte Schemaauswahl und externe Zielpfade. Kein persistierter Contract ohne Consumer. Andere Guard-Relation-Kandidaten wurden nicht bewertet.",
+      "description": "Diagnosis-only Target-Proof für validates_schema. Hermetisches, falsifizierbares Audit über den festgeschriebenen Base-Snapshot: base-gebundenes infer_facets, receiver-aufgelöste AST-Grammatik (20 derived + 3 manual Engine-Callsites, 2 + 3 Meta), abgeleitete Aggregate und ein fail-closed Manifest-Gate mit Falsifikationstests. Kein persistierter Contract ohne Consumer. Andere Guard-Relation-Kandidaten wurden nicht bewertet.",
       "evidence": [
         "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md",
         "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json",
-        "docs/proofs/_repro/guard_relation_validates_schema_audit.py"
+        "scripts/proofs/guard_relation_validates_schema_audit.py",
+        "merger/lenskit/tests/test_guard_relation_validates_schema_audit.py"
       ]
     }
   ]

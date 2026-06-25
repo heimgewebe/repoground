@@ -20,13 +20,17 @@ Tree.
 
 | Artefakt | Rolle |
 |---|---|
-| `docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json` | Spaltengebundenes, manuell reviewtes Flow-Manifest. |
-| `docs/proofs/_repro/guard_relation_validates_schema_audit.py` | Typisiert die Flowzeilen, leitet Aggregate ab und prüft AST-Callsites. |
-| `.github/workflows/lens-model.yml` | Führt Normal-, Wiederholungs- und `python -O`-Lauf aus und vergleicht sie bytegenau mit dem Manifest. |
+| `docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json` | Reviewtes Flow-Manifest (manuelle Eingabe) **und** neu berechneter `derived`-Report. |
+| `scripts/proofs/guard_relation_validates_schema_audit.py` | Liest den Base-Snapshot, lädt `infer_facets` aus der Base, leitet receiver-aufgelöste Callsites und Aggregate ab und prüft das Manifest fail-closed dagegen. |
+| `merger/lenskit/tests/test_guard_relation_validates_schema_audit.py` | Falsifikationstests: Grammatik, Snapshot-Bindung und Ablehnung manipulierter Manifeste. |
+| `.github/workflows/lens-model.yml` | Eigener Job `validates-schema-target-proof` (`fetch-depth: 0`): Lint, Falsifikationstests, Regenerieren + Bytevergleich und ein Negativ-Control (manipuliertes Manifest muss scheitern). |
 
-Die qualitativen Schema-Bindungen und Fehlerpfade sind manuell geprüft. Die
-Summen werden aus den einzelnen Flowdatensätzen berechnet; sie sind keine
-separate Eingabewahrheit.
+Manuelle Eingaben (reviewte Flowzeilen, `meta`, `text_only`) und maschinell
+abgeleitete Beobachtungen (`derived`) sind getrennt. Der `derived`-Report wird bei
+jedem Lauf **neu aus dem Snapshot berechnet**, nicht aus dem Manifest kopiert; der
+Bytevergleich prüft den neu berechneten Report. Summen sind abgeleitet, keine
+separate Eingabewahrheit. Die Gates verwenden `require`/`AuditError` statt `assert`
+und bleiben unter `python -O` aktiv.
 
 ## Nichtimplementierung
 
@@ -52,22 +56,40 @@ Zeilenverschiebungen verändern sie.
 `engine_call_line` ist die tatsächliche `.validate()`- oder
 `.iter_errors()`-Callsite.
 
-## AST-Callsite-Gate
+## AST-Callsite-Gate (receiver-aufgelöst, base-gebunden)
 
-Der Scanner erhebt im Base-Snapshot
-`(source_path, engine_owner_symbol, engine_call_line)` und vergleicht die Menge
-mit dem Flow-Manifest. Zusätzlich prüft er:
+Der Scanner liest den Base-Snapshot über `git`-Subprozesse (isolierte Git-Umgebung)
+und klassifiziert Testpfade über `infer_facets`, das **aus der Base** geladen wird,
+nicht aus dem Working Tree. Erkannt werden nur jsonschema-Receiver, die intra-modular
+statisch gebunden sind:
 
-- fünf `check_schema()`-Callsites;
-- genau den bekannten Syntaxfehler in
-  `merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py`;
-- erklärte `jsonschema`-Texttreffer ohne Engine-Callsite;
-- Testklassifikation über `lens_facets.infer_facets`.
+- `import jsonschema [as …]` und `jsonschema.validate(…)`;
+- `from jsonschema import validate [as …]`;
+- `Draft7Validator`/`Draft202012Validator`-Konstruktoren (direkt, als Attribut des
+  jsonschema-Modulalias, als lokal zugewiesene Validator-Variable oder gechaint);
+- `.check_schema(…)` auf denselben Bindungen.
 
-Die deklarierte Grammatik umfasst die im Snapshot verwendeten
-`.validate`-, `.iter_errors`- und `.check_schema`-Aufrufe sowie direkte
-`jsonschema.validate`-Importaliasse. Intermodulare Aliasweitergabe, dynamische
-Wrapper und Nicht-`jsonschema`-Validatoren liegen außerhalb des Scopes.
+Jede `.validate`/`.iter_errors`/`.check_schema`-Stelle mit einem **nicht** so
+gebundenen Receiver wird als `unresolved_candidate` geführt, nicht stillschweigend
+verworfen. Validatoren, die über einen projektlokalen Loader
+(`_load_jsonschema()` / `importlib.import_module`) bezogen werden, sind damit
+absichtlich `unresolved` und gelten als `manual_source_review`.
+
+Falsifizierbares Gate (exakte Mengengleichheit, fail-closed):
+
+```text
+reviewed_engine == resolved_engine ∪ unresolved_engine
+reviewed_meta    == resolved_meta    ∪ unresolved_meta
+```
+
+Eine falsche Callsite-Zeile, eine fehlende oder überzählige Flowzeile und jeder
+**neue** unresolved-Kandidat brechen diese Gleichheit. Zusätzlich müssen
+Schema-Ziele als Blob im Base-Tree existieren, `text_only`-Treffer ohne
+Engine-Callsite vollständig erklärt sein und genau ein Parsefehler
+(`…/invalid.py`) auftreten. Die Falsifikationstests belegen, dass das Gate
+manipulierte Manifeste (falsche Zeile, fehlendes Schema, entfernte
+Manual-Review-Zeile) tatsächlich ablehnt.
+
 AST-Gleichheit beweist Callsite-Abdeckung innerhalb dieser Grammatik, nicht die
 semantische Richtigkeit jeder Schema-Bindung.
 
@@ -78,16 +100,40 @@ semantische Richtigkeit jeder Schema-Bindung.
 | akzeptierte In-Repo-Flows | 24 |
 | semantische Schlüssel | 23 |
 | Engine-Callsites inklusive externem Flow | 23 |
+| – davon receiver-aufgelöst (`derived_ast`) | 20 |
+| – davon `manual_source_review` (Loader-Indirektion) | 3 |
 | Modul→Schema-Ziele | 21 |
 | akzeptierte Module | 17 |
 | akzeptierte Schema-Ziele | 18 |
 | externer Flow | 1 |
 | Meta-Engine-Callsites | 5 |
+| – davon receiver-aufgelöst (`derived_ast`) | 2 |
+| – davon `manual_source_review` | 3 |
 | manuell gebundene Meta-Schema-Flows | 6 |
-| Test-Facet-Dateien mit Validierungs-API | 45 |
-| Schema-Dateien ohne akzeptierte Beziehung | 36 |
+| Schema-Dateien (gesamt, abgeleitet) | 54 |
+| Schema-Dateien ohne akzeptierte Beziehung (abgeleitet) | 36 |
+| Test-Facet-Dateien mit aufgelöster Engine-Callsite | 41 |
+| Test-Facet-Dateien nur mit unresolved-Kandidat | 4 |
+| Test-Facet-Dateien mit irgendeiner Validierungs-API (Union) | 45 |
 
-Die Einheiten werden nicht zu einer globalen Summe vermischt.
+Die Einheiten werden nicht zu einer globalen Summe vermischt. Alle Schema- und
+Testzahlen werden aus dem Snapshot abgeleitet, nicht hartkodiert.
+
+**Provenienz (derived vs. manual).** Von 23 Engine-Callsites löst die Grammatik 20
+über jsonschema-Receiver auf; die übrigen drei
+(`lens_card_validate:136`, `pr_delta_card_validate:135`,
+`relation_card_validate/_schema_check:159`) beziehen jsonschema über
+`_load_jsonschema()`/`importlib` und sind daher `manual_source_review`. Analog
+sind 2 der 5 Meta-Callsites `derived_ast`, 3 `manual_source_review`. Die volle
+Liste je Klasse steht im `derived`-Report des Audit-JSON.
+
+**Testdatei-Zählung (44/45/41 aufgelöst).** Unter der strengen receiver-aufgelösten
+Grammatik enthalten **41** Test-Facet-Dateien eine aufgelöste jsonschema-Engine-
+Callsite; **4** weitere (`test_claim_evidence_map`, `test_lens_cards`,
+`test_lens_facets`, `test_primary_lens_audit`) enthalten nur unresolved-Kandidaten;
+die **Union** ist **45**. Die frühere „45“ war die Union unter einer generischen
+`.validate`-Grammatik, die frühere „44“ eine Zwischenregel. Die Differenz ist ein
+Grammatik-Artefakt, kein Faktum; alle drei Listen stehen im Audit-JSON.
 
 Von 24 akzeptierten Flows sind 22 direkt und zwei delegiert. Bei
 `relation_card_validate.validate_relation_card` liegen die Relation-Callsites an
@@ -131,13 +177,24 @@ basierende Validatoren wurden nicht vollständig inventarisiert.
 
 ```bash
 BASE_SHA="05bbd0d608afa8faf581887a455d4dcf6fa15ae9"
-SCRIPT="docs/proofs/_repro/guard_relation_validates_schema_audit.py"
+SCRIPT="scripts/proofs/guard_relation_validates_schema_audit.py"
 COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
 
+# regenerate the derived report and compare byte-for-byte
 python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/a.json
-python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/b.json
-python3 -O "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/o.json
-cmp /tmp/a.json /tmp/b.json
-cmp /tmp/a.json /tmp/o.json
 cmp /tmp/a.json "$COMMITTED"
+
+# falsification tests (the gate must reject tampered manifests)
+python3 -m pytest -q \
+  merger/lenskit/tests/test_guard_relation_validates_schema_audit.py
+
+# negative control: a tampered manifest must fail closed
+python3 - "$COMMITTED" > /tmp/tampered.json <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d["flows"][0] = d["flows"][0].replace("|39|", "|990|")
+print(json.dumps(d))
+PY
+! python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \
+    --manifest /tmp/tampered.json --output /tmp/rejected.json
 ```

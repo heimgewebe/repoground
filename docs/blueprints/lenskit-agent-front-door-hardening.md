@@ -882,11 +882,16 @@ Goldsets zurückgestellt.
 
 **Target-Proof `validates_schema`:** diagnosis-only untersucht in
 `docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md`.
-Der Proof dokumentiert reproduzierbare Instanzvalidierungs-Flows,
-Schema-Meta-Guards, bedingte Schemaauswahl und externe Zielpfade.
-Ein persistierter Contract wird mangels verbindlichem Consumer und belegtem
-Persistenzvorteil zurückgestellt. Die übrigen Guard-Relation-Kandidaten
-wurden dadurch nicht bewertet.
+Das Audit (`scripts/proofs/guard_relation_validates_schema_audit.py`) ist
+hermetisch an den festgeschriebenen Base-Snapshot gebunden (base-geladenes
+`infer_facets`), trennt receiver-aufgelöste (`derived_ast`) von
+loader-indirekten (`manual_source_review`) Callsites, leitet alle Aggregate ab
+und prüft das Flow-Manifest fail-closed; Falsifikationstests
+(`merger/lenskit/tests/test_guard_relation_validates_schema_audit.py`) und ein
+eigener CI-Job (`validates-schema-target-proof`, `fetch-depth: 0`) belegen, dass
+manipulierte Manifeste abgelehnt werden. Ein persistierter Contract wird mangels
+verbindlichem Consumer und belegtem Persistenzvorteil zurückgestellt. Die übrigen
+Guard-Relation-Kandidaten wurden dadurch nicht bewertet.
 
 **Ziel:** Tests und Guards formal mit Code, Contracts und Surfaces verbinden.
 
