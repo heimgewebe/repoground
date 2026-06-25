@@ -487,8 +487,7 @@ def main(argv: list[str] | None = None) -> int:
             "snapshot_keys_unique",
         ],
         "limitations": [
-            "Validators reached only through a project-local loader "
-            "(_load_jsonschema / importlib.import_module) are manual_source_review, not derived_ast.",
+            "Validators reached only through a project-local loader (_load_jsonschema / importlib.import_module) are manual_source_review, not derived_ast.",
             "Intermodular alias passing, dynamic wrappers and non-jsonschema validators are out of grammar.",
             "External (metarepo) schema targets are not resolved against any external snapshot.",
             "load_only / path_reference_only callsites are not inventoried.",
