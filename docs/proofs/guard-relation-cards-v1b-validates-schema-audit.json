@@ -1,171 +1,112 @@
 {
-  "base_sha": "05bbd0d608afa8faf581887a455d4dcf6fa15ae9",
-  "inventory_sha256": "19ccdd599e32d683b97d71a86b05594b825440bda1b900d32a756517f637b50a",
-  "inventory_path_count": 590,
-  "relation_identity": {
-    "fields": [
-      "source_path",
-      "relation_owner_symbol",
-      "relation_call_line",
-      "engine_owner_symbol",
-      "engine_call_line",
-      "schema_path",
-      "schema_fragment",
-      "activation_condition",
-      "target_scope"
+  "base": "05bbd0d608afa8faf581887a455d4dcf6fa15ae9",
+  "fields": [
+    "source_path",
+    "relation_owner_symbol",
+    "relation_call_line",
+    "engine_owner_symbol",
+    "engine_call_line",
+    "schema_path",
+    "schema_fragment",
+    "activation_condition",
+    "target_scope",
+    "schema_binding_origin",
+    "resolved_engine",
+    "validator_draft",
+    "format_checker_mode",
+    "dependency_requirement",
+    "missing_dependency_outcome",
+    "schema_requirement",
+    "missing_schema_outcome",
+    "meta_guard_present",
+    "schema_path_definition_line",
+    "schema_load_line"
+  ],
+  "flows": [
+    "merger/lenskit/architecture/graph_index.py|load_graph_index|39|load_graph_index|39|merger/lenskit/contracts/architecture.graph_index.v1.schema.json||unconditional|in_repo|same_symbol_literal|jsonschema.validate|auto-selected|none|optional_module_import|warn_and_continue|optional|silent_skip|0|31|38",
+    "merger/lenskit/cli/policy_loader.py|load_and_validate_embedding_policy|45|load_and_validate_embedding_policy|45|merger/lenskit/contracts/embedding-policy.v1.schema.json||unconditional|in_repo|same_symbol_literal|jsonschema.validate|auto-selected|none|optional_module_import|raises_domain_error|required|raises_domain_error|0|29|35",
+    "merger/lenskit/cli/pr_schau_verify.py|verify_basic|80|verify_basic|80|merger/lenskit/contracts/pr-schau.v1.schema.json||unconditional|in_repo|caller_parameter|jsonschema.validate|auto-selected|none|optional_module_import|warn_and_continue|required|raises_runtime_error|0|36|71",
+    "merger/lenskit/core/agent_export_gate.py|_validate_post_health_schema|262|_validate_post_health_schema|262|merger/lenskit/contracts/post-emit-health.v1.schema.json||unconditional|in_repo|same_symbol_literal|jsonschema.validate|auto-selected|none|optional_module_import|silent_skip|required|returns_blocked|0|255|261",
+    "merger/lenskit/core/doc_freshness.py|validate_registry|668|validate_registry|668|merger/lenskit/contracts/doc-freshness-registry.v1.schema.json||unconditional|in_repo|caller_parameter|Draft7Validator.iter_errors|draft7|none|dynamic_runtime_import|structural_fallback|required|raises_runtime_error|0|468|665",
+    "merger/lenskit/core/federation.py|add_bundle|156|add_bundle|156|merger/lenskit/contracts/federation-index.v1.schema.json||unconditional|in_repo|same_module_loader|jsonschema.validate|auto-selected|none|optional_module_import|raises_runtime_error|required|raises_runtime_error|0|24|27",
+    "merger/lenskit/core/federation.py|add_bundle|187|add_bundle|187|merger/lenskit/contracts/federation-index.v1.schema.json||unconditional|in_repo|same_module_loader|jsonschema.validate|auto-selected|none|optional_module_import|raises_runtime_error|required|raises_runtime_error|0|24|27",
+    "merger/lenskit/core/federation.py|init_federation|59|init_federation|59|merger/lenskit/contracts/federation-index.v1.schema.json||unconditional|in_repo|same_module_loader|jsonschema.validate|auto-selected|none|optional_module_import|raises_runtime_error|required|raises_runtime_error|0|24|27",
+    "merger/lenskit/core/federation.py|validate_federation|87|validate_federation|87|merger/lenskit/contracts/federation-index.v1.schema.json||unconditional|in_repo|same_module_loader|jsonschema.validate|auto-selected|none|optional_module_import|raises_runtime_error|required|raises_runtime_error|0|24|27",
+    "merger/lenskit/core/forensic_preflight.py|_validate_claim_map_schema|119|_validate_claim_map_schema|119|merger/lenskit/contracts/claim-evidence-map.v1.schema.json||unconditional|in_repo|same_symbol_literal|jsonschema.validate|auto-selected|none|optional_module_import|returns_blocked|required|returns_blocked|0|114|115",
+    "merger/lenskit/core/lens_card_validate.py|validate_lens_card|136|validate_lens_card|136|merger/lenskit/contracts/lens-card.v1.schema.json||unconditional|in_repo|same_module_loader|Draft7Validator.iter_errors|draft7|none|dynamic_runtime_import|returns_failed_check_skipped_unavailable|required|returns_blocked|1|27|68",
+    "merger/lenskit/core/parity_state.py|_validate_citation_map|349|_validate_citation_map|349|merger/lenskit/contracts/citation-map.v1.schema.json||unconditional|in_repo|same_symbol_literal|jsonschema.validate|auto-selected|none|optional_module_import|raises_domain_error|required|raises_domain_error|0|313|314",
+    "merger/lenskit/core/post_emit_health.py|_validate_claim_evidence_map_schema|331|_validate_claim_evidence_map_schema|331|merger/lenskit/contracts/claim-evidence-map.v1.schema.json||unconditional|in_repo|same_symbol_literal|jsonschema.validate|auto-selected|none|optional_module_import|returns_environment_error|required|returns_environment_error|0|324|330",
+    "merger/lenskit/core/post_emit_health.py|_validate_manifest_schema|404|_validate_manifest_schema|404|merger/lenskit/contracts/bundle-manifest.v1.schema.json||unconditional|in_repo|same_symbol_literal|jsonschema.validate|auto-selected|none|optional_module_import|returns_environment_error|required|returns_environment_error|0|396|403",
+    "merger/lenskit/core/pr_delta_card_validate.py|validate_pr_delta_card|135|validate_pr_delta_card|135|merger/lenskit/contracts/pr-delta-card.v1.schema.json||unconditional|in_repo|same_module_loader|Draft7Validator.iter_errors|draft7|FormatChecker|dynamic_runtime_import|returns_failed_check_skipped_unavailable|required|returns_blocked|1|30|71",
+    "merger/lenskit/core/pr_delta_cards.py|_validate_source_delta|105|_validate_source_delta|105|merger/lenskit/contracts/pr-schau-delta.v1.schema.json||unconditional|in_repo|same_module_loader|Draft202012Validator.iter_errors|draft2020-12|custom_date_time_checker|dynamic_runtime_import|raises_domain_error|required|raises_runtime_error|1|38|58",
+    "merger/lenskit/core/pr_schau_bundle.py|load_pr_schau_bundle|130|load_pr_schau_bundle|130|merger/lenskit/contracts/pr-schau.v1.schema.json||unconditional|in_repo|same_module_loader|jsonschema.validate|auto-selected|none|optional_module_import|silent_skip|optional|silent_skip|0|27|60",
+    "merger/lenskit/core/range_resolver.py|resolve_range_ref|193|resolve_range_ref|193|merger/lenskit/contracts/range-ref.v1.schema.json||range_ref_version != \"2\"|in_repo|same_module_constant|jsonschema.validate|auto-selected|none|optional_module_import|raises_runtime_error|required|raises_runtime_error|0|16|44",
+    "merger/lenskit/core/range_resolver.py|resolve_range_ref|193|resolve_range_ref|193|merger/lenskit/contracts/range-ref.v2.schema.json||range_ref_version == \"2\"|in_repo|same_module_constant|jsonschema.validate|auto-selected|none|optional_module_import|raises_runtime_error|required|raises_runtime_error|0|17|44",
+    "merger/lenskit/core/relation_card_validate.py|validate_relation_card|226|_schema_check|159|merger/lenskit/contracts/relation-card.v1.schema.json||unconditional|in_repo|same_module_loader|Draft7Validator.iter_errors|draft7|none|dynamic_runtime_import|returns_failed_check_skipped_unavailable|required|returns_blocked|1|47|110",
+    "merger/lenskit/core/relation_card_validate.py|validate_relation_card|235|_schema_check|159|merger/lenskit/contracts/architecture.graph.v1.schema.json||unconditional|in_repo|same_module_loader|Draft7Validator.iter_errors|draft7|none|dynamic_runtime_import|returns_failed_check_skipped_unavailable|required|returns_blocked|1|50|114",
+    "merger/lenskit/core/relation_cards.py|_validate_source_graph|137|_validate_source_graph|137|merger/lenskit/contracts/architecture.graph.v1.schema.json||unconditional|in_repo|same_module_loader|Draft7Validator.iter_errors|draft7|none|dynamic_runtime_import|raises_domain_error|required|raises_runtime_error|1|69|100",
+    "merger/lenskit/validate_merge_meta.py|validate_report_meta|114|validate_report_meta|114|merger/lenskit/contracts/repolens-delta.schema.json||unconditional|in_repo|same_symbol_literal|Draft202012Validator.iter_errors|draft2020-12|none|required_at_module_import|module_import_failure|optional|warn_and_continue|0|108|112",
+    "merger/lenskit/validate_merge_meta.py|validate_report_meta|95|validate_report_meta|95|merger/lenskit/contracts/repolens-report.schema.json|#/properties/merge|unconditional|in_repo|same_symbol_literal|Draft202012Validator.iter_errors|draft2020-12|none|required_at_module_import|module_import_failure|required|raises_runtime_error|0|87|91",
+    "merger/lenskit/adapters/sources.py|refresh|299|_validate_snapshot|178|metarepo/contracts/fleet/fleet.snapshot.schema.json||unconditional|external_static_relative|runtime_external_root|jsonschema.validate|auto-selected|none|optional_module_import|silent_skip|external_optional|silent_skip|0|200|177"
+  ],
+  "grammar": {
+    "supported": [
+      "attribute validate/iter_errors/check_schema",
+      "jsonschema validate aliases",
+      "Draft7/Draft202012 local instances"
+    ],
+    "unsupported": [
+      "inter-module aliases",
+      "dynamic wrappers",
+      "non-jsonschema validators"
     ]
   },
-  "relation_ids": [
-    "merger/lenskit/architecture/graph_index.py|load_graph_index|39|load_graph_index|39|merger/lenskit/contracts/architecture.graph_index.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/cli/policy_loader.py|load_and_validate_embedding_policy|45|load_and_validate_embedding_policy|45|merger/lenskit/contracts/embedding-policy.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/cli/pr_schau_verify.py|verify_basic|80|verify_basic|80|merger/lenskit/contracts/pr-schau.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/agent_export_gate.py|_validate_post_health_schema|262|_validate_post_health_schema|262|merger/lenskit/contracts/post-emit-health.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/doc_freshness.py|validate_registry|668|validate_registry|668|merger/lenskit/contracts/doc-freshness-registry.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/federation.py|add_bundle|156|add_bundle|156|merger/lenskit/contracts/federation-index.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/federation.py|add_bundle|187|add_bundle|187|merger/lenskit/contracts/federation-index.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/federation.py|init_federation|59|init_federation|59|merger/lenskit/contracts/federation-index.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/federation.py|validate_federation|87|validate_federation|87|merger/lenskit/contracts/federation-index.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/forensic_preflight.py|_validate_claim_map_schema|119|_validate_claim_map_schema|119|merger/lenskit/contracts/claim-evidence-map.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/lens_card_validate.py|validate_lens_card|136|validate_lens_card|136|merger/lenskit/contracts/lens-card.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/parity_state.py|_validate_citation_map|349|_validate_citation_map|349|merger/lenskit/contracts/citation-map.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/post_emit_health.py|_validate_claim_evidence_map_schema|331|_validate_claim_evidence_map_schema|331|merger/lenskit/contracts/claim-evidence-map.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/post_emit_health.py|_validate_manifest_schema|404|_validate_manifest_schema|404|merger/lenskit/contracts/bundle-manifest.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/pr_delta_card_validate.py|validate_pr_delta_card|135|validate_pr_delta_card|135|merger/lenskit/contracts/pr-delta-card.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/pr_delta_cards.py|_validate_source_delta|105|_validate_source_delta|105|merger/lenskit/contracts/pr-schau-delta.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/pr_schau_bundle.py|load_pr_schau_bundle|130|load_pr_schau_bundle|130|merger/lenskit/contracts/pr-schau.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/range_resolver.py|resolve_range_ref|193|resolve_range_ref|193|merger/lenskit/contracts/range-ref.v1.schema.json|null|range_ref_version != \"2\"|in_repo",
-    "merger/lenskit/core/range_resolver.py|resolve_range_ref|193|resolve_range_ref|193|merger/lenskit/contracts/range-ref.v2.schema.json|null|range_ref_version == \"2\"|in_repo",
-    "merger/lenskit/core/relation_card_validate.py|validate_relation_card|226|_schema_check|159|merger/lenskit/contracts/relation-card.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/relation_card_validate.py|validate_relation_card|235|_schema_check|159|merger/lenskit/contracts/architecture.graph.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/core/relation_cards.py|_validate_source_graph|137|_validate_source_graph|137|merger/lenskit/contracts/architecture.graph.v1.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/validate_merge_meta.py|validate_report_meta|114|validate_report_meta|114|merger/lenskit/contracts/repolens-delta.schema.json|null|unconditional|in_repo",
-    "merger/lenskit/validate_merge_meta.py|validate_report_meta|95|validate_report_meta|95|merger/lenskit/contracts/repolens-report.schema.json|#/properties/merge|unconditional|in_repo"
+  "inv": [
+    590,
+    "19ccdd599e32d683b97d71a86b05594b825440bda1b900d32a756517f637b50a"
   ],
-  "relation_counts": {
-    "callsite_flows": 24,
-    "unique_symbol_schema_targets": 23,
-    "unique_module_schema_targets": 21,
-    "accepted_modules": 17,
-    "accepted_schema_targets": 18,
-    "external_or_not_accepted_flows": 1,
-    "unique_instance_engine_callsites_including_external": 23
-  },
-  "axis_counts": {
-    "activation_condition": {
-      "range_ref_version != \"2\"": 1,
-      "range_ref_version == \"2\"": 1,
-      "unconditional": 22
-    },
-    "dependency_requirement": {
-      "dynamic_runtime_import": 7,
-      "optional_module_import": 15,
-      "required_at_module_import": 2
-    },
-    "engine_invocation": {
-      "delegated": 2,
-      "direct": 22
-    },
-    "format_checker_mode": {
-      "FormatChecker": 1,
-      "custom_date_time_checker": 1,
-      "none": 22
-    },
-    "missing_dependency_outcome": {
-      "module_import_failure": 2,
-      "raises_domain_error": 4,
-      "raises_runtime_error": 6,
-      "returns_blocked": 1,
-      "returns_environment_error": 2,
-      "returns_failed_check_skipped_unavailable": 4,
-      "silent_skip": 2,
-      "structural_fallback": 1,
-      "warn_and_continue": 2
-    },
-    "missing_schema_outcome": {
-      "raises_domain_error": 2,
-      "raises_runtime_error": 11,
-      "returns_blocked": 6,
-      "returns_environment_error": 2,
-      "silent_skip": 2,
-      "warn_and_continue": 1
-    },
-    "resolved_engine": {
-      "Draft202012Validator.iter_errors": 3,
-      "Draft7Validator.iter_errors": 6,
-      "jsonschema.validate": 15
-    },
-    "schema_binding_origin": {
-      "caller_parameter": 2,
-      "same_module_constant": 2,
-      "same_module_loader": 11,
-      "same_symbol_literal": 9
-    },
-    "schema_requirement": {
-      "optional": 3,
-      "required": 21
-    },
-    "target_scope": {
-      "in_repo": 24
-    },
-    "validator_draft": {
-      "auto-selected": 15,
-      "draft2020-12": 3,
-      "draft7": 6
-    }
-  },
-  "callsite_gate": {
-    "count": 23,
-    "ast_sha256": "bbe201d2a78a3feed479e2625890fb944560a479ba8a410f65f2986ea0cf71d1",
-    "reviewed_sha256": "bbe201d2a78a3feed479e2625890fb944560a479ba8a410f65f2986ea0cf71d1",
-    "equal": true
-  },
-  "meta_validation": {
-    "engine_callsite_count": 5,
-    "schema_flow_count": 6,
-    "ast_sha256": "3ced75fc6738b1d568bfa33dfe4c72900a06200af9fd181ea5dda653d49d0bfa",
-    "reviewed_sha256": "3ced75fc6738b1d568bfa33dfe4c72900a06200af9fd181ea5dda653d49d0bfa",
-    "equal": true
-  },
-  "schema_coverage": {
-    "total_schema_files": 54,
-    "with_accepted_in_repo_relation": 18,
-    "without_accepted_in_repo_relation": 36,
-    "with_relation_sha256": "489ded56d7d815fb70e6660efda0b678c2d73f25e3e75969d01539fea3f36f3c"
-  },
-  "test_inventory": {
-    "classification": "lens_facets.infer_facets (facet == 'test')",
-    "test_files_with_validation_api_count": 44,
-    "test_files_sha256": "903fa0f38f3c921d9aecd0b706976ebea92b8337cac0ed35407e27ac7f9f60ad"
-  },
-  "parse_failures": [
-    {
-      "path": "merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py",
-      "lineno": 1,
-      "message": "'(' was never closed",
-      "is_test_facet": false
-    }
+  "limits": [
+    "manual schema bindings/outcomes",
+    "AST proves callsites only",
+    "meta schemas manual",
+    "dynamic/non-jsonschema/load/reference out of scope",
+    "no runtime/consumer proof"
   ],
-  "candidate_discovery": {
-    "classification_boundary": "non_test_facet does not establish production status",
-    "ast_non_test_facet_validation_file_count": 18,
-    "text_non_test_facet_jsonschema_file_count": 23,
-    "text_only_non_validator_files": {
-      "merger/lenskit/core/bundle_surface_validate.py": "structural validator; jsonschema appears only in a validation-mode literal",
-      "merger/lenskit/core/dependency_diagnostics.py": "dependency status reporter only; no instance-validation API",
-      "merger/lenskit/core/output_health.py": "imports dependency diagnostics only; no instance-validation API",
-      "merger/lenskit/tests/conftest.py": "dependency-degradation fixture; no instance-validation API and no test facet",
-      "scripts/docmeta/check_planning_registration.py": "comment references schema validation tests; no instance-validation API"
-    }
-  },
-  "external_relation_ids": [
-    "merger/lenskit/adapters/sources.py|refresh|299|_validate_snapshot|178|metarepo/contracts/fleet/fleet.snapshot.schema.json|null|unconditional|external_static_relative"
+  "meta": [
+    "merger/lenskit/core/lens_card_validate.py|validate_lens_card|134|merger/lenskit/contracts/lens-card.v1.schema.json|1|manual_source_review",
+    "merger/lenskit/core/pr_delta_card_validate.py|validate_pr_delta_card|133|merger/lenskit/contracts/pr-delta-card.v1.schema.json|1|manual_source_review",
+    "merger/lenskit/core/pr_delta_cards.py|_validate_source_delta|99|merger/lenskit/contracts/pr-schau-delta.v1.schema.json|1|manual_source_review",
+    "merger/lenskit/core/relation_card_validate.py|_schema_check|157|merger/lenskit/contracts/architecture.graph.v1.schema.json|1|manual_source_review",
+    "merger/lenskit/core/relation_card_validate.py|_schema_check|157|merger/lenskit/contracts/relation-card.v1.schema.json|1|manual_source_review",
+    "merger/lenskit/core/relation_cards.py|_validate_source_graph|135|merger/lenskit/contracts/architecture.graph.v1.schema.json|1|manual_source_review"
   ],
-  "limitations": [
-    "Schema bindings and qualitative outcome labels are manually reviewed.",
-    "AST equality proves engine-callsite coverage, not schema-binding correctness.",
-    "Only in-repo *.schema.json targets are accepted.",
-    "Inline, dynamic, and non-jsonschema validators are outside this audit.",
-    "load_only and path_reference_only callsites are not inventoried.",
-    "Static code chains do not prove runtime execution or consumer need."
-  ]
+  "meta_fields": [
+    "source_path",
+    "engine_owner_symbol",
+    "engine_call_line",
+    "schema_path",
+    "followed_by_instance_validation",
+    "schema_binding_verification"
+  ],
+  "summary": {
+    "accepted_flows": 24,
+    "engine_callsites": 23,
+    "external_flows": 1,
+    "meta_callsites": 5,
+    "meta_flows": 6,
+    "module_schema_targets": 21,
+    "modules": 17,
+    "schema_files": 54,
+    "schema_targets": 18,
+    "schemas_without_relation": 36,
+    "semantic_keys": 23,
+    "test_files": 45
+  },
+  "text_only": {
+    "merger/lenskit/core/bundle_surface_validate.py": "structural validator only",
+    "merger/lenskit/core/dependency_diagnostics.py": "dependency reporter only",
+    "merger/lenskit/core/output_health.py": "dependency reporter consumer only",
+    "merger/lenskit/tests/conftest.py": "dependency fixture",
+    "scripts/docmeta/check_planning_registration.py": "comment-only reference"
+  }
 }
