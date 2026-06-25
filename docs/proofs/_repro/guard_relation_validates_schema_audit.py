@@ -32,7 +32,6 @@ import json
 import subprocess
 import sys
 import types
-from pathlib import PurePosixPath
 
 EXPECTED_BASE_SHA = "05bbd0d608afa8faf581887a455d4dcf6fa15ae9"
 EXPECTED_INVENTORY_SHA256 = (
