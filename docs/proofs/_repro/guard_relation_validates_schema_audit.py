@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import sys
+import subprocess
 from collections import Counter
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -129,6 +131,62 @@ def axis(flows: tuple[Flow, ...], name: str) -> dict[str, int]:
     return dict(sorted(Counter(str(getattr(flow, name)) for flow in flows).items()))
 
 
+def git(repo: str, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", repo, *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def inventory_sha(paths: list[str]) -> str:
+    payload = "\n".join(sorted(set(paths))) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def scan_calls(source: str, path: str) -> tuple[set[tuple[str, int]], set[tuple[str, int]]]:
+    tree = ast.parse(source, filename=path)
+    engines: set[tuple[str, int]] = set()
+    metas: set[tuple[str, int]] = set()
+    stack: list[str] = []
+    validate_aliases: set[str] = set()
+
+    class Visitor(ast.NodeVisitor):
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+            if node.module == "jsonschema":
+                for item in node.names:
+                    if item.name == "validate":
+                        validate_aliases.add(item.asname or item.name)
+            self.generic_visit(node)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+            stack.append(node.name)
+            self.generic_visit(node)
+            stack.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+            owner = stack[-1] if stack else "<module>"
+            func = node.func
+            if isinstance(func, ast.Name) and func.id in validate_aliases:
+                engines.add((owner, node.lineno))
+            elif isinstance(func, ast.Attribute):
+                if func.attr in {"validate", "iter_errors"}:
+                    engines.add((owner, node.lineno))
+                elif func.attr == "check_schema":
+                    metas.add((owner, node.lineno))
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+    return engines, metas
+
+
+def has_test_facet(infer_facets: Any, path: str) -> bool:
+    return any(item.get("facet") == "test" for item in infer_facets(path))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo")
@@ -141,10 +199,62 @@ def main() -> int:
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     require(args.base_sha == manifest["base"], "base mismatch")
+    require(args.repo is not None, "--repo is required for the callsite gate")
+    paths = sorted(set(git(args.repo, "ls-tree", "-r", "--name-only", args.base_sha).splitlines()))
+    require(paths == sorted(paths), "inventory ordering")
+    sys.path.insert(0, str(Path(args.repo).resolve()))
+    from merger.lenskit.core.lens_facets import infer_facets
+    require([len(paths), inventory_sha(paths)] == manifest["inv"], "inventory mismatch")
     flows = parse_rows(manifest["fields"], manifest["flows"], Flow)
     meta = parse_rows(manifest["meta_fields"], manifest["meta"], MetaFlow)
     accepted = tuple(flow for flow in flows if flow.target_scope == "in_repo")
     external = tuple(flow for flow in flows if flow.target_scope != "in_repo")
+
+    discovered: set[tuple[str, str, int]] = set()
+    discovered_meta: set[tuple[str, str, int]] = set()
+    test_files: set[str] = set()
+    text_files: set[str] = set()
+    parse_failures: set[str] = set()
+    for path in (item for item in paths if item.endswith(".py")):
+        source = git(args.repo, "show", f"{args.base_sha}:{path}")
+        if "jsonschema" in source:
+            text_files.add(path)
+        try:
+            engines, metas = scan_calls(source, path)
+        except SyntaxError:
+            parse_failures.add(path)
+            continue
+        if has_test_facet(infer_facets, path):
+            if engines:
+                test_files.add(path)
+            continue
+        discovered.update((path, owner, line) for owner, line in engines)
+        discovered_meta.update((path, owner, line) for owner, line in metas)
+    require(
+        parse_failures == {"merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py"},
+        f"parse failures: {sorted(parse_failures)}",
+    )
+    reviewed = {
+        (flow.source_path, flow.engine_owner_symbol, flow.engine_call_line)
+        for flow in flows
+    }
+    require(
+        discovered == reviewed,
+        f"callsite mismatch: only_ast={sorted(discovered-reviewed)} "
+        f"only_review={sorted(reviewed-discovered)}",
+    )
+    reviewed_meta = {
+        (flow.source_path, flow.engine_owner_symbol, flow.engine_call_line)
+        for flow in meta
+    }
+    require(discovered_meta == reviewed_meta, "meta callsite mismatch")
+    non_test_text = {path for path in text_files if not has_test_facet(infer_facets, path)}
+    engine_files = {path for path, _, _ in discovered}
+    require(
+        non_test_text - engine_files == set(manifest["text_only"]),
+        "text-only candidate mismatch",
+    )
+    require(len(test_files) == manifest["summary"]["test_files"], "test file count")
 
     axes = {
         "engine_invocation": dict(sorted(Counter(
