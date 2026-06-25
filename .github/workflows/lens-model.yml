@@ -55,6 +55,9 @@ name: Lens Model
       - "docs/proofs/lens-card-v1-proof.md"
       - "docs/proofs/pr-delta-cards-gap-report.md"
       - "docs/proofs/relation-cards-v1-target-proof.md"
+      - "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md"
+      - "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
+      - "docs/proofs/_repro/guard_relation_validates_schema_audit.py"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
@@ -103,6 +106,9 @@ name: Lens Model
       - "docs/proofs/lens-card-v1-proof.md"
       - "docs/proofs/pr-delta-cards-gap-report.md"
       - "docs/proofs/relation-cards-v1-target-proof.md"
+      - "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md"
+      - "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
+      - "docs/proofs/_repro/guard_relation_validates_schema_audit.py"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
@@ -123,6 +129,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -141,6 +149,45 @@ jobs:
         run: |
           pip install -r merger/lenskit/requirements.txt
           pip install -r requirements-dev.txt
+
+      - name: Verify validates_schema target-proof audit
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+
+          BASE_SHA="05bbd0d608afa8faf581887a455d4dcf6fa15ae9"
+          SCRIPT="docs/proofs/_repro/guard_relation_validates_schema_audit.py"
+          COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
+
+          python3 "$SCRIPT" \
+            --repo "$PWD" \
+            --base-sha "$BASE_SHA" \
+            --output /tmp/validates-schema-a.json
+
+          python3 "$SCRIPT" \
+            --repo "$PWD" \
+            --base-sha "$BASE_SHA" \
+            --output /tmp/validates-schema-b.json
+
+          python3 -O "$SCRIPT" \
+            --repo "$PWD" \
+            --base-sha "$BASE_SHA" \
+            --output /tmp/validates-schema-optimized.json
+
+          cmp /tmp/validates-schema-a.json \
+              /tmp/validates-schema-b.json
+
+          cmp /tmp/validates-schema-a.json \
+              /tmp/validates-schema-optimized.json
+
+          cmp /tmp/validates-schema-a.json \
+              "$COMMITTED"
+
+      - name: Lint validates_schema audit
+        run: |
+          ruff check \
+            docs/proofs/_repro/guard_relation_validates_schema_audit.py
 
       - name: Require jsonschema (contract tests must run, not skip)
         run: |
