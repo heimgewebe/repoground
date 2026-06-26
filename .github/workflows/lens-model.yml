@@ -178,9 +178,23 @@ jobs:
           SCRIPT="scripts/proofs/guard_relation_validates_schema_audit.py"
           COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
           python3 - "$COMMITTED" > /tmp/tampered.json <<'PY'
-          import json, sys
-          data = json.load(open(sys.argv[1]))
-          data["flows"][0] = data["flows"][0].replace("|39|", "|990|")
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              data = json.load(handle)
+
+          line_index = data["fields"].index("engine_call_line")
+          row_index = next(
+              index
+              for index, row in enumerate(data["flows"])
+              if row.startswith(
+                  "merger/lenskit/architecture/graph_index.py|load_graph_index|"
+              )
+          )
+          values = data["flows"][row_index].split("|")
+          values[line_index] = str(int(values[line_index]) + 10_000)
+          data["flows"][row_index] = "|".join(values)
           print(json.dumps(data))
           PY
           if python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \

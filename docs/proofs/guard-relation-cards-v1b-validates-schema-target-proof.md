@@ -21,7 +21,7 @@ Tree.
 | Artefakt | Rolle |
 |---|---|
 | `docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json` | Reviewtes Flow-Manifest (manuelle Eingabe) **und** neu berechneter `derived`-Report. |
-| `scripts/proofs/guard_relation_validates_schema_audit.py` | Liest den Base-Snapshot, lädt `infer_facets` aus der Base, leitet receiver-aufgelöste Callsites und Aggregate ab und prüft das Manifest fail-closed dagegen. |
+| `scripts/proofs/guard_relation_validates_schema_audit.py` | Liest den Base-Snapshot, prüft die Base-`infer_facets`-Imports auf Standardbibliothek, verfolgt jsonschema-Bindungen scope- und quellreihenfolgeabhängig, leitet Callsites/Aggregate ab und prüft das Manifest fail-closed dagegen. |
 | `merger/lenskit/tests/test_guard_relation_validates_schema_audit.py` | Falsifikationstests: Grammatik, Snapshot-Bindung und Ablehnung manipulierter Manifeste. |
 | `.github/workflows/lens-model.yml` | Eigener Job `validates-schema-target-proof` (`fetch-depth: 0`): Lint, Falsifikationstests, Regenerieren + Bytevergleich und ein Negativ-Control (manipuliertes Manifest muss scheitern). |
 
@@ -60,19 +60,31 @@ Zeilenverschiebungen verändern sie.
 
 Der Scanner liest den Base-Snapshot über `git`-Subprozesse (isolierte Git-Umgebung)
 und klassifiziert Testpfade über `infer_facets`, das **aus der Base** geladen wird,
-nicht aus dem Working Tree. Erkannt werden nur jsonschema-Receiver, die intra-modular
-statisch gebunden sind:
+nicht aus dem Working Tree. Vor dem `exec()` lehnt ein Import-Guard relative,
+repo-lokale, Third-Party- und dynamische Imports in der historischen
+`lens_facets.py` fail-closed ab. Die Base-Quelle läuft weiterhin unter dem
+aktuellen Python-Interpreter und dessen Standardbibliothek; eine historische
+Laufzeitumgebung wird nicht reproduziert.
 
-- `import jsonschema [as …]` und `jsonschema.validate(…)`;
+Die jsonschema-Grammatik verfolgt Bindungen in Quellreihenfolge und getrennt pro
+lexikalischem Scope. Funktionsparameter, lokale Binder und Reassignments maskieren
+geerbte Namen; Klassenowner werden qualifiziert, ohne Klassenlocals als Closures in
+Methoden zu leaken. Mehrdeutige Kontrollfluss-Merges werden konservativ
+`unresolved`. Erkannt werden insbesondere:
+
+- `import jsonschema [as …]`, optionale Modulimporte und
+  `jsonschema.validate(…)`;
 - `from jsonschema import validate [as …]`;
-- `Draft7Validator`/`Draft202012Validator`-Konstruktoren (direkt, als Attribut des
-  jsonschema-Modulalias, als lokal zugewiesene Validator-Variable oder gechaint);
-- `.check_schema(…)` auf denselben Bindungen.
+- Draft-Validator-Konstruktoren als Modulattribute, direkte Imports, lokale
+  Validatorvariablen oder lexikalisch eindeutige Closures;
+- `jsonschema.validators.validator_for(…)(…)` und statische Aliasformen;
+- `.check_schema(…)` auf statisch belegten Validatorbindungen.
 
 Jede `.validate`/`.iter_errors`/`.check_schema`-Stelle mit einem **nicht** so
 gebundenen Receiver wird als `unresolved_candidate` geführt, nicht stillschweigend
-verworfen. Validatoren, die über einen projektlokalen Loader
-(`_load_jsonschema()` / `importlib.import_module`) bezogen werden, sind damit
+verworfen. Validatoren aus einem projektlokalen Loader
+(`_load_jsonschema()` / `importlib.import_module`) und per Funktionsparameter
+injizierte Validatorobjekte ohne interprozeduralen Herkunftsbeweis sind damit
 absichtlich `unresolved` und gelten als `manual_source_review`.
 
 Falsifizierbares Gate (exakte Mengengleichheit, fail-closed):
@@ -100,40 +112,46 @@ semantische Richtigkeit jeder Schema-Bindung.
 | akzeptierte In-Repo-Flows | 24 |
 | semantische Schlüssel | 23 |
 | Engine-Callsites inklusive externem Flow | 23 |
-| – davon receiver-aufgelöst (`derived_ast`) | 20 |
-| – davon `manual_source_review` (Loader-Indirektion) | 3 |
+| – davon receiver-aufgelöst (`derived_ast`) | 18 |
+| – davon `manual_source_review` (Loader/Parameter) | 5 |
 | Modul→Schema-Ziele | 21 |
 | akzeptierte Module | 17 |
 | akzeptierte Schema-Ziele | 18 |
 | externer Flow | 1 |
 | Meta-Engine-Callsites | 5 |
-| – davon receiver-aufgelöst (`derived_ast`) | 2 |
-| – davon `manual_source_review` | 3 |
+| – davon receiver-aufgelöst (`derived_ast`) | 0 |
+| – davon `manual_source_review` | 5 |
 | manuell gebundene Meta-Schema-Flows | 6 |
 | Schema-Dateien (gesamt, abgeleitet) | 54 |
 | Schema-Dateien ohne akzeptierte Beziehung (abgeleitet) | 36 |
-| Test-Facet-Dateien mit aufgelöster Engine-Callsite | 41 |
-| Test-Facet-Dateien nur mit unresolved-Kandidat | 4 |
+| Test-Facet-Dateien mit aufgelöster Engine-Callsite | 39 |
+| Test-Facet-Dateien nur mit unresolved-Kandidat | 6 |
 | Test-Facet-Dateien mit irgendeiner Validierungs-API (Union) | 45 |
 
 Die Einheiten werden nicht zu einer globalen Summe vermischt. Alle Schema- und
 Testzahlen werden aus dem Snapshot abgeleitet, nicht hartkodiert.
 
-**Provenienz (derived vs. manual).** Von 23 Engine-Callsites löst die Grammatik 20
-über jsonschema-Receiver auf; die übrigen drei
-(`lens_card_validate:136`, `pr_delta_card_validate:135`,
-`relation_card_validate/_schema_check:159`) beziehen jsonschema über
-`_load_jsonschema()`/`importlib` und sind daher `manual_source_review`. Analog
-sind 2 der 5 Meta-Callsites `derived_ast`, 3 `manual_source_review`. Die volle
-Liste je Klasse steht im `derived`-Report des Audit-JSON.
+**Provenienz (derived vs. manual).** Von 23 Engine-Callsites löst die gehärtete
+Grammatik 18 über statisch belegte jsonschema-Receiver auf. Fünf bleiben
+`manual_source_review`: drei Loader-Fälle (`lens_card_validate:136`,
+`pr_delta_card_validate:135`, `relation_card_validate/_schema_check:159`) sowie
+zwei Helper, denen `jsonschema` als Funktionsparameter übergeben wird
+(`pr_delta_cards/_validate_source_delta:105`,
+`relation_cards/_validate_source_graph:137`). Der vorherige Scanner hatte diese
+Parameter wegen Imports in anderen Funktionen fälschlich als Modulaliase
+klassifiziert. Analog sind alle fünf Meta-Callsites manuell: drei Loader-Fälle
+plus die beiden parameterinjizierten Helper. Die volle Liste je Klasse steht im
+`derived`-Report des Audit-JSON.
 
-**Testdatei-Zählung (44/45/41 aufgelöst).** Unter der strengen receiver-aufgelösten
-Grammatik enthalten **41** Test-Facet-Dateien eine aufgelöste jsonschema-Engine-
-Callsite; **4** weitere (`test_claim_evidence_map`, `test_lens_cards`,
-`test_lens_facets`, `test_primary_lens_audit`) enthalten nur unresolved-Kandidaten;
-die **Union** ist **45**. Die frühere „45“ war die Union unter einer generischen
-`.validate`-Grammatik, die frühere „44“ eine Zwischenregel. Die Differenz ist ein
-Grammatik-Artefakt, kein Faktum; alle drei Listen stehen im Audit-JSON.
+**Testdatei-Zählung (39 aufgelöst / 6 unresolved-only / 45 Union).** Unter der
+scope-korrekten Grammatik enthalten **39** Test-Facet-Dateien eine aufgelöste
+jsonschema-Engine-Callsite; **6** weitere (`test_claim_evidence_map`,
+`test_extractor_schema`, `test_federation_query`, `test_lens_cards`,
+`test_lens_facets`, `test_primary_lens_audit`) enthalten nur
+unresolved-Kandidaten; die **Union** bleibt **45**. Die Verschiebung von zwei
+Dateien beruht ebenfalls auf zuvor durch Parameter-Shadowing überhöhter
+Provenienz, nicht auf verlorener Callsite-Abdeckung. Alle Listen stehen im
+Audit-JSON.
 
 Von 24 akzeptierten Flows sind 22 direkt und zwei delegiert. Bei
 `relation_card_validate.validate_relation_card` liegen die Relation-Callsites an
@@ -190,10 +208,22 @@ python3 -m pytest -q \
 
 # negative control: a tampered manifest must fail closed
 python3 - "$COMMITTED" > /tmp/tampered.json <<'PY'
-import json, sys
-d = json.load(open(sys.argv[1]))
-d["flows"][0] = d["flows"][0].replace("|39|", "|990|")
-print(json.dumps(d))
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    data = json.load(handle)
+line_index = data["fields"].index("engine_call_line")
+row_index = next(
+    index for index, row in enumerate(data["flows"])
+    if row.startswith(
+        "merger/lenskit/architecture/graph_index.py|load_graph_index|"
+    )
+)
+values = data["flows"][row_index].split("|")
+values[line_index] = str(int(values[line_index]) + 10_000)
+data["flows"][row_index] = "|".join(values)
+print(json.dumps(data))
 PY
 ! python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \
     --manifest /tmp/tampered.json --output /tmp/rejected.json

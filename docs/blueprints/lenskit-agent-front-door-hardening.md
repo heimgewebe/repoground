@@ -883,9 +883,10 @@ Goldsets zurückgestellt.
 **Target-Proof `validates_schema`:** diagnosis-only untersucht in
 `docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md`.
 Das Audit (`scripts/proofs/guard_relation_validates_schema_audit.py`) ist
-hermetisch an den festgeschriebenen Base-Snapshot gebunden (base-geladenes
-`infer_facets`), trennt receiver-aufgelöste (`derived_ast`) von
-loader-indirekten (`manual_source_review`) Callsites, leitet alle Aggregate ab
+hermetisch an den festgeschriebenen Base-Snapshot gebunden (base-geladenes,
+stdlib-import-geprüftes `infer_facets`), verfolgt Bindungen scope- und
+quellreihenfolgeabhängig und trennt statisch belegte (`derived_ast`) von
+loader- oder parameterindirekten (`manual_source_review`) Callsites, leitet alle Aggregate ab
 und prüft das Flow-Manifest fail-closed; Falsifikationstests
 (`merger/lenskit/tests/test_guard_relation_validates_schema_audit.py`) und ein
 eigener CI-Job (`validates-schema-target-proof`, `fetch-depth: 0`) belegen, dass

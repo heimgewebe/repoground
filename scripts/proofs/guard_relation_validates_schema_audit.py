@@ -23,10 +23,11 @@ callsite, missing schema, foreign ``.validate``) makes a gate fail, so the
 comparison is not a tautology. Gates use ``require`` / ``AuditError`` (never
 ``assert``) so they stay active under ``python -O``.
 
-Grammar boundary: only jsonschema receivers reachable by intra-module static
-binding are ``derived_ast``. Validators obtained through a project-local loader
-(``_load_jsonschema`` / ``importlib.import_module``) are ``manual_source_review``
-and listed explicitly; any *new* unresolved candidate fails the audit.
+Grammar boundary: only jsonschema receivers proven by scope- and source-order-
+aware intra-module binding are ``derived_ast``. Loader-indirect and unproven
+parameter-injected validators are ``manual_source_review`` and listed explicitly;
+any *new* unresolved candidate fails the audit. Historical ``lens_facets`` source
+is restricted to standard-library imports before execution.
 """
 from __future__ import annotations
 
@@ -140,7 +141,12 @@ def git(repo: str, *args: str) -> str:
     )
     return subprocess.run(
         ["git", "-C", repo, *args],
-        check=True, capture_output=True, text=True, env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="strict",
+        env=env,
     ).stdout
 
 
@@ -152,6 +158,7 @@ def inventory_sha(paths: list[str]) -> str:
 def load_base_infer_facets(repo: str, base_sha: str):
     """Load infer_facets from the BASE snapshot, never the working tree."""
     source = git(repo, "show", f"{base_sha}:{LENS_FACETS_PATH}")
+    validate_base_import_policy(source, f"{LENS_FACETS_PATH}@{base_sha[:12]}")
     import types
     module = types.ModuleType("lens_facets_base")
     exec(compile(source, f"{LENS_FACETS_PATH}@{base_sha[:12]}", "exec"), module.__dict__)  # noqa: S102
@@ -163,110 +170,664 @@ def load_base_infer_facets(repo: str, base_sha: str):
 # ---------------------------------------------------------------------------
 # Receiver-resolved jsonschema grammar
 # ---------------------------------------------------------------------------
+_BIND_JSONSCHEMA_MODULE = "jsonschema_module"
+_BIND_OPTIONAL_JSONSCHEMA_MODULE = "optional_jsonschema_module"
+_BIND_VALIDATE_FUNCTION = "validate_function"
+_BIND_VALIDATOR_CONSTRUCTOR = "validator_constructor"
+_BIND_VALIDATORS_MODULE = "validators_module"
+_BIND_VALIDATOR_FOR = "validator_for"
+_BIND_VALIDATOR_INSTANCE = "validator_instance"
+_BIND_NONE = "none"
+_BIND_UNKNOWN = "unknown"
+_MODULE_BINDINGS = {_BIND_JSONSCHEMA_MODULE, _BIND_OPTIONAL_JSONSCHEMA_MODULE}
+
+
+@dataclass
+class _Scope:
+    kind: str
+    bindings: dict[str, str]
+    global_names: set[str]
+    nonlocal_names: set[str]
+
+
+class _LocalBinderCollector(ast.NodeVisitor):
+    """Collect names local to one function without entering nested scopes."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+        self.global_names: set[str] = set()
+        self.nonlocal_names: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:  # noqa: N802
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+        for alias in node.names:
+            self.names.add(alias.asname or alias.name.split(".", 1)[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+        for alias in node.names:
+            if alias.name != "*":
+                self.names.add(alias.asname or alias.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+        self.names.add(node.name)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+        self.names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+        return
+
+    def visit_ListComp(self, node: ast.ListComp) -> None:  # noqa: N802
+        return
+
+    visit_SetComp = visit_ListComp
+    visit_GeneratorExp = visit_ListComp
+
+    def visit_DictComp(self, node: ast.DictComp) -> None:  # noqa: N802
+        return
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:  # noqa: N802
+        if node.name:
+            self.names.add(node.name)
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_Global(self, node: ast.Global) -> None:  # noqa: N802
+        self.global_names.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:  # noqa: N802
+        self.nonlocal_names.update(node.names)
+
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:  # noqa: N802
+        if node.name:
+            self.names.add(node.name)
+        if node.pattern is not None:
+            self.visit(node.pattern)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:  # noqa: N802
+        if node.name:
+            self.names.add(node.name)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:  # noqa: N802
+        if node.rest:
+            self.names.add(node.rest)
+        self.generic_visit(node)
+
+
+def _argument_names(arguments: ast.arguments) -> set[str]:
+    items = [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]
+    names = {item.arg for item in items}
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
+def _function_locals(
+    node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda,
+) -> tuple[set[str], set[str], set[str]]:
+    collector = _LocalBinderCollector()
+    if isinstance(node, ast.Lambda):
+        collector.visit(node.body)
+    else:
+        for statement in node.body:
+            collector.visit(statement)
+    names = collector.names | _argument_names(node.args)
+    names -= collector.global_names | collector.nonlocal_names
+    return names, collector.global_names, collector.nonlocal_names
+
+
+def _bound_names(target: ast.AST) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return set().union(*(_bound_names(item) for item in target.elts))
+    if isinstance(target, ast.Starred):
+        return _bound_names(target.value)
+    return set()
+
+
+def _pattern_names(pattern: ast.pattern) -> set[str]:
+    if isinstance(pattern, ast.MatchAs):
+        names = {pattern.name} if pattern.name else set()
+        if pattern.pattern is not None:
+            names.update(_pattern_names(pattern.pattern))
+        return names
+    if isinstance(pattern, ast.MatchStar):
+        return {pattern.name} if pattern.name else set()
+    if isinstance(pattern, ast.MatchMapping):
+        names = {pattern.rest} if pattern.rest else set()
+        for item in pattern.patterns:
+            names.update(_pattern_names(item))
+        return names
+    if isinstance(pattern, ast.MatchSequence):
+        return set().union(*(_pattern_names(item) for item in pattern.patterns))
+    if isinstance(pattern, ast.MatchClass):
+        items = [*pattern.patterns, *pattern.kwd_patterns]
+        return set().union(*(_pattern_names(item) for item in items))
+    if isinstance(pattern, ast.MatchOr):
+        return set().union(*(_pattern_names(item) for item in pattern.patterns))
+    return set()
+
+
+def _merge_binding(kinds: set[str | None]) -> str | None:
+    if len(kinds) == 1:
+        return next(iter(kinds))
+    optional_parts = {
+        _BIND_JSONSCHEMA_MODULE,
+        _BIND_OPTIONAL_JSONSCHEMA_MODULE,
+        _BIND_NONE,
+    }
+    if kinds <= optional_parts and _BIND_NONE in kinds and kinds & _MODULE_BINDINGS:
+        return _BIND_OPTIONAL_JSONSCHEMA_MODULE
+    if kinds == {None}:
+        return None
+    return _BIND_UNKNOWN
+
+
+def _merge_environments(environments: list[dict[str, str]]) -> dict[str, str]:
+    names = set().union(*(set(environment) for environment in environments))
+    merged: dict[str, str] = {}
+    for name in names:
+        kind = _merge_binding({environment.get(name) for environment in environments})
+        if kind is not None:
+            merged[name] = kind
+    return merged
+
+
+def _block_terminates(statements: list[ast.stmt]) -> bool:
+    if not statements:
+        return False
+    last = statements[-1]
+    if isinstance(last, (ast.Return, ast.Raise)):
+        return True
+    if isinstance(last, ast.If) and last.orelse:
+        return _block_terminates(last.body) and _block_terminates(last.orelse)
+    return False
+
+
+def validate_base_import_policy(source: str, path: str) -> None:
+    """Fail closed if historical ``lens_facets`` could import live repo code."""
+    tree = ast.parse(source, filename=path)
+    allowed = set(sys.stdlib_module_names) | {"__future__"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            require(
+                node.level == 0,
+                f"base import policy: relative import in {path}:{node.lineno}",
+            )
+            modules = [node.module or ""]
+            imported_loader = node.module == "importlib" and any(
+                alias.name == "import_module" for alias in node.names
+            )
+            require(
+                not imported_loader,
+                f"base import policy: dynamic import binding in {path}:{node.lineno}",
+            )
+        else:
+            modules = []
+        for module in modules:
+            root = module.split(".", 1)[0]
+            require(
+                root in allowed,
+                f"base import policy: non-stdlib import {module!r} in {path}:{node.lineno}",
+            )
+        if isinstance(node, ast.Call):
+            func = node.func
+            dynamic = isinstance(func, ast.Name) and func.id == "__import__"
+            dynamic = dynamic or (
+                isinstance(func, ast.Attribute) and func.attr == "import_module"
+            )
+            require(
+                not dynamic,
+                f"base import policy: dynamic import in {path}:{node.lineno}",
+            )
+
+
 def analyze(source: str, path: str):
     """Return resolved engine, resolved meta, and unresolved candidate sets.
 
+    The grammar is deliberately conservative. Bindings are tracked in source
+    order and per lexical scope; ambiguous control-flow merges become unknown.
     Sets contain ``(owner_symbol, lineno)``; unresolved entries add a kind tag
     (``unresolved_engine`` / ``unresolved_meta``).
     """
     tree = ast.parse(source, filename=path)
-
-    module_aliases: set[str] = set()       # names bound to the jsonschema module
-    validate_aliases: set[str] = set()     # names bound to jsonschema.validate
-    constructor_aliases: set[str] = set()  # names bound to a Draft*Validator class
-    validators_modules: set[str] = set()   # names bound to jsonschema.validators
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "jsonschema":
-                    module_aliases.add(alias.asname or "jsonschema")
-                elif alias.name == "jsonschema.validators":
-                    validators_modules.add(alias.asname or "jsonschema.validators")
-        elif isinstance(node, ast.ImportFrom) and node.module == "jsonschema":
-            for alias in node.names:
-                if alias.name == "validate":
-                    validate_aliases.add(alias.asname or alias.name)
-                elif alias.name in JSONSCHEMA_CONSTRUCTORS:
-                    constructor_aliases.add(alias.asname or alias.name)
-                elif alias.name == "validators":
-                    validators_modules.add(alias.asname or alias.name)
-
-    def is_constructor_call(node: ast.AST) -> bool:
-        if not isinstance(node, ast.Call):
-            return False
-        func = node.func
-        if isinstance(func, ast.Name) and func.id in constructor_aliases:
-            return True
-        if (isinstance(func, ast.Attribute) and func.attr in JSONSCHEMA_CONSTRUCTORS
-                and isinstance(func.value, ast.Name) and func.value.id in module_aliases):
-            return True
-        if isinstance(func, ast.Call):  # validator_for(schema)(...)
-            inner = func.func
-            if isinstance(inner, ast.Attribute) and inner.attr == "validator_for":
-                if isinstance(inner.value, ast.Name) and inner.value.id in (module_aliases | validators_modules):
-                    return True
-        return False
-
     engines: set[tuple[str, int]] = set()
     metas: set[tuple[str, int]] = set()
     unresolved: set[tuple[str, int, str]] = set()
 
     class Visitor(ast.NodeVisitor):
         def __init__(self) -> None:
-            self.stack: list[str] = []
-            self.validator_vars: list[set[str]] = [set()]
+            self.owners: list[str] = []
+            self.scopes: list[_Scope] = [
+                _Scope("module", {}, set(), set())
+            ]
 
-        def _enter(self, node):
-            self.stack.append(node.name)
-            current = set(self.validator_vars[-1])
-            for stmt in ast.walk(node):
-                if isinstance(stmt, ast.Assign) and is_constructor_call(stmt.value):
-                    for target in stmt.targets:
-                        if isinstance(target, ast.Name):
-                            current.add(target.id)
-            self.validator_vars.append(current)
-            self.generic_visit(node)
-            self.validator_vars.pop()
-            self.stack.pop()
+        @property
+        def scope(self) -> _Scope:
+            return self.scopes[-1]
 
-        visit_FunctionDef = _enter
-        visit_AsyncFunctionDef = _enter
+        def owner(self) -> str:
+            return ".".join(self.owners) if self.owners else "<module>"
+
+        def lookup(self, name: str) -> str | None:
+            current = self.scope
+            if current.kind == "function" and name in current.global_names:
+                return self.scopes[0].bindings.get(name)
+            if current.kind == "function" and name in current.nonlocal_names:
+                for scope in reversed(self.scopes[:-1]):
+                    if scope.kind == "function" and name in scope.bindings:
+                        return scope.bindings[name]
+                return None
+
+            crossed_function = False
+            for scope in reversed(self.scopes):
+                if crossed_function and scope.kind == "class":
+                    continue
+                if name in scope.bindings:
+                    return scope.bindings[name]
+                if scope.kind == "function":
+                    crossed_function = True
+            return None
+
+        def bind(self, name: str, kind: str) -> None:
+            current = self.scope
+            if current.kind == "function" and name in current.global_names:
+                self.scopes[0].bindings[name] = _BIND_UNKNOWN
+                return
+            if current.kind == "function" and name in current.nonlocal_names:
+                for scope in reversed(self.scopes[:-1]):
+                    if scope.kind == "function" and name in scope.bindings:
+                        scope.bindings[name] = _BIND_UNKNOWN
+                        return
+                current.bindings[name] = _BIND_UNKNOWN
+                return
+            current.bindings[name] = kind
+
+        def expression_binding(self, node: ast.AST) -> str:
+            if isinstance(node, ast.Name):
+                return self.lookup(node.id) or _BIND_UNKNOWN
+            if isinstance(node, ast.Constant) and node.value is None:
+                return _BIND_NONE
+            if isinstance(node, ast.Attribute):
+                base = self.expression_binding(node.value)
+                if base in _MODULE_BINDINGS:
+                    if node.attr == "validate":
+                        return _BIND_VALIDATE_FUNCTION
+                    if node.attr in JSONSCHEMA_CONSTRUCTORS:
+                        return _BIND_VALIDATOR_CONSTRUCTOR
+                    if node.attr == "validators":
+                        return _BIND_VALIDATORS_MODULE
+                if base == _BIND_VALIDATORS_MODULE and node.attr == "validator_for":
+                    return _BIND_VALIDATOR_FOR
+                return _BIND_UNKNOWN
+            if isinstance(node, ast.Call):
+                callee = self.expression_binding(node.func)
+                if callee == _BIND_VALIDATOR_FOR:
+                    return _BIND_VALIDATOR_CONSTRUCTOR
+                if callee == _BIND_VALIDATOR_CONSTRUCTOR:
+                    return _BIND_VALIDATOR_INSTANCE
+                return _BIND_UNKNOWN
+            if isinstance(node, ast.IfExp):
+                return _merge_binding({
+                    self.expression_binding(node.body),
+                    self.expression_binding(node.orelse),
+                }) or _BIND_UNKNOWN
+            return _BIND_UNKNOWN
+
+        def assignment_binding(self, value: ast.AST) -> str:
+            kind = self.expression_binding(value)
+            if kind in {_BIND_VALIDATOR_INSTANCE, _BIND_NONE}:
+                return kind
+            return _BIND_UNKNOWN
+
+        def visit_statements(self, statements: list[ast.stmt]) -> None:
+            for statement in statements:
+                self.visit(statement)
+
+        def analyze_branch(
+            self,
+            statements: list[ast.stmt],
+            baseline: dict[str, str],
+        ) -> tuple[dict[str, str], bool]:
+            self.scope.bindings = dict(baseline)
+            self.visit_statements(statements)
+            return dict(self.scope.bindings), _block_terminates(statements)
+
+        def visit_Import(self, node: ast.Import) -> None:  # noqa: N802
+            for alias in node.names:
+                bound = alias.asname or alias.name.split(".", 1)[0]
+                if alias.name == "jsonschema":
+                    kind = _BIND_JSONSCHEMA_MODULE
+                elif alias.name == "jsonschema.validators":
+                    kind = (
+                        _BIND_VALIDATORS_MODULE
+                        if alias.asname
+                        else _BIND_JSONSCHEMA_MODULE
+                    )
+                else:
+                    kind = _BIND_UNKNOWN
+                self.bind(bound, kind)
+
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:  # noqa: N802
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                bound = alias.asname or alias.name
+                kind = _BIND_UNKNOWN
+                if node.level == 0 and node.module == "jsonschema":
+                    if alias.name == "validate":
+                        kind = _BIND_VALIDATE_FUNCTION
+                    elif alias.name in JSONSCHEMA_CONSTRUCTORS:
+                        kind = _BIND_VALIDATOR_CONSTRUCTOR
+                    elif alias.name == "validators":
+                        kind = _BIND_VALIDATORS_MODULE
+                elif node.level == 0 and node.module == "jsonschema.validators":
+                    if alias.name == "validator_for":
+                        kind = _BIND_VALIDATOR_FOR
+                    elif alias.name in JSONSCHEMA_CONSTRUCTORS:
+                        kind = _BIND_VALIDATOR_CONSTRUCTOR
+                self.bind(bound, kind)
+
+        def visit_Assign(self, node: ast.Assign) -> None:  # noqa: N802
+            self.visit(node.value)
+            kind = self.assignment_binding(node.value)
+            for target in node.targets:
+                names = _bound_names(target)
+                target_kind = kind if isinstance(target, ast.Name) else _BIND_UNKNOWN
+                for name in names:
+                    self.bind(name, target_kind)
+
+        def visit_AnnAssign(self, node: ast.AnnAssign) -> None:  # noqa: N802
+            if node.annotation is not None:
+                self.visit(node.annotation)
+            if node.value is not None:
+                self.visit(node.value)
+                kind = self.assignment_binding(node.value)
+            else:
+                kind = _BIND_UNKNOWN
+            for name in _bound_names(node.target):
+                self.bind(name, kind if isinstance(node.target, ast.Name) else _BIND_UNKNOWN)
+
+        def visit_AugAssign(self, node: ast.AugAssign) -> None:  # noqa: N802
+            self.visit(node.value)
+            for name in _bound_names(node.target):
+                self.bind(name, _BIND_UNKNOWN)
+
+        def visit_NamedExpr(self, node: ast.NamedExpr) -> None:  # noqa: N802
+            self.visit(node.value)
+            kind = self.assignment_binding(node.value)
+            for name in _bound_names(node.target):
+                self.bind(name, kind)
+
+        def visit_Delete(self, node: ast.Delete) -> None:  # noqa: N802
+            for target in node.targets:
+                for name in _bound_names(target):
+                    self.bind(name, _BIND_UNKNOWN)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+            self._visit_function(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: N802
+            self._visit_function(node)
+
+        def _visit_function(
+            self,
+            node: ast.FunctionDef | ast.AsyncFunctionDef,
+        ) -> None:
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for default in [*node.args.defaults, *node.args.kw_defaults]:
+                if default is not None:
+                    self.visit(default)
+            if node.returns is not None:
+                self.visit(node.returns)
+            arguments = [
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            ]
+            if node.args.vararg is not None:
+                arguments.append(node.args.vararg)
+            if node.args.kwarg is not None:
+                arguments.append(node.args.kwarg)
+            for argument in arguments:
+                if argument.annotation is not None:
+                    self.visit(argument.annotation)
+            self.bind(node.name, _BIND_UNKNOWN)
+
+            local_names, global_names, nonlocal_names = _function_locals(node)
+            self.owners.append(node.name)
+            self.scopes.append(_Scope(
+                "function",
+                {name: _BIND_UNKNOWN for name in local_names},
+                global_names,
+                nonlocal_names,
+            ))
+            self.visit_statements(node.body)
+            self.scopes.pop()
+            self.owners.pop()
+
+        def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
+            for default in [*node.args.defaults, *node.args.kw_defaults]:
+                if default is not None:
+                    self.visit(default)
+            local_names, global_names, nonlocal_names = _function_locals(node)
+            self.scopes.append(_Scope(
+                "function",
+                {name: _BIND_UNKNOWN for name in local_names},
+                global_names,
+                nonlocal_names,
+            ))
+            self.visit(node.body)
+            self.scopes.pop()
+
+        def _visit_comprehension(
+            self,
+            node: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp,
+        ) -> None:
+            generators = node.generators
+            if not generators:
+                return
+
+            # Python evaluates the first iterable in the surrounding scope, then
+            # creates an implicit nested scope for targets, filters and payload.
+            self.visit(generators[0].iter)
+            local_names = set().union(
+                *(_bound_names(generator.target) for generator in generators)
+            )
+            self.scopes.append(_Scope(
+                "function",
+                {name: _BIND_UNKNOWN for name in local_names},
+                set(),
+                set(),
+            ))
+            for index, generator in enumerate(generators):
+                if index:
+                    self.visit(generator.iter)
+                for name in _bound_names(generator.target):
+                    self.bind(name, _BIND_UNKNOWN)
+                for condition in generator.ifs:
+                    self.visit(condition)
+            if isinstance(node, ast.DictComp):
+                self.visit(node.key)
+                self.visit(node.value)
+            else:
+                self.visit(node.elt)
+            self.scopes.pop()
+
+        def visit_ListComp(self, node: ast.ListComp) -> None:  # noqa: N802
+            self._visit_comprehension(node)
+
+        def visit_SetComp(self, node: ast.SetComp) -> None:  # noqa: N802
+            self._visit_comprehension(node)
+
+        def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:  # noqa: N802
+            self._visit_comprehension(node)
+
+        def visit_DictComp(self, node: ast.DictComp) -> None:  # noqa: N802
+            self._visit_comprehension(node)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for base in node.bases:
+                self.visit(base)
+            for keyword in node.keywords:
+                self.visit(keyword.value)
+            self.bind(node.name, _BIND_UNKNOWN)
+
+            self.owners.append(node.name)
+            self.scopes.append(_Scope("class", {}, set(), set()))
+            self.visit_statements(node.body)
+            self.scopes.pop()
+            self.owners.pop()
+
+        def visit_If(self, node: ast.If) -> None:  # noqa: N802
+            self.visit(node.test)
+            baseline = dict(self.scope.bindings)
+            body, body_terminates = self.analyze_branch(node.body, baseline)
+            if node.orelse:
+                other, other_terminates = self.analyze_branch(node.orelse, baseline)
+            else:
+                other, other_terminates = baseline, False
+            reachable = [
+                environment
+                for environment, terminates in (
+                    (body, body_terminates),
+                    (other, other_terminates),
+                )
+                if not terminates
+            ]
+            self.scope.bindings = (
+                _merge_environments(reachable) if reachable else baseline
+            )
+
+        def visit_Try(self, node: ast.Try) -> None:  # noqa: N802
+            baseline = dict(self.scope.bindings)
+            body, body_terminates = self.analyze_branch(node.body, baseline)
+            if not body_terminates and node.orelse:
+                body, body_terminates = self.analyze_branch(node.orelse, body)
+            paths: list[dict[str, str]] = []
+            if not body_terminates:
+                paths.append(body)
+            for handler in node.handlers:
+                handler_start = dict(baseline)
+                self.scope.bindings = handler_start
+                if handler.type is not None:
+                    self.visit(handler.type)
+                if handler.name:
+                    self.bind(handler.name, _BIND_UNKNOWN)
+                self.visit_statements(handler.body)
+                if not _block_terminates(handler.body):
+                    paths.append(dict(self.scope.bindings))
+            if not paths:
+                paths = [baseline]
+            if node.finalbody:
+                final_paths = []
+                for environment in paths:
+                    result, _ = self.analyze_branch(node.finalbody, environment)
+                    final_paths.append(result)
+                paths = final_paths
+            self.scope.bindings = _merge_environments(paths)
+
+        visit_TryStar = visit_Try
+
+        def visit_For(self, node: ast.For) -> None:  # noqa: N802
+            self._visit_loop(node, node.iter)
+
+        def visit_AsyncFor(self, node: ast.AsyncFor) -> None:  # noqa: N802
+            self._visit_loop(node, node.iter)
+
+        def _visit_loop(self, node: ast.For | ast.AsyncFor, value: ast.AST) -> None:
+            self.visit(value)
+            baseline = dict(self.scope.bindings)
+            self.scope.bindings = dict(baseline)
+            for name in _bound_names(node.target):
+                self.bind(name, _BIND_UNKNOWN)
+            self.visit_statements(node.body)
+            body = dict(self.scope.bindings)
+            merged = _merge_environments([baseline, body])
+            if node.orelse:
+                other, _ = self.analyze_branch(node.orelse, merged)
+                merged = other
+            self.scope.bindings = merged
+
+        def visit_While(self, node: ast.While) -> None:  # noqa: N802
+            self.visit(node.test)
+            baseline = dict(self.scope.bindings)
+            body, _ = self.analyze_branch(node.body, baseline)
+            merged = _merge_environments([baseline, body])
+            if node.orelse:
+                merged, _ = self.analyze_branch(node.orelse, merged)
+            self.scope.bindings = merged
+
+        def visit_With(self, node: ast.With) -> None:  # noqa: N802
+            for item in node.items:
+                self.visit(item.context_expr)
+                if item.optional_vars is not None:
+                    for name in _bound_names(item.optional_vars):
+                        self.bind(name, _BIND_UNKNOWN)
+            self.visit_statements(node.body)
+
+        visit_AsyncWith = visit_With
+
+        def visit_Match(self, node: ast.Match) -> None:  # noqa: N802
+            self.visit(node.subject)
+            baseline = dict(self.scope.bindings)
+            paths = [baseline]
+            for case in node.cases:
+                self.scope.bindings = dict(baseline)
+                for name in _pattern_names(case.pattern):
+                    self.bind(name, _BIND_UNKNOWN)
+                if case.guard is not None:
+                    self.visit(case.guard)
+                self.visit_statements(case.body)
+                if not _block_terminates(case.body):
+                    paths.append(dict(self.scope.bindings))
+            self.scope.bindings = _merge_environments(paths)
 
         def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
-            owner = self.stack[-1] if self.stack else "<module>"
-            func = node.func
-            vvars = self.validator_vars[-1]
             kind: str | None = None
-            if isinstance(func, ast.Name) and func.id in validate_aliases:
-                kind = "engine"
+            func = node.func
+            if isinstance(func, ast.Name):
+                if self.lookup(func.id) == _BIND_VALIDATE_FUNCTION:
+                    kind = "engine"
             elif isinstance(func, ast.Attribute):
-                recv = func.value
-                if func.attr in {"validate", "iter_errors"}:
-                    if isinstance(recv, ast.Name) and recv.id in module_aliases and func.attr == "validate":
+                receiver = self.expression_binding(func.value)
+                if func.attr == "validate":
+                    if receiver in _MODULE_BINDINGS | {_BIND_VALIDATOR_INSTANCE}:
                         kind = "engine"
-                    elif isinstance(recv, ast.Name) and recv.id in vvars:
-                        kind = "engine"
-                    elif is_constructor_call(recv):
+                    else:
+                        kind = "unresolved_engine"
+                elif func.attr == "iter_errors":
+                    if receiver == _BIND_VALIDATOR_INSTANCE:
                         kind = "engine"
                     else:
                         kind = "unresolved_engine"
                 elif func.attr == "check_schema":
-                    if isinstance(recv, ast.Name) and recv.id in (module_aliases | constructor_aliases):
-                        kind = "meta"
-                    elif (isinstance(recv, ast.Attribute) and recv.attr in JSONSCHEMA_CONSTRUCTORS
-                          and isinstance(recv.value, ast.Name) and recv.value.id in module_aliases):
-                        kind = "meta"
-                    elif isinstance(recv, ast.Name) and recv.id in vvars:
+                    if receiver in (
+                        _MODULE_BINDINGS
+                        | {_BIND_VALIDATOR_CONSTRUCTOR, _BIND_VALIDATOR_INSTANCE}
+                    ):
                         kind = "meta"
                     else:
                         kind = "unresolved_meta"
             if kind == "engine":
-                engines.add((owner, node.lineno))
+                engines.add((self.owner(), node.lineno))
             elif kind == "meta":
-                metas.add((owner, node.lineno))
+                metas.add((self.owner(), node.lineno))
             elif kind in {"unresolved_engine", "unresolved_meta"}:
-                unresolved.add((owner, node.lineno, kind))
+                unresolved.add((self.owner(), node.lineno, kind))
             self.generic_visit(node)
 
     Visitor().visit(tree)
@@ -353,10 +914,17 @@ def main(argv: list[str] | None = None) -> int:
         resolved_meta.update((path, owner, line) for owner, line in metas)
         unresolved_prod.update((path, owner, line, kind) for owner, line, kind in unresolved)
 
-    expected_parse_failures = set(manifest.get(
-        "expected_parse_failures",
-        ["merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py"],
-    ))
+    expected_parse_failure_rows = manifest.get("expected_parse_failures")
+    require(
+        isinstance(expected_parse_failure_rows, list)
+        and all(isinstance(item, str) and item for item in expected_parse_failure_rows),
+        "expected_parse_failures must be an explicit list of non-empty paths",
+    )
+    expected_parse_failures = set(expected_parse_failure_rows)
+    require(
+        len(expected_parse_failures) == len(expected_parse_failure_rows),
+        "expected_parse_failures contains duplicates",
+    )
     require(
         parse_failures == expected_parse_failures,
         f"parse failures: unexpected={sorted(parse_failures - expected_parse_failures)} "
@@ -474,6 +1042,8 @@ def main(argv: list[str] | None = None) -> int:
         "summary": summary,
         "checks": [
             "base_bound_infer_facets",
+            "base_infer_facets_stdlib_import_guard",
+            "scope_and_source_order_binding_grammar",
             "receiver_resolved_grammar",
             "resolved_engine_subset_of_reviewed",
             "engine_coverage_resolved_plus_manual_equals_reviewed",
@@ -487,8 +1057,9 @@ def main(argv: list[str] | None = None) -> int:
             "snapshot_keys_unique",
         ],
         "limitations": [
-            "Validators reached only through a project-local loader (_load_jsonschema / importlib.import_module) are manual_source_review, not derived_ast.",
+            "Validators reached through a project-local loader or an unproven function parameter are manual_source_review, not derived_ast.",
             "Intermodular alias passing, dynamic wrappers and non-jsonschema validators are out of grammar.",
+            "Historical lens_facets source is stdlib-import-only, but executes under the current Python interpreter and standard library.",
             "External (metarepo) schema targets are not resolved against any external snapshot.",
             "load_only / path_reference_only callsites are not inventoried.",
             "Runtime execution and current HEAD are not assessed.",

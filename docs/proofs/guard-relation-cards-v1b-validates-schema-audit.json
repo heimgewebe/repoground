@@ -66,6 +66,8 @@
     },
     "checks": [
       "base_bound_infer_facets",
+      "base_infer_facets_stdlib_import_guard",
+      "scope_and_source_order_binding_grammar",
       "receiver_resolved_grammar",
       "resolved_engine_subset_of_reviewed",
       "engine_coverage_resolved_plus_manual_equals_reviewed",
@@ -95,46 +97,46 @@
         "merger/lenskit/core/parity_state.py|_validate_citation_map|349",
         "merger/lenskit/core/post_emit_health.py|_validate_claim_evidence_map_schema|331",
         "merger/lenskit/core/post_emit_health.py|_validate_manifest_schema|404",
-        "merger/lenskit/core/pr_delta_cards.py|_validate_source_delta|105",
         "merger/lenskit/core/pr_schau_bundle.py|load_pr_schau_bundle|130",
         "merger/lenskit/core/range_resolver.py|resolve_range_ref|193",
-        "merger/lenskit/core/relation_cards.py|_validate_source_graph|137",
         "merger/lenskit/validate_merge_meta.py|validate_report_meta|114",
         "merger/lenskit/validate_merge_meta.py|validate_report_meta|95"
       ],
       "manual_source_review": [
         "merger/lenskit/core/lens_card_validate.py|validate_lens_card|136",
         "merger/lenskit/core/pr_delta_card_validate.py|validate_pr_delta_card|135",
-        "merger/lenskit/core/relation_card_validate.py|_schema_check|159"
+        "merger/lenskit/core/pr_delta_cards.py|_validate_source_delta|105",
+        "merger/lenskit/core/relation_card_validate.py|_schema_check|159",
+        "merger/lenskit/core/relation_cards.py|_validate_source_graph|137"
       ]
     },
     "generated_from_historical_snapshot": true,
     "limitations": [
-      "Validators reached only through a project-local loader (_load_jsonschema / importlib.import_module) are manual_source_review, not derived_ast.",
+      "Validators reached through a project-local loader or an unproven function parameter are manual_source_review, not derived_ast.",
       "Intermodular alias passing, dynamic wrappers and non-jsonschema validators are out of grammar.",
+      "Historical lens_facets source is stdlib-import-only, but executes under the current Python interpreter and standard library.",
       "External (metarepo) schema targets are not resolved against any external snapshot.",
       "load_only / path_reference_only callsites are not inventoried.",
       "Runtime execution and current HEAD are not assessed."
     ],
     "meta_callsites": {
-      "derived_ast": [
-        "merger/lenskit/core/pr_delta_cards.py|_validate_source_delta|99",
-        "merger/lenskit/core/relation_cards.py|_validate_source_graph|135"
-      ],
+      "derived_ast": [],
       "manual_source_review": [
         "merger/lenskit/core/lens_card_validate.py|validate_lens_card|134",
         "merger/lenskit/core/pr_delta_card_validate.py|validate_pr_delta_card|133",
-        "merger/lenskit/core/relation_card_validate.py|_schema_check|157"
+        "merger/lenskit/core/pr_delta_cards.py|_validate_source_delta|99",
+        "merger/lenskit/core/relation_card_validate.py|_schema_check|157",
+        "merger/lenskit/core/relation_cards.py|_validate_source_graph|135"
       ]
     },
     "parse_failures": [
       "merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py"
     ],
     "provenance": {
-      "engine_callsites_derived_ast": 20,
-      "engine_callsites_manual_source_review": 3,
-      "meta_callsites_derived_ast": 2,
-      "meta_callsites_manual_source_review": 3
+      "engine_callsites_derived_ast": 18,
+      "engine_callsites_manual_source_review": 5,
+      "meta_callsites_derived_ast": 0,
+      "meta_callsites_manual_source_review": 5
     },
     "runtime_execution_not_proven": true,
     "schema_coverage": {
@@ -217,7 +219,7 @@
     },
     "test_inventory": {
       "classification": "base-snapshot lens_facets.infer_facets (facet == 'test')",
-      "resolved_engine_count": 41,
+      "resolved_engine_count": 39,
       "resolved_engine_files": [
         "merger/lenskit/tests/test_agent_consumption_trace.py",
         "merger/lenskit/tests/test_agent_entry_manifest.py",
@@ -242,9 +244,7 @@
         "merger/lenskit/tests/test_diagnostics_lookup.py",
         "merger/lenskit/tests/test_embedding_policy_schema.py",
         "merger/lenskit/tests/test_export_safety_report.py",
-        "merger/lenskit/tests/test_extractor_schema.py",
         "merger/lenskit/tests/test_federation_cli.py",
-        "merger/lenskit/tests/test_federation_query.py",
         "merger/lenskit/tests/test_output_health.py",
         "merger/lenskit/tests/test_planning_registration_ratchet.py",
         "merger/lenskit/tests/test_post_emit_health.py",
@@ -262,15 +262,20 @@
         "merger/lenskit/tests/test_trace_lookup.py"
       ],
       "union_count": 45,
-      "unresolved_only_count": 4,
+      "unresolved_only_count": 6,
       "unresolved_only_files": [
         "merger/lenskit/tests/test_claim_evidence_map.py",
+        "merger/lenskit/tests/test_extractor_schema.py",
+        "merger/lenskit/tests/test_federation_query.py",
         "merger/lenskit/tests/test_lens_cards.py",
         "merger/lenskit/tests/test_lens_facets.py",
         "merger/lenskit/tests/test_primary_lens_audit.py"
       ]
     }
   },
+  "expected_parse_failures": [
+    "merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py"
+  ],
   "fields": [
     "source_path",
     "relation_owner_symbol",
@@ -322,13 +327,15 @@
   ],
   "grammar": {
     "supported": [
-      "attribute validate/iter_errors/check_schema",
-      "jsonschema validate aliases",
-      "Draft7/Draft202012 local instances"
+      "scope- and source-order-aware attribute validate/iter_errors/check_schema",
+      "jsonschema validate aliases and optional module imports",
+      "Draft validator local instances and lexical closures",
+      "jsonschema.validators.validator_for constructor chains"
     ],
     "unsupported": [
       "inter-module aliases",
       "dynamic wrappers",
+      "function-parameter provenance without interprocedural proof",
       "non-jsonschema validators"
     ]
   },
