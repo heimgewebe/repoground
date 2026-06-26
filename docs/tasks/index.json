@@ -339,10 +339,22 @@
     {
       "id": "TASK-GUARD-RELATION-DESIGN-001",
       "title": "Guard Relation Cards v1a Target Proof",
-      "status": "in-progress",
-      "description": "Diagnosis-only Target-Proof für tests_by_name. Auf dem untersuchten Snapshot wurden strukturell eindeutige Basename-Kandidaten gemessen; ihre semantische Präzision ist ohne Goldset nicht belegt. Kein aktuell implementierter oder verbindlich spezifizierter Consumer benötigt eine persistierte Card. Ein persistierter tests_by_name-Contract bleibt daher zurückgestellt. Andere Guard-Relation-Kandidaten wurden nicht bewertet. Status in-progress bis Merge und Post-Merge-Reconciliation.",
+      "status": "done",
+      "description": "Diagnosis-only Target-Proof für tests_by_name; gemergt via PR #798 (Merge-Commit 05bbd0d6), der Target-Proof liegt auf main. Ein persistierter tests_by_name-Contract wurde mangels verbindlichem Consumer zurückgestellt; andere Guard-Relation-Kandidaten blieben unbewertet; tatsächlicher Consumer- oder Retrievalnutzen wurde nicht belegt. Status done: Merge und Post-Merge-Reconciliation abgeschlossen.",
       "evidence": [
         "docs/proofs/guard-relation-cards-v1a-target-proof.md"
+      ]
+    },
+    {
+      "id": "TASK-GUARD-RELATION-VALIDATES-SCHEMA-DESIGN-001",
+      "title": "Guard Relation Cards v1b validates_schema Target Proof",
+      "status": "in-progress",
+      "description": "Diagnosis-only Target-Proof für validates_schema. Base-source-bound, falsifizierbares Audit über den festgeschriebenen Base-Snapshot: base-gebundenes infer_facets, receiver-aufgelöste AST-Grammatik (18 derived + 5 manual Engine-Callsites, 0 derived + 5 manual Meta), explizite unresolved-Dispositionen, abgeleitete Aggregate und ein fail-closed Manifest-Gate mit Falsifikationstests. Kein persistierter Contract ohne Consumer. Andere Guard-Relation-Kandidaten wurden nicht bewertet.",
+      "evidence": [
+        "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md",
+        "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json",
+        "scripts/proofs/guard_relation_validates_schema_audit.py",
+        "merger/lenskit/tests/test_guard_relation_validates_schema_audit.py"
       ]
     }
   ]
