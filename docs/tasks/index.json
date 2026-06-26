@@ -46,6 +46,24 @@
       ]
     },
     {
+      "id": "TASK-RETRIEVAL-BASELINE-HYGIENE-001",
+      "title": "Review Retrieval Goldset Self-Reference Hygiene",
+      "status": "in-progress",
+      "description": "Add exact, safe, default-empty repository-path exclusions before SQL ordering and LIMIT, and thread them only through query execution and evaluation. When an explicit repo_root is supplied, the review baseline excludes the repository-local goldset with reason goldset_self_reference and records that this is a changed measurement condition, not a ranking improvement. No ranking, router, CLI, bundle, embedding or Guard Relation production is introduced.",
+      "evidence": [
+        "merger/lenskit/retrieval/query_core.py",
+        "merger/lenskit/retrieval/eval_core.py",
+        "merger/lenskit/retrieval/review_eval.py",
+        "merger/lenskit/tests/test_review_retrieval_metrics.py",
+        "docs/diagnostics/review-retrieval-baseline.md"
+      ],
+      "missing_evidence": [
+        "No ranking quality improvement is claimed or established.",
+        "Review-intent routing and path/symbol boosting remain later Retrieval v2 slices.",
+        "Merge and post-merge reconciliation remain outstanding."
+      ]
+    },
+    {
       "id": "TASK-SERVICE-003B",
       "title": "rLens Source Acquisition Control-Plane Hardening",
       "status": "done",
@@ -348,8 +366,8 @@
     {
       "id": "TASK-GUARD-RELATION-VALIDATES-SCHEMA-DESIGN-001",
       "title": "Guard Relation Cards v1b validates_schema Target Proof",
-      "status": "in-progress",
-      "description": "Diagnosis-only Target-Proof für validates_schema. Base-source-bound, falsifizierbares Audit über den festgeschriebenen Base-Snapshot: base-gebundenes infer_facets, receiver-aufgelöste AST-Grammatik (18 derived + 5 manual Engine-Callsites, 0 derived + 5 manual Meta), explizite unresolved-Dispositionen, abgeleitete Aggregate und ein fail-closed Manifest-Gate mit Falsifikationstests. Kein persistierter Contract ohne Consumer. Andere Guard-Relation-Kandidaten wurden nicht bewertet.",
+      "status": "done",
+      "description": "Diagnosis-only Target-Proof für validates_schema; gemergt via PR #799 (74c10260) und post-merge reconciled. Das base-source-bound, falsifizierbare Audit bleibt ein Designnachweis. Ein persistierter Relation-Contract bleibt mangels verbindlichem Consumer, belegtem Persistenzvorteil und semantischem Goldset ausdrücklich zurückgestellt. Andere Guard-Relation-Kandidaten wurden nicht bewertet.",
       "evidence": [
         "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md",
         "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json",

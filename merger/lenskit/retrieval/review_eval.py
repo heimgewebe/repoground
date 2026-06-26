@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .eval_core import do_eval
 from .eval_diagnostics import DiagnosticsRecord, RetrievalEvalDiagnosticsCalibrator
+from .query_core import normalize_excluded_paths
 
 # Inference boundaries for the review-retrieval baseline. These mirror the
 # discipline already encoded in eval_core.claim_boundaries.does_not_prove and
@@ -38,6 +39,8 @@ DOES_NOT_ESTABLISH: Tuple[str, ...] = (
     "A miss does not prove code absence.",
     "recall@k does not prove ranking sufficiency.",
 )
+
+GOLDSET_SELF_REFERENCE_REASON = "goldset_self_reference"
 
 # Path-shape heuristics mirror the static goldset guard
 # (merger/lenskit/tests/test_review_retrieval_goldset.py) so target-kind labeling
@@ -56,6 +59,53 @@ def _is_repo_path_pattern(pattern: str) -> bool:
         or pattern.endswith(_REPO_PATH_SUFFIXES)
         or pattern in _ROOT_PATH_PATTERNS
     )
+
+
+def _resolve_goldset_exclusion(
+    goldset_path: Path,
+    repo_root: Optional[Path],
+) -> Tuple[List[str], List[Dict[str, str]]]:
+    """Resolve the goldset path only when an explicit repository root is supplied."""
+    if repo_root is None:
+        return [], []
+
+    resolved_root = Path(repo_root).resolve()
+    if not resolved_root.is_dir():
+        raise ValueError(f"repo_root must be an existing directory: {repo_root}")
+
+    supplied_goldset = Path(goldset_path)
+    resolved_goldset = (
+        supplied_goldset.resolve()
+        if supplied_goldset.is_absolute()
+        else (resolved_root / supplied_goldset).resolve()
+    )
+    try:
+        relative_goldset = resolved_goldset.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError("goldset_path must resolve inside repo_root") from exc
+
+    normalized_path = normalize_excluded_paths([relative_goldset.as_posix()])[0]
+    return [normalized_path], [
+        {
+            "path": normalized_path,
+            "reason": GOLDSET_SELF_REFERENCE_REASON,
+        }
+    ]
+
+
+def _normalize_path_exclusion_records(
+    records: Optional[List[Dict[str, str]]],
+) -> List[Dict[str, str]]:
+    normalized: Dict[Tuple[str, str], Dict[str, str]] = {}
+    for record in records or []:
+        if not isinstance(record, dict):
+            raise ValueError("path exclusion records must be objects")
+        path = normalize_excluded_paths([record.get("path")])[0]
+        reason = record.get("reason")
+        if not isinstance(reason, str) or not reason:
+            raise ValueError("path exclusion records require a non-empty reason")
+        normalized[(path, reason)] = {"path": path, "reason": reason}
+    return [normalized[key] for key in sorted(normalized)]
 
 
 def classify_target_kind(target: str) -> str:
@@ -168,6 +218,7 @@ def build_review_retrieval_baseline(
     k: Optional[int] = None,
     calibrator: Optional[RetrievalEvalDiagnosticsCalibrator] = None,
     goldset_path: Optional[Path] = None,
+    path_exclusions: Optional[List[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """Build the review retrieval baseline from ``eval_core.do_eval`` output.
 
@@ -181,6 +232,18 @@ def build_review_retrieval_baseline(
     details = eval_results.get("details", []) or []
     resolved_k = k if k is not None else _infer_k(metrics_in, fallback=10)
     recall_key = f"recall@{resolved_k}"
+    normalized_path_exclusions = _normalize_path_exclusion_records(path_exclusions)
+    if normalized_path_exclusions:
+        observed_excluded_paths = normalize_excluded_paths(
+            (eval_results.get("measurement_conditions") or {}).get("excluded_paths")
+        )
+        declared_excluded_paths = [
+            record["path"] for record in normalized_path_exclusions
+        ]
+        if observed_excluded_paths != declared_excluded_paths:
+            raise ValueError(
+                "baseline exclusion provenance does not match eval conditions"
+            )
 
     if calibrator is None:
         calibrator = RetrievalEvalDiagnosticsCalibrator()
@@ -268,7 +331,7 @@ def build_review_retrieval_baseline(
 
     total_queries = metrics_in.get("total_queries", len(details))
 
-    return {
+    baseline = {
         "version": "1.0",
         "authority": "diagnostic_signal",
         "risk_class": "diagnostic",
@@ -292,6 +355,19 @@ def build_review_retrieval_baseline(
         "miss_diagnostics": miss_diagnostics,
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
+    if normalized_path_exclusions:
+        baseline["measurement_conditions"] = {
+            "path_exclusions": normalized_path_exclusions,
+            "match": "exact_repository_path",
+            "application": "before_order_by_and_limit",
+            "ranking_algorithm_changed": False,
+            "does_not_establish": [
+                "Excluded paths are outside this measurement run only.",
+                "An excluded path is not established as irrelevant.",
+                "Changed metrics do not establish a ranking improvement.",
+            ],
+        }
+    return baseline
 
 
 def run_review_retrieval_baseline(
@@ -303,6 +379,7 @@ def run_review_retrieval_baseline(
     canonical_path: Optional[Path] = None,
     citation_path: Optional[Path] = None,
     is_stale: bool = False,
+    repo_root: Optional[Path] = None,
 ) -> Optional[Dict[str, Any]]:
     """Reproduction helper: run the eval and build the review baseline.
 
@@ -311,12 +388,16 @@ def run_review_retrieval_baseline(
     contract, or runtime behavior. Returns ``None`` if the underlying eval cannot
     parse the goldset (matching ``do_eval`` semantics).
     """
+    excluded_paths, path_exclusions = _resolve_goldset_exclusion(
+        Path(goldset_path), repo_root
+    )
     eval_results = do_eval(
         Path(index_path),
         Path(goldset_path),
         k,
         is_json_mode=True,
         is_stale=is_stale,
+        excluded_paths=excluded_paths,
     )
     if eval_results is None:
         return None
@@ -327,5 +408,9 @@ def run_review_retrieval_baseline(
         citation_path=Path(citation_path) if citation_path is not None else None,
     )
     return build_review_retrieval_baseline(
-        eval_results, k=k, calibrator=calibrator, goldset_path=goldset_path
+        eval_results,
+        k=k,
+        calibrator=calibrator,
+        goldset_path=goldset_path,
+        path_exclusions=path_exclusions,
     )
