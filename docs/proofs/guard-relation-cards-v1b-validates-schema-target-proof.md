@@ -82,24 +82,31 @@ Methoden zu leaken. Mehrdeutige Kontrollfluss-Merges werden konservativ
 
 Jede `.validate`/`.iter_errors`/`.check_schema`-Stelle mit einem **nicht** so
 gebundenen Receiver wird als `unresolved_candidate` geführt, nicht stillschweigend
-verworfen. Validatoren aus einem projektlokalen Loader
-(`_load_jsonschema()` / `importlib.import_module`) und per Funktionsparameter
-injizierte Validatorobjekte ohne interprozeduralen Herkunftsbeweis sind damit
-absichtlich `unresolved` und gelten als `manual_source_review`.
+verworfen. Jede Stelle braucht im Manifest genau eine explizite Disposition:
+`manual_jsonschema` für einen reviewten jsonschema-Flow oder
+`foreign_non_jsonschema` für eine fremde API. Nur `manual_jsonschema` zählt als
+`manual_source_review`; fremde Validatoren werden nicht als jsonschema-Evidenz
+akzeptiert. Fehlende, doppelte oder unbekannte Dispositionen brechen das Gate.
 
 Falsifizierbares Gate (exakte Mengengleichheit, fail-closed):
 
 ```text
-reviewed_engine == resolved_engine ∪ unresolved_engine
-reviewed_meta    == resolved_meta    ∪ unresolved_meta
+reviewed_relation == derived_relation
+reviewed_engine == resolved_engine ∪ manual_jsonschema_engine
+reviewed_meta    == resolved_meta    ∪ manual_jsonschema_meta
+foreign_non_jsonschema ∩ reviewed == ∅
 ```
 
-Eine falsche Callsite-Zeile, eine fehlende oder überzählige Flowzeile und jeder
-**neue** unresolved-Kandidat brechen diese Gleichheit. Zusätzlich müssen
-Schema-Ziele als Blob im Base-Tree existieren, `text_only`-Treffer ohne
-Engine-Callsite vollständig erklärt sein und genau ein Parsefehler
-(`…/invalid.py`) auftreten. Die Falsifikationstests belegen, dass das Gate
-manipulierte Manifeste (falsche Zeile, fehlendes Schema, entfernte
+`reviewed_relation` prüft direkte Flows über die Engine-Callsite und delegierte
+Flows über den im Snapshot belegten Helper-Aufruf
+(`relation_owner_symbol`, `relation_call_line`, `engine_owner_symbol`) plus die
+belegte Engine-Callsite. Eine falsche Relation- oder Engine-Callsite-Zeile, ein
+falscher Relation-Owner, ein falscher delegierter Helper, eine fehlende oder
+überzählige Flowzeile und jeder **neue** unresolved-Kandidat brechen diese
+Gleichheit. Zusätzlich müssen Schema-Ziele als Blob im Base-Tree existieren,
+`text_only`-Treffer ohne Engine-Callsite vollständig erklärt sein und genau ein
+Parsefehler (`…/invalid.py`) auftreten. Die Falsifikationstests belegen, dass
+das Gate manipulierte Manifeste (falsche Zeile, fehlendes Schema, entfernte
 Manual-Review-Zeile) tatsächlich ablehnt.
 
 AST-Gleichheit beweist Callsite-Abdeckung innerhalb dieser Grammatik, nicht die
@@ -200,24 +207,27 @@ COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
 
 # regenerate the derived report and compare byte-for-byte
 python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/a.json
+python3 -O "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/a-opt.json
+cmp /tmp/a.json /tmp/a-opt.json
 cmp /tmp/a.json "$COMMITTED"
 
 # falsification tests (the gate must reject tampered manifests)
 python3 -m pytest -q \
   merger/lenskit/tests/test_guard_relation_validates_schema_audit.py
 
-# negative control: a tampered manifest must fail closed
+# negative control: a tampered relation callsite must fail closed
 python3 - "$COMMITTED" > /tmp/tampered.json <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     data = json.load(handle)
-line_index = data["fields"].index("engine_call_line")
+line_index = data["fields"].index("relation_call_line")
 row_index = next(
     index for index, row in enumerate(data["flows"])
     if row.startswith(
-        "merger/lenskit/architecture/graph_index.py|load_graph_index|"
+        "merger/lenskit/core/relation_card_validate.py|"
+        "validate_relation_card|226|_schema_check|159"
     )
 )
 values = data["flows"][row_index].split("|")
@@ -225,6 +235,11 @@ values[line_index] = str(int(values[line_index]) + 10_000)
 data["flows"][row_index] = "|".join(values)
 print(json.dumps(data))
 PY
-! python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \
-    --manifest /tmp/tampered.json --output /tmp/rejected.json
+code=0
+output="$(
+  python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \
+    --manifest /tmp/tampered.json --output /tmp/rejected.json 2>&1
+)" || code=$?
+test "$code" -eq 2
+printf '%s\n' "$output" | grep -F "relation callsite mismatch"
 ```

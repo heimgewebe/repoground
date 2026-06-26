@@ -165,6 +165,8 @@ jobs:
           SCRIPT="scripts/proofs/guard_relation_validates_schema_audit.py"
           COMMITTED="docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
           python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/vsa.json
+          python3 -O "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" --output /tmp/vsa-opt.json
+          cmp /tmp/vsa.json /tmp/vsa-opt.json
           if ! cmp /tmp/vsa.json "$COMMITTED"; then
             echo "::error::regenerated audit differs from committed derived report"
             diff <(python3 -m json.tool "$COMMITTED") <(python3 -m json.tool /tmp/vsa.json) || true
@@ -184,12 +186,13 @@ jobs:
           with open(sys.argv[1], encoding="utf-8") as handle:
               data = json.load(handle)
 
-          line_index = data["fields"].index("engine_call_line")
+          line_index = data["fields"].index("relation_call_line")
           row_index = next(
               index
               for index, row in enumerate(data["flows"])
               if row.startswith(
-                  "merger/lenskit/architecture/graph_index.py|load_graph_index|"
+                  "merger/lenskit/core/relation_card_validate.py|"
+                  "validate_relation_card|226|_schema_check|159"
               )
           )
           values = data["flows"][row_index].split("|")
@@ -197,9 +200,14 @@ jobs:
           data["flows"][row_index] = "|".join(values)
           print(json.dumps(data))
           PY
-          if python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \
-               --manifest /tmp/tampered.json --output /tmp/rejected.json; then
-            echo "::error::tampered manifest was accepted; gate is tautological"
+          code=0
+          output="$(
+            python3 "$SCRIPT" --repo "$PWD" --base-sha "$BASE_SHA" \
+              --manifest /tmp/tampered.json --output /tmp/rejected.json 2>&1
+          )" || code=$?
+          echo "$output"
+          if [ "$code" -ne 2 ] || [[ "$output" != *"relation callsite mismatch"* ]]; then
+            echo "::error::tampered relation callsite did not fail the expected gate"
             exit 1
           fi
           echo "tampered manifest correctly rejected"

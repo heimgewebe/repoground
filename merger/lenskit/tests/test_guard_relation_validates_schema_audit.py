@@ -61,12 +61,58 @@ real_repo = pytest.mark.skipif(not _base_available(), reason="base snapshot not 
 # --------------------------------------------------------------------------
 def _analyze(src: str):
     engines, metas, unresolved = audit.analyze(src, "x.py")
-    return engines, metas, {(o, ln) for o, ln, _k in unresolved}
+    return engines, metas, _UnresolvedView(unresolved)
+
+
+class _UnresolvedView:
+    def __init__(self, entries):
+        self.entries = set(entries)
+
+    def __iter__(self):
+        return iter(self.entries)
+
+    def __bool__(self):
+        return bool(self.entries)
+
+    def __contains__(self, item):
+        if len(item) == 2:
+            owner, line = item
+            return any(
+                entry_owner == owner and entry_line == line
+                for entry_owner, entry_line, _kind in self.entries
+            )
+        return item in self.entries
+
+    def __repr__(self):
+        return repr(self.entries)
 
 
 def test_module_alias_validate_is_engine():
     eng, _meta, _un = _analyze("import jsonschema\ndef f():\n    jsonschema.validate(a, b)\n")
     assert ("f", 3) in eng
+
+
+def test_global_import_after_function_definition_is_late_bound():
+    src = (
+        "def check():\n"
+        "    jsonschema.validate(data, schema)\n"
+        "import jsonschema\n"
+    )
+    eng, _meta, un = _analyze(src)
+    assert ("check", 2) in eng
+    assert ("check", 2) not in un
+
+
+def test_later_global_reassignment_invalidates_function_global_lookup():
+    src = (
+        "import jsonschema\n"
+        "def check():\n"
+        "    jsonschema.validate(data, schema)\n"
+        "jsonschema = foreign_object\n"
+    )
+    eng, _meta, un = _analyze(src)
+    assert eng == set()
+    assert ("check", 3) in un
 
 
 def test_import_alias_validate_is_engine():
@@ -118,7 +164,7 @@ def test_loader_indirection_is_unresolved_not_engine():
     eng, _m, un = _analyze(src)
     # local `jsonschema` is not a module-alias binding -> not resolved
     assert eng == set()
-    assert any(ln == 4 for _o, ln in un)
+    assert ("f", 4) in un
 
 
 def test_nested_assignment_does_not_leak_to_outer_scope():
@@ -228,6 +274,20 @@ def test_lexical_closure_keeps_preceding_validator_binding():
     )
     eng, _meta, _un = _analyze(src)
     assert ("outer.inner", 5) in eng
+
+
+def test_later_closure_reassignment_invalidates_free_name():
+    src = (
+        "from jsonschema import Draft7Validator\n"
+        "def outer():\n"
+        "    validator = Draft7Validator(schema)\n"
+        "    def inner():\n"
+        "        return validator.iter_errors(data)\n"
+        "    validator = foreign_object\n"
+    )
+    eng, _meta, un = _analyze(src)
+    assert ("outer.inner", 5) not in eng
+    assert ("outer.inner", 5) in un
 
 
 def test_optional_module_import_remains_resolved():
@@ -342,6 +402,41 @@ def test_base_import_policy_rejects_live_or_dynamic_imports(source):
         audit.validate_base_import_policy(source, "lens_facets.py")
 
 
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        (0, "OK wrote /tmp/rejected.json", False),
+        (1, "Traceback (most recent call last)", False),
+        (2, "STOP: engine callsite mismatch", False),
+        (2, "STOP: relation callsite mismatch", True),
+    ],
+)
+def test_ci_negative_control_result_requires_exit_2_and_expected_gate(
+    code, output, expected
+):
+    assert audit.negative_control_result_ok(
+        code, output, "relation callsite mismatch"
+    ) is expected
+
+
+def test_workflow_negative_control_checks_relation_callsite_message():
+    yaml = pytest.importorskip("yaml")
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "lens-model.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["validates-schema-target-proof"]["steps"]
+    run = next(
+        step["run"]
+        for step in steps
+        if step.get("name") == "Negative control (a tampered manifest must fail closed)"
+    )
+    assert "relation_call_line" in run
+    assert "code=$?" in run
+    assert "relation callsite mismatch" in run
+
+
 def test_infer_facets_loaded_from_base_snapshot(tmp_path):
     repo = tmp_path / "r"
     repo.mkdir()
@@ -436,6 +531,78 @@ def test_wrong_engine_line_rejected(tmp_path):
 
 
 @real_repo
+def test_wrong_relation_line_rejected_by_relation_gate(tmp_path):
+    base = json.loads(COMMITTED.read_text(encoding="utf-8"))["base"]
+
+    def change_relation_line(data):
+        line_index = data["fields"].index("relation_call_line")
+        row_index = next(
+            index
+            for index, row in enumerate(data["flows"])
+            if row.startswith(
+                "merger/lenskit/core/relation_card_validate.py|"
+                "validate_relation_card|226|_schema_check|159"
+            )
+        )
+        values = data["flows"][row_index].split("|")
+        values[line_index] = str(int(values[line_index]) + 10_000)
+        data["flows"][row_index] = "|".join(values)
+
+    manifest = _tamper(tmp_path, change_relation_line)
+    with pytest.raises(audit.AuditError, match="relation callsite mismatch"):
+        audit.main(["--repo", str(REPO_ROOT), "--base-sha", base,
+                    "--manifest", str(manifest), "--output", str(tmp_path / "o.json")])
+
+
+@real_repo
+def test_wrong_relation_owner_rejected_by_relation_gate(tmp_path):
+    base = json.loads(COMMITTED.read_text(encoding="utf-8"))["base"]
+
+    def change_relation_owner(data):
+        owner_index = data["fields"].index("relation_owner_symbol")
+        row_index = next(
+            index
+            for index, row in enumerate(data["flows"])
+            if row.startswith(
+                "merger/lenskit/core/relation_card_validate.py|"
+                "validate_relation_card|226|_schema_check|159"
+            )
+        )
+        values = data["flows"][row_index].split("|")
+        values[owner_index] = "validate_relation_card_wrong_owner"
+        data["flows"][row_index] = "|".join(values)
+
+    manifest = _tamper(tmp_path, change_relation_owner)
+    with pytest.raises(audit.AuditError, match="relation callsite mismatch"):
+        audit.main(["--repo", str(REPO_ROOT), "--base-sha", base,
+                    "--manifest", str(manifest), "--output", str(tmp_path / "o.json")])
+
+
+@real_repo
+def test_wrong_delegated_helper_rejected_by_relation_gate(tmp_path):
+    base = json.loads(COMMITTED.read_text(encoding="utf-8"))["base"]
+
+    def change_helper(data):
+        helper_index = data["fields"].index("engine_owner_symbol")
+        row_index = next(
+            index
+            for index, row in enumerate(data["flows"])
+            if row.startswith(
+                "merger/lenskit/core/relation_card_validate.py|"
+                "validate_relation_card|226|_schema_check|159"
+            )
+        )
+        values = data["flows"][row_index].split("|")
+        values[helper_index] = "_wrong_schema_check"
+        data["flows"][row_index] = "|".join(values)
+
+    manifest = _tamper(tmp_path, change_helper)
+    with pytest.raises(audit.AuditError, match="relation callsite mismatch"):
+        audit.main(["--repo", str(REPO_ROOT), "--base-sha", base,
+                    "--manifest", str(manifest), "--output", str(tmp_path / "o.json")])
+
+
+@real_repo
 def test_nonexistent_schema_rejected(tmp_path):
     base = json.loads(COMMITTED.read_text(encoding="utf-8"))["base"]
     manifest = _tamper(tmp_path, lambda d: d["flows"].__setitem__(
@@ -444,6 +611,61 @@ def test_nonexistent_schema_rejected(tmp_path):
     with pytest.raises(audit.AuditError):
         audit.main(["--repo", str(REPO_ROOT), "--base-sha", base,
                     "--manifest", str(manifest), "--output", str(tmp_path / "o.json")])
+
+
+def test_foreign_method_candidate_is_not_automatic_manual_jsonschema():
+    _eng, _meta, un = _analyze("def check():\n    payment.validate()\n")
+    candidates = {("x.py", owner, line, kind) for owner, line, kind in un}
+    partition = audit.partition_unresolved_candidates(
+        candidates,
+        {
+            "engine": [
+                {
+                    "source_path": "x.py",
+                    "owner_symbol": "check",
+                    "call_line": 2,
+                    "disposition": "foreign_non_jsonschema",
+                    "reason": "payment object is not a jsonschema validator",
+                }
+            ],
+            "meta": [],
+        },
+        reviewed_engine=set(),
+        reviewed_meta=set(),
+    )
+    assert partition.manual_engine == set()
+    assert partition.foreign_engine == {("x.py", "check", 2)}
+
+
+def test_unresolved_candidate_without_disposition_fails_closed():
+    with pytest.raises(audit.AuditError, match="unresolved candidate disposition mismatch"):
+        audit.partition_unresolved_candidates(
+            {("x.py", "check", 2, "unresolved_engine")},
+            {"engine": [], "meta": []},
+            reviewed_engine=set(),
+            reviewed_meta=set(),
+        )
+
+
+def test_foreign_candidate_cannot_be_labeled_manual_jsonschema_without_reviewed_flow():
+    with pytest.raises(audit.AuditError, match="manual_jsonschema disposition without reviewed flow"):
+        audit.partition_unresolved_candidates(
+            {("x.py", "check", 2, "unresolved_engine")},
+            {
+                "engine": [
+                    {
+                        "source_path": "x.py",
+                        "owner_symbol": "check",
+                        "call_line": 2,
+                        "disposition": "manual_jsonschema",
+                        "reason": "wrongly treated as jsonschema",
+                    }
+                ],
+                "meta": [],
+            },
+            reviewed_engine=set(),
+            reviewed_meta=set(),
+        )
 
 
 @real_repo

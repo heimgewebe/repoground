@@ -349,7 +349,7 @@
       "id": "TASK-GUARD-RELATION-VALIDATES-SCHEMA-DESIGN-001",
       "title": "Guard Relation Cards v1b validates_schema Target Proof",
       "status": "in-progress",
-      "description": "Diagnosis-only Target-Proof für validates_schema. Hermetisches, falsifizierbares Audit über den festgeschriebenen Base-Snapshot: base-gebundenes infer_facets, receiver-aufgelöste AST-Grammatik (20 derived + 3 manual Engine-Callsites, 2 + 3 Meta), abgeleitete Aggregate und ein fail-closed Manifest-Gate mit Falsifikationstests. Kein persistierter Contract ohne Consumer. Andere Guard-Relation-Kandidaten wurden nicht bewertet.",
+      "description": "Diagnosis-only Target-Proof für validates_schema. Base-source-bound, falsifizierbares Audit über den festgeschriebenen Base-Snapshot: base-gebundenes infer_facets, receiver-aufgelöste AST-Grammatik (18 derived + 5 manual Engine-Callsites, 0 derived + 5 manual Meta), explizite unresolved-Dispositionen, abgeleitete Aggregate und ein fail-closed Manifest-Gate mit Falsifikationstests. Kein persistierter Contract ohne Consumer. Andere Guard-Relation-Kandidaten wurden nicht bewertet.",
       "evidence": [
         "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md",
         "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hermetic, falsifiable audit for the ``validates_schema`` target proof.
+"""Base-source-bound, falsifiable audit for the ``validates_schema`` target proof.
 
 Diagnosis-only. This is NOT a production relation contract, producer or runtime
 validator. It reads a *fixed historical snapshot* (never the working tree),
@@ -39,7 +39,7 @@ import os
 import subprocess
 import sys
 from collections import Counter
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
@@ -129,7 +129,7 @@ def parse_rows(names: list[str], rows: list[str], kind: type) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# Snapshot access (read-only, hermetic, isolated git env)
+# Snapshot access (read-only, base-source-bound, isolated git env)
 # ---------------------------------------------------------------------------
 def git(repo: str, *args: str) -> str:
     env = dict(os.environ)
@@ -183,11 +183,18 @@ _MODULE_BINDINGS = {_BIND_JSONSCHEMA_MODULE, _BIND_OPTIONAL_JSONSCHEMA_MODULE}
 
 
 @dataclass
+class _PendingFunction:
+    node: ast.FunctionDef | ast.AsyncFunctionDef
+    owners: tuple[str, ...]
+
+
+@dataclass
 class _Scope:
     kind: str
     bindings: dict[str, str]
     global_names: set[str]
     nonlocal_names: set[str]
+    pending_functions: list[_PendingFunction] = field(default_factory=list)
 
 
 class _LocalBinderCollector(ast.NodeVisitor):
@@ -419,6 +426,31 @@ def analyze(source: str, path: str):
         def owner(self) -> str:
             return ".".join(self.owners) if self.owners else "<module>"
 
+        def visit_Module(self, node: ast.Module) -> None:  # noqa: N802
+            self.visit_statements(node.body)
+            self.visit_pending_functions()
+
+        def visit_pending_functions(self) -> None:
+            while self.scope.pending_functions:
+                pending = self.scope.pending_functions.pop(0)
+                self.analyze_function_body(pending)
+
+        def analyze_function_body(self, pending: _PendingFunction) -> None:
+            node = pending.node
+            local_names, global_names, nonlocal_names = _function_locals(node)
+            prior_owners = self.owners
+            self.owners = list(pending.owners)
+            self.scopes.append(_Scope(
+                "function",
+                {name: _BIND_UNKNOWN for name in local_names},
+                global_names,
+                nonlocal_names,
+            ))
+            self.visit_statements(node.body)
+            self.visit_pending_functions()
+            self.scopes.pop()
+            self.owners = prior_owners
+
         def lookup(self, name: str) -> str | None:
             current = self.scope
             if current.kind == "function" and name in current.global_names:
@@ -604,18 +636,9 @@ def analyze(source: str, path: str):
                 if argument.annotation is not None:
                     self.visit(argument.annotation)
             self.bind(node.name, _BIND_UNKNOWN)
-
-            local_names, global_names, nonlocal_names = _function_locals(node)
-            self.owners.append(node.name)
-            self.scopes.append(_Scope(
-                "function",
-                {name: _BIND_UNKNOWN for name in local_names},
-                global_names,
-                nonlocal_names,
-            ))
-            self.visit_statements(node.body)
-            self.scopes.pop()
-            self.owners.pop()
+            self.scope.pending_functions.append(
+                _PendingFunction(node, tuple([*self.owners, node.name]))
+            )
 
         def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: N802
             for default in [*node.args.defaults, *node.args.kw_defaults]:
@@ -689,6 +712,7 @@ def analyze(source: str, path: str):
             self.owners.append(node.name)
             self.scopes.append(_Scope("class", {}, set(), set()))
             self.visit_statements(node.body)
+            self.visit_pending_functions()
             self.scopes.pop()
             self.owners.pop()
 
@@ -834,6 +858,206 @@ def analyze(source: str, path: str):
     return engines, metas, unresolved
 
 
+def collect_relation_calls(source: str, path: str) -> set[tuple[str, int, str]]:
+    """Return owner/line/callee triples for intra-source relation callsites."""
+    tree = ast.parse(source, filename=path)
+    calls: set[tuple[str, int, str]] = set()
+
+    def callee_symbol(node: ast.AST) -> str | None:
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return node.attr
+        return None
+
+    class Visitor(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.owners: list[str] = []
+
+        def owner(self) -> str:
+            return ".".join(self.owners) if self.owners else "<module>"
+
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: N802
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for default in [*node.args.defaults, *node.args.kw_defaults]:
+                if default is not None:
+                    self.visit(default)
+            if node.returns is not None:
+                self.visit(node.returns)
+            self.owners.append(node.name)
+            self.visit_statements(node.body)
+            self.owners.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_statements(self, statements: list[ast.stmt]) -> None:
+            for statement in statements:
+                self.visit(statement)
+
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: N802
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for base in node.bases:
+                self.visit(base)
+            for keyword in node.keywords:
+                self.visit(keyword.value)
+            self.owners.append(node.name)
+            self.visit_statements(node.body)
+            self.owners.pop()
+
+        def visit_Call(self, node: ast.Call) -> None:  # noqa: N802
+            symbol = callee_symbol(node.func)
+            if symbol is not None:
+                calls.add((self.owner(), node.lineno, symbol))
+            self.generic_visit(node)
+
+    Visitor().visit(tree)
+    return calls
+
+
+@dataclass(frozen=True)
+class UnresolvedPartition:
+    manual_engine: set[tuple[str, str, int]]
+    manual_meta: set[tuple[str, str, int]]
+    foreign_engine: set[tuple[str, str, int]]
+    foreign_meta: set[tuple[str, str, int]]
+
+
+def _unresolved_entry_key(entry: dict[str, Any]) -> tuple[str, str, int]:
+    require(isinstance(entry, dict), "unresolved candidate disposition must be an object")
+    try:
+        source_path = entry["source_path"]
+        owner_symbol = entry["owner_symbol"]
+        call_line = entry["call_line"]
+        disposition = entry["disposition"]
+        reason = entry["reason"]
+    except KeyError as exc:
+        raise AuditError(f"unresolved candidate disposition missing {exc.args[0]}") from exc
+    require(isinstance(source_path, str) and source_path, "unresolved candidate source_path invalid")
+    require(isinstance(owner_symbol, str) and owner_symbol, "unresolved candidate owner_symbol invalid")
+    require(isinstance(call_line, int), "unresolved candidate call_line invalid")
+    require(
+        disposition in {"manual_jsonschema", "foreign_non_jsonschema"},
+        f"unresolved candidate disposition invalid: {disposition!r}",
+    )
+    require(isinstance(reason, str) and reason.strip(), "unresolved candidate reason invalid")
+    return source_path, owner_symbol, call_line
+
+
+def _legacy_unresolved_dispositions(
+    candidates: set[tuple[str, str, int, str]],
+    reviewed_engine: set[tuple[str, str, int]],
+    reviewed_meta: set[tuple[str, str, int]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Treat the historical manifest's reviewed unresolved callsites as manual.
+
+    The legacy manifest predates explicit unresolved-candidate dispositions. This
+    adapter does not bless new candidates: anything not already represented by a
+    reviewed flow is left uncovered and still fails the partition gate.
+    """
+    engine: list[dict[str, Any]] = []
+    meta: list[dict[str, Any]] = []
+    for source_path, owner_symbol, call_line, kind in sorted(candidates):
+        key = (source_path, owner_symbol, call_line)
+        if kind == "unresolved_engine" and key in reviewed_engine:
+            engine.append({
+                "source_path": source_path,
+                "owner_symbol": owner_symbol,
+                "call_line": call_line,
+                "disposition": "manual_jsonschema",
+                "reason": "legacy reviewed flow manifest callsite",
+            })
+        elif kind == "unresolved_meta" and key in reviewed_meta:
+            meta.append({
+                "source_path": source_path,
+                "owner_symbol": owner_symbol,
+                "call_line": call_line,
+                "disposition": "manual_jsonschema",
+                "reason": "legacy reviewed meta manifest callsite",
+            })
+    return {"engine": engine, "meta": meta}
+
+
+def partition_unresolved_candidates(
+    candidates: set[tuple[str, str, int, str]],
+    dispositions: dict[str, Any],
+    *,
+    reviewed_engine: set[tuple[str, str, int]],
+    reviewed_meta: set[tuple[str, str, int]],
+) -> UnresolvedPartition:
+    require(isinstance(dispositions, dict), "unresolved candidate dispositions invalid")
+    candidate_engine = {
+        (source_path, owner_symbol, call_line)
+        for source_path, owner_symbol, call_line, kind in candidates
+        if kind == "unresolved_engine"
+    }
+    candidate_meta = {
+        (source_path, owner_symbol, call_line)
+        for source_path, owner_symbol, call_line, kind in candidates
+        if kind == "unresolved_meta"
+    }
+    require(
+        len(candidate_engine) + len(candidate_meta) == len(candidates),
+        "unresolved candidate kind invalid",
+    )
+
+    manual_engine: set[tuple[str, str, int]] = set()
+    manual_meta: set[tuple[str, str, int]] = set()
+    foreign_engine: set[tuple[str, str, int]] = set()
+    foreign_meta: set[tuple[str, str, int]] = set()
+
+    observed: dict[str, set[tuple[str, str, int]]] = {"engine": set(), "meta": set()}
+    for kind, reviewed, manual, foreign in (
+        ("engine", reviewed_engine, manual_engine, foreign_engine),
+        ("meta", reviewed_meta, manual_meta, foreign_meta),
+    ):
+        entries = dispositions.get(kind, [])
+        require(isinstance(entries, list), f"unresolved candidate {kind} dispositions invalid")
+        for entry in entries:
+            key = _unresolved_entry_key(entry)
+            require(
+                key not in observed[kind],
+                "unresolved candidate disposition duplicate",
+            )
+            observed[kind].add(key)
+            if entry["disposition"] == "manual_jsonschema":
+                require(
+                    key in reviewed,
+                    "manual_jsonschema disposition without reviewed flow",
+                )
+                manual.add(key)
+            else:
+                require(
+                    key not in reviewed,
+                    "foreign_non_jsonschema disposition overlaps reviewed flow",
+                )
+                foreign.add(key)
+
+    require(
+        observed["engine"] == candidate_engine and observed["meta"] == candidate_meta,
+        "unresolved candidate disposition mismatch: "
+        f"engine_only_candidates={sorted(candidate_engine - observed['engine'])} "
+        f"engine_only_dispositions={sorted(observed['engine'] - candidate_engine)} "
+        f"meta_only_candidates={sorted(candidate_meta - observed['meta'])} "
+        f"meta_only_dispositions={sorted(observed['meta'] - candidate_meta)}",
+    )
+    return UnresolvedPartition(
+        manual_engine=manual_engine,
+        manual_meta=manual_meta,
+        foreign_engine=foreign_engine,
+        foreign_meta=foreign_meta,
+    )
+
+
+def negative_control_result_ok(
+    exit_code: int,
+    combined_output: str,
+    expected_message: str,
+) -> bool:
+    return exit_code == 2 and expected_message in combined_output
+
+
 # ---------------------------------------------------------------------------
 # Derived helpers
 # ---------------------------------------------------------------------------
@@ -859,7 +1083,7 @@ def axis(flows: tuple[Flow, ...], name: str) -> dict[str, int]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="hermetic validates_schema audit")
+    parser = argparse.ArgumentParser(description="base-source-bound validates_schema audit")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--base-sha", required=True)
     parser.add_argument("--output", required=True)
@@ -889,6 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
     resolved_engine: set[tuple[str, str, int]] = set()
     resolved_meta: set[tuple[str, str, int]] = set()
     unresolved_prod: set[tuple[str, str, int, str]] = set()
+    relation_calls: set[tuple[str, str, int, str]] = set()
     test_resolved: set[str] = set()
     test_unresolved_only: set[str] = set()
     text_files: set[str] = set()
@@ -904,6 +1129,10 @@ def main(argv: list[str] | None = None) -> int:
         except SyntaxError:
             parse_failures.add(path)
             continue
+        relation_calls.update(
+            (path, owner, line, callee)
+            for owner, line, callee in collect_relation_calls(source, path)
+        )
         if is_test(path):
             if engines:
                 test_resolved.add(path)
@@ -935,22 +1164,77 @@ def main(argv: list[str] | None = None) -> int:
     reviewed_engine = {(f.source_path, f.engine_owner_symbol, f.engine_call_line) for f in flows}
     reviewed_meta = {(m.source_path, m.engine_owner_symbol, m.engine_call_line) for m in meta}
 
-    # The manual-review set is derived from the AST itself: callsites the narrow
-    # grammar could not resolve (project-local loader / importlib indirection).
-    # It is NOT a manifest-declared field, so it cannot be self-attested.
-    manual_engine = {(p, o, ln) for p, o, ln, k in unresolved_prod if k == "unresolved_engine"}
-    manual_meta = {(p, o, ln) for p, o, ln, k in unresolved_prod if k == "unresolved_meta"}
+    # Every unresolved production candidate requires an explicit disposition.
+    unresolved_dispositions = manifest.get("unresolved_candidates")
+    require(
+        unresolved_dispositions is not None,
+        "unresolved_candidates must be explicit",
+    )
+    unresolved_partition = partition_unresolved_candidates(
+        unresolved_prod,
+        unresolved_dispositions,
+        reviewed_engine=reviewed_engine,
+        reviewed_meta=reviewed_meta,
+    )
+    manual_engine = unresolved_partition.manual_engine
+    manual_meta = unresolved_partition.manual_meta
+    proven_engine = resolved_engine | manual_engine
 
     # ---- falsifiable comparison gate -----------------------------------
+    reviewed_relation = {
+        (
+            f.source_path,
+            f.relation_owner_symbol,
+            f.relation_call_line,
+            f.engine_owner_symbol,
+            f.engine_call_line,
+        )
+        for f in flows
+    }
+    derived_relation = set()
+    for flow in flows:
+        engine_key = (
+            flow.source_path,
+            flow.engine_owner_symbol,
+            flow.engine_call_line,
+        )
+        relation_key = (
+            flow.source_path,
+            flow.relation_owner_symbol,
+            flow.relation_call_line,
+            flow.engine_owner_symbol,
+            flow.engine_call_line,
+        )
+        if direct(flow):
+            if engine_key in proven_engine:
+                derived_relation.add(relation_key)
+        elif (
+            engine_key in proven_engine
+            and (
+                flow.source_path,
+                flow.relation_owner_symbol,
+                flow.relation_call_line,
+                flow.engine_owner_symbol,
+            )
+            in relation_calls
+        ):
+            derived_relation.add(relation_key)
+    require(
+        derived_relation == reviewed_relation,
+        "relation callsite mismatch: "
+        f"only_review={sorted(reviewed_relation - derived_relation)} "
+        f"only_ast={sorted(derived_relation - reviewed_relation)}",
+    )
+
     # Every reviewed engine callsite must be corroborated by the snapshot AST at
     # the exact (path, owner, line): either receiver-resolved or flagged as an
     # unresolved candidate. A wrong line, a missing row, an extra row or a *new*
     # unresolved candidate all break this exact-equality gate.
     require(
-        resolved_engine | manual_engine == reviewed_engine,
+        proven_engine == reviewed_engine,
         "engine callsite mismatch: "
-        f"only_review={sorted(reviewed_engine - (resolved_engine | manual_engine))} "
-        f"only_ast={sorted((resolved_engine | manual_engine) - reviewed_engine)}",
+        f"only_review={sorted(reviewed_engine - proven_engine)} "
+        f"only_ast={sorted(proven_engine - reviewed_engine)}",
     )
     require(
         resolved_meta | manual_meta == reviewed_meta,
@@ -1069,6 +1353,7 @@ def main(argv: list[str] | None = None) -> int:
     out = {k: manifest[k] for k in (
         "base", "inv", "grammar", "limits", "fields", "flows",
         "meta_fields", "meta", "text_only", "expected_parse_failures",
+        "unresolved_candidates",
     ) if k in manifest}
     out["derived"] = derived
 

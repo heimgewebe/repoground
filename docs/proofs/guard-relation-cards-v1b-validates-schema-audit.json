@@ -372,5 +372,81 @@
     "merger/lenskit/core/output_health.py": "dependency reporter consumer only",
     "merger/lenskit/tests/conftest.py": "dependency fixture",
     "scripts/docmeta/check_planning_registration.py": "comment-only reference"
+  },
+  "unresolved_candidates": {
+    "engine": [
+      {
+        "call_line": 136,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "validate_lens_card",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/lens_card_validate.py"
+      },
+      {
+        "call_line": 135,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "validate_pr_delta_card",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/pr_delta_card_validate.py"
+      },
+      {
+        "call_line": 105,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "_validate_source_delta",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/pr_delta_cards.py"
+      },
+      {
+        "call_line": 159,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "_schema_check",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/relation_card_validate.py"
+      },
+      {
+        "call_line": 137,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "_validate_source_graph",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/relation_cards.py"
+      }
+    ],
+    "meta": [
+      {
+        "call_line": 134,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "validate_lens_card",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/lens_card_validate.py"
+      },
+      {
+        "call_line": 133,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "validate_pr_delta_card",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/pr_delta_card_validate.py"
+      },
+      {
+        "call_line": 99,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "_validate_source_delta",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/pr_delta_cards.py"
+      },
+      {
+        "call_line": 157,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "_schema_check",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/relation_card_validate.py"
+      },
+      {
+        "call_line": 135,
+        "disposition": "manual_jsonschema",
+        "owner_symbol": "_validate_source_graph",
+        "reason": "reviewed schema flow",
+        "source_path": "merger/lenskit/core/relation_cards.py"
+      }
+    ]
   }
 }
