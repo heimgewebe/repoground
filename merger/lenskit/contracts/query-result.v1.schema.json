@@ -46,6 +46,37 @@
         ]
       }
     },
+    "applied_exclusions": {
+      "type": "object",
+      "description": "Exact repository-path exclusions applied before result limiting.",
+      "additionalProperties": false,
+      "required": [
+        "paths",
+        "match",
+        "application"
+      ],
+      "properties": {
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "match": {
+          "type": "string",
+          "const": "exact_repository_path"
+        },
+        "application": {
+          "type": "string",
+          "enum": [
+            "before_order_by_and_limit",
+            "before_order_by_and_limit_per_lane"
+          ]
+        }
+      }
+    },
     "count": {
       "type": "integer",
       "minimum": 0,
@@ -222,7 +253,8 @@
               "result_ranges",
               "bundle_manifest",
               "graph_index",
-              "context_bundle"
+              "context_bundle",
+              "path_exclusions"
             ]
           }
         },

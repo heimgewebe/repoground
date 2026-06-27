@@ -80,6 +80,8 @@ def execute_query(
     context_window_lines: int = 0,
     *,
     excluded_paths: Optional[List[str]] = None,
+    _prepared_fts_query: Optional[str] = None,
+    _prepared_router_output: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Executes a query against the SQLite index.
@@ -123,11 +125,23 @@ def execute_query(
             engine_type = "fts5"
             query_mode = "fts"
 
-            # Route query (synonym expansion, stop-verbs, intent)
-            router_output = route_query(query_text, overmatch_guard=overmatch_guard)
+            if _prepared_fts_query is not None:
+                # Internal seam for deterministic multi-lane planners. Public
+                # callers continue through the established legacy router.
+                router_output = _prepared_router_output
+                routed_query = _prepared_fts_query
+            else:
+                # Route query (synonym expansion, stop-verbs, intent)
+                router_output = route_query(
+                    query_text, overmatch_guard=overmatch_guard
+                )
 
-            # Use routed fts_query if available, fallback to original query
-            routed_query = router_output["fts_query"] if router_output["fts_query"] else query_text
+                # Use routed fts_query if available, fallback to original query
+                routed_query = (
+                    router_output["fts_query"]
+                    if router_output["fts_query"]
+                    else query_text
+                )
             routed_query_raw = routed_query
 
             # FTS Query: Escape double quotes

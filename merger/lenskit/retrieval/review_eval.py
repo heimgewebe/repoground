@@ -355,18 +355,34 @@ def build_review_retrieval_baseline(
         "miss_diagnostics": miss_diagnostics,
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
+    eval_conditions = eval_results.get("measurement_conditions") or {}
+    review_condition = eval_conditions.get("review_intent")
+    if normalized_path_exclusions or review_condition:
+        baseline["measurement_conditions"] = {}
     if normalized_path_exclusions:
-        baseline["measurement_conditions"] = {
+        baseline["measurement_conditions"].update({
             "path_exclusions": normalized_path_exclusions,
             "match": "exact_repository_path",
-            "application": "before_order_by_and_limit",
-            "ranking_algorithm_changed": False,
+            "application": (
+                "before_order_by_and_limit_per_lane"
+                if review_condition
+                else "before_order_by_and_limit"
+            ),
+            "ranking_algorithm_changed": bool(review_condition),
             "does_not_establish": [
                 "Excluded paths are outside this measurement run only.",
                 "An excluded path is not established as irrelevant.",
                 "Changed metrics do not establish a ranking improvement.",
             ],
-        }
+        })
+    if review_condition:
+        baseline["measurement_conditions"]["review_intent"] = dict(
+            review_condition
+        )
+        baseline["does_not_establish"].extend([
+            "Review-intent metrics do not establish improvement for unmeasured query classes.",
+            "This opt-in baseline does not establish readiness for default promotion.",
+        ])
     return baseline
 
 
@@ -380,6 +396,7 @@ def run_review_retrieval_baseline(
     citation_path: Optional[Path] = None,
     is_stale: bool = False,
     repo_root: Optional[Path] = None,
+    review_intent: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Reproduction helper: run the eval and build the review baseline.
 
@@ -398,6 +415,7 @@ def run_review_retrieval_baseline(
         is_json_mode=True,
         is_stale=is_stale,
         excluded_paths=excluded_paths,
+        review_intent=review_intent,
     )
     if eval_results is None:
         return None

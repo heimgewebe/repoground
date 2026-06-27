@@ -129,6 +129,36 @@ runtime behavior, or bundle artifact. Concrete metric values depend on the index
 the baseline is run against and are therefore reproduced on demand rather than
 pinned in this document.
 
+## Opt-in Review-Intent Router v1
+
+The baseline runner also accepts `review_intent=True`. This changes the measured
+query pipeline, so the report records `ranking_algorithm_changed=true`, plan
+version `review_intent.v1`, fusion method `round_robin_unique_path`, and
+`default_promoted=false`.
+
+The opt-in planner starts with a legacy compatibility lane, then adds bounded
+role lanes for the implementation/source surface, tests, contracts, CLI files,
+and documentation. Results are fused deterministically by unique repository
+path. Strict lane queries run before bounded relaxed fallbacks. Exact goldset
+self-reference exclusions are applied before ordering and limiting in every
+lane.
+
+```python
+review_baseline = run_review_retrieval_baseline(
+    index_path=Path("path/to/index.sqlite"),
+    goldset_path=Path("docs/retrieval/review_queries.v1.json"),
+    k=10,
+    repo_root=Path("."),
+    review_intent=True,
+)
+```
+
+This mode is a measured candidate, not the default. It is not exposed through the
+CLI, service API, or bundle producer in this slice. It cannot be combined with
+semantic or graph comparison. Goldset gains do not establish general retrieval
+quality, and a separate promotion decision must verify aggregate improvement,
+category compatibility, and live-repository drift.
+
 ## Tests
 
 `merger/lenskit/tests/test_review_retrieval_metrics.py` proves loading and

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
 from .query_core import execute_query, normalize_excluded_paths
+from .review_query import execute_review_query
 
 WHY_FAIL_QUERY_EXECUTION = "query execution failed"
 WHY_FAIL_MISSING_EXPLAIN = "missing explain from query execution"
@@ -244,18 +245,33 @@ def evaluate_single_run(
     graph_weights: Optional[Dict[str, float]],
     *,
     excluded_paths: Optional[List[str]] = None,
+    review_intent: bool = False,
 ) -> Tuple[bool, str, Optional[Dict[str, Any]], List[str], int, float, Dict[str, Any]]:
-    res = execute_query(
-        index_path=index_path,
-        query_text=q_text,
-        k=k,
-        filters=filters,
-        embedding_policy=embedding_policy,
-        explain=True,
-        graph_index_path=graph_index_path,
-        graph_weights=graph_weights,
-        excluded_paths=excluded_paths,
-    )
+    if review_intent:
+        if embedding_policy is not None or graph_index_path is not None:
+            raise ValueError(
+                "review_intent evaluation does not support semantic or graph comparison"
+            )
+        res = execute_review_query(
+            index_path=index_path,
+            query_text=q_text,
+            k=k,
+            filters=filters,
+            explain=True,
+            excluded_paths=excluded_paths,
+        )
+    else:
+        res = execute_query(
+            index_path=index_path,
+            query_text=q_text,
+            k=k,
+            filters=filters,
+            embedding_policy=embedding_policy,
+            explain=True,
+            graph_index_path=graph_index_path,
+            graph_weights=graph_weights,
+            excluded_paths=excluded_paths,
+        )
 
     is_relevant = False
     top_match = "-"
@@ -290,6 +306,7 @@ def do_eval(
     graph_weights: Optional[Dict[str, float]] = None,
     *,
     excluded_paths: Optional[List[str]] = None,
+    review_intent: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Executes a benchmark evaluation of the retrieval system against gold queries.
@@ -302,6 +319,12 @@ def do_eval(
       and the semantic error string is explicitly logged within the `semantic.error` block of the JSON output.
     """
     normalized_excluded_paths = normalize_excluded_paths(excluded_paths)
+    if review_intent and (
+        embedding_policy is not None or graph_index_path is not None
+    ):
+        raise ValueError(
+            "review_intent evaluation does not support semantic or graph comparison"
+        )
 
     try:
         gold_queries = parse_gold_queries(queries_path)
@@ -369,6 +392,7 @@ def do_eval(
                 None,
                 graph_weights,
                 excluded_paths=normalized_excluded_paths,
+                review_intent=review_intent,
             )
 
             s_rel, s_match, s_why, s_paths, s_count, s_rr, s_res = False, "-", None, [], 0, 0.0, {}
@@ -386,6 +410,7 @@ def do_eval(
                         graph_index_path,
                         graph_weights,
                         excluded_paths=normalized_excluded_paths,
+                        review_intent=review_intent,
                     )
                     if "graph_index" in s_res.get("claim_boundaries", {}).get("evidence_basis", []):
                         graph_index_used = True
@@ -597,19 +622,37 @@ def do_eval(
         },
         "miss_taxonomy": miss_taxonomy
     }
+    if normalized_excluded_paths or review_intent:
+        out["measurement_conditions"] = {}
     if normalized_excluded_paths:
-        out["measurement_conditions"] = {
+        out["measurement_conditions"].update({
             "excluded_paths": normalized_excluded_paths,
             "match": "exact_repository_path",
-            "application": "before_order_by_and_limit",
-            "ranking_algorithm_changed": False,
-        }
+            "application": (
+                "before_order_by_and_limit_per_lane"
+                if review_intent
+                else "before_order_by_and_limit"
+            ),
+            "ranking_algorithm_changed": review_intent,
+        })
         out["claim_boundaries"]["does_not_prove"].append(
             "Path exclusions change this measurement scope; they do not establish a ranking improvement."
         )
         out["claim_boundaries"]["does_not_prove"].append(
             "An excluded path is not established as irrelevant."
         )
+    if review_intent:
+        out["measurement_conditions"]["review_intent"] = {
+            "enabled": True,
+            "plan_version": "review_intent.v1",
+            "fusion": "round_robin_unique_path",
+            "default_promoted": False,
+            "ranking_algorithm_changed": True,
+        }
+        out["claim_boundaries"]["does_not_prove"].extend([
+            "Review-intent metrics do not establish improvement for unmeasured query classes.",
+            "This opt-in evaluation does not establish readiness for default promotion.",
+        ])
 
     if compare_mode:
         out["metrics"][f"{compare_type}_recall@{k}"] = sem_recall_at_k
