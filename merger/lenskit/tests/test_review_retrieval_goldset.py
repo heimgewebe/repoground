@@ -2,12 +2,16 @@ import json
 from pathlib import Path
 from typing import Any
 
+import jsonschema
 import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BASE_QUERIES_PATH = REPO_ROOT / "docs/retrieval/queries.v1.json"
 REVIEW_QUERIES_PATH = REPO_ROOT / "docs/retrieval/review_queries.v1.json"
+GOLDSET_SCHEMA_PATH = (
+    REPO_ROOT / "merger/lenskit/contracts/review-retrieval-goldset.v1.schema.json"
+)
 THIS_TEST_PATH = Path(__file__).resolve()
 REQUIRED_FIELDS = {"query", "expected_patterns", "filters", "accept_criteria"}
 ALLOWED_REVIEW_FIELDS = REQUIRED_FIELDS | {"category"}
@@ -231,3 +235,39 @@ def test_review_retrieval_goldset_symbolic_patterns_exist_in_repo_text(
         "symbolic patterns not found outside the goldset and its guard test: "
         f"{sorted(remaining_patterns)}"
     )
+
+
+def test_review_retrieval_goldset_validates_against_contract(
+    review_queries: list[dict[str, Any]],
+) -> None:
+    schema = _load_json(GOLDSET_SCHEMA_PATH)
+
+    jsonschema.Draft7Validator.check_schema(schema)
+    jsonschema.validate(instance=review_queries, schema=schema)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "error_fragment"),
+    [
+        (lambda case: case.update({"unexpected": True}), "Additional properties"),
+        (lambda case: case.update({"category": "impact"}), "is not one of"),
+        (
+            lambda case: case.update(
+                {"accept_criteria": {"recall_at_10": 1.1}}
+            ),
+            "greater than the maximum",
+        ),
+        (lambda case: case.update({"filters": {"unknown": "x"}}), "Additional properties"),
+    ],
+)
+def test_review_retrieval_goldset_contract_rejects_uncontrolled_shapes(
+    review_queries: list[dict[str, Any]],
+    mutation,
+    error_fragment: str,
+) -> None:
+    schema = _load_json(GOLDSET_SCHEMA_PATH)
+    invalid = json.loads(json.dumps(review_queries))
+    mutation(invalid[0])
+
+    with pytest.raises(jsonschema.ValidationError, match=error_fragment):
+        jsonschema.validate(instance=invalid, schema=schema)

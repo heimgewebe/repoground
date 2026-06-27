@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lenskit.merger/schemas/review-retrieval-goldset.v1.json",
+  "title": "Lenskit Review Retrieval Goldset v1",
+  "description": "Versioned diagnostic input for deterministic review-retrieval evaluation. Validity does not establish truth, correctness, completeness, runtime behavior, test sufficiency, regression absence, repository understanding, or general retrieval quality.",
+  "$comment": "Authority: diagnostic_input. Expected patterns are mechanical evaluation targets, not repository truth or review verdicts.",
+  "type": "array",
+  "minItems": 20,
+  "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["query", "category", "expected_patterns", "filters", "accept_criteria"],
+    "properties": {
+      "query": {"type": "string", "minLength": 1, "pattern": "\\S"},
+      "category": {
+        "type": "string",
+        "enum": ["agent_pack", "claim_evidence", "citation_map", "post_emit_health", "bundle_surface", "bundle_manifest", "retrieval", "router", "cli", "contracts", "security", "source_acquisition", "pr_schau", "range_ref", "lenses"]
+      },
+      "expected_patterns": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "description": "Repository-path substrings or symbolic text matched mechanically by the current evaluator."
+      },
+      "filters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "repo": {"type": ["string", "null"]},
+          "path": {"type": ["string", "null"]},
+          "ext": {"type": ["string", "null"]},
+          "layer": {"type": ["string", "null"]},
+          "artifact_type": {"type": ["string", "null"]}
+        }
+      },
+      "accept_criteria": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["recall_at_10"],
+        "properties": {
+          "recall_at_10": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Per-query acceptance ratio; not a general ranking-sufficiency claim."
+          }
+        }
+      }
+    }
+  }
+}

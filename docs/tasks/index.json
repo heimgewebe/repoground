@@ -422,6 +422,25 @@
         "No CLI, service API, bundle emission, manifest consumer, or retrieval default integration.",
         "The 20-query goldset and 50% expected-target recall do not establish general retrieval completeness."
       ]
+    },
+    {
+      "id": "TASK-RETRIEVAL-REVIEW-GOLDSET-CONTRACT-001",
+      "title": "Review Retrieval Goldset v1 Contract",
+      "status": "done",
+      "description": "Compatibility-preserving Draft-07 contract for the existing 20-query review-retrieval goldset. It closes category, filter, expected-pattern, and acceptance-threshold shapes without changing eval_core, query routing, ranking, expected targets, or default behavior.",
+      "evidence": [
+        "merger/lenskit/contracts/review-retrieval-goldset.v1.schema.json",
+        "docs/retrieval/review_queries.v1.json",
+        "merger/lenskit/tests/test_review_retrieval_goldset.py",
+        "docs/diagnostics/review-retrieval-baseline.md",
+        "docs/contracts/contracts-matrix.md",
+        "docs/proofs/review-retrieval-goldset-v1-contract-proof.md"
+      ],
+      "missing_evidence": [
+        "Schema validity does not establish that expected patterns are complete, relevant, or true.",
+        "The fixed v1 category enum requires explicit contract evolution for new review classes.",
+        "No evaluator, ranking, retrieval-default, CLI, service, or bundle integration change."
+      ]
     }
   ]
 }
