@@ -281,6 +281,68 @@
         ]
       }
     },
+    "measurement_conditions": {
+      "type": "object",
+      "description": "Optional machine-readable conditions that changed evaluation scope or ranking.",
+      "additionalProperties": false,
+      "properties": {
+        "excluded_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "match": {
+          "type": "string",
+          "const": "exact_repository_path"
+        },
+        "application": {
+          "type": "string",
+          "enum": [
+            "before_order_by_and_limit",
+            "before_order_by_and_limit_per_lane"
+          ]
+        },
+        "ranking_algorithm_changed": {
+          "type": "boolean"
+        },
+        "review_intent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "plan_version",
+            "fusion",
+            "default_promoted",
+            "ranking_algorithm_changed"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "const": true
+            },
+            "plan_version": {
+              "type": "string",
+              "const": "review_intent.v1"
+            },
+            "fusion": {
+              "type": "string",
+              "const": "round_robin_unique_path"
+            },
+            "default_promoted": {
+              "type": "boolean",
+              "const": false
+            },
+            "ranking_algorithm_changed": {
+              "type": "boolean",
+              "const": true
+            }
+          }
+        }
+      }
+    },
     "claim_boundaries": {
       "type": "object",
       "description": "Machine-readable epistemic boundaries of the evaluation output.",
@@ -312,7 +374,8 @@
               "query_results",
               "index",
               "retrieval_metrics",
-              "graph_index"
+              "graph_index",
+              "path_exclusions"
             ]
           },
           "minItems": 1

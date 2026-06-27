@@ -373,6 +373,33 @@
         "scripts/proofs/guard_relation_validates_schema_audit.py",
         "merger/lenskit/tests/test_guard_relation_validates_schema_audit.py"
       ]
+    },
+    {
+      "id": "TASK-RETRIEVAL-REVIEW-INTENT-001",
+      "title": "Deterministic Review-Intent Router v1",
+      "status": "done",
+      "description": "Opt-in deterministic multi-lane FTS5 review planner. The established legacy router is the first compatibility lane; explicit source/test/contract/CLI/docs lanes then add unique repository paths via strict-before-relaxed queries and round_robin_unique_path fusion. Path exclusions apply before ordering and limiting in every lane. Default execute_query behavior is unchanged. Eval and review-baseline surfaces can select the mode explicitly and record default_promoted=false. Semantic/graph composition, CLI/service/bundle integration, and default promotion remain outside this slice.",
+      "evidence": [
+        "merger/lenskit/retrieval/review_router.py",
+        "merger/lenskit/retrieval/review_query.py",
+        "merger/lenskit/retrieval/query_core.py",
+        "merger/lenskit/retrieval/eval_core.py",
+        "merger/lenskit/retrieval/review_eval.py",
+        "merger/lenskit/contracts/query-result.v1.schema.json",
+        "merger/lenskit/contracts/retrieval-eval.v1.schema.json",
+        "merger/lenskit/tests/test_review_router.py",
+        "merger/lenskit/tests/test_review_query.py",
+        "docs/proofs/review-intent-router-v1-target-proof.md",
+        "docs/diagnostics/review-retrieval-baseline.md",
+        "scripts/proofs/review_intent_router_audit.py",
+        "merger/lenskit/tests/test_review_intent_router_audit.py",
+        "docs/proofs/review-intent-router-v1-audit.json"
+      ],
+      "missing_evidence": [
+        "Default promotion is not approved; default_promoted remains false.",
+        "No CLI, service API, bundle, manifest, or consumer integration.",
+        "The commit-bound goldset audit does not establish quality for unmeasured query classes."
+      ]
     }
   ]
 }
