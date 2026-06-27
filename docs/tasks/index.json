@@ -441,6 +441,24 @@
         "The fixed v1 category enum requires explicit contract evolution for new review classes.",
         "No evaluator, ranking, retrieval-default, CLI, service, or bundle integration change."
       ]
+    },
+    {
+      "id": "TASK-ARCH-DETERMINISTIC-CORE-001",
+      "title": "Deterministic Lenskit Core Architecture Boundary",
+      "status": "done",
+      "description": "Normative architecture boundary for Lenskit as a deterministic lens apparatus: canonical content authority, snapshot/live-state separation, stable Primary Lens IDs, additive facets, relations, states, task contexts and cards, validation limits, and explicit exclusion of LLM, embedding, review-verdict, patch, and repository-control behavior from the core.",
+      "evidence": [
+        "docs/architecture/deterministic-lenskit-core.md",
+        "docs/architecture/lens-model.md",
+        "docs/architecture/agent-consumption-contract.md",
+        "merger/lenskit/tests/test_deterministic_lenskit_core_doc.py",
+        "docs/proofs/deterministic-lenskit-core-doc-proof.md"
+      ],
+      "missing_evidence": [
+        "Architecture documentation does not prove every runtime path conforms.",
+        "No runtime producer, contract artifact, bundle role, CLI, or consumer integration is added.",
+        "Deferred features remain subject to separate target proofs and implementation gates."
+      ]
     }
   ]
 }

@@ -9,7 +9,7 @@ The Agent Entry Manifest core is implemented with a contract, producer and
 focused tests.
 A dedicated CLI command, automatic bundle emission, bundle-manifest
 registration and stable consumer integration are not yet implemented.
-Agent Reading Pack v2, Export Safety Report, Lens Cards, Relation Cards, and Retrieval v2 are not yet implemented.
+Export Safety Report, Lens Cards, and Relation Cards exist as scoped contract/core surfaces. Agent Reading Pack v2 card indexes and any promoted Retrieval v2 default remain unimplemented.
 
 ---
 

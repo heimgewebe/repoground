@@ -29,6 +29,7 @@ Beziehungen:
 - `docs/blueprints/lenskit-agent-front-door-hardening.md`
 - `docs/blueprints/lenskit-authority-risk-matrix.md`
 - `docs/blueprints/lenskit-anti-hallucination-output-architecture.md`
+- `docs/architecture/deterministic-lenskit-core.md`
 - `docs/architecture/two-layer-artifact-pattern.md`
 - `docs/architecture/agent-consumption-contract.md`
 - `docs/architecture/answer-compliance.md`
