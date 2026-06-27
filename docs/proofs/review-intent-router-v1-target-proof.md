@@ -91,9 +91,23 @@ Focused verification while preparing the slice:
 - 293 focused retrieval, audit, and planning-control tests passed together;
 - Ruff passed for all changed Python files.
 
-Concrete metrics on a full repository snapshot remain index-dependent and must be
-reproduced against the selected snapshot. They are deliberately not frozen as a
-universal quality claim in this proof.
+## Commit-bound full-snapshot audit
+
+`docs/proofs/review-intent-router-v1-audit.json` was produced from clean tracked
+commit `be23706b7dadc4bf24f142ac1d2fb24423c3a4c8` and binds the measurement to the
+exact goldset, canonical dump, chunk index, and SQLite index hashes.
+
+For the versioned 20-query review goldset at `k=10`:
+
+- Recall improved from `10.0` to `100.0` (`+90.0` percentage points);
+- MRR improved from `0.1` to `0.37666666666666665`;
+- expected-target hits improved from `2/60` to `30/60`;
+- zero-hit ratio fell from `0.25` to `0.0`;
+- no category regressed in Recall or MRR;
+- all six audit gates passed.
+
+These values describe that exact snapshot and exclusion set. They are not a
+universal retrieval-quality claim and do not promote the mode to the default.
 
 ## Does not establish
 
@@ -106,8 +120,8 @@ universal quality claim in this proof.
 
 ## Remaining promotion gate
 
-Default promotion remains a separate decision. It requires a reproducible run
-against the versioned 20-query review goldset, aggregate improvement, no central
-category regression, useful miss diagnostics, and preserved query
-compatibility. Until that evidence is reviewed, `default_promoted` remains
-`false`.
+The commit-bound audit now supplies the aggregate and per-category measurement
+for this opt-in slice. Default promotion remains a separate decision because it
+also requires explicit product-policy review, broader unmeasured query evidence,
+and a decision about CLI, service, bundle, manifest, and consumer integration.
+Until such a follow-up is approved, `default_promoted` remains `false`.

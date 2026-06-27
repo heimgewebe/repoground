@@ -1,0 +1,304 @@
+{
+  "schema": "lenskit.review_intent_router_audit.v1",
+  "authority": "diagnostic_signal",
+  "risk_class": "diagnostic",
+  "source": {
+    "commit": "be23706b7dadc4bf24f142ac1d2fb24423c3a4c8",
+    "tracked_working_tree_clean": true,
+    "tracked_changes": []
+  },
+  "snapshot": {
+    "index_file": "review-intent-router-v2-max-260627-1903_merge.chunk_index.index.sqlite",
+    "index_sha256": "8725b1f947821251d63f1c34b9a5671c64b050cc358f06a3108c94534864f1c6",
+    "goldset_file": "docs/retrieval/review_queries.v1.json",
+    "goldset_sha256": "7135ee228935ad5758c64fe713261723207881c8a4ab30cc52894a050fa6b7bc",
+    "canonical_file": "review-intent-router-v2-max-260627-1903_merge.md",
+    "canonical_sha256": "f18ab509793ed9520a5dbd2c86679178309cdad675120286062cdec745515fb8",
+    "chunk_index_file": "review-intent-router-v2-max-260627-1903_merge.chunk_index.jsonl",
+    "chunk_index_sha256": "9443944ae49917dec4f97cb7e87a70ce6c31db3bb8299933a27fe1ec0eff9c29"
+  },
+  "measurement": {
+    "k": 10,
+    "excluded_paths": [
+      {
+        "path": "docs/proofs/review-intent-router-v1-audit.json",
+        "reason": "proof_surface_self_reference"
+      },
+      {
+        "path": "docs/proofs/review-intent-router-v1-target-proof.md",
+        "reason": "proof_surface_self_reference"
+      },
+      {
+        "path": "docs/retrieval/review_queries.v1.json",
+        "reason": "goldset_self_reference"
+      },
+      {
+        "path": "scripts/proofs/review_intent_router_audit.py",
+        "reason": "proof_surface_self_reference"
+      }
+    ],
+    "legacy": {
+      "total_queries": 20,
+      "recall@10": 10.0,
+      "MRR": 0.1,
+      "zero_hit_ratio": 0.25,
+      "expected_target_total": 60,
+      "expected_target_hits": 2,
+      "expected_target_misses": 58
+    },
+    "review_intent": {
+      "total_queries": 20,
+      "recall@10": 100.0,
+      "MRR": 0.37666666666666665,
+      "zero_hit_ratio": 0.0,
+      "expected_target_total": 60,
+      "expected_target_hits": 30,
+      "expected_target_misses": 30
+    },
+    "review_intent_conditions": {
+      "path_exclusions": [
+        {
+          "path": "docs/proofs/review-intent-router-v1-audit.json",
+          "reason": "proof_surface_self_reference"
+        },
+        {
+          "path": "docs/proofs/review-intent-router-v1-target-proof.md",
+          "reason": "proof_surface_self_reference"
+        },
+        {
+          "path": "docs/retrieval/review_queries.v1.json",
+          "reason": "goldset_self_reference"
+        },
+        {
+          "path": "scripts/proofs/review_intent_router_audit.py",
+          "reason": "proof_surface_self_reference"
+        }
+      ],
+      "match": "exact_repository_path",
+      "application": "before_order_by_and_limit_per_lane",
+      "ranking_algorithm_changed": true,
+      "does_not_establish": [
+        "Excluded paths are outside this measurement run only.",
+        "An excluded path is not established as irrelevant.",
+        "Changed metrics do not establish a ranking improvement."
+      ],
+      "review_intent": {
+        "enabled": true,
+        "plan_version": "review_intent.v1",
+        "fusion": "round_robin_unique_path",
+        "default_promoted": false,
+        "ranking_algorithm_changed": true
+      }
+    }
+  },
+  "comparison": {
+    "aggregate": {
+      "total_queries": 20,
+      "legacy_recall": 10.0,
+      "review_recall": 100.0,
+      "delta_recall": 90.0,
+      "legacy_mrr": 0.1,
+      "review_mrr": 0.37666666666666665,
+      "delta_mrr": 0.2766666666666666,
+      "legacy_zero_hit_ratio": 0.25,
+      "review_zero_hit_ratio": 0.0,
+      "legacy_expected_target_hits": 2,
+      "review_expected_target_hits": 30,
+      "expected_target_total": 60
+    },
+    "categories": [
+      {
+        "category": "agent_pack",
+        "legacy_recall": 50.0,
+        "review_recall": 100.0,
+        "delta_recall": 50.0,
+        "legacy_mrr": 0.5,
+        "review_mrr": 0.625,
+        "delta_mrr": 0.125,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "bundle_manifest",
+        "legacy_recall": 100.0,
+        "review_recall": 100.0,
+        "delta_recall": 0.0,
+        "legacy_mrr": 1.0,
+        "review_mrr": 1.0,
+        "delta_mrr": 0.0,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "bundle_surface",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.5,
+        "delta_mrr": 0.5,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "citation_map",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.125,
+        "delta_mrr": 0.125,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "claim_evidence",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.25,
+        "delta_mrr": 0.25,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "cli",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.5,
+        "delta_mrr": 0.5,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "contracts",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.3125,
+        "delta_mrr": 0.3125,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "lenses",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.16666666666666666,
+        "delta_mrr": 0.16666666666666666,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "post_emit_health",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.3333333333333333,
+        "delta_mrr": 0.3333333333333333,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "pr_schau",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.5,
+        "delta_mrr": 0.5,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "range_ref",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.3333333333333333,
+        "delta_mrr": 0.3333333333333333,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "retrieval",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.225,
+        "delta_mrr": 0.225,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "router",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.25,
+        "delta_mrr": 0.25,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "security",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.25,
+        "delta_mrr": 0.25,
+        "recall_regression": false,
+        "mrr_regression": false
+      },
+      {
+        "category": "source_acquisition",
+        "legacy_recall": 0.0,
+        "review_recall": 100.0,
+        "delta_recall": 100.0,
+        "legacy_mrr": 0.0,
+        "review_mrr": 0.25,
+        "delta_mrr": 0.25,
+        "recall_regression": false,
+        "mrr_regression": false
+      }
+    ],
+    "regressions": {
+      "recall": [],
+      "mrr": []
+    },
+    "gates": {
+      "query_count_unchanged": true,
+      "aggregate_recall_improved": true,
+      "aggregate_mrr_improved": true,
+      "expected_target_hits_improved": true,
+      "no_category_recall_regression": true,
+      "no_category_mrr_regression": true,
+      "passed": true
+    }
+  },
+  "default_promoted": false,
+  "claim_boundaries": {
+    "proves": [
+      "The declared pipelines were measured against this exact index and goldset under the listed exclusions."
+    ],
+    "does_not_prove": [
+      "Passing does not prove general retrieval quality.",
+      "A hit does not prove relevance or correctness.",
+      "A miss does not prove repository absence.",
+      "The snapshot does not prove current live-repository state.",
+      "Passing does not promote review-intent to the default."
+    ],
+    "requires_live_check": true
+  }
+}
