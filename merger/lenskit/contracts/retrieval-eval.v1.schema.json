@@ -313,13 +313,22 @@
           "additionalProperties": false,
           "required": [
             "enabled",
+            "requested",
             "plan_version",
             "fusion",
             "default_promoted",
+            "executed_queries",
+            "fallback_queries",
+            "error_queries",
+            "fallback_mode",
             "ranking_algorithm_changed"
           ],
           "properties": {
             "enabled": {
+              "type": "boolean",
+              "const": true
+            },
+            "requested": {
               "type": "boolean",
               "const": true
             },
@@ -335,9 +344,24 @@
               "type": "boolean",
               "const": false
             },
+            "executed_queries": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fallback_queries": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "error_queries": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "fallback_mode": {
+              "type": "string",
+              "const": "legacy"
+            },
             "ranking_algorithm_changed": {
-              "type": "boolean",
-              "const": true
+              "type": "boolean"
             }
           }
         }

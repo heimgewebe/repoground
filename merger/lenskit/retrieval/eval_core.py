@@ -368,6 +368,9 @@ def do_eval(
     results_detail = []
     category_stats: Dict[str, Dict[str, Any]] = {}
     graph_index_used = False
+    review_intent_executed_queries = 0
+    review_intent_fallback_queries = 0
+    review_intent_error_queries = 0
 
     for q in gold_queries:
         q_text = q["query"]
@@ -394,6 +397,11 @@ def do_eval(
                 excluded_paths=normalized_excluded_paths,
                 review_intent=review_intent,
             )
+            if review_intent:
+                if b_res.get("query_mode") == "review_intent":
+                    review_intent_executed_queries += 1
+                else:
+                    review_intent_fallback_queries += 1
 
             s_rel, s_match, s_why, s_paths, s_count, s_rr, s_res = False, "-", None, [], 0, 0.0, {}
             sem_error_str = None
@@ -463,6 +471,7 @@ def do_eval(
                 "found_count": b_count,
                 "top_results": b_paths,
                 "rr": b_rr,
+                "query_mode": b_res.get("query_mode"),
                 "explain": b_res.get("explain", {"filters": filters, "why_fail": WHY_FAIL_MISSING_EXPLAIN})
             }
             if b_why is not None:
@@ -503,6 +512,8 @@ def do_eval(
             results_detail.append(detail)
 
         except RuntimeError as e:
+            if review_intent:
+                review_intent_error_queries += 1
             if "Invalid graph index JSON" in str(e) or "Explicitly provided graph index file does not exist" in str(e):
                 raise e
             if not is_json_mode:
@@ -527,6 +538,8 @@ def do_eval(
             })
 
         except Exception as e:
+            if review_intent:
+                review_intent_error_queries += 1
             if not is_json_mode:
                 disp_q = (q_text[:32] + "..") if len(q_text) > 32 else q_text
                 if compare_mode:
@@ -644,10 +657,15 @@ def do_eval(
     if review_intent:
         out["measurement_conditions"]["review_intent"] = {
             "enabled": True,
+            "requested": True,
             "plan_version": "review_intent.v1",
             "fusion": "round_robin_unique_path",
             "default_promoted": False,
-            "ranking_algorithm_changed": True,
+            "executed_queries": review_intent_executed_queries,
+            "fallback_queries": review_intent_fallback_queries,
+            "error_queries": review_intent_error_queries,
+            "fallback_mode": "legacy",
+            "ranking_algorithm_changed": review_intent_executed_queries > 0,
         }
         out["claim_boundaries"]["does_not_prove"].extend([
             "Review-intent metrics do not establish improvement for unmeasured query classes.",

@@ -2,9 +2,11 @@
 Review Retrieval Metric Baseline + Miss Diagnostics adapter.
 
 This module connects the review goldset (`docs/retrieval/review_queries.v1.json`)
-to the *existing* evaluation and diagnostics infrastructure. It does not run, change,
-or improve retrieval, ranking, indexing, or routing behavior. It is a diagnostic
-measuring instrument only.
+to the existing evaluation and diagnostics infrastructure. The default mode
+measures the established lexical pipeline. With ``review_intent=True`` it
+explicitly selects the opt-in deterministic review pipeline and records that
+execution condition. It remains a diagnostic measuring instrument, not a
+quality or correctness verdict.
 
 Reuse, not reinvention:
 - Metrics (recall@k, MRR, zero_hit_ratio, per-category recall/MRR) come from
@@ -368,7 +370,9 @@ def build_review_retrieval_baseline(
                 if review_condition
                 else "before_order_by_and_limit"
             ),
-            "ranking_algorithm_changed": bool(review_condition),
+            "ranking_algorithm_changed": bool(
+                review_condition and review_condition.get("ranking_algorithm_changed")
+            ),
             "does_not_establish": [
                 "Excluded paths are outside this measurement run only.",
                 "An excluded path is not established as irrelevant.",
@@ -400,10 +404,11 @@ def run_review_retrieval_baseline(
 ) -> Optional[Dict[str, Any]]:
     """Reproduction helper: run the eval and build the review baseline.
 
-    This is a thin, library-only convenience wrapper around the existing
-    ``eval_core.do_eval`` plus the diagnostics calibrator. It adds no new CLI,
-    contract, or runtime behavior. Returns ``None`` if the underlying eval cannot
-    parse the goldset (matching ``do_eval`` semantics).
+    This is a library-only convenience wrapper around ``eval_core.do_eval`` plus
+    the diagnostics calibrator. The default path remains the established lexical
+    evaluation; ``review_intent=True`` selects the opt-in deterministic review
+    pipeline. Returns ``None`` if the underlying eval cannot parse the goldset
+    (matching ``do_eval`` semantics).
     """
     excluded_paths, path_exclusions = _resolve_goldset_exclusion(
         Path(goldset_path), repo_root

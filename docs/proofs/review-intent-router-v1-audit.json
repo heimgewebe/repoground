@@ -3,19 +3,25 @@
   "authority": "diagnostic_signal",
   "risk_class": "diagnostic",
   "source": {
-    "commit": "be23706b7dadc4bf24f142ac1d2fb24423c3a4c8",
+    "commit": "f1d34debaae6bbce0ce74803b2747ee41bfab931",
     "tracked_working_tree_clean": true,
-    "tracked_changes": []
+    "tracked_changes": [],
+    "manifest_commit_matches_head": true
   },
   "snapshot": {
-    "index_file": "review-intent-router-v2-max-260627-1903_merge.chunk_index.index.sqlite",
-    "index_sha256": "8725b1f947821251d63f1c34b9a5671c64b050cc358f06a3108c94534864f1c6",
+    "manifest_file": "fix-review-intent-v2-hardening-max-260627-2038_merge.bundle.manifest.json",
+    "manifest_sha256": "5a503d05a6dbd38ca5574659436b711dd41887e24cf80b828ec83b33908c19b5",
+    "run_id": "fix-review-intent-v2-hardening-full-max-260627-2038",
+    "generator_git_commit": "f1d34debaae6bbce0ce74803b2747ee41bfab931",
+    "index_file": "fix-review-intent-v2-hardening-max-260627-2038_merge.chunk_index.index.sqlite",
+    "index_sha256": "02fb8b6cc49a8090d7029482527551d9ecc089e1d8b5e2a0447ca8b6f5d0f5d6",
     "goldset_file": "docs/retrieval/review_queries.v1.json",
     "goldset_sha256": "7135ee228935ad5758c64fe713261723207881c8a4ab30cc52894a050fa6b7bc",
-    "canonical_file": "review-intent-router-v2-max-260627-1903_merge.md",
-    "canonical_sha256": "f18ab509793ed9520a5dbd2c86679178309cdad675120286062cdec745515fb8",
-    "chunk_index_file": "review-intent-router-v2-max-260627-1903_merge.chunk_index.jsonl",
-    "chunk_index_sha256": "9443944ae49917dec4f97cb7e87a70ce6c31db3bb8299933a27fe1ec0eff9c29"
+    "canonical_file": "fix-review-intent-v2-hardening-max-260627-2038_merge.md",
+    "canonical_sha256": "ea0d620bcfe35617db777c355fa1794977cacf23536c2d8e2be49b2c78b5453f",
+    "chunk_index_file": "fix-review-intent-v2-hardening-max-260627-2038_merge.chunk_index.jsonl",
+    "chunk_index_sha256": "3f074a9fdda2ad7fcbc53bb0181e0406efa810e9d7a44f7dfd7052360ff90ee7",
+    "manifest_binding_verified": true
   },
   "measurement": {
     "k": 10,
@@ -84,9 +90,14 @@
       ],
       "review_intent": {
         "enabled": true,
+        "requested": true,
         "plan_version": "review_intent.v1",
         "fusion": "round_robin_unique_path",
         "default_promoted": false,
+        "executed_queries": 20,
+        "fallback_queries": 0,
+        "error_queries": 0,
+        "fallback_mode": "legacy",
         "ranking_algorithm_changed": true
       }
     }
@@ -104,7 +115,11 @@
       "review_zero_hit_ratio": 0.0,
       "legacy_expected_target_hits": 2,
       "review_expected_target_hits": 30,
-      "expected_target_total": 60
+      "legacy_expected_target_total": 60,
+      "review_expected_target_total": 60,
+      "legacy_expected_target_recall": 3.3333333333333335,
+      "review_expected_target_recall": 50.0,
+      "delta_expected_target_recall": 46.666666666666664
     },
     "categories": [
       {
@@ -115,8 +130,15 @@
         "legacy_mrr": 0.5,
         "review_mrr": 0.625,
         "delta_mrr": 0.125,
+        "legacy_target_hits": 1,
+        "review_target_hits": 2,
+        "target_total": 5,
+        "legacy_target_recall": 20.0,
+        "review_target_recall": 40.0,
+        "delta_target_recall": 20.0,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "bundle_manifest",
@@ -126,8 +148,15 @@
         "legacy_mrr": 1.0,
         "review_mrr": 1.0,
         "delta_mrr": 0.0,
+        "legacy_target_hits": 1,
+        "review_target_hits": 1,
+        "target_total": 3,
+        "legacy_target_recall": 33.33333333333333,
+        "review_target_recall": 33.33333333333333,
+        "delta_target_recall": 0.0,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "bundle_surface",
@@ -137,8 +166,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.5,
         "delta_mrr": 0.5,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 3,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 66.66666666666666,
+        "delta_target_recall": 66.66666666666666,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "citation_map",
@@ -148,8 +184,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.125,
         "delta_mrr": 0.125,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 3,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 66.66666666666666,
+        "delta_target_recall": 66.66666666666666,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "claim_evidence",
@@ -159,8 +202,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.25,
         "delta_mrr": 0.25,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 3,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 66.66666666666666,
+        "delta_target_recall": 66.66666666666666,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "cli",
@@ -170,8 +220,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.5,
         "delta_mrr": 0.5,
+        "legacy_target_hits": 0,
+        "review_target_hits": 4,
+        "target_total": 6,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 66.66666666666666,
+        "delta_target_recall": 66.66666666666666,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "contracts",
@@ -181,8 +238,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.3125,
         "delta_mrr": 0.3125,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 5,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 40.0,
+        "delta_target_recall": 40.0,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "lenses",
@@ -192,8 +256,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.16666666666666666,
         "delta_mrr": 0.16666666666666666,
+        "legacy_target_hits": 0,
+        "review_target_hits": 1,
+        "target_total": 3,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 33.33333333333333,
+        "delta_target_recall": 33.33333333333333,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "post_emit_health",
@@ -203,8 +274,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.3333333333333333,
         "delta_mrr": 0.3333333333333333,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 3,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 66.66666666666666,
+        "delta_target_recall": 66.66666666666666,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "pr_schau",
@@ -214,8 +292,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.5,
         "delta_mrr": 0.5,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 4,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 50.0,
+        "delta_target_recall": 50.0,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "range_ref",
@@ -225,8 +310,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.3333333333333333,
         "delta_mrr": 0.3333333333333333,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 5,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 40.0,
+        "delta_target_recall": 40.0,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "retrieval",
@@ -236,8 +328,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.225,
         "delta_mrr": 0.225,
+        "legacy_target_hits": 0,
+        "review_target_hits": 3,
+        "target_total": 6,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 50.0,
+        "delta_target_recall": 50.0,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "router",
@@ -247,8 +346,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.25,
         "delta_mrr": 0.25,
+        "legacy_target_hits": 0,
+        "review_target_hits": 1,
+        "target_total": 3,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 33.33333333333333,
+        "delta_target_recall": 33.33333333333333,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "security",
@@ -258,8 +364,15 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.25,
         "delta_mrr": 0.25,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 5,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 40.0,
+        "delta_target_recall": 40.0,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       },
       {
         "category": "source_acquisition",
@@ -269,34 +382,45 @@
         "legacy_mrr": 0.0,
         "review_mrr": 0.25,
         "delta_mrr": 0.25,
+        "legacy_target_hits": 0,
+        "review_target_hits": 2,
+        "target_total": 3,
+        "legacy_target_recall": 0.0,
+        "review_target_recall": 66.66666666666666,
+        "delta_target_recall": 66.66666666666666,
         "recall_regression": false,
-        "mrr_regression": false
+        "mrr_regression": false,
+        "target_recall_regression": false
       }
     ],
     "regressions": {
       "recall": [],
-      "mrr": []
+      "mrr": [],
+      "target_recall": []
     },
     "gates": {
       "query_count_unchanged": true,
+      "expected_target_total_unchanged": true,
       "aggregate_recall_improved": true,
       "aggregate_mrr_improved": true,
       "expected_target_hits_improved": true,
+      "expected_target_recall_improved": true,
       "no_category_recall_regression": true,
       "no_category_mrr_regression": true,
+      "no_category_target_recall_regression": true,
       "passed": true
     }
   },
   "default_promoted": false,
   "claim_boundaries": {
     "proves": [
-      "The declared pipelines were measured against this exact index and goldset under the listed exclusions."
+      "The declared pipelines were measured against artifacts whose paths, sizes, hashes, and generator commit match this bundle manifest."
     ],
     "does_not_prove": [
       "Passing does not prove general retrieval quality.",
       "A hit does not prove relevance or correctness.",
       "A miss does not prove repository absence.",
-      "The snapshot does not prove current live-repository state.",
+      "The snapshot does not prove current live-repository state after the audited commit.",
       "Passing does not promote review-intent to the default."
     ],
     "requires_live_check": true

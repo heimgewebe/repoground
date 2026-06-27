@@ -91,23 +91,30 @@ Focused verification while preparing the slice:
 - 293 focused retrieval, audit, and planning-control tests passed together;
 - Ruff passed for all changed Python files.
 
-## Commit-bound full-snapshot audit
+## Manifest- and commit-bound full-snapshot audit
 
-`docs/proofs/review-intent-router-v1-audit.json` was produced from clean tracked
-commit `be23706b7dadc4bf24f142ac1d2fb24423c3a4c8` and binds the measurement to the
-exact goldset, canonical dump, chunk index, and SQLite index hashes.
+`docs/proofs/review-intent-router-v1-audit.json` was regenerated from clean tracked
+commit `f1d34debaae6bbce0ce74803b2747ee41bfab931`. The audit now requires the bundle
+manifest and verifies the canonical dump, chunk index, SQLite index, byte sizes,
+SHA-256 values, clean generator state, and generator commit against the audited
+repository HEAD.
 
 For the versioned 20-query review goldset at `k=10`:
 
-- Recall improved from `10.0` to `100.0` (`+90.0` percentage points);
+- query Recall improved from `10.0` to `100.0` (`+90.0` percentage points);
 - MRR improved from `0.1` to `0.37666666666666665`;
 - expected-target hits improved from `2/60` to `30/60`;
+- expected-target recall improved from `3.3333333333333335%` to `50.0%`;
 - zero-hit ratio fell from `0.25` to `0.0`;
-- no category regressed in Recall or MRR;
-- all six audit gates passed.
+- no category regressed in query Recall, MRR, or expected-target recall;
+- all nine audit gates passed;
+- all 20 queries executed the review pipeline, with zero fallbacks and zero errors.
 
-These values describe that exact snapshot and exclusion set. They are not a
-universal retrieval-quality claim and do not promote the mode to the default.
+The 100% query Recall means every query returned at least one expected path. It
+does not mean all requested artifacts were found; expected-target recall is 50%.
+These values describe that exact manifest-bound snapshot and exclusion set. They
+are not a universal retrieval-quality claim and do not promote the mode to the
+default.
 
 ## Does not establish
 
@@ -120,7 +127,7 @@ universal retrieval-quality claim and do not promote the mode to the default.
 
 ## Remaining promotion gate
 
-The commit-bound audit now supplies the aggregate and per-category measurement
+The manifest- and commit-bound audit now supplies aggregate and per-category query and expected-target measurements
 for this opt-in slice. Default promotion remains a separate decision because it
 also requires explicit product-policy review, broader unmeasured query evidence,
 and a decision about CLI, service, bundle, manifest, and consumer integration.
