@@ -459,6 +459,22 @@
         "No runtime producer, contract artifact, bundle role, CLI, or consumer integration is added.",
         "Deferred features remain subject to separate target proofs and implementation gates."
       ]
+    },
+    {
+      "id": "TASK-GRAPH-CURRENT-STATE-AUDIT-001",
+      "title": "Graph Current-State Audit",
+      "status": "done",
+      "description": "Audits the existing Architecture Graph, Entrypoints, Graph Index, CLI, conditional bundle registration, staleness checks, evidence levels, and opt-in query/eval use. Records the detected-but-used stale Graph Index as the first follow-up before provenance production, layer enrichment, or Symbol Index work.",
+      "evidence": [
+        "docs/diagnostics/graph-current-state-audit.md",
+        "merger/lenskit/tests/test_graph_current_state_audit.py",
+        "docs/proofs/graph-current-state-audit-proof.md"
+      ],
+      "missing_evidence": [
+        "The audit does not repair stale graph ranking; G1 remains open.",
+        "Graph and Entrypoints source artifacts are not automatically produced by the merge pipeline.",
+        "No graph completeness, runtime reachability, causality, retrieval relevance, or Symbol Index readiness is established."
+      ]
     }
   ]
 }
