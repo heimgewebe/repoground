@@ -1,5 +1,5 @@
 import sqlite3
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import json
 import time
 from typing import Dict, Any, Optional, List
@@ -13,6 +13,49 @@ WHY_ZERO_FILTERS = "filters too restrictive"
 WHY_ZERO_NONE = "no results"
 
 _MODEL_CACHE = {}
+
+
+def normalize_excluded_paths(excluded_paths: Optional[List[str]]) -> List[str]:
+    """Validate and normalize exact repository-relative POSIX path exclusions."""
+    if excluded_paths is None:
+        return []
+    if not isinstance(excluded_paths, (list, tuple)):
+        raise ValueError(
+            "excluded_paths must be a list or tuple of repository-relative paths"
+        )
+
+    normalized = set()
+    for raw_path in excluded_paths:
+        if not isinstance(raw_path, str):
+            raise ValueError("excluded_paths entries must be strings")
+        if not raw_path or raw_path != raw_path.strip():
+            raise ValueError("excluded_paths entries must be non-empty and unpadded")
+        if "\x00" in raw_path or "\\" in raw_path:
+            raise ValueError(
+                "excluded_paths entries must use repository-relative POSIX paths"
+            )
+        if raw_path.startswith("/") or (
+            len(raw_path) >= 2
+            and raw_path[0].isalpha()
+            and raw_path[1] == ":"
+        ):
+            raise ValueError("excluded_paths entries must be relative paths")
+
+        parts = raw_path.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise ValueError(
+                "excluded_paths entries must not contain empty, dot, or parent segments"
+            )
+
+        normalized_path = PurePosixPath(raw_path).as_posix()
+        if normalized_path != raw_path:
+            raise ValueError(
+                "excluded_paths entries must already be normalized POSIX paths"
+            )
+        normalized.add(normalized_path)
+
+    return sorted(normalized)
+
 
 def _get_semantic_model(model_name: str):
     if model_name not in _MODEL_CACHE:
@@ -34,7 +77,9 @@ def execute_query(
     trace: bool = False,
     build_context: bool = False,
     context_mode: str = "exact",
-    context_window_lines: int = 0
+    context_window_lines: int = 0,
+    *,
+    excluded_paths: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Executes a query against the SQLite index.
@@ -42,6 +87,7 @@ def execute_query(
     """
     if not filters:
         filters = {}
+    normalized_excluded_paths = normalize_excluded_paths(excluded_paths)
 
     trace_data = None
     if trace:
@@ -56,6 +102,8 @@ def execute_query(
             "fallback_markers": [],
             "loaded_artifacts": []
         }
+        if normalized_excluded_paths:
+            trace_data["excluded_paths"] = normalized_excluded_paths
 
     conn = None
     try:
@@ -162,6 +210,11 @@ def execute_query(
         if filters.get("artifact_type"):
             where_clauses.append("c.artifact_type = ?")
             params.append(filters["artifact_type"])
+
+        if normalized_excluded_paths:
+            placeholders = ", ".join("?" for _ in normalized_excluded_paths)
+            where_clauses.append(f"c.path NOT IN ({placeholders})")
+            params.extend(normalized_excluded_paths)
 
         # Combine clauses
         if query_text:
@@ -321,7 +374,8 @@ def execute_query(
 
         bm25_scores = [-r["score"] for r in rows if r["score"] is not None and query_text]
         max_bm25_score = max(bm25_scores) if bm25_scores else 1.0
-        if max_bm25_score == 0: max_bm25_score = 1.0
+        if max_bm25_score == 0:
+            max_bm25_score = 1.0
 
         # candidate_texts is built eagerly to keep row/result alignment simple.
         # fetch_k is small, so overhead is negligible.
@@ -537,6 +591,12 @@ def execute_query(
             "count": len(results),
             "results": results
         }
+        if normalized_excluded_paths:
+            out["applied_exclusions"] = {
+                "paths": normalized_excluded_paths,
+                "match": "exact_repository_path",
+                "application": "before_order_by_and_limit",
+            }
 
         # Agent Guardrail: Low result coverage
         # Note: This is currently just a simple quantity heuristic
@@ -561,16 +621,23 @@ def execute_query(
         )
         if graph_used_in_results:
             evidence.append("graph_index")
+        if normalized_excluded_paths:
+            evidence.append("path_exclusions")
+        does_not_prove = [
+            "Absence of a hit does not prove absence in the repository.",
+            "Ranking does not prove semantic importance.",
+            "Snapshot query does not prove live repository state.",
+            "Best-effort explain output is diagnostic, not canonical truth.",
+        ]
+        if normalized_excluded_paths:
+            does_not_prove.append(
+                "A path excluded from this query run is not established as irrelevant."
+            )
         out["claim_boundaries"] = {
             "proves": [
                 "These hits were returned by this index under this query and these filters."
             ],
-            "does_not_prove": [
-                "Absence of a hit does not prove absence in the repository.",
-                "Ranking does not prove semantic importance.",
-                "Snapshot query does not prove live repository state.",
-                "Best-effort explain output is diagnostic, not canonical truth."
-            ],
+            "does_not_prove": does_not_prove,
             "evidence_basis": evidence,
             "requires_live_check": True
         }
@@ -579,6 +646,8 @@ def execute_query(
             explain_block = {}
             explain_block["fts_query"] = fts_query_str if fts_query_str is not None else ""
             explain_block["filters"] = {k: v for k, v in (filters or {}).items() if v}
+            if normalized_excluded_paths:
+                explain_block["excluded_paths"] = normalized_excluded_paths
             if router_output:
                 explain_block["router"] = router_output
             if ranker_meta:

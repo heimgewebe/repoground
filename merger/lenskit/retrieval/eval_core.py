@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 
-from .query_core import execute_query
+from .query_core import execute_query, normalize_excluded_paths
 
 WHY_FAIL_QUERY_EXECUTION = "query execution failed"
 WHY_FAIL_MISSING_EXPLAIN = "missing explain from query execution"
@@ -241,7 +241,9 @@ def evaluate_single_run(
     k: int,
     embedding_policy: Optional[Dict[str, Any]],
     graph_index_path: Optional[Path],
-    graph_weights: Optional[Dict[str, float]]
+    graph_weights: Optional[Dict[str, float]],
+    *,
+    excluded_paths: Optional[List[str]] = None,
 ) -> Tuple[bool, str, Optional[Dict[str, Any]], List[str], int, float, Dict[str, Any]]:
     res = execute_query(
         index_path=index_path,
@@ -251,7 +253,8 @@ def evaluate_single_run(
         embedding_policy=embedding_policy,
         explain=True,
         graph_index_path=graph_index_path,
-        graph_weights=graph_weights
+        graph_weights=graph_weights,
+        excluded_paths=excluded_paths,
     )
 
     is_relevant = False
@@ -284,7 +287,9 @@ def do_eval(
     is_stale: bool = False,
     embedding_policy: Optional[Dict[str, Any]] = None,
     graph_index_path: Optional[Path] = None,
-    graph_weights: Optional[Dict[str, float]] = None
+    graph_weights: Optional[Dict[str, float]] = None,
+    *,
+    excluded_paths: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Executes a benchmark evaluation of the retrieval system against gold queries.
@@ -296,6 +301,8 @@ def do_eval(
     - The evaluation script will NOT abort. The lexical baseline data remains preserved,
       and the semantic error string is explicitly logged within the `semantic.error` block of the JSON output.
     """
+    normalized_excluded_paths = normalize_excluded_paths(excluded_paths)
+
     try:
         gold_queries = parse_gold_queries(queries_path)
     except Exception as e:
@@ -352,7 +359,17 @@ def do_eval(
 
         try:
             # Baseline run (no embedding policy)
-            b_rel, b_match, b_why, b_paths, b_count, b_rr, b_res = evaluate_single_run(q_text, filters, expected, index_path, k, None, None, graph_weights)
+            b_rel, b_match, b_why, b_paths, b_count, b_rr, b_res = evaluate_single_run(
+                q_text,
+                filters,
+                expected,
+                index_path,
+                k,
+                None,
+                None,
+                graph_weights,
+                excluded_paths=normalized_excluded_paths,
+            )
 
             s_rel, s_match, s_why, s_paths, s_count, s_rr, s_res = False, "-", None, [], 0, 0.0, {}
             sem_error_str = None
@@ -360,7 +377,15 @@ def do_eval(
                 try:
                     # Semantic run
                     s_rel, s_match, s_why, s_paths, s_count, s_rr, s_res = evaluate_single_run(
-                        q_text, filters, expected, index_path, k, embedding_policy, graph_index_path, graph_weights
+                        q_text,
+                        filters,
+                        expected,
+                        index_path,
+                        k,
+                        embedding_policy,
+                        graph_index_path,
+                        graph_weights,
+                        excluded_paths=normalized_excluded_paths,
                     )
                     if "graph_index" in s_res.get("claim_boundaries", {}).get("evidence_basis", []):
                         graph_index_used = True
@@ -537,6 +562,8 @@ def do_eval(
     evidence_basis = ["eval_queries", "expected_targets", "query_results", "index", "retrieval_metrics"]
     if graph_index_used:
         evidence_basis.append("graph_index")
+    if normalized_excluded_paths:
+        evidence_basis.append("path_exclusions")
 
     # Build the miss taxonomy for diagnostic purposes
     miss_taxonomy = build_miss_taxonomy(results_detail, is_stale)
@@ -570,6 +597,19 @@ def do_eval(
         },
         "miss_taxonomy": miss_taxonomy
     }
+    if normalized_excluded_paths:
+        out["measurement_conditions"] = {
+            "excluded_paths": normalized_excluded_paths,
+            "match": "exact_repository_path",
+            "application": "before_order_by_and_limit",
+            "ranking_algorithm_changed": False,
+        }
+        out["claim_boundaries"]["does_not_prove"].append(
+            "Path exclusions change this measurement scope; they do not establish a ranking improvement."
+        )
+        out["claim_boundaries"]["does_not_prove"].append(
+            "An excluded path is not established as irrelevant."
+        )
 
     if compare_mode:
         out["metrics"][f"{compare_type}_recall@{k}"] = sem_recall_at_k

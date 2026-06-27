@@ -9,6 +9,25 @@ evaluation and connects each expected target to the existing miss-diagnostics
 taxonomy. It does not run, change, or improve retrieval, ranking, indexing, or
 routing behavior. It is a diagnostic measuring instrument only.
 
+## Measurement Hygiene: Goldset Self-Reference
+
+The committed goldset is itself part of normal full-repository indexes. Its literal
+query text can therefore appear as a high-ranked result and consume top-k capacity.
+When the caller supplies `repo_root`, `run_review_retrieval_baseline` resolves the
+goldset inside that root and excludes its exact repository-relative path before SQL
+ordering and `LIMIT` are applied.
+
+The exclusion is exact: similarly named paths remain candidates. Unsafe, absolute,
+parent-traversing, backslash-ambiguous or out-of-root paths are rejected. Lenskit does
+not infer a repository root from an arbitrary absolute goldset path; without an
+explicit `repo_root`, legacy evaluation behavior remains unchanged.
+
+The report records the excluded path with reason `goldset_self_reference`, exact-match
+semantics, pre-limit application, and `ranking_algorithm_changed=false`. This is a
+changed measurement condition, not a retrieval or ranking improvement.
+It does not establish a ranking improvement. Exclusion does not establish that the
+goldset is irrelevant, and changed metrics do not establish general retrieval quality.
+
 The baseline reuses existing infrastructure rather than reimplementing it:
 
 - Metrics (`recall@k`, `MRR`, `zero_hit_ratio`, per-category recall/MRR) come from
@@ -96,6 +115,7 @@ baseline = run_review_retrieval_baseline(
     index_path=Path("path/to/index.sqlite"),
     goldset_path=Path("docs/retrieval/review_queries.v1.json"),
     k=10,
+    repo_root=Path("."),
     # Optional artifacts sharpen miss diagnostics:
     chunk_index_path=Path("path/to/chunks.jsonl"),
     canonical_path=Path("path/to/canonical.md"),
@@ -127,10 +147,14 @@ remains `merger/lenskit/tests/test_review_retrieval_goldset.py`.
 - A miss does not prove code absence.
 - `recall@10` does not prove ranking sufficiency.
 - Retrieval is not "good", "solved", or "sufficient" because of these numbers.
+- Removing a self-reference from the measurement candidate set does not establish
+  a ranking improvement.
+- An excluded path is not established as irrelevant.
 
 ## Follow-up
 
 Ranking improvements, semantic/embedding retrieval, and reranking remain separate
 later slices. This document closes the metric-baseline and miss-diagnostics
-subtask tracked by `TASK-AGENT-FRONTDOOR-004`; it does not promote retrieval
-quality or change retrieval runtime.
+subtask tracked by `TASK-AGENT-FRONTDOOR-004` and documents the in-progress
+self-reference hygiene slice `TASK-RETRIEVAL-BASELINE-HYGIENE-001`; it does not
+promote retrieval quality or change ranking behavior.

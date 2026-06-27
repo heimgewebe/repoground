@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from merger.lenskit.retrieval import index_db
+from merger.lenskit.retrieval.query_core import execute_query
 from merger.lenskit.retrieval.eval_diagnostics import (
     DiagnosticsRecord,
     RetrievalEvalDiagnosticsCalibrator,
@@ -315,6 +316,167 @@ def test_all_twenty_review_queries_flow_into_baseline(tmp_path):
     assert "MRR" in metrics
     assert "zero_hit_ratio" in metrics
     assert isinstance(metrics["expected_target_total"], int)
+    assert "measurement_conditions" not in baseline
+
+
+def _self_hit_index(tmp_path, *, include_similar: bool = True):
+    dump_path = tmp_path / "self-hit-dump.json"
+    chunk_path = tmp_path / "self-hit-chunks.jsonl"
+    db_path = tmp_path / "self-hit-index.sqlite"
+    chunks = [
+        {
+            "chunk_id": "goldset",
+            "repo_id": "r1",
+            "path": "docs/retrieval/review_queries.v1.json",
+            "content": "needle",
+            "start_line": 1,
+            "end_line": 1,
+            "layer": "docs",
+            "artifact_type": "config",
+        },
+        {
+            "chunk_id": "target",
+            "repo_id": "r1",
+            "path": "merger/lenskit/core/target.py",
+            "content": "needle",
+            "start_line": 1,
+            "end_line": 1,
+            "layer": "core",
+            "artifact_type": "code",
+        },
+    ]
+    if include_similar:
+        chunks.insert(
+            1,
+            {
+                "chunk_id": "similar",
+                "repo_id": "r1",
+                "path": "docs/retrieval/review_queries.v1.json.copy",
+                "content": "needle",
+                "start_line": 1,
+                "end_line": 1,
+                "layer": "docs",
+                "artifact_type": "config",
+            },
+        )
+    with chunk_path.open("w", encoding="utf-8") as handle:
+        for chunk in chunks:
+            handle.write(json.dumps(chunk) + "\n")
+    dump_path.write_text(json.dumps({"dummy": "data"}), encoding="utf-8")
+    index_db.build_index(dump_path, chunk_path, db_path)
+    return db_path
+
+
+def test_query_path_exclusion_is_exact_and_applied_before_limit(tmp_path):
+    db_path = _self_hit_index(tmp_path)
+
+    default_result = execute_query(db_path, "", k=2, explain=True)
+    explicit_default = execute_query(
+        db_path, "", k=2, explain=True, excluded_paths=None
+    )
+    assert explicit_default == default_result
+    assert [hit["path"] for hit in default_result["results"]] == [
+        "docs/retrieval/review_queries.v1.json",
+        "docs/retrieval/review_queries.v1.json.copy",
+    ]
+
+    excluded_result = execute_query(
+        db_path,
+        "",
+        k=2,
+        explain=True,
+        excluded_paths=["docs/retrieval/review_queries.v1.json"],
+    )
+    assert [hit["path"] for hit in excluded_result["results"]] == [
+        "docs/retrieval/review_queries.v1.json.copy",
+        "merger/lenskit/core/target.py",
+    ]
+    assert excluded_result["explain"]["excluded_paths"] == [
+        "docs/retrieval/review_queries.v1.json"
+    ]
+
+    deduplicated = execute_query(
+        db_path,
+        "",
+        k=2,
+        excluded_paths=[
+            "merger/lenskit/core/target.py",
+            "docs/retrieval/review_queries.v1.json",
+            "docs/retrieval/review_queries.v1.json",
+        ],
+    )
+    assert deduplicated["applied_exclusions"]["paths"] == [
+        "docs/retrieval/review_queries.v1.json",
+        "merger/lenskit/core/target.py",
+    ]
+
+
+@pytest.mark.parametrize(
+    "unsafe_path",
+    ["", ".", "../escape.json", "a//b", "/absolute.json", r"docs\retrieval\queries.json"],
+)
+def test_query_path_exclusion_rejects_unsafe_paths(tmp_path, unsafe_path):
+    db_path = _self_hit_index(tmp_path)
+    with pytest.raises(ValueError):
+        execute_query(db_path, "needle", excluded_paths=[unsafe_path])
+
+
+def test_review_baseline_excludes_repo_local_goldset_and_reports_provenance(tmp_path):
+    repo_root = tmp_path / "repo"
+    goldset_path = repo_root / "docs/retrieval/review_queries.v1.json"
+    goldset_path.parent.mkdir(parents=True)
+    goldset_path.write_text(
+        json.dumps(
+            [
+                {
+                    "query": "",
+                    "category": "retrieval",
+                    "expected_patterns": ["merger/lenskit/core/target.py"],
+                    "filters": {},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    db_path = _self_hit_index(tmp_path, include_similar=False)
+
+    baseline = run_review_retrieval_baseline(
+        db_path,
+        goldset_path,
+        k=1,
+        repo_root=repo_root,
+    )
+    assert baseline is not None
+    assert baseline["metrics"]["expected_target_hits"] == 1
+    assert baseline["measurement_conditions"] == {
+        "path_exclusions": [
+            {
+                "path": "docs/retrieval/review_queries.v1.json",
+                "reason": "goldset_self_reference",
+            }
+        ],
+        "match": "exact_repository_path",
+        "application": "before_order_by_and_limit",
+        "ranking_algorithm_changed": False,
+        "does_not_establish": [
+            "Excluded paths are outside this measurement run only.",
+            "An excluded path is not established as irrelevant.",
+            "Changed metrics do not establish a ranking improvement.",
+        ],
+    }
+
+
+def test_review_baseline_rejects_goldset_outside_repo_root(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    goldset_path = tmp_path / "outside.json"
+    goldset_path.write_text("[]", encoding="utf-8")
+    with pytest.raises(ValueError, match="inside repo_root"):
+        run_review_retrieval_baseline(
+            _self_hit_index(tmp_path),
+            goldset_path,
+            repo_root=repo_root,
+        )
 
 
 def test_baseline_doc_states_boundaries():
@@ -322,6 +484,8 @@ def test_baseline_doc_states_boundaries():
     assert "does not establish review completeness" in text
     assert "A hit does not prove answer correctness." in text
     assert "A miss does not prove code absence." in text
+    assert "goldset_self_reference" in text
+    assert "does not establish a ranking improvement" in text
 
 
 def test_unknown_diagnosis_fallback():
