@@ -48,8 +48,8 @@
     {
       "id": "TASK-RETRIEVAL-BASELINE-HYGIENE-001",
       "title": "Review Retrieval Goldset Self-Reference Hygiene",
-      "status": "in-progress",
-      "description": "Add exact, safe, default-empty repository-path exclusions before SQL ordering and LIMIT, and thread them only through query execution and evaluation. When an explicit repo_root is supplied, the review baseline excludes the repository-local goldset with reason goldset_self_reference and records that this is a changed measurement condition, not a ranking improvement. No ranking, router, CLI, bundle, embedding or Guard Relation production is introduced.",
+      "status": "done",
+      "description": "Add exact, safe, default-empty repository-path exclusions before SQL ordering and LIMIT, and thread them only through query execution and evaluation. When an explicit repo_root is supplied, the review baseline excludes the repository-local goldset with reason goldset_self_reference and records that this is a changed measurement condition, not a ranking improvement. No ranking, router, CLI, bundle, embedding or Guard Relation production is introduced. Status done: merged via PR #800 (d1726ea3) and post-merge reconciled on main.",
       "evidence": [
         "merger/lenskit/retrieval/query_core.py",
         "merger/lenskit/retrieval/eval_core.py",
@@ -59,8 +59,7 @@
       ],
       "missing_evidence": [
         "No ranking quality improvement is claimed or established.",
-        "Review-intent routing and path/symbol boosting remain later Retrieval v2 slices.",
-        "Merge and post-merge reconciliation remain outstanding."
+        "Review-intent routing and path/symbol boosting remain later Retrieval v2 slices."
       ]
     },
     {

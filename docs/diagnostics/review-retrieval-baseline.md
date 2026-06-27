@@ -155,6 +155,6 @@ remains `merger/lenskit/tests/test_review_retrieval_goldset.py`.
 
 Ranking improvements, semantic/embedding retrieval, and reranking remain separate
 later slices. This document closes the metric-baseline and miss-diagnostics
-subtask tracked by `TASK-AGENT-FRONTDOOR-004` and documents the in-progress
+subtask tracked by `TASK-AGENT-FRONTDOOR-004` and documents the completed
 self-reference hygiene slice `TASK-RETRIEVAL-BASELINE-HYGIENE-001`; it does not
 promote retrieval quality or change ranking behavior.
