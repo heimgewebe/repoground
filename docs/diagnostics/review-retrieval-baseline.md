@@ -41,8 +41,9 @@ The baseline reuses existing infrastructure rather than reimplementing it:
 ## Goldset
 
 - file: `docs/retrieval/review_queries.v1.json`
-- format: a top-level list following `docs/retrieval/queries.v1.json`, with the
-  loader-tolerated additive `category` field
+- contract: `merger/lenskit/contracts/review-retrieval-goldset.v1.schema.json`
+- format: a compatibility-preserving top-level list following
+  `docs/retrieval/queries.v1.json`, with the controlled additive `category` field
 - queries: 20
 - required categories: `agent_pack`, `claim_evidence`, `citation_map`,
   `post_emit_health`, `bundle_surface`, `bundle_manifest`, `retrieval`, `router`,
@@ -166,8 +167,12 @@ normalization, that all 20 queries flow into the baseline, category aggregation,
 `recall@10` / `MRR` / `zero_hit_ratio` reporting, per-target hit records (query id,
 target, hit status, rank), separate handling of multiple expected targets per
 query, reconciliation of misses with the existing taxonomy, deterministic
-miss-taxonomy counts, and the inference boundaries below. The structural guard
-remains `merger/lenskit/tests/test_review_retrieval_goldset.py`.
+miss-taxonomy counts, and the inference boundaries below. The structural guard remains
+`merger/lenskit/tests/test_review_retrieval_goldset.py`. It validates the committed
+goldset against `review-retrieval-goldset.v1.schema.json` and includes negative
+cases for uncontrolled fields, categories, filters, and acceptance thresholds.
+The contract formalizes the existing list shape; it does not change the evaluator,
+ranking, category meaning, or goldset contents.
 
 ## Does not mean / Does not establish
 
