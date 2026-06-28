@@ -69,9 +69,9 @@ def test_baseline_is_reproducible():
     assert report["metrics"] == {
         "local_resolution": {
             "total": 4,
-            "hits": 1,
-            "misses": 3,
-            "recall": 0.25,
+            "hits": 4,
+            "misses": 0,
+            "recall": 1.0,
         },
         "external_preservation": {
             "total": 2,
@@ -81,40 +81,21 @@ def test_baseline_is_reproducible():
         },
         "layer_assignment": {
             "total": 6,
-            "hits": 1,
-            "misses": 5,
-            "accuracy": 0.166667,
-            "unknown_file_share": 1.0,
+            "hits": 6,
+            "misses": 0,
+            "accuracy": 1.0,
+            "unknown_file_share": 0.166667,
         },
     }
 
 
-def test_baseline_exposes_case_level_gaps():
+def test_baseline_resolves_all_declared_cases_without_external_regression():
     goldset, fixture_root = _load()
     report = evaluate_graph_quality_fixture(fixture_root, goldset)
-    resolution = {
-        case["id"]
-        for case in report["cases"]["local_resolution"]
-        if not case["found"]
-    }
-    layers = {
-        case["path"]
-        for case in report["cases"]["layer_assignment"]
-        if not case["found"]
-    }
 
-    assert resolution == {
-        "absolute-from-cli",
-        "absolute-from-test",
-        "absolute-from-worker",
-    }
-    assert layers == {
-        "cli/main.py",
-        "core/service.py",
-        "core/utils.py",
-        "tests/service_case.py",
-        "scripts/worker.py",
-    }
+    assert all(case["found"] for case in report["cases"]["local_resolution"])
+    assert all(case["found"] for case in report["cases"]["external_preservation"])
+    assert all(case["found"] for case in report["cases"]["layer_assignment"])
 
 
 def test_goldset_rejects_duplicate_case_ids(tmp_path):
