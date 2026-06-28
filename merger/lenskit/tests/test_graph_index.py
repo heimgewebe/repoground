@@ -200,9 +200,15 @@ def test_schema_diagnostics_are_stable_json_paths(tmp_path):
 def test_graph_loader_keeps_existing_status_contract(tmp_path):
     bad_json = tmp_path / "bad.json"
     bad_json.write_text("{bad", encoding="utf-8")
-    assert load_graph_index(bad_json)["status"] == "invalid_json"
-    assert load_graph_index(tmp_path / "missing.json")["status"] == "not_found"
+    assert load_graph_index(tmp_path, "bad.json")["status"] == "invalid_json"
+    assert load_graph_index(tmp_path, "missing.json")["status"] == "not_found"
 
     invalid = tmp_path / "invalid.json"
     invalid.write_text('{"distances": {}}', encoding="utf-8")
-    assert load_graph_index(invalid)["status"] == "invalid_schema"
+    assert load_graph_index(tmp_path, "invalid.json")["status"] == "invalid_schema"
+
+
+def test_graph_loader_rejects_absolute_path(tmp_path):
+    result = load_graph_index(tmp_path, str(tmp_path / "graph.json"))
+
+    assert result == {"status": "invalid_path", "graph": None}
