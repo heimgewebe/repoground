@@ -75,7 +75,7 @@ final_score = score_pre * current_penalty
 
 ## 4. Fehlerpfade und Diagnose
 
-Fehlt das Artefakt `graph_index.json`, ist es ungültig oder verweist es auf einen anderen Dump-Index, bricht die Query-Runtime nicht hart ab. Stattdessen:
+Fehlt das Artefakt `graph_index.json`, ist es ungültig, kann es nicht validiert werden oder verweist es auf einen anderen Dump-Index, bricht die Query-Runtime nicht hart ab. Stattdessen:
 * Die Suche wird im "Baseline"-Modus ohne Graph-Bonus und ohne graph-bedingte Penalty ausgeführt.
 * Der erkannte Graph-Status bleibt im `explain`-Objekt sichtbar.
 
@@ -85,7 +85,7 @@ Das `explain`-Objekt der Query enthält Diagnoseinformationen zur Graph-Nutzung.
 
 Gibt an, ob ein geladener Graph tatsächlich in das Ranking eingeflossen ist:
 * `true` → Nur ein Graph mit `graph_status = "ok"` wurde im Scoring verwendet.
-* `false` → Es wurde kein Graph im Scoring verwendet, z. B. bei `graph_status = "not_found"`, `"invalid_json"`, `"invalid_schema"`, `"stale_or_mismatched"` oder `"unreadable"`.
+* `false` → Es wurde kein Graph im Scoring verwendet, z. B. bei `graph_status = "not_found"`, `"invalid_json"`, `"invalid_schema"`, `"validation_unavailable"`, `"stale_or_mismatched"`, `"unreadable"` oder `"invalid_path"`.
 
 Ein `stale_or_mismatched` Graph bleibt ein Diagnoseartefakt. Er darf weder Graph-Proximity noch Entrypoint-Bonus, Graph-Gewichte oder eine graph-bedingte Test-Penalty in den finalen Score einbringen.
 
@@ -97,5 +97,13 @@ Gibt detailliert Auskunft über den Zustand des geladenen Graphen. Folgende Wert
 * `not_found` → Datei nicht gefunden.
 * `invalid_json` → Datei konnte nicht als JSON geparst werden.
 * `invalid_schema` → JSON entspricht nicht dem `architecture.graph_index` Contract.
+* `validation_unavailable` → Validierungsbibliothek oder Schema fehlt; der Graph bleibt diagnostisch und wird nicht gerankt.
 * `stale_or_mismatched` → Graph verweist auf einen anderen Dump-Index (Hash-Mismatch); Diagnose bleibt sichtbar, Ranking fällt auf Baseline zurück.
 * `unreadable` → IO-Fehler (z.B. fehlende Leserechte).
+* `invalid_path` → Der relative Artefaktpfad verletzt die Root-Grenze; der Graph wird nicht geladen.
+
+## 5. Pfad-Sicherheitsgrenze
+
+Ein explizit gewählter Graph Index muss entweder als einfacher Geschwister-Dateiname angegeben werden oder als absoluter Pfad, dessen lexikalischer Elternordner dem Ordner des SQLite-Index entspricht. Die Query-Runtime löst den nutzerbestimmten Graph-Pfad nicht im Dateisystem auf. Sie übergibt ausschließlich den geprüften Dateinamen an den root-gebundenen Loader, der den gemeinsamen Pfad-Sicherheitshelfer verwendet.
+
+Ein Verstoß gegen diese Ortsgrenze ist ein harter Aufruferfehler. Ein vom Loader abgewiesener relativer Pfad erhält den Status `invalid_path`. In keinem dieser Fälle darf der Graph in das Ranking einfließen.

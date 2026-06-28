@@ -495,6 +495,27 @@
         "No graph completeness, runtime causality, retrieval benefit, or default-promotion claim is established.",
         "Graph input provenance coherence before compilation remains a separate follow-up."
       ]
+    },
+    {
+      "id": "TASK-GRAPH-PROVENANCE-COHERENCE-001",
+      "title": "Graph Provenance-Coherent Compilation",
+      "status": "done",
+      "description": "Validates both Graph Index source documents before distance calculation, requires source/source run and dump-hash equality, binds bundle compilation to the current run and finalized dump index, and propagates structured fail-closed diagnostics.",
+      "evidence": [
+        "merger/lenskit/architecture/graph_source_validation.py",
+        "merger/lenskit/architecture/graph_index.py",
+        "merger/lenskit/core/merge.py",
+        "merger/lenskit/cli/cmd_architecture.py",
+        "merger/lenskit/tests/test_graph_index.py",
+        "merger/lenskit/tests/test_graph_bundle_integration.py",
+        "merger/lenskit/tests/test_graph_bundle_manifest_provenance.py",
+        "merger/lenskit/tests/test_cli_architecture_graph_index.py",
+        "docs/proofs/graph-provenance-coherent-compilation-proof.md"
+      ],
+      "missing_evidence": [
+        "Automatic Graph and Entrypoints source production remains a separate G3 slice.",
+        "No graph completeness, runtime causality, retrieval benefit, test sufficiency, or default-ranking claim is established."
+      ]
     }
   ]
 }

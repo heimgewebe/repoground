@@ -1,0 +1,153 @@
+---
+name: Graph Model
+
+"on":
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "merger/lenskit/architecture/graph_index.py"
+      - "merger/lenskit/architecture/graph_source_validation.py"
+      - "merger/lenskit/cli/cmd_architecture.py"
+      - "merger/lenskit/core/merge.py"
+      - "merger/lenskit/retrieval/query_core.py"
+      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
+      - "merger/lenskit/contracts/architecture.graph_index.v1.schema.json"
+      - "merger/lenskit/contracts/entrypoints.v1.schema.json"
+      - "merger/lenskit/tests/test_graph_index.py"
+      - "merger/lenskit/tests/test_graph_bundle_integration.py"
+      - "merger/lenskit/tests/test_graph_bundle_manifest_provenance.py"
+      - "merger/lenskit/tests/test_cli_architecture_graph_index.py"
+      - "merger/lenskit/tests/test_graph_current_state_audit.py"
+      - "merger/lenskit/tests/test_graph_e2e.py"
+      - "merger/lenskit/tests/test_graph_rerank.py"
+      - "merger/lenskit/tests/test_graph_eval.py"
+      - "merger/lenskit/tests/test_retrieval_query.py"
+      - "docs/architecture/graph-runtime-contract.md"
+      - "docs/diagnostics/graph-current-state-audit.md"
+      - "docs/proofs/graph-provenance-coherent-compilation-proof.md"
+      - "docs/tasks/board.md"
+      - "docs/tasks/index.json"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - "pytest.ini"
+      - ".github/workflows/graph-model.yml"
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "merger/lenskit/architecture/graph_index.py"
+      - "merger/lenskit/architecture/graph_source_validation.py"
+      - "merger/lenskit/cli/cmd_architecture.py"
+      - "merger/lenskit/core/merge.py"
+      - "merger/lenskit/retrieval/query_core.py"
+      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
+      - "merger/lenskit/contracts/architecture.graph_index.v1.schema.json"
+      - "merger/lenskit/contracts/entrypoints.v1.schema.json"
+      - "merger/lenskit/tests/test_graph_index.py"
+      - "merger/lenskit/tests/test_graph_bundle_integration.py"
+      - "merger/lenskit/tests/test_graph_bundle_manifest_provenance.py"
+      - "merger/lenskit/tests/test_cli_architecture_graph_index.py"
+      - "merger/lenskit/tests/test_graph_current_state_audit.py"
+      - "merger/lenskit/tests/test_graph_e2e.py"
+      - "merger/lenskit/tests/test_graph_rerank.py"
+      - "merger/lenskit/tests/test_graph_eval.py"
+      - "merger/lenskit/tests/test_retrieval_query.py"
+      - "docs/architecture/graph-runtime-contract.md"
+      - "docs/diagnostics/graph-current-state-audit.md"
+      - "docs/proofs/graph-provenance-coherent-compilation-proof.md"
+      - "docs/tasks/board.md"
+      - "docs/tasks/index.json"
+      - "merger/lenskit/requirements.txt"
+      - "requirements-dev.txt"
+      - "pytest.ini"
+      - ".github/workflows/graph-model.yml"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  graph-model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Require jsonschema
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          import jsonschema
+
+          print("jsonschema", version("jsonschema"))
+          PY
+
+      - name: Validate graph schemas
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft7Validator
+
+          paths = (
+              Path("merger/lenskit/contracts/architecture.graph.v1.schema.json"),
+              Path("merger/lenskit/contracts/architecture.graph_index.v1.schema.json"),
+              Path("merger/lenskit/contracts/entrypoints.v1.schema.json"),
+          )
+          for path in paths:
+              with path.open(encoding="utf-8") as handle:
+                  schema = json.load(handle)
+              Draft7Validator.check_schema(schema)
+              print(f"{path.name}: meta-valid")
+          PY
+
+      - name: Run graph model tests
+        run: |
+          set -o pipefail
+          python -m pytest -q \
+            merger/lenskit/tests/test_graph_index.py \
+            merger/lenskit/tests/test_graph_bundle_integration.py \
+            merger/lenskit/tests/test_graph_bundle_manifest_provenance.py \
+            merger/lenskit/tests/test_cli_architecture_graph_index.py \
+            merger/lenskit/tests/test_graph_current_state_audit.py \
+            merger/lenskit/tests/test_graph_e2e.py \
+            merger/lenskit/tests/test_graph_rerank.py \
+            merger/lenskit/tests/test_graph_eval.py \
+            merger/lenskit/tests/test_retrieval_query.py \
+            2>&1 | tee graph-model-tests.log
+
+      - name: Upload failing test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-model-test-diagnostics
+          path: graph-model-tests.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Ruff
+        run: |
+          ruff check \
+            merger/lenskit/architecture/graph_index.py \
+            merger/lenskit/architecture/graph_source_validation.py \
+            merger/lenskit/cli/cmd_architecture.py \
+            merger/lenskit/retrieval/query_core.py \
+            merger/lenskit/tests/test_graph_index.py \
+            merger/lenskit/tests/test_graph_bundle_integration.py \
+            merger/lenskit/tests/test_graph_bundle_manifest_provenance.py \
+            merger/lenskit/tests/test_cli_architecture_graph_index.py \
+            merger/lenskit/tests/test_graph_current_state_audit.py \
+            merger/lenskit/tests/test_graph_e2e.py \
+            merger/lenskit/tests/test_graph_rerank.py \
+            merger/lenskit/tests/test_retrieval_query.py
