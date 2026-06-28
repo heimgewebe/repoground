@@ -137,11 +137,24 @@ jobs:
 
       - name: Commit verified query boundary
         run: |
-          set -euo pipefail
-          git config user.name "lenskit-g2-finalizer"
-          git config user.email "lenskit-g2-finalizer@users.noreply.github.com"
-          git add \
-            merger/lenskit/retrieval/query_core.py \
-            merger/lenskit/tests/test_retrieval_query.py
-          git commit -m "fix(graph): bind retrieval graph to index directory"
-          git push origin HEAD:fix/graph-provenance-coherence
+          set -o pipefail
+          {
+            git config user.name "lenskit-g2-finalizer"
+            git config user.email "lenskit-g2-finalizer@users.noreply.github.com"
+            git status --short --branch
+            git add \
+              merger/lenskit/retrieval/query_core.py \
+              merger/lenskit/tests/test_retrieval_query.py
+            git diff --cached --stat
+            git commit -m "fix(graph): bind retrieval graph to index directory"
+            git push --verbose origin HEAD:fix/graph-provenance-coherence
+          } 2>&1 | tee query-graph-commit.log
+
+      - name: Upload commit diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: query-graph-commit-diagnostics
+          path: query-graph-commit.log
+          if-no-files-found: warn
+          retention-days: 1
