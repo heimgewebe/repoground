@@ -1,0 +1,52 @@
+---
+name: Graph Source Roots Contract
+
+"on":
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "merger/lenskit/contracts/architecture.source_roots.v1.schema.json"
+      - "merger/lenskit/contracts/examples/source_roots_minimal.json"
+      - "merger/lenskit/tests/test_architecture_source_roots_schema.py"
+      - "docs/architecture/graph-source-roots.md"
+      - "docs/proofs/graph-source-roots-contract-proof.md"
+      - ".github/workflows/graph-source-roots.yml"
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "merger/lenskit/contracts/architecture.source_roots.v1.schema.json"
+      - "merger/lenskit/contracts/examples/source_roots_minimal.json"
+      - "merger/lenskit/tests/test_architecture_source_roots_schema.py"
+      - "docs/architecture/graph-source-roots.md"
+      - "docs/proofs/graph-source-roots-contract-proof.md"
+      - ".github/workflows/graph-source-roots.yml"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  source-roots-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Validate JSON
+        run: |
+          python3 -m json.tool merger/lenskit/contracts/architecture.source_roots.v1.schema.json >/dev/null
+          python3 -m json.tool merger/lenskit/contracts/examples/source_roots_minimal.json >/dev/null
+      - name: Run contract tests
+        run: python -m pytest -q merger/lenskit/tests/test_architecture_source_roots_schema.py
+      - name: Ruff
+        run: ruff check merger/lenskit/tests/test_architecture_source_roots_schema.py
+      - name: Structural checks
+        run: git diff --check

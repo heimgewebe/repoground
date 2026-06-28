@@ -592,6 +592,24 @@
         "The src-layout and namespace cases remain unresolved by design.",
         "No runtime, completeness, retrieval-benefit or default-ranking claim is established."
       ]
+    },
+    {
+      "id": "TASK-GRAPH-SOURCE-ROOTS-CONTRACT-001",
+      "title": "Explicit Graph Source Roots v1 Contract",
+      "status": "done",
+      "description": "Defines and tests explicit additional Python import roots before graph-producer consumption.",
+      "evidence": [
+        "merger/lenskit/contracts/architecture.source_roots.v1.schema.json",
+        "merger/lenskit/contracts/examples/source_roots_minimal.json",
+        "merger/lenskit/tests/test_architecture_source_roots_schema.py",
+        "docs/architecture/graph-source-roots.md",
+        "docs/proofs/graph-source-roots-contract-proof.md"
+      ],
+      "missing_evidence": [
+        "No graph producer, bundle producer or CLI consumer is implemented.",
+        "Repository-context directory validation remains a consumer obligation.",
+        "No runtime import, graph completeness, retrieval benefit or default-ranking claim is established."
+      ]
     }
   ]
 }
