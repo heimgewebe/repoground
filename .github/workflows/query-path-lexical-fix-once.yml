@@ -7,6 +7,11 @@ name: Query Path Lexical Fix Once
       - fix/graph-provenance-coherence
     paths:
       - ".github/workflows/query-path-lexical-fix-once.yml"
+  pull_request:
+    branches:
+      - main
+    types:
+      - synchronize
 
 permissions:
   contents: write
