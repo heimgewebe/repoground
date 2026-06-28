@@ -1,3 +1,5 @@
+"""Package-import control: one package target must resolve locally."""
+
 import package_case.pkg
 
 
