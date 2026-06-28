@@ -365,7 +365,7 @@ def execute_query(
         expected_sha256 = _read_expected_graph_sha256(conn)
 
         if graph_index_path:
-            graph_root = index_path.resolve().parent
+            graph_root = index_path.parent
             if graph_index_path.is_absolute():
                 if graph_index_path.parent != graph_root:
                     raise RuntimeError(
