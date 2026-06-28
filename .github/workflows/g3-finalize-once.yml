@@ -23,31 +23,33 @@ jobs:
         with:
           python-version: "3.12"
       - name: Apply integration patch
-        run: |
-          set -o pipefail
-          python3 scripts/finalize_graph_bundle_sources_once_v2.py 2>&1 | tee g3-patch.log
-      - name: Upload patch diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: g3-patch-diagnostics
-          path: g3-patch.log
-          retention-days: 1
+        run: python3 scripts/finalize_graph_bundle_sources_once_v2.py
       - name: Install dependencies
         run: |
           pip install -r merger/lenskit/requirements.txt
           pip install -r requirements-dev.txt
-      - name: Verify
+      - name: Run focused tests
         run: |
-          python -m pytest -q merger/lenskit/tests/test_graph_bundle_sources.py merger/lenskit/tests/test_graph_bundle_integration.py merger/lenskit/tests/test_graph_bundle_manifest_provenance.py merger/lenskit/tests/test_graph_index.py merger/lenskit/tests/test_graph_e2e.py
-          ruff check merger/lenskit/architecture/bundle_sources.py merger/lenskit/core/constants.py merger/lenskit/tests/test_graph_bundle_sources.py merger/lenskit/tests/test_graph_bundle_integration.py
+          set -o pipefail
+          python -m pytest -q merger/lenskit/tests/test_graph_bundle_sources.py merger/lenskit/tests/test_graph_bundle_integration.py merger/lenskit/tests/test_graph_bundle_manifest_provenance.py merger/lenskit/tests/test_graph_index.py merger/lenskit/tests/test_graph_e2e.py 2>&1 | tee g3-tests.log
+      - name: Upload failing tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g3-test-diagnostics
+          path: g3-tests.log
+          retention-days: 1
+      - name: Ruff
+        run: ruff check merger/lenskit/architecture/bundle_sources.py merger/lenskit/core/constants.py merger/lenskit/tests/test_graph_bundle_sources.py merger/lenskit/tests/test_graph_bundle_integration.py
+      - name: Structural checks
+        run: |
           python3 -m json.tool docs/tasks/index.json >/dev/null
           git diff --check
       - name: Commit verified slice
         run: |
           rm scripts/finalize_graph_bundle_sources_once.py
           rm scripts/finalize_graph_bundle_sources_once_v2.py
-          rm -f g3-patch.log
+          rm -f g3-tests.log
           git config user.name lenskit-g3-finalizer
           git config user.email lenskit-g3-finalizer@users.noreply.github.com
           git add -A
