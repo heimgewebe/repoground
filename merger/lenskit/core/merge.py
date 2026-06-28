@@ -5013,7 +5013,7 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
         arch_graph_path = base_name_func(part_suffix="").with_suffix(".architecture_graph.json")
         entrypoints_path = base_name_func(part_suffix="").with_suffix(".entrypoints.json")
 
-        if arch_graph_path.exists() and entrypoints_path.exists():
+        if arch_graph_path.exists() or entrypoints_path.exists():
             graph_index_data = compile_graph_index(
                 arch_graph_path,
                 entrypoints_path,
