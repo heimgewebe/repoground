@@ -533,6 +533,26 @@
         "Multi-repository graph identity and aggregation remain out of scope.",
         "No graph completeness, runtime causality, retrieval benefit, or default-ranking claim is established."
       ]
+    },
+    {
+      "id": "TASK-GRAPH-QUALITY-GOLDSET-001",
+      "title": "Graph Resolution and Layer Goldset v1",
+      "status": "done",
+      "description": "Adds a versioned synthetic graph-quality goldset, deterministic evaluator, case-level committed baseline, and CI gate before G4 mutates local-module resolution or graph layers.",
+      "evidence": [
+        "docs/retrieval/graph_quality_goldset.v1.json",
+        "merger/lenskit/architecture/graph_quality_eval.py",
+        "merger/lenskit/tests/fixtures/graph_quality_goldset",
+        "merger/lenskit/tests/test_graph_quality_goldset.py",
+        "docs/diagnostics/graph-quality-baseline.v1.json",
+        "docs/diagnostics/graph-quality-baseline.md",
+        ".github/workflows/graph-quality-goldset.yml"
+      ],
+      "missing_evidence": [
+        "The synthetic fixture is not representative of all Python packaging layouts.",
+        "No resolution or layer producer improvement is implemented in this task.",
+        "No runtime causality, graph completeness, retrieval benefit, impact, or test-sufficiency claim is established."
+      ]
     }
   ]
 }
