@@ -1,26 +1,37 @@
 {
   "kind": "lenskit.graph_quality_baseline",
-  "version": "1.0",
+  "version": "1.1",
   "metrics": {
     "local_resolution": {
-      "total": 4,
-      "hits": 4,
-      "misses": 0,
-      "recall": 1.0
+      "total": 7,
+      "hits": 5,
+      "misses": 2,
+      "recall": 0.714286
     },
     "external_preservation": {
-      "total": 2,
-      "hits": 2,
+      "total": 3,
+      "hits": 3,
       "misses": 0,
       "accuracy": 1.0
     },
     "layer_assignment": {
-      "total": 6,
-      "hits": 6,
+      "total": 8,
+      "hits": 8,
       "misses": 0,
       "accuracy": 1.0,
-      "unknown_file_share": 0.166667
+      "unknown_file_share": 0.588235
+    },
+    "parse_failure_handling": {
+      "total": 1,
+      "hits": 1,
+      "misses": 0,
+      "accuracy": 1.0
     }
+  },
+  "coverage": {
+    "files_seen": 18,
+    "files_parsed": 17,
+    "parse_failures": 1
   },
   "cases": {
     "local_resolution": [
@@ -47,6 +58,24 @@
         "source": "scripts/worker.py",
         "target": "core/service.py",
         "found": true
+      },
+      {
+        "id": "package-init-import",
+        "source": "package_case/consumer.py",
+        "target": "package_case/pkg/__init__.py",
+        "found": true
+      },
+      {
+        "id": "src-layout-import-root-gap",
+        "source": "src_layout/consumer.py",
+        "target": "src_layout/src/acme/service.py",
+        "found": false
+      },
+      {
+        "id": "namespace-import-root-gap",
+        "source": "namespace_case/consumer.py",
+        "target": "namespace_case/acme/alpha.py",
+        "found": false
       }
     ],
     "external_preservation": [
@@ -61,6 +90,17 @@
         "source": "core/service.py",
         "module": "json",
         "found": true
+      },
+      {
+        "id": "ambiguous-search-roots-remain-external",
+        "source": "collision_case/consumer.py",
+        "module": "mod",
+        "found": true,
+        "forbidden_targets": [
+          "duplicate_case/mod.py",
+          "package_case/mod.py"
+        ],
+        "forbidden_target_hits": []
       }
     ],
     "layer_assignment": [
@@ -99,11 +139,32 @@
         "expected": "unknown",
         "actual": "unknown",
         "found": true
+      },
+      {
+        "path": "tests/core/overlap_case.py",
+        "expected": "test",
+        "actual": "test",
+        "found": true
+      },
+      {
+        "path": "tools/core/worker.py",
+        "expected": "core",
+        "actual": "core",
+        "found": true
+      }
+    ],
+    "parse_failure_handling": [
+      {
+        "id": "invalid-syntax-is-skipped",
+        "path": "invalid_case/broken.py",
+        "node_present": false,
+        "found": true
       }
     ]
   },
   "does_not_establish": [
     "runtime import behavior",
+    "runtime import path configuration",
     "runtime causality",
     "graph completeness",
     "layer ontology completeness",
