@@ -20,9 +20,15 @@ temporary filtered tree for static analysis. Redacted, truncated, unverifiable,
 or out-of-scope files cannot silently influence the retrieval Graph Index.
 
 Existing source pairs remain supported. Partial pairs are not silently repaired;
-the provenance-coherent compiler fails closed. Multi-repository automatic
-production is explicitly skipped because the current Graph Index identity uses
-`file:<path>` without a repository discriminator.
+the provenance-coherent compiler fails closed. Unexpected source-production
+failures propagate and remove any partially written pair. Multi-repository
+automatic production is explicitly skipped because the current Graph Index
+identity uses `file:<path>` without a repository discriminator.
+
+If the retrieval surface contains no eligible Python source, the producer emits
+a schema-valid empty pair and reports `no eligible full-contact Python sources`
+diagnostically. This is an explicit empty observation, not evidence that the
+repository contains no Python code.
 
 The source documents are registered as diagnostic, derived, regenerable,
 staleness-sensitive artifacts. They are inputs to the retrieval Graph Index, not
@@ -31,8 +37,11 @@ canonical repository truth and not runtime observations.
 ## Verification
 
 Tests cover deterministic single-repository production, actual bundle provenance,
-repository labels, Graph Index compilation, derived-manifest registration,
-partial-pair preservation, and explicit multi-repository non-production.
+repository labels, Graph Index compilation, derived-manifest and bundle-manifest
+registration, full-contact path selection, exclusion of truncated or unverifiable
+sources, explicit empty-surface diagnostics, malformed chunk-index rejection,
+cleanup after write failure, partial-pair preservation, propagated producer
+failures, and explicit multi-repository non-production.
 
 ## Non-claims
 
