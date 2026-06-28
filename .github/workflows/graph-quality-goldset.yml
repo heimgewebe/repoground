@@ -1,0 +1,79 @@
+---
+name: Graph Quality Goldset
+
+"on":
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "docs/retrieval/graph_quality_goldset.v1.json"
+      - "docs/diagnostics/graph-quality-baseline.v1.json"
+      - "docs/diagnostics/graph-quality-baseline.md"
+      - "merger/lenskit/architecture/graph_quality_eval.py"
+      - "merger/lenskit/architecture/import_graph.py"
+      - "merger/lenskit/tests/fixtures/graph_quality_goldset/**"
+      - "merger/lenskit/tests/test_graph_quality_goldset.py"
+      - ".github/workflows/graph-quality-goldset.yml"
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "docs/retrieval/graph_quality_goldset.v1.json"
+      - "docs/diagnostics/graph-quality-baseline.v1.json"
+      - "docs/diagnostics/graph-quality-baseline.md"
+      - "merger/lenskit/architecture/graph_quality_eval.py"
+      - "merger/lenskit/architecture/import_graph.py"
+      - "merger/lenskit/tests/fixtures/graph_quality_goldset/**"
+      - "merger/lenskit/tests/test_graph_quality_goldset.py"
+      - ".github/workflows/graph-quality-goldset.yml"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  graph-quality-goldset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Validate JSON surfaces
+        run: |
+          python3 -m json.tool docs/retrieval/graph_quality_goldset.v1.json >/dev/null
+          python3 -m json.tool docs/diagnostics/graph-quality-baseline.v1.json >/dev/null
+
+      - name: Run graph quality tests
+        run: |
+          set -o pipefail
+          python -m pytest -q \
+            merger/lenskit/tests/test_graph_quality_goldset.py \
+            merger/lenskit/tests/test_import_graph.py \
+            2>&1 | tee graph-quality-goldset-tests.log
+
+      - name: Upload failing diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-quality-goldset-diagnostics
+          path: graph-quality-goldset-tests.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Ruff
+        run: |
+          ruff check \
+            merger/lenskit/architecture/graph_quality_eval.py \
+            merger/lenskit/tests/test_graph_quality_goldset.py
+
+      - name: Structural checks
+        run: git diff --check
