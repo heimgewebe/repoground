@@ -573,6 +573,25 @@
         "src layouts, namespace packages and broader layer ontology require new falsifiable cases before implementation.",
         "No runtime import order, runtime causality, graph completeness, retrieval benefit, impact, test sufficiency or default-ranking claim is established."
       ]
+    },
+    {
+      "id": "TASK-GRAPH-QUALITY-GOLDSET-002",
+      "title": "Packaging Edge-Case Graph Goldset v1.1",
+      "status": "done",
+      "description": "Expands the graph-quality measurement surface without changing the graph producer or ranking.",
+      "evidence": [
+        "docs/retrieval/graph_quality_goldset.v1.json",
+        "merger/lenskit/architecture/graph_quality_eval.py",
+        "merger/lenskit/tests/test_graph_quality_goldset.py",
+        "docs/diagnostics/graph-quality-baseline.v1.json",
+        "docs/diagnostics/graph-quality-baseline.md",
+        "docs/proofs/graph-packaging-edge-case-goldset-proof.md"
+      ],
+      "missing_evidence": [
+        "No explicit source-root contract is implemented.",
+        "The src-layout and namespace cases remain unresolved by design.",
+        "No runtime, completeness, retrieval-benefit or default-ranking claim is established."
+      ]
     }
   ]
 }
