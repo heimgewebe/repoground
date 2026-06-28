@@ -1,6 +1,6 @@
 {
   "kind": "lenskit.graph_quality_goldset",
-  "version": "1.0",
+  "version": "1.1",
   "fixture_root": "merger/lenskit/tests/fixtures/graph_quality_goldset",
   "local_resolution_cases": [
     {
@@ -26,6 +26,24 @@
       "source": "scripts/worker.py",
       "target": "core/service.py",
       "import_form": "from core.service import run"
+    },
+    {
+      "id": "package-init-import",
+      "source": "package_case/consumer.py",
+      "target": "package_case/pkg/__init__.py",
+      "import_form": "import package_case.pkg"
+    },
+    {
+      "id": "src-layout-import-root-gap",
+      "source": "src_layout/consumer.py",
+      "target": "src_layout/src/acme/service.py",
+      "import_form": "from acme.service import run"
+    },
+    {
+      "id": "namespace-import-root-gap",
+      "source": "namespace_case/consumer.py",
+      "target": "namespace_case/acme/alpha.py",
+      "import_form": "from acme.alpha import run"
     }
   ],
   "external_preservation_cases": [
@@ -38,6 +56,16 @@
       "id": "json-remains-external",
       "source": "core/service.py",
       "module": "json"
+    },
+    {
+      "id": "ambiguous-search-roots-remain-external",
+      "source": "collision_case/consumer.py",
+      "module": "mod",
+      "import_form": "import mod",
+      "forbidden_targets": [
+        "duplicate_case/mod.py",
+        "package_case/mod.py"
+      ]
     }
   ],
   "layer_cases": [
@@ -64,10 +92,25 @@
     {
       "path": "misc/helpers.py",
       "expected": "unknown"
+    },
+    {
+      "path": "tests/core/overlap_case.py",
+      "expected": "test"
+    },
+    {
+      "path": "tools/core/worker.py",
+      "expected": "core"
+    }
+  ],
+  "parse_failure_cases": [
+    {
+      "id": "invalid-syntax-is-skipped",
+      "path": "invalid_case/broken.py"
     }
   ],
   "does_not_establish": [
     "runtime import behavior",
+    "runtime import path configuration",
     "runtime causality",
     "graph completeness",
     "layer ontology completeness",
