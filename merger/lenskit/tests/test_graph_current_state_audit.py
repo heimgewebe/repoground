@@ -38,7 +38,7 @@ def test_graph_audit_tracks_conditional_bundle_production() -> None:
     assert "generate_entrypoints_document" not in merge_source
     assert '.with_suffix(".architecture_graph.json")' in merge_source
     assert '.with_suffix(".entrypoints.json")' in merge_source
-    assert "if arch_graph_path.exists() and entrypoints_path.exists()" in merge_source
+    assert "if arch_graph_path.exists() or entrypoints_path.exists()" in merge_source
     assert "Automatic source-artifact emission | absent" in audit
     assert "Conditional bundle registration | implemented" in audit
 
