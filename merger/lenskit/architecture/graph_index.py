@@ -17,6 +17,12 @@ from .graph_source_validation import (
 
 logger = logging.getLogger(__name__)
 
+_GRAPH_INDEX_SCHEMA_PATH = (
+    Path(__file__).parent.parent
+    / "contracts"
+    / "architecture.graph_index.v1.schema.json"
+)
+
 
 def load_graph_index(
     root: Path,
@@ -42,28 +48,24 @@ def load_graph_index(
         logger.warning("Graph index file unreadable: %s", exc)
         return {"status": "unreadable", "graph": None}
 
-    schema_path = (
-        Path(__file__).parent.parent
-        / "contracts"
-        / "architecture.graph_index.v1.schema.json"
-    )
-    if schema_path.exists():
-        if jsonschema is None:
-            logger.warning(
-                "Schema validation skipped because jsonschema is unavailable "
-                "in this environment."
-            )
-        else:
-            try:
-                with schema_path.open(encoding="utf-8") as handle:
-                    schema = json.load(handle)
-                jsonschema.validate(instance=data, schema=schema)
-            except jsonschema.ValidationError as exc:
-                logger.warning("Graph index schema validation failed: %s", exc)
-                return {"status": "invalid_schema", "graph": None}
-            except Exception as exc:
-                logger.error("Error reading/validating graph schema: %s", exc)
-                return {"status": "invalid_schema", "graph": None}
+    if jsonschema is None:
+        logger.warning(
+            "Graph index validation unavailable because jsonschema is not installed"
+        )
+        return {"status": "validation_unavailable", "graph": None}
+
+    try:
+        with _GRAPH_INDEX_SCHEMA_PATH.open(encoding="utf-8") as handle:
+            schema = json.load(handle)
+        jsonschema.Draft7Validator.check_schema(schema)
+        validator = jsonschema.Draft7Validator(schema)
+        validator.validate(data)
+    except jsonschema.ValidationError as exc:
+        logger.warning("Graph index schema validation failed: %s", exc)
+        return {"status": "invalid_schema", "graph": None}
+    except (OSError, json.JSONDecodeError, jsonschema.SchemaError) as exc:
+        logger.error("Graph index schema validation unavailable: %s", exc)
+        return {"status": "validation_unavailable", "graph": None}
 
     if expected_sha256:
         graph_sha = data.get("canonical_dump_index_sha256")
