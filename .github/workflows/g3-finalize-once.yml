@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Apply integration patch
-        run: python3 scripts/finalize_graph_bundle_sources_once_v2.py
+        run: python3 scripts/finalize_graph_bundle_sources_once_v3.py
       - name: Install dependencies
         run: |
           pip install -r merger/lenskit/requirements.txt
@@ -49,6 +49,7 @@ jobs:
         run: |
           rm scripts/finalize_graph_bundle_sources_once.py
           rm scripts/finalize_graph_bundle_sources_once_v2.py
+          rm scripts/finalize_graph_bundle_sources_once_v3.py
           rm -f g3-tests.log
           git config user.name lenskit-g3-finalizer
           git config user.email lenskit-g3-finalizer@users.noreply.github.com
