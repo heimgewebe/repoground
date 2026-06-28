@@ -1,4 +1,3 @@
-import hashlib
 import json
 import logging
 from pathlib import Path
@@ -63,51 +62,6 @@ def load_graph_index(
     return {"status": "ok", "graph": data}
 
 
-def _sibling_dump_index(
-    graph_path: Path,
-    entrypoints_path: Path,
-) -> Path | None:
-    graph_suffix = ".architecture_graph.json"
-    entrypoint_suffix = ".entrypoints.json"
-    if not graph_path.name.endswith(graph_suffix):
-        return None
-    if not entrypoints_path.name.endswith(entrypoint_suffix):
-        return None
-    graph_stem = graph_path.name[: -len(graph_suffix)]
-    entrypoint_stem = entrypoints_path.name[: -len(entrypoint_suffix)]
-    if graph_path.parent != entrypoints_path.parent or graph_stem != entrypoint_stem:
-        return None
-    candidate = graph_path.parent / f"{graph_stem}.dump_index.json"
-    return candidate if candidate.is_file() else None
-
-
-def _infer_bundle_provenance(
-    graph_path: Path,
-    entrypoints_path: Path,
-) -> tuple[str | None, str | None]:
-    dump_index_path = _sibling_dump_index(graph_path, entrypoints_path)
-    if dump_index_path is None:
-        return None, None
-    try:
-        dump_index = json.loads(dump_index_path.read_text(encoding="utf-8"))
-        run_id = dump_index["run_id"]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise GraphIndexCompilationError(
-            "bundle_provenance_unavailable",
-            f"sibling dump index is unusable: {dump_index_path}",
-            source="expected_provenance",
-            errors=[str(exc)],
-        ) from exc
-    if not isinstance(run_id, str) or not run_id:
-        raise GraphIndexCompilationError(
-            "invalid_expected_provenance",
-            "sibling dump index run_id must be a non-empty string",
-            source="expected_provenance",
-        )
-    sha256 = hashlib.sha256(dump_index_path.read_bytes()).hexdigest()
-    return run_id, sha256
-
-
 def compile_graph_index(
     graph_path: Path,
     entrypoints_path: Path,
@@ -127,11 +81,6 @@ def compile_graph_index(
         "entrypoints.v1.schema.json",
         "entrypoints",
     )
-    if expected_run_id is None and expected_canonical_sha256 is None:
-        expected_run_id, expected_canonical_sha256 = _infer_bundle_provenance(
-            graph_path,
-            entrypoints_path,
-        )
     run_id, canonical_sha = require_coherence(
         graph,
         entrypoints,

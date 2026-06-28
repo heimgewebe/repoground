@@ -127,3 +127,17 @@ def test_bundle_manifest_graph_uses_current_bundle_provenance(tmp_path, monkeypa
     assert graph_entry["canonicality"] == "derived"
     assert graph_entry["regenerable"] is True
     assert graph_entry["staleness_sensitive"] is True
+
+
+    eval_entries = [
+        artifact
+        for artifact in manifest["artifacts"]
+        if artifact.get("role") == ArtifactRole.RETRIEVAL_EVAL_JSON.value
+    ]
+    assert len(eval_entries) == 1
+    eval_entry = eval_entries[0]
+    assert eval_entry["contract"] == {"id": "retrieval-eval", "version": "v1"}
+    assert eval_entry["authority"] == "diagnostic_signal"
+    assert eval_entry["canonicality"] == "diagnostic"
+    assert eval_entry["regenerable"] is True
+    assert eval_entry["staleness_sensitive"] is True

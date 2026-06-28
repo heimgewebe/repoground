@@ -107,7 +107,7 @@ def test_graph_bundle_fails_closed_on_provenance_mismatch(tmp_path):
     with pytest.raises(GraphIndexCompilationError) as caught:
         build_derived_artifacts(**args)
 
-    assert caught.value.code == "provenance_mismatch"
+    assert caught.value.code == "bundle_provenance_mismatch"
     assert not base.with_suffix(".graph_index.json").exists()
 
 

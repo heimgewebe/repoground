@@ -5006,18 +5006,28 @@ def build_derived_artifacts(dump_index_path, chunk_path, base_name_func, run_id,
     # Generate Graph Index Artifact
     graph_index_path = None
     try:
-        from ..architecture.graph_index import compile_graph_index
+        from ..architecture.graph_index import (
+            GraphIndexCompilationError,
+            compile_graph_index,
+        )
         arch_graph_path = base_name_func(part_suffix="").with_suffix(".architecture_graph.json")
         entrypoints_path = base_name_func(part_suffix="").with_suffix(".entrypoints.json")
 
         if arch_graph_path.exists() and entrypoints_path.exists():
-            graph_index_data = compile_graph_index(arch_graph_path, entrypoints_path)
+            graph_index_data = compile_graph_index(
+                arch_graph_path,
+                entrypoints_path,
+                expected_run_id=run_id,
+                expected_canonical_sha256=_compute_file_sha256(dump_index_path),
+            )
             graph_index_path = base_name_func(part_suffix="").with_suffix(".graph_index.json")
             graph_index_path.write_text(json.dumps(graph_index_data, indent=2, sort_keys=True), encoding="utf-8")
             derived_paths.append(graph_index_path)
     except ImportError as e:
         if debug:
             print(f"Skipping graph index artifact: architecture module not available ({e})", file=sys.stderr)
+    except GraphIndexCompilationError:
+        raise
     except Exception as e:
         if debug:
             print(f"Error compiling graph index artifact: {e}", file=sys.stderr)
