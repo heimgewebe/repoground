@@ -4,9 +4,9 @@
   "metrics": {
     "local_resolution": {
       "total": 4,
-      "hits": 1,
-      "misses": 3,
-      "recall": 0.25
+      "hits": 4,
+      "misses": 0,
+      "recall": 1.0
     },
     "external_preservation": {
       "total": 2,
@@ -16,10 +16,10 @@
     },
     "layer_assignment": {
       "total": 6,
-      "hits": 1,
-      "misses": 5,
-      "accuracy": 0.166667,
-      "unknown_file_share": 1.0
+      "hits": 6,
+      "misses": 0,
+      "accuracy": 1.0,
+      "unknown_file_share": 0.166667
     }
   },
   "cases": {
@@ -28,7 +28,7 @@
         "id": "absolute-from-cli",
         "source": "cli/main.py",
         "target": "core/service.py",
-        "found": false
+        "found": true
       },
       {
         "id": "relative-from-core",
@@ -40,13 +40,13 @@
         "id": "absolute-from-test",
         "source": "tests/service_case.py",
         "target": "core/service.py",
-        "found": false
+        "found": true
       },
       {
         "id": "absolute-from-worker",
         "source": "scripts/worker.py",
         "target": "core/service.py",
-        "found": false
+        "found": true
       }
     ],
     "external_preservation": [
@@ -67,32 +67,32 @@
       {
         "path": "cli/main.py",
         "expected": "cli",
-        "actual": "unknown",
-        "found": false
+        "actual": "cli",
+        "found": true
       },
       {
         "path": "core/service.py",
         "expected": "core",
-        "actual": "unknown",
-        "found": false
+        "actual": "core",
+        "found": true
       },
       {
         "path": "core/utils.py",
         "expected": "core",
-        "actual": "unknown",
-        "found": false
+        "actual": "core",
+        "found": true
       },
       {
         "path": "tests/service_case.py",
         "expected": "test",
-        "actual": "unknown",
-        "found": false
+        "actual": "test",
+        "found": true
       },
       {
         "path": "scripts/worker.py",
         "expected": "infra",
-        "actual": "unknown",
-        "found": false
+        "actual": "infra",
+        "found": true
       },
       {
         "path": "misc/helpers.py",

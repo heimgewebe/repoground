@@ -102,19 +102,9 @@
       "path": "test_c.py",
       "repo": "",
       "language": "python",
-      "layer": "unknown",
+      "layer": "test",
       "is_test": true,
       "size_bytes": 9
-    },
-    {
-      "node_id": "module:c",
-      "kind": "external",
-      "path": "",
-      "repo": "",
-      "language": "python",
-      "layer": "unknown",
-      "is_test": false,
-      "size_bytes": 0
     },
     {
       "node_id": "module:json",
@@ -148,36 +138,6 @@
     },
     {
       "node_id": "module:os.path",
-      "kind": "external",
-      "path": "",
-      "repo": "",
-      "language": "python",
-      "layer": "unknown",
-      "is_test": false,
-      "size_bytes": 0
-    },
-    {
-      "node_id": "module:pkg",
-      "kind": "external",
-      "path": "",
-      "repo": "",
-      "language": "python",
-      "layer": "unknown",
-      "is_test": false,
-      "size_bytes": 0
-    },
-    {
-      "node_id": "module:pkg.submodule",
-      "kind": "external",
-      "path": "",
-      "repo": "",
-      "language": "python",
-      "layer": "unknown",
-      "is_test": false,
-      "size_bytes": 0
-    },
-    {
-      "node_id": "module:sub",
       "kind": "external",
       "path": "",
       "repo": "",
@@ -319,7 +279,7 @@
     },
     {
       "src": "file:c.py",
-      "dst": "module:pkg",
+      "dst": "file:pkg/__init__.py",
       "edge_type": "import",
       "evidence_level": "S1",
       "evidence": {
@@ -330,7 +290,7 @@
     },
     {
       "src": "file:c.py",
-      "dst": "module:pkg.submodule",
+      "dst": "file:pkg/submodule.py",
       "edge_type": "import",
       "evidence_level": "S1",
       "evidence": {
@@ -341,7 +301,7 @@
     },
     {
       "src": "file:c.py",
-      "dst": "module:sub",
+      "dst": "file:sub/__init__.py",
       "edge_type": "import",
       "evidence_level": "S1",
       "evidence": {
@@ -407,7 +367,7 @@
     },
     {
       "src": "file:test_c.py",
-      "dst": "module:c",
+      "dst": "file:c.py",
       "edge_type": "import",
       "evidence_level": "S1",
       "evidence": {
@@ -423,6 +383,6 @@
     "edge_counts_by_type": {
       "import": 18
     },
-    "unknown_layer_share": 1.0
+    "unknown_layer_share": 0.9411764705882353
   }
 }

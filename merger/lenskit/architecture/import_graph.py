@@ -1,23 +1,29 @@
 """
 Extracts a Python import graph via static AST analysis.
 
-Resolver Boundaries (S1 MVP):
-- This artifact is S1 (static heuristic) and does not represent runtime causality.
-- Relative import resolution is an MVP heuristic and might not resolve complex edge cases.
-- Absolute ImportFrom edges intentionally generate edges to both the base module and the submodule.
-- Targets that cannot be safely resolved locally remain as modular/external string representations.
-- Star imports (`*`) are not semantically expanded.
-- `repo` and `layer` attributes are currently placeholders or minimal.
+Resolver boundaries (S1 heuristic):
+- This artifact is static evidence and does not represent runtime causality.
+- Local modules are resolved only when a unique repository-relative Python path exists.
+- Ambiguous or unavailable module names remain external module strings.
+- Relative imports and repository-root absolute imports are supported.
+- Star imports are not semantically expanded.
+- Layers are inferred from explicit path segments only; unmatched paths remain unknown.
 """
 
+from __future__ import annotations
+
 import ast
-import os
 import logging
-from typing import TypedDict, List, Dict, Literal
-from pathlib import Path
+import os
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal, TypedDict
 
 logger = logging.getLogger(__name__)
+
+_SKIP_DIRECTORIES = {"__pycache__", "env", "node_modules", "venv"}
+_INFRA_SEGMENTS = {"infra", "scripts", "tools"}
+
 
 class Evidence(TypedDict, total=False):
     source_path: str
@@ -25,12 +31,14 @@ class Evidence(TypedDict, total=False):
     end_line: int
     extract: str
 
+
 class Edge(TypedDict):
     src: str
     dst: str
     edge_type: Literal["import", "require", "config-link", "string-ref", "call-heuristic"]
     evidence_level: Literal["S0", "S1", "S2"]
     evidence: Evidence
+
 
 class Node(TypedDict, total=False):
     node_id: str
@@ -42,11 +50,13 @@ class Node(TypedDict, total=False):
     is_test: bool
     size_bytes: int
 
+
 class Coverage(TypedDict):
     files_seen: int
     files_parsed: int
-    edge_counts_by_type: Dict[str, int]
+    edge_counts_by_type: dict[str, int]
     unknown_layer_share: float
+
 
 class GraphDocument(TypedDict, total=False):
     kind: Literal["lenskit.architecture.graph"]
@@ -55,8 +65,8 @@ class GraphDocument(TypedDict, total=False):
     canonical_dump_index_sha256: str
     generated_at: str
     granularity: str
-    nodes: List[Node]
-    edges: List[Edge]
+    nodes: list[Node]
+    edges: list[Edge]
     coverage: Coverage
 
 
@@ -64,245 +74,284 @@ def _is_test_file(path: str) -> bool:
     name = Path(path).name
     return name.startswith("test_") or name.endswith("_test.py")
 
-def _get_module_id(import_name: str) -> str:
-    """Returns a deterministic node_id for an imported module."""
-    # E.g. 'os.path' -> 'external:os.path' for external modules.
-    # In a simple MVP, we treat all imported modules as external or local.
-    # For simplicity in this graph MVP, we prefix with 'module:'
-    return f"module:{import_name}"
+
+def _infer_layer(path: str) -> str:
+    parts = set(Path(path).parts)
+    if _is_test_file(path) or parts.intersection({"test", "tests"}):
+        return "test"
+    if "cli" in parts:
+        return "cli"
+    if "core" in parts:
+        return "core"
+    if parts.intersection(_INFRA_SEGMENTS):
+        return "infra"
+    return "unknown"
+
+
+def _iter_python_files(repo_root: Path) -> list[Path]:
+    paths: list[Path] = []
+    for root, dirs, files in os.walk(repo_root):
+        dirs[:] = sorted(
+            directory
+            for directory in dirs
+            if not directory.startswith(".") and directory not in _SKIP_DIRECTORIES
+        )
+        for filename in sorted(files):
+            if filename.endswith(".py"):
+                paths.append(Path(root) / filename)
+    return paths
+
+
+def _module_name_for_path(relative_path: Path) -> str | None:
+    module_parts = list(relative_path.with_suffix("").parts)
+    if module_parts and module_parts[-1] == "__init__":
+        module_parts.pop()
+    return ".".join(module_parts) or None
+
+
+def _build_local_module_index(
+    repo_root: Path,
+    python_files: list[Path],
+) -> dict[str, str]:
+    candidates: dict[str, list[str]] = {}
+    for file_path in python_files:
+        relative_path = file_path.relative_to(repo_root)
+        module_name = _module_name_for_path(relative_path)
+        if module_name is None:
+            continue
+        candidates.setdefault(module_name, []).append(relative_path.as_posix())
+
+    return {
+        module_name: paths[0]
+        for module_name, paths in candidates.items()
+        if len(paths) == 1
+    }
+
+
+def _local_file_id(module_name: str | None, module_index: dict[str, str]) -> str | None:
+    if not module_name:
+        return None
+    relative_path = module_index.get(module_name)
+    return f"file:{relative_path}" if relative_path is not None else None
+
+
+def _relative_base_module(source_path: str, level: int, module: str | None) -> str | None:
+    package_parts = list(Path(source_path).parent.parts)
+    ascend = level - 1
+    if ascend > len(package_parts):
+        return None
+    if ascend:
+        package_parts = package_parts[:-ascend]
+    if module:
+        package_parts.extend(module.split("."))
+    return ".".join(package_parts) or None
+
+
+def _import_destinations(
+    node: ast.Import,
+    module_index: dict[str, str],
+) -> list[str]:
+    destinations: list[str] = []
+    for alias in node.names:
+        local_id = _local_file_id(alias.name, module_index)
+        destinations.append(local_id or f"module:{alias.name}")
+    return destinations
+
+
+def _import_from_destinations(
+    node: ast.ImportFrom,
+    source_path: str,
+    module_index: dict[str, str],
+) -> list[str]:
+    if node.level:
+        base_module = _relative_base_module(source_path, node.level, node.module)
+        unresolved_base = f"{'.' * node.level}{node.module or ''}"
+    else:
+        base_module = node.module
+        unresolved_base = node.module or ""
+
+    destinations: list[str] = []
+    local_base = _local_file_id(base_module, module_index)
+    if local_base is not None and (node.module is not None or node.level == 0):
+        destinations.append(local_base)
+
+    local_children: list[str] = []
+    for alias in node.names:
+        if alias.name == "*":
+            continue
+        child_module = f"{base_module}.{alias.name}" if base_module else alias.name
+        local_child = _local_file_id(child_module, module_index)
+        if local_child is not None:
+            local_children.append(local_child)
+    destinations.extend(local_children)
+
+    if destinations:
+        return destinations
+
+    if unresolved_base:
+        destinations.append(f"module:{unresolved_base}")
+    for alias in node.names:
+        if alias.name == "*":
+            continue
+        unresolved_child = (
+            f"{unresolved_base}.{alias.name}" if unresolved_base else alias.name
+        )
+        destinations.append(f"module:{unresolved_child}")
+    return destinations
+
+
+def _evidence(node: ast.AST, source_path: str) -> Evidence:
+    evidence: Evidence = {"source_path": source_path}
+    line_number = getattr(node, "lineno", None)
+    if line_number is not None:
+        evidence["start_line"] = line_number
+        evidence["end_line"] = getattr(node, "end_lineno", line_number)
+    return evidence
+
+
+def _ensure_destination_node(nodes: dict[str, Node], destination: str) -> None:
+    if destination in nodes:
+        return
+    if destination.startswith("file:"):
+        path = destination.removeprefix("file:")
+        nodes[destination] = {
+            "node_id": destination,
+            "kind": "file",
+            "path": path,
+            "repo": "",
+            "language": "python",
+            "layer": _infer_layer(path),
+            "is_test": _is_test_file(path),
+            "size_bytes": 0,
+        }
+        return
+    nodes[destination] = {
+        "node_id": destination,
+        "kind": "external",
+        "path": "",
+        "repo": "",
+        "language": "python",
+        "layer": "unknown",
+        "is_test": False,
+        "size_bytes": 0,
+    }
 
 
 def generate_import_graph_document(
     repo_root: Path,
     run_id: str,
-    canonical_dump_index_sha256: str
+    canonical_dump_index_sha256: str,
 ) -> GraphDocument:
-    """
-    Parses Python files in the given repository root via AST to build an import graph.
-    Returns a JSON-serializable dict conforming to architecture.graph.v1.schema.json.
-    """
-    nodes: Dict[str, Node] = {}
-    edges: List[Edge] = []
+    """Build a deterministic static Python import graph for ``repo_root``."""
 
-    files_seen = 0
+    nodes: dict[str, Node] = {}
+    edges: list[Edge] = []
     files_parsed = 0
+    python_files = _iter_python_files(repo_root)
+    module_index = _build_local_module_index(repo_root, python_files)
 
-    # We will build up nodes and edges while traversing.
-    for root, dirs, files in os.walk(repo_root):
-        # Exclude common directories to ignore
-        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ('__pycache__', 'venv', 'env', 'node_modules')]
+    for file_path in python_files:
+        relative_path = file_path.relative_to(repo_root).as_posix()
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(content, filename=relative_path)
+            files_parsed += 1
+        except Exception as exc:
+            logger.warning("Could not parse AST for %s: %s", relative_path, exc)
+            continue
 
-        for file in files:
-            if file.endswith('.py'):
-                files_seen += 1
-                file_path = Path(root) / file
-                rel_path = file_path.relative_to(repo_root).as_posix()
+        node_id = f"file:{relative_path}"
+        file_node: Node = {
+            "node_id": node_id,
+            "kind": "file",
+            "path": relative_path,
+            "repo": "",
+            "language": "python",
+            "layer": _infer_layer(relative_path),
+            "is_test": _is_test_file(relative_path),
+            "size_bytes": file_path.stat().st_size,
+        }
+        nodes[node_id] = file_node
 
-                try:
-                    content = file_path.read_text(encoding='utf-8')
-                    tree = ast.parse(content, filename=rel_path)
-                    files_parsed += 1
-                except Exception as e:
-                    logger.warning("Could not parse AST for %s: %s", rel_path, e)
-                    continue
+        for syntax_node in ast.walk(tree):
+            if isinstance(syntax_node, ast.Import):
+                destinations = _import_destinations(syntax_node, module_index)
+            elif isinstance(syntax_node, ast.ImportFrom):
+                destinations = _import_from_destinations(
+                    syntax_node,
+                    relative_path,
+                    module_index,
+                )
+            else:
+                continue
 
-                # Register the file as a node
-                node_id = f"file:{rel_path}"
-                stat = file_path.stat()
-                is_test = _is_test_file(rel_path)
-
-                if node_id not in nodes:
-                    nodes[node_id] = {
-                        "node_id": node_id,
-                        "kind": "file",
-                        "path": rel_path,
-                        "repo": "",  # In a full run, this is injected
-                        "language": "python",
-                        "layer": "unknown",
-                        "is_test": is_test,
-                        "size_bytes": stat.st_size
+            evidence = _evidence(syntax_node, relative_path)
+            for destination in destinations:
+                _ensure_destination_node(nodes, destination)
+                edges.append(
+                    {
+                        "src": node_id,
+                        "dst": destination,
+                        "edge_type": "import",
+                        "evidence_level": "S1",
+                        "evidence": evidence,
                     }
-                else:
-                    # Update placeholder node
-                    nodes[node_id]["size_bytes"] = stat.st_size
+                )
 
-                # Find imports
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Import):
-                        for alias in node.names:
-                            dst_module = alias.name
-                            dst_id = _get_module_id(dst_module)
+    sorted_nodes = sorted(nodes.values(), key=lambda item: item["node_id"])
+    unique_edges: dict[tuple[str, str, int], Edge] = {}
+    for edge in edges:
+        key = (
+            edge["src"],
+            edge["dst"],
+            edge["evidence"].get("start_line", 0),
+        )
+        unique_edges.setdefault(key, edge)
+    sorted_edges = sorted(
+        unique_edges.values(),
+        key=lambda item: (
+            item["src"],
+            item["dst"],
+            item["evidence"].get("start_line", 0),
+        ),
+    )
 
-                            destinations = [dst_module]
+    unknown_layer_count = sum(
+        1 for node in sorted_nodes if node.get("layer") == "unknown"
+    )
+    unknown_layer_share = (
+        unknown_layer_count / len(sorted_nodes) if sorted_nodes else 0.0
+    )
+    edge_counts_by_type: dict[str, int] = {}
+    for edge in sorted_edges:
+        edge_type = edge["edge_type"]
+        edge_counts_by_type[edge_type] = edge_counts_by_type.get(edge_type, 0) + 1
 
-                            evidence: Evidence = {
-                                "source_path": rel_path,
-                            }
-                            if hasattr(node, 'lineno'):
-                                evidence["start_line"] = node.lineno
-                                evidence["end_line"] = getattr(node, 'end_lineno', node.lineno)
-
-                            for dest in destinations:
-                                dst_id = _get_module_id(dest)
-                                if dst_id not in nodes:
-                                    nodes[dst_id] = {
-                                        "node_id": dst_id,
-                                        "kind": "external",
-                                        "path": "",
-                                        "repo": "",
-                                        "language": "python",
-                                        "layer": "unknown",
-                                        "is_test": False,
-                                        "size_bytes": 0
-                                    }
-                                edges.append({
-                                    "src": node_id,
-                                    "dst": dst_id,
-                                    "edge_type": "import",
-                                    "evidence_level": "S1",
-                                    "evidence": evidence
-                                })
-
-                    elif isinstance(node, ast.ImportFrom):
-                        destinations = []
-                        is_relative = node.level > 0
-
-                        if is_relative:
-                            # Relative imports
-                            if node.module is not None:
-                                current_dir = file_path.parent
-                                for _ in range(node.level - 1):
-                                    current_dir = current_dir.parent
-
-                                # Try resolving to a file if alias is not '*'
-                                for alias in node.names:
-                                    if alias.name == "*":
-                                        continue
-
-                                    # Target could be current_dir / module_dir / alias.name.py
-                                    # Or target could be current_dir / module.py (and alias is just something inside)
-                                    # We try module_dir / alias.name.py first
-                                    module_parts = node.module.split('.')
-
-                                    target_dir = current_dir
-                                    for part in module_parts:
-                                        target_dir = target_dir / part
-
-                                    target_file = target_dir / f"{alias.name}.py"
-                                    if target_file.is_file():
-                                        destinations.append(f"file:{target_file.relative_to(repo_root).as_posix()}")
-                                    elif (current_dir / f"{module_parts[0]}.py").is_file():
-                                        # e.g., from .b import bar where b is b.py
-                                        destinations.append(f"file:{(current_dir / f'{module_parts[0]}.py').relative_to(repo_root).as_posix()}")
-                                    else:
-                                        # Fallback to string module representations
-                                        dest_mod = "." * node.level + node.module
-                                        destinations.append(f"module:{dest_mod}")
-                                        destinations.append(f"module:{dest_mod}.{alias.name}")
-                            else:
-                                # from . import b
-                                current_dir = file_path.parent
-                                for _ in range(node.level - 1):
-                                    current_dir = current_dir.parent
-
-                                for alias in node.names:
-                                    target_file = current_dir / f"{alias.name}.py"
-                                    if target_file.is_file():
-                                        destinations.append(f"file:{target_file.relative_to(repo_root).as_posix()}")
-                                    else:
-                                        destinations.append(f"module:{'.' * node.level}{alias.name}")
-                        else:
-                            # Absolute ImportFrom (e.g., from os import path)
-                            if node.module is not None:
-                                destinations.append(f"module:{node.module}")
-                                for alias in node.names:
-                                    if alias.name != "*":
-                                        destinations.append(f"module:{node.module}.{alias.name}")
-
-                        evidence: Evidence = {
-                            "source_path": rel_path,
-                        }
-                        if hasattr(node, 'lineno'):
-                            evidence["start_line"] = node.lineno
-                            evidence["end_line"] = getattr(node, 'end_lineno', node.lineno)
-
-                        for dest in destinations:
-                            if dest.startswith("file:"):
-                                dst_id = dest
-                                # if it's a file but not in nodes, we can add a placeholder, it will be filled when visited
-                                if dst_id not in nodes:
-                                    nodes[dst_id] = {
-                                        "node_id": dst_id,
-                                        "kind": "file",
-                                        "path": dest[5:],
-                                        "repo": "",
-                                        "language": "python",
-                                        "layer": "unknown",
-                                        "is_test": _is_test_file(dest[5:]),
-                                        "size_bytes": 0 # placeholder
-                                    }
-                            else:
-                                dst_id = dest
-                                if dst_id not in nodes:
-                                    nodes[dst_id] = {
-                                        "node_id": dst_id,
-                                        "kind": "external",
-                                        "path": "",
-                                        "repo": "",
-                                        "language": "python",
-                                        "layer": "unknown",
-                                        "is_test": False,
-                                        "size_bytes": 0
-                                    }
-
-                            edges.append({
-                                "src": node_id,
-                                "dst": dst_id,
-                                "edge_type": "import",
-                                "evidence_level": "S1",
-                                "evidence": evidence
-                            })
-
-    # Determinism: sort nodes and edges
-    sorted_nodes = sorted(nodes.values(), key=lambda n: n["node_id"])
-
-    # Deduplicate edges
-    unique_edges = {}
-    for e in edges:
-        key = (e["src"], e["dst"], e["evidence"].get("start_line", 0))
-        if key not in unique_edges:
-            unique_edges[key] = e
-
-    sorted_edges = sorted(unique_edges.values(), key=lambda e: (e["src"], e["dst"], e["evidence"].get("start_line", 0)))
-
-    # Coverage
-    unknown_layer_count = sum(1 for n in sorted_nodes if n.get("layer") == "unknown")
-    unknown_layer_share = (unknown_layer_count / len(sorted_nodes)) if sorted_nodes else 0.0
-
-    edge_counts_by_type = {}
-    for e in sorted_edges:
-        edge_counts_by_type[e["edge_type"]] = edge_counts_by_type.get(e["edge_type"], 0) + 1
-
-    coverage: Coverage = {
-        "files_seen": files_seen,
-        "files_parsed": files_parsed,
-        "edge_counts_by_type": edge_counts_by_type,
-        "unknown_layer_share": unknown_layer_share
-    }
-
+    files_seen = len(python_files)
     if files_seen > 0 and files_parsed / files_seen < 0.5:
-        logger.warning("Low AST parsing coverage: %.2f%%", (files_parsed / files_seen) * 100)
+        logger.warning(
+            "Low AST parsing coverage: %.2f%%",
+            (files_parsed / files_seen) * 100,
+        )
 
-    doc: GraphDocument = {
+    return {
         "kind": "lenskit.architecture.graph",
         "version": "1.0",
         "run_id": run_id,
         "canonical_dump_index_sha256": canonical_dump_index_sha256,
-        "generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "generated_at": (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        ),
         "granularity": "file",
         "nodes": sorted_nodes,
         "edges": sorted_edges,
-        "coverage": coverage
+        "coverage": {
+            "files_seen": files_seen,
+            "files_parsed": files_parsed,
+            "edge_counts_by_type": edge_counts_by_type,
+            "unknown_layer_share": unknown_layer_share,
+        },
     }
-
-    return doc
