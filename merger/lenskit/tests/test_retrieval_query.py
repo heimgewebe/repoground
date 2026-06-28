@@ -419,7 +419,7 @@ def test_query_explain_graph_fields_match_scoring(mini_index, tmp_path, monkeypa
     }
     graph_index_path.write_text(json.dumps(graph_index), encoding="utf-8")
 
-    def mock_load(path, expected_sha256=None):
+    def mock_load(root, relative_path, expected_sha256=None):
         return {"status": "ok", "graph": graph_index}
 
     monkeypatch.setattr(query_core, "load_graph_index", mock_load)
@@ -472,7 +472,7 @@ def test_graph_bonus_is_bounded(mini_index, tmp_path, monkeypatch):
     }
     graph_index_path.write_text(json.dumps(graph_index), encoding="utf-8")
 
-    def mock_load(path, expected_sha256=None):
+    def mock_load(root, relative_path, expected_sha256=None):
         return {"status": "ok", "graph": graph_index}
 
     monkeypatch.setattr(query_core, "load_graph_index", mock_load)
@@ -510,7 +510,7 @@ def test_graph_staleness_marker(mini_index, tmp_path, monkeypatch):
 
     captured = {}
 
-    def mock_load(path, expected_sha256=None):
+    def mock_load(root, relative_path, expected_sha256=None):
         captured["expected_sha256"] = expected_sha256
         return {"status": "stale_or_mismatched", "graph": graph_index}
 
@@ -825,7 +825,7 @@ def test_claim_boundaries_graph_index_evidence_when_graph_used(mini_index, tmp_p
     }
     graph_index_path.write_text(json.dumps(graph_index), encoding="utf-8")
 
-    def mock_load(path, expected_sha256=None):
+    def mock_load(root, relative_path, expected_sha256=None):
         return {"status": "ok", "graph": graph_index}
 
     monkeypatch.setattr(query_core, "load_graph_index", mock_load)
@@ -845,7 +845,7 @@ def test_claim_boundaries_no_graph_index_evidence_when_graph_not_used(mini_index
     graph_index_path = tmp_path / "graph_index.json"
     graph_index_path.write_text("{}", encoding="utf-8")
 
-    def mock_load(path, expected_sha256=None):
+    def mock_load(root, relative_path, expected_sha256=None):
         return {"status": "invalid_schema", "graph": None}
 
     monkeypatch.setattr(query_core, "load_graph_index", mock_load)

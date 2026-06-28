@@ -365,9 +365,30 @@ def execute_query(
         expected_sha256 = _read_expected_graph_sha256(conn)
 
         if graph_index_path:
-            if not graph_index_path.exists():
-                raise RuntimeError(f"Explicitly provided graph index file does not exist: {graph_index_path}")
-            res = load_graph_index(graph_index_path, expected_sha256=expected_sha256)
+            graph_root = index_path.resolve().parent
+            if graph_index_path.is_absolute():
+                graph_resolved = graph_index_path.resolve()
+                if graph_resolved.parent != graph_root:
+                    raise RuntimeError(
+                        "Graph Index and SQLite index must share one directory"
+                    )
+                graph_relative_path = graph_resolved.name
+            else:
+                if graph_index_path.parent != Path("."):
+                    raise RuntimeError(
+                        "Graph Index must be a sibling artifact name"
+                    )
+                graph_relative_path = graph_index_path.name
+            res = load_graph_index(
+                graph_root,
+                graph_relative_path,
+                expected_sha256=expected_sha256,
+            )
+            if res["status"] == "not_found":
+                raise RuntimeError(
+                    "Explicitly provided graph index file does not exist: "
+                    f"{graph_root / graph_relative_path}"
+                )
             graph_status = res["status"]
             if graph_status == "ok":
                 graph_index = res["graph"]
