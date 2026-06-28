@@ -71,17 +71,17 @@ def test_graph_audit_tracks_exploratory_cli_provenance() -> None:
 def test_g2_compiler_validates_and_binds_both_sources() -> None:
     compiler = _read("merger/lenskit/architecture/graph_index.py")
     validation = _read("merger/lenskit/architecture/graph_source_validation.py")
-    merge_source = _read("merger/lenskit/core/merge.py")
 
-    assert 'load_source(' in compiler
+    assert "load_source(" in compiler
     assert '"architecture.graph.v1.schema.json"' in compiler
     assert '"entrypoints.v1.schema.json"' in compiler
     assert "require_coherence(" in compiler
+    assert "_infer_bundle_provenance(" in compiler
+    assert '".dump_index.json"' in compiler
+    assert "hashlib.sha256" in compiler
     assert "Draft7Validator" in validation
     assert '"validation_unavailable"' in validation
     assert '"provenance_mismatch"' in validation
-    assert "expected_run_id=run_id" in merge_source
-    assert "expected_canonical_sha256=_compute_file_sha256(dump_index_path)" in merge_source
     assert (
         REPO_ROOT / "docs/proofs/graph-provenance-coherent-compilation-proof.md"
     ).is_file()
