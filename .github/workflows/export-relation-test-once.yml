@@ -1,0 +1,23 @@
+name: Export Relation Test Once
+
+"on":
+  push:
+    branches: [feat/graph-resolution-v1]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relation-test-source
+          path: merger/lenskit/tests/test_relation_cards.py
+          retention-days: 1
