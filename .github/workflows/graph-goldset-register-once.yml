@@ -1,0 +1,99 @@
+name: Graph Goldset Register Once
+
+"on":
+  push:
+    branches: [feat/graph-goldset-v1]
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/graph-goldset-v1
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Register task
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          task_id = "TASK-GRAPH-QUALITY-GOLDSET-001"
+          board_path = Path("docs/tasks/board.md")
+          board = board_path.read_text(encoding="utf-8")
+          if task_id not in board:
+              row = (
+                  "| TASK-GRAPH-QUALITY-GOLDSET-001 | Graph Resolution and Layer Goldset v1 | done | "
+                  "`docs/retrieval/graph_quality_goldset.v1.json`, "
+                  "`merger/lenskit/architecture/graph_quality_eval.py`, "
+                  "`merger/lenskit/tests/test_graph_quality_goldset.py`, "
+                  "`docs/diagnostics/graph-quality-baseline.{md,v1.json}` | "
+                  "Versionierte G4-Messgrundlage mit case-level Baseline für lokale Importauflösung, "
+                  "External-Preservation und Layer-Zuweisung. Keine Producer-, Ranking- oder Runtime-Änderung; "
+                  "synthetisches Goldset beweist keine allgemeine Graphqualität. |\n"
+              )
+              board_path.write_text(board.rstrip() + "\n" + row, encoding="utf-8")
+
+          index_path = Path("docs/tasks/index.json")
+          data = json.loads(index_path.read_text(encoding="utf-8"))
+          if not any(task.get("id") == task_id for task in data["tasks"]):
+              data["tasks"].append(
+                  {
+                      "id": task_id,
+                      "title": "Graph Resolution and Layer Goldset v1",
+                      "status": "done",
+                      "description": (
+                          "Adds a versioned synthetic graph-quality goldset, deterministic evaluator, "
+                          "case-level committed baseline, and CI gate before G4 mutates local-module "
+                          "resolution or graph layers."
+                      ),
+                      "evidence": [
+                          "docs/retrieval/graph_quality_goldset.v1.json",
+                          "merger/lenskit/architecture/graph_quality_eval.py",
+                          "merger/lenskit/tests/fixtures/graph_quality_goldset",
+                          "merger/lenskit/tests/test_graph_quality_goldset.py",
+                          "docs/diagnostics/graph-quality-baseline.v1.json",
+                          "docs/diagnostics/graph-quality-baseline.md",
+                          ".github/workflows/graph-quality-goldset.yml",
+                      ],
+                      "missing_evidence": [
+                          "The synthetic fixture is not representative of all Python packaging layouts.",
+                          "No resolution or layer producer improvement is implemented in this task.",
+                          "No runtime causality, graph completeness, retrieval benefit, impact, or test-sufficiency claim is established.",
+                      ],
+                  }
+              )
+              index_path.write_text(
+                  json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                  encoding="utf-8",
+              )
+          PY
+
+      - name: Validate registration
+        run: |
+          python3 -m json.tool docs/tasks/index.json >/dev/null
+          python3 -m scripts.docmeta.check_planning_registration \
+            --ratchet \
+            --baseline docs/tasks/planning-registration-baseline.json \
+            --format human
+          git diff --check
+
+      - name: Commit registration
+        run: |
+          git config user.name lenskit-graph-goldset-registrar
+          git config user.email lenskit-graph-goldset-registrar@users.noreply.github.com
+          git add docs/tasks/board.md docs/tasks/index.json
+          git commit -m "docs(tasks): register graph quality goldset v1"
+          git push origin HEAD:feat/graph-goldset-v1
