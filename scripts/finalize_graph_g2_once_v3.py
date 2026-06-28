@@ -3,17 +3,25 @@ from __future__ import annotations
 import finalize_graph_g2_once as finalizer
 
 
-def _insert_after_unique(
+def _insert_after_occurrence(
     lines: list[str],
     needle: str,
     additions: list[str],
+    *,
+    occurrence: int = 0,
 ) -> list[str]:
     indexes = [index for index, line in enumerate(lines) if line.strip().startswith(needle)]
-    if len(indexes) != 1:
-        raise RuntimeError(f"expected one line starting with {needle!r}, found {len(indexes)}")
-    index = indexes[0]
-    existing = {line.strip().rstrip("\\").strip() for line in lines}
-    missing = [item for item in additions if item not in existing]
+    if occurrence >= len(indexes):
+        raise RuntimeError(
+            f"expected occurrence {occurrence} of line starting with {needle!r}; "
+            f"found {len(indexes)}"
+        )
+    index = indexes[occurrence]
+    local_window = {
+        line.strip().rstrip("\\").strip()
+        for line in lines[index + 1 : index + 1 + len(additions) + 8]
+    }
+    missing = [item for item in additions if item not in local_window]
     if not missing:
         return lines
     slash = "\\"
@@ -63,7 +71,7 @@ def patch_lens_workflow() -> None:
         content = content.replace(schema_anchor, schema_anchor + schema_addition, 1)
 
     lines = content.splitlines(keepends=True)
-    lines = _insert_after_unique(
+    lines = _insert_after_occurrence(
         lines,
         "merger/lenskit/tests/test_architecture_import_graph.py",
         [
@@ -74,8 +82,9 @@ def patch_lens_workflow() -> None:
             "merger/lenskit/tests/test_graph_current_state_audit.py",
             "merger/lenskit/tests/test_graph_e2e.py",
         ],
+        occurrence=0,
     )
-    lines = _insert_after_unique(
+    lines = _insert_after_occurrence(
         lines,
         "merger/lenskit/architecture/import_graph.py",
         [
@@ -89,6 +98,7 @@ def patch_lens_workflow() -> None:
             "merger/lenskit/tests/test_graph_current_state_audit.py",
             "merger/lenskit/tests/test_graph_e2e.py",
         ],
+        occurrence=0,
     )
     finalizer.write(path, "".join(lines))
 
