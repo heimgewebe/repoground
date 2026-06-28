@@ -1,0 +1,115 @@
+---
+name: Graph Bundle Sources
+
+"on":
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "merger/lenskit/architecture/bundle_sources.py"
+      - "merger/lenskit/architecture/import_graph.py"
+      - "merger/lenskit/architecture/entrypoints.py"
+      - "merger/lenskit/core/constants.py"
+      - "merger/lenskit/core/merge.py"
+      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
+      - "merger/lenskit/contracts/entrypoints.v1.schema.json"
+      - "merger/lenskit/contracts/architecture.graph_index.v1.schema.json"
+      - "merger/lenskit/contracts/bundle-manifest.v1.schema.json"
+      - "merger/lenskit/tests/test_graph_bundle_sources.py"
+      - "merger/lenskit/tests/test_graph_bundle_integration.py"
+      - "merger/lenskit/tests/test_graph_bundle_manifest_provenance.py"
+      - "docs/proofs/graph-bundle-source-production-proof.md"
+      - "docs/tasks/board.md"
+      - "docs/tasks/index.json"
+      - ".github/workflows/graph-bundle-sources.yml"
+  pull_request:
+    branches: ["main", "master"]
+    paths:
+      - "merger/lenskit/architecture/bundle_sources.py"
+      - "merger/lenskit/architecture/import_graph.py"
+      - "merger/lenskit/architecture/entrypoints.py"
+      - "merger/lenskit/core/constants.py"
+      - "merger/lenskit/core/merge.py"
+      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
+      - "merger/lenskit/contracts/entrypoints.v1.schema.json"
+      - "merger/lenskit/contracts/architecture.graph_index.v1.schema.json"
+      - "merger/lenskit/contracts/bundle-manifest.v1.schema.json"
+      - "merger/lenskit/tests/test_graph_bundle_sources.py"
+      - "merger/lenskit/tests/test_graph_bundle_integration.py"
+      - "merger/lenskit/tests/test_graph_bundle_manifest_provenance.py"
+      - "docs/proofs/graph-bundle-source-production-proof.md"
+      - "docs/tasks/board.md"
+      - "docs/tasks/index.json"
+      - ".github/workflows/graph-bundle-sources.yml"
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  graph-bundle-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Validate schemas
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from jsonschema import Draft7Validator
+
+          for name in (
+              "architecture.graph.v1.schema.json",
+              "entrypoints.v1.schema.json",
+              "architecture.graph_index.v1.schema.json",
+              "bundle-manifest.v1.schema.json",
+          ):
+              path = Path("merger/lenskit/contracts") / name
+              with path.open(encoding="utf-8") as handle:
+                  Draft7Validator.check_schema(json.load(handle))
+              print(f"{name}: meta-valid")
+          PY
+
+      - name: Run source-production tests
+        run: |
+          set -o pipefail
+          python -m pytest -q \
+            merger/lenskit/tests/test_graph_bundle_sources.py \
+            merger/lenskit/tests/test_graph_bundle_integration.py \
+            merger/lenskit/tests/test_graph_bundle_manifest_provenance.py \
+            2>&1 | tee graph-bundle-sources-tests.log
+
+      - name: Upload failing diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-bundle-sources-diagnostics
+          path: graph-bundle-sources-tests.log
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Ruff
+        run: |
+          ruff check \
+            merger/lenskit/architecture/bundle_sources.py \
+            merger/lenskit/core/constants.py \
+            merger/lenskit/tests/test_graph_bundle_sources.py \
+            merger/lenskit/tests/test_graph_bundle_integration.py \
+            merger/lenskit/tests/test_graph_bundle_manifest_provenance.py
+
+      - name: Structural checks
+        run: |
+          python3 -m json.tool docs/tasks/index.json >/dev/null
+          git diff --check
