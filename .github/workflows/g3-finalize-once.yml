@@ -25,7 +25,7 @@ jobs:
       - name: Apply integration patch
         run: |
           set -o pipefail
-          python3 scripts/finalize_graph_bundle_sources_once.py 2>&1 | tee g3-patch.log
+          python3 scripts/finalize_graph_bundle_sources_once_v2.py 2>&1 | tee g3-patch.log
       - name: Upload patch diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -46,6 +46,7 @@ jobs:
       - name: Commit verified slice
         run: |
           rm scripts/finalize_graph_bundle_sources_once.py
+          rm scripts/finalize_graph_bundle_sources_once_v2.py
           rm -f g3-patch.log
           git config user.name lenskit-g3-finalizer
           git config user.email lenskit-g3-finalizer@users.noreply.github.com
