@@ -21,11 +21,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python3 scripts/finalize_graph_path_boundary_once.py
-      - run: |
+      - name: Apply final path-boundary patch
+        run: python3 scripts/finalize_graph_path_boundary_once.py
+      - name: Install dependencies
+        run: |
           pip install -r merger/lenskit/requirements.txt
           pip install -r requirements-dev.txt
-      - run: |
+      - name: Run focused tests
+        run: |
+          set -o pipefail
           python -m pytest -q \
             merger/lenskit/tests/test_graph_index.py \
             merger/lenskit/tests/test_graph_bundle_integration.py \
@@ -35,7 +39,17 @@ jobs:
             merger/lenskit/tests/test_graph_e2e.py \
             merger/lenskit/tests/test_graph_rerank.py \
             merger/lenskit/tests/test_graph_eval.py \
-            merger/lenskit/tests/test_retrieval_query.py
+            merger/lenskit/tests/test_retrieval_query.py \
+            2>&1 | tee graph-path-tests.log
+      - name: Upload failing test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-path-test-diagnostics
+          path: graph-path-tests.log
+          retention-days: 1
+      - name: Ruff
+        run: |
           ruff check \
             merger/lenskit/architecture/graph_index.py \
             merger/lenskit/architecture/graph_source_validation.py \
@@ -49,8 +63,10 @@ jobs:
             merger/lenskit/tests/test_graph_e2e.py \
             merger/lenskit/tests/test_graph_rerank.py \
             merger/lenskit/tests/test_retrieval_query.py
-          git diff --check
-      - run: |
+      - name: Diff check
+        run: git diff --check
+      - name: Commit verified changes
+        run: |
           git config user.name "lenskit-g2-finalizer"
           git config user.email "lenskit-g2-finalizer@users.noreply.github.com"
           git add \
