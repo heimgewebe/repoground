@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,6 +10,10 @@ from typing import Any, Mapping, Sequence
 
 from .entrypoints import generate_entrypoints_document
 from .import_graph import generate_import_graph_document
+
+
+class BundleGraphSourceError(RuntimeError):
+    """Graph source production failed before a coherent pair was published."""
 
 
 @dataclass(frozen=True)
@@ -46,21 +51,96 @@ def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
             tmp_path.unlink(missing_ok=True)
 
 
+def _eligible_python_paths(chunk_index_path: Path, repo_name: str) -> tuple[str, ...]:
+    """Return full-contact Python paths from the retrieval source surface."""
+
+    eligibility: dict[str, bool] = {}
+    try:
+        with chunk_index_path.open(encoding="utf-8") as handle:
+            for line_number, raw_line in enumerate(handle, start=1):
+                if not raw_line.strip():
+                    continue
+                try:
+                    item = json.loads(raw_line)
+                except json.JSONDecodeError as exc:
+                    raise BundleGraphSourceError(
+                        f"invalid chunk index JSON at line {line_number}"
+                    ) from exc
+                if not isinstance(item, Mapping):
+                    raise BundleGraphSourceError(
+                        f"invalid chunk index record at line {line_number}"
+                    )
+
+                item_repo = item.get("repo") or item.get("repo_id")
+                if item_repo != repo_name:
+                    continue
+                raw_path = item.get("path") or item.get("source_file")
+                if not isinstance(raw_path, str) or not raw_path.endswith(".py"):
+                    continue
+
+                rel_path = Path(raw_path)
+                if rel_path.is_absolute() or ".." in rel_path.parts:
+                    raise BundleGraphSourceError(
+                        f"unsafe chunk source path: {raw_path!r}"
+                    )
+                normalized = rel_path.as_posix()
+                source_range = item.get("source_range")
+                source_declared = not isinstance(source_range, Mapping) or (
+                    source_range.get("status") == "declared"
+                )
+                full_contact = (
+                    item.get("source_status", "full") == "full"
+                    and not bool(item.get("truncated", False))
+                    and source_declared
+                )
+                eligibility[normalized] = eligibility.get(normalized, True) and full_contact
+    except OSError as exc:
+        raise BundleGraphSourceError(
+            f"chunk index is unreadable: {chunk_index_path}"
+        ) from exc
+
+    return tuple(sorted(path for path, allowed in eligibility.items() if allowed))
+
+
+def _materialize_selected_python_tree(
+    repo_root: Path,
+    selected_paths: Sequence[str],
+    destination_root: Path,
+) -> None:
+    resolved_root = repo_root.resolve()
+    for raw_path in selected_paths:
+        rel_path = Path(raw_path)
+        source = (repo_root / rel_path).resolve()
+        try:
+            source.relative_to(resolved_root)
+        except ValueError as exc:
+            raise BundleGraphSourceError(
+                f"selected source escapes repository root: {raw_path!r}"
+            ) from exc
+        if not source.is_file():
+            raise BundleGraphSourceError(
+                f"selected source file does not exist: {raw_path!r}"
+            )
+        destination = destination_root / rel_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+
+
 def ensure_bundle_graph_sources(
     *,
     base_path: Path,
+    chunk_index_path: Path,
     repo_summaries: Sequence[Mapping[str, Any]] | None,
     run_id: str,
     canonical_dump_index_sha256: str,
     generated_at: str,
 ) -> BundleGraphSources:
-    """Create bundle-bound graph sources when identity is unambiguous.
+    """Create a coherent source pair from the bundle retrieval surface.
 
-    Existing source pairs remain authoritative inputs for backwards compatibility.
-    A partial pair is left untouched so the compiler can fail closed. Automatic
-    production is deliberately limited to one repository because the current
-    Graph Index key space addresses files by path only and cannot distinguish
-    identical paths from multiple repositories.
+    Existing source pairs remain caller-supplied inputs for backwards
+    compatibility. A partial pair is left untouched so the compiler can fail
+    closed. Automatic production is limited to one repository because the
+    current Graph Index key space addresses files by path only.
     """
 
     graph_path = base_path.with_suffix(".architecture_graph.json")
@@ -95,25 +175,44 @@ def ensure_bundle_graph_sources(
         )
 
     summary = summaries[0]
-    repo_root = Path(summary["root"])
-    repo_name = str(summary["name"])
+    try:
+        repo_root = Path(summary["root"])
+        repo_name = str(summary["name"])
+        selected_paths = _eligible_python_paths(chunk_index_path, repo_name)
+        with tempfile.TemporaryDirectory(prefix="lenskit-graph-sources-") as tmp:
+            selected_root = Path(tmp)
+            _materialize_selected_python_tree(
+                repo_root,
+                selected_paths,
+                selected_root,
+            )
+            graph = generate_import_graph_document(
+                selected_root,
+                run_id,
+                canonical_dump_index_sha256,
+            )
+            entrypoints = generate_entrypoints_document(
+                selected_root,
+                run_id,
+                canonical_dump_index_sha256,
+            )
 
-    graph = generate_import_graph_document(
-        repo_root,
-        run_id,
-        canonical_dump_index_sha256,
-    )
-    graph["generated_at"] = generated_at
-    for node in graph.get("nodes", []):
-        if node.get("kind") == "file":
-            node["repo"] = repo_name
+        graph["generated_at"] = generated_at
+        for node in graph.get("nodes", []):
+            if node.get("kind") == "file":
+                node["repo"] = repo_name
 
-    entrypoints = generate_entrypoints_document(
-        repo_root,
-        run_id,
-        canonical_dump_index_sha256,
-    )
+        _write_json_atomic(graph_path, graph)
+        _write_json_atomic(entrypoints_path, entrypoints)
+    except BundleGraphSourceError:
+        graph_path.unlink(missing_ok=True)
+        entrypoints_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:
+        graph_path.unlink(missing_ok=True)
+        entrypoints_path.unlink(missing_ok=True)
+        raise BundleGraphSourceError(
+            f"failed to produce bundle-bound graph sources: {exc}"
+        ) from exc
 
-    _write_json_atomic(graph_path, graph)
-    _write_json_atomic(entrypoints_path, entrypoints)
     return BundleGraphSources(graph_path, entrypoints_path, "produced")
