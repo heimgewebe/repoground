@@ -2,7 +2,7 @@
 
 ## Status
 
-Implements the first measured G4 producer slice after `TASK-GRAPH-QUALITY-GOLDSET-001` established a reproducible baseline.
+Implements `TASK-GRAPH-RESOLUTION-LAYERS-001`, the first measured G4 producer slice after `TASK-GRAPH-QUALITY-GOLDSET-001` established a reproducible baseline.
 
 ## Change
 
@@ -23,6 +23,12 @@ Against `docs/retrieval/graph_quality_goldset.v1.json`:
 
 The committed case-level result is `docs/diagnostics/graph-quality-baseline.v1.json`. The existing architecture-import golden snapshot also proves plain `import c`, local package imports, relative imports, star-import base preservation, and external standard-library imports.
 
+## Downstream projection
+
+Relation Cards intentionally project every schema-valid local `file -> file` S1 import edge from the architecture graph. G4a therefore increases the real golden-fixture projection from six to ten cards. The Relation Card contract, authority, evidence level, derivation type, sorting, and negative semantics remain unchanged; only the producer now supplies four additional local edges that were previously represented as external module strings.
+
+This is a consumer-visible change, but not a new relation detector. Relation Cards still inherit the Graph producer's static heuristic boundary and do not establish runtime dependencies, causality, impact, review priority, or test sufficiency.
+
 ## Negative semantics
 
 - ambiguous local module names remain external;
@@ -34,7 +40,7 @@ The committed case-level result is `docs/diagnostics/graph-quality-baseline.v1.j
 
 ## Verification
 
-Regression coverage includes schema validation, the architecture graph golden snapshot, ambiguous module collision handling, layer-precedence handling, goldset reproducibility, external-module preservation, Graph Model, Graph Bundle Sources, and Graph Quality Goldset CI gates.
+Regression coverage includes schema validation, the architecture graph golden snapshot, ambiguous module collision handling, layer-precedence handling, goldset reproducibility, external-module preservation, the updated Relation Card golden-fixture projection, Graph Model, Graph Bundle Sources, and Graph Quality Goldset CI gates.
 
 ## Non-claims
 
