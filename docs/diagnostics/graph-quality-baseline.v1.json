@@ -1,0 +1,114 @@
+{
+  "kind": "lenskit.graph_quality_baseline",
+  "version": "1.0",
+  "metrics": {
+    "local_resolution": {
+      "total": 4,
+      "hits": 1,
+      "misses": 3,
+      "recall": 0.25
+    },
+    "external_preservation": {
+      "total": 2,
+      "hits": 2,
+      "misses": 0,
+      "accuracy": 1.0
+    },
+    "layer_assignment": {
+      "total": 6,
+      "hits": 1,
+      "misses": 5,
+      "accuracy": 0.166667,
+      "unknown_file_share": 1.0
+    }
+  },
+  "cases": {
+    "local_resolution": [
+      {
+        "id": "absolute-from-cli",
+        "source": "cli/main.py",
+        "target": "core/service.py",
+        "found": false
+      },
+      {
+        "id": "relative-from-core",
+        "source": "core/service.py",
+        "target": "core/utils.py",
+        "found": true
+      },
+      {
+        "id": "absolute-from-test",
+        "source": "tests/service_case.py",
+        "target": "core/service.py",
+        "found": false
+      },
+      {
+        "id": "absolute-from-worker",
+        "source": "scripts/worker.py",
+        "target": "core/service.py",
+        "found": false
+      }
+    ],
+    "external_preservation": [
+      {
+        "id": "requests-remains-external",
+        "source": "cli/main.py",
+        "module": "requests",
+        "found": true
+      },
+      {
+        "id": "json-remains-external",
+        "source": "core/service.py",
+        "module": "json",
+        "found": true
+      }
+    ],
+    "layer_assignment": [
+      {
+        "path": "cli/main.py",
+        "expected": "cli",
+        "actual": "unknown",
+        "found": false
+      },
+      {
+        "path": "core/service.py",
+        "expected": "core",
+        "actual": "unknown",
+        "found": false
+      },
+      {
+        "path": "core/utils.py",
+        "expected": "core",
+        "actual": "unknown",
+        "found": false
+      },
+      {
+        "path": "tests/service_case.py",
+        "expected": "test",
+        "actual": "unknown",
+        "found": false
+      },
+      {
+        "path": "scripts/worker.py",
+        "expected": "infra",
+        "actual": "unknown",
+        "found": false
+      },
+      {
+        "path": "misc/helpers.py",
+        "expected": "unknown",
+        "actual": "unknown",
+        "found": true
+      }
+    ]
+  },
+  "does_not_establish": [
+    "runtime import behavior",
+    "runtime causality",
+    "graph completeness",
+    "layer ontology completeness",
+    "retrieval benefit",
+    "change impact",
+    "test sufficiency"
+  ]
+}

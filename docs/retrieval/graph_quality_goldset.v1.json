@@ -1,0 +1,78 @@
+{
+  "kind": "lenskit.graph_quality_goldset",
+  "version": "1.0",
+  "fixture_root": "merger/lenskit/tests/fixtures/graph_quality_goldset",
+  "local_resolution_cases": [
+    {
+      "id": "absolute-from-cli",
+      "source": "cli/main.py",
+      "target": "core/service.py",
+      "import_form": "from core.service import run"
+    },
+    {
+      "id": "relative-from-core",
+      "source": "core/service.py",
+      "target": "core/utils.py",
+      "import_form": "from .utils import helper"
+    },
+    {
+      "id": "absolute-from-test",
+      "source": "tests/service_case.py",
+      "target": "core/service.py",
+      "import_form": "from core.service import run"
+    },
+    {
+      "id": "absolute-from-worker",
+      "source": "scripts/worker.py",
+      "target": "core/service.py",
+      "import_form": "from core.service import run"
+    }
+  ],
+  "external_preservation_cases": [
+    {
+      "id": "requests-remains-external",
+      "source": "cli/main.py",
+      "module": "requests"
+    },
+    {
+      "id": "json-remains-external",
+      "source": "core/service.py",
+      "module": "json"
+    }
+  ],
+  "layer_cases": [
+    {
+      "path": "cli/main.py",
+      "expected": "cli"
+    },
+    {
+      "path": "core/service.py",
+      "expected": "core"
+    },
+    {
+      "path": "core/utils.py",
+      "expected": "core"
+    },
+    {
+      "path": "tests/service_case.py",
+      "expected": "test"
+    },
+    {
+      "path": "scripts/worker.py",
+      "expected": "infra"
+    },
+    {
+      "path": "misc/helpers.py",
+      "expected": "unknown"
+    }
+  ],
+  "does_not_establish": [
+    "runtime import behavior",
+    "runtime causality",
+    "graph completeness",
+    "layer ontology completeness",
+    "retrieval benefit",
+    "change impact",
+    "test sufficiency"
+  ]
+}
