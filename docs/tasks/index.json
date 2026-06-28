@@ -553,6 +553,26 @@
         "No resolution or layer producer improvement is implemented in this task.",
         "No runtime causality, graph completeness, retrieval benefit, impact, or test-sufficiency claim is established."
       ]
+    },
+    {
+      "id": "TASK-GRAPH-RESOLUTION-LAYERS-001",
+      "title": "Unique Local Import Resolution and Path Layers",
+      "status": "done",
+      "description": "Implements measured G4a producer improvements: uniquely mapped repository-relative Python modules become local file edges, ambiguous and unavailable modules remain external, and deterministic path-segment layers cover test, cli, core and infrastructure files.",
+      "evidence": [
+        "merger/lenskit/architecture/import_graph.py",
+        "merger/lenskit/tests/test_architecture_import_graph.py",
+        "merger/lenskit/tests/fixtures/architecture_import_graph/expected.graph.json",
+        "merger/lenskit/tests/test_graph_quality_goldset.py",
+        "docs/diagnostics/graph-quality-baseline.v1.json",
+        "docs/diagnostics/graph-quality-baseline.md",
+        "docs/proofs/graph-local-resolution-layers-proof.md"
+      ],
+      "missing_evidence": [
+        "The synthetic v1 goldset is not representative of all Python packaging layouts.",
+        "src layouts, namespace packages and broader layer ontology require new falsifiable cases before implementation.",
+        "No runtime import order, runtime causality, graph completeness, retrieval benefit, impact, test sufficiency or default-ranking claim is established."
+      ]
     }
   ]
 }
