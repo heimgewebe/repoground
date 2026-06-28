@@ -1,0 +1,98 @@
+from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+AUDIT = REPO_ROOT / "docs/diagnostics/graph-current-state-audit.md"
+
+
+def _read(path: str) -> str:
+    return (REPO_ROOT / path).read_text(encoding="utf-8")
+
+
+def test_graph_audit_names_existing_contracts_and_surfaces() -> None:
+    text = AUDIT.read_text(encoding="utf-8")
+
+    for path in (
+        "merger/lenskit/contracts/architecture.graph.v1.schema.json",
+        "merger/lenskit/contracts/architecture.graph_index.v1.schema.json",
+        "merger/lenskit/contracts/entrypoints.v1.schema.json",
+        "merger/lenskit/architecture/import_graph.py",
+        "merger/lenskit/architecture/entrypoints.py",
+        "merger/lenskit/architecture/graph_index.py",
+    ):
+        assert (REPO_ROOT / path).is_file()
+
+    for contract in (
+        "architecture.graph.v1.schema.json",
+        "architecture.graph_index.v1.schema.json",
+        "entrypoints.v1.schema.json",
+    ):
+        assert contract in text
+
+
+def test_graph_audit_tracks_conditional_bundle_production() -> None:
+    merge_source = _read("merger/lenskit/core/merge.py")
+    audit = AUDIT.read_text(encoding="utf-8")
+
+    assert "generate_import_graph_document" not in merge_source
+    assert "generate_entrypoints_document" not in merge_source
+    assert '.with_suffix(".architecture_graph.json")' in merge_source
+    assert '.with_suffix(".entrypoints.json")' in merge_source
+    assert "if arch_graph_path.exists() and entrypoints_path.exists()" in merge_source
+    assert "Automatic source-artifact emission | absent" in audit
+    assert "Conditional bundle registration | implemented" in audit
+
+
+def test_graph_audit_tracks_stale_graph_ranking_defect() -> None:
+    query_source = _read("merger/lenskit/retrieval/query_core.py")
+    runtime_contract = _read("docs/architecture/graph-runtime-contract.md")
+    audit = AUDIT.read_text(encoding="utf-8")
+
+    assert 'graph_status in ("ok", "stale_or_mismatched")' in query_source
+    assert 'graph_status = "stale_or_mismatched"' in runtime_contract
+    assert "still uses a Graph Index" in audit
+    assert "Ignore mismatched Graph Indexes" in audit
+
+
+def test_graph_audit_tracks_exploratory_cli_provenance() -> None:
+    cli_source = _read("merger/lenskit/cli/cmd_architecture.py")
+    audit = AUDIT.read_text(encoding="utf-8")
+
+    assert "uuid.uuid4" in cli_source
+    assert 'canonical_sha256 = "0" * 64' in cli_source
+    assert "random UUID-derived run ID" in audit
+    assert "placeholder hash of 64 zeroes" in audit
+
+
+def test_graph_audit_carries_measurement_boundaries_and_priorities() -> None:
+    audit = AUDIT.read_text(encoding="utf-8")
+
+    for value in (
+        "361 / 360",
+        "1,060",
+        "360 / 700",
+        "4,197",
+        "1.0",
+        "2 / 42",
+        "366 / 694",
+    ):
+        assert value in audit
+
+    for follow_up in (
+        "G1 — Ignore mismatched Graph Indexes",
+        "G2 — Provenance-coherent compilation",
+        "G3 — Bundle-bound source production",
+        "G4 — Resolution and layer quality",
+        "G5 — Symbol and wider graph experiments",
+    ):
+        assert follow_up in audit
+
+    for boundary in (
+        "repository understanding",
+        "graph or entrypoint completeness",
+        "runtime reachability",
+        "change impact",
+        "test sufficiency",
+        "regression absence",
+    ):
+        assert boundary in audit
