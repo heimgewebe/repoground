@@ -30,17 +30,24 @@ def test_graph_audit_names_existing_contracts_and_surfaces() -> None:
         assert contract in text
 
 
-def test_graph_audit_tracks_conditional_bundle_production() -> None:
+def test_graph_audit_preserves_historical_g3_gap_and_tracks_current_slice() -> None:
     merge_source = _read("merger/lenskit/core/merge.py")
+    producer = _read("merger/lenskit/architecture/bundle_sources.py")
     audit = AUDIT.read_text(encoding="utf-8")
 
     assert "generate_import_graph_document" not in merge_source
     assert "generate_entrypoints_document" not in merge_source
-    assert '.with_suffix(".architecture_graph.json")' in merge_source
-    assert '.with_suffix(".entrypoints.json")' in merge_source
-    assert "if arch_graph_path.exists() or entrypoints_path.exists()" in merge_source
+    assert "ensure_bundle_graph_sources(" in merge_source
+    assert "generate_import_graph_document(" in producer
+    assert "generate_entrypoints_document(" in producer
+    assert '.with_suffix(".architecture_graph.json")' in producer
+    assert '.with_suffix(".entrypoints.json")' in producer
+    assert "_eligible_python_paths(" in producer
     assert "Automatic source-artifact emission | absent" in audit
     assert "Conditional bundle registration | implemented" in audit
+    assert (
+        REPO_ROOT / "docs/proofs/graph-bundle-source-production-proof.md"
+    ).is_file()
 
 
 def test_graph_audit_keeps_historical_stale_ranking_finding_after_g1_fix() -> None:
@@ -78,12 +85,10 @@ def test_g2_compiler_validates_and_binds_both_sources() -> None:
     assert '"architecture.graph.v1.schema.json"' in compiler
     assert '"entrypoints.v1.schema.json"' in compiler
     assert "require_coherence(" in compiler
+    assert "dump_sha256 = _compute_file_sha256(dump_index_path)" in merge_source
     assert "expected_run_id=run_id" in merge_source
-    assert (
-        "expected_canonical_sha256=_compute_file_sha256(dump_index_path)"
-        in merge_source
-    )
-    assert "except GraphIndexCompilationError:" in merge_source
+    assert "expected_canonical_sha256=dump_sha256" in merge_source
+    assert "except (BundleGraphSourceError, GraphIndexCompilationError):" in merge_source
     assert "Draft7Validator" in validation
     assert '"validation_unavailable"' in validation
     assert '"provenance_mismatch"' in validation
