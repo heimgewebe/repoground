@@ -393,11 +393,15 @@ class TestRealGraphFixture:
         pairs = [(c["source"]["path"], c["target"]["path"], c["evidence"]["start_line"]) for c in cards]
         assert pairs == [
             ("a.py", "b.py", 3),
+            ("c.py", "pkg/__init__.py", 1),
+            ("c.py", "pkg/submodule.py", 1),
+            ("c.py", "sub/__init__.py", 2),
             ("pkg/__init__.py", "pkg/submodule.py", 1),
             ("pkg/__init__.py", "pkg/submodule.py", 2),
             ("pkg/nested/m.py", "pkg/submodule.py", 1),
             ("pkg/nested/m.py", "pkg/submodule.py", 2),
             ("sub/__init__.py", "sub/x.py", 1),
+            ("test_c.py", "c.py", 1),
         ]
         # No external module: target ever appears as a card endpoint.
         assert all("module:" not in c["target"]["path"] for c in cards)
