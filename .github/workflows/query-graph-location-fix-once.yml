@@ -57,16 +57,29 @@ jobs:
           replacement = [
               "        if graph_index_path:\n",
               "            graph_root = index_path.resolve().parent\n",
-              "            graph_resolved = graph_index_path.resolve()\n",
-              "            if graph_resolved.parent != graph_root:\n",
-              "                raise RuntimeError(\n",
-              "                    \"Graph Index and SQLite index must share one directory\"\n",
-              "                )\n",
+              "            if graph_index_path.is_absolute():\n",
+              "                graph_resolved = graph_index_path.resolve()\n",
+              "                if graph_resolved.parent != graph_root:\n",
+              "                    raise RuntimeError(\n",
+              "                        \"Graph Index and SQLite index must share one directory\"\n",
+              "                    )\n",
+              "                graph_relative_path = graph_resolved.name\n",
+              "            else:\n",
+              "                if graph_index_path.parent != Path(\".\"):\n",
+              "                    raise RuntimeError(\n",
+              "                        \"Graph Index must be a sibling artifact name\"\n",
+              "                    )\n",
+              "                graph_relative_path = graph_index_path.name\n",
               "            res = load_graph_index(\n",
               "                graph_root,\n",
-              "                graph_resolved.name,\n",
+              "                graph_relative_path,\n",
               "                expected_sha256=expected_sha256,\n",
               "            )\n",
+              "            if res[\"status\"] == \"not_found\":\n",
+              "                raise RuntimeError(\n",
+              "                    \"Explicitly provided graph index file does not exist: \"\n",
+              "                    f\"{graph_root / graph_relative_path}\"\n",
+              "                )\n",
               "            graph_status = res[\"status\"]\n",
               "            if graph_status == \"ok\":\n",
               "                graph_index = res[\"graph\"]\n",
@@ -76,6 +89,15 @@ jobs:
           ]
           lines[start:end] = replacement
           file.write_text("".join(lines), encoding="utf-8")
+
+          tests = Path("merger/lenskit/tests/test_retrieval_query.py")
+          text = tests.read_text(encoding="utf-8")
+          old = "def mock_load(path, expected_sha256=None):"
+          new = "def mock_load(root, relative_path, expected_sha256=None):"
+          count = text.count(old)
+          if count != 5:
+              raise SystemExit(f"expected five loader mocks, found {count}")
+          tests.write_text(text.replace(old, new), encoding="utf-8")
           PY
 
       - name: Install dependencies
@@ -107,7 +129,8 @@ jobs:
           ruff check \
             merger/lenskit/architecture/graph_index.py \
             merger/lenskit/retrieval/query_core.py \
-            merger/lenskit/tests/test_graph_index.py
+            merger/lenskit/tests/test_graph_index.py \
+            merger/lenskit/tests/test_retrieval_query.py
 
       - name: Diff check
         run: git diff --check
@@ -117,6 +140,8 @@ jobs:
           set -euo pipefail
           git config user.name "lenskit-g2-finalizer"
           git config user.email "lenskit-g2-finalizer@users.noreply.github.com"
-          git add merger/lenskit/retrieval/query_core.py
+          git add \
+            merger/lenskit/retrieval/query_core.py \
+            merger/lenskit/tests/test_retrieval_query.py
           git commit -m "fix(graph): bind retrieval graph to index directory"
           git push origin HEAD:fix/graph-provenance-coherence
