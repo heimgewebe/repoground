@@ -2,7 +2,7 @@
 
 ## Status
 
-`TASK-GRAPH-PROVENANCE-COHERENCE-001` implements the G2 slice identified by the Graph Current-State Audit.
+This change implements the G2 slice identified by the Graph Current-State Audit.
 
 ## Problem
 
@@ -17,7 +17,8 @@ The Graph Index compiler previously loaded `architecture.graph.v1` and `entrypoi
 3. Validate the entrypoint document against `entrypoints.v1.schema.json`.
 4. Require identical non-empty `run_id` values.
 5. Require identical `canonical_dump_index_sha256` values.
-6. When the bundle pipeline invokes the compiler, require the source run ID to equal the current bundle run ID and the source hash to equal the actual current dump-index hash.
+6. For the bundle naming convention, resolve the sibling dump-index document and require the source run ID and source hash to match that current dump index.
+7. Preserve explicit `expected_run_id` and `expected_canonical_sha256` arguments for callers that bind provenance without the bundle file layout.
 
 If `jsonschema` is unavailable, compilation fails closed. It does not emit a supposedly validated Graph Index under degraded validation capability.
 
@@ -38,7 +39,7 @@ The bundle path still does not generate graph or entrypoint source documents. Th
 
 - If both prerequisite sources are absent, the existing clean fallback remains: no Graph Index is emitted.
 - If both sources exist but validation or provenance coherence fails, the error propagates and no Graph Index is written.
-- If both sources are valid and bound to the current run and dump index, the derived Graph Index is emitted and registered as a derived retrieval index.
+- If both sources are valid and bound to the sibling current run and dump index, the derived Graph Index is emitted and registered as a derived retrieval index.
 
 ## Historical audit reconciliation
 
@@ -57,7 +58,9 @@ Focused tests cover:
 - missing `jsonschema` fail-closed behavior;
 - deterministic schema diagnostics;
 - conditional bundle emission and missing-source fallback;
+- bundle-manifest registration with current provenance;
 - structured CLI failure output;
+- graph end-to-end compilation with schema-valid sources;
 - G1 audit reconciliation.
 
 ## Non-claims
