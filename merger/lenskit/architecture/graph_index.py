@@ -26,7 +26,8 @@ def load_graph_index(
     if not path.exists():
         return {"status": "not_found", "graph": None}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        with path.open(encoding="utf-8") as handle:
+            data = json.load(handle)
     except json.JSONDecodeError:
         return {"status": "invalid_json", "graph": None}
     except OSError as exc:
@@ -46,7 +47,8 @@ def load_graph_index(
             )
         else:
             try:
-                schema = json.loads(schema_path.read_text(encoding="utf-8"))
+                with schema_path.open(encoding="utf-8") as handle:
+                    schema = json.load(handle)
                 jsonschema.validate(instance=data, schema=schema)
             except jsonschema.ValidationError as exc:
                 logger.warning("Graph index schema validation failed: %s", exc)
