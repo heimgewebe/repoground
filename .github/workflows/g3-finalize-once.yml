@@ -3,6 +3,9 @@ name: G3 Finalize Once
 on:
   push:
     branches: [feat/graph-bundle-source-production]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
