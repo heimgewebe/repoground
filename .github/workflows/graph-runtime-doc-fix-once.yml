@@ -1,0 +1,53 @@
+name: Graph Runtime Doc Fix Once
+
+on:
+  push:
+    branches: [fix/graph-provenance-coherence]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/graph-provenance-coherence
+      - name: Update validation fallback docs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          contract = Path('docs/architecture/graph-runtime-contract.md')
+          text = contract.read_text(encoding='utf-8')
+          text = text.replace(
+              'ist es ungültig oder verweist es auf einen anderen Dump-Index',
+              'ist es ungültig, kann es nicht validiert werden oder verweist es auf einen anderen Dump-Index',
+          )
+          text = text.replace(
+              '`"invalid_schema"`, `"stale_or_mismatched"`',
+              '`"invalid_schema"`, `"validation_unavailable"`, `"stale_or_mismatched"`',
+          )
+          anchor = '* `invalid_schema` → JSON entspricht nicht dem `architecture.graph_index` Contract.\n'
+          line = '* `validation_unavailable` → Validierungsbibliothek oder Schema fehlt; der Graph bleibt diagnostisch und wird nicht gerankt.\n'
+          if line not in text:
+              text = text.replace(anchor, anchor + line, 1)
+          contract.write_text(text, encoding='utf-8')
+
+          proof = Path('docs/proofs/graph-provenance-coherent-compilation-proof.md')
+          proof_text = proof.read_text(encoding='utf-8')
+          anchor = 'If `jsonschema` is unavailable, compilation fails closed. It does not emit a supposedly validated Graph Index under degraded validation capability.\n'
+          addition = '\nThe retrieval loader also fails closed when validation support or its packaged schema is unavailable, returning `validation_unavailable` and no graph object.\n'
+          if addition.strip() not in proof_text:
+              proof_text = proof_text.replace(anchor, anchor + addition, 1)
+          proof.write_text(proof_text, encoding='utf-8')
+          PY
+      - run: git diff --check
+      - name: Commit
+        run: |
+          git config user.name lenskit-doc-finalizer
+          git config user.email lenskit-doc-finalizer@users.noreply.github.com
+          git add docs/architecture/graph-runtime-contract.md docs/proofs/graph-provenance-coherent-compilation-proof.md
+          git commit -m 'docs(graph): define unavailable validation fallback'
+          git push origin HEAD:fix/graph-provenance-coherence
