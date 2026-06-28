@@ -57,7 +57,7 @@ jobs:
           set -o pipefail
           python -m pytest -q \
             merger/lenskit/tests/test_graph_quality_goldset.py \
-            merger/lenskit/tests/test_import_graph.py \
+            merger/lenskit/tests/test_architecture_import_graph.py \
             2>&1 | tee graph-quality-goldset-tests.log
 
       - name: Upload failing diagnostics
