@@ -346,7 +346,8 @@ def test_query_semantic_reranking(mini_index, monkeypatch):
         def encode(self, texts):
             # If input is string, make it list-like for uniform processing
             is_single = isinstance(texts, str)
-            if is_single: texts = [texts]
+            if is_single:
+                texts = [texts]
 
             embeddings = []
             for t in texts:
@@ -531,10 +532,11 @@ def test_graph_staleness_marker(mini_index, tmp_path, monkeypatch):
     hit = hits[0]
     ge = hit["why"]["diagnostics"]["graph"]
 
-    assert ge["graph_used"] is True
+    assert ge["graph_used"] is False
     assert ge["graph_status"] == "stale_or_mismatched"
-    assert ge["distance"] == 0
-    assert ge["graph_bonus"] > 0
+    assert ge["distance"] == -1
+    assert ge["graph_bonus"] == 0.0
+    assert "graph_index" not in res["claim_boundaries"]["evidence_basis"]
 
     # Direct proof that _read_expected_graph_sha256 extracted the legacy fallback and passed it to the mock
     assert captured.get("expected_sha256") == "legacy_sha"
@@ -662,11 +664,10 @@ def test_graph_staleness_e2e_hash_mismatch(mini_index, tmp_path):
     # The actual graph_index JSON was written to disk and loaded natively.
 
 
-def test_query_uses_stale_graph_runtime_path(mini_index, tmp_path):
+def test_query_ignores_stale_graph_runtime_path(mini_index, tmp_path):
     """
-    Proves that when query_core loads a 'stale_or_mismatched' graph (caused
-    explicitly by a hash mismatch, not missing file), it continues to process
-    the graph (graph_used = True) and computes a positive graph_bonus.
+    Proves that a hash-mismatched graph remains diagnostic only and cannot
+    contribute distance, bonus, penalty, or graph evidence to ranking.
     """
     import json
     import sqlite3
@@ -709,12 +710,11 @@ def test_query_uses_stale_graph_runtime_path(mini_index, tmp_path):
 
     diagnostics = hit["why"]["diagnostics"]["graph"]
 
-    # Validating the true integration and semantic application
     assert diagnostics["graph_status"] == "stale_or_mismatched"
-    assert diagnostics["graph_used"] is True, "Graph must still be used by policy despite mismatch"
-    assert diagnostics["distance"] == 0, "Graph distance must still be projected correctly"
-    assert diagnostics["graph_bonus"] > 0, "Graph bonus must actually influence the score"
-    assert "graph_index" in res["claim_boundaries"]["evidence_basis"], "Claim boundaries must record graph evidence usage"
+    assert diagnostics["graph_used"] is False
+    assert diagnostics["distance"] == -1
+    assert diagnostics["graph_bonus"] == 0.0
+    assert "graph_index" not in res["claim_boundaries"]["evidence_basis"]
     assert res["claim_boundaries"]["requires_live_check"] is True
 
 

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import pytest
 from merger.lenskit.cli import cmd_eval
@@ -22,6 +23,7 @@ def eval_env(tmp_path):
 
     dump_path.write_text(json.dumps({"run_id": "test", "canonical_dump_index_sha256": "0"}), encoding="utf-8")
     index_db.build_index(dump_path, chunk_path, db_path)
+    db_hash = hashlib.sha256(dump_path.read_bytes()).hexdigest()
 
     queries_path.write_text("1. **\"index\"**\n   * *Expected:* `src/entry.py`\n")
 
@@ -29,7 +31,7 @@ def eval_env(tmp_path):
         "kind": "lenskit.architecture.graph_index",
         "version": "1.0",
         "run_id": "test",
-        "canonical_dump_index_sha256": "0"*64,
+        "canonical_dump_index_sha256": db_hash,
         "distances": {"file:src/entry.py": 0, "file:src/util.py": 1},
         "metrics": {"entrypoint_count": 1, "nodes_reachable": 2, "unreachable_nodes": 0}
     }
@@ -135,3 +137,31 @@ def test_eval_graph_delta_reporting(eval_env, capsys):
     sem_hit_why = detail["why"]
     assert "graph" in sem_hit_why["diagnostics"]
     assert sem_hit_why["diagnostics"]["graph"]["graph_used"] is True
+
+
+def test_eval_stale_graph_is_diagnostic_only(eval_env, capsys, tmp_path):
+    stale_graph = json.loads(eval_env["graph_index"].read_text(encoding="utf-8"))
+    stale_graph["canonical_dump_index_sha256"] = "f" * 64
+    stale_path = tmp_path / "stale_graph.json"
+    stale_path.write_text(json.dumps(stale_graph), encoding="utf-8")
+
+    args = argparse.Namespace(
+        index=str(eval_env["db"]),
+        queries=str(eval_env["queries"]),
+        k=10,
+        emit="json",
+        stale_policy="ignore",
+        embedding_policy=None,
+        graph_index=str(stale_path),
+        graph_weights=None,
+    )
+
+    assert cmd_eval.run_eval(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    detail = output["details"][0]
+    graph = detail["why"]["diagnostics"]["graph"]
+    assert graph["graph_status"] == "stale_or_mismatched"
+    assert graph["graph_used"] is False
+    assert graph["graph_bonus"] == 0.0
+    assert detail["baseline"]["top_results"] == detail["graph"]["top_results"]
+    assert detail["baseline"]["rr"] == detail["graph"]["rr"]

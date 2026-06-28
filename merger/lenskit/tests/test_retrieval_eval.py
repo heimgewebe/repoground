@@ -1,3 +1,4 @@
+import hashlib
 import json
 import pytest
 from pathlib import Path
@@ -463,8 +464,13 @@ def _build_eval_env(tmp_path, graph_index_content=None, graph_invalid=False):
         graph_path = tmp_path / "bad_graph.json"
         graph_path.write_text("{bad json")
     elif graph_index_content is not None:
+        graph_payload = dict(graph_index_content)
+        if graph_payload.get("canonical_dump_index_sha256") is None:
+            graph_payload["canonical_dump_index_sha256"] = hashlib.sha256(
+                dump_path.read_bytes()
+            ).hexdigest()
         graph_path = tmp_path / "graph_index.json"
-        graph_path.write_text(json.dumps(graph_index_content), encoding="utf-8")
+        graph_path.write_text(json.dumps(graph_payload), encoding="utf-8")
 
     return db_path, queries_path, graph_path
 
@@ -490,7 +496,7 @@ def test_retrieval_eval_claim_boundaries_graph_present_when_graph_actually_used(
         "kind": "lenskit.architecture.graph_index",
         "version": "1.0",
         "run_id": "test",
-        "canonical_dump_index_sha256": "0" * 64,
+        "canonical_dump_index_sha256": None,
         "distances": {"file:src/entry.py": 0},
         "metrics": {"entrypoint_count": 1, "nodes_reachable": 1, "unreachable_nodes": 0}
     }
@@ -507,6 +513,36 @@ def test_retrieval_eval_claim_boundaries_graph_present_when_graph_actually_used(
 
     assert out is not None
     assert "graph_index" in out["claim_boundaries"]["evidence_basis"]
+
+
+def test_retrieval_eval_claim_boundaries_graph_absent_when_graph_is_stale(tmp_path):
+    stale_graph = {
+        "kind": "lenskit.architecture.graph_index",
+        "version": "1.0",
+        "run_id": "test",
+        "canonical_dump_index_sha256": "f" * 64,
+        "distances": {"file:src/entry.py": 0},
+        "metrics": {
+            "entrypoint_count": 1,
+            "nodes_reachable": 1,
+            "unreachable_nodes": 0,
+        },
+    }
+    db_path, queries_path, graph_path = _build_eval_env(
+        tmp_path, graph_index_content=stale_graph
+    )
+
+    out = eval_core.do_eval(
+        index_path=db_path,
+        queries_path=queries_path,
+        k=5,
+        is_json_mode=True,
+        is_stale=False,
+        graph_index_path=graph_path,
+    )
+
+    assert out is not None
+    assert "graph_index" not in out["claim_boundaries"]["evidence_basis"]
 
 
 def test_run_eval_explain_always_present_on_error(mini_index_for_eval, tmp_path, capsys, monkeypatch):

@@ -86,3 +86,33 @@ def test_graph_fallback(mini_index_with_graph):
     res = query_core.execute_query(db_path, query_text="hello", k=10, explain=True, graph_index_path=None)
     assert "ranker" not in res["explain"]
     assert "why_list" not in res.get("results", [{}])[0] if res.get("results") else True
+
+
+def test_stale_graph_is_diagnostic_only(mini_index_with_graph, tmp_path):
+    db_path, graph_index_path = mini_index_with_graph
+    baseline = query_core.execute_query(db_path, query_text="hello", k=10, explain=True)
+    stale_graph = json.loads(graph_index_path.read_text(encoding="utf-8"))
+    stale_graph["canonical_dump_index_sha256"] = "f" * 64
+    stale_path = tmp_path / "stale_graph_index.json"
+    stale_path.write_text(json.dumps(stale_graph), encoding="utf-8")
+    observed = query_core.execute_query(
+        db_path,
+        query_text="hello",
+        k=10,
+        explain=True,
+        graph_index_path=stale_path,
+        test_penalty=0.1,
+    )
+    assert [(h["path"], h["score"], h["final_score"]) for h in observed["results"]] == [
+        (h["path"], h["score"], h["final_score"]) for h in baseline["results"]
+    ]
+    assert "ranker" not in observed["explain"]
+    for hit in observed["results"]:
+        graph = hit["why"]["diagnostics"]["graph"]
+        assert graph["graph_status"] == "stale_or_mismatched"
+        assert graph["graph_used"] is False
+        assert graph["distance"] == -1
+        assert graph["graph_bonus"] == 0.0
+        assert "entrypoint_boost" not in hit.get("why_list", [])
+        assert "near_entry" not in hit.get("why_list", [])
+        assert "not_test" not in hit.get("why_list", [])

@@ -369,7 +369,7 @@ def execute_query(
                 raise RuntimeError(f"Explicitly provided graph index file does not exist: {graph_index_path}")
             res = load_graph_index(graph_index_path, expected_sha256=expected_sha256)
             graph_status = res["status"]
-            if graph_status in ("ok", "stale_or_mismatched"):
+            if graph_status == "ok":
                 graph_index = res["graph"]
             else:
                 graph_index = None
@@ -420,7 +420,7 @@ def execute_query(
                 path_str = r["path"]
                 node_id = f"file:{path_str}"
 
-                graph_used = graph_status in ("ok", "stale_or_mismatched")
+                graph_used = graph_status == "ok"
                 dist = -1
 
                 graph_proximity = 0.0

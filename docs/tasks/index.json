@@ -475,6 +475,26 @@
         "Graph and Entrypoints source artifacts are not automatically produced by the merge pipeline.",
         "No graph completeness, runtime reachability, causality, retrieval relevance, or Symbol Index readiness is established."
       ]
+    },
+    {
+      "id": "TASK-GRAPH-STALE-BASELINE-001",
+      "title": "Stale Graph Index Baseline Fallback",
+      "status": "done",
+      "description": "Prevents a Graph Index with a canonical dump hash mismatch from influencing query or evaluation ranking. Mismatch diagnostics remain visible while lexical baseline ordering, scores, penalties, and evidence basis are preserved. Fresh explicit Graph Indexes retain existing opt-in behavior.",
+      "evidence": [
+        "merger/lenskit/retrieval/query_core.py",
+        "merger/lenskit/tests/test_graph_rerank.py",
+        "merger/lenskit/tests/test_graph_eval.py",
+        "merger/lenskit/tests/test_retrieval_query.py",
+        "merger/lenskit/tests/test_retrieval_eval.py",
+        "docs/architecture/graph-runtime-contract.md",
+        "docs/proofs/graph-stale-index-baseline-fallback-proof.md"
+      ],
+      "missing_evidence": [
+        "No automatic Graph or Entrypoints production or bundle discovery is added.",
+        "No graph completeness, runtime causality, retrieval benefit, or default-promotion claim is established.",
+        "Graph input provenance coherence before compilation remains a separate follow-up."
+      ]
     }
   ]
 }

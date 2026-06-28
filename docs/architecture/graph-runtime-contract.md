@@ -75,24 +75,27 @@ final_score = score_pre * current_penalty
 
 ## 4. Fehlerpfade und Diagnose
 
-Fehlt das Artefakt `graph_index.json` oder ist es ungültig, bricht die Query-Runtime nicht hart ab. Stattdessen:
-* Die Suche wird im "Baseline"-Modus (ohne Graph-Bonus) ausgeführt.
+Fehlt das Artefakt `graph_index.json`, ist es ungültig oder verweist es auf einen anderen Dump-Index, bricht die Query-Runtime nicht hart ab. Stattdessen:
+* Die Suche wird im "Baseline"-Modus ohne Graph-Bonus und ohne graph-bedingte Penalty ausgeführt.
+* Der erkannte Graph-Status bleibt im `explain`-Objekt sichtbar.
 
 Das `explain`-Objekt der Query enthält Diagnoseinformationen zur Graph-Nutzung.
 
 ### 4.1 `graph_used`
 
 Gibt an, ob ein geladener Graph tatsächlich in das Ranking eingeflossen ist:
-* `true` → Ein Graph wurde im Scoring verwendet. Das kann sowohl bei `graph_status = "ok"` als auch bei `graph_status = "stale_or_mismatched"` gelten.
-* `false` → Es wurde kein Graph im Scoring verwendet, z. B. bei `graph_status = "not_found"`, `"invalid_json"`, `"invalid_schema"` oder `"unreadable"`.
+* `true` → Nur ein Graph mit `graph_status = "ok"` wurde im Scoring verwendet.
+* `false` → Es wurde kein Graph im Scoring verwendet, z. B. bei `graph_status = "not_found"`, `"invalid_json"`, `"invalid_schema"`, `"stale_or_mismatched"` oder `"unreadable"`.
+
+Ein `stale_or_mismatched` Graph bleibt ein Diagnoseartefakt. Er darf weder Graph-Proximity noch Entrypoint-Bonus, Graph-Gewichte oder eine graph-bedingte Test-Penalty in den finalen Score einbringen.
 
 ### 4.2 `graph_status`
 
 Gibt detailliert Auskunft über den Zustand des geladenen Graphen. Folgende Werte sind definiert:
 
-* `ok` → Graph erfolgreich geladen und validiert.
+* `ok` → Graph erfolgreich geladen, validiert und an denselben Dump-Index gebunden.
 * `not_found` → Datei nicht gefunden.
 * `invalid_json` → Datei konnte nicht als JSON geparst werden.
 * `invalid_schema` → JSON entspricht nicht dem `architecture.graph_index` Contract.
-* `stale_or_mismatched` → Graph verweist auf einen anderen Dump-Index (Hash-Mismatch).
+* `stale_or_mismatched` → Graph verweist auf einen anderen Dump-Index (Hash-Mismatch); Diagnose bleibt sichtbar, Ranking fällt auf Baseline zurück.
 * `unreadable` → IO-Fehler (z.B. fehlende Leserechte).
