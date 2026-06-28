@@ -64,7 +64,8 @@ def load_source(path: Path, schema_name: str, source: str) -> dict[str, Any]:
             source=source,
         )
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        with path.open(encoding="utf-8") as handle:
+            document = json.load(handle)
     except FileNotFoundError as exc:
         raise GraphIndexCompilationError(
             "source_not_found",
@@ -88,7 +89,8 @@ def load_source(path: Path, schema_name: str, source: str) -> dict[str, Any]:
 
     schema_path = Path(__file__).parent.parent / "contracts" / schema_name
     try:
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        with schema_path.open(encoding="utf-8") as handle:
+            schema = json.load(handle)
         jsonschema.Draft7Validator.check_schema(schema)
         validator = jsonschema.Draft7Validator(schema)
     except (OSError, json.JSONDecodeError, jsonschema.SchemaError) as exc:
