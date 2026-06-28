@@ -28,6 +28,8 @@ List order has no precedence meaning. A future consumer must preserve ambiguity 
 
 The schema validates JSON shape and lexical path rules. A consumer must additionally check that declared directories exist in the selected repository snapshot and belong to the same source surface used for graph construction. Invalid declarations must fail closed or leave imports unresolved; they must not trigger directory-name guessing.
 
+Schema validity alone therefore proves neither directory existence nor safe producer consumption. Those are contextual checks owned by the later consumer slice.
+
 ## Provenance boundary
 
 The declaration says only that a caller explicitly supplied additional roots. It does not establish effective runtime `sys.path`, installed-package state, editable-install behavior, build-backend interpretation, runtime import order, or runtime causality.
