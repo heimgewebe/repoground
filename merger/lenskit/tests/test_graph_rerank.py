@@ -116,3 +116,26 @@ def test_stale_graph_is_diagnostic_only(mini_index_with_graph, tmp_path):
         assert "entrypoint_boost" not in hit.get("why_list", [])
         assert "near_entry" not in hit.get("why_list", [])
         assert "not_test" not in hit.get("why_list", [])
+
+
+def test_graph_path_outside_index_directory_is_rejected(
+    mini_index_with_graph,
+    tmp_path,
+):
+    db_path, graph_index_path = mini_index_with_graph
+    foreign_dir = tmp_path / "foreign"
+    foreign_dir.mkdir()
+    foreign_graph = foreign_dir / graph_index_path.name
+    foreign_graph.write_text(
+        graph_index_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="must share one directory"):
+        query_core.execute_query(
+            db_path,
+            query_text="hello",
+            k=10,
+            explain=True,
+            graph_index_path=foreign_graph,
+        )
