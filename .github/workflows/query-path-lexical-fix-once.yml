@@ -1,0 +1,75 @@
+---
+name: Query Path Lexical Fix Once
+
+"on":
+  push:
+    branches:
+      - fix/graph-provenance-coherence
+    paths:
+      - ".github/workflows/query-path-lexical-fix-once.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/graph-provenance-coherence
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply lexical path check
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("merger/lenskit/retrieval/query_core.py")
+          text = path.read_text(encoding="utf-8")
+          old = """            if graph_index_path.is_absolute():
+                graph_resolved = graph_index_path.resolve()
+                if graph_resolved.parent != graph_root:
+                    raise RuntimeError(
+                        \"Graph Index and SQLite index must share one directory\"
+                    )
+                graph_relative_path = graph_resolved.name
+"""
+          new = """            if graph_index_path.is_absolute():
+                if graph_index_path.parent != graph_root:
+                    raise RuntimeError(
+                        \"Graph Index and SQLite index must share one directory\"
+                    )
+                graph_relative_path = graph_index_path.name
+"""
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one path block, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+      - name: Install dependencies
+        run: |
+          pip install -r merger/lenskit/requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Verify
+        run: |
+          python -m pytest -q \
+            merger/lenskit/tests/test_graph_rerank.py \
+            merger/lenskit/tests/test_retrieval_query.py
+          ruff check merger/lenskit/retrieval/query_core.py
+          git diff --check
+
+      - name: Commit verified fix
+        run: |
+          set -euo pipefail
+          git config user.name "lenskit-g2-finalizer"
+          git config user.email "lenskit-g2-finalizer@users.noreply.github.com"
+          git add merger/lenskit/retrieval/query_core.py
+          git commit -m "fix(graph): avoid resolving caller Graph Index path"
+          git push origin HEAD:fix/graph-provenance-coherence
