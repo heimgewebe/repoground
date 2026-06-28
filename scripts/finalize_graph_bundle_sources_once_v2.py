@@ -31,8 +31,10 @@ def patch_workflow() -> None:
         for i, line in enumerate(lines)
         if line.strip().startswith("merger/lenskit/tests/test_graph_index.py")
     ]
-    if len(test_indexes) != 1:
-        raise RuntimeError(f"expected one pytest anchor, found {len(test_indexes)}")
+    if len(test_indexes) != 2:
+        raise RuntimeError(
+            f"expected Pytest and Ruff test anchors, found {len(test_indexes)}"
+        )
     slash = "\\"
     test_line = (
         "            merger/lenskit/tests/test_graph_bundle_sources.py "
