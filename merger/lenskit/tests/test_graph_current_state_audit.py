@@ -88,7 +88,9 @@ def test_g2_compiler_validates_and_binds_both_sources() -> None:
     assert "dump_sha256 = _compute_file_sha256(dump_index_path)" in merge_source
     assert "expected_run_id=run_id" in merge_source
     assert "expected_canonical_sha256=dump_sha256" in merge_source
-    assert "except (BundleGraphSourceError, GraphIndexCompilationError):" in merge_source
+    assert 'except GraphIndexCompilationError as e:' in merge_source
+    assert '"validation_unavailable"' in merge_source
+    assert 'except BundleGraphSourceError:' in merge_source
     assert "Draft7Validator" in validation
     assert '"validation_unavailable"' in validation
     assert '"provenance_mismatch"' in validation
