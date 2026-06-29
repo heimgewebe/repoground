@@ -28,7 +28,7 @@ def load_graph_quality_goldset(path: Path) -> dict[str, Any]:
         raise GraphQualityGoldsetError("graph goldset must be a JSON object")
     if payload.get("kind") != "lenskit.graph_quality_goldset":
         raise GraphQualityGoldsetError("unexpected graph goldset kind")
-    if payload.get("version") not in {"1.0", "1.1"}:
+    if payload.get("version") not in {"1.0", "1.1", "1.2"}:
         raise GraphQualityGoldsetError("unsupported graph goldset version")
 
     for key in (
@@ -42,10 +42,20 @@ def load_graph_quality_goldset(path: Path) -> dict[str, Any]:
             raise GraphQualityGoldsetError(f"graph goldset missing {key}")
 
     parse_failure_cases = payload.get("parse_failure_cases", [])
-    if payload["version"] == "1.1" and "parse_failure_cases" not in payload:
+    if payload["version"] in {"1.1", "1.2"} and "parse_failure_cases" not in payload:
         raise GraphQualityGoldsetError("graph goldset missing parse_failure_cases")
     if not isinstance(parse_failure_cases, list):
         raise GraphQualityGoldsetError("parse failure cases must be a list")
+
+    source_roots = payload.get("source_roots", [])
+    if payload["version"] == "1.2" and "source_roots" not in payload:
+        raise GraphQualityGoldsetError("graph goldset missing source_roots")
+    if not isinstance(source_roots, list) or not all(
+        isinstance(root, str) and root for root in source_roots
+    ):
+        raise GraphQualityGoldsetError("graph goldset source_roots are invalid")
+    if len(set(source_roots)) != len(source_roots):
+        raise GraphQualityGoldsetError("graph goldset source_roots must be unique")
 
     case_ids: set[str] = set()
     for case in payload["local_resolution_cases"]:
@@ -223,5 +233,6 @@ def evaluate_graph_quality_fixture(
         repo_root,
         run_id="graph-quality-goldset-v1",
         canonical_dump_index_sha256="0" * 64,
+        source_roots=tuple(goldset.get("source_roots", [])),
     )
     return evaluate_graph_quality_document(graph, goldset)

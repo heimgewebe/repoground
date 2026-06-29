@@ -34,6 +34,8 @@ def test_goldset_references_existing_fixture_sources():
 
     for relative_path in sorted(paths):
         assert (fixture_root / relative_path).is_file(), relative_path
+    for source_root in goldset["source_roots"]:
+        assert (fixture_root / source_root).is_dir(), source_root
 
     import_cases = list(goldset["local_resolution_cases"])
     import_cases.extend(
@@ -57,7 +59,13 @@ def test_fixture_python_files_are_not_pytest_collectable():
 def test_goldset_has_nontrivial_packaging_coverage():
     goldset, _ = _load()
 
-    assert goldset["version"] == "1.1"
+    assert goldset["version"] == "1.2"
+    assert goldset["source_roots"] == [
+        "duplicate_case",
+        "namespace_case",
+        "package_case",
+        "src_layout/src",
+    ]
     assert len(goldset["local_resolution_cases"]) >= 7
     assert len(goldset["external_preservation_cases"]) >= 3
     assert len(goldset["layer_cases"]) >= 8
@@ -84,9 +92,9 @@ def test_baseline_is_reproducible():
     assert report["metrics"] == {
         "local_resolution": {
             "total": 7,
-            "hits": 5,
-            "misses": 2,
-            "recall": 0.714286,
+            "hits": 7,
+            "misses": 0,
+            "recall": 1.0,
         },
         "external_preservation": {
             "total": 3,
@@ -115,7 +123,7 @@ def test_baseline_is_reproducible():
     }
 
 
-def test_baseline_exposes_packaging_gaps_without_external_regression():
+def test_declared_roots_resolve_packaging_cases_without_external_regression():
     goldset, fixture_root = _load()
     report = evaluate_graph_quality_fixture(fixture_root, goldset)
 
@@ -124,10 +132,16 @@ def test_baseline_exposes_packaging_gaps_without_external_regression():
         for case in report["cases"]["local_resolution"]
         if not case["found"]
     }
-    assert misses == {
+    assert misses == set()
+    resolved = {
+        case["id"]
+        for case in report["cases"]["local_resolution"]
+        if case["found"]
+    }
+    assert {
         "src-layout-import-root-gap",
         "namespace-import-root-gap",
-    }
+    } <= resolved
     assert all(case["found"] for case in report["cases"]["external_preservation"])
     assert all(case["found"] for case in report["cases"]["layer_assignment"])
     assert all(case["found"] for case in report["cases"]["parse_failure_handling"])
@@ -159,4 +173,14 @@ def test_goldset_rejects_invalid_forbidden_targets(tmp_path):
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(GraphQualityGoldsetError, match="forbidden_targets"):
+        load_graph_quality_goldset(path)
+
+
+def test_goldset_rejects_duplicate_source_roots(tmp_path):
+    payload = json.loads(GOLDSET_PATH.read_text(encoding="utf-8"))
+    payload["source_roots"].append(payload["source_roots"][0])
+    path = tmp_path / "duplicate-source-roots.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(GraphQualityGoldsetError, match="source_roots must be unique"):
         load_graph_quality_goldset(path)

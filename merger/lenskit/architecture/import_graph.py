@@ -3,9 +3,12 @@ Extracts a Python import graph via static AST analysis.
 
 Resolver boundaries (S1 heuristic):
 - This artifact is static evidence and does not represent runtime causality.
-- Local modules are resolved only when a unique repository-relative Python path exists.
+- Local modules are resolved only when a unique repository-relative or explicitly
+  rooted Python path exists.
 - Ambiguous or unavailable module names remain external module strings.
 - Relative imports and repository-root absolute imports are supported.
+- Explicit source roots add module-name candidates; they do not establish runtime
+  ``sys.path`` or precedence.
 - Star imports are not semantically expanded.
 - Layers are inferred from explicit path segments only; unmatched paths remain unknown.
 """
@@ -15,6 +18,7 @@ from __future__ import annotations
 import ast
 import logging
 import os
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -23,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 _SKIP_DIRECTORIES = {"__pycache__", "env", "node_modules", "venv"}
 _INFRA_SEGMENTS = {"infra", "scripts", "tools"}
+
+
+class SourceRootError(ValueError):
+    """An explicit source-root declaration is invalid for the repository snapshot."""
 
 
 class Evidence(TypedDict, total=False):
@@ -102,6 +110,59 @@ def _iter_python_files(repo_root: Path) -> list[Path]:
     return paths
 
 
+def _normalize_source_roots(
+    repo_root: Path,
+    source_roots: Sequence[str],
+) -> tuple[Path, ...]:
+    if not source_roots:
+        return ()
+
+    resolved_repo = repo_root.resolve()
+    if not resolved_repo.is_dir():
+        raise SourceRootError("repository root is not an existing directory")
+
+    normalized: list[Path] = []
+    seen: set[str] = set()
+    for raw_root in source_roots:
+        if not isinstance(raw_root, str) or not raw_root:
+            raise SourceRootError("source root must be a non-empty string")
+        if (
+            raw_root != raw_root.strip()
+            or raw_root.startswith("/")
+            or raw_root.endswith("/")
+            or "\\" in raw_root
+            or "\x00" in raw_root
+            or "//" in raw_root
+        ):
+            raise SourceRootError(
+                f"source root must be a canonical relative POSIX path: {raw_root!r}"
+            )
+        parts = raw_root.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise SourceRootError(
+                f"source root must not contain dot segments: {raw_root!r}"
+            )
+        if raw_root in seen:
+            raise SourceRootError(f"duplicate source root: {raw_root!r}")
+        seen.add(raw_root)
+
+        relative_root = Path(*parts)
+        resolved_root = (resolved_repo / relative_root).resolve()
+        try:
+            resolved_root.relative_to(resolved_repo)
+        except ValueError as exc:
+            raise SourceRootError(
+                f"source root escapes repository: {raw_root!r}"
+            ) from exc
+        if not resolved_root.is_dir():
+            raise SourceRootError(
+                f"source root is not an existing directory: {raw_root!r}"
+            )
+        normalized.append(relative_root)
+
+    return tuple(sorted(normalized, key=lambda item: item.as_posix()))
+
+
 def _module_name_for_path(relative_path: Path) -> str | None:
     module_parts = list(relative_path.with_suffix("").parts)
     if module_parts and module_parts[-1] == "__init__":
@@ -109,20 +170,36 @@ def _module_name_for_path(relative_path: Path) -> str | None:
     return ".".join(module_parts) or None
 
 
+def _module_paths_for_file(
+    relative_path: Path,
+    source_roots: Sequence[Path],
+) -> tuple[Path, ...]:
+    module_paths = {relative_path}
+    for source_root in source_roots:
+        try:
+            module_paths.add(relative_path.relative_to(source_root))
+        except ValueError:
+            continue
+    return tuple(sorted(module_paths, key=lambda item: item.as_posix()))
+
+
 def _build_local_module_index(
     repo_root: Path,
     python_files: list[Path],
+    source_roots: Sequence[Path] = (),
 ) -> dict[str, str]:
-    candidates: dict[str, list[str]] = {}
+    candidates: dict[str, set[str]] = {}
     for file_path in python_files:
         relative_path = file_path.relative_to(repo_root)
-        module_name = _module_name_for_path(relative_path)
-        if module_name is None:
-            continue
-        candidates.setdefault(module_name, []).append(relative_path.as_posix())
+        repository_path = relative_path.as_posix()
+        for module_path in _module_paths_for_file(relative_path, source_roots):
+            module_name = _module_name_for_path(module_path)
+            if module_name is None:
+                continue
+            candidates.setdefault(module_name, set()).add(repository_path)
 
     return {
-        module_name: paths[0]
+        module_name: min(paths)
         for module_name, paths in candidates.items()
         if len(paths) == 1
     }
@@ -241,14 +318,21 @@ def generate_import_graph_document(
     repo_root: Path,
     run_id: str,
     canonical_dump_index_sha256: str,
+    *,
+    source_roots: Sequence[str] = (),
 ) -> GraphDocument:
     """Build a deterministic static Python import graph for ``repo_root``."""
 
     nodes: dict[str, Node] = {}
     edges: list[Edge] = []
     files_parsed = 0
+    normalized_source_roots = _normalize_source_roots(repo_root, source_roots)
     python_files = _iter_python_files(repo_root)
-    module_index = _build_local_module_index(repo_root, python_files)
+    module_index = _build_local_module_index(
+        repo_root,
+        python_files,
+        normalized_source_roots,
+    )
 
     for file_path in python_files:
         relative_path = file_path.relative_to(repo_root).as_posix()
