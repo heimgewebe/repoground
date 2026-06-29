@@ -1,7 +1,13 @@
 {
   "kind": "lenskit.graph_quality_goldset",
-  "version": "1.1",
+  "version": "1.2",
   "fixture_root": "merger/lenskit/tests/fixtures/graph_quality_goldset",
+  "source_roots": [
+    "duplicate_case",
+    "namespace_case",
+    "package_case",
+    "src_layout/src"
+  ],
   "local_resolution_cases": [
     {
       "id": "absolute-from-cli",
