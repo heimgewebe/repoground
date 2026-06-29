@@ -610,6 +610,20 @@
         "Repository-context directory validation remains a consumer obligation.",
         "No runtime import, graph completeness, retrieval benefit or default-ranking claim is established."
       ]
+    },
+    {
+      "id": "TASK-ROADMAP-AGENT-OPERATIONALIZATION-001",
+      "title": "Agent Operationalization Roadmap",
+      "status": "done",
+      "description": "Registers the post-core Agent/Lens/Graph/Retrieval operationalization roadmap. The plan reclassifies already-implemented contract/core/test slices as foundation and orders remaining work around emission, manifest visibility, agent indexing, export-safety wiring, consumer frontdoors, graph reconciliation, guard-relation measurement and retrieval-v2 promotion gates. Docs-only: no producer, schema, CLI or runtime behavior is changed.",
+      "evidence": [
+        "docs/roadmap/lenskit-agent-operationalization-roadmap.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No implementation, producer, schema, CLI, bundle emission or runtime behavior is added by this planning slice."
+      ]
     }
   ]
 }

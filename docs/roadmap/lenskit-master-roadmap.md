@@ -139,6 +139,7 @@ Spätere PRs:
   Review-Goldset folgen vor optionalen Consumption-Contracts, Facets/Cards/Relations
   und deterministischem Retrieval v2. Nächster Umsetzungsslice:
   `TASK-AGENT-FRONTDOOR-001` — Agent Reading Pack v1.1.
+- Post-core Anschlussplanung ist jetzt registriert: `docs/roadmap/lenskit-agent-operationalization-roadmap.md`. Dieser Plan verschiebt die naechsten Schritte von neuen Grundcontracts zu Emission, Manifest-Sichtbarkeit, Agent-Indexierung, Export-Safety-Wiring, Consumer-Frontdoors, Guard-Relation-Messung und Retrieval-v2-Promotion-Gates.
 Gate:
 - Evidence refs validierbar
 - Unsicherheit und Provenance sichtbar
