@@ -66,6 +66,8 @@ Nichtziele: kein Loeschen unklassifizierter lokaler Artefakte, keine Feature-Arb
 
 ### TASK-AGENT-ENTRY-MANIFEST-001 - Agent Entry Manifest Emission
 
+Status: umgesetzt. Der Slice ist als CLI- und Bundle-Emission verdrahtet; die Agent Entry Manifest bleibt navigation_index/derived und self-excluding gegen zirkulaere Hash-Claims.
+
 Ziel: Eine kleine, maschinenlesbare Front Door fuer Agenten schaffen, die vorhandene Agent-, Reading-, Trace-, Export- und Card-Surfaces auffindbar macht.
 
 Erlaubt: CLI `agent-entry manifest`, optionales Bundle-Artefakt, Manifest-Rolle `navigation_index`, Verweise auf vorhandene Contracts und Reports.

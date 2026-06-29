@@ -54,6 +54,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_doc_freshness import register_doc_freshness_commands
     register_doc_freshness_commands(subparsers)
 
+    # Agent entry manifest command
+    from .cmd_agent_entry import register_agent_entry_commands
+    register_agent_entry_commands(subparsers)
+
     # Agent consumption command
     from .cmd_agent_consumption import register_agent_consumption_commands
     register_agent_consumption_commands(subparsers)
@@ -257,6 +261,9 @@ def main(args: Optional[List[str]] = None) -> int:
         else:
             parser.parse_args(["doc-freshness", "--help"])
             return 0
+    elif parsed_args.command == "agent-entry":
+        from .cmd_agent_entry import run_agent_entry
+        return run_agent_entry(parsed_args)
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)

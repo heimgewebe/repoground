@@ -624,6 +624,29 @@
       "missing_evidence": [
         "No implementation, producer, schema, CLI, bundle emission or runtime behavior is added by this planning slice."
       ]
+    },
+    {
+      "id": "TASK-AGENT-ENTRY-MANIFEST-001",
+      "title": "Agent Entry Manifest Emission",
+      "status": "done",
+      "description": "Implements the Agent Entry Manifest as an emitted, bundle-registered, CLI-accessible navigation surface. The existing contract/core model is wired into the CLI and standard bundle pipeline; the artifact is authority=navigation_index, canonicality=derived, risk_class=navigation and self-excludes its own manifest entry to avoid circular sha256 truth claims. No review verdict, answer scoring, truth gate, LLM, embedding or consumer default is introduced.",
+      "evidence": [
+        "merger/lenskit/contracts/agent-entry-manifest.v1.schema.json",
+        "merger/lenskit/contracts/bundle-manifest.v1.schema.json",
+        "merger/lenskit/core/agent_entry_manifest.py",
+        "merger/lenskit/core/constants.py",
+        "merger/lenskit/core/merge.py",
+        "merger/lenskit/cli/cmd_agent_entry.py",
+        "merger/lenskit/cli/main.py",
+        "merger/lenskit/tests/test_agent_entry_manifest.py",
+        "merger/lenskit/tests/test_cli_agent_entry.py",
+        "merger/lenskit/tests/test_bundle_manifest_integration.py",
+        "docs/roadmap/lenskit-agent-operationalization-roadmap.md"
+      ],
+      "missing_evidence": [
+        "Agent Reading Pack v2 indexing remains a separate follow-up.",
+        "No agent adoption, answer correctness, repo understanding, retrieval quality or forensic readiness is established."
+      ]
     }
   ]
 }

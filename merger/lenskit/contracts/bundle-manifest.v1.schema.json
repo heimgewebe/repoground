@@ -124,7 +124,8 @@
               "output_health",
               "citation_map_jsonl",
               "claim_evidence_map_json",
-              "agent_reading_pack"
+              "agent_reading_pack",
+              "agent_entry_manifest"
             ],
             "description": "Machine-readable enum role for this artifact."
           },
@@ -286,7 +287,8 @@
                     "architecture_graph_json",
                     "entrypoints_json",
                     "graph_index_json",
-                    "architecture_summary"
+                    "architecture_summary",
+                    "agent_entry_manifest"
                   ]
                 }
               },
@@ -756,6 +758,64 @@
                 },
                 "risk_class": {
                   "const": "navigation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "agent_entry_manifest"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/json"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "agent-entry-manifest"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
                 }
               }
             }

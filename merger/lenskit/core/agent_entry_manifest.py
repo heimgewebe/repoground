@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import os
+import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Iterator
 
 
@@ -20,6 +25,10 @@ _READ_FIRST_PRIORITY = (
 # V1 agent-entry expected surfaces. Broader bundle inventory roles
 # (chunk indexes, sqlite index, retrieval eval, derived/dump indexes)
 # are surfaced when present but are not reported as unavailable in v1.
+_SELF_ROLE = "agent_entry_manifest"
+_MANIFEST_SUFFIX = ".bundle.manifest.json"
+_OUTPUT_SUFFIX = ".agent_entry_manifest.json"
+
 _EXPECTED_SURFACES = (
     "canonical_md",
     "agent_reading_pack",
@@ -138,6 +147,12 @@ def build_agent_entry_manifest(
             continue
 
         role = _artifact_role(artifact)
+        if role == _SELF_ROLE:
+            # Agent Entry Manifest is intentionally self-excluding. A manifest
+            # cannot truthfully carry its own freshly computed sha256 inside its
+            # own body without a circular hash. Re-runs over final manifests
+            # therefore stay deterministic and do not list a stale self-entry.
+            continue
         path = _artifact_path(artifact)
 
         if role == "canonical_md" and not path:
@@ -240,4 +255,145 @@ def build_agent_entry_manifest(
         "available_surfaces": available_surfaces,
         "unavailable_surfaces": unavailable_surfaces,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _write_bytes_atomic(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            delete=False,
+            dir=str(path.parent),
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+        ) as tmp_file:
+            tmp_file.write(data)
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())
+            tmp_path = Path(tmp_file.name)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path is not None and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
+def _default_output_path(manifest_path: Path) -> Path | None:
+    if manifest_path.name.endswith(_MANIFEST_SUFFIX):
+        stem = manifest_path.name[: -len(_MANIFEST_SUFFIX)]
+        return manifest_path.parent / f"{stem}{_OUTPUT_SUFFIX}"
+    return None
+
+
+def produce_agent_entry_manifest(
+    manifest_path_str: str,
+    output_path_str: str | None = None,
+) -> Dict[str, Any]:
+    """Produce ``<stem>.agent_entry_manifest.json`` from a bundle manifest.
+
+    The produced file is navigation-only. It is deliberately self-excluding:
+    when run over a final manifest that already registers an
+    ``agent_entry_manifest`` artifact, that existing self-entry is skipped in
+    the generated payload to avoid circular hash claims.
+    """
+    manifest_path = Path(manifest_path_str)
+    if not manifest_path.is_absolute():
+        manifest_path = Path.cwd() / manifest_path
+    manifest_path = manifest_path.resolve()
+
+    output_path: Path | None
+    if output_path_str:
+        candidate = Path(output_path_str)
+        output_path = candidate if candidate.is_absolute() else Path.cwd() / candidate
+        output_path = output_path.resolve()
+    else:
+        output_path = _default_output_path(manifest_path)
+
+    if not manifest_path.is_file():
+        return {
+            "status": "fail",
+            "error_kind": "path_read_error",
+            "bundle_manifest_path": str(manifest_path),
+            "output_path": str(output_path) if output_path is not None else None,
+            "errors": [f"Manifest not found or not a file: {manifest_path}"],
+            "warnings": [],
+        }
+    if output_path is None:
+        return {
+            "status": "fail",
+            "error_kind": "output_path_error",
+            "bundle_manifest_path": str(manifest_path),
+            "output_path": None,
+            "errors": [
+                f"Cannot derive output path: manifest filename {manifest_path.name!r} "
+                f"does not end with {_MANIFEST_SUFFIX!r}."
+            ],
+            "warnings": [],
+        }
+    if output_path == manifest_path:
+        return {
+            "status": "fail",
+            "error_kind": "output_path_error",
+            "bundle_manifest_path": str(manifest_path),
+            "output_path": str(output_path),
+            "errors": ["Output path collides with bundle manifest input."],
+            "warnings": [],
+        }
+
+    try:
+        bundle_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return {
+            "status": "fail",
+            "error_kind": "path_read_error",
+            "bundle_manifest_path": str(manifest_path),
+            "output_path": str(output_path),
+            "errors": [f"Cannot load manifest: {exc}"],
+            "warnings": [],
+        }
+
+    try:
+        payload = build_agent_entry_manifest(bundle_manifest)
+    except Exception as exc:
+        return {
+            "status": "fail",
+            "error_kind": "manifest_error",
+            "bundle_manifest_path": str(manifest_path),
+            "output_path": str(output_path),
+            "errors": [str(exc)],
+            "warnings": [],
+        }
+
+    body = json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    try:
+        _write_bytes_atomic(output_path, body)
+    except OSError as exc:
+        return {
+            "status": "fail",
+            "error_kind": "path_write_error",
+            "bundle_manifest_path": str(manifest_path),
+            "output_path": str(output_path),
+            "errors": [f"Cannot write output: {exc}"],
+            "warnings": [],
+        }
+
+    return {
+        "status": "ok",
+        "error_kind": "ok",
+        "bundle_manifest_path": str(manifest_path),
+        "bundle_run_id": payload.get("bundle_run_id"),
+        "output_path": str(output_path),
+        "output_sha256": _sha256_bytes(body),
+        "output_bytes": len(body),
+        "available_surface_count": len(payload.get("available_surfaces", [])),
+        "unavailable_surface_count": len(payload.get("unavailable_surfaces", [])),
+        "errors": [],
+        "warnings": [],
     }

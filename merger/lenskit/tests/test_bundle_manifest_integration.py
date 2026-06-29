@@ -26,6 +26,9 @@ _CLAIM_EVIDENCE_MAP_SCHEMA_PATH = _CONTRACTS_DIR / "claim-evidence-map.v1.schema
 _BUNDLE_SURFACE_VALIDATION_SCHEMA_PATH = (
     _CONTRACTS_DIR / "bundle-surface-validation.v1.schema.json"
 )
+_AGENT_ENTRY_MANIFEST_SCHEMA_PATH = (
+    _CONTRACTS_DIR / "agent-entry-manifest.v1.schema.json"
+)
 _REAL_DOC_FRESHNESS_REGISTRY_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "doc-freshness-registry.yml"
 )
@@ -190,6 +193,18 @@ def test_generate_bundle_manifest_integration(tmp_path):
     assert claim_map_entry["staleness_sensitive"] is True
     assert claim_map_entry["path"].endswith(".claim_evidence_map.json")
 
+    agent_entry = roles_map.get(ArtifactRole.AGENT_ENTRY_MANIFEST.value)
+    assert agent_entry and "contract" in agent_entry
+    assert agent_entry["contract"]["id"] == "agent-entry-manifest"
+    assert agent_entry["contract"]["version"] == "v1"
+    assert agent_entry["interpretation"]["mode"] == "contract"
+    assert agent_entry["authority"] == "navigation_index"
+    assert agent_entry["canonicality"] == "derived"
+    assert agent_entry["risk_class"] == "navigation"
+    assert agent_entry["regenerable"] is True
+    assert agent_entry["staleness_sensitive"] is True
+    assert agent_entry["path"].endswith(".agent_entry_manifest.json")
+
     output_health_entry = roles_map.get(ArtifactRole.OUTPUT_HEALTH.value)
     assert output_health_entry and "contract" not in output_health_entry
     assert output_health_entry["interpretation"]["mode"] == "role_only"
@@ -254,8 +269,13 @@ def test_output_health_broken_range_ref_is_fail_in_repo_near_flow(tmp_path):
     first_chunk = json.loads(lines[0])
     assert isinstance(first_chunk, dict)
     assert isinstance(first_chunk.get("content_range_ref"), dict)
-    first_chunk["content_range_ref"]["file_path"] = "totally_missing_artifact.md"
-    first_chunk["content_range_ref"]["content_sha256"] = "0" * _SHA256_HEX_LENGTH
+    target_range = first_chunk.get("canonical_range") or first_chunk["content_range_ref"]
+    target_range["file_path"] = "totally_missing_artifact.md"
+    target_range["content_sha256"] = "0" * _SHA256_HEX_LENGTH
+    if "canonical_range" in first_chunk:
+        first_chunk["canonical_range"] = target_range
+    else:
+        first_chunk["content_range_ref"] = target_range
     lines[0] = json.dumps(first_chunk, ensure_ascii=False)
     artifacts.chunk_index.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -1604,3 +1624,29 @@ def test_real_dump_surface_validation_sidecar_schema_valid(tmp_path):
         _BUNDLE_SURFACE_VALIDATION_SCHEMA_PATH.read_text(encoding="utf-8")
     )
     jsonschema.validate(instance=report, schema=schema)
+
+def test_agent_entry_manifest_file_exists_and_schema_valid(tmp_path):
+    artifacts, manifest, manifest_dir = _make_minimal_bundle(tmp_path, output_mode="dual")
+
+    assert artifacts.agent_entry_manifest is not None
+    assert artifacts.agent_entry_manifest.exists()
+
+    payload = json.loads(artifacts.agent_entry_manifest.read_text(encoding="utf-8"))
+    schema = json.loads(_AGENT_ENTRY_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=payload, schema=schema)
+
+    entry = _artifact_by_role(manifest, ArtifactRole.AGENT_ENTRY_MANIFEST.value)
+    assert entry is not None
+    assert (manifest_dir / entry["path"]).is_file()
+    assert entry["sha256"] == _sha256_file(artifacts.agent_entry_manifest)
+
+    available_roles = {surface["role"] for surface in payload["available_surfaces"]}
+    assert ArtifactRole.CANONICAL_MD.value in available_roles
+    assert ArtifactRole.AGENT_READING_PACK.value in available_roles
+    assert ArtifactRole.OUTPUT_HEALTH.value in available_roles
+    assert "post_emit_health" in available_roles
+    assert "bundle_surface_validation" in available_roles
+    assert ArtifactRole.AGENT_ENTRY_MANIFEST.value not in available_roles
+    assert payload["authority"] == "navigation_index"
+    assert payload["canonicality"] == "derived"
+    assert "repo_understood" in payload["does_not_establish"]

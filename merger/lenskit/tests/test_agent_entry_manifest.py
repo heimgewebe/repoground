@@ -516,3 +516,49 @@ def test_agent_entry_manifest_ignores_non_string_link_paths(schema):
     unavailable = {surface["role"] for surface in report["unavailable_surfaces"]}
     assert "post_emit_health" in unavailable
     assert "bundle_surface_validation" in unavailable
+
+def test_agent_entry_manifest_excludes_self_artifact(schema):
+    bundle = valid_bundle_fixture()
+    bundle["artifacts"].append(
+        {
+            "role": "agent_entry_manifest",
+            "path": "merge.agent_entry_manifest.json",
+            "sha256": "self-sha",
+            "authority": "navigation_index",
+            "canonicality": "derived",
+            "risk_class": "navigation",
+        }
+    )
+    report = build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+    jsonschema.validate(instance=report, schema=schema)
+    available = {surface["role"] for surface in report["available_surfaces"]}
+    assert "agent_entry_manifest" not in available
+
+
+def test_produce_agent_entry_manifest_writes_default_output(tmp_path, schema):
+    from merger.lenskit.core.agent_entry_manifest import produce_agent_entry_manifest
+
+    manifest_path = tmp_path / "bundle.bundle.manifest.json"
+    manifest_path.write_text(json.dumps(valid_bundle_fixture()), encoding="utf-8")
+
+    report = produce_agent_entry_manifest(str(manifest_path))
+
+    assert report["status"] == "ok"
+    out_path = tmp_path / "bundle.agent_entry_manifest.json"
+    assert Path(report["output_path"]) == out_path
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=payload, schema=schema)
+    assert payload["kind"] == "lenskit.agent_entry_manifest"
+    assert payload["bundle_run_id"] == "run-1"
+
+
+def test_produce_agent_entry_manifest_rejects_manifest_collision(tmp_path):
+    from merger.lenskit.core.agent_entry_manifest import produce_agent_entry_manifest
+
+    manifest_path = tmp_path / "bundle.bundle.manifest.json"
+    manifest_path.write_text(json.dumps(valid_bundle_fixture()), encoding="utf-8")
+
+    report = produce_agent_entry_manifest(str(manifest_path), str(manifest_path))
+
+    assert report["status"] == "fail"
+    assert report["error_kind"] == "output_path_error"

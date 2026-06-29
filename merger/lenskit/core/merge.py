@@ -229,6 +229,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.PR_DELTA_JSON: {"id": "pr-schau-delta", "version": "1.0"},
     ArtifactRole.CITATION_MAP_JSONL: {"id": "citation-map", "version": "v1"},
     ArtifactRole.CLAIM_EVIDENCE_MAP_JSON: {"id": "claim-evidence-map", "version": "v1"},
+    ArtifactRole.AGENT_ENTRY_MANIFEST: {"id": "agent-entry-manifest", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -322,6 +323,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "staleness_sensitive": True,
     },
     ArtifactRole.AGENT_READING_PACK: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.AGENT_ENTRY_MANIFEST: {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
@@ -589,6 +597,7 @@ class MergeArtifacts:
     output_health: Optional[Path] = None
     claim_evidence_map: Optional[Path] = None
     agent_reading_pack: Optional[Path] = None
+    agent_entry_manifest: Optional[Path] = None
     other: List[Path] = None
 
     def __post_init__(self):
@@ -624,6 +633,8 @@ class MergeArtifacts:
             paths.append(self.claim_evidence_map)
         if self.agent_reading_pack and self.agent_reading_pack not in paths:
             paths.append(self.agent_reading_pack)
+        if self.agent_entry_manifest and self.agent_entry_manifest not in paths:
+            paths.append(self.agent_entry_manifest)
         if self.bundle_manifest:
             paths.append(self.bundle_manifest)
 
@@ -6404,6 +6415,7 @@ def write_reports_v2(
     # is emitted for every bundle; the producer adapts to whichever artifacts
     # are present.
     agent_reading_pack_path = None
+    agent_entry_manifest_path = None
     from .agent_reading_pack import produce_agent_reading_pack
 
     pack_report = produce_agent_reading_pack(str(bundle_manifest_path))
@@ -6468,6 +6480,35 @@ def write_reports_v2(
     bundle_manifest["links"] = links
     _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
 
+
+    # Agent Entry Manifest: machine-readable navigation front door.
+    # Produced after surface links are stamped but before the final surface
+    # validation pass, so it can expose post_emit_health and
+    # bundle_surface_validation links while the validator still sees the final
+    # artifact-bearing manifest. The payload is intentionally self-excluding to
+    # avoid a circular sha256 claim.
+    from .agent_entry_manifest import produce_agent_entry_manifest
+
+    if final_canonical_md:
+        entry_report = produce_agent_entry_manifest(str(bundle_manifest_path))
+        if entry_report.get("status") != "ok":
+            raise RuntimeError(
+                "Failed to produce agent_entry_manifest: "
+                + "; ".join(entry_report.get("errors", []) or ["unknown error"])
+            )
+        agent_entry_manifest_path = Path(entry_report["output_path"])
+        out_paths.append(agent_entry_manifest_path)
+        if agent_entry_manifest_path not in other_paths:
+            other_paths.append(agent_entry_manifest_path)
+        _add_artifact(
+            agent_entry_manifest_path,
+            ArtifactRole.AGENT_ENTRY_MANIFEST,
+            "application/json",
+        )
+        artifacts_list.sort(key=lambda a: (a["role"], a["path"]))
+        bundle_manifest["artifacts"] = artifacts_list
+        _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
+
     # ── Phase 2: final surface validation (links now present in manifest) ─────
     # The second pass runs against the link-bearing manifest, enabling
     # surface_links_coherent to resolve. Overwrite the sidecar in-place.
@@ -6521,6 +6562,7 @@ def write_reports_v2(
             output_health=output_health_path,
             claim_evidence_map=claim_evidence_map_path,
             agent_reading_pack=agent_reading_pack_path,
+            agent_entry_manifest=agent_entry_manifest_path,
             other=other_paths
         )
     else:
@@ -6538,5 +6580,6 @@ def write_reports_v2(
             output_health=output_health_path,
             claim_evidence_map=claim_evidence_map_path,
             agent_reading_pack=agent_reading_pack_path,
+            agent_entry_manifest=agent_entry_manifest_path,
             other=other_paths
         )
