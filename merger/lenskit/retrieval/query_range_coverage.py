@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 
-_RANGE_REF_REQUIRED_KEYS = (
+_RANGE_REF_V1_REQUIRED_KEYS = (
     "artifact_role",
     "repo_id",
     "file_path",
@@ -12,6 +12,21 @@ _RANGE_REF_REQUIRED_KEYS = (
     "start_line",
     "end_line",
     "content_sha256",
+)
+
+_RANGE_REF_V2_REQUIRED_KEYS = (
+    "range_ref_version",
+    "artifact_role",
+    "artifact_path",
+    "artifact_byte_start",
+    "artifact_byte_end",
+    "artifact_line_start",
+    "artifact_line_end",
+    "source_file_path",
+    "source_line_start",
+    "source_line_end",
+    "content_sha256",
+    "range_content_sha256",
 )
 
 _DOES_NOT_ESTABLISH = [
@@ -33,8 +48,13 @@ def _is_int_not_bool(value: Any) -> bool:
 def _range_ref_error(ref: Any) -> Optional[str]:
     if not isinstance(ref, dict):
         return "range ref is not an object"
+    if ref.get("range_ref_version") == "2":
+        return _range_ref_v2_error(ref)
+    return _range_ref_v1_error(ref)
 
-    missing = [key for key in _RANGE_REF_REQUIRED_KEYS if key not in ref]
+
+def _range_ref_v1_error(ref: Dict[str, Any]) -> Optional[str]:
+    missing = [key for key in _RANGE_REF_V1_REQUIRED_KEYS if key not in ref]
     if missing:
         return "range ref missing required keys: " + ", ".join(missing)
 
@@ -42,23 +62,85 @@ def _range_ref_error(ref: Any) -> Optional[str]:
         if not isinstance(ref.get(key), str) or not ref.get(key):
             return f"range ref field {key!r} must be a non-empty string"
 
-    for key in ("start_byte", "end_byte", "start_line", "end_line"):
+    return _validate_range_numbers(
+        ref,
+        start_byte_key="start_byte",
+        end_byte_key="end_byte",
+        start_line_key="start_line",
+        end_line_key="end_line",
+    )
+
+
+def _range_ref_v2_error(ref: Dict[str, Any]) -> Optional[str]:
+    missing = [key for key in _RANGE_REF_V2_REQUIRED_KEYS if key not in ref]
+    if missing:
+        return "range ref v2 missing required keys: " + ", ".join(missing)
+
+    for key in (
+        "range_ref_version",
+        "artifact_role",
+        "artifact_path",
+        "source_file_path",
+        "content_sha256",
+        "range_content_sha256",
+    ):
+        if not isinstance(ref.get(key), str) or not ref.get(key):
+            return f"range ref v2 field {key!r} must be a non-empty string"
+
+    return _validate_range_numbers(
+        ref,
+        start_byte_key="artifact_byte_start",
+        end_byte_key="artifact_byte_end",
+        start_line_key="artifact_line_start",
+        end_line_key="artifact_line_end",
+    ) or _validate_range_numbers(
+        ref,
+        start_byte_key="source_line_start",
+        end_byte_key="source_line_end",
+        start_line_key="source_line_start",
+        end_line_key="source_line_end",
+        line_only=True,
+    )
+
+
+def _validate_range_numbers(
+    ref: Dict[str, Any],
+    *,
+    start_byte_key: str,
+    end_byte_key: str,
+    start_line_key: str,
+    end_line_key: str,
+    line_only: bool = False,
+) -> Optional[str]:
+    for key in (start_line_key, end_line_key):
         if not _is_int_not_bool(ref.get(key)):
             return f"range ref field {key!r} must be an integer"
+    if ref[start_line_key] < 1:
+        return f"range ref {start_line_key} must be >= 1"
+    if ref[end_line_key] < ref[start_line_key]:
+        return f"range ref {end_line_key} must be >= {start_line_key}"
 
-    if ref["start_byte"] < 0:
-        return "range ref start_byte must be >= 0"
-    if ref["end_byte"] <= ref["start_byte"]:
-        return "range ref end_byte must be > start_byte"
-    if ref["start_line"] < 1:
-        return "range ref start_line must be >= 1"
-    if ref["end_line"] < ref["start_line"]:
-        return "range ref end_line must be >= start_line"
+    if line_only:
+        return None
 
+    for key in (start_byte_key, end_byte_key):
+        if not _is_int_not_bool(ref.get(key)):
+            return f"range ref field {key!r} must be an integer"
+    if ref[start_byte_key] < 0:
+        return f"range ref {start_byte_key} must be >= 0"
+    if ref[end_byte_key] <= ref[start_byte_key]:
+        return f"range ref {end_byte_key} must be > {start_byte_key}"
     return None
 
 
 def _canonical_range_key(ref: Dict[str, Any]) -> Tuple[str, int, int, str]:
+    if ref.get("range_ref_version") == "2":
+        return (
+            str(ref.get("artifact_path") or ref.get("file_path") or ""),
+            int(ref.get("artifact_byte_start", ref.get("start_byte", -1))),
+            int(ref.get("artifact_byte_end", ref.get("end_byte", -1))),
+            str(ref.get("range_content_sha256") or ref.get("content_sha256") or ""),
+        )
     return (
         str(ref.get("file_path", "")),
         int(ref.get("start_byte", -1)),
