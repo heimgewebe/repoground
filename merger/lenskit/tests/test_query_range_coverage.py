@@ -94,3 +94,53 @@ def test_query_range_coverage_missing_citation_map_is_diagnostic(tmp_path):
     assert 'not found' in report['citation_map']['warnings'][0]
     assert report['total_hits'] == 0
     assert report['coverage']['explicit_range_ref_ratio'] == 0.0
+
+
+def _ref_v2(role='canonical_md', *, artifact_path='merge.md', start_byte=0, end_byte=10):
+    return {
+        'range_ref_version': '2',
+        'artifact_role': role,
+        'repo_id': 'lenskit',
+        'artifact_path': artifact_path,
+        'artifact_byte_start': start_byte,
+        'artifact_byte_end': end_byte,
+        'artifact_line_start': 1,
+        'artifact_line_end': 2,
+        'source_file_path': 'src/example.py',
+        'source_line_start': 3,
+        'source_line_end': 4,
+        'content_sha256': 'b' * 64,
+        'range_content_sha256': 'a' * 64,
+    }
+
+
+def test_query_range_coverage_accepts_v2_canonical_refs_and_citation_candidates(tmp_path):
+    canonical_ref = _ref_v2('canonical_md')
+    citation_map = tmp_path / 'citation_map.jsonl'
+    citation_map.write_text(
+        json.dumps({
+            'citation_id': 'cite-v2',
+            'repo_id': 'lenskit',
+            'chunk_id': 'chunk-v2',
+            'canonical_range': {
+                'file_path': canonical_ref['artifact_path'],
+                'start_byte': canonical_ref['artifact_byte_start'],
+                'end_byte': canonical_ref['artifact_byte_end'],
+                'start_line': canonical_ref['artifact_line_start'],
+                'end_line': canonical_ref['artifact_line_end'],
+                'content_sha256': canonical_ref['range_content_sha256'],
+            },
+        }) + '\n',
+        encoding='utf-8',
+    )
+
+    report = build_query_range_coverage_report(
+        {'results': [{'chunk_id': 'chunk-v2', 'path': 'merge.md', 'range': '1-2', 'range_ref': canonical_ref}]},
+        citation_map_jsonl=citation_map,
+    )
+
+    assert report['per_hit'][0]['status'] == 'canonical_explicit'
+    assert report['counts']['hits_with_explicit_canonical_md_range_ref'] == 1
+    assert report['per_hit'][0]['citation_id_candidates'] == [
+        {'citation_id': 'cite-v2', 'match_reasons': ['chunk_id', 'canonical_range']}
+    ]
