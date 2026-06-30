@@ -390,3 +390,90 @@ def test_cli_validate_trace_missing_shape(tmp_path, capsys):
     ])
     assert rc == 2
     assert "Answer compliance missing required keys" in capsys.readouterr().err
+
+
+def test_cli_preflight_stdout_from_bundle_manifest(tmp_path, capsys):
+    manifest = tmp_path / "bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "artifacts": [
+            {"role": "agent_reading_pack"},
+            {"role": "canonical_md"},
+            {"role": "citation_map_jsonl"},
+            {"role": "claim_evidence_map_json"},
+        ],
+        "links": {
+            "post_emit_health_path": "demo.post_emit_health.json",
+            "bundle_surface_validation_path": "demo.bundle_surface_validation.json",
+        },
+    }), encoding="utf-8")
+
+    rc = main([
+        "agent-consumption", "preflight",
+        "--task-profile", "pr_review",
+        "--bundle-manifest", str(manifest),
+    ])
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["kind"] == "lenskit.agent_consumption_preflight"
+    assert out["status"] == "pass"
+    assert out["required_reading"]["status"] == "pass"
+    assert "post_emit_health" in out["available_roles"]
+    assert "bundle_surface_validation" in out["available_roles"]
+    assert out["agent_consumption_trace"] is None
+    assert set(out["answer_compliance_template"]["declared_artifacts"]) == set(
+        out["required_reading"]["required"] + out["required_reading"]["recommended"]
+    )
+    assert "repo_understood" in out["does_not_establish"]
+
+
+def test_cli_preflight_validates_answer_compliance(tmp_path, capsys):
+    ac_file = tmp_path / "answer-compliance.json"
+    ac_file.write_text(json.dumps({
+        "task_profile": "basic_repo_question",
+        "declared_artifacts": ["agent_reading_pack", "canonical_md", "citation_map_jsonl"],
+        "does_not_establish": DOES_NOT_ESTABLISH,
+    }), encoding="utf-8")
+
+    rc = main([
+        "agent-consumption", "preflight",
+        "--task-profile", "basic_repo_question",
+        "--available-roles", "agent_reading_pack,canonical_md,citation_map_jsonl",
+        "--answer-compliance", str(ac_file),
+    ])
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "pass"
+    assert out["agent_consumption_trace"]["status"] == "pass"
+    assert out["agent_consumption_trace"]["declared_artifacts"] == [
+        "agent_reading_pack", "canonical_md", "citation_map_jsonl"
+    ]
+
+
+def test_cli_preflight_warn_strict_exits_1(tmp_path, capsys):
+    rc = main([
+        "agent-consumption", "preflight",
+        "--task-profile", "basic_repo_question",
+        "--available-roles", "agent_reading_pack,canonical_md",
+        "--strict",
+    ])
+
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "warn"
+    assert out["required_reading"]["missing_recommended"] == ["citation_map_jsonl"]
+
+
+def test_cli_preflight_invalid_manifest_shape(tmp_path, capsys):
+    manifest = tmp_path / "bundle.manifest.json"
+    manifest.write_text(json.dumps({"artifacts": {}}), encoding="utf-8")
+
+    rc = main([
+        "agent-consumption", "preflight",
+        "--task-profile", "basic_repo_question",
+        "--bundle-manifest", str(manifest),
+    ])
+
+    assert rc == 2
+    assert "expected artifacts array" in capsys.readouterr().err

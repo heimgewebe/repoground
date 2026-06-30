@@ -23,6 +23,7 @@ _EXPECTED_PROFILES = {
     "roadmap_status_claim",
     "artifact_surface_review",
     "retrieval_quality_review",
+    "security_export_review",
 }
 _EXPECTED_PROFILE_KEYS = {
     "required",

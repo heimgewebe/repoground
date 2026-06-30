@@ -108,9 +108,11 @@ Nichtziele: keine neuen Relationstypen, keine Retrieval-Nutzung, keine Review-Fi
 
 ### TASK-AGENT-CONSUMPTION-PREFLIGHT-001 - Agent Consumption Preflight
 
+Status: umgesetzt. `agent-consumption preflight` loest Required Reading auf, kann Rollen aus einem Bundle Manifest ableiten, erzeugt eine Answer-Compliance-Vorlage und validiert optional vorhandene Answer Compliance.
+
 Ziel: Required Reading, Consumption Trace und Export-/Card-Surfaces in einem praktischen Vorpruefbefehl zusammenziehen.
 
-Aufgaben: CLI `agent-consumption preflight --task-profile ...`; required/recommended-Artefakte gegen Bundle/Manifest pruefen; Trace-Vorlage erzeugen; negative Semantik pruefen; Exit-Codes analog zu bestehenden Trace-Validierungen.
+Umgesetzt: CLI `agent-consumption preflight --task-profile ...`; required/recommended-Artefakte gegen explizite Rollen oder Bundle Manifest pruefen; Answer-Compliance-Vorlage erzeugen; optional vorhandene Answer Compliance validieren; negative Semantik und Exit-Codes analog zu bestehenden Trace-Validierungen.
 
 Nichtziel: Kein echter Lesebeweis. Ein Agent kann eine Trace falsch ausfuellen; der Contract macht die Abweichung nur maschinenlesbar.
 

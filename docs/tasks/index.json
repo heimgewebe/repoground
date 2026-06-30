@@ -736,6 +736,19 @@
         "Relation Cards are not emitted by this slice.",
         "PR Delta Cards remain diagnostic_signal/diagnostic and do not prove change impact, risk, review completeness, runtime correctness, GitHub PR identity or commit identity."
       ]
+    },
+    {
+      "id": "TASK-AGENT-CONSUMPTION-PREFLIGHT-001",
+      "title": "Agent Consumption Preflight",
+      "status": "done",
+      "description": "Adds agent-consumption preflight CLI.",
+      "evidence": [
+        "merger/lenskit/cli/cmd_agent_consumption.py",
+        "merger/lenskit/tests/test_cli_agent_consumption.py",
+        "docs/architecture/agent-consumption-contract.md",
+        "docs/roadmap/lenskit-agent-operationalization-roadmap.md",
+        "docs/tasks/board.md"
+      ]
     }
   ]
 }

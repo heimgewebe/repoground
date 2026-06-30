@@ -139,7 +139,10 @@ and Agent Consumption Trace validator.
 Commands:
 
 - `agent-consumption required`
+- `agent-consumption preflight`
 - `agent-consumption validate-trace`
+
+`preflight` resolves required reading, can derive available roles from a Bundle Manifest, emits an Answer Compliance template, and optionally validates a supplied Answer Compliance file into an Agent Consumption Trace.
 
 The CLI is a thin execution layer. It does not create an Agent Entry Manifest,
 mutate Bundle Manifest, update Output Health/Post-Emit Health, enforce Export
@@ -172,7 +175,7 @@ Implemented:
 - Core validator
 - strict-mode validation
 - deterministic exit-code policy
-- CLI commands for Required Reading resolution and trace validation
+- CLI commands for Required Reading resolution, preflight, and trace validation
 - focused contract, validator and CLI tests
 
 Deferred:
@@ -184,4 +187,4 @@ Deferred:
 
 The validator performs no I/O, holds no global state, and reuses the existing Required Reading resolution rather than re-deriving it.
 
-`available_roles` is supplied explicitly. When omitted, only required and recommended roles are treated as known, and any other declared role is conservatively warned. The trace does not infer roles from the Bundle Manifest. Bundle-aware CLI integration or Agent Entry Manifest consumption remains deferred, and the `ArtifactRole` enum is not extended here.
+`available_roles` is supplied explicitly. When omitted, only required and recommended roles are treated as known, and any other declared role is conservatively warned. The trace does not infer roles from the Bundle Manifest. The `preflight` CLI can derive roles from a Bundle Manifest as operator convenience, but it still does not mutate or certify the bundle. Agent Entry Manifest consumption remains deferred, and the `ArtifactRole` enum is not extended here.

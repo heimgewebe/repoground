@@ -22,6 +22,19 @@ def register_agent_consumption_commands(subparsers) -> None:
     req_parser.add_argument("--available-roles-file", help="Path to JSON file containing available roles")
     req_parser.add_argument("--out", "--output", dest="out", help="Output path for the result JSON")
 
+    # preflight command
+    pre_parser = subparsers_ac.add_parser(
+        "preflight",
+        help="Resolve required reading and emit an answer-compliance template",
+    )
+    pre_parser.add_argument("--task-profile", required=True, help="Task profile (e.g., pr_review)")
+    pre_parser.add_argument("--available-roles", help="Comma-separated list of available roles")
+    pre_parser.add_argument("--available-roles-file", help="Path to JSON file containing available roles")
+    pre_parser.add_argument("--bundle-manifest", help="Path to a bundle manifest to derive available roles")
+    pre_parser.add_argument("--answer-compliance", help="Optional Answer Compliance JSON to validate")
+    pre_parser.add_argument("--strict", action="store_true", help="Treat 'warn' status as exit code 1")
+    pre_parser.add_argument("--out", "--output", dest="out", help="Output path for the preflight JSON")
+
     # validate-trace command
     val_parser = subparsers_ac.add_parser(
         "validate-trace", help="Compare Required Reading Result with Answer Compliance"
@@ -94,6 +107,32 @@ def _collect_available_roles(csv_value: str | None, roles_file: Path | None) -> 
     return roles
 
 
+def _load_roles_from_bundle_manifest(path: Path | None) -> set[str]:
+    if path is None:
+        return set()
+    data = _read_json_object(path)
+    roles: set[str] = set()
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise AgentConsumptionCliError(
+            f"Invalid bundle manifest {path}: expected artifacts array."
+        )
+    for artifact in artifacts:
+        if isinstance(artifact, dict) and isinstance(artifact.get("role"), str):
+            roles.add(artifact["role"])
+
+    # Some diagnostic sidecars are linked, not registered as artifacts.  Make
+    # them available for required-reading/preflight without pretending they are
+    # bundle artifacts.
+    links = data.get("links") or {}
+    if isinstance(links, dict):
+        if links.get("post_emit_health_path"):
+            roles.add("post_emit_health")
+        if links.get("bundle_surface_validation_path"):
+            roles.add("bundle_surface_validation")
+    return roles
+
+
 def _require_keys(data: dict, keys: set[str], *, label: str) -> None:
     missing = sorted(keys - set(data))
     if missing:
@@ -110,6 +149,103 @@ def _exit_for_status(status: str, *, strict: bool = False) -> int:
     if status in ("fail", "not_applicable"):
         return 1
     return 2
+
+
+def _answer_compliance_template(task_profile: str, artifacts: list[str]) -> dict:
+    from merger.lenskit.core.agent_consumption_validate import DOES_NOT_ESTABLISH
+
+    return {
+        "task_profile": task_profile,
+        "declared_artifacts": sorted(artifacts),
+        "declared_citations": [],
+        "declared_ranges": [],
+        "epistemic_gaps": [],
+        "unread_required_artifacts": [],
+        "unread_recommended_artifacts": [],
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+    }
+
+
+def _preflight_status(required_status: str, trace_status: str | None) -> str:
+    if trace_status is not None:
+        return trace_status
+    return required_status
+
+
+def run_agent_consumption_preflight(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.agent_consumption_validate import validate_agent_consumption
+    from merger.lenskit.core.required_reading import (
+        default_required_reading_protocol,
+        resolve_required_reading,
+    )
+
+    try:
+        roles_file_path = (
+            Path(args.available_roles_file) if args.available_roles_file else None
+        )
+        manifest_path = Path(args.bundle_manifest) if args.bundle_manifest else None
+        available_roles = _collect_available_roles(args.available_roles, roles_file_path)
+        available_roles |= _load_roles_from_bundle_manifest(manifest_path)
+
+        protocol = default_required_reading_protocol()
+        required = resolve_required_reading(
+            protocol, available_roles, args.task_profile
+        )
+
+        template_artifacts = sorted(
+            set(required.get("available_required") or [])
+            | set(required.get("available_recommended") or [])
+        )
+        if not template_artifacts:
+            template_artifacts = sorted(set(required.get("required") or []))
+        template = _answer_compliance_template(args.task_profile, template_artifacts)
+
+        trace = None
+        if args.answer_compliance:
+            ac_data = _read_json_object(Path(args.answer_compliance))
+            _require_keys(
+                ac_data, {"task_profile", "declared_artifacts", "does_not_establish"},
+                label="Answer compliance",
+            )
+            trace = validate_agent_consumption(
+                required, ac_data, available_roles=available_roles
+            )
+
+        status = _preflight_status(
+            required.get("status", "unknown"),
+            trace.get("status") if isinstance(trace, dict) else None,
+        )
+        payload = {
+            "kind": "lenskit.agent_consumption_preflight",
+            "version": "1.0",
+            "task_profile": args.task_profile,
+            "status": status,
+            "available_roles": sorted(available_roles),
+            "required_reading": required,
+            "answer_compliance_template": template,
+            "agent_consumption_trace": trace,
+            "does_not_establish": [
+                "actual_reading_proven",
+                "answer_correct",
+                "repo_understood",
+                "all_relevant_context_used",
+                "claims_true",
+                "test_sufficiency",
+                "regression_absence",
+                "runtime_behavior",
+                "forensic_ready",
+            ],
+        }
+
+        out_path = Path(args.out) if args.out else None
+        _write_json_or_stdout(payload, out_path)
+        return _exit_for_status(status, strict=args.strict)
+    except AgentConsumptionCliError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"Error: unexpected failure: {e}", file=sys.stderr)
+        return 2
 
 
 def run_agent_consumption_required(args: argparse.Namespace) -> int:
@@ -190,6 +326,8 @@ def run_agent_consumption_validate_trace(args: argparse.Namespace) -> int:
 def run_agent_consumption(args: argparse.Namespace) -> int:
     if args.agent_consumption_cmd == "required":
         return run_agent_consumption_required(args)
+    if args.agent_consumption_cmd == "preflight":
+        return run_agent_consumption_preflight(args)
     if args.agent_consumption_cmd == "validate-trace":
         return run_agent_consumption_validate_trace(args)
     return 2
