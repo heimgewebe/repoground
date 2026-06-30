@@ -1037,3 +1037,15 @@ def test_agent_reading_pack_v2_indexes_present_artifacts():
     assert "demo.retrieval_eval.json" in _section(body, "RETRIEVAL_DIAGNOSTICS")
     assert "not content truth" in _section(body, "AGENT_ENTRY_MANIFEST")
     assert "do not prove impact" in _section(body, "RELATION_CARD_INDEX")
+
+
+def test_agent_reading_pack_export_safety_section_names_report_fields(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    report = produce_agent_reading_pack(str(manifest))
+    assert report["status"] == "ok"
+    body = Path(report["output_path"]).read_text(encoding="utf-8")
+    section = _section(body, "EXPORT_SAFETY_REPORT")
+    assert "`profile`" in section
+    assert "`redaction_required`" in section
+    assert "`redaction_observed`" in section
+    assert "secret absence" in section

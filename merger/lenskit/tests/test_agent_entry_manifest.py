@@ -562,3 +562,27 @@ def test_produce_agent_entry_manifest_rejects_manifest_collision(tmp_path):
 
     assert report["status"] == "fail"
     assert report["error_kind"] == "output_path_error"
+
+
+def test_agent_entry_manifest_includes_linked_export_safety_report(schema):
+    bundle = {
+        "run_id": "run-1",
+        "created_at": "2026-06-18T00:00:00Z",
+        "artifacts": [
+            {
+                "role": "canonical_md",
+                "path": "merge.md",
+                "sha256": "abc",
+                "authority": "canonical_content",
+                "canonicality": "content_source",
+            }
+        ],
+        "links": {"export_safety_report_path": "merge.export_safety_report.json"},
+    }
+    report = build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+    jsonschema.validate(instance=report, schema=schema)
+    surfaces = {surface["role"]: surface for surface in report["available_surfaces"]}
+    assert surfaces["export_safety_report"]["path"] == "merge.export_safety_report.json"
+    assert surfaces["export_safety_report"]["authority"] == "diagnostic_signal"
+    unavailable = {surface["role"] for surface in report["unavailable_surfaces"]}
+    assert "export_safety_report" not in unavailable

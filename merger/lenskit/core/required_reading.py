@@ -80,6 +80,27 @@ _PROFILES: dict[str, dict] = {
         "answer_checklist_required": True,
         "does_not_establish": _DOES_NOT_ESTABLISH,
     },
+    "security_export_review": {
+        "required": (
+            "agent_reading_pack",
+            "canonical_md",
+            "export_safety_report",
+            "post_emit_health",
+        ),
+        "recommended": (
+            "agent_entry_manifest",
+            "bundle_surface_validation",
+            "output_health",
+        ),
+        "insufficient": (
+            "export decision without export_safety_report",
+            "redaction profile claim without post_emit_health",
+            "treating export_safety_report as secret absence",
+        ),
+        "citation_required": True,
+        "answer_checklist_required": True,
+        "does_not_establish": _DOES_NOT_ESTABLISH,
+    },
 }
 
 

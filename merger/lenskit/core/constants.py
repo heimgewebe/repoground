@@ -24,6 +24,7 @@ class ArtifactRole(str, Enum):
     CLAIM_EVIDENCE_MAP_JSON = "claim_evidence_map_json"
     AGENT_READING_PACK = "agent_reading_pack"
     AGENT_ENTRY_MANIFEST = "agent_entry_manifest"
+    EXPORT_SAFETY_REPORT = "export_safety_report"
 
 
 CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY = "claim_evidence_map_absence_reason"

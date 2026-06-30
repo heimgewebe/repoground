@@ -662,6 +662,30 @@
         "No consumer default, retrieval ranking, card emission or export-safety wiring is implemented by this slice.",
         "The emitted pack remains navigation_index/derived and does not prove agent adoption or answer correctness."
       ]
+    },
+    {
+      "id": "TASK-EXPORT-SAFETY-WIRING-001",
+      "title": "Export Safety Report Wiring",
+      "status": "done",
+      "description": "Wires the existing Export Safety Report into agent-facing surfaces: CLI reporting from a bundle manifest, manifest role support, Agent Entry linked-surface visibility, Required Reading security_export_review expectations and Agent Reading Pack export-safety guidance. The report remains diagnostic_signal/diagnostic and does not establish secret absence, PII absence, answer safety, repo understanding or forensic readiness.",
+      "evidence": [
+        "merger/lenskit/core/export_safety_report.py",
+        "merger/lenskit/cli/cmd_export_safety.py",
+        "merger/lenskit/cli/main.py",
+        "merger/lenskit/core/required_reading.py",
+        "merger/lenskit/core/agent_entry_manifest.py",
+        "merger/lenskit/core/agent_reading_pack.py",
+        "merger/lenskit/contracts/bundle-manifest.v1.schema.json",
+        "merger/lenskit/tests/test_cli_export_safety.py",
+        "merger/lenskit/tests/test_export_safety_report.py",
+        "merger/lenskit/tests/test_required_reading_protocol.py",
+        "merger/lenskit/tests/test_agent_entry_manifest.py",
+        "merger/lenskit/tests/test_agent_reading_pack.py"
+      ],
+      "missing_evidence": [
+        "No automatic dump-fail, external secret scanner, PII heuristic or public-share guarantee is introduced.",
+        "No agent adoption, answer correctness, repo understanding or forensic readiness is established."
+      ]
     }
   ]
 }

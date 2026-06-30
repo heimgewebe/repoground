@@ -58,6 +58,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_agent_entry import register_agent_entry_commands
     register_agent_entry_commands(subparsers)
 
+    # Export safety command
+    from .cmd_export_safety import register_export_safety_commands
+    register_export_safety_commands(subparsers)
+
     # Agent consumption command
     from .cmd_agent_consumption import register_agent_consumption_commands
     register_agent_consumption_commands(subparsers)
@@ -264,6 +268,9 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-entry":
         from .cmd_agent_entry import run_agent_entry
         return run_agent_entry(parsed_args)
+    elif parsed_args.command == "export-safety":
+        from .cmd_export_safety import run_export_safety
+        return run_export_safety(parsed_args)
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)

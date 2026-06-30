@@ -496,6 +496,12 @@ def render_agent_reading_pack(model: PackModel) -> str:
         "`sqlite_index`, `canonical_md` | `docs/retrieval/*` | impressionistic retrieval "
         "claims without metrics |"
     )
+    lines.append(
+        "| `security_export_review` | `agent_reading_pack`, `canonical_md`, "
+        "`export_safety_report`, `post_emit_health` | `agent_entry_manifest`, "
+        "`bundle_surface_validation`, `output_health` | export decision without "
+        "export_safety_report; treating export_safety_report as secret absence |"
+    )
     lines.append("")
 
     # ── WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT ───────────────────────────
@@ -592,6 +598,10 @@ def render_agent_reading_pack(model: PackModel) -> str:
         lines.append(
             "- No bundle-registered `export_safety_report` artifact is present in this manifest."
         )
+    lines.append(
+        "- Inspect report fields `profile`, `status`, `redaction_required`, "
+        "`redaction_observed`, `post_emit_health_status`, and `agent_export_gate_status`."
+    )
     lines.append(
         "- Export-safety reports are diagnostic policy checks. They do not prove "
         "secret absence, PII absence, public-share safety, repo understanding or forensic readiness."

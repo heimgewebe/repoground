@@ -230,6 +230,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.CITATION_MAP_JSONL: {"id": "citation-map", "version": "v1"},
     ArtifactRole.CLAIM_EVIDENCE_MAP_JSON: {"id": "claim-evidence-map", "version": "v1"},
     ArtifactRole.AGENT_ENTRY_MANIFEST: {"id": "agent-entry-manifest", "version": "v1"},
+    ArtifactRole.EXPORT_SAFETY_REPORT: {"id": "export-safety-report", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -333,6 +334,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.EXPORT_SAFETY_REPORT: {
+        "authority": "diagnostic_signal",
+        "canonicality": "diagnostic",
+        "risk_class": "diagnostic",
         "regenerable": True,
         "staleness_sensitive": True,
     },

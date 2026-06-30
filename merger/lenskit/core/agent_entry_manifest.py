@@ -113,6 +113,19 @@ def _linked_sidecar_surfaces(bundle_manifest: Dict[str, Any]) -> Iterator[Dict[s
             "recommended_for": [],
         }
 
+    export_safety_path = _str_or_none(links.get("export_safety_report_path"))
+    if export_safety_path:
+        yield {
+            "role": "export_safety_report",
+            "path": export_safety_path,
+            "sha256": None,
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "risk_class": "diagnostic",
+            "required_for": [],
+            "recommended_for": [],
+        }
+
 
 def build_agent_entry_manifest(
     bundle_manifest: Dict[str, Any],

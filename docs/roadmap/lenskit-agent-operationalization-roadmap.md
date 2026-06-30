@@ -88,6 +88,8 @@ Nicht erlaubt: freie Review-Zusammenfassung, Fix-Empfehlung, Impact-Sprache, Aus
 
 ### TASK-EXPORT-SAFETY-WIRING-001 - Export Safety Report Wiring
 
+Status: umgesetzt. Export Safety ist als CLI, Required-Reading-Profil, Agent-Entry-Link und Reading-Pack-Hinweis sichtbar; bleibt diagnostisch und beweist keine Secret-/PII-Abwesenheit.
+
 Ziel: Der vorhandene Export-Safety-Report wird fuer Agenten und Bundle-Consumer sichtbar.
 
 Aufgaben: Export Safety Report im Agent Entry Manifest referenzieren; Export-Profil und Redaction-Status im Agent Reading Pack sichtbar machen; `security_export_review` als Profil mit Export-Safety-Anforderung verdrahten; optionalen CLI-Check fuer Report/Profilstatus ergaenzen.

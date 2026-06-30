@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 _DOES_NOT_ESTABLISH = [
@@ -298,3 +300,111 @@ def build_export_safety_report(
         "errors": errors,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
+
+
+def _load_json_object(path: Path) -> Dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _artifact_by_role(bundle_manifest: Dict[str, Any], role: str) -> Dict[str, Any] | None:
+    artifacts = bundle_manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return None
+    for artifact in artifacts:
+        if isinstance(artifact, dict) and artifact.get("role") == role:
+            return artifact
+    return None
+
+
+def _resolve_bundle_relative(manifest_dir: Path, raw_path: Any) -> Path | None:
+    if not isinstance(raw_path, str) or not raw_path:
+        return None
+    if raw_path.startswith("/") or ".." in raw_path.replace("\\", "/").split("/"):
+        return None
+    return manifest_dir / raw_path
+
+
+def _load_artifact_or_link(
+    bundle_manifest: Dict[str, Any],
+    manifest_dir: Path,
+    *,
+    role: str | None = None,
+    link_key: str | None = None,
+) -> Dict[str, Any] | None:
+    raw_path: Any = None
+    if role is not None:
+        artifact = _artifact_by_role(bundle_manifest, role)
+        if artifact is not None:
+            raw_path = artifact.get("path")
+    if raw_path is None and link_key is not None:
+        links = bundle_manifest.get("links")
+        if isinstance(links, dict):
+            raw_path = links.get(link_key)
+    path = _resolve_bundle_relative(manifest_dir, raw_path)
+    if path is None:
+        return None
+    return _load_json_object(path)
+
+
+def build_export_safety_report_from_bundle_manifest(
+    bundle_manifest_path: str | Path,
+    *,
+    profile: str,
+    agent_facing: Optional[bool] = None,
+    public_facing: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """Build an Export Safety Report from a bundle manifest and adjacent sidecars.
+
+    This adapter is read-only and diagnostic. It does not infer secret absence,
+    public-share safety or forensic readiness.
+    """
+    manifest_path = Path(bundle_manifest_path)
+    manifest_dir = manifest_path.parent
+    bundle_manifest = _load_json_object(manifest_path)
+    if bundle_manifest is None:
+        report = build_export_safety_report(
+            profile=profile,
+            agent_facing=agent_facing,
+            public_facing=public_facing,
+        )
+        report["bundle_manifest_path"] = str(manifest_path)
+        report["adapter_error"] = "bundle_manifest_unreadable_or_invalid"
+        return report
+
+    post_emit_health = _load_artifact_or_link(
+        bundle_manifest,
+        manifest_dir,
+        role="post_emit_health",
+        link_key="post_emit_health_path",
+    )
+    output_health = _load_artifact_or_link(
+        bundle_manifest,
+        manifest_dir,
+        role="output_health",
+    )
+    agent_export_gate = _load_artifact_or_link(
+        bundle_manifest,
+        manifest_dir,
+        role="agent_export_gate",
+        link_key="agent_export_gate_path",
+    )
+
+    report = build_export_safety_report(
+        profile=profile,
+        post_emit_health=post_emit_health,
+        output_health=output_health,
+        agent_export_gate=agent_export_gate,
+        agent_facing=agent_facing,
+        public_facing=public_facing,
+    )
+    report["bundle_manifest_path"] = str(manifest_path)
+    report["input_observed"] = {
+        "post_emit_health": post_emit_health is not None,
+        "output_health": output_health is not None,
+        "agent_export_gate": agent_export_gate is not None,
+    }
+    return report

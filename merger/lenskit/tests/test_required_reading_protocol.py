@@ -288,3 +288,15 @@ def test_schema_invalid_when_does_not_establish_has_duplicates():
 def test_basic_repo_question_does_not_require_citation_by_default():
     protocol = default_required_reading_protocol()
     assert protocol["task_profiles"]["basic_repo_question"]["citation_required"] is False
+
+
+def test_security_export_review_profile_requires_export_safety():
+    protocol = default_required_reading_protocol()
+    result = resolve_required_reading(
+        protocol,
+        {"agent_reading_pack", "canonical_md", "post_emit_health"},
+        "security_export_review",
+    )
+    assert result["status"] == "fail"
+    assert "export_safety_report" in result["missing_required"]
+    assert "treating export_safety_report as secret absence" in result["insufficient"]
