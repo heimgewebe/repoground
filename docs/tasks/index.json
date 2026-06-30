@@ -686,6 +686,19 @@
         "No automatic dump-fail, external secret scanner, PII heuristic or public-share guarantee is introduced.",
         "No agent adoption, answer correctness, repo understanding or forensic readiness is established."
       ]
+    },
+    {
+      "id": "TASK-AGENT-SURFACE-REAL-DUMP-SMOKE-001",
+      "title": "Agent Surface Real Dump Smoke",
+      "status": "done",
+      "description": "Adds a minimal integration smoke for recently added agent-facing bundle surfaces and allows adapter diagnostic fields in the report schema.",
+      "evidence": [
+        "merger/lenskit/tests/test_asrs.py",
+        "merger/lenskit/contracts/export-safety-report.v1.schema.json"
+      ],
+      "missing_evidence": [
+        "This smoke is diagnostic only."
+      ]
     }
   ]
 }

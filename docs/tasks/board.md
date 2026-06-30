@@ -58,3 +58,4 @@
 | TASK-AGENT-READING-PACK-V2-INDEX-001 | Agent Reading Pack v2 Indexes | done | `merger/lenskit/core/agent_reading_pack.py`, `merger/lenskit/tests/test_agent_reading_pack.py` | Reading Pack indexiert Agent-/Card-/Graph-/Retrieval-Surfaces als Navigation; keine Truth-/Review-Claims. |
 
 | TASK-EXPORT-SAFETY-WIRING-001 | Export Safety Report Wiring | done | `merger/lenskit/core/export_safety_report.py`, `merger/lenskit/cli/cmd_export_safety.py`, `merger/lenskit/core/required_reading.py`, `merger/lenskit/core/agent_entry_manifest.py`, `merger/lenskit/core/agent_reading_pack.py` | Export-Safety wird agent-facing sichtbar; diagnostisch, keine Secret-/PII-/Forensic-Garantie. |
+| TASK-AGENT-SURFACE-REAL-DUMP-SMOKE-001 | Agent Surface Real Dump Smoke | done | `merger/lenskit/tests/test_asrs.py` | Minimal integration check. |

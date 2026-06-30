@@ -25,83 +25,200 @@
     "does_not_establish"
   ],
   "properties": {
-    "kind": { "const": "lenskit.export_safety_report" },
-    "version": { "const": "1.0" },
-
-    "profile": { "type": "string" },
-    "profile_known": { "type": "boolean" },
-
-    "agent_facing": { "type": "boolean" },
-    "public_facing": { "type": "boolean" },
-
-    "redaction_required": { "type": "boolean" },
-    "redaction_observed": { "type": ["boolean", "null"] },
+    "kind": {
+      "const": "lenskit.export_safety_report"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "profile": {
+      "type": "string"
+    },
+    "profile_known": {
+      "type": "boolean"
+    },
+    "agent_facing": {
+      "type": "boolean"
+    },
+    "public_facing": {
+      "type": "boolean"
+    },
+    "redaction_required": {
+      "type": "boolean"
+    },
+    "redaction_observed": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "redaction_source": {
-      "type": ["string", "null"],
-      "enum": ["post_emit_health", "output_health", null]
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "post_emit_health",
+        "output_health",
+        null
+      ]
     },
-
-    "post_emit_health_required": { "type": "boolean" },
+    "post_emit_health_required": {
+      "type": "boolean"
+    },
     "post_emit_health_status": {
-      "type": ["string", "null"],
-      "enum": ["pass", "warn", "fail", "error", "missing", "blocked", null]
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "error",
+        "missing",
+        "blocked",
+        null
+      ]
     },
-
-    "agent_export_gate_required": { "type": "boolean" },
+    "agent_export_gate_required": {
+      "type": "boolean"
+    },
     "agent_export_gate_status": {
-      "type": ["string", "null"]
+      "type": [
+        "string",
+        "null"
+      ]
     },
-
     "status": {
       "type": "string",
-      "enum": ["pass", "warn", "fail"]
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
     },
-
     "checks": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "status"],
+        "required": [
+          "name",
+          "status"
+        ],
         "properties": {
-          "name": { "type": "string" },
+          "name": {
+            "type": "string"
+          },
           "status": {
             "type": "string",
-            "enum": ["pass", "warn", "fail", "not_applicable"]
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "not_applicable"
+            ]
           },
-          "detail": { "type": "string" }
+          "detail": {
+            "type": "string"
+          }
         }
       }
     },
-
     "warnings": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
-
     "errors": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
-
     "inputs": {
       "type": "object",
       "additionalProperties": true
     },
-
     "does_not_establish": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "allOf": [
-        { "contains": { "const": "claims_true" } },
-        { "contains": { "const": "answer_safe_without_citations" } },
-        { "contains": { "const": "repo_understood" } },
-        { "contains": { "const": "runtime_correctness" } },
-        { "contains": { "const": "test_sufficiency" } },
-        { "contains": { "const": "regression_absence" } },
-        { "contains": { "const": "forensic_ready" } },
-        { "contains": { "const": "secret_absence" } },
-        { "contains": { "const": "pii_absence" } }
+        {
+          "contains": {
+            "const": "claims_true"
+          }
+        },
+        {
+          "contains": {
+            "const": "answer_safe_without_citations"
+          }
+        },
+        {
+          "contains": {
+            "const": "repo_understood"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime_correctness"
+          }
+        },
+        {
+          "contains": {
+            "const": "test_sufficiency"
+          }
+        },
+        {
+          "contains": {
+            "const": "regression_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "forensic_ready"
+          }
+        },
+        {
+          "contains": {
+            "const": "secret_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "pii_absence"
+          }
+        }
+      ]
+    },
+    "bundle_manifest_path": {
+      "type": "string"
+    },
+    "adapter_error": {
+      "type": "string"
+    },
+    "input_observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "post_emit_health": {
+          "type": "boolean"
+        },
+        "output_health": {
+          "type": "boolean"
+        },
+        "agent_export_gate": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "post_emit_health",
+        "output_health",
+        "agent_export_gate"
       ]
     }
   }
