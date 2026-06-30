@@ -126,9 +126,11 @@ Promotion-Gate: keine zentrale Query-Klasse regressiert; expected-target recall 
 
 ### TASK-QUERY-RANGE-REF-AUDIT-001 - Query Range-Ref Audit
 
+Status: umgesetzt. Beleg: `docs/proofs/query-range-ref-audit-proof.md`.
+
 Ziel: Vor einem neuen Proof-Carrying-Query-Contract pruefen, welche Query-Treffer bereits aufloesbare Range-Refs tragen.
 
-Aufgaben: Query-Result-Schema und Runtime-Ausgabe gegen Range-Ref-Faehigkeit auditieren; Roundtrip gegen `canonical_md` pruefen; Citation-Map-Kompatibilitaet pruefen; nur bei belegter Luecke minimalen Adapter planen.
+Umgesetzt: Query-Result-Schema und Runtime-Ausgabe gegen Range-Ref-Faehigkeit auditiert; vorhandene Roundtrip-/Resolver-Tests gruen; Citation-Map-Kompatibilitaet als indirekte Chunk-/Range-Bruecke bewertet; naechster minimaler Adapter `query-range-coverage report` geplant.
 
 Nichtziele: kein grosser neuer Query-Contract ohne Gap-Beweis, kein Graph-/Symbol-Boost in diesem Slice.
 
