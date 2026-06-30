@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from ..retrieval.query_core import execute_query
+from ..retrieval.query_range_coverage import build_query_range_coverage_report
 from ..retrieval.session import build_agent_query_session
 from ..retrieval.output_projection import project_output
 from .stale_check import check_stale_index
@@ -83,6 +84,17 @@ def run_query(args: argparse.Namespace) -> int:
             context_window_lines=context_window_lines
         )
 
+        range_coverage_requested = (
+            getattr(args, "range_coverage_report", False)
+            or bool(getattr(args, "citation_map", None))
+        )
+        if range_coverage_requested:
+            citation_map = getattr(args, "citation_map", None)
+            result["range_coverage"] = build_query_range_coverage_report(
+                result,
+                citation_map_jsonl=Path(citation_map) if citation_map else None,
+            )
+
         if getattr(args, "trace", False) and "query_trace" in result:
             out_dir_str = getattr(args, "trace_out_dir", None)
             out_dir = Path(out_dir_str) if out_dir_str else Path.cwd()
@@ -137,5 +149,25 @@ def run_query(args: argparse.Namespace) -> int:
             print("-" * 60)
             print("Explain Diagnostics:")
             print(json.dumps(result["explain"], indent=2))
+        if "range_coverage" in result:
+            coverage = result["range_coverage"]
+            counts = coverage["counts"]
+            print("-" * 60)
+            print("Range Coverage:")
+            print(
+                "    total={total} explicit={explicit} canonical={canonical} "
+                "derived={derived} unresolved={unresolved} malformed={malformed}".format(
+                    total=coverage["total_hits"],
+                    explicit=counts["hits_with_explicit_range_ref"],
+                    canonical=counts["hits_with_explicit_canonical_md_range_ref"],
+                    derived=counts["hits_with_derived_range_ref"],
+                    unresolved=counts["unresolved_hits"],
+                    malformed=counts["malformed_hits"],
+                )
+            )
+            if coverage["citation_map"]["warnings"]:
+                print("    citation_map_warnings:")
+                for warning in coverage["citation_map"]["warnings"]:
+                    print(f"    - {warning}")
 
     return 0

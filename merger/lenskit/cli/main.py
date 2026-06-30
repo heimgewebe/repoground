@@ -102,6 +102,8 @@ def main(args: Optional[List[str]] = None) -> int:
     query_parser.add_argument("--context-window-lines", type=int, default=0, help="Number of lines to expand in window mode")
     query_parser.add_argument("--trace", action="store_true", help="Generate query_trace.json and agent_query_session.json (defaults to current directory, override with --trace-out-dir)")
     query_parser.add_argument("--trace-out-dir", help="Output directory for trace and session artifacts")
+    query_parser.add_argument("--range-diagnostics", dest="range_coverage_report", action="store_true", help="Attach per-hit range diagnostics")
+    query_parser.add_argument("--citation-map", help="Optional citation_map_jsonl for citation id candidates")
 
     # Eval command
     eval_parser = subparsers.add_parser("eval", help="Evaluate retrieval quality against Gold Queries")
