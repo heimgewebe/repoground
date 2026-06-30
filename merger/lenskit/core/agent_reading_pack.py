@@ -634,10 +634,10 @@ def render_agent_reading_pack(model: PackModel) -> str:
         lines.append(
             "- No bundle-registered PR Delta Card artifact is present in this manifest."
         )
-        if _artifact_by_role(model, "delta_json") is not None:
-            lines.append(
-                "- `delta_json` is present; it is the source diagnostic surface, not a card index."
-            )
+    if _artifact_by_role(model, "delta_json") is not None:
+        lines.append(
+            "- `delta_json` is present; it is the source diagnostic surface, not a card index."
+        )
     lines.append(
         "- PR Delta Cards, when present, describe file-level navigation deltas only. "
         "They do not prove review findings, breakage, safety or required fixes."

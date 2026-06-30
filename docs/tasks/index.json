@@ -723,7 +723,7 @@
       "id": "TASK-PR-DELTA-CARD-BUNDLE-EMISSION-001",
       "title": "PR Delta Card Bundle Emission",
       "status": "done",
-      "description": "Emits PR Delta Cards v1 as an optional bundle-registered pr_delta_cards_jsonl diagnostic JSONL artifact when a valid pr-schau-delta.v1 source is available. Absent source emits no artifact; invalid source fails before writing the optional card artifact.",
+      "description": "Emits delta_json plus PR Delta Cards v1 for valid pr-schau-delta.v1 input; absent input emits neither artifact.",
       "evidence": [
         "merger/lenskit/core/constants.py",
         "merger/lenskit/core/merge.py",

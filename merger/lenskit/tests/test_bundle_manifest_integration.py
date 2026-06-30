@@ -860,11 +860,31 @@ def test_lens_cards_jsonl_bundle_artifact_is_emitted(tmp_path):
     assert "change_impact" in card["does_not_establish"]
 
 
-def test_pr_delta_cards_jsonl_bundle_artifact_is_emitted_for_valid_source(tmp_path):
+def test_pr_delta_bundle_artifacts_are_emitted_for_valid_source(tmp_path):
+    source_delta = _valid_pr_delta_source()
     artifacts, data, manifest_dir = _make_minimal_bundle(
         tmp_path,
-        delta_meta=_valid_pr_delta_source(),
+        delta_meta=source_delta,
     )
+
+    delta_entry = _artifact_by_role(data, ArtifactRole.PR_DELTA_JSON.value)
+    assert delta_entry is not None
+    assert delta_entry["content_type"] == "application/json"
+    assert delta_entry["contract"] == {"id": "pr-schau-delta", "version": "1.0"}
+    assert delta_entry["interpretation"] == {"mode": "contract"}
+    assert delta_entry["authority"] == "diagnostic_signal"
+    assert delta_entry["canonicality"] == "diagnostic"
+    assert delta_entry["risk_class"] == "diagnostic"
+    assert delta_entry["regenerable"] is True
+    assert delta_entry["staleness_sensitive"] is True
+
+    assert artifacts.delta_json is not None
+    delta_json_path = manifest_dir / delta_entry["path"]
+    assert delta_json_path == artifacts.delta_json
+    assert delta_json_path.exists()
+    assert delta_entry["bytes"] == delta_json_path.stat().st_size
+    assert delta_entry["sha256"] == _sha256_file(delta_json_path)
+    assert json.loads(delta_json_path.read_text(encoding="utf-8")) == source_delta
 
     entry = _artifact_by_role(data, ArtifactRole.PR_DELTA_CARDS_JSONL.value)
     assert entry is not None
@@ -908,23 +928,28 @@ def test_pr_delta_cards_jsonl_bundle_artifact_is_emitted_for_valid_source(tmp_pa
     pack_body = artifacts.agent_reading_pack.read_text(encoding="utf-8")
     assert "## PR_DELTA_CARD_INDEX" in pack_body
     assert pr_delta_cards_path.name in pack_body
+    assert "`delta_json` is present" in pack_body
 
 
-def test_pr_delta_cards_jsonl_absent_when_source_absent(tmp_path):
+def test_pr_delta_artifacts_absent_when_source_absent(tmp_path):
     artifacts, data, manifest_dir = _make_minimal_bundle(tmp_path)
 
+    assert _artifact_by_role(data, ArtifactRole.PR_DELTA_JSON.value) is None
     assert _artifact_by_role(data, ArtifactRole.PR_DELTA_CARDS_JSONL.value) is None
+    assert artifacts.delta_json is None
     assert artifacts.pr_delta_cards is None
+    assert not list(manifest_dir.glob("*.delta.json"))
     assert not list(manifest_dir.glob("*.pr_delta_cards.jsonl"))
 
 
-def test_pr_delta_cards_jsonl_invalid_source_fails_without_artifact(tmp_path):
+def test_pr_delta_artifacts_invalid_source_fails_without_artifact(tmp_path):
     invalid_source = _valid_pr_delta_source()
     invalid_source["summary"]["changed"] = 2
 
     with pytest.raises(SourceValidationError):
         _make_minimal_bundle(tmp_path, delta_meta=invalid_source)
 
+    assert not list((tmp_path / "out").glob("*.delta.json"))
     assert not list((tmp_path / "out").glob("*.pr_delta_cards.jsonl"))
 
 
