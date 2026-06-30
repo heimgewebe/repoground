@@ -1049,3 +1049,13 @@ def test_agent_reading_pack_export_safety_section_names_report_fields(tmp_path):
     assert "`redaction_required`" in section
     assert "`redaction_observed`" in section
     assert "secret absence" in section
+
+
+def test_agent_consumption_contracts_section_mentions_preflight_cli(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    section = _section(body, "AGENT_CONSUMPTION_CONTRACTS")
+
+    assert "agent-consumption preflight" in section
+    assert "--task-profile <profile>" in section
+    assert "actual_reading_proven" in section

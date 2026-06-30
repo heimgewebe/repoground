@@ -580,6 +580,7 @@ def render_agent_reading_pack(model: PackModel) -> str:
         "- CLI: `python3 -m merger.lenskit.cli.main agent-consumption required "
         "--task-profile <profile> ...`"
     )
+    lines.append("- CLI: `python3 -m merger.lenskit.cli.main agent-consumption preflight --task-profile <profile> ...`")
     lines.append(
         "- CLI: `python3 -m merger.lenskit.cli.main agent-consumption validate-trace ...`"
     )
