@@ -11,6 +11,7 @@ from merger.lenskit.core.constants import ArtifactRole
 from merger.lenskit.core.merge import FileInfo, scan_repo, write_reports_v2
 from merger.lenskit.core.output_health import compute_output_health
 from merger.lenskit.core.post_emit_health import compute_post_emit_health
+from merger.lenskit.core.pr_delta_cards import SourceValidationError
 from merger.lenskit.tests._test_constants import make_generator_info
 
 
@@ -29,6 +30,7 @@ _BUNDLE_SURFACE_VALIDATION_SCHEMA_PATH = (
 _AGENT_ENTRY_MANIFEST_SCHEMA_PATH = (
     _CONTRACTS_DIR / "agent-entry-manifest.v1.schema.json"
 )
+_PR_DELTA_CARD_SCHEMA_PATH = _CONTRACTS_DIR / "pr-delta-card.v1.schema.json"
 _REAL_DOC_FRESHNESS_REGISTRY_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "doc-freshness-registry.yml"
 )
@@ -638,7 +640,7 @@ def test_generator_info_none_is_supported_and_hash_is_computed(tmp_path):
     assert re.fullmatch(r"[a-f0-9]{64}", data["generator"]["config_sha256"])
 
 
-def _make_minimal_bundle(tmp_path, *, output_mode: str = "dual"):
+def _make_minimal_bundle(tmp_path, *, output_mode: str = "dual", delta_meta=None):
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     f1 = src_dir / "file1.txt"
@@ -680,12 +682,39 @@ def _make_minimal_bundle(tmp_path, *, output_mode: str = "dual"):
         plan_only=False,
         code_only=False,
         extras=MockExtras(),
+        delta_meta=delta_meta,
         output_mode=output_mode,
         generator_info=make_generator_info(),
     )
     data = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
     manifest_dir = artifacts.bundle_manifest.parent
     return artifacts, data, manifest_dir
+
+
+def _valid_pr_delta_source(*, files=None):
+    if files is None:
+        files = [
+            {
+                "path": "file1.txt",
+                "status": "changed",
+                "size_bytes": 11,
+                "sha256": "0" * _SHA256_HEX_LENGTH,
+                "sha256_status": "ok",
+            }
+        ]
+
+    summary = {"added": 0, "changed": 0, "removed": 0}
+    for item in files:
+        summary[item["status"]] += 1
+
+    return {
+        "kind": "repolens.pr_schau.delta",
+        "version": 1,
+        "repo": "test-repo",
+        "generated_at": "2026-06-21T10:00:00Z",
+        "summary": summary,
+        "files": files,
+    }
 
 
 def test_bundle_manifest_artifact_hashes_match_files(tmp_path):
@@ -829,6 +858,74 @@ def test_lens_cards_jsonl_bundle_artifact_is_emitted(tmp_path):
     assert card["canonicality"] == "derived"
     assert card["path"] == "file1.txt"
     assert "change_impact" in card["does_not_establish"]
+
+
+def test_pr_delta_cards_jsonl_bundle_artifact_is_emitted_for_valid_source(tmp_path):
+    artifacts, data, manifest_dir = _make_minimal_bundle(
+        tmp_path,
+        delta_meta=_valid_pr_delta_source(),
+    )
+
+    entry = _artifact_by_role(data, ArtifactRole.PR_DELTA_CARDS_JSONL.value)
+    assert entry is not None
+    assert entry["content_type"] == "application/x-ndjson"
+    assert entry["contract"] == {"id": "pr-delta-card", "version": "v1"}
+    assert entry["interpretation"] == {"mode": "contract"}
+    assert entry["authority"] == "diagnostic_signal"
+    assert entry["canonicality"] == "diagnostic"
+    assert entry["risk_class"] == "diagnostic"
+    assert entry["regenerable"] is True
+    assert entry["staleness_sensitive"] is True
+
+    assert artifacts.pr_delta_cards is not None
+    pr_delta_cards_path = manifest_dir / entry["path"]
+    assert pr_delta_cards_path == artifacts.pr_delta_cards
+    assert pr_delta_cards_path.exists()
+    assert entry["bytes"] == pr_delta_cards_path.stat().st_size
+    assert entry["sha256"] == _sha256_file(pr_delta_cards_path)
+
+    cards = [
+        json.loads(line)
+        for line in pr_delta_cards_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(cards) == 1
+    card = cards[0]
+    card_schema = json.loads(_PR_DELTA_CARD_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.Draft7Validator(
+        card_schema,
+        format_checker=jsonschema.FormatChecker(),
+    ).validate(card)
+    assert card["kind"] == "lenskit.pr_delta_card"
+    assert card["authority"] == "diagnostic_signal"
+    assert card["canonicality"] == "diagnostic"
+    assert card["delta_context"]["repo"] == "test-repo"
+    assert card["path"] == "file1.txt"
+    assert card["change_status"] == "changed"
+    assert "change_impact" in card["does_not_establish"]
+    assert "github_pull_request_identity" in card["does_not_establish"]
+
+    assert artifacts.agent_reading_pack is not None
+    pack_body = artifacts.agent_reading_pack.read_text(encoding="utf-8")
+    assert "## PR_DELTA_CARD_INDEX" in pack_body
+    assert pr_delta_cards_path.name in pack_body
+
+
+def test_pr_delta_cards_jsonl_absent_when_source_absent(tmp_path):
+    artifacts, data, manifest_dir = _make_minimal_bundle(tmp_path)
+
+    assert _artifact_by_role(data, ArtifactRole.PR_DELTA_CARDS_JSONL.value) is None
+    assert artifacts.pr_delta_cards is None
+    assert not list(manifest_dir.glob("*.pr_delta_cards.jsonl"))
+
+
+def test_pr_delta_cards_jsonl_invalid_source_fails_without_artifact(tmp_path):
+    invalid_source = _valid_pr_delta_source()
+    invalid_source["summary"]["changed"] = 2
+
+    with pytest.raises(SourceValidationError):
+        _make_minimal_bundle(tmp_path, delta_meta=invalid_source)
+
+    assert not list((tmp_path / "out").glob("*.pr_delta_cards.jsonl"))
 
 
 def test_bundle_manifest_canonical_dump_index_sha_matches_dump_index_artifact(tmp_path):
@@ -1065,6 +1162,13 @@ def test_c22_correct_per_role_risk_class_is_valid():
                                                 "interpretation": {"mode": "contract"}}),
         "delta_json":          ("diagnostic",  {"contract": {"id": "x", "version": "v1"},
                                                 "interpretation": {"mode": "contract"}}),
+        "pr_delta_cards_jsonl":("diagnostic",  {"contract": {"id": "pr-delta-card", "version": "v1"},
+                                                "interpretation": {"mode": "contract"},
+                                                "content_type": "application/x-ndjson",
+                                                "authority": "diagnostic_signal",
+                                                "canonicality": "diagnostic",
+                                                "regenerable": True,
+                                                "staleness_sensitive": True}),
         "citation_map_jsonl":  ("navigation",  {"contract": {"id": "citation-map", "version": "v1"},
                                                 "interpretation": {"mode": "contract"},
                                                 "content_type": "application/x-ndjson",
@@ -1101,10 +1205,19 @@ def test_c22_wrong_per_role_risk_class_is_invalid():
             _validate(_artifact(role, risk_class=risk))
 
     # Roles that require contract+interpretation: wrong risk_class still invalid.
-    for role in ("architecture_summary", "delta_json"):
+    for role in ("architecture_summary", "delta_json", "pr_delta_cards_jsonl"):
+        contract_id = "pr-delta-card" if role == "pr_delta_cards_jsonl" else "x"
         artifact = _artifact(role, risk_class="navigation",
-                             contract={"id": "x", "version": "v1"},
+                             contract={"id": contract_id, "version": "v1"},
                              interpretation={"mode": "contract"})
+        if role == "pr_delta_cards_jsonl":
+            artifact.update({
+                "content_type": "application/x-ndjson",
+                "authority": "diagnostic_signal",
+                "canonicality": "diagnostic",
+                "regenerable": True,
+                "staleness_sensitive": True,
+            })
         with pytest.raises(jsonschema.ValidationError):
             _validate(artifact)
 

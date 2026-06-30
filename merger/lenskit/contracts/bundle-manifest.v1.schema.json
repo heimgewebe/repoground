@@ -142,7 +142,8 @@
               "agent_reading_pack",
               "agent_entry_manifest",
               "export_safety_report",
-              "lens_cards_jsonl"
+              "lens_cards_jsonl",
+              "pr_delta_cards_jsonl"
             ],
             "description": "Machine-readable enum role for this artifact."
           },
@@ -306,7 +307,8 @@
                     "graph_index_json",
                     "architecture_summary",
                     "agent_entry_manifest",
-                    "lens_cards_jsonl"
+                    "lens_cards_jsonl",
+                    "pr_delta_cards_jsonl"
                   ]
                 }
               },
@@ -973,6 +975,64 @@
                 },
                 "risk_class": {
                   "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "pr_delta_cards_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/x-ndjson"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "pr-delta-card"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
                 },
                 "regenerable": {
                   "const": true

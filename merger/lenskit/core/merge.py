@@ -232,6 +232,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.AGENT_ENTRY_MANIFEST: {"id": "agent-entry-manifest", "version": "v1"},
     ArtifactRole.EXPORT_SAFETY_REPORT: {"id": "export-safety-report", "version": "v1"},
     ArtifactRole.LENS_CARDS_JSONL: {"id": "lens-card", "version": "v1"},
+    ArtifactRole.PR_DELTA_CARDS_JSONL: {"id": "pr-delta-card", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -349,6 +350,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.PR_DELTA_CARDS_JSONL: {
+        "authority": "diagnostic_signal",
+        "canonicality": "diagnostic",
+        "risk_class": "diagnostic",
         "regenerable": True,
         "staleness_sensitive": True,
     },
@@ -615,6 +623,7 @@ class MergeArtifacts:
     agent_reading_pack: Optional[Path] = None
     agent_entry_manifest: Optional[Path] = None
     lens_cards: Optional[Path] = None
+    pr_delta_cards: Optional[Path] = None
     other: List[Path] = None
 
     def __post_init__(self):
@@ -654,6 +663,8 @@ class MergeArtifacts:
             paths.append(self.agent_entry_manifest)
         if self.lens_cards and self.lens_cards not in paths:
             paths.append(self.lens_cards)
+        if self.pr_delta_cards and self.pr_delta_cards not in paths:
+            paths.append(self.pr_delta_cards)
         if self.bundle_manifest:
             paths.append(self.bundle_manifest)
 
@@ -6260,6 +6271,36 @@ def write_reports_v2(
             "application/x-ndjson",
         )
 
+    def _write_pr_delta_cards_jsonl(base_manifest_path: Path) -> Optional[Path]:
+        """Emit PR Delta Cards v1 when a valid changed-set source is available."""
+        if delta_meta is None:
+            return None
+
+        from .pr_delta_cards import produce_pr_delta_cards
+
+        cards = produce_pr_delta_cards(delta_meta)
+        if not cards:
+            return None
+        out_path = base_manifest_path.with_name(
+            base_manifest_path.name.replace(
+                ".bundle.manifest.json", ".pr_delta_cards.jsonl"
+            )
+        )
+        text = "".join(json.dumps(card, sort_keys=True) + "\n" for card in cards)
+        _write_text_atomic(out_path, text)
+        return out_path
+
+    pr_delta_cards_path = _write_pr_delta_cards_jsonl(bundle_manifest_path)
+    if pr_delta_cards_path is not None:
+        out_paths.append(pr_delta_cards_path)
+        if pr_delta_cards_path not in other_paths:
+            other_paths.append(pr_delta_cards_path)
+        _add_artifact(
+            pr_delta_cards_path,
+            ArtifactRole.PR_DELTA_CARDS_JSONL,
+            "application/x-ndjson",
+        )
+
     # Write output health report BEFORE the bundle manifest is finalized.
     # In this implementation, health checks are anchored to already-materialized primary artifacts
     # (especially dump_index), not to the final bundle manifest entry itself.
@@ -6616,6 +6657,7 @@ def write_reports_v2(
             agent_reading_pack=agent_reading_pack_path,
             agent_entry_manifest=agent_entry_manifest_path,
             lens_cards=lens_cards_path,
+            pr_delta_cards=pr_delta_cards_path,
             other=other_paths
         )
     else:
@@ -6635,5 +6677,6 @@ def write_reports_v2(
             agent_reading_pack=agent_reading_pack_path,
             agent_entry_manifest=agent_entry_manifest_path,
             lens_cards=lens_cards_path,
+            pr_delta_cards=pr_delta_cards_path,
             other=other_paths
         )
