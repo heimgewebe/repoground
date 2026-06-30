@@ -1,6 +1,50 @@
 from typing import Dict, Any, Optional
 import copy
 
+def _build_candidate_surface(range_coverage: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Build a wrapper-safe diagnostic surface for candidate ids.
+
+    This intentionally lives outside the strict context-bundle object. Candidate
+    ids are navigation hints from range diagnostics, not proof that an answer is
+    correct or that the retrieval set is complete.
+    """
+    if not isinstance(range_coverage, dict):
+        return None
+
+    entries = []
+    for hit in range_coverage.get("per_hit", []):
+        if not isinstance(hit, dict):
+            continue
+        candidates = hit.get("citation_id_candidates") or []
+        if not candidates:
+            continue
+        entries.append({
+            "chunk_id": hit.get("chunk_id"),
+            "path": hit.get("path"),
+            "range": hit.get("range"),
+            "range_status": hit.get("status"),
+            "range_ref_kind": hit.get("range_ref_kind"),
+            "citation_id_candidates": copy.deepcopy(candidates),
+        })
+
+    if not entries:
+        return None
+
+    semantics = range_coverage.get("diagnostic_semantics", {})
+    return {
+        "kind": "lenskit.query_candidate_citation_surface",
+        "version": "1.0",
+        "source": "range_coverage",
+        "hits": entries,
+        "does_not_establish": list(semantics.get("does_not_establish", [
+            "truth",
+            "answer_correctness",
+            "retrieval_completeness",
+            "citation_sufficiency",
+        ])),
+    }
+
+
 def project_output(result: Dict[str, Any], output_profile: Optional[str] = None) -> Dict[str, Any]:
     """
     Applies the output profile projection to the query result.
@@ -78,6 +122,11 @@ def project_output(result: Dict[str, Any], output_profile: Optional[str] = None)
 
         if res.get("warnings"):
             wrapper["warnings"] = res["warnings"]
+            needs_wrapper = True
+
+        candidate_surface = _build_candidate_surface(res.get("range_coverage"))
+        if candidate_surface:
+            wrapper["citation_candidates"] = candidate_surface
             needs_wrapper = True
 
         if needs_wrapper:
