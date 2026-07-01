@@ -172,9 +172,9 @@ Default-Promotion nur wenn: besser als Baseline; keine zentrale Kategorie schlec
 
 ## P4 - Backlog
 
-Statusabgleich 2026-07-01: Der Token Budget Report ist umgesetzt. Der additive CheckView-Adapter fuer vorhandene Check-Surfaces ist umgesetzt; ein breiterer Consumer-Adapter bleibt separat.
+Statusabgleich 2026-07-01: Der Token Budget Report ist umgesetzt. Der additive CheckView-Adapter fuer vorhandene Check-Surfaces ist umgesetzt. Die kompakte Kompatibilitaetsprojektion fuer CheckView ist umgesetzt; ein breiterer Consumer-Adapter bleibt separat.
 
-Bewusst spaeter: Symbol Index v1, kompakte Kompatibilitaetsprojektion, breiter Read-only Adapter ohne Mirror.
+Bewusst spaeter: Symbol Index v1, breiter Read-only Adapter ohne Mirror.
 
 Diese Backlog-Punkte duerfen keine neuen Wahrheits-, Review-, Patch- oder Runtime-Claims einfuehren.
 
