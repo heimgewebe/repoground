@@ -17,6 +17,7 @@ silently promoted to status-bearing checks.
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -159,3 +160,38 @@ def check_by_name(report: Mapping[str, Any], name: str) -> CheckView | None:
     once and reuse the returned mapping.
     """
     return checks_by_name(report).get(name)
+
+
+def compact_check_projection(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a compact by-name compatibility projection for ``report["checks"]``.
+
+    The projection is a consumer-side convenience view. It does **not** modify
+    producer shapes, schemas, contracts, or CLI output. It keeps the
+    ``output_health`` mapping shape useful for existing by-name consumers while
+    giving list-shaped check logs the same by-name lookup surface:
+
+    - mapping-shaped checks keep their emitted value, deep-copied;
+    - list-shaped checks become compact ``{"status": ..., "detail": ...,
+      "validation": ...}`` dicts with absent fields omitted;
+    - duplicate names deterministically keep the last emitted entry, matching
+      :func:`checks_by_name`.
+
+    This is not a truth, completeness, runtime, or test-sufficiency signal. It
+    is only a shape bridge for read-only consumers that need a small stable
+    lookup projection.
+    """
+    result: dict[str, Any] = {}
+    for view in iter_check_views(report):
+        if view.container_shape == "mapping":
+            result[view.name] = deepcopy(view.value)
+            continue
+
+        projected: dict[str, Any] = {}
+        if view.status is not None:
+            projected["status"] = view.status
+        if view.detail is not None:
+            projected["detail"] = view.detail
+        if view.validation is not None:
+            projected["validation"] = deepcopy(dict(view.validation))
+        result[view.name] = projected
+    return result

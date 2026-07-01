@@ -828,6 +828,25 @@
       "missing_evidence": [
         "Code behavior unchanged."
       ]
+    },
+    {
+      "id": "TASK-CHECKVIEW-COMPACT-COMPAT-PROJECTION-001",
+      "title": "CheckView Compact Compatibility Projection",
+      "status": "done",
+      "description": "Adds compact_check_projection(report) as an additive read-only by-name projection over existing CheckView surfaces. Mapping-shaped checks keep their emitted values as deep copies; list-shaped checks become compact status/detail/validation dictionaries. No producer shape, schema, contract, CLI, bundle artifact, or existing consumer behavior is changed.",
+      "evidence": [
+        "merger/lenskit/core/check_view.py",
+        "merger/lenskit/tests/test_validation_check_view.py",
+        "docs/proofs/checkview-compact-compat-projection-proof.md",
+        "docs/roadmap/lenskit-agent-operationalization-roadmap.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No broader consumer adapter is implemented.",
+        "Existing consumers are not migrated to the projection.",
+        "The projection does not establish truth, completeness, runtime behavior, test sufficiency, regression absence, repo understanding or forensic readiness."
+      ]
     }
   ]
 }

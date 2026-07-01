@@ -11,6 +11,7 @@ from merger.lenskit.core.bundle_surface_validate import validate_bundle_surface
 from merger.lenskit.core.check_view import (
     check_by_name,
     checks_by_name,
+    compact_check_projection,
     iter_check_views,
 )
 from merger.lenskit.core.output_health import compute_output_health
@@ -310,3 +311,110 @@ def test_list_shape_detail_wins_over_reason():
     cv = check_by_name(report, "x")
     assert cv is not None
     assert cv.detail == "detail text"
+
+
+# ---------------------------------------------------------------------------
+# 7. Compact compatibility projection
+# ---------------------------------------------------------------------------
+
+
+def test_compact_projection_preserves_mapping_values_and_copies_nested():
+    """Mapping-shaped checks keep their values, but nested dicts are copied."""
+    report = {
+        "checks": {
+            "flag": True,
+            "count": 3,
+            "nested": {
+                "status": "pass",
+                "reason": "kept as emitted",
+                "validation": {
+                    "mode": "full_schema",
+                    "engine": "jsonschema",
+                    "reason": "available",
+                },
+            },
+        }
+    }
+
+    projection = compact_check_projection(report)
+
+    assert projection["flag"] is True
+    assert projection["count"] == 3
+    assert projection["nested"]["status"] == "pass"
+    assert projection["nested"]["reason"] == "kept as emitted"
+
+    projection["nested"]["status"] = "mutated"
+    assert report["checks"]["nested"]["status"] == "pass"
+
+
+def test_compact_projection_compacts_list_shape_by_name():
+    """List-shaped check logs get a compact by-name status/detail view."""
+    report = {
+        "checks": [
+            {
+                "name": "manifest_present",
+                "status": "pass",
+                "detail": "manifest exists",
+                "extra": "not mirrored",
+            }
+        ]
+    }
+
+    projection = compact_check_projection(report)
+
+    assert projection == {
+        "manifest_present": {
+            "status": "pass",
+            "detail": "manifest exists",
+        }
+    }
+
+
+def test_compact_projection_list_reason_fallback_and_validation_copy():
+    """The projection uses CheckView's reason fallback and copies validation."""
+    validation = {
+        "mode": "structural_precheck",
+        "engine": "bundle_surface_validate",
+        "reason": "surface_coherence_check",
+    }
+    report = {
+        "checks": [
+            {
+                "name": "claim_evidence_map_surface",
+                "status": "pass",
+                "reason": "present",
+                "validation": validation,
+            }
+        ]
+    }
+
+    projection = compact_check_projection(report)
+
+    assert projection["claim_evidence_map_surface"] == {
+        "status": "pass",
+        "detail": "present",
+        "validation": validation,
+    }
+    projection["claim_evidence_map_surface"]["validation"]["mode"] = "mutated"
+    assert validation["mode"] == "structural_precheck"
+
+
+def test_compact_projection_duplicate_list_names_last_wins():
+    """Duplicate names follow checks_by_name: last emitted entry wins."""
+    report = {
+        "checks": [
+            {"name": "alpha", "status": "fail", "detail": "first"},
+            {"name": "alpha", "status": "pass", "detail": "second"},
+        ]
+    }
+
+    assert compact_check_projection(report) == {
+        "alpha": {"status": "pass", "detail": "second"}
+    }
+
+
+def test_compact_projection_defensive_bad_shapes():
+    """Bad or absent checks surfaces project to an empty mapping."""
+    assert compact_check_projection({}) == {}
+    assert compact_check_projection({"checks": None}) == {}
+    assert compact_check_projection({"checks": "bad"}) == {}
