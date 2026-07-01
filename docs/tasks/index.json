@@ -761,8 +761,27 @@
         "merger/lenskit/tests/test_concept_cards.py"
       ],
       "missing_evidence": [
-        "No automatic bundle emission, manifest role, CLI command or consumer integration is introduced in this slice.",
+        "No CLI command, custom external registry input or consumer integration is introduced in this slice.",
         "Concept Cards remain navigation_index/derived and do not prove truth, completeness, semantic importance, review priority, runtime dependency, causality, security assessment, change impact or regression absence."
+      ]
+    },
+    {
+      "id": "TASK-CONCEPT-CARD-BUNDLE-EMISSION-001",
+      "title": "Concept Card Bundle Emission",
+      "status": "done",
+      "description": "Emits built-in default Concept Cards v1 as a bundle-registered concept_cards_jsonl navigation artifact. This wires the existing Concept Card producer into the standard bundle manifest and Agent Reading Pack index without adding truth, semantic-importance, review-priority, runtime-dependency, causality, security or impact claims.",
+      "evidence": [
+        "merger/lenskit/core/constants.py",
+        "merger/lenskit/core/merge.py",
+        "merger/lenskit/core/agent_reading_pack.py",
+        "merger/lenskit/contracts/bundle-manifest.v1.schema.json",
+        "merger/lenskit/tests/test_bundle_manifest_integration.py",
+        "merger/lenskit/tests/test_agent_reading_pack.py"
+      ],
+      "missing_evidence": [
+        "Custom external Concept Card registries, CLI commands and consumer integration are not introduced by this slice.",
+        "Concept Cards remain navigation_index/derived and do not prove truth, completeness, semantic importance, review priority, runtime dependency, causality, security assessment, change impact or consumer adoption.",
+        "Relation Cards are not emitted by this slice."
       ]
     }
   ]

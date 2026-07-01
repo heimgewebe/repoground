@@ -31,6 +31,7 @@ _AGENT_ENTRY_MANIFEST_SCHEMA_PATH = (
     _CONTRACTS_DIR / "agent-entry-manifest.v1.schema.json"
 )
 _PR_DELTA_CARD_SCHEMA_PATH = _CONTRACTS_DIR / "pr-delta-card.v1.schema.json"
+_CONCEPT_CARD_SCHEMA_PATH = _CONTRACTS_DIR / "concept-card.v1.schema.json"
 _REAL_DOC_FRESHNESS_REGISTRY_PATH = (
     Path(__file__).resolve().parents[3] / "docs" / "doc-freshness-registry.yml"
 )
@@ -860,6 +861,57 @@ def test_lens_cards_jsonl_bundle_artifact_is_emitted(tmp_path):
     assert "change_impact" in card["does_not_establish"]
 
 
+def test_concept_cards_jsonl_bundle_artifact_is_emitted(tmp_path):
+    artifacts, data, manifest_dir = _make_minimal_bundle(tmp_path)
+
+    entry = _artifact_by_role(data, ArtifactRole.CONCEPT_CARDS_JSONL.value)
+    assert entry is not None
+    assert entry["content_type"] == "application/x-ndjson"
+    assert entry["contract"] == {"id": "concept-card", "version": "v1"}
+    assert entry["interpretation"] == {"mode": "contract"}
+    assert entry["authority"] == "navigation_index"
+    assert entry["canonicality"] == "derived"
+    assert entry["risk_class"] == "navigation"
+    assert entry["regenerable"] is True
+    assert entry["staleness_sensitive"] is True
+
+    assert artifacts.concept_cards is not None
+    concept_cards_path = manifest_dir / entry["path"]
+    assert concept_cards_path == artifacts.concept_cards
+    assert concept_cards_path.exists()
+    assert entry["bytes"] == concept_cards_path.stat().st_size
+    assert entry["sha256"] == _sha256_file(concept_cards_path)
+
+    cards = [
+        json.loads(line)
+        for line in concept_cards_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(cards) >= 5
+    card_schema = json.loads(_CONCEPT_CARD_SCHEMA_PATH.read_text(encoding="utf-8"))
+    card_ids = {card["card_id"] for card in cards}
+    assert "concept.canonical-truth" in card_ids
+    assert "concept.citation-range" in card_ids
+    assert "dependency.canonical-to-citation-range" in card_ids
+
+    for card in cards:
+        jsonschema.Draft7Validator(
+            card_schema,
+            format_checker=jsonschema.FormatChecker(),
+        ).validate(card)
+        assert card["kind"] == "lenskit.concept_card"
+        assert card["authority"] == "navigation_index"
+        assert card["canonicality"] == "derived"
+        assert "truth" in card["does_not_establish"]
+        assert "semantic_importance" in card["does_not_establish"]
+        assert "runtime_dependency" in card["does_not_establish"]
+
+    assert artifacts.agent_reading_pack is not None
+    pack_body = artifacts.agent_reading_pack.read_text(encoding="utf-8")
+    assert "## CONCEPT_CARD_INDEX" in pack_body
+    assert concept_cards_path.name in pack_body
+    assert "semantic importance" in pack_body
+
+
 def test_pr_delta_bundle_artifacts_are_emitted_for_valid_source(tmp_path):
     source_delta = _valid_pr_delta_source()
     artifacts, data, manifest_dir = _make_minimal_bundle(
@@ -1187,6 +1239,13 @@ def test_c22_correct_per_role_risk_class_is_valid():
                                                 "interpretation": {"mode": "contract"}}),
         "delta_json":          ("diagnostic",  {"contract": {"id": "x", "version": "v1"},
                                                 "interpretation": {"mode": "contract"}}),
+        "concept_cards_jsonl":("navigation",  {"contract": {"id": "concept-card", "version": "v1"},
+                                                "interpretation": {"mode": "contract"},
+                                                "content_type": "application/x-ndjson",
+                                                "authority": "navigation_index",
+                                                "canonicality": "derived",
+                                                "regenerable": True,
+                                                "staleness_sensitive": True}),
         "pr_delta_cards_jsonl":("diagnostic",  {"contract": {"id": "pr-delta-card", "version": "v1"},
                                                 "interpretation": {"mode": "contract"},
                                                 "content_type": "application/x-ndjson",
@@ -1230,9 +1289,19 @@ def test_c22_wrong_per_role_risk_class_is_invalid():
             _validate(_artifact(role, risk_class=risk))
 
     # Roles that require contract+interpretation: wrong risk_class still invalid.
-    for role in ("architecture_summary", "delta_json", "pr_delta_cards_jsonl"):
-        contract_id = "pr-delta-card" if role == "pr_delta_cards_jsonl" else "x"
-        artifact = _artifact(role, risk_class="navigation",
+    for role in (
+        "architecture_summary",
+        "delta_json",
+        "concept_cards_jsonl",
+        "pr_delta_cards_jsonl",
+    ):
+        if role == "pr_delta_cards_jsonl":
+            contract_id = "pr-delta-card"
+        elif role == "concept_cards_jsonl":
+            contract_id = "concept-card"
+        else:
+            contract_id = "x"
+        artifact = _artifact(role, risk_class="diagnostic" if role == "concept_cards_jsonl" else "navigation",
                              contract={"id": contract_id, "version": "v1"},
                              interpretation={"mode": "contract"})
         if role == "pr_delta_cards_jsonl":
@@ -1240,6 +1309,14 @@ def test_c22_wrong_per_role_risk_class_is_invalid():
                 "content_type": "application/x-ndjson",
                 "authority": "diagnostic_signal",
                 "canonicality": "diagnostic",
+                "regenerable": True,
+                "staleness_sensitive": True,
+            })
+        elif role == "concept_cards_jsonl":
+            artifact.update({
+                "content_type": "application/x-ndjson",
+                "authority": "navigation_index",
+                "canonicality": "derived",
                 "regenerable": True,
                 "staleness_sensitive": True,
             })
@@ -1304,6 +1381,7 @@ _EXPECTED_RISK_CLASS_BY_ROLE = {
     ArtifactRole.CITATION_MAP_JSONL.value: "navigation",
     ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value: "evidence_index",
     ArtifactRole.AGENT_READING_PACK.value: "navigation",
+    ArtifactRole.CONCEPT_CARDS_JSONL.value: "navigation",
 }
 
 _RETRIEVAL_INDEX_ROLES = (

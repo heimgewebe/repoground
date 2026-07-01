@@ -143,6 +143,7 @@
               "agent_entry_manifest",
               "export_safety_report",
               "lens_cards_jsonl",
+              "concept_cards_jsonl",
               "pr_delta_cards_jsonl"
             ],
             "description": "Machine-readable enum role for this artifact."
@@ -308,6 +309,7 @@
                     "architecture_summary",
                     "agent_entry_manifest",
                     "lens_cards_jsonl",
+                    "concept_cards_jsonl",
                     "pr_delta_cards_jsonl"
                   ]
                 }
@@ -1033,6 +1035,64 @@
                 },
                 "risk_class": {
                   "const": "diagnostic"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "concept_cards_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/x-ndjson"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "concept-card"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
                 },
                 "regenerable": {
                   "const": true
