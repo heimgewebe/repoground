@@ -8,6 +8,33 @@ from ..architecture.entrypoints import generate_entrypoints_document
 from ..architecture.import_graph import generate_import_graph_document
 
 
+def _load_source_roots(args: argparse.Namespace) -> tuple[str, ...]:
+    roots: list[str] = []
+    raw_roots = getattr(args, "source_roots", None)
+    if raw_roots:
+        roots.extend(root.strip() for root in raw_roots.split(",") if root.strip())
+
+    source_roots_file = getattr(args, "source_roots_file", None)
+    if source_roots_file:
+        path = Path(source_roots_file).expanduser().resolve()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ValueError(f"failed to read --source-roots-file: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("--source-roots-file must contain a JSON object")
+        if payload.get("kind") != "lenskit.architecture.source_roots":
+            raise ValueError("--source-roots-file has invalid kind")
+        if payload.get("version") != "1.0":
+            raise ValueError("--source-roots-file has invalid version")
+        file_roots = payload.get("roots")
+        if not isinstance(file_roots, list) or not all(isinstance(root, str) for root in file_roots):
+            raise ValueError("--source-roots-file roots must be a string array")
+        roots.extend(file_roots)
+
+    return tuple(roots)
+
+
 def run_architecture_cmd(args: argparse.Namespace) -> int:
     """Execute the architecture CLI command."""
 
@@ -29,7 +56,17 @@ def run_architecture_cmd(args: argparse.Namespace) -> int:
             return 1
         run_id = f"cmd_run_{uuid.uuid4().hex[:8]}"
         canonical_sha256 = "0" * 64
-        doc = generate_import_graph_document(repo_root, run_id, canonical_sha256)
+        try:
+            source_roots = _load_source_roots(args)
+            doc = generate_import_graph_document(
+                repo_root,
+                run_id,
+                canonical_sha256,
+                source_roots=source_roots,
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
         print(json.dumps(doc, indent=2))
         return 0
 

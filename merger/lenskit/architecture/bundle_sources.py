@@ -135,6 +135,7 @@ def ensure_bundle_graph_sources(
     run_id: str,
     canonical_dump_index_sha256: str,
     generated_at: str,
+    source_roots: Sequence[str] | None = None,
 ) -> BundleGraphSources:
     """Create a coherent source pair from the bundle retrieval surface.
 
@@ -179,6 +180,11 @@ def ensure_bundle_graph_sources(
     try:
         repo_root = Path(summary["root"])
         repo_name = str(summary["name"])
+        explicit_source_roots = tuple(
+            source_roots
+            if source_roots is not None
+            else summary.get("source_roots", ())
+        )
         selected_paths = _eligible_python_paths(chunk_index_path, repo_name)
         with tempfile.TemporaryDirectory(prefix="lenskit-graph-sources-") as tmp:
             selected_root = Path(tmp)
@@ -191,6 +197,7 @@ def ensure_bundle_graph_sources(
                 selected_root,
                 run_id,
                 canonical_dump_index_sha256,
+                source_roots=explicit_source_roots,
             )
             entrypoints = generate_entrypoints_document(
                 selected_root,

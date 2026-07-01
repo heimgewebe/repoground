@@ -6,7 +6,7 @@ This is the contract boundary required before the Python import graph may resolv
 
 The schema is `merger/lenskit/contracts/architecture.source_roots.v1.schema.json`. A minimal example is `merger/lenskit/contracts/examples/source_roots_minimal.json`.
 
-This slice defines and tests the declaration only. The graph producer, bundle producer, CLI, ranking, and graph-quality baseline do not consume it yet.
+The declaration is now consumed by the graph producer, the architecture CLI (`--source-roots` / `--source-roots-file`), and the bundle graph-source producer when a single-repo summary supplies `source_roots`. Ranking and default retrieval behavior do not consume it.
 
 ## Shape
 
@@ -34,6 +34,6 @@ Schema validity alone therefore proves neither directory existence nor safe prod
 
 The declaration says only that a caller explicitly supplied additional roots. It does not establish effective runtime `sys.path`, installed-package state, editable-install behavior, build-backend interpretation, runtime import order, or runtime causality.
 
-## Planned consumer tests
+## Consumer tests
 
-A later producer slice must prove that explicit roots resolve the two G4b source-root cases, competing roots remain ambiguous, and absence of a declaration preserves current graph behavior.
+Consumer tests prove that explicit roots resolve source-root import cases, competing roots remain ambiguous, absence of a declaration preserves current graph behavior, the architecture CLI passes roots into import-graph generation, and bundle-bound graph source production consumes `repo_summaries[].source_roots` for single-repo outputs. Invalid declarations fail closed; no directory-name guessing is introduced.

@@ -139,6 +139,8 @@ Nichtziele: kein grosser neuer Query-Contract ohne Gap-Beweis, kein Graph-/Symbo
 ## P2 - Graph und Relations kontrolliert weiterfuehren
 
 ### TASK-GRAPH-SOURCE-ROOTS-RECONCILE-001 - Graph Source Roots Consumer Reconciliation
+Status: umgesetzt. Graph Producer, CLI und Single-Repo-Bundlepfad konsumieren explizite Source Roots; Default-Ranking bleibt unveraendert.
+
 
 Ziel: Nach G4c-2 wird verifiziert, dass der Source-Roots-Consumer sauber in Graph Producer, CLI, Bundle, Degradation und Tests verdrahtet ist.
 

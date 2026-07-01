@@ -155,6 +155,8 @@ def main(args: Optional[List[str]] = None) -> int:
     architecture_group.add_argument("--graph-index", action="store_true", help="Compile graph index from entrypoints and import graph")
     architecture_parser.add_argument("--graph-in", help="Path to architecture.graph.json")
     architecture_parser.add_argument("--entrypoints-in", help="Path to entrypoints.json")
+    architecture_parser.add_argument("--source-roots", help="Comma-separated explicit Python source roots for --import-graph")
+    architecture_parser.add_argument("--source-roots-file", help="Path to architecture.source_roots.v1 JSON for --import-graph")
 
     # Atlas command
     from .cmd_atlas import register_atlas_commands
