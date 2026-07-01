@@ -936,6 +936,23 @@
         "No producer normalization or schema migration is implemented.",
         "No broad migration of output_health consumers is implemented."
       ]
+    },
+    {
+      "id": "TASK-CHECKVIEW-REMAINING-CONSUMER-AUDIT-001",
+      "title": "CheckView Remaining Consumer Audit v1",
+      "status": "done",
+      "description": "Re-audits remaining raw checks readers after the first CheckView consumer migrations. Classifies migrated consumers, deferred runtime readers and adjacent out-of-scope namespaces, recommending post_emit_health as the only plausible next narrow code slice. No runtime consumer is migrated in this audit.",
+      "evidence": [
+        "docs/proofs/checkview-remaining-consumer-audit-v1.md",
+        "merger/lenskit/tests/test_checkview_remaining_consumer_audit_doc.py",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No post_emit_health migration is implemented.",
+        "No parity_state, merge.py, forensic_preflight or smoke-script migration is implemented.",
+        "The audit does not prove any future migration correct."
+      ]
     }
   ]
 }
