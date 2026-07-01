@@ -953,6 +953,24 @@
         "No parity_state, merge.py, forensic_preflight or smoke-script migration is implemented.",
         "The audit does not prove any future migration correct."
       ]
+    },
+    {
+      "id": "TASK-POST-EMIT-HEALTH-CHECKVIEW-BRIDGE-001",
+      "title": "Post-Emit Health CheckView Bridge",
+      "status": "done",
+      "description": "Migrates the post_emit_health output_health bridge to compact_check_projection(report) for mapping-shaped output_health checks while preserving observation-only verdict semantics and not overstating searchable evidence for false, none, missing or non-mapping checks.",
+      "evidence": [
+        "merger/lenskit/core/post_emit_health.py",
+        "merger/lenskit/tests/test_post_emit_health.py",
+        "docs/proofs/post-emit-health-checkview-bridge-proof.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No parity_state migration is implemented.",
+        "No merge.py invariant or forensic_preflight migration is implemented.",
+        "No smoke-script migration is implemented."
+      ]
     }
   ]
 }
