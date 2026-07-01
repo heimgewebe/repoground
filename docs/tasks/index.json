@@ -814,6 +814,20 @@
         "No Card schema deep-validation is introduced in this surface slice; producer and contract tests remain the card-shape authority.",
         "No CLI, consumer integration, retrieval integration, truth, completeness, runtime-dependency, causality, security-assessment or change-impact claim is established."
       ]
+    },
+    {
+      "id": "TASK-BACKLOG-STATUS-RECONCILE-001",
+      "title": "Backlog Status Reconciliation",
+      "status": "done",
+      "description": "Reconciles roadmap backlog status after recent merged work.",
+      "evidence": [
+        "docs/roadmap/lenskit-agent-operationalization-roadmap.md",
+        "docs/tasks/index.json",
+        "docs/tasks/board.md"
+      ],
+      "missing_evidence": [
+        "Code behavior unchanged."
+      ]
     }
   ]
 }
