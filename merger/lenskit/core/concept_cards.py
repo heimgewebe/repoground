@@ -60,6 +60,7 @@ DEFAULT_CONCEPT_CARD_SPECS: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+<<<<<<< HEAD
         "card_type": "concept",
         "card_id": "concept.citation-range",
         "title": "Citation range",
@@ -73,6 +74,8 @@ DEFAULT_CONCEPT_CARD_SPECS: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+=======
+>>>>>>> b9ef24ec (fix: close audit guard gaps)
         "card_type": "dependency",
         "card_id": "dependency.canonical-to-citation-range",
         "title": "Canonical content to citation ranges",
@@ -267,14 +270,20 @@ def produce_concept_card(spec: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def produce_concept_cards(specs: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Produce a sorted, card_id-deduplicated list of Concept Cards."""
+    """Produce sorted cards, deduplicating only identical projections."""
     if isinstance(specs, (Mapping, str, bytes, bytearray, os.PathLike)):
         raise TypeError("specs must be an iterable of mapping specs")
 
     cards_by_id: dict[str, dict[str, Any]] = {}
     for spec in specs:
         card = produce_concept_card(spec)
-        cards_by_id.setdefault(card["card_id"], card)
+        card_id = card["card_id"]
+        previous = cards_by_id.get(card_id)
+        if previous is not None:
+            if previous != card:
+                raise ValueError(f"card_id collision: {card_id!r}")
+            continue
+        cards_by_id[card_id] = card
     return [cards_by_id[card_id] for card_id in sorted(cards_by_id)]
 
 

@@ -48,3 +48,8 @@ atlas_scan_*.md
 # Local Claude/agent runtime state
 .claude/settings.local.json
 .claude/worktrees/
+
+# Root core dumps
+/core
+/core.*
+*.core

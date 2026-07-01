@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import hashlib
 from pathlib import Path
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Tuple
 
 try:
     import jsonschema  # type: ignore
@@ -53,13 +53,24 @@ def _compute_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _load_schema() -> Optional[Dict[str, Any]]:
+def _require_jsonschema() -> Any:
+    if jsonschema is None:
+        _raise("jsonschema dependency unavailable; cannot validate pr-schau bundle")
+    return jsonschema
+
+
+def _load_schema() -> Dict[str, Any]:
     if not SCHEMA_PATH.exists():
-        return None
+        _raise(f"Schema file not found: {SCHEMA_PATH}")
     try:
-        return json.loads(SCHEMA_PATH.read_text("utf-8"))
-    except Exception:
-        return None
+        schema = json.loads(SCHEMA_PATH.read_text("utf-8"))
+    except json.JSONDecodeError as e:
+        _raise(f"Invalid schema JSON in {SCHEMA_PATH}: {e}")
+    except OSError as e:
+        _raise(f"Could not read schema file {SCHEMA_PATH}: {e}")
+    if not isinstance(schema, dict):
+        _raise(f"Schema root must be an object: {SCHEMA_PATH}")
+    return schema
 
 
 def _raise(msg: str) -> None:
@@ -122,14 +133,14 @@ def load_pr_schau_bundle(
             if req not in data:
                 _raise(f"Missing required v1 field: {req}")
 
-    # --- Schema validation (basic/full, if jsonschema + schema present) ---
+    # --- Schema validation (basic/full) ---
     if verify_level in ("basic", "full"):
         schema = _load_schema()
-        if jsonschema and schema:
-            try:
-                jsonschema.validate(instance=data, schema=schema)
-            except Exception as e:
-                _raise(f"Schema validation failed: {e}")
+        validator = _require_jsonschema()
+        try:
+            validator.validate(instance=data, schema=schema)
+        except Exception as e:
+            _raise(f"Schema validation failed: {e}")
 
     # --- Existence and integrity checks ---
     if verify_level in ("basic", "full"):
