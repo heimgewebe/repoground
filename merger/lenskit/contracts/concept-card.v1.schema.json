@@ -1,0 +1,203 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/concept-card.v1.schema.json",
+  "title": "Concept Card (concept-card v1.0)",
+  "description": "A deterministic task-navigation card for concepts, dependency axes, known failure modes and reusable query shapes. Concept Cards are derived navigation indexes. They establish no truth, correctness, completeness, runtime behavior, test sufficiency, regression absence, semantic importance, review priority, change impact, runtime dependency, causality or security assessment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "authority",
+    "canonicality",
+    "card_id",
+    "card_type",
+    "title",
+    "summary",
+    "source_rule",
+    "derivation_type",
+    "navigation_refs",
+    "payload",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": { "const": "lenskit.concept_card" },
+    "version": { "const": "1.0" },
+    "authority": { "const": "navigation_index" },
+    "canonicality": { "const": "derived" },
+    "card_id": { "$ref": "#/definitions/card_id" },
+    "card_type": {
+      "type": "string",
+      "enum": ["concept", "dependency", "failure", "query"]
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-facing description. It must be read as navigation prose, not as proof of repo state."
+    },
+    "source_rule": { "const": "concept_card_registry_v1" },
+    "derivation_type": {
+      "const": "direct",
+      "description": "Concept Card v1 directly projects explicit registry specs; it does not infer hidden semantics."
+    },
+    "navigation_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/navigation_ref" }
+    },
+    "payload": {
+      "type": "object",
+      "description": "Shape is constrained by card_type through allOf clauses below."
+    },
+    "notes": { "type": "string", "minLength": 1 },
+    "does_not_establish": { "$ref": "#/definitions/does_not_establish" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "card_type": { "const": "concept" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["aliases", "related_card_ids"],
+            "properties": {
+              "aliases": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "related_card_ids": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "$ref": "#/definitions/card_id" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "card_type": { "const": "dependency" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["from_card_id", "to_card_id", "relation"],
+            "properties": {
+              "from_card_id": { "$ref": "#/definitions/card_id" },
+              "to_card_id": { "$ref": "#/definitions/card_id" },
+              "relation": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "card_type": { "const": "failure" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["symptoms", "diagnostic_entrypoints"],
+            "properties": {
+              "symptoms": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "diagnostic_entrypoints": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "card_type": { "const": "query" } } },
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["query_patterns"],
+            "properties": {
+              "query_patterns": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "card_id": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 120,
+      "pattern": "^[a-z0-9][a-z0-9._:-]{1,119}$"
+    },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![\\s\\S]*[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029\\uFEFF])(?![\\s\\S]*[\\uD800-\\uDFFF])(?![\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]+$)(?![A-Za-z]:)(?!/)(?![\\s\\S]*//)(?![\\s\\S]*/$)(?![\\s\\S]*\\\\)(?![\\s\\S]*(?:^|/)\\.\\.?(?:/|$))[\\s\\S]+$"
+    },
+    "navigation_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "target"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["repo_path", "artifact_role", "card_id", "query"]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "repo_path" } } },
+          "then": { "properties": { "target": { "$ref": "#/definitions/repo_path" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["artifact_role", "card_id"] } } },
+          "then": { "properties": { "target": { "$ref": "#/definitions/card_id" } } }
+        }
+      ]
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "additionalItems": false,
+      "description": "Fixed canonical negative-semantics tuple: exactly these twelve values in this exact order.",
+      "items": [
+        { "const": "truth" },
+        { "const": "correctness" },
+        { "const": "completeness" },
+        { "const": "runtime_behavior" },
+        { "const": "test_sufficiency" },
+        { "const": "regression_absence" },
+        { "const": "semantic_importance" },
+        { "const": "review_priority" },
+        { "const": "change_impact" },
+        { "const": "runtime_dependency" },
+        { "const": "causality" },
+        { "const": "security_assessment" }
+      ]
+    }
+  }
+}
