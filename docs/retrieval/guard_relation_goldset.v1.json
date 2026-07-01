@@ -1,0 +1,108 @@
+{
+  "kind": "lenskit.guard_relation_goldset",
+  "version": "1.0",
+  "task": "TASK-GUARD-RELATION-GOLDSET-001",
+  "scope": "diagnostic_only",
+  "relation_types": [
+    "tests_by_name",
+    "validates_schema"
+  ],
+  "negative_semantics": [
+    "test_sufficiency",
+    "runtime_correctness",
+    "regression_absence",
+    "review_impact",
+    "schema_runtime_equivalence"
+  ],
+  "decision_policy": {
+    "persist_contract_requires_consumer": true,
+    "minimum_precision_if_consumer_exists": 0.95,
+    "unresolved_candidates_must_be_explained": true
+  },
+  "cases": [
+    {
+      "id": "tbn-accepted-router",
+      "relation_type": "tests_by_name",
+      "candidate_status": "accepted",
+      "expected_status": "accepted",
+      "subject": "merger/lenskit/tests/test_router.py",
+      "object": "merger/lenskit/retrieval/router.py",
+      "evidence": "v1a basename candidate plus manual goldset label"
+    },
+    {
+      "id": "tbn-accepted-range-resolver",
+      "relation_type": "tests_by_name",
+      "candidate_status": "accepted",
+      "expected_status": "accepted",
+      "subject": "merger/lenskit/tests/test_range_resolver.py",
+      "object": "merger/lenskit/core/range_resolver.py",
+      "evidence": "v1a basename candidate plus manual goldset label"
+    },
+    {
+      "id": "tbn-negative-wrong-layer",
+      "relation_type": "tests_by_name",
+      "candidate_status": "accepted",
+      "expected_status": "rejected",
+      "subject": "merger/lenskit/tests/test_router.py",
+      "object": "merger/lenskit/core/router.py",
+      "evidence": "negative control; same basename but wrong package/layer"
+    },
+    {
+      "id": "tbn-unresolved-extractor-schema",
+      "relation_type": "tests_by_name",
+      "candidate_status": "unresolved",
+      "expected_status": "unresolved",
+      "subject": "merger/lenskit/tests/test_extractor_schema.py",
+      "object": null,
+      "evidence": "v1a unresolved-only class"
+    },
+    {
+      "id": "vs-accepted-range-ref-v2",
+      "relation_type": "validates_schema",
+      "candidate_status": "accepted",
+      "expected_status": "accepted",
+      "subject": "merger/lenskit/core/range_resolver.py|resolve_range_ref",
+      "object": "merger/lenskit/contracts/range-ref.v2.schema.json",
+      "evidence": "v1b accepted schema coverage"
+    },
+    {
+      "id": "vs-accepted-relation-graph",
+      "relation_type": "validates_schema",
+      "candidate_status": "accepted",
+      "expected_status": "accepted",
+      "subject": "merger/lenskit/core/relation_cards.py|_validate_source_graph",
+      "object": "merger/lenskit/contracts/architecture.graph.v1.schema.json",
+      "evidence": "v1b manual_source_review accepted schema flow"
+    },
+    {
+      "id": "vs-negative-wrong-schema",
+      "relation_type": "validates_schema",
+      "candidate_status": "accepted",
+      "expected_status": "rejected",
+      "subject": "merger/lenskit/core/relation_card_validate.py|_schema_check",
+      "object": "merger/lenskit/contracts/bundle-manifest.v1.schema.json",
+      "evidence": "negative control; wrong schema target for validator surface"
+    },
+    {
+      "id": "vs-unresolved-external-schema",
+      "relation_type": "validates_schema",
+      "candidate_status": "unresolved",
+      "expected_status": "unresolved",
+      "subject": "external/metarepo schema reference",
+      "object": null,
+      "evidence": "v1b external_unresolved class"
+    }
+  ],
+  "persistence_decision": {
+    "persist_guard_relation_cards": false,
+    "reason": "Goldset remains diagnostic, consumer need is not established, negative controls show relation-specific false-positive risk, and unresolved candidates remain explicit."
+  },
+  "does_not_establish": [
+    "test_sufficiency",
+    "runtime_correctness",
+    "regression_absence",
+    "schema_runtime_equivalence",
+    "review_completeness",
+    "need_for_persistent_guard_relation_cards"
+  ]
+}
