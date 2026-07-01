@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from ..retrieval.query_core import execute_query
+from ..retrieval.review_query import execute_review_query
 from ..retrieval.query_range_coverage import build_query_range_coverage_report
 from ..retrieval.session import build_agent_query_session
 from ..retrieval.output_projection import project_output
@@ -67,22 +68,48 @@ def run_query(args: argparse.Namespace) -> int:
             or context_window_lines > 0
         )
 
-        result = execute_query(
-            index_path=index_path,
-            query_text=args.q,
-            k=args.k,
-            filters=applied_filters,
-            embedding_policy=policy_instance,
-            explain=getattr(args, "explain", False),
-            overmatch_guard=getattr(args, "overmatch_guard", False),
-            graph_index_path=Path(args.graph_index) if getattr(args, "graph_index", None) else None,
-            graph_weights=graph_weights_dict,
-            test_penalty=getattr(args, "test_penalty", 0.75),
-            trace=getattr(args, "trace", False),
-            build_context=build_context,
-            context_mode=context_mode,
-            context_window_lines=context_window_lines
-        )
+        use_review_intent = bool(getattr(args, "review_intent", False))
+        if use_review_intent:
+            blocked_options = []
+            if policy_instance is not None:
+                blocked_options.append("--embedding-policy")
+            if getattr(args, "graph_index", None):
+                blocked_options.append("--graph-index")
+            if getattr(args, "trace", False):
+                blocked_options.append("--trace")
+            if build_context:
+                blocked_options.append("context bundle/output profile options")
+            if blocked_options:
+                joined = ", ".join(blocked_options)
+                print(
+                    "Error: --review-intent does not combine with " + joined,
+                    file=sys.stderr,
+                )
+                return 1
+            result = execute_review_query(
+                index_path=index_path,
+                query_text=args.q,
+                k=args.k,
+                filters=applied_filters,
+                explain=getattr(args, "explain", False),
+            )
+        else:
+            result = execute_query(
+                index_path=index_path,
+                query_text=args.q,
+                k=args.k,
+                filters=applied_filters,
+                embedding_policy=policy_instance,
+                explain=getattr(args, "explain", False),
+                overmatch_guard=getattr(args, "overmatch_guard", False),
+                graph_index_path=Path(args.graph_index) if getattr(args, "graph_index", None) else None,
+                graph_weights=graph_weights_dict,
+                test_penalty=getattr(args, "test_penalty", 0.75),
+                trace=getattr(args, "trace", False),
+                build_context=build_context,
+                context_mode=context_mode,
+                context_window_lines=context_window_lines
+            )
 
         range_coverage_requested = (
             getattr(args, "range_coverage_report", False)

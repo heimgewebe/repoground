@@ -93,6 +93,7 @@ def main(args: Optional[List[str]] = None) -> int:
     query_parser.add_argument("--embedding-policy", help="Path to embedding-policy.v1 JSON policy instance (requests semantic pipeline; currently candidate overfetch only)")
     query_parser.add_argument("--explain", action="store_true", help="Include diagnostic explain block in query results")
     query_parser.add_argument("--overmatch-guard", action="store_true", help="Disable synonym OR-expansion in router")
+    query_parser.add_argument("--review-intent", action="store_true", help="Use opt-in deterministic Review-Intent Router; default query behavior remains unchanged")
     query_parser.add_argument("--graph-index", help="Path to graph_index.json to enable graph-aware reranking")
     query_parser.add_argument("--graph-weights", help='JSON string of graph weights (e.g. \'{"w_bm25": 0.65}\')')
     query_parser.add_argument("--test-penalty", type=float, default=0.75, help="Score penalty multiplier for test files")
