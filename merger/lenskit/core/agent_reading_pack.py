@@ -40,6 +40,7 @@ from .claim_evidence_diagnostics import (
     claim_absence_reason_detail,
     claim_absence_reason_from_manifest,
 )
+from .check_view import compact_check_projection
 from .constants import ArtifactRole
 from .path_security import resolve_secure_path
 
@@ -343,7 +344,8 @@ def compute_top_files(
 
 def summarize_health(health_doc: Dict[str, Any]) -> HealthSummary:
     """Build a HealthSummary from a parsed output_health.json document."""
-    checks = health_doc.get("checks") if isinstance(health_doc.get("checks"), dict) else {}
+    raw_checks = health_doc.get("checks")
+    checks = compact_check_projection(health_doc) if isinstance(raw_checks, dict) else {}
     errors = health_doc.get("errors")
     warnings = health_doc.get("warnings")
     return HealthSummary(

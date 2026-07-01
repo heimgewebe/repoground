@@ -900,6 +900,24 @@
         "No producer normalization or schema migration is implemented.",
         "No secret absence, PII absence, runtime correctness or forensic readiness is established."
       ]
+    },
+    {
+      "id": "TASK-AGENT-READING-PACK-CHECKVIEW-HEALTH-001",
+      "title": "Agent Reading Pack CheckView Health Consumer",
+      "status": "done",
+      "description": "Migrates agent_reading_pack.summarize_health to use compact_check_projection(report) for mapping-shaped output_health checks while preserving existing field semantics and ignoring non-mapping checks shapes. Rendering, artifact emission and JSON contracts remain unchanged.",
+      "evidence": [
+        "merger/lenskit/core/agent_reading_pack.py",
+        "merger/lenskit/tests/test_agent_reading_pack.py",
+        "docs/proofs/agent-reading-pack-checkview-health-proof.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No context_quality migration is implemented.",
+        "No producer normalization or schema migration is implemented.",
+        "No broad migration of output_health consumers is implemented."
+      ]
     }
   ]
 }
