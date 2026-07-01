@@ -45,6 +45,7 @@ Status model (precedence ``fail`` > ``blocked`` > ``warn`` > ``pass``):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import uuid
 from pathlib import Path
@@ -94,6 +95,33 @@ _ENGINE_NAME = "bundle_surface_validate"
 _CLAIM_MAP_ROLE = ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value
 _AGENT_PACK_ROLE = ArtifactRole.AGENT_READING_PACK.value
 _OUTPUT_HEALTH_ROLE = ArtifactRole.OUTPUT_HEALTH.value
+
+_CARD_SURFACE_ROLES = {
+    ArtifactRole.LENS_CARDS_JSONL.value: {
+        "contract": {"id": "lens-card", "version": "v1"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+    },
+    ArtifactRole.CONCEPT_CARDS_JSONL.value: {
+        "contract": {"id": "concept-card", "version": "v1"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+    },
+    ArtifactRole.RELATION_CARDS_JSONL.value: {
+        "contract": {"id": "relation-card", "version": "v1"},
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+    },
+    ArtifactRole.PR_DELTA_CARDS_JSONL.value: {
+        "contract": {"id": "pr-delta-card", "version": "v1"},
+        "authority": "diagnostic_signal",
+        "canonicality": "diagnostic",
+        "risk_class": "diagnostic",
+    },
+}
 
 # Pack markers (see core/agent_reading_pack.py). The surface validator keeps
 # these explicit because it guards the emitted runtime artifact, not merely the
@@ -202,6 +230,168 @@ def _read_pack_text(
         return path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return None
+
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _card_surface_checks(
+    *,
+    by_role: Dict[str, Dict[str, Any]],
+    manifest_dir: Path,
+) -> List[Check]:
+    """Validate optional Card JSONL surfaces when they are present.
+
+    Absence is allowed because Card artifacts are optional/profile-dependent.
+    Presence, however, must be coherent: manifest metadata, file existence,
+    byte/hash accounting and JSONL parseability must all hold.
+    """
+    checks: List[Check] = []
+    present = [role for role in _CARD_SURFACE_ROLES if role in by_role]
+    if not present:
+        return [
+            _surface_check(
+                "card_surface_artifacts",
+                "skipped",
+                "no bundle-registered card artifacts present; optional surface absent",
+            )
+        ]
+
+    problems: List[str] = []
+    parsed_counts: Dict[str, int] = {}
+    for role in present:
+        entry = by_role[role]
+        expected = _CARD_SURFACE_ROLES[role]
+        for key in ("content_type", "authority", "canonicality", "risk_class"):
+            expected_value = (
+                "application/x-ndjson" if key == "content_type" else expected[key]
+            )
+            actual = entry.get(key)
+            if actual != expected_value:
+                problems.append(
+                    f"{role}: {key}={actual!r}, expected {expected_value!r}"
+                )
+        if entry.get("contract") != expected["contract"]:
+            problems.append(
+                f"{role}: contract={entry.get('contract')!r}, "
+                f"expected {expected['contract']!r}"
+            )
+        if entry.get("regenerable") is not True:
+            problems.append(f"{role}: regenerable is not true")
+        if entry.get("staleness_sensitive") is not True:
+            problems.append(f"{role}: staleness_sensitive is not true")
+
+        raw_path = entry.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            problems.append(f"{role}: path missing or invalid")
+            continue
+        try:
+            path = resolve_secure_path(manifest_dir, raw_path)
+        except ValueError as exc:
+            problems.append(f"{role}: path rejected: {exc}")
+            continue
+        if not path.is_file():
+            problems.append(f"{role}: file does not exist at {raw_path}")
+            continue
+        try:
+            size = path.stat().st_size
+            sha = _sha256_file(path)
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            problems.append(f"{role}: file unreadable: {type(exc).__name__}: {exc}")
+            continue
+        if entry.get("bytes") != size:
+            problems.append(
+                f"{role}: bytes={entry.get('bytes')!r}, actual={size}"
+            )
+        if entry.get("sha256") != sha:
+            expected_sha = entry.get("sha256")
+            problems.append(
+                f"{role}: sha256 mismatch manifest={str(expected_sha)[:12]} "
+                f"actual={sha[:12]}"
+            )
+        rows = [line for line in text.splitlines() if line.strip()]
+        if not rows:
+            problems.append(f"{role}: JSONL is empty")
+            continue
+        count = 0
+        for line_no, line in enumerate(rows, start=1):
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError as exc:
+                problems.append(f"{role}: invalid JSONL at line {line_no}: {exc.msg}")
+                break
+            if not isinstance(item, dict):
+                problems.append(f"{role}: JSONL line {line_no} is not an object")
+                break
+            count += 1
+        parsed_counts[role] = count
+
+    if problems:
+        return [
+            _surface_check(
+                "card_surface_artifacts",
+                "fail",
+                "; ".join(problems),
+            )
+        ]
+    detail = ", ".join(f"{role}={parsed_counts[role]}" for role in present)
+    checks.append(
+        _surface_check(
+            "card_surface_artifacts",
+            "pass",
+            "card artifact metadata, files, hashes and JSONL parseability coherent: "
+            + detail,
+        )
+    )
+    return checks
+
+
+def _card_agent_pack_index_check(
+    *,
+    by_role: Dict[str, Dict[str, Any]],
+    pack_present_in_manifest: bool,
+    pack_text: Optional[str],
+) -> Check:
+    present = [role for role in _CARD_SURFACE_ROLES if role in by_role]
+    if not present:
+        return _surface_check(
+            "card_agent_reading_pack_index",
+            "skipped",
+            "no card artifacts present; no card index linkage required",
+        )
+    if not pack_present_in_manifest:
+        return _surface_check(
+            "card_agent_reading_pack_index",
+            "fail",
+            "card artifacts present but agent_reading_pack is not declared",
+        )
+    if pack_text is None:
+        return _surface_check(
+            "card_agent_reading_pack_index",
+            "warn",
+            "card artifacts present but agent_reading_pack is not readable",
+        )
+    missing = [role for role in present if role not in pack_text]
+    if missing:
+        return _surface_check(
+            "card_agent_reading_pack_index",
+            "fail",
+            "agent_reading_pack does not reference present card artifact role(s): "
+            + ", ".join(missing),
+        )
+    return _surface_check(
+        "card_agent_reading_pack_index",
+        "pass",
+        "agent_reading_pack references all present card artifact roles: "
+        + ", ".join(present),
+    )
 
 
 def _pack_front_door_v1_1_surface_check(
@@ -602,6 +792,17 @@ def validate_bundle_surface(
     )
     checks.append(
         _pack_front_door_v1_1_surface_check(
+            pack_present_in_manifest=pack_entry is not None,
+            pack_text=pack_text,
+        )
+    )
+
+
+    # ── card artifact surfaces (optional, strict when present) ───────────────
+    checks.extend(_card_surface_checks(by_role=by_role, manifest_dir=mp.parent))
+    checks.append(
+        _card_agent_pack_index_check(
+            by_role=by_role,
             pack_present_in_manifest=pack_entry is not None,
             pack_text=pack_text,
         )
