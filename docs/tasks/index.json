@@ -749,6 +749,21 @@
         "docs/roadmap/lenskit-agent-operationalization-roadmap.md",
         "docs/tasks/board.md"
       ]
+    },
+    {
+      "id": "TASK-CONCEPT-CARD-V1-001",
+      "title": "Concept Cards v1 Contract/Core/Tests",
+      "status": "done",
+      "description": "Adds Concept Cards v1 as deterministic task-navigation cards for explicit registry specs: concept, dependency, failure and query cards. The producer validates and projects supplied specs only; it does not scan the repository or infer hidden semantics.",
+      "evidence": [
+        "merger/lenskit/contracts/concept-card.v1.schema.json",
+        "merger/lenskit/core/concept_cards.py",
+        "merger/lenskit/tests/test_concept_cards.py"
+      ],
+      "missing_evidence": [
+        "No automatic bundle emission, manifest role, CLI command or consumer integration is introduced in this slice.",
+        "Concept Cards remain navigation_index/derived and do not prove truth, completeness, semantic importance, review priority, runtime dependency, causality, security assessment, change impact or regression absence."
+      ]
     }
   ]
 }
