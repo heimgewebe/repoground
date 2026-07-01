@@ -60,7 +60,6 @@ DEFAULT_CONCEPT_CARD_SPECS: tuple[dict[str, Any], ...] = (
         ],
     },
     {
-<<<<<<< HEAD
         "card_type": "concept",
         "card_id": "concept.citation-range",
         "title": "Citation range",
@@ -74,8 +73,6 @@ DEFAULT_CONCEPT_CARD_SPECS: tuple[dict[str, Any], ...] = (
         ],
     },
     {
-=======
->>>>>>> b9ef24ec (fix: close audit guard gaps)
         "card_type": "dependency",
         "card_id": "dependency.canonical-to-citation-range",
         "title": "Canonical content to citation ranges",

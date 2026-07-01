@@ -107,24 +107,16 @@ def test_default_concept_cards_cover_all_card_types() -> None:
     cards = produce_default_concept_cards()
     assert [card["card_type"] for card in cards] == [
         "concept",
-<<<<<<< HEAD
         "concept",
-=======
->>>>>>> b9ef24ec (fix: close audit guard gaps)
         "dependency",
         "failure",
         "query",
     ]
-<<<<<<< HEAD
     assert len(DEFAULT_CONCEPT_CARD_SPECS) == 5
-=======
-    assert len(DEFAULT_CONCEPT_CARD_SPECS) == 4
->>>>>>> b9ef24ec (fix: close audit guard gaps)
     for card in cards:
         _validate(card)
 
 
-<<<<<<< HEAD
 def test_default_concept_cards_do_not_have_dangling_card_refs() -> None:
     cards = produce_default_concept_cards()
     card_ids = {card["card_id"] for card in cards}
@@ -144,8 +136,6 @@ def test_default_concept_cards_do_not_have_dangling_card_refs() -> None:
     assert referenced_ids <= card_ids
 
 
-=======
->>>>>>> b9ef24ec (fix: close audit guard gaps)
 def test_card_types_are_pinned() -> None:
     assert CARD_TYPES == ("concept", "dependency", "failure", "query")
 
