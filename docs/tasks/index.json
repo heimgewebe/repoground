@@ -865,6 +865,23 @@
         "No producer normalization or schema migration is implemented.",
         "No JSON output or machine-readable report shape is changed."
       ]
+    },
+    {
+      "id": "TASK-CHECKVIEW-CONSUMER-INVENTORY-001",
+      "title": "CheckView Consumer Inventory v1",
+      "status": "done",
+      "description": "Inventories runtime consumers of output_health, post_emit_health and bundle_surface_validation check surfaces after the first CheckView projection consumer. Classifies safe candidates, deferred operational consumers and adjacent out-of-scope check namespaces before further migration. No producer, schema, JSON output or runtime behavior is changed.",
+      "evidence": [
+        "docs/proofs/checkview-consumer-inventory-v1.md",
+        "merger/lenskit/tests/test_checkview_consumer_inventory_doc.py",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No consumer migration is implemented by this inventory slice.",
+        "The inventory does not prove that any future migration is correct.",
+        "Adjacent validator/governance check namespaces remain separate adapter decisions."
+      ]
     }
   ]
 }
