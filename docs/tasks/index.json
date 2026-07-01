@@ -798,6 +798,22 @@
         "Only supported imports/S1/local file-to-file edges are projected.",
         "No CLI command, retrieval integration, default consumer behavior, runtime dependency, causality, security assessment, change impact or agent adoption is established."
       ]
+    },
+    {
+      "id": "TASK-CARD-SURFACE-VALIDATION-001",
+      "title": "Card Surface Validation",
+      "status": "done",
+      "description": "Adds additive bundle-surface validation for optional Card JSONL artifacts. Absent Card artifacts remain allowed; present Card artifacts must have coherent manifest metadata, existing files, matching bytes and sha256, parseable non-empty JSONL, and Agent Reading Pack role visibility. This validates the emitted surface only and does not validate card semantic truth or consumer adoption.",
+      "evidence": [
+        "merger/lenskit/core/bundle_surface_validate.py",
+        "merger/lenskit/tests/test_bundle_surface_validate.py",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No Card schema deep-validation is introduced in this surface slice; producer and contract tests remain the card-shape authority.",
+        "No CLI, consumer integration, retrieval integration, truth, completeness, runtime-dependency, causality, security-assessment or change-impact claim is established."
+      ]
     }
   ]
 }

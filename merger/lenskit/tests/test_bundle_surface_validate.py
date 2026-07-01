@@ -67,8 +67,114 @@ _DUMMY_SHA = "0" * 64
 
 
 
+def _add_card_artifact(
+    manifest_path,
+    *,
+    role=None,
+    content='{"kind":"lenskit.lens_card"}\n',
+    contract=None,
+):
+    role = role or ArtifactRole.LENS_CARDS_JSONL.value
+    contract = contract or {"id": "lens-card", "version": "v1"}
+    card_path = manifest_path.parent / f"x.{role}.jsonl"
+    card_path.write_text(content, encoding="utf-8")
+    data = card_path.read_bytes()
+    doc = json.loads(manifest_path.read_text(encoding="utf-8"))
+    doc["artifacts"].append(
+        {
+            "role": role,
+            "path": card_path.name,
+            "content_type": "application/x-ndjson",
+            "bytes": len(data),
+            "sha256": __import__("hashlib").sha256(data).hexdigest(),
+            "contract": contract,
+            "interpretation": {"mode": "contract"},
+            "authority": "navigation_index",
+            "canonicality": "derived",
+            "risk_class": "navigation",
+            "regenerable": True,
+            "staleness_sensitive": True,
+        }
+    )
+    manifest_path.write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    return card_path
+
+
 def _check(report, name):
     return next(c for c in report["checks"] if c["name"] == name)
+
+
+# ── card artifact surfaces ──────────────────────────────────────────────────
+
+
+def test_card_surface_optional_absence_is_skipped(tmp_path):
+    mp = _make_manifest(tmp_path, claim_present=True)
+
+    report = validate_bundle_surface(mp, require_claim_evidence_map=True)
+
+    assert report["status"] == "pass"
+    assert _check(report, "card_surface_artifacts")["status"] == "skipped"
+    assert _check(report, "card_agent_reading_pack_index")["status"] == "skipped"
+
+
+def test_card_surface_present_artifact_passes(tmp_path):
+    mp = _make_manifest(
+        tmp_path,
+        claim_present=True,
+        pack_text=_PACK_SUMMARY_PRESENT + "\nlens_cards_jsonl\n",
+    )
+    _add_card_artifact(mp)
+
+    report = validate_bundle_surface(mp, require_claim_evidence_map=True)
+
+    assert report["status"] == "pass"
+    assert _check(report, "card_surface_artifacts")["status"] == "pass"
+    assert "lens_cards_jsonl=1" in _check(report, "card_surface_artifacts")["detail"]
+    assert _check(report, "card_agent_reading_pack_index")["status"] == "pass"
+
+
+def test_card_surface_invalid_jsonl_fails(tmp_path):
+    mp = _make_manifest(
+        tmp_path,
+        claim_present=True,
+        pack_text=_PACK_SUMMARY_PRESENT + "\nlens_cards_jsonl\n",
+    )
+    _add_card_artifact(mp, content="{not-json}\n")
+
+    report = validate_bundle_surface(mp, require_claim_evidence_map=True)
+
+    check = _check(report, "card_surface_artifacts")
+    assert report["status"] == "fail"
+    assert check["status"] == "fail"
+    assert "invalid JSONL" in check["detail"]
+
+
+def test_card_surface_wrong_contract_fails(tmp_path):
+    mp = _make_manifest(
+        tmp_path,
+        claim_present=True,
+        pack_text=_PACK_SUMMARY_PRESENT + "\nlens_cards_jsonl\n",
+    )
+    _add_card_artifact(mp, contract={"id": "wrong-card", "version": "v1"})
+
+    report = validate_bundle_surface(mp, require_claim_evidence_map=True)
+
+    check = _check(report, "card_surface_artifacts")
+    assert report["status"] == "fail"
+    assert check["status"] == "fail"
+    assert "contract" in check["detail"]
+
+
+def test_card_surface_pack_missing_present_role_fails(tmp_path):
+    mp = _make_manifest(tmp_path, claim_present=True, pack_text=_PACK_SUMMARY_PRESENT)
+    _add_card_artifact(mp)
+
+    report = validate_bundle_surface(mp, require_claim_evidence_map=True)
+
+    check = _check(report, "card_agent_reading_pack_index")
+    assert report["status"] == "fail"
+    assert check["status"] == "fail"
+    assert "lens_cards_jsonl" in check["detail"]
 
 
 # ── agent-reading-pack v1.1 front door ─────────────────────────────────────
