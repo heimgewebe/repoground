@@ -160,6 +160,8 @@ Nichtziele: keine sofortige Persistenz, kein Testvollstaendigkeitsclaim, kein Re
 
 ### TASK-RETRIEVAL-V2-PROMOTION-GATE-001 - Retrieval v2 Promotion Gate
 
+Status: umgesetzt. Diagnostisches Promotion-Gate vergleicht Legacy-FTS und Review-Intent-Baselines plus optionale Graph-/Range-Health-Berichte; Default-Promotion bleibt auch bei bestandenem Gate eine spaetere explizite Entscheidung.
+
 Ziel: Retrieval v2 wird nicht als Wunschfeature gebaut, sondern als messbare Promotion-Frage behandelt.
 
 Vergleichen: legacy FTS; Review-Intent opt-in; Review-Intent plus frischer Graph, falls vorhanden.
