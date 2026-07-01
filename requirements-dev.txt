@@ -1,5 +1,5 @@
-pytest==8.3.4
-pytest-asyncio==0.23.8
+pytest==9.0.3
+pytest-asyncio==1.4.0
 ruff==0.15.13
 fastapi>=0.119,<1
 pydantic>=2,<3
