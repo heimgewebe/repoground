@@ -422,10 +422,46 @@ def test_output_health_projected_as_observation(tmp_path):
     assert oh["verdict_observed"] == "warn"
     assert oh["checks"]["canonical_md_hash_ok"] is True
     assert oh["checks"]["chunk_index_hash_ok"] is True
+    assert oh["checks"]["sqlite_row_count_matches_chunk_count"] is None
+    assert oh["checks"]["fts_content_non_empty"] is None
+    assert oh["checks"]["redaction_status_explicit"] is True
     assert oh["checks"]["redact_secrets_enabled"] is True
     assert oh["checks"]["range_ref_resolution_status"] == "no_range_ref"
     # The projection must not invent post-emit validity from output_health.
     assert report["signals"]["post_emit_health"]["available"] is False
+
+
+def test_output_health_non_mapping_checks_shape_is_ignored(tmp_path):
+    manifest = _make_bundle(tmp_path, health_verdict="pass", redaction=True)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    output_health_artifact = next(a for a in data["artifacts"] if a["role"] == "output_health")
+    health_path = tmp_path / output_health_artifact["path"]
+    health_doc = json.loads(health_path.read_text(encoding="utf-8"))
+    health_doc["checks"] = [
+        {"name": "canonical_md_hash_ok", "status": "pass"},
+        {"name": "range_ref_resolution_status", "status": "pass", "detail": "ok"},
+    ]
+    health_bytes = json.dumps(health_doc, indent=2).encode("utf-8")
+    health_path.write_bytes(health_bytes)
+    output_health_artifact["bytes"] = len(health_bytes)
+    output_health_artifact["sha256"] = _sha256(health_bytes)
+    manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    report = compute_context_quality(str(manifest))
+
+    oh = report["signals"]["output_health"]
+    assert oh["available"] is True
+    assert oh["verdict_observed"] == "pass"
+    assert oh["checks"] == {
+        "canonical_md_hash_ok": None,
+        "chunk_index_hash_ok": None,
+        "sqlite_row_count_matches_chunk_count": None,
+        "fts_content_non_empty": None,
+        "range_ref_resolution_status": None,
+        "redaction_status_explicit": None,
+        "redact_secrets_enabled": None,
+    }
+
 
 
 # ---------------------------------------------------------------------------

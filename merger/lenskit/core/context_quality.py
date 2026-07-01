@@ -39,6 +39,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .check_view import compact_check_projection
 from .clock import now_utc
 from .path_security import resolve_secure_path
 from .post_emit_health import derive_post_health_path
@@ -226,7 +227,8 @@ def _project_output_health(
         warnings.append(f"output_health unavailable: {err}")
         return {"available": False, "source": source, "reason": err}
 
-    checks = doc.get("checks") if isinstance(doc.get("checks"), dict) else {}
+    raw_checks = doc.get("checks")
+    checks = compact_check_projection(doc) if isinstance(raw_checks, dict) else {}
     return {
         "available": True,
         "source": source,

@@ -918,6 +918,24 @@
         "No producer normalization or schema migration is implemented.",
         "No broad migration of output_health consumers is implemented."
       ]
+    },
+    {
+      "id": "TASK-CONTEXT-QUALITY-CHECKVIEW-HEALTH-001",
+      "title": "Context Quality CheckView Health Consumer",
+      "status": "done",
+      "description": "Migrates context_quality._project_output_health to use compact_check_projection(report) for mapping-shaped output_health checks while preserving field semantics and ignoring non-mapping check shapes. Schema, output shape, write behavior and projection-status semantics remain unchanged.",
+      "evidence": [
+        "merger/lenskit/core/context_quality.py",
+        "merger/lenskit/tests/test_context_quality.py",
+        "docs/proofs/context-quality-checkview-health-proof.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No parity_state migration is implemented.",
+        "No producer normalization or schema migration is implemented.",
+        "No broad migration of output_health consumers is implemented."
+      ]
     }
   ]
 }
