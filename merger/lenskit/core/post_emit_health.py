@@ -42,6 +42,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from .check_view import compact_check_projection
 from .clock import now_utc
 from .claim_evidence_diagnostics import (
     claim_absence_reason_detail,
@@ -838,7 +839,8 @@ def compute_post_emit_health(
             if isinstance(oh_doc, dict):
                 v = oh_doc.get("verdict")
                 output_health_verdict = v if isinstance(v, str) else None
-                oh_checks = oh_doc.get("checks") if isinstance(oh_doc.get("checks"), dict) else {}
+                raw_checks = oh_doc.get("checks")
+                oh_checks = compact_check_projection(oh_doc) if isinstance(raw_checks, dict) else {}
                 rc_match = oh_checks.get("sqlite_row_count_matches_chunk_count")
                 fts_ok = oh_checks.get("fts_content_non_empty")
                 if rc_match is not None or fts_ok is not None:

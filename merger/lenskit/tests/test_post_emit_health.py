@@ -35,10 +35,79 @@ def _sha256(data: bytes) -> str:
 
 
 
+def _inject_sqlite_index(manifest: Path) -> None:
+    sqlite_bytes = b"not-a-real-sqlite-db-but-valid-manifest-bytes"
+    filename = "demo.index.sqlite"
+    (manifest.parent / filename).write_bytes(sqlite_bytes)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artifacts"].append({
+        "role": "sqlite_index",
+        "path": filename,
+        "content_type": "application/octet-stream",
+        "bytes": len(sqlite_bytes),
+        "sha256": _sha256(sqlite_bytes),
+        "authority": "runtime_cache",
+        "canonicality": "cache",
+    })
+    manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _replace_output_health_checks(manifest: Path, checks_value) -> None:
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    health_entry = next(a for a in data["artifacts"] if a["role"] == "output_health")
+    health_path = manifest.parent / health_entry["path"]
+    health_doc = json.loads(health_path.read_text(encoding="utf-8"))
+    health_doc["checks"] = checks_value
+    health_bytes = json.dumps(health_doc, indent=2).encode("utf-8")
+    health_path.write_bytes(health_bytes)
+    health_entry["bytes"] = len(health_bytes)
+    health_entry["sha256"] = _sha256(health_bytes)
+    manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 
 # ---------------------------------------------------------------------------
 # Required tests
 # ---------------------------------------------------------------------------
+
+
+def test_post_emit_health_output_health_bridge_searchable_when_sqlite_checks_true(tmp_path):
+    manifest = _make_bundle(
+        tmp_path,
+        health_checks={
+            "sqlite_row_count_matches_chunk_count": True,
+            "fts_content_non_empty": True,
+        },
+    )
+    _inject_sqlite_index(manifest)
+
+    report = compute_post_emit_health(str(manifest))
+
+    assert report["status"] == "pass"
+    assert "searchable" in report["evidence_levels_reached"]
+
+
+@pytest.mark.parametrize(
+    "checks_value",
+    [
+        {"sqlite_row_count_matches_chunk_count": False, "fts_content_non_empty": True},
+        {"sqlite_row_count_matches_chunk_count": None, "fts_content_non_empty": True},
+        {"fts_content_non_empty": True},
+        [
+            {"name": "sqlite_row_count_matches_chunk_count", "status": "pass"},
+            {"name": "fts_content_non_empty", "status": "pass"},
+        ],
+    ],
+)
+def test_post_emit_health_output_health_bridge_does_not_overstate_searchable(tmp_path, checks_value):
+    manifest = _make_bundle(tmp_path)
+    _inject_sqlite_index(manifest)
+    _replace_output_health_checks(manifest, checks_value)
+
+    report = compute_post_emit_health(str(manifest))
+
+    assert report["status"] == "pass"
+    assert "searchable" not in report["evidence_levels_reached"]
 
 
 def test_post_emit_health_respects_output_health_noise_hygiene_unavailable(tmp_path):
