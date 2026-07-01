@@ -847,6 +847,24 @@
         "Existing consumers are not migrated to the projection.",
         "The projection does not establish truth, completeness, runtime behavior, test sufficiency, regression absence, repo understanding or forensic readiness."
       ]
+    },
+    {
+      "id": "TASK-CHECKVIEW-BUNDLE-SURFACE-CLI-CONSUMER-001",
+      "title": "CheckView Bundle-Surface CLI Consumer",
+      "status": "done",
+      "description": "Connects the bundle-surface human CLI printer to compact_check_projection(report) as the first low-risk read-only consumer of the CheckView compatibility projection. JSON output, producer reports, schemas, contracts and exit-code semantics remain unchanged.",
+      "evidence": [
+        "merger/lenskit/cli/cmd_bundle_surface.py",
+        "merger/lenskit/tests/test_cli_bundle_surface.py",
+        "docs/proofs/checkview-bundle-surface-cli-consumer-proof.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
+      ],
+      "missing_evidence": [
+        "No broad migration of output_health dict-consumers is implemented.",
+        "No producer normalization or schema migration is implemented.",
+        "No JSON output or machine-readable report shape is changed."
+      ]
     }
   ]
 }

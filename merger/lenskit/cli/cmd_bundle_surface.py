@@ -12,6 +12,7 @@ Exit codes (consistent with ``lenskit bundle-health``):
 import argparse
 import json
 import sys
+from typing import Any
 
 
 def register_bundle_surface_commands(subparsers) -> None:
@@ -94,14 +95,33 @@ def run_bundle_surface_validate(args: argparse.Namespace) -> int:
 
 
 def _print_human_report(report: dict, written_path=None) -> None:
+    from merger.lenskit.core.check_view import compact_check_projection
     print(f"Bundle Surface Validation: {report['status'].upper()}")
     print(f"  bundle_manifest_path:        {report['bundle_manifest_path']}")
     print(f"  bundle_run_id:               {report.get('bundle_run_id')}")
     print(f"  require_claim_evidence_map:  {report.get('require_claim_evidence_map')}")
     print("  checks:")
-    for c in report.get("checks", []):
-        print(f"    [{c['status']}] {c['name']}: {c.get('detail', '')}")
+    for name, check in compact_check_projection(report).items():
+        print(_format_human_check(name, check))
     print(f"  does_not_mean:               {', '.join(report.get('does_not_mean') or [])}")
     if written_path is not None:
         print(f"  written_artifact:            {written_path}")
         print("  NOTE: written artifact is unregistered; manifest not mutated.")
+
+
+def _format_human_check(name: str, check: Any) -> str:
+    """Format a compact CheckView projection entry for human CLI output.
+
+    The bundle-surface producer emits list-shaped checks today. This helper keeps
+    the human printer read-only and projection-based, so it can also render
+    mapping-shaped check summaries without mirroring producer-specific shapes.
+    """
+    if isinstance(check, dict):
+        status = check.get("status")
+        detail = check.get("detail")
+        if not isinstance(detail, str):
+            detail = check.get("reason")
+        detail_text = detail if isinstance(detail, str) else ""
+        if isinstance(status, str):
+            return f"    [{status}] {name}: {detail_text}"
+    return f"    {name}: {check!r}"
