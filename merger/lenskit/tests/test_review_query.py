@@ -252,3 +252,84 @@ def test_review_query_rejects_invalid_k(review_fixture):
 
     with pytest.raises(ValueError, match="k must be at least 1"):
         execute_review_query(index_path, query, k=0)
+
+
+def test_cli_query_review_intent_opt_in_uses_review_router(review_fixture, capsys):
+    from argparse import Namespace
+    from merger.lenskit.cli import cmd_query
+
+    _, _, index_path, query = review_fixture
+    args = Namespace(
+        index=str(index_path),
+        q=query,
+        k=4,
+        repo=None,
+        path=None,
+        ext=None,
+        layer=None,
+        artifact_type=None,
+        emit="json",
+        stale_policy="ignore",
+        embedding_policy=None,
+        explain=True,
+        graph_index=None,
+        graph_weights=None,
+        test_penalty=0.75,
+        output_profile=None,
+        context_window_lines=0,
+        context_mode="exact",
+        build_context_bundle=False,
+        overmatch_guard=False,
+        review_intent=True,
+        trace=False,
+        range_coverage_report=False,
+        citation_map=None,
+    )
+
+    rc = cmd_query.run_query(args)
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+
+    assert data["query_mode"] == "review_intent"
+    assert data["engine"] == "fts5+review_intent_v1"
+    assert data["count"] == 4
+    assert "review_intent_router" in data["explain"]
+    assert data["explain"]["fusion"]["method"] == "round_robin_unique_path"
+    assert "This opt-in result does not establish readiness for default promotion." in data["claim_boundaries"]["does_not_prove"]
+
+
+def test_cli_query_review_intent_rejects_context_options(review_fixture, capsys):
+    from argparse import Namespace
+    from merger.lenskit.cli import cmd_query
+
+    _, _, index_path, query = review_fixture
+    args = Namespace(
+        index=str(index_path),
+        q=query,
+        k=4,
+        repo=None,
+        path=None,
+        ext=None,
+        layer=None,
+        artifact_type=None,
+        emit="json",
+        stale_policy="ignore",
+        embedding_policy=None,
+        explain=True,
+        graph_index=None,
+        graph_weights=None,
+        test_penalty=0.75,
+        output_profile="review_context",
+        context_window_lines=0,
+        context_mode="exact",
+        build_context_bundle=False,
+        overmatch_guard=False,
+        review_intent=True,
+        trace=False,
+        range_coverage_report=False,
+        citation_map=None,
+    )
+
+    rc = cmd_query.run_query(args)
+    assert rc == 1
+    assert "--review-intent does not combine" in capsys.readouterr().err

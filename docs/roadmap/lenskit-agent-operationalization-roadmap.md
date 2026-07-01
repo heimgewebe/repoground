@@ -118,9 +118,11 @@ Nichtziel: Kein echter Lesebeweis. Ein Agent kann eine Trace falsch ausfuellen; 
 
 ### TASK-REVIEW-INTENT-CLI-001 - Review-Intent Router CLI
 
+Status: umgesetzt. `lenskit query --review-intent` ist opt-in verfuegbar; Default-Query bleibt unveraendert.
+
 Ziel: Der vorhandene Review-Intent Router wird als opt-in CLI-Oberflaeche nutzbar, ohne Default-Promotion.
 
-Aufgaben: CLI-Flag oder separater Command fuer Review-Intent Query; Ausgabe von Intent, Lane-Plan, Exclusions, Treffern, Fallbacks und Miss-Klassen; Default-Query bleibt unveraendert.
+Umgesetzt: CLI-Flag fuer Review-Intent Query; bei `--explain` Ausgabe von Intent-Plan, Lane-Summaries, Fusion und Treffern; inkompatible Graph-/Semantic-/Trace-/Context-Optionen werden fail-closed abgelehnt, statt still ignoriert zu werden.
 
 Promotion-Gate: keine zentrale Query-Klasse regressiert; expected-target recall besser oder gleich; Fehler-/Fallback-Zaehlung ehrlich; stale Graph Index beeinflusst Ranking nicht.
 
