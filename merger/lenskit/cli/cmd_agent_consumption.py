@@ -117,6 +117,13 @@ def _load_roles_from_bundle_manifest(path: Path | None) -> set[str]:
         raise AgentConsumptionCliError(
             f"Invalid bundle manifest {path}: expected artifacts array."
         )
+
+    # The bundle manifest is the source used to derive the available roles.
+    # Treat it as available for required-reading profiles that explicitly ask
+    # for the manifest surface without pretending it is listed inside its own
+    # artifacts array.
+    roles.add("bundle_manifest")
+
     for artifact in artifacts:
         if isinstance(artifact, dict) and isinstance(artifact.get("role"), str):
             roles.add(artifact["role"])

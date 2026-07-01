@@ -420,11 +420,38 @@ def test_cli_preflight_stdout_from_bundle_manifest(tmp_path, capsys):
     assert out["required_reading"]["status"] == "pass"
     assert "post_emit_health" in out["available_roles"]
     assert "bundle_surface_validation" in out["available_roles"]
+    assert "bundle_manifest" in out["available_roles"]
     assert out["agent_consumption_trace"] is None
     assert set(out["answer_compliance_template"]["declared_artifacts"]) == set(
         out["required_reading"]["required"] + out["required_reading"]["recommended"]
     )
     assert "repo_understood" in out["does_not_establish"]
+
+
+def test_cli_preflight_bundle_manifest_self_role_satisfies_surface_review(tmp_path, capsys):
+    manifest = tmp_path / "bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "artifacts": [
+            {"role": "canonical_md"},
+            {"role": "output_health"},
+        ],
+        "links": {
+            "post_emit_health_path": "demo.post_emit_health.json",
+            "bundle_surface_validation_path": "demo.bundle_surface_validation.json",
+        },
+    }), encoding="utf-8")
+
+    rc = main([
+        "agent-consumption", "preflight",
+        "--task-profile", "artifact_surface_review",
+        "--bundle-manifest", str(manifest),
+    ])
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "pass"
+    assert out["required_reading"]["missing_required"] == []
+    assert "bundle_manifest" in out["required_reading"]["available_required"]
 
 
 def test_cli_preflight_validates_answer_compliance(tmp_path, capsys):
