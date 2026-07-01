@@ -5,6 +5,7 @@ Exit codes: 0 = pass/warn, 1 = fail, 2 = blocked.
 import json
 from pathlib import Path
 
+from merger.lenskit.cli.cmd_bundle_surface import _print_human_report
 from merger.lenskit.cli.main import main
 from merger.lenskit.core.post_emit_health import derive_post_health_path
 
@@ -143,3 +144,31 @@ def test_cli_human_output_without_require(tmp_path, capsys):
     text = capsys.readouterr().out
     assert "Bundle Surface Validation: PASS" in text
     assert "claim_evidence_map_surface" in text
+
+
+def test_cli_human_printer_uses_checkview_projection_for_mapping_shape(capsys):
+    """Human printer can render mapping-shaped checks through CheckView projection.
+
+    The bundle-surface producer remains list-shaped; this fixture proves the
+    consumer is no longer hardwired to that one producer shape.
+    """
+    report = {
+        "status": "pass",
+        "bundle_manifest_path": "x.bundle.manifest.json",
+        "bundle_run_id": "run",
+        "require_claim_evidence_map": False,
+        "checks": {
+            "manifest_present": True,
+            "range_ref_resolution": {
+                "status": "pass",
+                "reason": "range refs resolved",
+            },
+        },
+        "does_not_mean": ["forensic_ready"],
+    }
+
+    _print_human_report(report)
+
+    text = capsys.readouterr().out
+    assert "manifest_present: True" in text
+    assert "[pass] range_ref_resolution: range refs resolved" in text
