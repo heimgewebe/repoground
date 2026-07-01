@@ -219,6 +219,14 @@ def test_batch_rejects_single_mapping_instead_of_iterable() -> None:
         produce_concept_cards(_spec())  # type: ignore[arg-type]
 
 
+def test_batch_rejects_conflicting_duplicate_card_id() -> None:
+    first = _spec("query", "query.canonical-truth")
+    second = _spec("query", "query.canonical-truth")
+    second["title"] = "Different title"
+
+    with pytest.raises(ValueError, match="card_id collision"):
+        produce_concept_cards([first, second])
+
 @pytest.mark.parametrize("bad_path", ["a//b", "../secret.md", "/abs/path.md", "a\\b"])
 def test_repo_path_navigation_refs_use_facet_path_gate(bad_path: str) -> None:
     spec = _spec()
