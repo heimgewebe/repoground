@@ -172,7 +172,7 @@ Default-Promotion nur wenn: besser als Baseline; keine zentrale Kategorie schlec
 
 ## P4 - Backlog
 
-Bewusst spaeter: Symbol Index v1, Token Budget Report, Compat Export Projection, Read-only Adapter ohne Mirror.
+Status: Token Budget Report v1 ist umgesetzt. Bewusst spaeter bleiben: Symbol Index v1, Compat Export Projection, Read-only Adapter ohne Mirror.
 
 Diese Backlog-Punkte duerfen keine neuen Wahrheits-, Review-, Patch- oder Runtime-Claims einfuehren.
 
