@@ -778,11 +778,39 @@ def test_compute_top_files_pure(tmp_path):
 
 
 def test_summarize_health_extracts_fields():
-    summary = summarize_health(_health_doc(verdict="warn"))
+    doc = _health_doc(verdict="warn")
+    doc["errors"] = ["e1", "e2"]
+    doc["warnings"] = ["w1"]
+
+    summary = summarize_health(doc)
+
     assert summary.present is True
     assert summary.verdict == "warn"
     assert summary.chunk_count == 2
+    assert summary.sqlite_row_count == 2
     assert summary.fts_content_non_empty is True
+    assert summary.range_ref_resolution_status == "ok"
+    assert summary.error_count == 2
+    assert summary.warning_count == 1
+
+
+def test_summarize_health_ignores_non_mapping_checks_shape():
+    summary = summarize_health({
+        "verdict": "pass",
+        "checks": [
+            {"name": "chunk_count", "status": "pass", "detail": "not a scalar count"},
+            {"name": "range_ref_resolution_status", "status": "pass"},
+        ],
+        "errors": [],
+        "warnings": [],
+    })
+
+    assert summary.present is True
+    assert summary.verdict == "pass"
+    assert summary.chunk_count is None
+    assert summary.sqlite_row_count is None
+    assert summary.fts_content_non_empty is None
+    assert summary.range_ref_resolution_status is None
 
 
 def test_render_is_pure_from_model():
