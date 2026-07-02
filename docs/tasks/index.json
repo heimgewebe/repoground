@@ -688,13 +688,17 @@
       "id": "TASK-AGENT-SURFACE-REAL-DUMP-SMOKE-001",
       "title": "Agent Surface Real Dump Smoke",
       "status": "done",
-      "description": "Adds a minimal integration smoke for recently added agent-facing bundle surfaces and allows adapter diagnostic fields in the report schema.",
+      "description": "Hardens the existing ASRS smoke for agent-facing bundle surfaces.",
       "evidence": [
         "merger/lenskit/tests/test_asrs.py",
-        "merger/lenskit/contracts/export-safety-report.v1.schema.json"
+        "merger/lenskit/contracts/export-safety-report.v1.schema.json",
+        "docs/proofs/agent-surface-real-dump-smoke-proof.md",
+        "docs/tasks/board.md",
+        "docs/tasks/index.json"
       ],
       "missing_evidence": [
-        "This smoke is diagnostic only."
+        "Diagnostic smoke only.",
+        "No producer, schema or CLI behavior change."
       ]
     },
     {
