@@ -142,6 +142,7 @@
               "agent_reading_pack",
               "agent_entry_manifest",
               "export_safety_report",
+              "snapshot_plan_json",
               "lens_cards_jsonl",
               "concept_cards_jsonl",
               "relation_cards_jsonl",
@@ -312,7 +313,8 @@
                     "lens_cards_jsonl",
                     "concept_cards_jsonl",
                     "relation_cards_jsonl",
-                    "pr_delta_cards_jsonl"
+                    "pr_delta_cards_jsonl",
+                    "snapshot_plan_json"
                   ]
                 }
               },

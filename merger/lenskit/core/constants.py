@@ -25,6 +25,7 @@ class ArtifactRole(str, Enum):
     AGENT_READING_PACK = "agent_reading_pack"
     AGENT_ENTRY_MANIFEST = "agent_entry_manifest"
     EXPORT_SAFETY_REPORT = "export_safety_report"
+    SNAPSHOT_PLAN_JSON = "snapshot_plan_json"
     LENS_CARDS_JSONL = "lens_cards_jsonl"
     CONCEPT_CARDS_JSONL = "concept_cards_jsonl"
     RELATION_CARDS_JSONL = "relation_cards_jsonl"

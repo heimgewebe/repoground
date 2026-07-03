@@ -231,6 +231,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.CLAIM_EVIDENCE_MAP_JSON: {"id": "claim-evidence-map", "version": "v1"},
     ArtifactRole.AGENT_ENTRY_MANIFEST: {"id": "agent-entry-manifest", "version": "v1"},
     ArtifactRole.EXPORT_SAFETY_REPORT: {"id": "export-safety-report", "version": "v1"},
+    ArtifactRole.SNAPSHOT_PLAN_JSON: {"id": "repobrief.snapshot_plan", "version": "v1"},
     ArtifactRole.LENS_CARDS_JSONL: {"id": "lens-card", "version": "v1"},
     ArtifactRole.CONCEPT_CARDS_JSONL: {"id": "concept-card", "version": "v1"},
     ArtifactRole.RELATION_CARDS_JSONL: {"id": "relation-card", "version": "v1"},
@@ -349,6 +350,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "staleness_sensitive": True,
     },
     ArtifactRole.EXPORT_SAFETY_REPORT: {
+        "authority": "diagnostic_signal",
+        "canonicality": "diagnostic",
+        "risk_class": "diagnostic",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.SNAPSHOT_PLAN_JSON: {
         "authority": "diagnostic_signal",
         "canonicality": "diagnostic",
         "risk_class": "diagnostic",

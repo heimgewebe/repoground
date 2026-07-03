@@ -303,3 +303,30 @@ def test_public_share_rejects_explicit_dual_output_mode(tmp_path):
 
     assert rc == 2
     assert not out.exists()
+
+
+def test_snapshot_create_emits_snapshot_plan_report(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "public-share",
+    ])
+
+    emitted = json.loads(capsys.readouterr().out)
+    manifest_data = json.loads(Path(emitted["bundle_manifest"]).read_text(encoding="utf-8"))
+    report = json.loads(Path(emitted["snapshot_plan_report"]).read_text(encoding="utf-8"))
+    assert rc == 0
+    assert report["kind"] == "repobrief.snapshot_plan"
+    assert report["output_plan"] == emitted["output_plan"]
+    assert any(a.get("role") == "snapshot_plan_json" for a in manifest_data["artifacts"])

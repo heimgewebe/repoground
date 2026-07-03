@@ -92,20 +92,29 @@ def _sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def _add_manifest_artifact(bundle_manifest: Path, artifact_path: Path, role: str, content_type: str) -> None:
+def _add_manifest_artifact(
+    bundle_manifest: Path,
+    artifact_path: Path,
+    role: str,
+    content_type: str,
+    extra: dict[str, Any] | None = None,
+) -> None:
     data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
     artifacts = data.setdefault("artifacts", [])
     if not isinstance(artifacts, list):
         artifacts = []
         data["artifacts"] = artifacts
     artifacts[:] = [a for a in artifacts if not (isinstance(a, dict) and a.get("role") == role)]
-    artifacts.append({
+    entry = {
         "path": artifact_path.name,
         "role": role,
         "content_type": content_type,
         "bytes": artifact_path.stat().st_size,
         "sha256": _sha256_file(artifact_path),
-    })
+    }
+    if extra:
+        entry.update(extra)
+    artifacts.append(entry)
     artifacts.sort(key=lambda a: (str(a.get("role", "")), str(a.get("path", ""))))
     _json_write_atomic(bundle_manifest, data)
 
@@ -134,6 +143,49 @@ def emit_export_safety_report(bundle_manifest: Path | None, profile: str) -> Pat
     )
     _json_write_atomic(out, report)
     _add_manifest_artifact(bundle_manifest, out, "export_safety_report", "application/json")
+    return out
+
+
+
+def emit_snapshot_plan_report(
+    bundle_manifest: Path | None,
+    profile: str,
+    output_plan: dict[str, Any],
+) -> Path | None:
+    if bundle_manifest is None:
+        return None
+    report = {
+        "kind": "repobrief.snapshot_plan",
+        "version": "v1",
+        "command": "repobrief snapshot create",
+        "profile": profile,
+        "output_plan": output_plan,
+        "mutation_boundary": {
+            "writes": ["brief_bundle_artifacts"],
+            "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree"],
+            "read_paths_do_not_refresh": True,
+        },
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+    }
+    out = bundle_manifest.with_name(
+        bundle_manifest.name.replace(".bundle.manifest.json", ".snapshot_plan.json")
+    )
+    _json_write_atomic(out, report)
+    _add_manifest_artifact(
+        bundle_manifest,
+        out,
+        "snapshot_plan_json",
+        "application/json",
+        extra={
+            "contract": {"id": "repobrief.snapshot_plan", "version": "v1"},
+            "interpretation": {"mode": "contract"},
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "risk_class": "diagnostic",
+            "regenerable": True,
+            "staleness_sensitive": True,
+        },
+    )
     return out
 
 def parse_extensions(values: Iterable[str] | None) -> list[str] | None:
@@ -263,10 +315,13 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         generator_info=generator_info,
     )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
+    snapshot_plan_path = emit_snapshot_plan_report(artifacts.bundle_manifest, profile, output_plan)
     export_safety_path = emit_export_safety_report(artifacts.bundle_manifest, profile)
     refreshed_paths = refresh_entry(artifacts.bundle_manifest)
     profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
     artifact_paths = [path for path in artifacts.get_all_paths() if path not in dropped_profile_paths]
+    if snapshot_plan_path is not None and snapshot_plan_path not in artifact_paths:
+        artifact_paths.append(snapshot_plan_path)
     if export_safety_path is not None and export_safety_path not in artifact_paths:
         artifact_paths.append(export_safety_path)
 
@@ -280,6 +335,7 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         "out": str(out),
         "bundle_manifest": str(artifacts.bundle_manifest) if artifacts.bundle_manifest else None,
         "profile_evaluation": profile_evaluation,
+        "snapshot_plan_report": str(snapshot_plan_path) if snapshot_plan_path else None,
         "export_safety_report": str(export_safety_path) if export_safety_path else None,
         "refreshed_agent_entrypoints": [str(path) for path in refreshed_paths],
         "removed_profile_excluded_artifacts": [str(path) for path in dropped_profile_paths],
