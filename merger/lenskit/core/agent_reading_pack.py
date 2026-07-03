@@ -66,6 +66,7 @@ _CLAIM_EVIDENCE_MAP = ArtifactRole.CLAIM_EVIDENCE_MAP_JSON.value
 _SELF_ROLE = ArtifactRole.AGENT_READING_PACK.value
 _AGENT_ENTRY_MANIFEST = ArtifactRole.AGENT_ENTRY_MANIFEST.value
 _EXPORT_SAFETY_REPORT = "export_safety_report"
+_SNAPSHOT_PLAN_JSON = "snapshot_plan_json"
 _LENS_CARD_ROLES = ("lens_cards_jsonl", "lens_card_jsonl", "lens_cards")
 _CONCEPT_CARD_ROLES = ("concept_cards_jsonl", "concept_card_jsonl", "concept_cards")
 _PR_DELTA_CARD_ROLES = ("pr_delta_cards_jsonl", "pr_delta_card_jsonl", "pr_delta_cards")
@@ -614,6 +615,20 @@ def render_agent_reading_pack(model: PackModel) -> str:
     )
     lines.append("")
 
+    # ── SNAPSHOT_PLAN_REPORT ─────────────────────────────────────────────
+    lines.append("## SNAPSHOT_PLAN_REPORT")
+    snapshot_plan = _artifact_by_role(model, _SNAPSHOT_PLAN_JSON)
+    if snapshot_plan is not None:
+        _append_artifact_bullet(lines, snapshot_plan)
+    else:
+        lines.append("- No bundle-registered `snapshot_plan_json` artifact is present in this manifest.")
+    lines.append(
+        "- Snapshot Plan reports describe how RepoBrief selected the snapshot profile "
+        "and output mode. They do not prove repo understanding, correctness, "
+        "completeness, safety, test sufficiency or forensic readiness."
+    )
+    lines.append("")
+
     # ── LENS_CARD_INDEX ─────────────────────────────────────────────────
     lines.append("## LENS_CARD_INDEX")
     lens_card_artifacts = _artifacts_by_roles(model, _LENS_CARD_ROLES)
@@ -782,6 +797,11 @@ def render_agent_reading_pack(model: PackModel) -> str:
     lines.append(
         "- `export_safety_report` / `lenskit.export_safety_report`: "
         "export diagnostic only."
+    )
+    lines.append(
+        "- `snapshot_plan_json` / `repobrief.snapshot_plan`: snapshot planning "
+        "diagnostic only; it records profile/output-mode decisions and does not "
+        "prove correctness, completeness or safety."
     )
     lines.append(
         "This does not establish `repo_understood`, `answer_safe_without_citations`, "

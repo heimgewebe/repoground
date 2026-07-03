@@ -1087,3 +1087,40 @@ def test_agent_consumption_contracts_section_mentions_preflight_cli(tmp_path):
     assert "agent-consumption preflight" in section
     assert "--task-profile <profile>" in section
     assert "actual_reading_proven" in section
+
+
+def test_reading_pack_surfaces_snapshot_plan_report(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    plan_doc = {
+        "kind": "repobrief.snapshot_plan",
+        "version": "v1",
+        "profile": "public-share",
+        "output_plan": {"selected_output_mode": "archive"},
+        "does_not_establish": ["truth"],
+    }
+    plan_bytes = json.dumps(plan_doc, indent=2).encode("utf-8")
+    plan_path = tmp_path / "demo.snapshot_plan.json"
+    plan_path.write_bytes(plan_bytes)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artifacts"].append(
+        {
+            "role": "snapshot_plan_json",
+            "path": plan_path.name,
+            "content_type": "application/json",
+            "bytes": len(plan_bytes),
+            "sha256": _sha256(plan_bytes),
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "risk_class": "diagnostic",
+        }
+    )
+    manifest.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+    report = produce_agent_reading_pack(str(manifest))
+    body = Path(report["output_path"]).read_text(encoding="utf-8")
+
+    section = _section(body, "SNAPSHOT_PLAN_REPORT")
+    assert "snapshot_plan_json" in section
+    assert "demo.snapshot_plan.json" in section
+    assert "do not prove repo understanding" in section
+    assert "`snapshot_plan_json` / `repobrief.snapshot_plan`" in body

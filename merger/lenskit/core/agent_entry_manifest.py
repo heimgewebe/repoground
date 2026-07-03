@@ -38,6 +38,7 @@ _EXPECTED_SURFACES = (
     "bundle_surface_validation",
     "output_health",
     "export_safety_report",
+    "snapshot_plan_json",
 )
 
 
