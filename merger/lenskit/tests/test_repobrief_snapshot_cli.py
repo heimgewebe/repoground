@@ -239,3 +239,67 @@ def test_snapshot_create_graph_index_is_not_verified_as_primary_json(tmp_path, c
     captured = capsys.readouterr()
     assert rc == 0
     assert captured.err == ""
+
+
+def test_public_share_uses_archive_output_mode_by_default(monkeypatch, tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+    calls = {}
+
+    def fake_scan_repo(*args, **kwargs):
+        return {"name": "repo", "root": repo, "files": [], "total_files": 0, "total_bytes": 0, "ext_hist": {}}
+
+    def fake_write_reports_v2(*args, **kwargs):
+        calls["output_mode"] = kwargs["output_mode"]
+        manifest = out / "repo_merge.bundle.manifest.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"kind": "repolens.bundle.manifest", "artifacts": [], "links": {}, "capabilities": {}}),
+            encoding="utf-8",
+        )
+        return FakeArtifacts(manifest)
+
+    monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
+    monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "public-share",
+    ])
+
+    emitted = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert calls["output_mode"] == "archive"
+    assert emitted["output_mode"] == "archive"
+
+
+def test_public_share_rejects_explicit_dual_output_mode(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    out = tmp_path / "briefs"
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "public-share",
+        "--output-mode",
+        "dual",
+    ])
+
+    assert rc == 2
+    assert not out.exists()

@@ -94,8 +94,11 @@ PROFILE_ARTIFACT_RULES = {
     },
     "public-share": {
         **BASE_RULES,
+        "citation_map_jsonl": REQ_OPTIONAL,
+        "chunk_index_jsonl": REQ_OPTIONAL,
         "sqlite_index": REQ_EXCLUDED,
         "export_safety_report": REQ_REQUIRED,
+        "retrieval_eval_json": REQ_NA,
     },
     "ci-artifact": {
         **BASE_RULES,
@@ -208,3 +211,27 @@ def present_roles_from_manifest(bundle_manifest: Mapping[str, Any]) -> set[str]:
 def profile_excluded_roles(profile: str) -> tuple[str, ...]:
     rules = _rules(profile)
     return tuple(role for role in ARTIFACT_ORDER if rules[role] == REQ_EXCLUDED)
+
+
+PROFILE_DEFAULT_OUTPUT_MODES = {
+    "public-share": "archive",
+}
+
+OUTPUT_MODE_ARTIFACT_ROLES = {
+    "archive": frozenset(),
+    "retrieval": frozenset({"sqlite_index"}),
+    "dual": frozenset({"sqlite_index"}),
+}
+
+
+def profile_default_output_mode(profile: str) -> str:
+    _rules(profile)
+    return PROFILE_DEFAULT_OUTPUT_MODES.get(profile, "dual")
+
+
+def profile_output_mode_conflicts(profile: str, output_mode: str) -> tuple[str, ...]:
+    if output_mode not in OUTPUT_MODE_ARTIFACT_ROLES:
+        raise ValueError(f"unknown RepoBrief output mode: {output_mode}")
+    excluded = set(profile_excluded_roles(profile))
+    produced = set(OUTPUT_MODE_ARTIFACT_ROLES[output_mode])
+    return tuple(sorted(excluded & produced))

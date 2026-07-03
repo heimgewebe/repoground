@@ -13,8 +13,10 @@ from merger.lenskit.core.merge import ExtrasConfig, parse_human_size, scan_repo,
 from merger.lenskit.core.repobrief_profiles import (
     evaluate_profile,
     present_roles_from_manifest,
+    profile_default_output_mode,
     profile_level,
     profile_names,
+    profile_output_mode_conflicts,
     profile_policy,
     profile_excluded_roles,
 )
@@ -179,7 +181,7 @@ def register_repobrief_commands(subparsers: argparse._SubParsersAction) -> None:
     create_parser.add_argument("--split-size", default="25MB")
     create_parser.add_argument("--path-filter")
     create_parser.add_argument("--ext", action="append")
-    create_parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"], default="dual")
+    create_parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"])
     create_parser.add_argument("--redact-secrets", action="store_true")
     create_parser.add_argument("--no-include-hidden", action="store_false", dest="include_hidden")
     create_parser.set_defaults(include_hidden=True)
@@ -202,6 +204,16 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         return 2
     if out == repo or repo in out.parents:
         print("bad output path", file=sys.stderr)
+        return 2
+
+    output_mode = args.output_mode or profile_default_output_mode(profile)
+    conflicts = profile_output_mode_conflicts(profile, output_mode)
+    if conflicts:
+        print(
+            f"repobrief snapshot create: profile {profile} excludes artifacts produced by output mode {output_mode}: "
+            + ", ".join(conflicts),
+            file=sys.stderr,
+        )
         return 2
 
     out.mkdir(parents=True, exist_ok=True)
@@ -238,7 +250,7 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         path_filter=args.path_filter,
         ext_filter=ext_filter,
         extras=extras,
-        output_mode=args.output_mode,
+        output_mode=output_mode,
         redact_secrets=args.redact_secrets,
         include_hidden=args.include_hidden,
         generator_info=generator_info,
@@ -256,6 +268,7 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         "status": "ok",
         "command": "repobrief snapshot create",
         "profile": profile,
+        "output_mode": output_mode,
         "repo": str(repo),
         "out": str(out),
         "bundle_manifest": str(artifacts.bundle_manifest) if artifacts.bundle_manifest else None,
