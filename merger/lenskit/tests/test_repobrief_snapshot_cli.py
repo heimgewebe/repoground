@@ -407,3 +407,36 @@ def test_repobrief_artifact_get_cli_reports_available_missing_and_path_only(tmp_
     rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md", "--path-only"])
     assert rc == 0
     assert capsys.readouterr().out.strip() == str(artifact.resolve())
+
+
+def test_repobrief_artifact_list_cli_reports_artifacts_and_roles_only(tmp_path, capsys):
+    first = tmp_path / "demo.md"
+    second = tmp_path / "plan.json"
+    first.write_text("# demo\n", encoding="utf-8")
+    second.write_text("{}\n", encoding="utf-8")
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "kind": "repolens.bundle.manifest",
+        "version": "1.0",
+        "run_id": "run-1",
+        "created_at": "2026-07-03T00:00:00Z",
+        "generator": {"name": "test", "version": "1", "config_sha256": "a" * 64},
+        "artifacts": [
+            {"role": "snapshot_plan_json", "path": second.name, "content_type": "application/json", "bytes": second.stat().st_size, "sha256": "c" * 64},
+            {"role": "canonical_md", "path": first.name, "content_type": "text/markdown", "bytes": first.stat().st_size, "sha256": "b" * 64},
+        ],
+        "links": {},
+        "capabilities": {},
+    }), encoding="utf-8")
+
+    rc = main(["repobrief", "artifact", "list", "--bundle-manifest", str(manifest)])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert out["kind"] == "repobrief.artifact_list"
+    assert out["roles"] == ["canonical_md", "snapshot_plan_json"]
+    assert out["artifact_count"] == 2
+    assert out["mutation_boundary"]["writes"] == []
+
+    rc = main(["repobrief", "artifact", "list", "--bundle-manifest", str(manifest), "--roles-only"])
+    assert rc == 0
+    assert capsys.readouterr().out.splitlines() == ["canonical_md", "snapshot_plan_json"]
