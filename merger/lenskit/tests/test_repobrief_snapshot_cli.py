@@ -376,3 +376,34 @@ def test_repobrief_core_get_artifact_reports_available_and_missing(tmp_path):
     assert found["artifact"]["file_exists"] is True
     assert missing["status"] == "missing"
     assert missing["artifact"] is None
+
+
+def test_repobrief_artifact_get_cli_reports_available_missing_and_path_only(tmp_path, capsys):
+    artifact = tmp_path / "demo.md"
+    artifact.write_text("# demo\n", encoding="utf-8")
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "kind": "repolens.bundle.manifest",
+        "version": "1.0",
+        "run_id": "run-1",
+        "created_at": "2026-07-03T00:00:00Z",
+        "generator": {"name": "test", "version": "1", "config_sha256": "a" * 64},
+        "artifacts": [{"role": "canonical_md", "path": artifact.name, "content_type": "text/markdown", "bytes": artifact.stat().st_size, "sha256": "b" * 64, "authority": "canonical_content", "canonicality": "content_source"}],
+        "links": {},
+        "capabilities": {},
+    }), encoding="utf-8")
+
+    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert out["status"] == "available"
+    assert out["artifact"]["role"] == "canonical_md"
+
+    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "missing_role"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert out["status"] == "missing"
+
+    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md", "--path-only"])
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == str(artifact.resolve())
