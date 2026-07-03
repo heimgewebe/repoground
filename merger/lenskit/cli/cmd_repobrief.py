@@ -241,6 +241,7 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         "name": "repobrief",
         "version": os.getenv("RLENS_VERSION", "dev"),
         "platform": "cli",
+        "repobrief_output_plan": output_plan,
     }
     artifacts = write_reports_v2(
         out,
