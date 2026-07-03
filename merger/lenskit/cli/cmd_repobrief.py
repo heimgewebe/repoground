@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -73,6 +74,59 @@ def mark_bundle_manifest_profile(bundle_manifest: Path | None, profile: str) -> 
     _json_write_atomic(bundle_manifest, data)
     return evaluation
 
+
+
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _add_manifest_artifact(bundle_manifest: Path, artifact_path: Path, role: str, content_type: str) -> None:
+    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    artifacts = data.setdefault("artifacts", [])
+    if not isinstance(artifacts, list):
+        artifacts = []
+        data["artifacts"] = artifacts
+    artifacts[:] = [a for a in artifacts if not (isinstance(a, dict) and a.get("role") == role)]
+    artifacts.append({
+        "path": artifact_path.name,
+        "role": role,
+        "content_type": content_type,
+        "bytes": artifact_path.stat().st_size,
+        "sha256": _sha256_file(artifact_path),
+    })
+    artifacts.sort(key=lambda a: (str(a.get("role", "")), str(a.get("path", ""))))
+    _json_write_atomic(bundle_manifest, data)
+
+
+def _export_safety_requirement(profile: str) -> str:
+    return str(profile_policy(profile)["artifact_rules"].get("export_safety_report", "optional"))
+
+
+def should_emit_export_safety_report(profile: str) -> bool:
+    return _export_safety_requirement(profile) in {"required", "recommended"}
+
+
+def emit_export_safety_report(bundle_manifest: Path | None, profile: str) -> Path | None:
+    if bundle_manifest is None or not should_emit_export_safety_report(profile):
+        return None
+    from merger.lenskit.core.export_safety_report import build_export_safety_report_from_bundle_manifest
+
+    report = build_export_safety_report_from_bundle_manifest(
+        bundle_manifest,
+        profile=profile,
+        agent_facing=True if profile in {"agent-portable", "full-max", "pr-review", "ci-artifact"} else None,
+        public_facing=True if profile == "public-share" else None,
+    )
+    out = bundle_manifest.with_name(
+        bundle_manifest.name.replace(".bundle.manifest.json", ".export_safety_report.json")
+    )
+    _json_write_atomic(out, report)
+    _add_manifest_artifact(bundle_manifest, out, "export_safety_report", "application/json")
+    return out
 
 def parse_extensions(values: Iterable[str] | None) -> list[str] | None:
     if not values:
@@ -188,7 +242,11 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         include_hidden=args.include_hidden,
         generator_info=generator_info,
     )
+    export_safety_path = emit_export_safety_report(artifacts.bundle_manifest, profile)
     profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile)
+    artifact_paths = artifacts.get_all_paths()
+    if export_safety_path is not None and export_safety_path not in artifact_paths:
+        artifact_paths.append(export_safety_path)
 
     result = {
         "status": "ok",
@@ -198,7 +256,8 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         "out": str(out),
         "bundle_manifest": str(artifacts.bundle_manifest) if artifacts.bundle_manifest else None,
         "profile_evaluation": profile_evaluation,
-        "artifacts": [str(path) for path in artifacts.get_all_paths()],
+        "export_safety_report": str(export_safety_path) if export_safety_path else None,
+        "artifacts": [str(path) for path in artifact_paths],
         "mutation_boundary": {
             "writes": ["brief_bundle_artifacts"],
             "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree"],
