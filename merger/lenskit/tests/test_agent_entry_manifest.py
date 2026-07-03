@@ -586,3 +586,34 @@ def test_agent_entry_manifest_includes_linked_export_safety_report(schema):
     assert surfaces["export_safety_report"]["authority"] == "diagnostic_signal"
     unavailable = {surface["role"] for surface in report["unavailable_surfaces"]}
     assert "export_safety_report" not in unavailable
+
+
+def test_agent_entry_manifest_surfaces_snapshot_plan(schema):
+    bundle = valid_bundle_fixture()
+    bundle["artifacts"].append(
+        {
+            "role": "snapshot_plan_json",
+            "path": "merge.snapshot_plan.json",
+            "sha256": "plan-sha",
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "risk_class": "diagnostic",
+        }
+    )
+
+    report = build_agent_entry_manifest(bundle, created_at="2026-06-18T00:00:00Z")
+
+    jsonschema.validate(instance=report, schema=schema)
+    surfaces = {surface["role"]: surface for surface in report["available_surfaces"]}
+    assert surfaces["snapshot_plan_json"]["path"] == "merge.snapshot_plan.json"
+    assert surfaces["snapshot_plan_json"]["authority"] == "diagnostic_signal"
+    unavailable = {surface["role"] for surface in report["unavailable_surfaces"]}
+    assert "snapshot_plan_json" not in unavailable
+
+
+def test_agent_entry_manifest_old_bundle_marks_snapshot_plan_unavailable(schema):
+    report = build_agent_entry_manifest(valid_bundle_fixture(), created_at="2026-06-18T00:00:00Z")
+
+    jsonschema.validate(instance=report, schema=schema)
+    unavailable = {surface["role"] for surface in report["unavailable_surfaces"]}
+    assert "snapshot_plan_json" in unavailable
