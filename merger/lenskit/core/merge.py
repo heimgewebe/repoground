@@ -6117,6 +6117,7 @@ def write_reports_v2(
         and not p.name.endswith(".retrieval_eval.json")
         and not p.name.endswith(".architecture_graph.json")
         and not p.name.endswith(".entrypoints.json")
+        and not p.name.endswith(".graph_index.json")
     ]
 
     dump_indices = [p for p in out_paths if p.name.endswith(".dump_index.json")]

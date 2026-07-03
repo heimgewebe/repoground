@@ -218,3 +218,24 @@ def test_public_share_removes_profile_excluded_sqlite(monkeypatch, tmp_path, cap
     assert emitted["removed_profile_excluded_artifacts"]
     assert emitted["profile_evaluation"]["profile_excluded_present"] == []
     assert manifest_data["capabilities"]["fts5_bm25"] is False
+
+
+def test_snapshot_create_graph_index_is_not_verified_as_primary_json(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "agent-portable",
+    ])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert captured.err == ""
