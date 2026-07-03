@@ -256,6 +256,9 @@ def register_repobrief_commands(subparsers: argparse._SubParsersAction) -> None:
     get_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
     get_parser.add_argument("--role", required=True, help="Artifact role to resolve")
     get_parser.add_argument("--path-only", action="store_true", help="Print only the resolved artifact path")
+    list_parser = artifact_subparsers.add_parser("list", help="List artifact metadata")
+    list_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    list_parser.add_argument("--roles-only", action="store_true", help="Print only artifact roles")
 
 
 def run_repobrief(args: argparse.Namespace) -> int:
@@ -265,6 +268,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_snapshot_status(args)
     if args.repobrief_cmd == "artifact" and args.artifact_cmd == "get":
         return run_artifact_get(args)
+    if args.repobrief_cmd == "artifact" and args.artifact_cmd == "list":
+        return run_artifact_list(args)
     print("Unsupported RepoBrief command", file=sys.stderr)
     return 2
 
@@ -297,6 +302,21 @@ def run_artifact_get(args: argparse.Namespace) -> int:
         return 0
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "available" else 1
+
+def run_artifact_list(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_access import list_artifacts
+
+    try:
+        result = list_artifacts(args.bundle_manifest)
+    except ValueError as exc:
+        print("repobrief artifact list: " + str(exc), file=sys.stderr)
+        return 2
+    if args.roles_only:
+        for role in result.get("roles", []):
+            print(role)
+        return 0
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 def run_snapshot_create(args: argparse.Namespace) -> int:
     profile = args.profile

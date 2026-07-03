@@ -94,6 +94,23 @@ def snapshot_status(bundle_manifest: str | Path) -> dict[str, Any]:
     }
 
 
+def list_artifacts(bundle_manifest: str | Path) -> dict[str, Any]:
+    status = snapshot_status(bundle_manifest)
+    return {
+        "kind": "repobrief.artifact_list",
+        "version": "v1",
+        "status": status["status"],
+        "bundle_manifest": status["bundle_manifest"],
+        "bundle_run_id": status["bundle_run_id"],
+        "profile": status["profile"],
+        "artifact_count": status["artifact_count"],
+        "roles": status["roles"],
+        "artifacts": status["artifacts"],
+        "mutation_boundary": status["mutation_boundary"],
+        "does_not_establish": status["does_not_establish"],
+    }
+
+
 def get_artifact(bundle_manifest: str | Path, role: str) -> dict[str, Any]:
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     manifest = _read_json_object(manifest_path)
