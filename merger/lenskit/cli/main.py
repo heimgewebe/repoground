@@ -74,6 +74,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_rlens_client import register_rlens_client_commands
     register_rlens_client_commands(subparsers)
 
+    # RepoBrief command
+    from .cmd_repobrief import register_repobrief_commands
+    register_repobrief_commands(subparsers)
+
     # Index command
     index_parser = subparsers.add_parser("index", help="Build or verify retrieval index")
     index_parser.add_argument("--dump", required=True, help="Path to dump_index.json")
@@ -292,6 +296,9 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "rlens-client":
         from .cmd_rlens_client import run_rlens_client
         return run_rlens_client(parsed_args)
+    elif parsed_args.command == "repobrief":
+        from .cmd_repobrief import run_repobrief
+        return run_repobrief(parsed_args)
 
     return 0
 
