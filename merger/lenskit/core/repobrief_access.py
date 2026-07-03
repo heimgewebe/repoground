@@ -68,6 +68,60 @@ def _artifact_record(bundle_manifest: Path, artifact: dict[str, Any]) -> dict[st
     }
 
 
+def available_roles(bundle_manifest: str | Path) -> list[str]:
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest = _read_json_object(manifest_path)
+    roles: set[str] = {"bundle_manifest"}
+    for artifact in _artifact_list(manifest):
+        role = artifact.get("role")
+        if isinstance(role, str) and role:
+            roles.add(role)
+    links = manifest.get("links")
+    if isinstance(links, dict):
+        linked_roles = {
+            "post_emit_health_path": "post_emit_health",
+            "bundle_surface_validation_path": "bundle_surface_validation",
+            "export_safety_report_path": "export_safety_report",
+        }
+        for key, role in linked_roles.items():
+            if links.get(key):
+                roles.add(role)
+    return sorted(roles)
+
+
+def resolve_required_reading_for_bundle(
+    bundle_manifest: str | Path,
+    task_profile: str,
+) -> dict[str, Any]:
+    from merger.lenskit.core.required_reading import (
+        default_required_reading_protocol,
+        resolve_required_reading,
+    )
+
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    roles = available_roles(manifest_path)
+    required = resolve_required_reading(
+        default_required_reading_protocol(),
+        set(roles),
+        task_profile,
+    )
+    return {
+        "kind": "repobrief.required_reading_resolution",
+        "version": "v1",
+        "status": required.get("status"),
+        "bundle_manifest": str(manifest_path),
+        "task_profile": task_profile,
+        "available_roles": roles,
+        "required_reading": required,
+        "mutation_boundary": {
+            "writes": [],
+            "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree", "brief_bundle_artifacts"],
+            "read_paths_do_not_refresh": True,
+        },
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
 def snapshot_status(bundle_manifest: str | Path) -> dict[str, Any]:
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     manifest = _read_json_object(manifest_path)

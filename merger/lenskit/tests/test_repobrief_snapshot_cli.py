@@ -440,3 +440,41 @@ def test_repobrief_artifact_list_cli_reports_artifacts_and_roles_only(tmp_path, 
     rc = main(["repobrief", "artifact", "list", "--bundle-manifest", str(manifest), "--roles-only"])
     assert rc == 0
     assert capsys.readouterr().out.splitlines() == ["canonical_md", "snapshot_plan_json"]
+
+
+def test_repobrief_required_reading_resolve_cli_uses_bundle_roles(tmp_path, capsys):
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "kind": "repolens.bundle.manifest",
+        "version": "1.0",
+        "run_id": "run-1",
+        "created_at": "2026-07-03T00:00:00Z",
+        "generator": {"name": "test", "version": "1", "config_sha256": "a" * 64},
+        "artifacts": [
+            {"role": "agent_reading_pack", "path": "pack.md"},
+            {"role": "canonical_md", "path": "demo.md"},
+            {"role": "citation_map_jsonl", "path": "citation.jsonl"},
+            {"role": "snapshot_plan_json", "path": "plan.json"},
+        ],
+        "links": {},
+        "capabilities": {},
+    }), encoding="utf-8")
+
+    rc = main([
+        "repobrief",
+        "required-reading",
+        "resolve",
+        "--bundle-manifest",
+        str(manifest),
+        "--task-profile",
+        "basic_repo_question",
+    ])
+
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert out["kind"] == "repobrief.required_reading_resolution"
+    assert out["status"] == "pass"
+    assert "bundle_manifest" in out["available_roles"]
+    assert out["required_reading"]["status"] == "pass"
+    assert out["required_reading"]["missing_recommended"] == []
+    assert out["mutation_boundary"]["writes"] == []

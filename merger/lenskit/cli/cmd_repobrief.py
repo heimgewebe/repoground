@@ -259,6 +259,11 @@ def register_repobrief_commands(subparsers: argparse._SubParsersAction) -> None:
     list_parser = artifact_subparsers.add_parser("list", help="List artifact metadata")
     list_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
     list_parser.add_argument("--roles-only", action="store_true", help="Print only artifact roles")
+    reading_parser = repobrief_subparsers.add_parser("required-reading", help="Brief required-reading commands")
+    reading_subparsers = reading_parser.add_subparsers(dest="required_reading_cmd", required=True, help="Required-reading commands")
+    resolve_parser = reading_subparsers.add_parser("resolve", help="Resolve required reading from a bundle manifest")
+    resolve_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    resolve_parser.add_argument("--task-profile", required=True, help="Required-reading task profile")
 
 
 def run_repobrief(args: argparse.Namespace) -> int:
@@ -270,6 +275,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_artifact_get(args)
     if args.repobrief_cmd == "artifact" and args.artifact_cmd == "list":
         return run_artifact_list(args)
+    if args.repobrief_cmd == "required-reading" and args.required_reading_cmd == "resolve":
+        return run_required_reading_resolve(args)
     print("Unsupported RepoBrief command", file=sys.stderr)
     return 2
 
@@ -317,6 +324,17 @@ def run_artifact_list(args: argparse.Namespace) -> int:
         return 0
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+def run_required_reading_resolve(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_access import resolve_required_reading_for_bundle
+
+    try:
+        result = resolve_required_reading_for_bundle(args.bundle_manifest, args.task_profile)
+    except ValueError as exc:
+        print("repobrief required-reading resolve: " + str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") in {"pass", "warn"} else 1
 
 def run_snapshot_create(args: argparse.Namespace) -> int:
     profile = args.profile
