@@ -6,6 +6,7 @@ from merger.lenskit.core.repobrief_profiles import (
     present_roles_from_manifest,
     profile_level,
     profile_names,
+    profile_output_mode_plan,
     profile_policy,
 )
 
@@ -96,3 +97,20 @@ def test_profile_rules_match_expected_high_signal_requirements():
     assert PROFILE_ARTIFACT_RULES["pr-review"]["pr_delta_cards_jsonl"] == "required"
     assert PROFILE_ARTIFACT_RULES["full-max"]["sqlite_index"] == "required"
     assert PROFILE_ARTIFACT_RULES["local-private"]["citation_map_jsonl"] == "optional"
+
+
+def test_profile_output_mode_plan_is_machine_readable():
+    public_default = profile_output_mode_plan("public-share")
+    assert public_default["selected_output_mode"] == "archive"
+    assert public_default["defaulted"] is True
+    assert public_default["conflicts"] == []
+    assert public_default["excluded_roles"] == ["sqlite_index"]
+
+    public_dual = profile_output_mode_plan("public-share", "dual")
+    assert public_dual["selected_output_mode"] == "dual"
+    assert public_dual["defaulted"] is False
+    assert public_dual["conflicts"] == ["sqlite_index"]
+
+    agent_default = profile_output_mode_plan("agent-portable")
+    assert agent_default["selected_output_mode"] == "dual"
+    assert agent_default["conflicts"] == []

@@ -235,3 +235,17 @@ def profile_output_mode_conflicts(profile: str, output_mode: str) -> tuple[str, 
     excluded = set(profile_excluded_roles(profile))
     produced = set(OUTPUT_MODE_ARTIFACT_ROLES[output_mode])
     return tuple(sorted(excluded & produced))
+
+
+def profile_output_mode_plan(profile: str, requested_output_mode: str | None = None) -> dict[str, Any]:
+    selected_output_mode = requested_output_mode or profile_default_output_mode(profile)
+    conflicts = profile_output_mode_conflicts(profile, selected_output_mode)
+    return {
+        "profile": profile,
+        "requested_output_mode": requested_output_mode,
+        "selected_output_mode": selected_output_mode,
+        "defaulted": requested_output_mode is None,
+        "conflicts": list(conflicts),
+        "excluded_roles": list(profile_excluded_roles(profile)),
+        "conflict_candidate_roles": sorted(OUTPUT_MODE_ARTIFACT_ROLES[selected_output_mode]),
+    }

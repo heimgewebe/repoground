@@ -13,10 +13,9 @@ from merger.lenskit.core.merge import ExtrasConfig, parse_human_size, scan_repo,
 from merger.lenskit.core.repobrief_profiles import (
     evaluate_profile,
     present_roles_from_manifest,
-    profile_default_output_mode,
     profile_level,
     profile_names,
-    profile_output_mode_conflicts,
+    profile_output_mode_plan,
     profile_policy,
     profile_excluded_roles,
 )
@@ -61,7 +60,11 @@ def _json_write_atomic(path: Path, data: dict[str, Any]) -> None:
                 pass
 
 
-def mark_bundle_manifest_profile(bundle_manifest: Path | None, profile: str) -> dict[str, Any] | None:
+def mark_bundle_manifest_profile(
+    bundle_manifest: Path | None,
+    profile: str,
+    output_plan: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     if bundle_manifest is None:
         return None
     data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
@@ -73,6 +76,8 @@ def mark_bundle_manifest_profile(bundle_manifest: Path | None, profile: str) -> 
     capabilities["repobrief_profile"] = profile
     capabilities["repobrief_snapshot_create"] = True
     capabilities["repobrief_profile_policy"] = profile_policy(profile)
+    if output_plan is not None:
+        capabilities["repobrief_output_plan"] = output_plan
     capabilities["repobrief_profile_evaluation"] = evaluation
     _json_write_atomic(bundle_manifest, data)
     return evaluation
@@ -206,8 +211,9 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         print("bad output path", file=sys.stderr)
         return 2
 
-    output_mode = args.output_mode or profile_default_output_mode(profile)
-    conflicts = profile_output_mode_conflicts(profile, output_mode)
+    output_plan = profile_output_mode_plan(profile, args.output_mode)
+    output_mode = output_plan["selected_output_mode"]
+    conflicts = tuple(output_plan["conflicts"])
     if conflicts:
         print(
             f"repobrief snapshot create: profile {profile} excludes artifacts produced by output mode {output_mode}: "
@@ -257,9 +263,8 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
     )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
     export_safety_path = emit_export_safety_report(artifacts.bundle_manifest, profile)
-    profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile)
     refreshed_paths = refresh_entry(artifacts.bundle_manifest)
-    profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile)
+    profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
     artifact_paths = [path for path in artifacts.get_all_paths() if path not in dropped_profile_paths]
     if export_safety_path is not None and export_safety_path not in artifact_paths:
         artifact_paths.append(export_safety_path)
@@ -269,6 +274,7 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         "command": "repobrief snapshot create",
         "profile": profile,
         "output_mode": output_mode,
+        "output_plan": output_plan,
         "repo": str(repo),
         "out": str(out),
         "bundle_manifest": str(artifacts.bundle_manifest) if artifacts.bundle_manifest else None,
