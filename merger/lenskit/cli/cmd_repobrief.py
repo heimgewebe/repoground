@@ -246,12 +246,25 @@ def register_repobrief_commands(subparsers: argparse._SubParsersAction) -> None:
     status_parser = snapshot_subparsers.add_parser("status", help="Read status for an existing Brief Snapshot")
     status_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
 
+    artifact_parser = repobrief_subparsers.add_parser("artifact", help="Brief artifact read-only commands")
+    artifact_subparsers = artifact_parser.add_subparsers(
+        dest="artifact_cmd",
+        required=True,
+        help="Artifact commands",
+    )
+    get_parser = artifact_subparsers.add_parser("get", help="Read artifact metadata by role")
+    get_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    get_parser.add_argument("--role", required=True, help="Artifact role to resolve")
+    get_parser.add_argument("--path-only", action="store_true", help="Print only the resolved artifact path")
+
 
 def run_repobrief(args: argparse.Namespace) -> int:
     if args.repobrief_cmd == "snapshot" and args.snapshot_cmd == "create":
         return run_snapshot_create(args)
     if args.repobrief_cmd == "snapshot" and args.snapshot_cmd == "status":
         return run_snapshot_status(args)
+    if args.repobrief_cmd == "artifact" and args.artifact_cmd == "get":
+        return run_artifact_get(args)
     print("Unsupported RepoBrief command", file=sys.stderr)
     return 2
 
@@ -266,6 +279,24 @@ def run_snapshot_status(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def run_artifact_get(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_access import get_artifact
+
+    try:
+        result = get_artifact(args.bundle_manifest, args.role)
+    except ValueError as exc:
+        print("repobrief artifact get: " + str(exc), file=sys.stderr)
+        return 2
+    if args.path_only:
+        artifact = result.get("artifact") if isinstance(result, dict) else None
+        if not isinstance(artifact, dict) or not artifact.get("absolute_path"):
+            return 1
+        print(artifact["absolute_path"])
+        return 0
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") == "available" else 1
 
 def run_snapshot_create(args: argparse.Namespace) -> int:
     profile = args.profile
