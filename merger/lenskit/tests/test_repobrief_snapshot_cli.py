@@ -160,3 +160,61 @@ def test_local_private_does_not_emit_optional_export_safety(monkeypatch, tmp_pat
     assert not (out / "repo_merge.export_safety_report.json").exists()
     manifest_data = json.loads((out / "repo_merge.bundle.manifest.json").read_text(encoding="utf-8"))
     assert all(a.get("role") != "export_safety_report" for a in manifest_data.get("artifacts", []))
+
+
+def test_public_share_removes_profile_excluded_sqlite(monkeypatch, tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+
+    def fake_scan_repo(*args, **kwargs):
+        return {"name": "repo", "root": repo, "files": [], "total_files": 0, "total_bytes": 0, "ext_hist": {}}
+
+    def fake_write_reports_v2(*args, **kwargs):
+        manifest = out / "repo_merge.bundle.manifest.json"
+        sqlite = out / "repo_merge.chunk_index.index.sqlite"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        sqlite.write_bytes(b"sqlite-placeholder")
+        manifest.write_text(
+            json.dumps(
+                {
+                    "kind": "repolens.bundle.manifest",
+                    "artifacts": [
+                        {"role": "sqlite_index", "path": sqlite.name},
+                        {"role": "canonical_md", "path": "brief.md"},
+                    ],
+                    "links": {},
+                    "capabilities": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        fake = FakeArtifacts(manifest)
+        fake.sqlite_index = sqlite
+        fake.get_all_paths = lambda: [manifest, fake.canonical_md, sqlite]
+        return fake
+
+    monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
+    monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "public-share",
+    ])
+
+    assert rc == 0
+    assert not (out / "repo_merge.chunk_index.index.sqlite").exists()
+    manifest_data = json.loads((out / "repo_merge.bundle.manifest.json").read_text(encoding="utf-8"))
+    assert all(a.get("role") != "sqlite_index" for a in manifest_data["artifacts"])
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["removed_profile_excluded_artifacts"]
+    assert emitted["profile_evaluation"]["profile_excluded_present"] == []
+    assert manifest_data["capabilities"]["fts5_bm25"] is False

@@ -203,3 +203,8 @@ def present_roles_from_manifest(bundle_manifest: Mapping[str, Any]) -> set[str]:
         if links.get("bundle_surface_validation_path") or links.get("surface_validation_path"):
             roles.add("bundle_surface_validation")
     return roles
+
+
+def profile_excluded_roles(profile: str) -> tuple[str, ...]:
+    rules = _rules(profile)
+    return tuple(role for role in ARTIFACT_ORDER if rules[role] == REQ_EXCLUDED)

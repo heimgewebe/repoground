@@ -16,6 +16,7 @@ from merger.lenskit.core.repobrief_profiles import (
     profile_level,
     profile_names,
     profile_policy,
+    profile_excluded_roles,
 )
 
 DOES_NOT_ESTABLISH = [
@@ -242,9 +243,12 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         include_hidden=args.include_hidden,
         generator_info=generator_info,
     )
+    dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
     export_safety_path = emit_export_safety_report(artifacts.bundle_manifest, profile)
     profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile)
-    artifact_paths = artifacts.get_all_paths()
+    refreshed_paths = refresh_entry(artifacts.bundle_manifest)
+    profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile)
+    artifact_paths = [path for path in artifacts.get_all_paths() if path not in dropped_profile_paths]
     if export_safety_path is not None and export_safety_path not in artifact_paths:
         artifact_paths.append(export_safety_path)
 
@@ -257,6 +261,8 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         "bundle_manifest": str(artifacts.bundle_manifest) if artifacts.bundle_manifest else None,
         "profile_evaluation": profile_evaluation,
         "export_safety_report": str(export_safety_path) if export_safety_path else None,
+        "refreshed_agent_entrypoints": [str(path) for path in refreshed_paths],
+        "removed_profile_excluded_artifacts": [str(path) for path in dropped_profile_paths],
         "artifacts": [str(path) for path in artifact_paths],
         "mutation_boundary": {
             "writes": ["brief_bundle_artifacts"],
@@ -267,3 +273,77 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def _drop_manifest_role(bundle_manifest: Path, role: str) -> list[Path]:
+    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    artifacts = data.get("artifacts", [])
+    if not isinstance(artifacts, list):
+        return []
+    kept = []
+    dropped: list[Path] = []
+    root = bundle_manifest.parent.resolve()
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or artifact.get("role") != role:
+            kept.append(artifact)
+            continue
+        raw_path = artifact.get("path")
+        if isinstance(raw_path, str) and raw_path:
+            candidate = (bundle_manifest.parent / raw_path).resolve()
+            try:
+                candidate.relative_to(root)
+            except ValueError:
+                pass
+            else:
+                dropped.append(candidate)
+    data["artifacts"] = kept
+    if role == "sqlite_index":
+        capabilities = data.setdefault("capabilities", {})
+        if isinstance(capabilities, dict) and not any(
+            isinstance(a, dict) and a.get("role") == "sqlite_index" for a in kept
+        ):
+            capabilities["fts5_bm25"] = False
+    _json_write_atomic(bundle_manifest, data)
+    for path in dropped:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            # Already absent is acceptable during profile-surface cleanup.
+            pass
+    return dropped
+
+
+def enforce_profile_exclusions(bundle_manifest: Path | None, profile: str) -> list[Path]:
+    if bundle_manifest is None:
+        return []
+    dropped: list[Path] = []
+    for role in profile_excluded_roles(profile):
+        dropped.extend(_drop_manifest_role(bundle_manifest, role))
+    return dropped
+
+
+def refresh_entry(bundle_manifest: Path | None) -> list[Path]:
+    if bundle_manifest is None:
+        return []
+    import importlib
+
+    refreshed: list[Path] = []
+    base = "merger.lenskit.core."
+    pack_mod = importlib.import_module(base + "agent_" + "reading_pack")
+    entry_mod = importlib.import_module(base + "agent_" + "entry_manifest")
+    pack_fn = getattr(pack_mod, "produce_" + "agent_" + "reading_pack")
+    entry_fn = getattr(entry_mod, "produce_" + "agent_" + "entry_manifest")
+
+    pack_report = pack_fn(str(bundle_manifest))
+    if pack_report.get("status") == "ok":
+        pack_path = Path(pack_report["output_path"])
+        _add_manifest_artifact(bundle_manifest, pack_path, "agent_reading_pack", "text/markdown")
+        refreshed.append(pack_path)
+
+    entry_report = entry_fn(str(bundle_manifest))
+    if entry_report.get("status") == "ok":
+        entry_path = Path(entry_report["output_path"])
+        _add_manifest_artifact(bundle_manifest, entry_path, "agent_entry_manifest", "application/json")
+        refreshed.append(entry_path)
+
+    return refreshed
