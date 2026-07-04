@@ -736,3 +736,69 @@ def test_repobrief_rr_resolution_schema_rejects_status_only_inner_result():
 
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=payload, schema=schema)
+
+
+def test_repobrief_snapshot_check_matches_contract_schema(tmp_path, capsys):
+    import pytest
+
+    jsonschema = pytest.importorskip("jsonschema")
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "kind": "repolens.bundle.manifest",
+        "version": "1.0",
+        "run_id": "run-1",
+        "created_at": "2026-07-03T00:00:00Z",
+        "generator": {"name": "test", "version": "1", "config_sha256": "a" * 64},
+        "artifacts": [
+            {"role": "agent_reading_pack", "path": "pack.md"},
+            {"role": "canonical_md", "path": "demo.md"},
+            {"role": "citation_map_jsonl", "path": "citation.jsonl"},
+            {"role": "snapshot_plan_json", "path": "plan.json"},
+        ],
+        "links": {},
+        "capabilities": {"repobrief_profile": "agent-portable"},
+    }), encoding="utf-8")
+    schema_path = Path(__file__).parent.parent / "contracts" / "repobrief-snapshot-check.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    jsonschema.Draft7Validator.check_schema(schema)
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "check",
+        "--bundle-manifest",
+        str(manifest),
+        "--task-profile",
+        "basic_repo_question",
+    ])
+
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    jsonschema.validate(instance=out, schema=schema)
+
+
+def test_repobrief_snapshot_check_schema_requires_profile_evaluation_status():
+    import pytest
+
+    jsonschema = pytest.importorskip("jsonschema")
+    schema_path = Path(__file__).parent.parent / "contracts" / "repobrief-snapshot-check.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    payload = {
+        "kind": "repobrief.snapshot_check",
+        "version": "v1",
+        "status": "pass",
+        "bundle_manifest": "/tmp/demo.bundle.manifest.json",
+        "bundle_run_id": "run-1",
+        "profile": "agent-portable",
+        "task_profile": "basic_repo_question",
+        "artifact_count": 0,
+        "roles": [],
+        "snapshot_status": {"kind": "repobrief.snapshot_status", "version": "v1", "status": "ok"},
+        "artifact_list": {"kind": "repobrief.artifact_list", "version": "v1", "status": "ok"},
+        "required_reading": {"kind": "repobrief.required_reading_resolution", "version": "v1", "status": "pass"},
+        "mutation_boundary": {"writes": [], "does_not_mutate": ["git"], "read_paths_do_not_refresh": True},
+        "does_not_establish": ["truth"],
+    }
+
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=payload, schema=schema)

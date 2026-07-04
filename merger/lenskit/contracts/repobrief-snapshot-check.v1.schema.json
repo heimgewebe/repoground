@@ -1,0 +1,89 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.github.io/lenskit/contracts/repobrief-snapshot-check.v1.schema.json",
+  "title": "RepoBrief Snapshot Check v1",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "bundle_manifest",
+    "bundle_run_id",
+    "profile",
+    "profile_evaluation_status",
+    "task_profile",
+    "artifact_count",
+    "roles",
+    "snapshot_status",
+    "artifact_list",
+    "required_reading",
+    "mutation_boundary",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "repobrief.snapshot_check"},
+    "version": {"const": "v1"},
+    "status": {"enum": ["pass", "warn", "fail", "unknown"]},
+    "bundle_manifest": {"type": "string", "minLength": 1},
+    "bundle_run_id": {"type": ["string", "null"]},
+    "profile": {"type": ["string", "null"]},
+    "profile_evaluation_status": {"type": ["string", "null"]},
+    "task_profile": {"type": "string", "minLength": 1},
+    "artifact_count": {"type": "integer", "minimum": 0},
+    "roles": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "snapshot_status": {
+      "type": "object",
+      "required": ["kind", "version", "status"],
+      "properties": {
+        "kind": {"const": "repobrief.snapshot_status"},
+        "version": {"const": "v1"},
+        "status": {"const": "ok"}
+      },
+      "additionalProperties": true
+    },
+    "artifact_list": {
+      "type": "object",
+      "required": ["kind", "version", "status"],
+      "properties": {
+        "kind": {"const": "repobrief.artifact_list"},
+        "version": {"const": "v1"},
+        "status": {"const": "ok"}
+      },
+      "additionalProperties": true
+    },
+    "required_reading": {
+      "type": "object",
+      "required": ["kind", "version", "status"],
+      "properties": {
+        "kind": {"const": "repobrief.required_reading_resolution"},
+        "version": {"const": "v1"},
+        "status": {"enum": ["pass", "warn", "fail", "not_applicable"]}
+      },
+      "additionalProperties": true
+    },
+    "mutation_boundary": {
+      "type": "object",
+      "required": ["writes", "does_not_mutate", "read_paths_do_not_refresh"],
+      "properties": {
+        "writes": {"type": "array", "maxItems": 0},
+        "does_not_mutate": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "read_paths_do_not_refresh": {"const": true}
+      },
+      "additionalProperties": true
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": true
+}
