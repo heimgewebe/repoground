@@ -345,9 +345,10 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                     except ValueError:
                         candidate = None
             if candidate is not None:
-                artifact_paths_by_role.setdefault(role, candidate)
                 if candidate.exists():
+                    artifact_paths_by_role[role] = candidate
                     break
+                artifact_paths_by_role.setdefault(role, candidate)
     for role, path in linked_paths.items():
         if path is not None:
             artifact_paths_by_role[role] = path

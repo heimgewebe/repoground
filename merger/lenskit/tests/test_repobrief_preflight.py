@@ -287,3 +287,35 @@ def test_used_range_resolves_bundle_surface_validation_lines(tmp_path):
     assert result['status'] == 'pass'
     assert result['used_ranges']['resolved'][0]['artifact'] == 'bundle_surface_validation'
 
+
+def test_used_range_prefers_existing_duplicate_role_path(tmp_path):
+    existing = tmp_path / 'canonical_existing.txt'
+    existing.write_text('ok\n', encoding='utf-8')
+
+    manifest = _bundle(tmp_path, ['agent_reading_pack', 'citation_map_jsonl', 'snapshot_plan_json'])
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['artifacts'].append({
+        'role': 'canonical_md',
+        'path': 'canonical_missing.txt',
+        'content_type': 'text/plain',
+        'bytes': 1,
+        'sha256': '0' * 64,
+    })
+    data['artifacts'].append({
+        'role': 'canonical_md',
+        'path': existing.name,
+        'content_type': 'text/plain',
+        'bytes': existing.stat().st_size,
+        'sha256': '1' * 64,
+    })
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(
+        manifest,
+        'basic_repo_question',
+        used_ranges=[{'artifact': 'canonical_md', 'range_ref': {'start_line': 1, 'end_line': 1}}],
+    )
+
+    assert result['status'] == 'pass'
+    assert result['used_ranges']['resolved'][0]['artifact'] == 'canonical_md'
+
