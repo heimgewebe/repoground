@@ -635,3 +635,36 @@ def test_repobrief_artifact_ref_matches_contract_schema(tmp_path, capsys):
     assert rc == 1
     jsonschema.validate(instance=missing, schema=schema)
 
+
+
+def test_repobrief_artifact_list_matches_contract_schema(tmp_path, capsys):
+    import pytest
+
+    jsonschema = pytest.importorskip("jsonschema")
+    first = tmp_path / "demo.md"
+    second = tmp_path / "plan.json"
+    first.write_text("# demo\n", encoding="utf-8")
+    second.write_text("{}\n", encoding="utf-8")
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "kind": "repolens.bundle.manifest",
+        "version": "1.0",
+        "run_id": "run-1",
+        "created_at": "2026-07-03T00:00:00Z",
+        "generator": {"name": "test", "version": "1", "config_sha256": "a" * 64},
+        "artifacts": [
+            {"role": "snapshot_plan_json", "path": second.name, "content_type": "application/json", "bytes": second.stat().st_size, "sha256": "c" * 64},
+            {"role": "canonical_md", "path": first.name, "content_type": "text/markdown", "bytes": first.stat().st_size, "sha256": "b" * 64},
+        ],
+        "links": {},
+        "capabilities": {"repobrief_profile": "agent-portable"},
+    }), encoding="utf-8")
+    schema_path = Path(__file__).parent.parent / "contracts" / "repobrief-artifact-list.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    jsonschema.Draft7Validator.check_schema(schema)
+    rc = main(["repobrief", "artifact", "list", "--bundle-manifest", str(manifest)])
+
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    jsonschema.validate(instance=out, schema=schema)

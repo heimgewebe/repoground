@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.github.io/lenskit/contracts/repobrief-artifact-list.v1.schema.json",
+  "title": "RepoBrief Artifact List v1",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "bundle_manifest",
+    "artifact_count",
+    "roles",
+    "artifacts",
+    "mutation_boundary",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "repobrief.artifact_list"},
+    "version": {"const": "v1"},
+    "status": {"const": "ok"},
+    "bundle_manifest": {"type": "string", "minLength": 1},
+    "bundle_run_id": {"type": ["string", "null"]},
+    "profile": {"type": ["string", "null"]},
+    "artifact_count": {"type": "integer", "minimum": 0},
+    "roles": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "path", "absolute_path", "file_exists"],
+        "properties": {
+          "role": {"type": ["string", "null"]},
+          "path": {"type": ["string", "null"]},
+          "absolute_path": {"type": ["string", "null"]},
+          "file_exists": {"type": "boolean"},
+          "content_type": {"type": ["string", "null"]},
+          "bytes": {"type": ["integer", "null"], "minimum": 0},
+          "sha256": {"type": ["string", "null"]},
+          "authority": {"type": ["string", "null"]},
+          "canonicality": {"type": ["string", "null"]},
+          "risk_class": {"type": ["string", "null"]},
+          "contract": {"type": ["object", "null"]},
+          "interpretation": {"type": ["object", "null"]}
+        },
+        "additionalProperties": true
+      }
+    },
+    "mutation_boundary": {
+      "type": "object",
+      "required": ["writes", "does_not_mutate", "read_paths_do_not_refresh"],
+      "properties": {
+        "writes": {"type": "array", "maxItems": 0},
+        "does_not_mutate": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "read_paths_do_not_refresh": {"const": true}
+      },
+      "additionalProperties": true
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": true
+}
