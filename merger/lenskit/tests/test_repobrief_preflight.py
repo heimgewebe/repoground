@@ -208,3 +208,82 @@ def test_preflight_cli_valid_manifest_prints_preflight_json(tmp_path, capsys):
     assert emitted['kind'] == 'repobrief.consumption_preflight'
     assert emitted['status'] == 'pass'
     assert emitted['mutation_boundary']['writes'] == []
+
+
+def test_required_linked_surface_sidecar_unreadable_fails(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    surface = tmp_path / 'surface.json'
+    surface.mkdir()
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['links'] = {'bundle_surface_validation_path': surface.name}
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(manifest, 'artifact_surface_review')
+
+    assert result['status'] == 'fail'
+    assert any(
+        f['code'] == 'validation_required_sidecar_unreadable'
+        and f['artifact'] == 'bundle_surface_validation'
+        and f['severity'] == 'fail'
+        for f in result['findings']
+    )
+
+
+def test_bundle_surface_recorded_status_mismatch_warns(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    surface = tmp_path / 'surface.json'
+    surface.write_text(json.dumps({'status': 'pass'}), encoding='utf-8')
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['links'] = {
+        'bundle_surface_validation_path': surface.name,
+        'bundle_surface_validation_status': 'warn',
+    }
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(manifest, 'basic_repo_question')
+
+    assert result['status'] == 'warn'
+    assert result['validation']['bundle_surface_validation']['recorded_status'] == 'warn'
+    assert result['validation']['bundle_surface_validation']['sidecar_status'] == 'pass'
+    assert any(f['code'] == 'validation_surface_status_mismatch' for f in result['findings'])
+
+
+def test_used_range_resolves_bundle_manifest_lines(tmp_path):
+    result = run_consumption_preflight(
+        _bundle(tmp_path, FULL_BASIC),
+        'basic_repo_question',
+        used_ranges=[{'artifact': 'bundle_manifest', 'range_ref': {'start_line': 1, 'end_line': 1}}],
+    )
+
+    assert result['status'] == 'pass'
+    assert result['used_ranges']['resolved'][0]['artifact'] == 'bundle_manifest'
+
+
+def test_used_range_resolves_linked_post_emit_health_lines(tmp_path):
+    result = run_consumption_preflight(
+        _bundle(tmp_path, FULL_BASIC),
+        'basic_repo_question',
+        used_ranges=[{'artifact': 'post_emit_health', 'range_ref': {'start_line': 1, 'end_line': 1}}],
+    )
+
+    assert result['status'] == 'pass'
+    assert result['used_ranges']['resolved'][0]['artifact'] == 'post_emit_health'
+
+
+def test_used_range_resolves_bundle_surface_validation_lines(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    surface = tmp_path / 'surface.json'
+    surface.write_text(json.dumps({'status': 'pass'}), encoding='utf-8')
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['links'] = {'bundle_surface_validation_path': surface.name}
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(
+        manifest,
+        'basic_repo_question',
+        used_ranges=[{'artifact': 'bundle_surface_validation', 'range_ref': {'start_line': 1, 'end_line': 1}}],
+    )
+
+    assert result['status'] == 'pass'
+    assert result['used_ranges']['resolved'][0]['artifact'] == 'bundle_surface_validation'
+

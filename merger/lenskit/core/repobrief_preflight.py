@@ -329,6 +329,29 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         if derived.exists():
             linked_paths["post_emit_health"] = derived
 
+    # Central role -> file map used by validation and range checks.
+    artifact_paths_by_role: dict[str, Path] = {"bundle_manifest": manifest_path}
+    for role, role_records in records_by_role.items():
+        for record in role_records:
+            candidate: Path | None = None
+            absolute_path = record.get("absolute_path")
+            if isinstance(absolute_path, str) and absolute_path:
+                candidate = Path(absolute_path)
+            else:
+                relative_path = record.get("path")
+                if isinstance(relative_path, str) and relative_path:
+                    try:
+                        candidate = resolve_secure_path(manifest_dir, relative_path)
+                    except ValueError:
+                        candidate = None
+            if candidate is not None:
+                artifact_paths_by_role.setdefault(role, candidate)
+                if candidate.exists():
+                    break
+    for role, path in linked_paths.items():
+        if path is not None:
+            artifact_paths_by_role[role] = path
+
     available_roles: set[str] = {"bundle_manifest"}
     file_missing_roles: set[str] = set()
     for role, role_records in records_by_role.items():
@@ -370,6 +393,13 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     recommended_roles = list(required_reading["recommended"])
     missing_required = list(required_reading["missing_required"])
     missing_recommended = list(required_reading["missing_recommended"])
+    required_role_set = set(required_roles)
+
+    def add_sidecar_read_failure(role: str, detail: str) -> None:
+        if role in required_role_set:
+            add("validation_required_sidecar_unreadable", SEVERITY_FAIL, "validation", detail, artifact=role)
+        else:
+            add("validation_unreadable", SEVERITY_WARN, "validation", detail, artifact=role)
 
     for role in missing_required:
         if role in file_missing_roles:
@@ -415,7 +445,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             artifact=role,
         )
     if file_missing_roles:
-        artifact_files_status = STATUS_FAIL if file_missing_roles & set(required_roles) else STATUS_WARN
+        artifact_files_status = STATUS_FAIL if file_missing_roles & required_role_set else STATUS_WARN
     else:
         artifact_files_status = STATUS_PASS
     checks.append(
@@ -447,6 +477,10 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         else:
             availability = AVAILABILITY_MISSING
         path_value = record.get("path")
+        if path_value is None:
+            mapped_path = artifact_paths_by_role.get(role)
+            if mapped_path is not None:
+                path_value = str(mapped_path)
         if path_value is None and linked is not None:
             path_value = str(linked)
         artifact_statuses.append(
@@ -539,12 +573,9 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         )
     elif post_doc is None:
         validation["post_emit_health"] = {"present": False, "status": None, "skipped_checks": [], "path": str(post_path)}
-        add(
-            "validation_unreadable",
-            SEVERITY_WARN,
-            "validation",
+        add_sidecar_read_failure(
+            "post_emit_health",
             f"post-emit health sidecar cannot be read: {post_error}",
-            artifact="post_emit_health",
         )
     else:
         post_status = post_doc.get("status")
@@ -587,27 +618,48 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
 
     recorded_surface_status = links.get("bundle_surface_validation_status")
     surface_path = linked_paths.get("bundle_surface_validation")
+    surface_sidecar_status: str | None = None
     if surface_path is not None:
         surface_doc, surface_error = _load_json_file(surface_path)
         if surface_doc is None:
-            add("validation_unreadable", SEVERITY_WARN, "validation", f"bundle surface validation sidecar cannot be read: {surface_error}", artifact="bundle_surface_validation")
+            add_sidecar_read_failure(
+                "bundle_surface_validation",
+                f"bundle surface validation sidecar cannot be read: {surface_error}",
+            )
         elif isinstance(surface_doc.get("status"), str):
-            links = dict(links)
-            links["bundle_surface_validation_status"] = surface_doc["status"]
+            surface_sidecar_status = surface_doc["status"]
         else:
-            add("validation_unreadable", SEVERITY_WARN, "validation", "bundle surface validation sidecar carries no string status", artifact="bundle_surface_validation")
-    surface_status = links.get("bundle_surface_validation_status")
+            add_sidecar_read_failure(
+                "bundle_surface_validation",
+                "bundle surface validation sidecar carries no string status",
+            )
+    surface_status = surface_sidecar_status
+    if surface_status is None and isinstance(recorded_surface_status, str):
+        surface_status = recorded_surface_status
     validation["bundle_surface_validation"] = {
         "status": surface_status if isinstance(surface_status, str) else None,
         "recorded_status": recorded_surface_status if isinstance(recorded_surface_status, str) else None,
+        "sidecar_status": surface_sidecar_status,
         "path": str(linked_paths["bundle_surface_validation"]) if linked_paths.get("bundle_surface_validation") else None,
     }
+    if (
+        isinstance(recorded_surface_status, str)
+        and surface_sidecar_status is not None
+        and recorded_surface_status != surface_sidecar_status
+    ):
+        add(
+            "validation_surface_status_mismatch",
+            SEVERITY_WARN,
+            "validation",
+            f"bundle surface validation recorded status={recorded_surface_status} but sidecar status={surface_sidecar_status}",
+            artifact="bundle_surface_validation",
+        )
     if surface_status == STATUS_WARN:
         add(
             "validation_degraded",
             SEVERITY_WARN,
             "validation",
-            "bundle surface validation recorded status=warn",
+            "bundle surface validation status=warn",
             artifact="bundle_surface_validation",
         )
     elif surface_status in {STATUS_FAIL, "blocked"}:
@@ -615,7 +667,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             "validation_failed",
             SEVERITY_FAIL,
             "validation",
-            f"bundle surface validation recorded status={surface_status}",
+            f"bundle surface validation status={surface_status}",
             artifact="bundle_surface_validation",
         )
 
@@ -900,11 +952,8 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                 unresolved(f"range_ref for '{role}' has invalid line bounds {start_line}..{end_line}", artifact=role)
                 continue
             if role not in line_counts:
-                record = next(
-                    (r for r in records_by_role.get(role, []) if r.get("file_exists") and r.get("absolute_path")),
-                    None,
-                )
-                line_counts[role] = _count_lines(Path(record["absolute_path"])) if record else None
+                path = artifact_paths_by_role.get(role)
+                line_counts[role] = _count_lines(path) if path is not None else None
             total_lines = line_counts[role]
             if total_lines is None:
                 unresolved(f"artifact '{role}' file cannot be read to verify line bounds", artifact=role)
