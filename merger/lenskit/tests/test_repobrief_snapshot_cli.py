@@ -555,3 +555,42 @@ def test_repobrief_snapshot_check_propagates_failed_profile_evaluation(tmp_path,
     assert out["status"] == "fail"
     assert out["profile_evaluation_status"] == "fail"
     assert out["required_reading"]["status"] == "pass"
+
+
+def test_repobrief_snapshot_status_matches_contract_schema(tmp_path, capsys):
+    import pytest
+
+    jsonschema = pytest.importorskip("jsonschema")
+    artifact = tmp_path / "demo.md"
+    artifact.write_text("# demo\n", encoding="utf-8")
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(json.dumps({
+        "kind": "repolens.bundle.manifest",
+        "version": "1.0",
+        "run_id": "run-1",
+        "created_at": "2026-07-03T00:00:00Z",
+        "generator": {"name": "test", "version": "1", "config_sha256": "a" * 64},
+        "artifacts": [{
+            "role": "canonical_md",
+            "path": artifact.name,
+            "content_type": "text/markdown",
+            "bytes": artifact.stat().st_size,
+            "sha256": "b" * 64,
+            "authority": "canonical_content",
+            "canonicality": "content_source",
+        }],
+        "links": {},
+        "capabilities": {
+            "repobrief_profile": "agent-portable",
+            "repobrief_profile_evaluation": {"status": "pass"},
+        },
+    }), encoding="utf-8")
+    schema_path = Path(__file__).parent.parent / "contracts" / "repobrief-snapshot-status.v1.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    jsonschema.Draft7Validator.check_schema(schema)
+    rc = main(["repobrief", "snapshot", "status", "--bundle-manifest", str(manifest)])
+
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    jsonschema.validate(instance=out, schema=schema)
