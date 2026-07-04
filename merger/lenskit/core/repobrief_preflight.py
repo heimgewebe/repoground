@@ -199,6 +199,10 @@ def _read_json_object(path: Path, *, label: str) -> dict[str, Any]:
         raise ValueError(f"{label} does not exist: {path}") from exc
     except json.JSONDecodeError as exc:
         raise ValueError(f"{label} is not valid JSON: {path}") from exc
+    except UnicodeError as exc:
+        raise ValueError(f"{label} is not valid UTF-8 text: {path}") from exc
+    except OSError as exc:
+        raise ValueError(f"{label} cannot be read: {path}") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{label} must be a JSON object")
     return data
@@ -581,9 +585,21 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                 artifact="post_emit_health",
             )
 
+    recorded_surface_status = links.get("bundle_surface_validation_status")
+    surface_path = linked_paths.get("bundle_surface_validation")
+    if surface_path is not None:
+        surface_doc, surface_error = _load_json_file(surface_path)
+        if surface_doc is None:
+            add("validation_unreadable", SEVERITY_WARN, "validation", f"bundle surface validation sidecar cannot be read: {surface_error}", artifact="bundle_surface_validation")
+        elif isinstance(surface_doc.get("status"), str):
+            links = dict(links)
+            links["bundle_surface_validation_status"] = surface_doc["status"]
+        else:
+            add("validation_unreadable", SEVERITY_WARN, "validation", "bundle surface validation sidecar carries no string status", artifact="bundle_surface_validation")
     surface_status = links.get("bundle_surface_validation_status")
     validation["bundle_surface_validation"] = {
-        "recorded_status": surface_status if isinstance(surface_status, str) else None,
+        "status": surface_status if isinstance(surface_status, str) else None,
+        "recorded_status": recorded_surface_status if isinstance(recorded_surface_status, str) else None,
         "path": str(linked_paths["bundle_surface_validation"]) if linked_paths.get("bundle_surface_validation") else None,
     }
     if surface_status == STATUS_WARN:
@@ -790,28 +806,33 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             )
             known_ids = set()
             unparseable_lines = 0
-            try:
-                with Path(map_record["absolute_path"]).open("r", encoding="utf-8") as handle:
-                    for line in handle:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                        except json.JSONDecodeError:
-                            unparseable_lines += 1
-                            continue
-                        if isinstance(entry, dict) and isinstance(entry.get("citation_id"), str):
-                            known_ids.add(entry["citation_id"])
-            except OSError as exc:
+            map_path = map_record.get("absolute_path") if isinstance(map_record, Mapping) else None
+            if not isinstance(map_path, str) or not map_path:
                 known_ids = None
-                add(
-                    "used_citations_unverifiable",
-                    SEVERITY_FAIL,
-                    "used_citations",
-                    f"citation map cannot be read: {exc}",
-                    artifact="citation_map_jsonl",
-                )
+                add("used_citations_unverifiable", SEVERITY_FAIL, "used_citations", "citation map is marked available but no readable absolute path was resolved", artifact="citation_map_jsonl")
+            else:
+                try:
+                    with Path(map_path).open("r", encoding="utf-8") as handle:
+                        for line in handle:
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                entry = json.loads(line)
+                            except json.JSONDecodeError:
+                                unparseable_lines += 1
+                                continue
+                            if isinstance(entry, dict) and isinstance(entry.get("citation_id"), str):
+                                known_ids.add(entry["citation_id"])
+                except OSError as exc:
+                    known_ids = None
+                    add(
+                        "used_citations_unverifiable",
+                        SEVERITY_FAIL,
+                        "used_citations",
+                        f"citation map cannot be read: {exc}",
+                        artifact="citation_map_jsonl",
+                    )
             if unparseable_lines and known_ids is not None:
                 add(
                     "citation_map_lines_unparseable",
@@ -874,29 +895,27 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             if bounds is None:
                 unresolved(f"range_ref for '{role}' carries no integer line bounds", artifact=role)
                 continue
-            start_line, end_line, artifact_anchored = bounds
+            start_line, end_line, _artifact_anchored = bounds
             if start_line < 1 or end_line < start_line:
                 unresolved(f"range_ref for '{role}' has invalid line bounds {start_line}..{end_line}", artifact=role)
                 continue
-            resolution = "role_available_only"
-            if artifact_anchored:
-                if role not in line_counts:
-                    record = next(
-                        (r for r in records_by_role.get(role, []) if r.get("file_exists") and r.get("absolute_path")),
-                        None,
-                    )
-                    line_counts[role] = _count_lines(Path(record["absolute_path"])) if record else None
-                total_lines = line_counts[role]
-                if total_lines is None:
-                    unresolved(f"artifact '{role}' file cannot be read to verify line bounds", artifact=role)
-                    continue
-                if end_line > total_lines:
-                    unresolved(
-                        f"range {start_line}..{end_line} exceeds artifact '{role}' length of {total_lines} line(s)",
-                        artifact=role,
-                    )
-                    continue
-                resolution = "artifact_lines_verified"
+            if role not in line_counts:
+                record = next(
+                    (r for r in records_by_role.get(role, []) if r.get("file_exists") and r.get("absolute_path")),
+                    None,
+                )
+                line_counts[role] = _count_lines(Path(record["absolute_path"])) if record else None
+            total_lines = line_counts[role]
+            if total_lines is None:
+                unresolved(f"artifact '{role}' file cannot be read to verify line bounds", artifact=role)
+                continue
+            if end_line > total_lines:
+                unresolved(
+                    f"range {start_line}..{end_line} exceeds artifact '{role}' length of {total_lines} line(s)",
+                    artifact=role,
+                )
+                continue
+            resolution = "artifact_lines_verified"
             used_ranges_block["resolved"].append(
                 {"index": index, "artifact": role, "start_line": start_line, "end_line": end_line, "resolution": resolution}
             )

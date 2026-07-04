@@ -147,3 +147,64 @@ def test_preflight_cli_invalid_manifest_json_returns_usage_error(tmp_path, capsy
     assert rc == 2
     assert 'repobrief preflight: bundle manifest is not valid JSON' in captured.err
     assert 'Traceback' not in captured.err
+
+
+def test_start_end_line_range_exceeding_artifact_length_fails(tmp_path):
+    result = run_consumption_preflight(
+        _bundle(tmp_path, FULL_BASIC),
+        'basic_repo_question',
+        used_ranges=[{'artifact': 'canonical_md', 'range_ref': {'start_line': 1, 'end_line': 3}}],
+    )
+    assert result['status'] == 'fail'
+    assert any(f['code'] == 'used_range_unresolved' for f in result['findings'])
+
+
+def test_start_end_line_range_within_artifact_length_passes(tmp_path):
+    result = run_consumption_preflight(
+        _bundle(tmp_path, FULL_BASIC, post=True),
+        'basic_repo_question',
+        used_ranges=[{'artifact': 'canonical_md', 'range_ref': {'start_line': 1, 'end_line': 1}}],
+    )
+    assert result['status'] == 'pass'
+    assert result['used_ranges']['resolved'][0]['resolution'] == 'artifact_lines_verified'
+
+
+def test_bundle_surface_sidecar_fail_fails_even_without_recorded_manifest_status(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    surface = tmp_path / 'surface.json'
+    surface.write_text(json.dumps({'status': 'fail'}), encoding='utf-8')
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['links'] = {'bundle_surface_validation_path': surface.name}
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(manifest, 'basic_repo_question')
+
+    assert result['status'] == 'fail'
+    assert any(f['artifact'] == 'bundle_surface_validation' and f['severity'] == 'fail' for f in result['findings'])
+
+
+def test_bundle_surface_sidecar_warn_warns(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    surface = tmp_path / 'surface.json'
+    surface.write_text(json.dumps({'status': 'warn'}), encoding='utf-8')
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['links'] = {'bundle_surface_validation_path': surface.name}
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(manifest, 'basic_repo_question')
+
+    assert result['status'] == 'warn'
+    assert any(f['artifact'] == 'bundle_surface_validation' and f['severity'] == 'warn' for f in result['findings'])
+
+
+def test_preflight_cli_valid_manifest_prints_preflight_json(tmp_path, capsys):
+    from merger.lenskit.cli.main import main
+
+    rc = main(['repobrief', 'preflight', '--bundle-manifest', str(_bundle(tmp_path, FULL_BASIC))])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    emitted = json.loads(captured.out)
+    assert emitted['kind'] == 'repobrief.consumption_preflight'
+    assert emitted['status'] == 'pass'
+    assert emitted['mutation_boundary']['writes'] == []
