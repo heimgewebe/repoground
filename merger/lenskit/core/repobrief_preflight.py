@@ -289,6 +289,34 @@ def _resolve_link_path(manifest_dir: Path, raw: Any) -> tuple[Path | None, str |
         return None, str(exc)
 
 
+def _post_emit_health_binding_error(
+    post_doc: Mapping[str, Any],
+    *,
+    manifest_path: Path,
+    manifest_run_id: Any,
+) -> str | None:
+    manifest_path_value = post_doc.get("bundle_manifest_path")
+    if not isinstance(manifest_path_value, str) or not manifest_path_value.strip():
+        return "post-emit health bundle_manifest_path is missing or empty"
+    try:
+        post_manifest_path = Path(manifest_path_value).expanduser().resolve()
+    except OSError as exc:
+        return f"post-emit health bundle_manifest_path cannot be resolved: {exc}"
+    if post_manifest_path != manifest_path:
+        return "post-emit health bundle_manifest_path does not match the evaluated manifest"
+
+    status = post_doc.get("status")
+    if status == STATUS_PASS:
+        if not isinstance(manifest_run_id, str) or not manifest_run_id.strip():
+            return "manifest run_id is missing or empty; cannot bind post-emit health"
+        post_bundle_run_id = post_doc.get("bundle_run_id")
+        if not isinstance(post_bundle_run_id, str) or not post_bundle_run_id.strip():
+            return "post-emit health bundle_run_id is missing or empty"
+        if post_bundle_run_id != manifest_run_id:
+            return "post-emit health bundle_run_id does not match manifest run_id"
+    return None
+
+
 def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     """Run the RepoBrief agent consumption preflight for one bundle manifest.
 
@@ -298,6 +326,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     manifest_path = Path(preflight_input.bundle_manifest).expanduser().resolve()
     manifest = _read_json_object(manifest_path, label="bundle manifest")
     manifest_dir = manifest_path.parent
+    manifest_run_id = manifest.get("run_id")
     status_report = snapshot_status(manifest_path)
     records = [a for a in status_report["artifacts"] if isinstance(a, dict)]
 
@@ -590,12 +619,21 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             if isinstance(item, dict) and item.get("status") == "skipped" and isinstance(item.get("name"), str):
                 skipped_checks.append(item["name"])
         skipped_checks.sort()
+        post_binding_error = _post_emit_health_binding_error(
+            post_doc,
+            manifest_path=manifest_path,
+            manifest_run_id=manifest_run_id,
+        )
         validation["post_emit_health"] = {
             "present": True,
             "status": post_status if isinstance(post_status, str) else None,
             "skipped_checks": skipped_checks,
             "path": str(post_path),
+            "binding_status": "fail" if post_binding_error else "pass",
+            "binding_error": post_binding_error,
         }
+        if post_binding_error is not None:
+            add_sidecar_read_failure("post_emit_health", post_binding_error)
         if post_status == STATUS_WARN:
             add("validation_degraded", SEVERITY_WARN, "validation", "post-emit health reports status=warn", artifact="post_emit_health")
         elif post_status in {STATUS_FAIL, "blocked"}:

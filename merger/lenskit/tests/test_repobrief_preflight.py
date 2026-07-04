@@ -12,7 +12,12 @@ def _artifact(root: Path, role: str, text: str = 'x\n') -> dict:
 
 def _bundle(tmp_path: Path, roles, *, generator=True, post=True, capabilities=None):
     artifacts = [_artifact(tmp_path, role) for role in roles]
-    data = {'kind': 'repobrief.bundle_manifest', 'created_at': '2026-07-04T06:00:00Z', 'artifacts': artifacts}
+    data = {
+        'kind': 'repobrief.bundle_manifest',
+        'run_id': 'run-1',
+        'created_at': '2026-07-04T06:00:00Z',
+        'artifacts': artifacts,
+    }
     if generator:
         data['generator'] = {'runtime': {'git_commit': 'a' * 40}}
     if capabilities:
@@ -20,8 +25,26 @@ def _bundle(tmp_path: Path, roles, *, generator=True, post=True, capabilities=No
     manifest = tmp_path / 'sample.bundle.manifest.json'
     manifest.write_text(json.dumps(data), encoding='utf-8')
     if post is True:
-        (tmp_path / 'sample.bundle_health.post.json').write_text(json.dumps({'status': 'pass', 'checks': []}), encoding='utf-8')
+        (tmp_path / 'sample.bundle_health.post.json').write_text(
+            json.dumps({
+                'kind': 'lenskit.post_emit_health',
+                'version': '1.0',
+                'bundle_manifest_path': str(manifest.resolve()),
+                'bundle_run_id': 'run-1',
+                'status': 'pass',
+                'checks': [],
+            }),
+            encoding='utf-8',
+        )
     elif isinstance(post, dict):
+        if post.get('status') == 'pass':
+            post = {
+                'kind': 'lenskit.post_emit_health',
+                'version': '1.0',
+                'bundle_manifest_path': str(manifest.resolve()),
+                'bundle_run_id': data['run_id'],
+                **post,
+            }
         (tmp_path / 'sample.bundle_health.post.json').write_text(json.dumps(post), encoding='utf-8')
     return manifest
 
@@ -395,6 +418,76 @@ def test_linked_directory_sidecar_is_not_available(tmp_path):
     assert status['file_exists'] is False
     assert any(
         f['artifact'] == 'bundle_surface_validation' and 'not a regular file' in f['detail']
+        for f in result['findings']
+    )
+
+
+def _write_bound_post_health(manifest: Path, *, status='pass', bundle_run_id='run-1', manifest_path=None):
+    target_manifest = manifest if manifest_path is None else manifest_path
+    (manifest.parent / 'sample.bundle_health.post.json').write_text(
+        json.dumps({
+            'kind': 'lenskit.post_emit_health',
+            'version': '1.0',
+            'bundle_manifest_path': str(target_manifest.resolve()),
+            'bundle_run_id': bundle_run_id,
+            'status': status,
+            'checks': [],
+        }),
+        encoding='utf-8',
+    )
+
+
+def test_post_emit_health_must_bind_to_manifest_path(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['run_id'] = 'run-1'
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+    other_manifest = tmp_path / 'other.bundle.manifest.json'
+    other_manifest.write_text(json.dumps({'kind': 'repobrief.bundle_manifest', 'run_id': 'other'}), encoding='utf-8')
+    _write_bound_post_health(manifest, manifest_path=other_manifest)
+
+    result = run_consumption_preflight(manifest, 'pr_review')
+
+    assert result['status'] == 'fail'
+    assert result['validation']['post_emit_health']['binding_status'] == 'fail'
+    assert any(
+        f['code'] == 'validation_required_sidecar_unreadable'
+        and f['artifact'] == 'post_emit_health'
+        and 'bundle_manifest_path does not match' in f['detail']
+        for f in result['findings']
+    )
+
+
+def test_post_emit_health_pass_must_bind_to_manifest_run_id(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['run_id'] = 'run-1'
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+    _write_bound_post_health(manifest, bundle_run_id='other-run')
+
+    result = run_consumption_preflight(manifest, 'pr_review')
+
+    assert result['status'] == 'fail'
+    assert result['validation']['post_emit_health']['binding_status'] == 'fail'
+    assert any(
+        f['artifact'] == 'post_emit_health'
+        and 'bundle_run_id does not match' in f['detail']
+        for f in result['findings']
+    )
+
+
+def test_post_emit_health_valid_binding_passes(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['run_id'] = 'run-1'
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+    _write_bound_post_health(manifest, bundle_run_id='run-1')
+
+    result = run_consumption_preflight(manifest, 'pr_review')
+
+    assert result['validation']['post_emit_health']['binding_status'] == 'pass'
+    assert not any(
+        f['artifact'] == 'post_emit_health' and 'does not match' in f['detail']
         for f in result['findings']
     )
 
