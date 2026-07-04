@@ -1,0 +1,186 @@
+{
+  "$id": "https://heimgewebe.github.io/lenskit/contracts/repobrief-required-reading-resolution.v1.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": true,
+  "properties": {
+    "available_roles": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "bundle_manifest": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "does_not_establish": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "kind": {
+      "const": "repobrief.required_reading_resolution"
+    },
+    "mutation_boundary": {
+      "additionalProperties": true,
+      "properties": {
+        "does_not_mutate": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "read_paths_do_not_refresh": {
+          "const": true
+        },
+        "writes": {
+          "maxItems": 0,
+          "type": "array"
+        }
+      },
+      "required": [
+        "writes",
+        "does_not_mutate",
+        "read_paths_do_not_refresh"
+      ],
+      "type": "object"
+    },
+    "required_reading": {
+      "additionalProperties": true,
+      "properties": {
+        "answer_checklist_required": {
+          "type": "boolean"
+        },
+        "available_recommended": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "available_required": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "citation_required": {
+          "type": "boolean"
+        },
+        "does_not_establish": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "insufficient": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "missing_recommended": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "missing_required": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "recommended": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "required": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "status": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "not_applicable"
+          ]
+        },
+        "task_profile": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_profile",
+        "required",
+        "recommended",
+        "insufficient",
+        "available_required",
+        "missing_required",
+        "available_recommended",
+        "missing_recommended",
+        "status",
+        "citation_required",
+        "answer_checklist_required",
+        "does_not_establish"
+      ],
+      "type": "object"
+    },
+    "status": {
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "not_applicable"
+      ]
+    },
+    "task_profile": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "version": {
+      "const": "v1"
+    }
+  },
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "bundle_manifest",
+    "task_profile",
+    "available_roles",
+    "required_reading",
+    "mutation_boundary",
+    "does_not_establish"
+  ],
+  "title": "RepoBrief Required Reading Resolution v1",
+  "type": "object"
+}
