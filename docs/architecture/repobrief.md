@@ -97,3 +97,27 @@ The public system name is RepoBrief.
 The legacy implementation namespace remains `lenskit` until a later package and repository rename decision explicitly changes it.
 
 Existing artifact kinds such as `lenskit.*` remain compatible during this phase. Renaming artifact kinds is outside the scope of this document.
+
+## Read-only access CLI
+
+The first RepoBrief read-only access surface is intentionally small. It reads an existing Brief Bundle manifest and reports structured metadata. It must not create a snapshot, refresh a bundle, read artifact contents, mutate Git, create pull requests, or write patch files.
+
+Current read-only commands:
+
+```bash
+repobrief snapshot status --bundle-manifest <path>
+repobrief artifact list --bundle-manifest <path>
+repobrief artifact list --bundle-manifest <path> --roles-only
+repobrief artifact get --bundle-manifest <path> --role <role>
+repobrief artifact get --bundle-manifest <path> --role <role> --path-only
+repobrief required-reading resolve --bundle-manifest <path> --task-profile <profile>
+repobrief snapshot check --bundle-manifest <path> --task-profile <profile>
+```
+
+`artifact list` and `artifact get` expose artifact metadata and resolved paths. They do not print artifact contents.
+
+`required-reading resolve` derives available roles from the bundle manifest, including linked diagnostic surfaces such as post-emit health and bundle surface validation when those links are present. It then resolves the selected task profile against the Required Reading Protocol.
+
+`snapshot check` combines the snapshot status, artifact list, and required-reading resolution. It also propagates an existing failing RepoBrief profile evaluation from the manifest. A green required-reading result must not override a failing snapshot profile evaluation.
+
+These commands are access helpers. They do not establish truth, correctness, completeness, runtime behavior, test sufficiency, regression absence, repository understanding, claim validity, freshness, or forensic readiness.
