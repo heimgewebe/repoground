@@ -139,6 +139,7 @@ class PreflightArtifactStatus:
     availability: str
     file_exists: bool
     path: str | None = None
+    resolved_path: str | None = None
     authority: str | None = None
     canonicality: str | None = None
 
@@ -149,6 +150,7 @@ class PreflightArtifactStatus:
             "availability": self.availability,
             "file_exists": self.file_exists,
             "path": self.path,
+            "resolved_path": self.resolved_path,
             "authority": self.authority,
             "canonicality": self.canonicality,
         }
@@ -209,8 +211,10 @@ def _read_json_object(path: Path, *, label: str) -> dict[str, Any]:
 
 
 def _load_json_file(path: Path) -> tuple[dict[str, Any] | None, str | None]:
-    if not path.exists() or not path.is_file():
+    if not path.exists():
         return None, "file not found"
+    if not path.is_file():
+        return None, "not a regular file"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeError) as exc:
@@ -326,7 +330,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             linked_paths[role] = resolved
     if "post_emit_health" not in linked_paths:
         derived = derive_post_health_path(manifest_path)
-        if derived.exists():
+        if derived.is_file():
             linked_paths["post_emit_health"] = derived
 
     # Central role -> file map used by validation and range checks.
@@ -345,7 +349,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                     except ValueError:
                         candidate = None
             if candidate is not None:
-                if candidate.exists():
+                if candidate.is_file():
                     artifact_paths_by_role[role] = candidate
                     break
                 artifact_paths_by_role.setdefault(role, candidate)
@@ -356,14 +360,17 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     available_roles: set[str] = {"bundle_manifest"}
     file_missing_roles: set[str] = set()
     for role, role_records in records_by_role.items():
-        if any(record.get("file_exists") for record in role_records):
+        artifact_path = artifact_paths_by_role.get(role)
+        if any(record.get("file_exists") for record in role_records) and (
+            artifact_path is None or artifact_path.is_file()
+        ):
             available_roles.add(role)
         else:
             file_missing_roles.add(role)
     for role, path in linked_paths.items():
         if role in available_roles:
             continue
-        if path is not None and path.exists():
+        if path is not None and path.is_file():
             available_roles.add(role)
         elif role in _LINKED_SIDECAR_ROLES.values() and any(
             links.get(key) for key, mapped in _LINKED_SIDECAR_ROLES.items() if mapped == role
@@ -477,11 +484,9 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             availability = AVAILABILITY_FILE_MISSING
         else:
             availability = AVAILABILITY_MISSING
+        mapped_path = artifact_paths_by_role.get(role)
+        resolved_path_value = str(mapped_path) if mapped_path is not None else None
         path_value = record.get("path")
-        if path_value is None:
-            mapped_path = artifact_paths_by_role.get(role)
-            if mapped_path is not None:
-                path_value = str(mapped_path)
         if path_value is None and linked is not None:
             path_value = str(linked)
         artifact_statuses.append(
@@ -491,6 +496,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                 availability=availability,
                 file_exists=availability == AVAILABILITY_AVAILABLE,
                 path=path_value if isinstance(path_value, str) else None,
+                resolved_path=resolved_path_value,
                 authority=record.get("authority") if isinstance(record.get("authority"), str) else None,
                 canonicality=record.get("canonicality") if isinstance(record.get("canonicality"), str) else None,
             )
@@ -706,7 +712,7 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     validation["output_health"] = {"present": bool(output_health_path), "verdict": output_health_verdict}
     validation["snapshot_profile_evaluation"] = snapshot_profile_evaluation
 
-    validation_findings = [f for f in findings if f.area == "validation" and f.code.startswith("validation")]
+    validation_findings = [f for f in findings if f.area == "validation"]
     if any(f.severity == SEVERITY_FAIL for f in validation_findings):
         validation_status = STATUS_FAIL
     elif validation_findings:
@@ -800,21 +806,24 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         if isinstance(declaration.get("used_ranges"), list):
             used_ranges_input.extend(declaration["used_ranges"])
         boundaries = declaration.get("does_not_establish")
-        boundaries_ok = isinstance(boundaries, list) and len(boundaries) > 0 and all(
-            isinstance(item, str) and item for item in boundaries
-        )
+        required_boundaries = set(DOES_NOT_ESTABLISH)
+        if isinstance(boundaries, list):
+            provided_boundaries = {item for item in boundaries if isinstance(item, str) and item}
+        else:
+            provided_boundaries = set()
+        boundaries_ok = required_boundaries <= provided_boundaries
         if not boundaries_ok:
             add(
                 "declaration_missing_negative_semantics",
                 SEVERITY_FAIL,
                 "declaration",
-                "consumption declaration must carry a non-empty does_not_establish list",
+                "consumption declaration must include all required does_not_establish boundaries",
             )
         checks.append(
             _check(
                 "does_not_establish",
                 STATUS_PASS if boundaries_ok else STATUS_FAIL,
-                "declaration carries negative semantics" if boundaries_ok else "declaration lacks does_not_establish boundaries",
+                "declaration carries negative semantics" if boundaries_ok else "declaration lacks required does_not_establish boundaries",
             )
         )
     else:
@@ -853,19 +862,21 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                 artifact="citation_map_jsonl",
             )
         else:
-            map_record = next(
-                (r for r in records_by_role.get("citation_map_jsonl", []) if r.get("file_exists") and r.get("absolute_path")),
-                None,
-            )
             known_ids = set()
             unparseable_lines = 0
-            map_path = map_record.get("absolute_path") if isinstance(map_record, Mapping) else None
-            if not isinstance(map_path, str) or not map_path:
+            map_path = artifact_paths_by_role.get("citation_map_jsonl")
+            if map_path is None or not map_path.is_file():
                 known_ids = None
-                add("used_citations_unverifiable", SEVERITY_FAIL, "used_citations", "citation map is marked available but no readable absolute path was resolved", artifact="citation_map_jsonl")
+                add(
+                    "used_citations_unverifiable",
+                    SEVERITY_FAIL,
+                    "used_citations",
+                    "citation map is marked available but no readable file path was resolved",
+                    artifact="citation_map_jsonl",
+                )
             else:
                 try:
-                    with Path(map_path).open("r", encoding="utf-8") as handle:
+                    with map_path.open("r", encoding="utf-8") as handle:
                         for line in handle:
                             line = line.strip()
                             if not line:

@@ -319,3 +319,82 @@ def test_used_range_prefers_existing_duplicate_role_path(tmp_path):
     assert result['status'] == 'pass'
     assert result['used_ranges']['resolved'][0]['artifact'] == 'canonical_md'
 
+
+def test_snapshot_profile_fail_counts_in_validation_state(tmp_path):
+    manifest = _bundle(
+        tmp_path,
+        FULL_BASIC,
+        capabilities={'repobrief_profile': 'security-export-review'},
+    )
+
+    result = run_consumption_preflight(manifest, 'basic_repo_question')
+
+    validation_check = next(c for c in result['checks'] if c['name'] == 'validation_state')
+    assert validation_check['status'] == 'fail'
+    assert any(f['code'] == 'snapshot_profile_missing_required' for f in result['findings'])
+
+
+def test_declaration_must_include_required_negative_semantics(tmp_path):
+    result = run_consumption_preflight(
+        _bundle(tmp_path, FULL_BASIC),
+        'basic_repo_question',
+        declaration={'does_not_establish': ['irgendwas']},
+    )
+
+    assert result['status'] == 'fail'
+    assert any(f['code'] == 'declaration_missing_negative_semantics' for f in result['findings'])
+
+
+def test_artifact_status_exposes_resolved_duplicate_role_path(tmp_path):
+    existing = tmp_path / 'canonical_existing.txt'
+    existing.write_text('ok\n', encoding='utf-8')
+
+    manifest = _bundle(tmp_path, ['agent_reading_pack', 'citation_map_jsonl', 'snapshot_plan_json'])
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['artifacts'].append({
+        'role': 'canonical_md',
+        'path': 'canonical_missing.txt',
+        'content_type': 'text/plain',
+        'bytes': 1,
+        'sha256': '0' * 64,
+    })
+    data['artifacts'].append({
+        'role': 'canonical_md',
+        'path': existing.name,
+        'content_type': 'text/plain',
+        'bytes': existing.stat().st_size,
+        'sha256': '1' * 64,
+    })
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(
+        manifest,
+        'basic_repo_question',
+        used_ranges=[{'artifact': 'canonical_md', 'range_ref': {'start_line': 1, 'end_line': 1}}],
+    )
+
+    status = next(s for s in result['artifact_statuses'] if s['role'] == 'canonical_md')
+    assert result['status'] == 'pass'
+    assert status['path'] == 'canonical_missing.txt'
+    assert status['resolved_path'].endswith('canonical_existing.txt')
+
+
+def test_linked_directory_sidecar_is_not_available(tmp_path):
+    manifest = _bundle(tmp_path, FULL_BASIC)
+    surface = tmp_path / 'surface.json'
+    surface.mkdir()
+    data = json.loads(manifest.read_text(encoding='utf-8'))
+    data['links'] = {'bundle_surface_validation_path': surface.name}
+    manifest.write_text(json.dumps(data), encoding='utf-8')
+
+    result = run_consumption_preflight(manifest, 'basic_repo_question')
+
+    status = next(s for s in result['artifact_statuses'] if s['role'] == 'bundle_surface_validation')
+    assert result['status'] == 'warn'
+    assert status['availability'] == 'file_missing'
+    assert status['file_exists'] is False
+    assert any(
+        f['artifact'] == 'bundle_surface_validation' and 'not a regular file' in f['detail']
+        for f in result['findings']
+    )
+
