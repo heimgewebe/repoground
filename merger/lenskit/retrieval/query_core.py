@@ -131,8 +131,10 @@ def execute_query(
             )
         if read_only:
             uri_path = quote(resolved_index_path.as_posix(), safe="/")
+            # lgtm[py/path-injection] resolved_index_path is validated above.
             conn = sqlite3.connect(f"file:{uri_path}?mode=ro&immutable=1", uri=True)
         else:
+            # lgtm[py/path-injection] resolved_index_path is validated above.
             conn = sqlite3.connect(str(resolved_index_path))
         conn.row_factory = sqlite3.Row
 
