@@ -17,6 +17,11 @@ _DOES_NOT_ESTABLISH = (
     "freshness",
 )
 
+CITATION_MAP_ROLE = "citation_map_jsonl"
+RESOLVED_EVIDENCE_KIND = "repobrief.resolved_evidence"
+RESOLVED_EVIDENCE_VERSION = "v1"
+_CITATION_RANGE_KEY_FIELDS = ("file_path", "start_byte", "end_byte", "content_sha256")
+
 
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
@@ -306,82 +311,98 @@ def range_get(bundle_manifest: str | Path, range_ref: dict[str, Any]) -> dict[st
     }
 
 
-def _load_citation_map(manifest_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    artifact_result = get_artifact(manifest_path, "citation_map_jsonl")
+def _empty_citation_map_status(
+    *,
+    status: str,
+    error_code: str | None,
+    artifact_path: str | None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "status": status,
+        "error_code": error_code,
+        "artifact_path": artifact_path,
+        "row_count": 0,
+        "invalid_row_count": 0,
+    }
+    if error is not None:
+        result["error"] = error
+    return result
+
+
+def _citation_range_key(value: Any) -> tuple[Any, ...] | None:
+    if not isinstance(value, dict):
+        return None
+    key = tuple(value.get(field) for field in _CITATION_RANGE_KEY_FIELDS)
+    if any(part is None for part in key):
+        return None
+    return key
+
+
+def _load_citation_lookup(
+    manifest_path: Path,
+) -> tuple[dict[str, dict[str, Any]], dict[tuple[Any, ...], dict[str, Any]], dict[str, Any]]:
+    artifact_result = get_artifact(manifest_path, CITATION_MAP_ROLE)
     artifact = artifact_result.get("artifact") if isinstance(artifact_result, dict) else None
     artifact_path_str = artifact.get("absolute_path") if isinstance(artifact, dict) else None
     if not artifact_path_str:
-        return [], {
-            "status": "missing",
-            "error_code": "citation_map_jsonl_missing",
-            "artifact_path": None,
-            "row_count": 0,
-            "invalid_row_count": 0,
-        }
+        return {}, {}, _empty_citation_map_status(
+            status="missing",
+            error_code="citation_map_jsonl_missing",
+            artifact_path=None,
+        )
     artifact_path = Path(str(artifact_path_str))
     if not artifact_path.exists():
-        return [], {
-            "status": "missing",
-            "error_code": "citation_map_jsonl_file_missing",
-            "artifact_path": str(artifact_path),
-            "row_count": 0,
-            "invalid_row_count": 0,
-        }
-    try:
-        lines = artifact_path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeDecodeError) as exc:
-        return [], {
-            "status": "invalid",
-            "error_code": "citation_map_jsonl_unreadable",
-            "error": str(exc),
-            "artifact_path": str(artifact_path),
-            "row_count": 0,
-            "invalid_row_count": 0,
-        }
-    rows: list[dict[str, Any]] = []
+        return {}, {}, _empty_citation_map_status(
+            status="missing",
+            error_code="citation_map_jsonl_file_missing",
+            artifact_path=str(artifact_path),
+        )
+
+    by_chunk_id: dict[str, dict[str, Any]] = {}
+    by_range: dict[tuple[Any, ...], dict[str, Any]] = {}
+    row_count = 0
     invalid_row_count = 0
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            invalid_row_count += 1
-            continue
-        if isinstance(row, dict) and isinstance(row.get("citation_id"), str) and row["citation_id"]:
-            rows.append(row)
-        else:
-            invalid_row_count += 1
-    return rows, {
+    try:
+        with artifact_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    invalid_row_count += 1
+                    continue
+                if not isinstance(row, dict):
+                    invalid_row_count += 1
+                    continue
+                citation_id = row.get("citation_id")
+                if not isinstance(citation_id, str) or not citation_id:
+                    invalid_row_count += 1
+                    continue
+                row_count += 1
+                chunk_id = row.get("chunk_id")
+                if isinstance(chunk_id, str) and chunk_id and chunk_id not in by_chunk_id:
+                    by_chunk_id[chunk_id] = row
+                range_key = _citation_range_key(row.get("canonical_range"))
+                if range_key is not None and range_key not in by_range:
+                    by_range[range_key] = row
+    except (OSError, UnicodeDecodeError) as exc:
+        return {}, {}, _empty_citation_map_status(
+            status="invalid",
+            error_code="citation_map_jsonl_unreadable",
+            artifact_path=str(artifact_path),
+            error=str(exc),
+        )
+
+    return by_chunk_id, by_range, {
         "status": "available",
         "error_code": None,
         "artifact_path": str(artifact_path),
-        "row_count": len(rows),
+        "row_count": row_count,
         "invalid_row_count": invalid_row_count,
     }
-
-
-def _citation_lookup(
-    rows: list[dict[str, Any]],
-) -> tuple[dict[str, dict[str, Any]], dict[tuple[Any, ...], dict[str, Any]]]:
-    by_chunk_id: dict[str, dict[str, Any]] = {}
-    by_range: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for row in rows:
-        chunk_id = row.get("chunk_id")
-        if isinstance(chunk_id, str) and chunk_id and chunk_id not in by_chunk_id:
-            by_chunk_id[chunk_id] = row
-        canonical_range = row.get("canonical_range")
-        if isinstance(canonical_range, dict):
-            key = (
-                canonical_range.get("file_path"),
-                canonical_range.get("start_byte"),
-                canonical_range.get("end_byte"),
-                canonical_range.get("content_sha256"),
-            )
-            if all(value is not None for value in key) and key not in by_range:
-                by_range[key] = row
-    return by_chunk_id, by_range
 
 
 def _citation_record(row: dict[str, Any]) -> dict[str, Any]:
@@ -403,8 +424,10 @@ def _resolve_hit_evidence(
     citation_map_available: bool,
 ) -> dict[str, Any]:
     range_ref = hit.get("range_ref")
-    range_ref_source = "range_ref" if isinstance(range_ref, dict) else None
-    if range_ref_source is None and isinstance(hit.get("derived_range_ref"), dict):
+    range_ref_source = None
+    if isinstance(range_ref, dict):
+        range_ref_source = "range_ref"
+    elif isinstance(hit.get("derived_range_ref"), dict):
         range_ref = hit["derived_range_ref"]
         range_ref_source = "derived_range_ref"
 
@@ -437,15 +460,9 @@ def _resolve_hit_evidence(
         chunk_id = hit.get("chunk_id")
         if isinstance(chunk_id, str):
             row = by_chunk_id.get(chunk_id)
-        explicit_ref = hit.get("range_ref")
-        if row is None and isinstance(explicit_ref, dict) and explicit_ref.get("artifact_role") == "canonical_md":
-            key = (
-                explicit_ref.get("file_path"),
-                explicit_ref.get("start_byte"),
-                explicit_ref.get("end_byte"),
-                explicit_ref.get("content_sha256"),
-            )
-            row = by_range.get(key)
+        range_key = _citation_range_key(range_ref)
+        if row is None and range_key is not None:
+            row = by_range.get(range_key)
         if row is not None:
             record["citation_status"] = "resolved"
             record["citation_id"] = row.get("citation_id")
@@ -455,24 +472,39 @@ def _resolve_hit_evidence(
 
 
 def _resolve_query_evidence(manifest_path: Path, query_result: Any) -> dict[str, Any]:
-    rows, citation_map_status = _load_citation_map(manifest_path)
-    by_chunk_id, by_range = _citation_lookup(rows)
-    citation_map_available = citation_map_status["status"] == "available"
     hits = query_result.get("results") if isinstance(query_result, dict) else None
+    hit_list = [hit for hit in (hits if isinstance(hits, list) else []) if isinstance(hit, dict)]
+    if not hit_list:
+        return {
+            "kind": RESOLVED_EVIDENCE_KIND,
+            "version": RESOLVED_EVIDENCE_VERSION,
+            "citation_map": {
+                "status": "skipped",
+                "error_code": None,
+                "artifact_path": None,
+                "row_count": 0,
+                "invalid_row_count": 0,
+                "reason": "no_hits",
+            },
+            "hit_count": 0,
+            "hits": [],
+            "does_not_establish": list(_DOES_NOT_ESTABLISH),
+        }
+
+    by_chunk_id, by_range, citation_map_status = _load_citation_lookup(manifest_path)
+    citation_map_available = citation_map_status["status"] == "available"
     resolved_hits = [
         _resolve_hit_evidence(manifest_path, hit, by_chunk_id, by_range, citation_map_available)
-        for hit in (hits if isinstance(hits, list) else [])
-        if isinstance(hit, dict)
+        for hit in hit_list
     ]
     return {
-        "kind": "repobrief.resolved_evidence",
-        "version": "v1",
+        "kind": RESOLVED_EVIDENCE_KIND,
+        "version": RESOLVED_EVIDENCE_VERSION,
         "citation_map": citation_map_status,
         "hit_count": len(resolved_hits),
         "hits": resolved_hits,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
-
 
 def query_existing_index(
     bundle_manifest: str | Path,

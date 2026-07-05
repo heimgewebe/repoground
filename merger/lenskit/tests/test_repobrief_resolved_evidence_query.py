@@ -221,3 +221,61 @@ def test_query_existing_index_rejects_non_boolean_resolve_evidence(tmp_path):
         assert result["status"] == "invalid"
         assert result["error_code"] == "resolve_evidence_invalid"
         assert result["query_result"] is None
+
+
+def test_query_existing_index_reports_invalid_citation_map_rows(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+    citation_map_path = tmp_path / "demo.citation_map.jsonl"
+    with citation_map_path.open("a", encoding="utf-8") as handle:
+        handle.write("not json\n")
+        handle.write(json.dumps({"chunk_id": "missing-citation-id"}) + "\n")
+
+    result = repobrief_access.query_existing_index(
+        bundle["manifest"], "hello", k=5, resolve_evidence=True
+    )
+
+    assert result["status"] == "available"
+    citation_map = result["resolved_evidence"]["citation_map"]
+    assert citation_map["status"] == "available"
+    assert citation_map["row_count"] == 1
+    assert citation_map["invalid_row_count"] == 2
+    hit = result["resolved_evidence"]["hits"][0]
+    assert hit["citation_status"] == "resolved"
+    assert hit["citation_id"] == bundle["citation_id"]
+
+
+def test_resolved_evidence_uses_derived_range_ref_when_range_ref_missing(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+    base = repobrief_access.query_existing_index(bundle["manifest"], "hello", k=1)
+    hit = dict(base["query_result"]["results"][0])
+    range_ref = hit.pop("range_ref")
+    hit.pop("chunk_id", None)
+    hit["derived_range_ref"] = range_ref
+
+    resolved = repobrief_access._resolve_query_evidence(bundle["manifest"], {"results": [hit]})
+
+    assert resolved["hit_count"] == 1
+    resolved_hit = resolved["hits"][0]
+    assert resolved_hit["range_ref_source"] == "derived_range_ref"
+    assert resolved_hit["range_status"] == "resolved"
+    assert resolved_hit["range"]["text"] == bundle["chunk_text"]
+    assert resolved_hit["citation_status"] == "resolved"
+    assert resolved_hit["citation_id"] == bundle["citation_id"]
+
+
+def test_resolved_evidence_skips_citation_map_for_empty_hits(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+    citation_map_path = tmp_path / "demo.citation_map.jsonl"
+    citation_map_path.write_text("not json\n", encoding="utf-8")
+
+    result = repobrief_access.query_existing_index(
+        bundle["manifest"], "no-such-token", k=5, resolve_evidence=True
+    )
+
+    assert result["status"] == "available"
+    resolved = result["resolved_evidence"]
+    assert resolved["hit_count"] == 0
+    assert resolved["hits"] == []
+    assert resolved["citation_map"]["status"] == "skipped"
+    assert resolved["citation_map"]["reason"] == "no_hits"
+    assert resolved["citation_map"]["invalid_row_count"] == 0
