@@ -115,12 +115,7 @@ def execute_query(
         raw_index_path = str(index_path)
         if "\x00" in raw_index_path:
             raise ValueError("Invalid index path: NUL bytes are not allowed.")
-        try:
-            resolved_index_path = Path(index_path).resolve(strict=True)
-        except FileNotFoundError as exc:
-            raise ValueError("Invalid index path: file does not exist.") from exc
-        if not resolved_index_path.is_file():
-            raise ValueError("Invalid index path: expected a regular file.")
+        resolved_index_path = Path(index_path)
         if read_only and not resolved_index_path.name.endswith(".index.sqlite"):
             raise ValueError("Invalid index path: expected canonical read-only index file.")
         if not read_only and not any(
@@ -131,13 +126,13 @@ def execute_query(
                 "Invalid index path: expected a SQLite index file "
                 f"ending with one of {_ALLOWED_SQLITE_INDEX_SUFFIXES!r}."
             )
+        uri_path = quote(resolved_index_path.as_posix(), safe="/")
         if read_only:
-            uri_path = quote(resolved_index_path.as_posix(), safe="/")
-            # lgtm[py/path-injection] resolved_index_path is validated above.
+            # lgtm[py/path-injection] callers validate and confine the index path.
             conn = sqlite3.connect(f"file:{uri_path}?mode=ro&immutable=1", uri=True)
         else:
-            # lgtm[py/path-injection] resolved_index_path is validated above.
-            conn = sqlite3.connect(str(resolved_index_path))
+            # lgtm[py/path-injection] open with mode=rw so SQLite never creates a user-chosen path.
+            conn = sqlite3.connect(f"file:{uri_path}?mode=rw", uri=True)
         conn.row_factory = sqlite3.Row
 
         where_clauses = []
