@@ -40,6 +40,12 @@ RepoBrief may:
 - query existing indexes,
 - later expose read-first MCP resources and a small set of explicit tools.
 
+## MCP boundary
+
+The planned RepoBrief MCP surface is defined in [RepoBrief MCP Boundary](repobrief-mcp-boundary.md).
+
+The MCP boundary is documentation for future implementation. It does not assert that an MCP server, MCP resources, or MCP tools exist today.
+
 ## Non-goals
 
 RepoBrief must not:
