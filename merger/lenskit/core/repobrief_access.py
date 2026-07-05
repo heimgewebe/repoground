@@ -23,6 +23,7 @@ RESOLVED_EVIDENCE_KIND = "repobrief.resolved_evidence"
 RESOLVED_EVIDENCE_VERSION = "v1"
 SOURCE_CITATION_PROJECTION_KIND = "repobrief.source_citation_projection"
 SOURCE_CITATION_PROJECTION_VERSION = "v1"
+TEXT_EXCERPT_MAX_CHARS = 1200
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _CITATION_RANGE_KEY_FIELDS = ("file_path", "start_byte", "end_byte")
@@ -495,6 +496,7 @@ def _resolve_hit_evidence(
         "chunk_id": hit.get("chunk_id"),
         "path": hit.get("path"),
         "range_ref_source": range_ref_source,
+        "range_ref": None,
         "range_status": "unresolved",
         "range": None,
         "range_error": None,
@@ -511,6 +513,7 @@ def _resolve_hit_evidence(
             range_result = range_get(manifest_path, candidate_ref)
             record["range_ref_source"] = candidate_source
             selected_range_ref = candidate_ref
+            record["range_ref"] = selected_range_ref
             if range_result.get("status") == "available":
                 record["range_status"] = "resolved"
                 record["range"] = range_result.get("range")
@@ -571,19 +574,31 @@ def _resolve_query_evidence(manifest_path: Path, query_result: Any) -> dict[str,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
 
+def _first_not_none(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
 def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
     if not isinstance(range_value, dict):
         return None
+    provenance = range_value.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+    lines = range_value.get("lines")
+    start_line = end_line = None
+    if isinstance(lines, list) and len(lines) == 2:
+        start_line, end_line = lines
     return {
-        "artifact_role": range_value.get("artifact_role"),
-        "file_path": range_value.get("file_path") or range_value.get("path") or range_value.get("artifact_path"),
-        "start_byte": range_value.get("start_byte") or range_value.get("artifact_byte_start"),
-        "end_byte": range_value.get("end_byte") or range_value.get("artifact_byte_end"),
-        "start_line": range_value.get("start_line") or range_value.get("artifact_line_start"),
-        "end_line": range_value.get("end_line") or range_value.get("artifact_line_end"),
-        "content_sha256": range_value.get("range_content_sha256") or range_value.get("content_sha256"),
+        "artifact_role": _first_not_none(range_value.get("artifact_role"), provenance.get("artifact_role")),
+        "file_path": _first_not_none(range_value.get("file_path"), range_value.get("path"), range_value.get("artifact_path")),
+        "start_byte": _first_not_none(range_value.get("start_byte"), range_value.get("artifact_byte_start")),
+        "end_byte": _first_not_none(range_value.get("end_byte"), range_value.get("artifact_byte_end")),
+        "start_line": _first_not_none(range_value.get("start_line"), range_value.get("artifact_line_start"), start_line),
+        "end_line": _first_not_none(range_value.get("end_line"), range_value.get("artifact_line_end"), end_line),
+        "content_sha256": _first_not_none(range_value.get("range_content_sha256"), range_value.get("content_sha256"), range_value.get("sha256")),
     }
-
 
 def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
     hits = resolved_evidence.get("hits") if isinstance(resolved_evidence, dict) else None
@@ -593,8 +608,8 @@ def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
         range_value = hit.get("range")
         text = range_value.get("text") if isinstance(range_value, dict) else None
         citation = hit.get("citation") if isinstance(hit.get("citation"), dict) else None
-        citation_range = citation.get("canonical_range") if citation else None
-        source_range = _source_range_projection(range_value)
+        citation_range = _source_range_projection(citation.get("canonical_range") if citation else None)
+        source_range = _source_range_projection(hit.get("range_ref")) or citation_range or _source_range_projection(range_value)
         if isinstance(source_range, dict) and source_range.get("file_path") is None:
             source_range = citation_range if isinstance(citation_range, dict) else source_range
         items.append({
@@ -604,7 +619,8 @@ def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
             "range_status": hit.get("range_status"),
             "range_ref_source": hit.get("range_ref_source"),
             "source_range": source_range,
-            "text": text if isinstance(text, str) else None,
+            "text_excerpt": text[:TEXT_EXCERPT_MAX_CHARS] if isinstance(text, str) else None,
+            "text_truncated": isinstance(text, str) and len(text) > TEXT_EXCERPT_MAX_CHARS,
             "citation_status": hit.get("citation_status"),
             "citation_id": hit.get("citation_id"),
             "citation_range": citation_range,
@@ -734,7 +750,8 @@ def query_existing_index(
         "project_sources": project_sources,
         "index_artifact": artifact,
         "query_result": query_result,
-        "resolved_evidence": resolved_evidence,
+        "evidence_resolution_used": resolve_evidence or project_sources,
+        "resolved_evidence": resolved_evidence if resolve_evidence else None,
         "source_citation_projection": source_citation_projection,
         "mutation_boundary": _read_only_mutation_boundary(),
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
