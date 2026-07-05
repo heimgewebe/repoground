@@ -22,7 +22,7 @@ def _resolve_sqlite_index_path(index_path: Path) -> Path:
     if "\x00" in raw_path:
         raise ValueError("Invalid index path: NUL bytes are not allowed.")
     try:
-        resolved_index_path = Path(index_path).expanduser().resolve(strict=True)
+        resolved_index_path = Path(index_path).resolve(strict=True)
     except FileNotFoundError as exc:
         raise ValueError("Invalid index path: file does not exist.") from exc
     if not resolved_index_path.is_file():

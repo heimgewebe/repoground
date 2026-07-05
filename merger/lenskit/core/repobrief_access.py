@@ -200,7 +200,6 @@ def get_artifact(bundle_manifest: str | Path, role: str) -> dict[str, Any]:
     }
 
 
-
 MAX_QUERY_EXISTING_INDEX_K = 100
 
 
@@ -323,12 +322,12 @@ def query_existing_index(
             error_code="query_invalid",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
         )
-    if k < 1 or k > MAX_QUERY_EXISTING_INDEX_K:
+    if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > MAX_QUERY_EXISTING_INDEX_K:
         return _invalid_read_result(
             kind="repobrief.query_existing_index",
             bundle_manifest=manifest_path,
             status="invalid",
-            error=f"k must be between 1 and {MAX_QUERY_EXISTING_INDEX_K}",
+            error=f"k must be an integer between 1 and {MAX_QUERY_EXISTING_INDEX_K}",
             error_code="k_out_of_bounds",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
         )

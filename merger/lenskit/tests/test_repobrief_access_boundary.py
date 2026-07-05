@@ -143,6 +143,18 @@ def test_query_existing_index_rejects_unbounded_k(tmp_path):
     assert result["query_result"] is None
 
 
+def test_query_existing_index_rejects_non_integer_k(tmp_path):
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    _write_manifest(manifest, [])
+
+    for bad_k in ("5", 2.0, True, None):
+        result = repobrief_access.query_existing_index(manifest, "hello", k=bad_k)
+
+        assert result["status"] == "invalid"
+        assert result["error_code"] == "k_out_of_bounds"
+        assert result["query_result"] is None
+
+
 def test_query_existing_index_rejects_non_sqlite_artifact_path(tmp_path):
     bad_index = tmp_path / "index.txt"
     bad_index.write_text("not sqlite", encoding="utf-8")
@@ -155,7 +167,6 @@ def test_query_existing_index_rejects_non_sqlite_artifact_path(tmp_path):
     assert result["error_code"] == "query_execution_failed"
     assert "expected a SQLite index file" in result["error"]
     assert bad_index.exists()
-
 
 
 def test_query_existing_index_forces_read_only_query_mode(monkeypatch, tmp_path):
