@@ -200,6 +200,156 @@ def get_artifact(bundle_manifest: str | Path, role: str) -> dict[str, Any]:
     }
 
 
+def _read_only_mutation_boundary() -> dict[str, Any]:
+    return {
+        "writes": [],
+        "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree", "brief_bundle_artifacts"],
+        "read_paths_do_not_refresh": True,
+    }
+
+
+def _invalid_read_result(
+    *,
+    kind: str,
+    bundle_manifest: Path,
+    status: str,
+    error: str,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = {
+        "kind": kind,
+        "version": "v1",
+        "status": status,
+        "bundle_manifest": str(bundle_manifest),
+        "error": error,
+        "mutation_boundary": _read_only_mutation_boundary(),
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+    if extra:
+        result.update(extra)
+    return result
+
+
+def range_get(bundle_manifest: str | Path, range_ref: dict[str, Any]) -> dict[str, Any]:
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    if not isinstance(range_ref, dict):
+        return _invalid_read_result(
+            kind="repobrief.range_get",
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error="range_ref must be a JSON object",
+            extra={"range_ref": range_ref, "range": None},
+        )
+
+    if range_ref.get("artifact_role") == "source_file":
+        return _invalid_read_result(
+            kind="repobrief.range_get",
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error=(
+                "source_file range_refs are outside the read-only RepoBrief "
+                "bundle artifact boundary"
+            ),
+            extra={"range_ref": range_ref, "range": None},
+        )
+
+    from merger.lenskit.core.range_resolver import resolve_range_ref
+
+    try:
+        resolved = resolve_range_ref(manifest_path, range_ref)
+    except Exception as exc:
+        return _invalid_read_result(
+            kind="repobrief.range_get",
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error=str(exc),
+            extra={"range_ref": range_ref, "range": None},
+        )
+
+    return {
+        "kind": "repobrief.range_get",
+        "version": "v1",
+        "status": "available",
+        "bundle_manifest": str(manifest_path),
+        "range_ref": range_ref,
+        "range": resolved,
+        "mutation_boundary": _read_only_mutation_boundary(),
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
+def query_existing_index(
+    bundle_manifest: str | Path,
+    query: str,
+    k: int = 10,
+    filters: dict[str, str | None] | None = None,
+) -> dict[str, Any]:
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    if k < 1:
+        return _invalid_read_result(
+            kind="repobrief.query_existing_index",
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error="k must be >= 1",
+            extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
+        )
+
+    artifact_result = get_artifact(manifest_path, "sqlite_index")
+    artifact = artifact_result.get("artifact") if isinstance(artifact_result, dict) else None
+    if not isinstance(artifact, dict) or not artifact.get("absolute_path"):
+        return _invalid_read_result(
+            kind="repobrief.query_existing_index",
+            bundle_manifest=manifest_path,
+            status="missing",
+            error="sqlite_index artifact is not present in the bundle manifest",
+            extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
+        )
+
+    index_path = Path(str(artifact["absolute_path"]))
+    if not index_path.exists():
+        return _invalid_read_result(
+            kind="repobrief.query_existing_index",
+            bundle_manifest=manifest_path,
+            status="missing",
+            error="sqlite_index artifact file does not exist",
+            extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
+        )
+
+    from merger.lenskit.retrieval.query_core import execute_query
+
+    try:
+        query_result = execute_query(
+            index_path,
+            query,
+            k=k,
+            filters=filters or {},
+            trace=False,
+            build_context=False,
+        )
+    except Exception as exc:
+        return _invalid_read_result(
+            kind="repobrief.query_existing_index",
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error=str(exc),
+            extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
+        )
+
+    return {
+        "kind": "repobrief.query_existing_index",
+        "version": "v1",
+        "status": "available",
+        "bundle_manifest": str(manifest_path),
+        "query": query,
+        "k": k,
+        "filters": filters or {},
+        "index_artifact": artifact,
+        "query_result": query_result,
+        "mutation_boundary": _read_only_mutation_boundary(),
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
 def snapshot_check(
     bundle_manifest: str | Path,
     task_profile: str = "basic_repo_question",
