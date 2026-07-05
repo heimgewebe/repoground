@@ -121,7 +121,9 @@ def execute_query(
             raise ValueError("Invalid index path: file does not exist.") from exc
         if not resolved_index_path.is_file():
             raise ValueError("Invalid index path: expected a regular file.")
-        if not any(
+        if read_only and not resolved_index_path.name.endswith(".index.sqlite"):
+            raise ValueError("Invalid index path: expected canonical read-only index file.")
+        if not read_only and not any(
             resolved_index_path.name.endswith(suffix)
             for suffix in _ALLOWED_SQLITE_INDEX_SUFFIXES
         ):
