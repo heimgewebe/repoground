@@ -201,9 +201,8 @@ def test_query_existing_index_reads_prebuilt_sqlite_index_without_mutation(tmp_p
 
     dump_path = tmp_path / "dump.json"
     chunk_path = tmp_path / "chunks.jsonl"
-    index_path = tmp_path / "index.sqlite"
     manifest = tmp_path / "demo.bundle.manifest.json"
-    index_path = tmp_path / 'index.index.sqlite'
+    index_path = tmp_path / "index.index.sqlite"
     chunk = {
         "chunk_id": "c1",
         "repo_id": "demo",

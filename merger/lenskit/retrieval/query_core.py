@@ -2,7 +2,6 @@ import sqlite3
 from pathlib import Path, PurePosixPath
 import json
 import time
-from urllib.parse import quote
 from typing import Dict, Any, Optional, List
 
 from .router import route_query
@@ -13,7 +12,8 @@ WHY_ZERO_TOKENS = "tokens too restrictive"
 WHY_ZERO_FILTERS = "filters too restrictive"
 WHY_ZERO_NONE = "no results"
 
-_ALLOWED_SQLITE_INDEX_SUFFIXES = (".index.sqlite", ".sqlite", ".sqlite3", ".db")
+_REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX = ".index.sqlite"
+_ALLOWED_SQLITE_INDEX_SUFFIXES = (_REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX, ".sqlite", ".sqlite3", ".db")
 _MODEL_CACHE = {}
 
 
@@ -116,7 +116,7 @@ def execute_query(
         if "\x00" in raw_index_path:
             raise ValueError("Invalid index path: NUL bytes are not allowed.")
         resolved_index_path = Path(index_path)
-        if read_only and not resolved_index_path.name.endswith(".index.sqlite"):
+        if read_only and not resolved_index_path.name.endswith(_REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX):
             raise ValueError("Invalid index path: expected canonical read-only index file.")
         if not read_only and not any(
             resolved_index_path.name.endswith(suffix)
@@ -126,12 +126,13 @@ def execute_query(
                 "Invalid index path: expected a SQLite index file "
                 f"ending with one of {_ALLOWED_SQLITE_INDEX_SUFFIXES!r}."
             )
-        uri_path = quote(resolved_index_path.as_posix(), safe="/")
         if read_only:
+            if not resolved_index_path.is_absolute():
+                raise ValueError("Invalid index path: expected an absolute read-only index path.")
+            db_uri = f"{resolved_index_path.as_uri()}?mode=ro&immutable=1"
             # lgtm[py/path-injection] callers validate and confine the index path.
-            conn = sqlite3.connect(f"file:{uri_path}?mode=ro&immutable=1", uri=True)
+            conn = sqlite3.connect(db_uri, uri=True)
         else:
-            # lgtm[py/path-injection] open with mode=rw so SQLite never creates a user-chosen path.
             conn = sqlite3.connect(str(resolved_index_path))
         conn.row_factory = sqlite3.Row
 
