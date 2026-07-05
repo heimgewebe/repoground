@@ -21,6 +21,8 @@ _DOES_NOT_ESTABLISH = (
 CITATION_MAP_ROLE = "citation_map_jsonl"
 RESOLVED_EVIDENCE_KIND = "repobrief.resolved_evidence"
 RESOLVED_EVIDENCE_VERSION = "v1"
+SOURCE_CITATION_PROJECTION_KIND = "repobrief.source_citation_projection"
+SOURCE_CITATION_PROJECTION_VERSION = "v1"
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _CITATION_RANGE_KEY_FIELDS = ("file_path", "start_byte", "end_byte")
@@ -569,12 +571,63 @@ def _resolve_query_evidence(manifest_path: Path, query_result: Any) -> dict[str,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
 
+def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
+    if not isinstance(range_value, dict):
+        return None
+    return {
+        "artifact_role": range_value.get("artifact_role"),
+        "file_path": range_value.get("file_path") or range_value.get("path") or range_value.get("artifact_path"),
+        "start_byte": range_value.get("start_byte") or range_value.get("artifact_byte_start"),
+        "end_byte": range_value.get("end_byte") or range_value.get("artifact_byte_end"),
+        "start_line": range_value.get("start_line") or range_value.get("artifact_line_start"),
+        "end_line": range_value.get("end_line") or range_value.get("artifact_line_end"),
+        "content_sha256": range_value.get("range_content_sha256") or range_value.get("content_sha256"),
+    }
+
+
+def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
+    hits = resolved_evidence.get("hits") if isinstance(resolved_evidence, dict) else None
+    hit_list = [hit for hit in (hits if isinstance(hits, list) else []) if isinstance(hit, dict)]
+    items: list[dict[str, Any]] = []
+    for ordinal, hit in enumerate(hit_list):
+        range_value = hit.get("range")
+        text = range_value.get("text") if isinstance(range_value, dict) else None
+        citation = hit.get("citation") if isinstance(hit.get("citation"), dict) else None
+        citation_range = citation.get("canonical_range") if citation else None
+        source_range = _source_range_projection(range_value)
+        if isinstance(source_range, dict) and source_range.get("file_path") is None:
+            source_range = citation_range if isinstance(citation_range, dict) else source_range
+        items.append({
+            "ordinal": ordinal,
+            "chunk_id": hit.get("chunk_id"),
+            "path": hit.get("path"),
+            "range_status": hit.get("range_status"),
+            "range_ref_source": hit.get("range_ref_source"),
+            "source_range": source_range,
+            "text": text if isinstance(text, str) else None,
+            "citation_status": hit.get("citation_status"),
+            "citation_id": hit.get("citation_id"),
+            "citation_range": citation_range,
+        })
+    return {
+        "kind": SOURCE_CITATION_PROJECTION_KIND,
+        "version": SOURCE_CITATION_PROJECTION_VERSION,
+        "status": "available",
+        "hit_count": len(items),
+        "citation_count": sum(1 for item in items if item.get("citation_status") == "resolved"),
+        "unresolved_count": sum(1 for item in items if item.get("range_status") != "resolved"),
+        "items": items,
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
 def query_existing_index(
     bundle_manifest: str | Path,
     query: str,
     k: int = 10,
     filters: dict[str, str | None] | None = None,
     resolve_evidence: bool = False,
+    project_sources: bool = False,
 ) -> dict[str, Any]:
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     if not isinstance(query, str):
@@ -602,6 +655,16 @@ def query_existing_index(
             status="invalid",
             error="resolve_evidence must be a boolean",
             error_code="resolve_evidence_invalid",
+            extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
+        )
+
+    if not isinstance(project_sources, bool):
+        return _invalid_read_result(
+            kind="repobrief.query_existing_index",
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error="project_sources must be a boolean",
+            error_code="project_sources_invalid",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
         )
 
@@ -650,6 +713,15 @@ def query_existing_index(
             extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
         )
 
+    resolved_evidence = (
+        _resolve_query_evidence(manifest_path, query_result)
+        if (resolve_evidence or project_sources)
+        else None
+    )
+    source_citation_projection = (
+        _project_source_citations(resolved_evidence) if project_sources else None
+    )
+
     return {
         "kind": "repobrief.query_existing_index",
         "version": "v1",
@@ -659,11 +731,11 @@ def query_existing_index(
         "k": k,
         "filters": filters or {},
         "resolve_evidence": resolve_evidence,
+        "project_sources": project_sources,
         "index_artifact": artifact,
         "query_result": query_result,
-        "resolved_evidence": (
-            _resolve_query_evidence(manifest_path, query_result) if resolve_evidence else None
-        ),
+        "resolved_evidence": resolved_evidence,
+        "source_citation_projection": source_citation_projection,
         "mutation_boundary": _read_only_mutation_boundary(),
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
