@@ -39,6 +39,20 @@ REPOBRIEF_OUTPUT_MODE=dual
 REPOBRIEF_LENSKIT_ROOT=%h/repos/lenskit
 ```
 
+## Unit sketch
+
+A local user service can read the configured repository file and invoke the existing CLI. The service is intentionally a thin wrapper around one explicit command:
+
+```ini
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/repobrief/snapshots/lenskit.env
+WorkingDirectory=%h/repos/lenskit
+ExecStart=/usr/bin/python3 -m merger.lenskit.cli.main repobrief snapshot create --repo ${REPOBRIEF_REPO} --out ${REPOBRIEF_OUT} --profile ${REPOBRIEF_PROFILE}
+```
+
+A timer may run this service daily with `Persistent=true` and a randomized delay. For several repositories, prefer one configured instance per repository or a small batch wrapper that only iterates configuration files and calls the same command.
+
 ## Safety requirements
 
 1. Output directories stay outside source repositories.
