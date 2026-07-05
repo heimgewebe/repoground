@@ -1,0 +1,223 @@
+import hashlib
+import json
+
+from merger.lenskit.core import repobrief_access
+from merger.lenskit.core.citation_id import make_citation_id
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _sqlite_sidecars(index_path):
+    return {
+        index_path.with_name(index_path.name + suffix)
+        for suffix in ("-wal", "-shm", "-journal")
+    }
+
+
+def _build_resolved_bundle(tmp_path, with_citation_map=True):
+    from merger.lenskit.retrieval import index_db
+
+    canonical = tmp_path / "brief.md"
+    canonical.write_text("# Brief\n\nhello resolved world\n", encoding="utf-8")
+    content = canonical.read_bytes()
+    start = content.index(b"hello")
+    end = len(content)
+    chunk_bytes = content[start:end]
+    chunk_sha = _sha256_bytes(chunk_bytes)
+    canonical_sha = _sha256_bytes(content)
+
+    range_ref = {
+        "artifact_role": "canonical_md",
+        "repo_id": "demo",
+        "file_path": canonical.name,
+        "start_byte": start,
+        "end_byte": end,
+        "start_line": 3,
+        "end_line": 3,
+        "content_sha256": chunk_sha,
+    }
+    chunk = {
+        "chunk_id": "c1",
+        "repo_id": "demo",
+        "path": canonical.name,
+        "content": chunk_bytes.decode("utf-8"),
+        "start_byte": start,
+        "end_byte": end,
+        "start_line": 3,
+        "end_line": 3,
+        "layer": "core",
+        "artifact_type": "doc",
+        "content_sha256": chunk_sha,
+        "content_range_ref": range_ref,
+    }
+    chunk_path = tmp_path / "chunks.jsonl"
+    chunk_path.write_text(json.dumps(chunk) + "\n", encoding="utf-8")
+    dump_path = tmp_path / "dump.json"
+    dump_path.write_text(json.dumps({"version": "1.0", "repos": {"demo": {}}}), encoding="utf-8")
+    index_path = tmp_path / "demo.index.sqlite"
+    index_db.build_index(dump_path, chunk_path, index_path)
+
+    citation_id = make_citation_id(canonical_sha, start, end, chunk_sha)
+    artifacts = [
+        {
+            "role": "canonical_md",
+            "path": canonical.name,
+            "content_type": "text/markdown",
+            "bytes": len(content),
+            "sha256": canonical_sha,
+        },
+        {"role": "sqlite_index", "path": index_path.name},
+    ]
+    if with_citation_map:
+        citation_map_path = tmp_path / "demo.citation_map.jsonl"
+        row = {
+            "citation_id": citation_id,
+            "repo_id": "demo",
+            "chunk_id": "c1",
+            "snapshot": {
+                "run_id": "run-1",
+                "canonical_md_path": canonical.name,
+                "canonical_md_sha256": canonical_sha,
+            },
+            "canonical_range": {
+                "file_path": canonical.name,
+                "start_byte": start,
+                "end_byte": end,
+                "start_line": 3,
+                "end_line": 3,
+                "content_sha256": chunk_sha,
+            },
+            "produced_by": "citation_map_producer/v1",
+        }
+        citation_map_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+        artifacts.append({"role": "citation_map_jsonl", "path": citation_map_path.name})
+
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(
+        json.dumps({
+            "kind": "repolens.bundle.manifest",
+            "version": "1.0",
+            "run_id": "run-1",
+            "artifacts": artifacts,
+            "links": {},
+            "capabilities": {},
+        }),
+        encoding="utf-8",
+    )
+    return {
+        "manifest": manifest,
+        "index_path": index_path,
+        "canonical": canonical,
+        "chunk_text": chunk_bytes.decode("utf-8"),
+        "citation_id": citation_id,
+    }
+
+
+def test_query_existing_index_resolves_hit_evidence_and_citation(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+
+    result = repobrief_access.query_existing_index(
+        bundle["manifest"], "hello", k=5, resolve_evidence=True
+    )
+
+    assert result["status"] == "available"
+    assert result["resolve_evidence"] is True
+    resolved = result["resolved_evidence"]
+    assert resolved["kind"] == "repobrief.resolved_evidence"
+    assert resolved["version"] == "v1"
+    assert resolved["citation_map"]["status"] == "available"
+    assert resolved["citation_map"]["row_count"] == 1
+    assert resolved["hit_count"] == 1
+    hit = resolved["hits"][0]
+    assert hit["chunk_id"] == "c1"
+    assert hit["range_ref_source"] == "range_ref"
+    assert hit["range_status"] == "resolved"
+    assert hit["range"]["text"] == bundle["chunk_text"]
+    assert hit["range_error_code"] is None
+    assert hit["citation_status"] == "resolved"
+    assert hit["citation_id"] == bundle["citation_id"]
+    assert hit["citation"]["canonical_range"]["file_path"] == bundle["canonical"].name
+    assert resolved["does_not_establish"] == result["does_not_establish"]
+    assert result["mutation_boundary"]["writes"] == []
+
+
+def test_query_existing_index_degrades_when_citation_map_missing(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path, with_citation_map=False)
+
+    result = repobrief_access.query_existing_index(
+        bundle["manifest"], "hello", k=5, resolve_evidence=True
+    )
+
+    assert result["status"] == "available"
+    resolved = result["resolved_evidence"]
+    assert resolved["citation_map"]["status"] == "missing"
+    assert resolved["citation_map"]["error_code"] == "citation_map_jsonl_missing"
+    hit = resolved["hits"][0]
+    assert hit["range_status"] == "resolved"
+    assert hit["range"]["text"] == bundle["chunk_text"]
+    assert hit["citation_status"] == "unavailable"
+    assert hit["citation_id"] is None
+    assert hit["citation"] is None
+
+
+def test_query_existing_index_resolution_is_read_only(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+    index_path = bundle["index_path"]
+
+    before_files = {path.name for path in tmp_path.iterdir()}
+    before_hashes = {path.name: _sha256(path) for path in tmp_path.iterdir() if path.is_file()}
+
+    result = repobrief_access.query_existing_index(
+        bundle["manifest"], "hello", k=5, resolve_evidence=True
+    )
+
+    after_files = {path.name for path in tmp_path.iterdir()}
+    after_hashes = {path.name: _sha256(path) for path in tmp_path.iterdir() if path.is_file()}
+
+    assert result["status"] == "available"
+    assert result["resolved_evidence"]["hits"][0]["range_status"] == "resolved"
+    assert before_files == after_files
+    assert before_hashes == after_hashes
+    assert not any(path.exists() for path in _sqlite_sidecars(index_path))
+    assert result["mutation_boundary"]["writes"] == []
+    assert result["mutation_boundary"]["read_paths_do_not_refresh"] is True
+
+
+def test_query_existing_index_resolution_defaults_off(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+
+    result = repobrief_access.query_existing_index(bundle["manifest"], "hello", k=5)
+
+    assert result["status"] == "available"
+    assert result["resolve_evidence"] is False
+    assert result["resolved_evidence"] is None
+
+
+def test_query_existing_index_rejects_non_boolean_resolve_evidence(tmp_path):
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(
+        json.dumps({
+            "kind": "repolens.bundle.manifest",
+            "version": "1.0",
+            "run_id": "run-1",
+            "artifacts": [],
+            "links": {},
+            "capabilities": {},
+        }),
+        encoding="utf-8",
+    )
+
+    for bad_value in ("yes", 1, None):
+        result = repobrief_access.query_existing_index(
+            manifest, "hello", k=1, resolve_evidence=bad_value
+        )
+
+        assert result["status"] == "invalid"
+        assert result["error_code"] == "resolve_evidence_invalid"
+        assert result["query_result"] is None
