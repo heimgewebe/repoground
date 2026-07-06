@@ -296,6 +296,7 @@ def test_resolved_evidence_falls_back_to_derived_range_ref_when_range_ref_invali
     resolved_hit = resolved["hits"][0]
     assert resolved_hit["range_ref_source"] == "derived_range_ref"
     assert resolved_hit["range_status"] == "resolved"
+    assert resolved_hit["range_ref"] == valid_range_ref
     assert resolved_hit["range_error_code"] is None
     assert resolved_hit["range"]["text"] == bundle["chunk_text"]
     assert resolved_hit["citation_status"] == "resolved"

@@ -21,6 +21,9 @@ _DOES_NOT_ESTABLISH = (
 CITATION_MAP_ROLE = "citation_map_jsonl"
 RESOLVED_EVIDENCE_KIND = "repobrief.resolved_evidence"
 RESOLVED_EVIDENCE_VERSION = "v1"
+SOURCE_CITATION_PROJECTION_KIND = "repobrief.source_citation_projection"
+SOURCE_CITATION_PROJECTION_VERSION = "v1"
+TEXT_EXCERPT_MAX_CHARS = 1200
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _CITATION_RANGE_KEY_FIELDS = ("file_path", "start_byte", "end_byte")
@@ -493,6 +496,7 @@ def _resolve_hit_evidence(
         "chunk_id": hit.get("chunk_id"),
         "path": hit.get("path"),
         "range_ref_source": range_ref_source,
+        "range_ref": None,
         "range_status": "unresolved",
         "range": None,
         "range_error": None,
@@ -508,8 +512,9 @@ def _resolve_hit_evidence(
         for candidate_source, candidate_ref in range_candidates:
             range_result = range_get(manifest_path, candidate_ref)
             record["range_ref_source"] = candidate_source
-            selected_range_ref = candidate_ref
             if range_result.get("status") == "available":
+                selected_range_ref = candidate_ref
+                record["range_ref"] = selected_range_ref
                 record["range_status"] = "resolved"
                 record["range"] = range_result.get("range")
                 record["range_error"] = None
@@ -569,12 +574,210 @@ def _resolve_query_evidence(manifest_path: Path, query_result: Any) -> dict[str,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
 
+
+def _first_not_none(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _line_pair(value: Any) -> tuple[int | None, int | None]:
+    if not isinstance(value, list) or len(value) != 2:
+        return None, None
+    start, end = value
+    if isinstance(start, bool) or isinstance(end, bool):
+        return None, None
+    if not isinstance(start, int) or not isinstance(end, int):
+        return None, None
+    return start, end
+
+
+def _has_range_identity(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    file_path = value.get("file_path")
+    start_byte = value.get("start_byte")
+    end_byte = value.get("end_byte")
+    if not _is_non_empty_string(file_path):
+        return False
+    if not _is_int_not_bool(start_byte) or not _is_int_not_bool(end_byte):
+        return False
+    return start_byte >= 0 and end_byte > start_byte
+
+
+def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
+    if not isinstance(range_value, dict):
+        return None
+    provenance = range_value.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+    start_line, end_line = _line_pair(range_value.get("lines"))
+    artifact_path = _first_not_none(
+        range_value.get("artifact_path"),
+        range_value.get("file_path"),
+        range_value.get("path"),
+        provenance.get("artifact_path"),
+        provenance.get("file_path"),
+    )
+    artifact_start_byte = _first_not_none(
+        range_value.get("artifact_byte_start"),
+        range_value.get("start_byte"),
+        provenance.get("artifact_byte_start"),
+        provenance.get("start_byte"),
+    )
+    artifact_end_byte = _first_not_none(
+        range_value.get("artifact_byte_end"),
+        range_value.get("end_byte"),
+        provenance.get("artifact_byte_end"),
+        provenance.get("end_byte"),
+    )
+    artifact_start_line = _first_not_none(
+        range_value.get("artifact_line_start"),
+        range_value.get("start_line"),
+        start_line,
+    )
+    artifact_end_line = _first_not_none(
+        range_value.get("artifact_line_end"),
+        range_value.get("end_line"),
+        end_line,
+    )
+    source_file_path = _first_not_none(
+        range_value.get("source_file_path"),
+        provenance.get("source_file_path"),
+    )
+    source_start_line = _first_not_none(
+        range_value.get("source_line_start"),
+        provenance.get("source_line_start"),
+    )
+    source_end_line = _first_not_none(
+        range_value.get("source_line_end"),
+        provenance.get("source_line_end"),
+    )
+    has_source_axis = _is_non_empty_string(source_file_path)
+    return {
+        "artifact_role": _first_not_none(range_value.get("artifact_role"), provenance.get("artifact_role")),
+        "file_path": artifact_path,
+        "start_byte": artifact_start_byte,
+        "end_byte": artifact_end_byte,
+        "start_line": artifact_start_line,
+        "end_line": artifact_end_line,
+        "content_sha256": _first_not_none(range_value.get("range_content_sha256"), range_value.get("content_sha256"), range_value.get("sha256")),
+        "artifact_path": artifact_path,
+        "artifact_start_byte": artifact_start_byte,
+        "artifact_end_byte": artifact_end_byte,
+        "artifact_start_line": artifact_start_line,
+        "artifact_end_line": artifact_end_line,
+        "source_file_path": source_file_path,
+        "source_start_line": source_start_line,
+        "source_end_line": source_end_line,
+        "coordinate_basis": "artifact_bytes_with_source_lines" if has_source_axis else "artifact_bytes",
+    }
+
+
+def _empty_source_citation_projection(status: str = "unavailable") -> dict[str, Any]:
+    return {
+        "kind": SOURCE_CITATION_PROJECTION_KIND,
+        "version": SOURCE_CITATION_PROJECTION_VERSION,
+        "status": status,
+        "hit_count": 0,
+        "citation_count": 0,
+        "unresolved_count": 0,
+        "range_unresolved_count": 0,
+        "citation_unresolved_count": 0,
+        "text_excerpt_max_chars": TEXT_EXCERPT_MAX_CHARS,
+        "items": [],
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
+def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
+    if not isinstance(resolved_evidence, dict):
+        return _empty_source_citation_projection()
+
+    hits = resolved_evidence.get("hits")
+    hit_list = [hit for hit in (hits if isinstance(hits, list) else []) if isinstance(hit, dict)]
+    items: list[dict[str, Any]] = []
+    citation_count = 0
+    unresolved_count = 0
+    range_unresolved_count = 0
+    citation_unresolved_count = 0
+    for ordinal, hit in enumerate(hit_list):
+        range_value = hit.get("range")
+        text = range_value.get("text") if isinstance(range_value, dict) else None
+        raw_citation = hit.get("citation")
+        citation = raw_citation if isinstance(raw_citation, dict) else None
+        citation_range = _source_range_projection(
+            citation.get("canonical_range") if citation else None
+        )
+        range_ref_projection = (
+            _source_range_projection(hit.get("range_ref"))
+            if hit.get("range_status") == "resolved"
+            else None
+        )
+        range_projection = _source_range_projection(range_value)
+        candidates = [range_ref_projection, citation_range, range_projection]
+        source_range = next(
+            (candidate for candidate in candidates if _has_range_identity(candidate)),
+            None,
+        )
+        if source_range is None:
+            source_range = next(
+                (candidate for candidate in candidates if isinstance(candidate, dict)),
+                None,
+            )
+        range_status = hit.get("range_status")
+        citation_status = hit.get("citation_status")
+        citation_id = hit.get("citation_id")
+        if range_status != "resolved":
+            range_unresolved_count += 1
+        citation_resolved = (
+            citation_status == "resolved"
+            and isinstance(citation_id, str)
+            and _CITATION_ID_RE.fullmatch(citation_id) is not None
+        )
+        if citation_resolved:
+            citation_count += 1
+        else:
+            citation_unresolved_count += 1
+        if range_status != "resolved" or not citation_resolved:
+            unresolved_count += 1
+        items.append({
+            "ordinal": ordinal,
+            "chunk_id": hit.get("chunk_id"),
+            "path": hit.get("path"),
+            "range_status": range_status,
+            "range_ref_source": hit.get("range_ref_source"),
+            "source_range": source_range,
+            "text_excerpt": text[:TEXT_EXCERPT_MAX_CHARS] if isinstance(text, str) else None,
+            "text_truncated": isinstance(text, str) and len(text) > TEXT_EXCERPT_MAX_CHARS,
+            "citation_status": citation_status,
+            "citation_resolved": citation_resolved,
+            "citation_id": citation_id,
+            "citation_range": citation_range,
+        })
+    return {
+        "kind": SOURCE_CITATION_PROJECTION_KIND,
+        "version": SOURCE_CITATION_PROJECTION_VERSION,
+        "status": "available",
+        "hit_count": len(items),
+        "citation_count": citation_count,
+        "unresolved_count": unresolved_count,
+        "range_unresolved_count": range_unresolved_count,
+        "citation_unresolved_count": citation_unresolved_count,
+        "text_excerpt_max_chars": TEXT_EXCERPT_MAX_CHARS,
+        "items": items,
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
 def query_existing_index(
     bundle_manifest: str | Path,
     query: str,
     k: int = 10,
     filters: dict[str, str | None] | None = None,
     resolve_evidence: bool = False,
+    project_sources: bool = False,
 ) -> dict[str, Any]:
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     if not isinstance(query, str):
@@ -602,6 +805,16 @@ def query_existing_index(
             status="invalid",
             error="resolve_evidence must be a boolean",
             error_code="resolve_evidence_invalid",
+            extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
+        )
+
+    if not isinstance(project_sources, bool):
+        return _invalid_read_result(
+            kind="repobrief.query_existing_index",
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error="project_sources must be a boolean",
+            error_code="project_sources_invalid",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
         )
 
@@ -650,6 +863,15 @@ def query_existing_index(
             extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
         )
 
+    resolved_evidence = (
+        _resolve_query_evidence(manifest_path, query_result)
+        if (resolve_evidence or project_sources)
+        else None
+    )
+    source_citation_projection = (
+        _project_source_citations(resolved_evidence) if project_sources else None
+    )
+
     return {
         "kind": "repobrief.query_existing_index",
         "version": "v1",
@@ -659,11 +881,12 @@ def query_existing_index(
         "k": k,
         "filters": filters or {},
         "resolve_evidence": resolve_evidence,
+        "project_sources": project_sources,
         "index_artifact": artifact,
         "query_result": query_result,
-        "resolved_evidence": (
-            _resolve_query_evidence(manifest_path, query_result) if resolve_evidence else None
-        ),
+        "evidence_resolution_used": resolve_evidence or project_sources,
+        "resolved_evidence": resolved_evidence if resolve_evidence else None,
+        "source_citation_projection": source_citation_projection,
         "mutation_boundary": _read_only_mutation_boundary(),
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
