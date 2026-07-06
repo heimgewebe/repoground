@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .clock import now_utc
 
 from .dependency_diagnostics import jsonschema_dependency
+from .health_degradation import HEALTH_STATUS_MODEL, degradation_item, degradation_summary
 
 
 def _probe_jsonschema_available() -> bool:
@@ -305,6 +306,27 @@ def _range_ref_check(
             "fail",
             _range_ref_validation("jsonschema", "available"),
         )
+
+
+def _output_health_degradation(checks: Dict[str, Any], *, jsonschema_available: bool) -> Dict[str, Any]:
+    items: List[Dict[str, Any]] = []
+    if not jsonschema_available:
+        items.append(degradation_item("jsonschema_unavailable", "degraded", "jsonschema dependency unavailable for strict validation"))
+        items.append(degradation_item("environment_degraded", "degraded", "runtime cannot execute every strict validation check"))
+    rr = checks.get("range_ref_resolution")
+    if isinstance(rr, dict):
+        rr_status = str(rr.get("status", ""))
+        rr_reason = str(rr.get("reason", rr_status))
+        validation = rr.get("validation")
+        if rr_status in {"environment_error", "unavailable"}:
+            items.append(degradation_item("range_strict_unavailable", "degraded", rr_reason, check="range_ref_resolution"))
+        elif rr_status in {"no_range_ref", "skipped"}:
+            items.append(degradation_item("range_strict_unavailable", "not_applicable", rr_reason, check="range_ref_resolution"))
+        if isinstance(validation, dict) and validation.get("mode") == "skipped_unavailable":
+            reason = str(validation.get("reason", rr_reason))
+            status = "degraded" if rr_status == "environment_error" else "not_applicable"
+            items.append(degradation_item("schema_validation_skipped", status, reason, check="range_ref_resolution"))
+    return degradation_summary(items)
 
 
 def compute_output_health(
@@ -595,6 +617,10 @@ def compute_output_health(
     else:
         verdict = "pass"
 
+    health_degradation = _output_health_degradation(
+        checks, jsonschema_available=_JSONSCHEMA_AVAILABLE
+    )
+
     # Format created_at timestamp
     ts = now_utc()
     if isinstance(ts, str):
@@ -605,6 +631,8 @@ def compute_output_health(
 
     return {
         "kind": "lenskit.output_health",
+        "health_status_model": list(HEALTH_STATUS_MODEL),
+        "degradation": health_degradation,
         "version": "1.0",
         "run_id": run_id,
         "created_at": created_at,

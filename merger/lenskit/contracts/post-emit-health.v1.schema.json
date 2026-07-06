@@ -276,6 +276,22 @@
           ]
         }
       }
+    },
+    "health_status_model": {
+      "type": "array",
+      "items": {"type": "string", "enum": ["pass", "warn", "fail", "degraded", "not_applicable"]}
+    },
+    "degradation": {
+      "type": "object",
+      "required": ["status", "status_model", "classes", "items", "does_not_establish"],
+      "properties": {
+        "status": {"type": "string", "enum": ["pass", "warn", "fail", "degraded", "not_applicable"]},
+        "status_model": {"type": "array", "items": {"type": "string", "enum": ["pass", "warn", "fail", "degraded", "not_applicable"]}},
+        "classes": {"type": "array", "items": {"type": "string", "enum": ["jsonschema_unavailable", "schema_validation_skipped", "range_strict_unavailable", "claim_evidence_validation_skipped", "environment_degraded", "profile_skipped"]}},
+        "items": {"type": "array", "items": {"type": "object", "required": ["class", "status", "reason"], "properties": {"class": {"type": "string", "enum": ["jsonschema_unavailable", "schema_validation_skipped", "range_strict_unavailable", "claim_evidence_validation_skipped", "environment_degraded", "profile_skipped"]}, "status": {"type": "string", "enum": ["pass", "warn", "fail", "degraded", "not_applicable"]}, "reason": {"type": "string"}, "check": {"type": "string"}}, "additionalProperties": false}},
+        "does_not_establish": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
     }
   }
 }

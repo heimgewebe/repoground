@@ -53,6 +53,7 @@ from .output_health import _is_jsonschema_unavailable_error
 from .path_security import resolve_secure_path
 
 from .dependency_diagnostics import jsonschema_dependency
+from .health_degradation import HEALTH_STATUS_MODEL, degradation_item, degradation_summary
 
 try:
     import jsonschema
@@ -337,6 +338,30 @@ def _validate_claim_evidence_map_schema(doc: Dict[str, Any]) -> Tuple[str, str]:
         return "environment_error", f"could not load claim_evidence_map schema: {e}"
 
 
+def _post_emit_degradation(checks: List[Dict[str, Any]], *, jsonschema_available: bool) -> Dict[str, Any]:
+    items: List[Dict[str, Any]] = []
+    if not jsonschema_available:
+        items.append(degradation_item("jsonschema_unavailable", "degraded", "jsonschema dependency unavailable for strict validation"))
+        items.append(degradation_item("environment_degraded", "degraded", "runtime cannot execute every strict validation check"))
+    for check in checks:
+        name = str(check.get("name", ""))
+        status = str(check.get("status", ""))
+        validation = check.get("validation")
+        if status != "skipped" or not isinstance(validation, dict):
+            continue
+        if validation.get("mode") != "skipped_unavailable":
+            continue
+        reason = str(validation.get("reason", check.get("detail", "skipped")))
+        item_status = "not_applicable" if reason == "check_not_applicable" else "degraded"
+        if name == "range_ref_resolution":
+            items.append(degradation_item("range_strict_unavailable", item_status, reason, check=name))
+        elif name == "claim_evidence_map_schema_valid":
+            items.append(degradation_item("claim_evidence_validation_skipped", item_status, reason, check=name))
+        if name in {"manifest_schema_valid", "range_ref_resolution", "claim_evidence_map_schema_valid"}:
+            items.append(degradation_item("schema_validation_skipped", item_status, reason, check=name))
+    return degradation_summary(items)
+
+
 def _assemble(
     *,
     status: str,
@@ -358,8 +383,13 @@ def _assemble(
     jsonschema_available: bool = False,
     agent_pack: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    health_degradation = _post_emit_degradation(
+        checks, jsonschema_available=jsonschema_available
+    )
     return {
         "kind": KIND,
+        "health_status_model": list(HEALTH_STATUS_MODEL),
+        "degradation": health_degradation,
         "version": VERSION,
         "dependencies": jsonschema_dependency(
             available=jsonschema_available,

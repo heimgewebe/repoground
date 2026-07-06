@@ -830,3 +830,20 @@ def test_post_emit_health_schema_rejects_dependency_available_effect_mismatch():
     schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=report, schema=schema)
+
+def test_post_emit_health_degradation_summary_lists_skipped_validation_classes(tmp_path, monkeypatch):
+    manifest = _make_bundle(tmp_path, include_claim_map=True, include_citation=True)
+    monkeypatch.setattr(post_emit_health, "jsonschema", None)
+    monkeypatch.setattr(range_resolver, "jsonschema", None)
+
+    report = compute_post_emit_health(str(manifest))
+
+    assert report["degradation"]["status"] == "degraded"
+    assert set(report["degradation"]["classes"]) >= {
+        "jsonschema_unavailable",
+        "schema_validation_skipped",
+        "range_strict_unavailable",
+        "claim_evidence_validation_skipped",
+        "environment_degraded",
+    }
+    assert report["health_status_model"] == report["degradation"]["status_model"]

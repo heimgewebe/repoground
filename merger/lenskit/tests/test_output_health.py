@@ -547,6 +547,12 @@ def test_no_range_reference_is_warn_not_pass(tmp_path):
     result = compute_output_health(**kwargs)
 
     assert result["checks"]["range_ref_resolution_ok"] is None
+    assert result["degradation"]["status"] == "not_applicable"
+    assert result["degradation"]["classes"] == [
+        "range_strict_unavailable",
+        "schema_validation_skipped",
+    ]
+    assert "not_applicable" in result["health_status_model"]
     assert result["verdict"] == "warn"
     assert any(
         "range_ref" in w.lower() and "skipped" in w.lower() for w in result["warnings"]
@@ -1520,3 +1526,35 @@ def test_output_health_dependencies_reports_jsonschema_unavailable(monkeypatch):
         "required_for": ["range_ref_schema"],
         "effect": "validation_degraded",
     }
+
+def test_output_health_reports_degradation_summary_for_jsonschema_skip(tmp_path, monkeypatch):
+    from unittest.mock import patch
+
+    canonical_md_path, canonical_md_sha, chunk_index_path, chunk_sha, dump_index_path = _make_range_ref_chunks(tmp_path)
+    monkeypatch.setattr("merger.lenskit.core.output_health._JSONSCHEMA_AVAILABLE", False)
+    with (
+        patch("merger.lenskit.core.range_resolver.resolve_range_ref", side_effect=_raise_jsonschema_unavailable),
+        patch("merger.lenskit.core.range_resolver.jsonschema", None),
+    ):
+        result = compute_output_health(
+            run_id="run-degradation-summary",
+            stem="test",
+            primary_manifest_path=dump_index_path,
+            canonical_md_path=canonical_md_path,
+            chunk_index_path=chunk_index_path,
+            dump_index_path=dump_index_path,
+            sqlite_index_path=None,
+            sqlite_index_required=False,
+            redact_secrets=False,
+            expected_canonical_md_sha256=canonical_md_sha,
+            expected_chunk_index_sha256=chunk_sha,
+        )
+
+    assert result["degradation"]["status"] == "degraded"
+    assert set(result["degradation"]["classes"]) >= {
+        "jsonschema_unavailable",
+        "schema_validation_skipped",
+        "range_strict_unavailable",
+        "environment_degraded",
+    }
+    assert result["health_status_model"] == result["degradation"]["status_model"]
