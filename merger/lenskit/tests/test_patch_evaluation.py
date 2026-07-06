@@ -196,6 +196,18 @@ def test_diagnostics_flags_missing_non_claims_and_isolation():
     assert "workspace_not_isolated" in classes
 
 
+def test_diagnostics_tolerates_malformed_non_claim_members():
+    art = _minimal_artifact()
+    art["does_not_establish"] = [{"not": "hashable"}, 7, "correctness"]
+
+    diag = pe.patch_evaluation_diagnostics(art)  # must not raise
+
+    assert "correctness" not in diag["missing_non_claims"]
+    assert "merge_readiness" in diag["missing_non_claims"]
+    classes = {d["class"] for d in diag["degradations"]}
+    assert "missing_non_claims" in classes
+
+
 # Regression (Codex P2): the summary path must tolerate malformed scalar context
 # fields instead of raising TypeError from list(scalar). The --summary CLI flag
 # summarizes regardless of the validation verdict, so a schema-invalid artifact

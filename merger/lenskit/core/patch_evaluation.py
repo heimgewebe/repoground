@@ -252,6 +252,18 @@ def _as_list(value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else []
 
 
+def _as_string_set(value: Any) -> set[str]:
+    """Return string members from a possibly malformed list field.
+
+    Diagnostics may run before schema validation has accepted the artifact.
+    Keep them total for malformed evidence surfaces: ignore non-string members
+    instead of raising from ``set([{}])``.
+    """
+    if not isinstance(value, list):
+        return set()
+    return {item for item in value if isinstance(item, str)}
+
+
 def _command_status_counts(commands: Any) -> dict[str, int]:
     counts = {status: 0 for status in _COMMAND_STATUSES}
     counts["unknown"] = 0
@@ -329,7 +341,7 @@ def patch_evaluation_diagnostics(data: Mapping[str, Any]) -> dict[str, Any]:
             missing_required_top.append(field)
 
     declared = data.get("does_not_establish")
-    declared_set = set(declared) if isinstance(declared, list) else set()
+    declared_set = _as_string_set(declared)
     missing_non_claims = [
         claim for claim in REQUIRED_DOES_NOT_ESTABLISH if claim not in declared_set
     ]
