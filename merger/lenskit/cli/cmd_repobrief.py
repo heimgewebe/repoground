@@ -272,6 +272,30 @@ def register_repobrief_commands(subparsers: argparse._SubParsersAction) -> None:
     resolve_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
     resolve_parser.add_argument("--task-profile", required=True, help="Required-reading task profile")
 
+    external_parser = repobrief_subparsers.add_parser(
+        "external-manifest",
+        help="Write bounded external manifest references from existing bundle manifests",
+    )
+    external_subparsers = external_parser.add_subparsers(
+        dest="external_manifest_cmd",
+        required=True,
+        help="External manifest commands",
+    )
+    external_write_parser = external_subparsers.add_parser(
+        "write",
+        help="Write an external manifest reference without refreshing the source snapshot",
+    )
+    external_write_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    external_write_parser.add_argument("--out", required=True, help="Output manifest path")
+    external_write_parser.add_argument("--repository", required=True, help="Registry repository segment, for example cabinet")
+    external_write_parser.add_argument("--ref", required=True, help="Registry ref segment, for example main")
+    external_write_parser.add_argument(
+        "--artifact-family",
+        choices=["repobrief", "lenskit"],
+        default="repobrief",
+        help="External artifact family to advertise",
+    )
+
     patch_eval_parser = repobrief_subparsers.add_parser(
         "patch-evaluation",
         help="Read-only consumption of external Patch Evaluation Sidecar artifacts",
@@ -308,10 +332,33 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_artifact_list(args)
     if args.repobrief_cmd == "required-reading" and args.required_reading_cmd == "resolve":
         return run_required_reading_resolve(args)
+    if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "write":
+        return run_external_manifest_write(args)
     if args.repobrief_cmd == "patch-evaluation" and args.patch_evaluation_cmd == "validate":
         return run_patch_evaluation_validate(args)
     print("Unsupported RepoBrief command", file=sys.stderr)
     return 2
+
+
+def run_external_manifest_write(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.external_manifest_reference import (
+        ExternalManifestReferenceError,
+        write_external_manifest_reference,
+    )
+
+    try:
+        result = write_external_manifest_reference(
+            args.bundle_manifest,
+            args.out,
+            repository=args.repository,
+            ref=args.ref,
+            artifact_family=args.artifact_family,
+        )
+    except ExternalManifestReferenceError as exc:
+        print("repobrief external-manifest write: " + str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
 
 
 def run_patch_evaluation_validate(args: argparse.Namespace) -> int:
