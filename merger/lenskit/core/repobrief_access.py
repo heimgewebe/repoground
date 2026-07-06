@@ -594,12 +594,16 @@ def _line_pair(value: Any) -> tuple[int | None, int | None]:
 
 
 def _has_range_identity(value: Any) -> bool:
-    return (
-        isinstance(value, dict)
-        and value.get("file_path") is not None
-        and value.get("start_byte") is not None
-        and value.get("end_byte") is not None
-    )
+    if not isinstance(value, dict):
+        return False
+    file_path = value.get("file_path")
+    start_byte = value.get("start_byte")
+    end_byte = value.get("end_byte")
+    if not _is_non_empty_string(file_path):
+        return False
+    if not _is_int_not_bool(start_byte) or not _is_int_not_bool(end_byte):
+        return False
+    return start_byte >= 0 and end_byte > start_byte
 
 
 def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
@@ -611,9 +615,25 @@ def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
     start_line, end_line = _line_pair(range_value.get("lines"))
     return {
         "artifact_role": _first_not_none(range_value.get("artifact_role"), provenance.get("artifact_role")),
-        "file_path": _first_not_none(range_value.get("file_path"), range_value.get("path"), range_value.get("artifact_path")),
-        "start_byte": _first_not_none(range_value.get("start_byte"), range_value.get("artifact_byte_start")),
-        "end_byte": _first_not_none(range_value.get("end_byte"), range_value.get("artifact_byte_end")),
+        "file_path": _first_not_none(
+            range_value.get("file_path"),
+            range_value.get("path"),
+            range_value.get("artifact_path"),
+            provenance.get("file_path"),
+            provenance.get("artifact_path"),
+        ),
+        "start_byte": _first_not_none(
+            range_value.get("start_byte"),
+            range_value.get("artifact_byte_start"),
+            provenance.get("start_byte"),
+            provenance.get("artifact_byte_start"),
+        ),
+        "end_byte": _first_not_none(
+            range_value.get("end_byte"),
+            range_value.get("artifact_byte_end"),
+            provenance.get("end_byte"),
+            provenance.get("artifact_byte_end"),
+        ),
         "start_line": _first_not_none(range_value.get("start_line"), range_value.get("artifact_line_start"), start_line),
         "end_line": _first_not_none(range_value.get("end_line"), range_value.get("artifact_line_end"), end_line),
         "content_sha256": _first_not_none(range_value.get("range_content_sha256"), range_value.get("content_sha256"), range_value.get("sha256")),
@@ -653,7 +673,11 @@ def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
         citation_range = _source_range_projection(
             citation.get("canonical_range") if citation else None
         )
-        range_ref_projection = _source_range_projection(hit.get("range_ref"))
+        range_ref_projection = (
+            _source_range_projection(hit.get("range_ref"))
+            if hit.get("range_status") == "resolved"
+            else None
+        )
         range_projection = _source_range_projection(range_value)
         candidates = [range_ref_projection, citation_range, range_projection]
         source_range = next(
@@ -665,7 +689,11 @@ def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
         citation_id = hit.get("citation_id")
         if range_status != "resolved":
             range_unresolved_count += 1
-        if citation_status == "resolved" and citation_id:
+        if (
+            citation_status == "resolved"
+            and isinstance(citation_id, str)
+            and _CITATION_ID_RE.fullmatch(citation_id) is not None
+        ):
             citation_count += 1
         if citation_status != "resolved":
             citation_unresolved_count += 1

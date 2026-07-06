@@ -123,7 +123,7 @@ def test_source_citation_projection_prefers_complete_citation_range_over_partial
                 "sha256": "b" * 64,
             },
             "citation_status": "resolved",
-            "citation_id": "cit_present",
+            "citation_id": "cit_0000000000000001",
             "citation": {
                 "canonical_range": {
                     "file_path": "citation.md",
@@ -200,3 +200,59 @@ def test_query_existing_index_rejects_non_boolean_project_sources(tmp_path):
     )
     assert result["status"] == "invalid"
     assert result["error_code"] == "project_sources_invalid"
+
+
+def test_source_citation_projection_ignores_structurally_invalid_range_identity():
+    projection = repobrief_access._project_source_citations({
+        "hits": [{
+            "chunk_id": "c1",
+            "path": "brief.md",
+            "range_status": "resolved",
+            "range_ref_source": "range_ref",
+            "range_ref": {
+                "file_path": "bad.md",
+                "start_byte": True,
+                "end_byte": 5,
+            },
+            "range": {
+                "text": "hello",
+                "file_path": "good.md",
+                "start_byte": 0,
+                "end_byte": 5,
+            },
+            "citation_status": "unavailable",
+            "citation_id": None,
+            "citation": None,
+        }]
+    })
+
+    assert projection["items"][0]["source_range"]["file_path"] == "good.md"
+
+
+def test_source_citation_projection_ignores_range_ref_when_range_status_unresolved():
+    projection = repobrief_access._project_source_citations({
+        "hits": [{
+            "chunk_id": "c1",
+            "path": "brief.md",
+            "range_status": "unresolved",
+            "range_ref_source": "range_ref",
+            "range_ref": {
+                "file_path": "stale.md",
+                "start_byte": 0,
+                "end_byte": 5,
+            },
+            "range": {
+                "text": "hello",
+                "file_path": "resolved-output.md",
+                "start_byte": 0,
+                "end_byte": 5,
+            },
+            "citation_status": "unavailable",
+            "citation_id": None,
+            "citation": None,
+        }]
+    })
+
+    item = projection["items"][0]
+    assert item["source_range"]["file_path"] == "resolved-output.md"
+    assert projection["range_unresolved_count"] == 1
