@@ -238,6 +238,20 @@ def _assemble(checks: list[dict[str, Any]], *, jsonschema_available: bool) -> di
     }
 
 
+def _as_list(value: Any) -> list[Any]:
+    """Return a shallow copy if ``value`` is a list, else ``[]``.
+
+    The summary path runs on artifacts that have not necessarily passed schema
+    validation (e.g. the ``--summary`` CLI flag summarizes regardless of the
+    validation verdict). A malformed scalar in a field that the schema declares
+    as an array must therefore degrade to an empty list here rather than raise a
+    ``TypeError`` from ``list(scalar)`` — this stays read-only and never turns a
+    bad artifact into a traceback. A string is intentionally treated as invalid
+    (empty), not splatted into characters.
+    """
+    return list(value) if isinstance(value, list) else []
+
+
 def _command_status_counts(commands: Any) -> dict[str, int]:
     counts = {status: 0 for status in _COMMAND_STATUSES}
     counts["unknown"] = 0
@@ -290,11 +304,11 @@ def summarize_patch_evaluation(data: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(data.get("patch"), Mapping)
             else None
         ),
-        "referenced_citations": list(repobrief_context.get("citations") or []),
-        "referenced_ranges": list(repobrief_context.get("cited_ranges") or []),
-        "referenced_workbench_outputs": list(repobrief_context.get("workbench_outputs") or []),
+        "referenced_citations": _as_list(repobrief_context.get("citations")),
+        "referenced_ranges": _as_list(repobrief_context.get("cited_ranges")),
+        "referenced_workbench_outputs": _as_list(repobrief_context.get("workbench_outputs")),
         # The artifact's own declared non-claims, surfaced verbatim.
-        "does_not_establish": list(data.get("does_not_establish") or []),
+        "does_not_establish": _as_list(data.get("does_not_establish")),
         # Consuming this artifact adds no authority of its own.
         "consumer_does_not_establish": list(CONSUMER_DOES_NOT_ESTABLISH),
     }

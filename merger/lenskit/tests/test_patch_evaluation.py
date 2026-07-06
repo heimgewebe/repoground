@@ -6,6 +6,7 @@ fail-closed schema validation, the mandatory non-claim enforcement, the strict
 ``additionalProperties`` boundary, and the read-only guarantee (no shell, Git,
 patch, worktree, or secret usage anywhere in the module).
 """
+import argparse
 import json
 from pathlib import Path
 
@@ -193,6 +194,44 @@ def test_diagnostics_flags_missing_non_claims_and_isolation():
     classes = {d["class"] for d in diag["degradations"]}
     assert "missing_non_claims" in classes
     assert "workspace_not_isolated" in classes
+
+
+# Regression (Codex P2): the summary path must tolerate malformed scalar context
+# fields instead of raising TypeError from list(scalar). The --summary CLI flag
+# summarizes regardless of the validation verdict, so a schema-invalid artifact
+# must still yield the failing validation JSON, never a traceback.
+def test_summary_tolerates_malformed_scalar_context_fields():
+    art = _minimal_artifact()
+    art["repobrief_context"] = {
+        "citations": 123,            # scalar int -> would raise list(int)
+        "cited_ranges": "cit-oops",  # scalar str -> would splat into chars
+        "workbench_outputs": None,   # null
+    }
+    art["does_not_establish"] = 99   # scalar int -> would raise list(int)
+
+    summary = pe.summarize_patch_evaluation(art)  # must not raise
+    assert summary["referenced_citations"] == []
+    assert summary["referenced_ranges"] == []
+    assert summary["referenced_workbench_outputs"] == []
+    assert summary["does_not_establish"] == []
+    assert summary["authority"] == "external_evaluation_evidence"
+
+
+def test_cli_summary_on_malformed_artifact_returns_validation_json_not_traceback(tmp_path, capsys):
+    from merger.lenskit.cli import cmd_repobrief
+
+    art = _minimal_artifact()
+    art["repobrief_context"] = {"citations": 7}  # invalid scalar; schema will also reject
+    path = tmp_path / "malformed.json"
+    path.write_text(json.dumps(art), encoding="utf-8")
+
+    args = argparse.Namespace(path=str(path), summary=True)
+    rc = cmd_repobrief.run_patch_evaluation_validate(args)  # must not raise
+
+    assert rc == 1  # schema-invalid -> validation fails
+    out = json.loads(capsys.readouterr().out)  # well-formed JSON, no traceback
+    assert out["validation"]["status"] == "fail"
+    assert out["summary"]["authority"] == "external_evaluation_evidence"
 
 
 def test_load_rejects_non_object(tmp_path):
