@@ -10,7 +10,7 @@ def _artifact(root: Path, role: str, text: str = 'x\n') -> dict:
     return {'role': role, 'path': path.name, 'content_type': 'text/plain', 'bytes': path.stat().st_size, 'sha256': '0' * 64}
 
 
-def _bundle(tmp_path: Path, roles, *, generator=True, post=True, capabilities=None):
+def _bundle(tmp_path: Path, roles, *, generator=True, snapshot=True, post=True, capabilities=None):
     artifacts = [_artifact(tmp_path, role) for role in roles]
     data = {
         'kind': 'repobrief.bundle_manifest',
@@ -20,6 +20,8 @@ def _bundle(tmp_path: Path, roles, *, generator=True, post=True, capabilities=No
     }
     if generator:
         data['generator'] = {'runtime': {'git_commit': 'a' * 40}}
+    if snapshot:
+        data['snapshot_provenance'] = {'version': 'v1', 'repositories': [{'name': 'repo', 'repo_root': str(tmp_path), 'repo_remote': None, 'git_commit': 'b' * 40, 'git_dirty': False, 'git_branch': 'main', 'provenance_status': 'present', 'freshness_basis': 'git_commit'}], 'does_not_establish': ['freshness_against_remote']}
     if capabilities:
         data['capabilities'] = capabilities
     manifest = tmp_path / 'sample.bundle.manifest.json'

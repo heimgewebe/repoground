@@ -157,12 +157,18 @@ def test_bundle_manifest_generator_runtime_provenance_present(tmp_path):
     # Non-redacted single-repo bundle keeps the locating paths.
     assert runtime["module_file"]
     assert runtime["package_root"]
+    snapshot = manifest["snapshot_provenance"]
+    assert snapshot["version"] == "v1"
+    assert snapshot["repositories"][0]["provenance_status"] == "not_git_checkout"
+    assert snapshot["repositories"][0]["freshness_basis"] == "unknown"
 
 
 def test_bundle_manifest_generator_runtime_redacted_when_redaction_enabled(tmp_path):
     artifacts = _make_single_repo_bundle(tmp_path, redact=True)
     manifest = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
     runtime = manifest["generator"]["runtime"]
+    snapshot = manifest["snapshot_provenance"]
+    assert snapshot["repositories"][0]["repo_root"] is None
     assert runtime["module_file"] is None
     assert runtime["package_root"] is None
     assert runtime["python_executable"] is None

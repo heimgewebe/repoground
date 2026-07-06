@@ -785,6 +785,22 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     generator = manifest.get("generator") if isinstance(manifest.get("generator"), dict) else {}
     runtime = generator.get("runtime") if isinstance(generator.get("runtime"), dict) else None
     git_commit = runtime.get("git_commit") if isinstance(runtime, dict) else None
+    snapshot_provenance = manifest.get("snapshot_provenance")
+    snapshot_repositories = (
+        snapshot_provenance.get("repositories")
+        if isinstance(snapshot_provenance, dict)
+        else None
+    )
+    if not isinstance(snapshot_repositories, list):
+        snapshot_repositories = []
+    snapshot_present_repos = [
+        repo
+        for repo in snapshot_repositories
+        if isinstance(repo, dict)
+        and repo.get("provenance_status") == "present"
+        and isinstance(repo.get("git_commit"), str)
+        and repo.get("git_commit")
+    ]
 
     freshness: dict[str, Any] = {
         "created_at": created_at_raw if isinstance(created_at_raw, str) else None,
@@ -794,6 +810,10 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         "as_of": None,
         "generator_runtime_recorded": runtime is not None,
         "generator_git_commit": git_commit if isinstance(git_commit, str) else None,
+        "snapshot_provenance_recorded": isinstance(snapshot_provenance, dict),
+        "snapshot_repository_count": len(snapshot_repositories),
+        "snapshot_present_repository_count": len(snapshot_present_repos),
+        "snapshot_freshness_basis": "git_commit" if snapshot_present_repos else "unknown",
     }
     if created_at is None:
         freshness["status"] = "unknown"
@@ -829,6 +849,30 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                 )
             else:
                 freshness["status"] = "fresh"
+    if not isinstance(snapshot_provenance, dict):
+        freshness["status"] = "unknown"
+        add(
+            "snapshot_provenance_missing",
+            SEVERITY_WARN,
+            "freshness",
+            "bundle manifest records no snapshot_provenance; source snapshot freshness is unknown",
+        )
+    elif not snapshot_repositories:
+        freshness["status"] = "unknown"
+        add(
+            "snapshot_repository_provenance_missing",
+            SEVERITY_WARN,
+            "freshness",
+            "snapshot_provenance contains no repository entries; source snapshot freshness is unknown",
+        )
+    elif not snapshot_present_repos:
+        freshness["status"] = "unknown"
+        add(
+            "snapshot_git_commit_missing",
+            SEVERITY_WARN,
+            "freshness",
+            "snapshot_provenance records no repository with provenance_status=present and git_commit; source snapshot freshness is unknown",
+        )
     if runtime is None:
         freshness["status"] = "unknown"
         add(

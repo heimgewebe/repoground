@@ -6519,12 +6519,15 @@ def write_reports_v2(
     # bundle itself (e.g. a service emitting from a stale build that no longer
     # matches the repository code). Absolute paths are nulled when redacting.
     from .runtime_provenance import build_runtime_provenance
+    from .snapshot_provenance import build_snapshot_provenance
+
     generator_block = {
         "name": generator_info.get("name", "lenskit"),
         "version": generator_info.get("version", "unknown"),
         "config_sha256": config_sha256,
         "runtime": build_runtime_provenance(redact=redact_secrets),
     }
+    snapshot_provenance = build_snapshot_provenance(repo_summaries, redact=redact_secrets)
 
     bundle_manifest = {
         "kind": "repolens.bundle.manifest",
@@ -6532,6 +6535,7 @@ def write_reports_v2(
         "run_id": run_id,
         "created_at": clock.now_utc().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generator": generator_block,
+        "snapshot_provenance": snapshot_provenance,
         "artifacts": artifacts_list,
         "links": links,
         "capabilities": {

@@ -1224,6 +1224,97 @@
         }
       },
       "additionalProperties": true
+    },
+    "snapshot_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "repositories",
+        "does_not_establish"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "v1"
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "repo_root",
+              "repo_remote",
+              "git_commit",
+              "git_dirty",
+              "git_branch",
+              "provenance_status",
+              "freshness_basis"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "repo_root": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "repo_remote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "git_commit": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{40}$"
+              },
+              "git_dirty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "git_branch": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "provenance_status": {
+                "type": "string",
+                "enum": [
+                  "present",
+                  "not_git_checkout",
+                  "git_unavailable",
+                  "unavailable_environment",
+                  "producer_did_not_collect"
+                ]
+              },
+              "freshness_basis": {
+                "type": "string",
+                "enum": [
+                  "git_commit",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        },
+        "does_not_establish": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   }
 }
