@@ -512,9 +512,9 @@ def _resolve_hit_evidence(
         for candidate_source, candidate_ref in range_candidates:
             range_result = range_get(manifest_path, candidate_ref)
             record["range_ref_source"] = candidate_source
-            selected_range_ref = candidate_ref
-            record["range_ref"] = selected_range_ref
             if range_result.get("status") == "available":
+                selected_range_ref = candidate_ref
+                record["range_ref"] = selected_range_ref
                 record["range_status"] = "resolved"
                 record["range"] = range_result.get("range")
                 record["range_error"] = None
@@ -574,11 +574,33 @@ def _resolve_query_evidence(manifest_path: Path, query_result: Any) -> dict[str,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
 
-def _first_not_none(*values):
+
+def _first_not_none(*values: Any) -> Any:
     for value in values:
         if value is not None:
             return value
     return None
+
+
+def _line_pair(value: Any) -> tuple[int | None, int | None]:
+    if not isinstance(value, list) or len(value) != 2:
+        return None, None
+    start, end = value
+    if isinstance(start, bool) or isinstance(end, bool):
+        return None, None
+    if not isinstance(start, int) or not isinstance(end, int):
+        return None, None
+    return start, end
+
+
+def _has_range_identity(value: Any) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get("file_path") is not None
+        and value.get("start_byte") is not None
+        and value.get("end_byte") is not None
+    )
+
 
 def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
     if not isinstance(range_value, dict):
@@ -586,10 +608,7 @@ def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
     provenance = range_value.get("provenance")
     if not isinstance(provenance, dict):
         provenance = {}
-    lines = range_value.get("lines")
-    start_line = end_line = None
-    if isinstance(lines, list) and len(lines) == 2:
-        start_line, end_line = lines
+    start_line, end_line = _line_pair(range_value.get("lines"))
     return {
         "artifact_role": _first_not_none(range_value.get("artifact_role"), provenance.get("artifact_role")),
         "file_path": _first_not_none(range_value.get("file_path"), range_value.get("path"), range_value.get("artifact_path")),
@@ -600,29 +619,67 @@ def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
         "content_sha256": _first_not_none(range_value.get("range_content_sha256"), range_value.get("content_sha256"), range_value.get("sha256")),
     }
 
+
+def _empty_source_citation_projection(status: str = "unavailable") -> dict[str, Any]:
+    return {
+        "kind": SOURCE_CITATION_PROJECTION_KIND,
+        "version": SOURCE_CITATION_PROJECTION_VERSION,
+        "status": status,
+        "hit_count": 0,
+        "citation_count": 0,
+        "unresolved_count": 0,
+        "range_unresolved_count": 0,
+        "citation_unresolved_count": 0,
+        "text_excerpt_max_chars": TEXT_EXCERPT_MAX_CHARS,
+        "items": [],
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
 def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
-    hits = resolved_evidence.get("hits") if isinstance(resolved_evidence, dict) else None
+    if not isinstance(resolved_evidence, dict):
+        return _empty_source_citation_projection()
+
+    hits = resolved_evidence.get("hits")
     hit_list = [hit for hit in (hits if isinstance(hits, list) else []) if isinstance(hit, dict)]
     items: list[dict[str, Any]] = []
+    citation_count = 0
+    range_unresolved_count = 0
+    citation_unresolved_count = 0
     for ordinal, hit in enumerate(hit_list):
         range_value = hit.get("range")
         text = range_value.get("text") if isinstance(range_value, dict) else None
         citation = hit.get("citation") if isinstance(hit.get("citation"), dict) else None
-        citation_range = _source_range_projection(citation.get("canonical_range") if citation else None)
-        source_range = _source_range_projection(hit.get("range_ref")) or citation_range or _source_range_projection(range_value)
-        if isinstance(source_range, dict) and source_range.get("file_path") is None:
-            source_range = citation_range if isinstance(citation_range, dict) else source_range
+        citation_range = _source_range_projection(
+            citation.get("canonical_range") if citation else None
+        )
+        range_ref_projection = _source_range_projection(hit.get("range_ref"))
+        range_projection = _source_range_projection(range_value)
+        candidates = [range_ref_projection, citation_range, range_projection]
+        source_range = next(
+            (candidate for candidate in candidates if _has_range_identity(candidate)),
+            next((candidate for candidate in candidates if isinstance(candidate, dict)), None),
+        )
+        range_status = hit.get("range_status")
+        citation_status = hit.get("citation_status")
+        citation_id = hit.get("citation_id")
+        if range_status != "resolved":
+            range_unresolved_count += 1
+        if citation_status == "resolved" and citation_id:
+            citation_count += 1
+        if citation_status != "resolved":
+            citation_unresolved_count += 1
         items.append({
             "ordinal": ordinal,
             "chunk_id": hit.get("chunk_id"),
             "path": hit.get("path"),
-            "range_status": hit.get("range_status"),
+            "range_status": range_status,
             "range_ref_source": hit.get("range_ref_source"),
             "source_range": source_range,
             "text_excerpt": text[:TEXT_EXCERPT_MAX_CHARS] if isinstance(text, str) else None,
             "text_truncated": isinstance(text, str) and len(text) > TEXT_EXCERPT_MAX_CHARS,
-            "citation_status": hit.get("citation_status"),
-            "citation_id": hit.get("citation_id"),
+            "citation_status": citation_status,
+            "citation_id": citation_id,
             "citation_range": citation_range,
         })
     return {
@@ -630,8 +687,11 @@ def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
         "version": SOURCE_CITATION_PROJECTION_VERSION,
         "status": "available",
         "hit_count": len(items),
-        "citation_count": sum(1 for item in items if item.get("citation_status") == "resolved"),
-        "unresolved_count": sum(1 for item in items if item.get("range_status") != "resolved"),
+        "citation_count": citation_count,
+        "unresolved_count": range_unresolved_count,
+        "range_unresolved_count": range_unresolved_count,
+        "citation_unresolved_count": citation_unresolved_count,
+        "text_excerpt_max_chars": TEXT_EXCERPT_MAX_CHARS,
         "items": items,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
