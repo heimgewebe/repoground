@@ -281,7 +281,7 @@ The decision is not “tooling or no tooling.” The decision is “deterministi
 
 ## Future work
 
-- RBAW-V1-T002: define the Patch Evaluation Artifact contract for the external Sidecar.
-- RBAW-V1-T003: define read-only RepoBrief consumption of external patch-evaluation artifacts.
-- RBAW-V1-T004: prototype an external Patch Evaluation Sidecar harness.
-- RBAW-V1-T005: triage Lenskit agent optimization axes, especially AST/symbol, relation, graph, retrieval, and output-hygiene work, without adding mutation authority to RepoBrief.
+- RBAW-V1-T002: defined by [Patch Evaluation Artifact v1](../contracts/patch-evaluation-v1.md).
+- RBAW-V1-T003: implemented by the read-only Patch Evaluation consumer described in [Patch Evaluation Artifact v1](../contracts/patch-evaluation-v1.md).
+- RBAW-V1-T004: prototype an external Patch Evaluation Sidecar harness later, after provenance/freshness and agent-evidence hygiene remain stable.
+- RBAW-V1-T005: triaged by [RepoBrief Agent Optimization Triage v1](repobrief-agent-optimization-triage.md).
