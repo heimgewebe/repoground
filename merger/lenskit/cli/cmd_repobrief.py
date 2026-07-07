@@ -428,6 +428,31 @@ def run_external_manifest_publish(args: argparse.Namespace) -> int:
 def run_external_manifest_refresh(args: argparse.Namespace) -> int:
     import contextlib
     import io
+
+    repo_path = Path(args.repo).expanduser().resolve()
+    publication_root = Path(args.publication_root).expanduser().resolve()
+    if publication_root == repo_path or repo_path in publication_root.parents:
+        print("repobrief external-manifest refresh: publication root must not be inside the source repo", file=sys.stderr)
+        return 2
+
+    from merger.lenskit.core.external_manifest_reference import (
+        ExternalManifestReferenceError,
+        publication_manifest_path,
+        publish_external_manifest_references,
+    )
+
+    try:
+        for family in (args.artifact_families or ["lenskit", "repobrief"]):
+            publication_manifest_path(
+                publication_root,
+                repository=args.repository,
+                ref=args.ref,
+                artifact_family=family,
+            )
+    except ExternalManifestReferenceError as exc:
+        print("repobrief external-manifest refresh: " + str(exc), file=sys.stderr)
+        return 2
+
     snapshot_args = argparse.Namespace(
         repo=args.repo, out=args.out, profile=args.profile, mode=args.mode,
         max_bytes=args.max_bytes, split_size=args.split_size, path_filter=args.path_filter,
@@ -443,13 +468,16 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
     snapshot_result = json.loads(snapshot_stdout.getvalue())
     bundle_manifest = snapshot_result.get("bundle_manifest")
     if not isinstance(bundle_manifest, str) or not bundle_manifest:
-        print("missing bundle_manifest", file=sys.stderr)
+        print("repobrief external-manifest refresh: missing bundle_manifest", file=sys.stderr)
         return 1
-    from merger.lenskit.core.external_manifest_reference import publish_external_manifest_references
-    publication = publish_external_manifest_references(
-        bundle_manifest, args.publication_root,
-        repository=args.repository, ref=args.ref, artifact_families=args.artifact_families,
-    )
+    try:
+        publication = publish_external_manifest_references(
+            bundle_manifest, publication_root,
+            repository=args.repository, ref=args.ref, artifact_families=args.artifact_families,
+        )
+    except ExternalManifestReferenceError as exc:
+        print("repobrief external-manifest refresh: " + str(exc), file=sys.stderr)
+        return 2
     print(json.dumps({
         "status": "ok",
         "command": "repobrief external-manifest refresh",
