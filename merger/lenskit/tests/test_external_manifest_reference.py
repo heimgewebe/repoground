@@ -8,6 +8,8 @@ import pytest
 from merger.lenskit.core.external_manifest_reference import (
     ExternalManifestReferenceError,
     build_external_manifest_reference,
+    publication_manifest_path,
+    publish_external_manifest_references,
     write_external_manifest_reference,
 )
 
@@ -118,3 +120,54 @@ def test_rejects_non_bundle_manifest(tmp_path: Path) -> None:
 
     with pytest.raises(ExternalManifestReferenceError, match="repolens.bundle.manifest"):
         build_external_manifest_reference(path, repository="cabinet", ref="main")
+
+def test_publication_manifest_path_uses_stable_external_layout(tmp_path: Path) -> None:
+    path = publication_manifest_path(
+        tmp_path / "published",
+        repository="cabinet",
+        ref="main",
+        artifact_family="repobrief",
+    )
+
+    assert path == tmp_path / "published" / "external" / "repobrief" / "cabinet" / "main" / "manifest.json"
+
+
+def test_publish_external_manifest_references_can_publish_one_family(tmp_path: Path) -> None:
+    bundle_path = write_bundle(tmp_path)
+    root = tmp_path / "published"
+
+    result = publish_external_manifest_references(
+        bundle_path,
+        root,
+        repository="cabinet",
+        ref="main",
+        artifact_families=["repobrief"],
+    )
+
+    assert [row["artifactFamily"] for row in result["published"]] == ["repobrief"]
+    assert (root / "external" / "repobrief" / "cabinet" / "main" / "manifest.json").is_file()
+    assert not (root / "external" / "lenskit" / "cabinet" / "main" / "manifest.json").exists()
+
+
+def test_repobrief_cli_publishes_external_manifest_references(tmp_path: Path) -> None:
+    from merger.lenskit.cli.repobrief import main as repobrief_main
+
+    bundle_path = write_bundle(tmp_path)
+    root = tmp_path / "published"
+
+    rc = repobrief_main([
+        "external-manifest",
+        "publish",
+        "--bundle-manifest",
+        str(bundle_path),
+        "--publication-root",
+        str(root),
+        "--repository",
+        "cabinet",
+        "--ref",
+        "main",
+    ])
+
+    assert rc == 0
+    assert (root / "external" / "repobrief" / "cabinet" / "main" / "manifest.json").is_file()
+    assert (root / "external" / "lenskit" / "cabinet" / "main" / "manifest.json").is_file()

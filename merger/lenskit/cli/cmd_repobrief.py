@@ -292,6 +292,22 @@ def register_repobrief_command_groups(repobrief_parser: argparse.ArgumentParser)
         help="External artifact family to advertise",
     )
 
+    external_publish_parser = external_subparsers.add_parser(
+        "publish",
+        help="Publish external manifest references under a stable publication root",
+    )
+    external_publish_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    external_publish_parser.add_argument("--publication-root", required=True, help="Root directory for published external manifests")
+    external_publish_parser.add_argument("--repository", required=True, help="Registry repository segment, for example cabinet")
+    external_publish_parser.add_argument("--ref", required=True, help="Registry ref segment, for example main")
+    external_publish_parser.add_argument(
+        "--artifact-family",
+        choices=["repobrief", "lenskit"],
+        action="append",
+        dest="artifact_families",
+        help="Artifact family to publish; repeatable; defaults to both",
+    )
+
     patch_eval_parser = repobrief_subparsers.add_parser(
         "patch-evaluation",
         help="Read-only consumption of external Patch Evaluation Sidecar artifacts",
@@ -337,6 +353,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_required_reading_resolve(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "write":
         return run_external_manifest_write(args)
+    if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "publish":
+        return run_external_manifest_publish(args)
     if args.repobrief_cmd == "patch-evaluation" and args.patch_evaluation_cmd == "validate":
         return run_patch_evaluation_validate(args)
     print("Unsupported RepoBrief command", file=sys.stderr)
@@ -359,6 +377,27 @@ def run_external_manifest_write(args: argparse.Namespace) -> int:
         )
     except ExternalManifestReferenceError as exc:
         print("repobrief external-manifest write: " + str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def run_external_manifest_publish(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.external_manifest_reference import (
+        ExternalManifestReferenceError,
+        publish_external_manifest_references,
+    )
+
+    try:
+        result = publish_external_manifest_references(
+            args.bundle_manifest,
+            args.publication_root,
+            repository=args.repository,
+            ref=args.ref,
+            artifact_families=args.artifact_families,
+        )
+    except ExternalManifestReferenceError as exc:
+        print("repobrief external-manifest publish: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

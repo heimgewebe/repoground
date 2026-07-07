@@ -5,7 +5,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 SUPPORTED_FAMILIES = {"repobrief", "lenskit"}
 BUNDLE_KIND = "repolens.bundle.manifest"
@@ -115,6 +115,68 @@ def build_external_manifest_reference(
         },
         "snapshotProvenance": snapshot_provenance if isinstance(snapshot_provenance, dict) else None,
         "artifacts": _artifact_rows(bundle),
+        "doesNotEstablish": list(DOES_NOT_ESTABLISH),
+    }
+
+
+def publication_manifest_path(
+    publication_root: str | Path,
+    *,
+    repository: str,
+    ref: str,
+    artifact_family: str,
+) -> Path:
+    """Return the stable external manifest publication path for a registry segment."""
+    family = artifact_family.strip().lower() if isinstance(artifact_family, str) else ""
+    if family not in SUPPORTED_FAMILIES:
+        raise ExternalManifestReferenceError("artifact_family must be repobrief or lenskit")
+    repository = _registry_segment(repository, "repository")
+    ref = _registry_segment(ref, "ref")
+    return Path(publication_root).expanduser().resolve() / "external" / family / repository / ref / "manifest.json"
+
+
+def publish_external_manifest_references(
+    bundle_manifest_path: str | Path,
+    publication_root: str | Path,
+    *,
+    repository: str,
+    ref: str,
+    artifact_families: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Publish one or more external manifest references under a stable root."""
+    families = list(dict.fromkeys(artifact_families)) if artifact_families is not None else sorted(SUPPORTED_FAMILIES)
+    if not families:
+        raise ExternalManifestReferenceError("at least one artifact family is required")
+    published = []
+    for family in families:
+        out = publication_manifest_path(
+            publication_root,
+            repository=repository,
+            ref=ref,
+            artifact_family=family,
+        )
+        manifest = write_external_manifest_reference(
+            bundle_manifest_path,
+            out,
+            repository=repository,
+            ref=ref,
+            artifact_family=family,
+        )
+        published.append({
+            "artifactFamily": manifest["artifactFamily"],
+            "kind": manifest["kind"],
+            "path": str(out),
+            "generatedAt": manifest["generatedAt"],
+            "relativePublicationPath": Path(os.path.relpath(out, Path(publication_root).expanduser().resolve())).as_posix(),
+        })
+    return {
+        "kind": "repobrief.external_manifest_publication",
+        "version": "1",
+        "repository": _registry_segment(repository, "repository"),
+        "ref": _registry_segment(ref, "ref"),
+        "publicationRoot": str(Path(publication_root).expanduser().resolve()),
+        "bundleManifest": str(Path(bundle_manifest_path).expanduser().resolve()),
+        "published": published,
         "doesNotEstablish": list(DOES_NOT_ESTABLISH),
     }
 
