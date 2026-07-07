@@ -1133,10 +1133,14 @@
     {
       "id": "TASK-CI-CONTRACTS-PATHS-001",
       "title": "contracts-validate.yml Path Filter Reconciliation",
-      "status": "open",
-      "description": "contracts-validate.yml triggers on json/**, proto/** and fixtures/** which do not exist in this repository; the actual contracts live under merger/lenskit/contracts/**. Decide whether the workflow should cover the real contract paths, be documented as intentional metarepo template overhead, or be removed.",
+      "status": "done",
+      "description": "Closed by PR #905: contracts-validate now runs without workflow-level path filters so its guard sees outbound contract renames, and the guard protects the real Lenskit contract roots under merger/lenskit/contracts/ and docs/contracts/.",
       "evidence": [
-        ".github/workflows/contracts-validate.yml"
+        ".github/workflows/contracts-validate.yml",
+        "https://github.com/heimgewebe/lenskit/pull/905"
+      ],
+      "missing_evidence": [
+        "This closeout does not claim contract correctness, fixture completeness, schema completeness, or release readiness."
       ]
     },
     {
