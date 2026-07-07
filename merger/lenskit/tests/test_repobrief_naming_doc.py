@@ -78,3 +78,25 @@ def test_naming_doc_keeps_phase_one_compatibility_boundary() -> None:
         assert boundary in text
 
     assert "No later path is selected by this document." in text
+
+
+def test_repobrief_doc_documents_cli_migration_compatibility() -> None:
+    text = _read(REPOBRIEF_DOC)
+
+    assert "## CLI migration and compatibility" in text
+    assert "python -m merger.lenskit.cli.repobrief" in text
+    assert "python -m merger.lenskit.cli.main repobrief" in text
+    assert "globally installed shell binary named `repobrief`" in text
+    assert "external-manifest publish" in text
+
+    for boundary in (
+        "must not refresh snapshots",
+        "mutate Git",
+        "create pull requests",
+        "apply patches",
+        "runtime correctness",
+        "test sufficiency",
+        "review completeness",
+        "merge readiness",
+    ):
+        assert boundary in text
