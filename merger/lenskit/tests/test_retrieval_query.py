@@ -542,6 +542,9 @@ def test_graph_staleness_marker(mini_index, tmp_path, monkeypatch):
     assert ge["graph_status"] == "stale_or_mismatched"
     assert ge["distance"] == -1
     assert ge["graph_bonus"] == 0.0
+    assert ge["degradation"]["degradation"] == "stale"
+    assert ge["degradation"]["graph_must_not_influence_retrieval"] is True
+    assert ge["degradation"]["graph_used_consistent_with_status"] is True
     assert "graph_index" not in res["claim_boundaries"]["evidence_basis"]
 
     # Direct proof that _read_expected_graph_sha256 extracted the legacy fallback and passed it to the mock
@@ -720,8 +723,12 @@ def test_query_ignores_stale_graph_runtime_path(mini_index, tmp_path):
     assert diagnostics["graph_used"] is False
     assert diagnostics["distance"] == -1
     assert diagnostics["graph_bonus"] == 0.0
+    assert diagnostics["degradation"]["degradation"] == "stale"
+    assert diagnostics["degradation"]["retrieval_eligible"] is False
+    assert "runtime_reachability" in diagnostics["degradation"]["does_not_establish"]
     assert "graph_index" not in res["claim_boundaries"]["evidence_basis"]
     assert res["claim_boundaries"]["requires_live_check"] is True
+    assert any("Graph diagnostics do not prove runtime reachability" in item for item in res["claim_boundaries"]["does_not_prove"])
 
 
 # ---------------------------------------------------------------------------
