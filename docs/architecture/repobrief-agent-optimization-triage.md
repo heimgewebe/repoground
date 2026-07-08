@@ -62,6 +62,23 @@ The alternative axis is important: the goal is not “more tools for agents” i
 
 This order differs from a tool-first path. It deliberately delays the shiny Workbench pieces until stale/missing/degraded evidence has a stable vocabulary. The less glamorous foundation is the part that prevents agent overconfidence.
 
+## Registered follow-up tasks — 2026-07-08
+
+The broad improvement axes above are now registered as concrete task-control items instead of remaining only as prose recommendations:
+
+- `TASK-REPOBRIEF-SYMBOL-INDEX-CONSUMER-001`
+- `TASK-REPOBRIEF-MCP-READONLY-RESOURCES-001`
+- `TASK-REPOBRIEF-MCP-SNAPSHOT-CREATE-001`
+- `TASK-RUNTIME-ARTIFACT-RETENTION-001`
+- `TASK-GUARD-RELATION-PERSISTENCE-DECISION-001`
+- `TASK-RETRIEVAL-V2-DEFAULT-PROMOTION-DECISION-001`
+- `TASK-GRAPH-DEGRADATION-SEMANTICS-HARDENING-001`
+- `TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001`
+- `TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001`
+- `TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001`
+
+This registration does not implement the tasks and does not change RepoBrief authority boundaries. It only moves the improvement backlog from chat/triage prose into the repository task registry.
+
 ## Risks and benefits
 
 Benefits:

@@ -1161,6 +1161,179 @@
         "No formatting policy or broad lint cleanup is introduced.",
         "Path-scoped Ruff jobs are not moved onto the narrow repo-wide ratchet config."
       ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-SYMBOL-INDEX-CONSUMER-001",
+      "title": "RepoBrief Symbol Index Consumer Wiring",
+      "status": "open",
+      "description": "Wire the existing deterministic Python AST symbol index into RepoBrief consumer surfaces as a read-only navigation aid: decide whether and how it appears in bundle manifests, Agent Reading Pack indexes, CLI/read-access commands, availability reporting, and query helpers. Preserve the existing non-claims: symbol presence does not prove reachability, runtime behavior, dependency completeness, test sufficiency, review impact, or merge readiness.",
+      "evidence": [
+        "merger/lenskit/architecture/symbol_index.py",
+        "merger/lenskit/contracts/python-symbol-index.v1.schema.json",
+        "merger/lenskit/tests/test_python_symbol_index.py",
+        "docs/proofs/python-symbol-index-proof.md",
+        "docs/architecture/repobrief-agent-optimization-triage.md"
+      ],
+      "missing_evidence": [
+        "No proof yet that the symbol index is registered as a bundle artifact or surfaced in Agent Reading Pack / CLI consumers.",
+        "No claim that symbol data improves retrieval or agent edit quality.",
+        "No runtime reachability, call graph completeness, or import success claim."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-MCP-READONLY-RESOURCES-001",
+      "title": "RepoBrief MCP Read-only Resources",
+      "status": "open",
+      "description": "Implement the first RepoBrief MCP surface as resources over existing Brief Bundles only: manifest, canonical source, reading pack, health, availability, and artifact-by-role. Reads must not create snapshots, refresh bundles, touch Git, run shells, inspect secrets, open PRs, apply patches, or produce review verdicts.",
+      "evidence": [
+        "docs/architecture/repobrief-mcp-boundary.md",
+        "docs/architecture/repobrief-agent-workbench-boundary.md",
+        "merger/lenskit/tests/test_repobrief_mcp_boundary_doc.py"
+      ],
+      "missing_evidence": [
+        "No MCP server/resources implementation exists yet.",
+        "No read-only resource contract tests exist yet.",
+        "No evidence that MCP access preserves RepoBrief negative semantics at runtime."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-MCP-SNAPSHOT-CREATE-001",
+      "title": "RepoBrief MCP Explicit Snapshot Create",
+      "status": "open",
+      "description": "After read-only MCP resources are stable, add a single explicit MCP write tool for Brief Bundle generation only: snapshot_create. It must require explicit repo, explicit profile, controlled output root, timeout guard, and size guard, and it must never be reachable as a side effect of resource reads or read-only tools.",
+      "evidence": [
+        "docs/architecture/repobrief-mcp-boundary.md",
+        "docs/architecture/repobrief.md"
+      ],
+      "missing_evidence": [
+        "Blocked until read-only MCP resources are implemented and validated.",
+        "No MCP snapshot_create implementation exists yet.",
+        "No tool-level guard tests for repo/profile/output-root/timeout/size constraints exist yet."
+      ]
+    },
+    {
+      "id": "TASK-RUNTIME-ARTIFACT-RETENTION-001",
+      "title": "Runtime Artifact Retention and GC Policy",
+      "status": "open",
+      "description": "Define and implement or explicitly defer retention, TTL, and garbage-collection behavior for runtime artifacts such as query_trace, context_bundle, and agent_query_session. Current lifecycle metadata is groundwork only and must not be read as active cleanup.",
+      "evidence": [
+        "docs/architecture/runtime-matrix.md",
+        "docs/architecture/artifact-inventory.md",
+        "docs/service-api.md",
+        "docs/proofs/runtime-artifact-metadata-gap-audit.md",
+        "merger/lenskit/contracts/artifact-lookup.v1.schema.json",
+        "merger/lenskit/contracts/context-lookup.v1.schema.json",
+        "merger/lenskit/contracts/trace-lookup.v1.schema.json"
+      ],
+      "missing_evidence": [
+        "No GC, TTL, or automatic deletion behavior is implemented.",
+        "No retention decision is encoded as an enforceable policy.",
+        "No migration/backward-compatibility proof for stored runtime artifacts exists."
+      ]
+    },
+    {
+      "id": "TASK-GUARD-RELATION-PERSISTENCE-DECISION-001",
+      "title": "Guard Relation Persistence Decision",
+      "status": "open",
+      "description": "Re-evaluate whether Guard Relation Cards should be persisted after the diagnostic goldset showed false-positive and unresolved-case risk. A decision must identify a concrete consumer need, acceptable precision/recall thresholds, negative semantics, and whether persistence remains blocked.",
+      "evidence": [
+        "docs/retrieval/guard_relation_goldset.v1.json",
+        "docs/proofs/guard-relation-goldset-proof.md",
+        "docs/proofs/guard-relation-cards-v1a-target-proof.md",
+        "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md",
+        "docs/architecture/lens-model.md"
+      ],
+      "missing_evidence": [
+        "No established consumer currently requires persistent Guard Relation Cards.",
+        "Existing diagnostic precision and unresolved cases do not justify persistence by themselves.",
+        "No proof that consumers would not overread Guard Relations as test sufficiency or runtime correctness."
+      ]
+    },
+    {
+      "id": "TASK-RETRIEVAL-V2-DEFAULT-PROMOTION-DECISION-001",
+      "title": "Retrieval v2 Default Promotion Decision",
+      "status": "open",
+      "description": "Run and document a current, reproducible promotion decision for Retrieval v2-style surfaces using the existing diagnostic gate. Default promotion must remain false unless measured reports show non-regression across recall, MRR, expected-target recall, category regressions, fallback counts, graph freshness, and range/citation health.",
+      "evidence": [
+        "merger/lenskit/retrieval/retrieval_promotion_gate.py",
+        "scripts/proofs/retrieval_promotion_gate.py",
+        "merger/lenskit/tests/test_retrieval_promotion_gate.py",
+        "docs/proofs/retrieval-v2-promotion-gate-proof.md",
+        "docs/diagnostics/review-retrieval-baseline.md"
+      ],
+      "missing_evidence": [
+        "The diagnostic gate exists, but no current default-promotion decision is recorded.",
+        "No claim that Retrieval v2 is better on current real dumps.",
+        "No default query behavior change is authorized by the existing proof."
+      ]
+    },
+    {
+      "id": "TASK-GRAPH-DEGRADATION-SEMANTICS-HARDENING-001",
+      "title": "Graph Degradation Semantics Hardening",
+      "status": "open",
+      "description": "Audit and harden graph-related outputs so stale, missing, invalid, degraded, or unavailable graph evidence is reported consistently and cannot be read as runtime reachability, causality, impact, completeness, or default-promotion readiness. Focus on diagnostics and consumer wording, not new graph inference.",
+      "evidence": [
+        "docs/diagnostics/graph-current-state-audit.md",
+        "docs/architecture/system-map.lenskit.md",
+        "docs/architecture/runtime-matrix.md",
+        "merger/lenskit/architecture/graph_index.py",
+        "merger/lenskit/architecture/graph_source_validation.py"
+      ],
+      "missing_evidence": [
+        "No current proof that every graph consumer uses the same degradation vocabulary.",
+        "No claim of graph completeness, import correctness, runtime reachability, causality, or impact.",
+        "No promotion of graph-conditioned ranking to default."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001",
+      "title": "RepoBrief Agent Workbench Usefulness Evaluation",
+      "status": "open",
+      "description": "Measure which RepoBrief agent/workbench artifacts actually help real agent review or edit workflows, and which add noise. The evaluation should compare evidence-usefulness, navigation value, false confidence risk, missing-evidence visibility, and agent answer compliance on current bundles without changing RepoBrief authority boundaries.",
+      "evidence": [
+        "docs/architecture/repobrief-agent-optimization-triage.md",
+        "docs/architecture/repobrief-agent-workbench-boundary.md",
+        "docs/architecture/agent-consumption-contract.md",
+        "docs/proofs/agent-surface-real-dump-smoke-proof.md"
+      ],
+      "missing_evidence": [
+        "No measured usefulness report exists for current Agent Workbench surfaces.",
+        "No evidence yet separates genuinely useful artifacts from noisy navigation surfaces.",
+        "No claim that existing surfaces improve agent correctness or reduce review defects."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001",
+      "title": "RepoBrief Package and Repository Rename Decision",
+      "status": "open",
+      "description": "Decide whether RepoBrief remains a public CLI/system name over the legacy lenskit repo/module, or whether a later GitHub repo and/or Python package rename is worth the migration cost. The decision must account for compatibility, import churn, existing artifacts, docs, external consumers, and rollback complexity.",
+      "evidence": [
+        "docs/architecture/repobrief.md",
+        "docs/architecture/naming.md",
+        "docs/architecture/repobrief-agent-optimization-triage.md"
+      ],
+      "missing_evidence": [
+        "No external-consumer inventory or migration cost analysis is recorded.",
+        "No decision to rename the Python package or GitHub repository exists.",
+        "No compatibility/rollback plan exists for a package or repo rename."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
+      "title": "RepoBrief Broad Read-only Adapter without Mirror Authority",
+      "status": "open",
+      "description": "Design a broader read-only adapter for RepoBrief consumers that exposes existing snapshot/artifact/query/range/status helpers without repository mirror authority. The adapter must not clone, fetch, pull, refresh, create PRs, apply patches, run shells, read secrets, or silently create snapshots.",
+      "evidence": [
+        "docs/architecture/repobrief.md",
+        "docs/architecture/repobrief-agent-workbench-boundary.md",
+        "docs/architecture/repobrief-mcp-boundary.md",
+        "docs/roadmap/lenskit-agent-operationalization-roadmap.md"
+      ],
+      "missing_evidence": [
+        "No adapter design or implementation exists yet for broad read-only consumption without mirror authority.",
+        "No proof that consumers can access the needed surfaces without hidden refresh or Git mutation.",
+        "No compatibility contract exists across CLI, MCP, and library consumers."
+      ]
     }
   ]
 }
