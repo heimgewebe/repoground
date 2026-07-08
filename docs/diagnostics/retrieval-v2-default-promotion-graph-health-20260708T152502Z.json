@@ -1,0 +1,35 @@
+{
+  "does_not_establish": [
+    "runtime_reachability",
+    "runtime_causality",
+    "change_impact",
+    "graph_completeness",
+    "default_promotion_readiness"
+  ],
+  "expected_dump_index_sha256": "1bd7b3d4b56fe2b742026c5cb21396df0f3ff9434507d51745f4a36614c0f149",
+  "graph_canonical_dump_index_sha256": "1bd7b3d4b56fe2b742026c5cb21396df0f3ff9434507d51745f4a36614c0f149",
+  "graph_status": "ok",
+  "input_artifacts": [
+    {
+      "bytes": 37134,
+      "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.graph_index.json",
+      "role": "graph_index",
+      "sha256": "d87983354fea89e1691149f13e293f2e0ec7ded01780c7fe67a97dccc358ce2c"
+    },
+    {
+      "bytes": 2179,
+      "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.dump_index.json",
+      "role": "dump_index",
+      "sha256": "1bd7b3d4b56fe2b742026c5cb21396df0f3ff9434507d51745f4a36614c0f149"
+    }
+  ],
+  "kind": "lenskit.retrieval_v2_default_promotion.graph_health",
+  "metrics": {
+    "entrypoint_count": 48,
+    "nodes_reachable": 385,
+    "unreachable_nodes": 303
+  },
+  "run_id": "20260708T152502Z",
+  "stale": false,
+  "status": "fresh"
+}

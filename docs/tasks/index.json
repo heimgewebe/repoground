@@ -1257,9 +1257,15 @@
     {
       "id": "TASK-RETRIEVAL-V2-DEFAULT-PROMOTION-DECISION-001",
       "title": "Retrieval v2 Default Promotion Decision",
-      "status": "open",
-      "description": "Run and document a current, reproducible promotion decision for Retrieval v2-style surfaces using the existing diagnostic gate. Default promotion must remain false unless measured reports show non-regression across recall, MRR, expected-target recall, category regressions, fallback counts, graph freshness, and range/citation health.",
+      "status": "done",
+      "description": "Closed by Retrieval v2 Default Promotion Decision 20260708T152502Z: the current real-dump diagnostic gate passed with review-intent recall@10 95.0 versus legacy 10.0, MRR 0.3751190476190477 versus 0.1, expected-target hits 27/60 versus 2/60, no category regressions, zero candidate fallbacks, fresh graph health, and passing range/citation health. The explicit decision remains keep false: the diagnostic gate is non-promotional and does not authorize a default behavior change.",
       "evidence": [
+        "docs/proofs/retrieval-v2-default-promotion-decision-20260708T152502Z-proof.md",
+        "docs/diagnostics/retrieval-v2-default-promotion-decision-20260708T152502Z.json",
+        "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+        "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+        "docs/diagnostics/retrieval-v2-default-promotion-graph-health-20260708T152502Z.json",
+        "docs/diagnostics/retrieval-v2-default-promotion-range-health-20260708T152502Z.json",
         "merger/lenskit/retrieval/retrieval_promotion_gate.py",
         "scripts/proofs/retrieval_promotion_gate.py",
         "merger/lenskit/tests/test_retrieval_promotion_gate.py",
@@ -1267,9 +1273,10 @@
         "docs/diagnostics/review-retrieval-baseline.md"
       ],
       "missing_evidence": [
-        "The diagnostic gate exists, but no current default-promotion decision is recorded.",
-        "No claim that Retrieval v2 is better on current real dumps.",
-        "No default query behavior change is authorized by the existing proof."
+        "No default query behavior change is authorized by this decision.",
+        "No retrieval correctness, review completeness, answer correctness, runtime behavior, or general agent quality improvement is established.",
+        "No default-promotion readiness beyond the measured goldset and recorded dump artifacts is established.",
+        "Graph and range/citation health do not establish graph completeness, runtime causality, citation semantics, or merge/review readiness."
       ]
     },
     {

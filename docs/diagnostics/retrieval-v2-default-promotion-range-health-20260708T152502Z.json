@@ -1,0 +1,38 @@
+{
+  "counts": {
+    "citation_map_lines": 1379,
+    "malformed_hits": 0
+  },
+  "does_not_establish": [
+    "citation_semantic_correctness",
+    "range_semantic_correctness",
+    "review_completeness",
+    "answer_correctness"
+  ],
+  "input_artifacts": [
+    {
+      "bytes": 2780416,
+      "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.citation_map.jsonl",
+      "role": "citation_map_jsonl",
+      "sha256": "e02ebf80f82f309267afcdc0e0415e5862ec149bbb61741d2fbdff5193a36d0c"
+    },
+    {
+      "bytes": 4299,
+      "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.bundle_surface_validation.json",
+      "role": "bundle_surface_validation",
+      "sha256": "d6bf2a6dd8ea29fae57f3d9ca62327cba29e1da951aacd1107c21848e0125961"
+    },
+    {
+      "bytes": 4019,
+      "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.bundle_health.post.json",
+      "role": "bundle_health",
+      "sha256": "3691d0e757172825ea212c0a7684abe99438228d6c76bf603cabf589bd27498b"
+    }
+  ],
+  "kind": "lenskit.retrieval_v2_default_promotion.range_citation_health",
+  "range_citation_health": "pass",
+  "range_ref_resolution_status": "ok",
+  "run_id": "20260708T152502Z",
+  "status": "pass",
+  "surface_validation_status": "pass"
+}

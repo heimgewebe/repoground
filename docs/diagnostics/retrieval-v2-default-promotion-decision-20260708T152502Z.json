@@ -1,0 +1,350 @@
+{
+  "decision": {
+    "default_promotion_allowed": false,
+    "reason": "diagnostic gate only; promotion requires explicit later decision even when gates pass"
+  },
+  "does_not_establish": [
+    "retrieval_correctness",
+    "review_completeness",
+    "answer_correctness",
+    "default_promotion_readiness_beyond_this_goldset",
+    "runtime_behavior"
+  ],
+  "gates": [
+    {
+      "candidate": 95.0,
+      "legacy": 10.0,
+      "name": "global_recall_non_regression",
+      "passed": true
+    },
+    {
+      "candidate": 0.3751190476190477,
+      "legacy": 0.1,
+      "name": "global_mrr_non_regression",
+      "passed": true
+    },
+    {
+      "candidate": 0.45,
+      "legacy": 0.033333,
+      "name": "expected_target_recall_non_regression",
+      "passed": true
+    },
+    {
+      "categories": [
+        {
+          "candidate": {
+            "MRR": 0.625,
+            "recall@10": 100.0
+          },
+          "category": "agent_pack",
+          "legacy": {
+            "MRR": 0.5,
+            "recall@10": 50.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 1.0,
+            "recall@10": 100.0
+          },
+          "category": "bundle_manifest",
+          "legacy": {
+            "MRR": 1.0,
+            "recall@10": 100.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.3333333333333333,
+            "recall@10": 100.0
+          },
+          "category": "bundle_surface",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 1.0,
+            "recall@10": 100.0
+          },
+          "category": "citation_map",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.3333333333333333,
+            "recall@10": 100.0
+          },
+          "category": "claim_evidence",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.375,
+            "recall@10": 100.0
+          },
+          "category": "cli",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.25,
+            "recall@10": 50.0
+          },
+          "category": "contracts",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.14285714285714285,
+            "recall@10": 100.0
+          },
+          "category": "lenses",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.1,
+            "recall@10": 100.0
+          },
+          "category": "post_emit_health",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.5,
+            "recall@10": 100.0
+          },
+          "category": "pr_schau",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.3333333333333333,
+            "recall@10": 100.0
+          },
+          "category": "range_ref",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.20833333333333331,
+            "recall@10": 100.0
+          },
+          "category": "retrieval",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.25,
+            "recall@10": 100.0
+          },
+          "category": "router",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.225,
+            "recall@10": 100.0
+          },
+          "category": "security",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        },
+        {
+          "candidate": {
+            "MRR": 0.14285714285714285,
+            "recall@10": 100.0
+          },
+          "category": "source_acquisition",
+          "legacy": {
+            "MRR": 0.0,
+            "recall@10": 0.0
+          },
+          "passed": true
+        }
+      ],
+      "name": "per_category_non_regression",
+      "passed": true
+    },
+    {
+      "candidate": 33,
+      "legacy": 58,
+      "name": "miss_count_non_regression",
+      "passed": true
+    },
+    {
+      "candidate": 0,
+      "name": "fallback_count_zero",
+      "passed": true
+    },
+    {
+      "graph_supplied": true,
+      "name": "fresh_graph_if_supplied",
+      "passed": true
+    },
+    {
+      "name": "range_citation_health_ok_if_supplied",
+      "passed": true,
+      "range_report_supplied": true
+    }
+  ],
+  "kind": "lenskit.retrieval_promotion_gate",
+  "measurement_metadata": {
+    "does_not_establish": [
+      "retrieval_correctness",
+      "review_completeness",
+      "answer_correctness",
+      "runtime_behavior",
+      "default_promotion_readiness_beyond_this_goldset",
+      "agent_quality_improvement_by_itself"
+    ],
+    "dump_stem": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525",
+    "input_artifacts": [
+      {
+        "bytes": 16377,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.bundle.manifest.json",
+        "role": "bundle_manifest",
+        "sha256": "a07b01f410e0b295ed993eea65fc11ba78a7963b622d9e19366f0a073f399f8b"
+      },
+      {
+        "bytes": 4019,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.bundle_health.post.json",
+        "role": "bundle_health",
+        "sha256": "3691d0e757172825ea212c0a7684abe99438228d6c76bf603cabf589bd27498b"
+      },
+      {
+        "bytes": 4299,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.bundle_surface_validation.json",
+        "role": "bundle_surface_validation",
+        "sha256": "d6bf2a6dd8ea29fae57f3d9ca62327cba29e1da951aacd1107c21848e0125961"
+      },
+      {
+        "bytes": 2179,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.dump_index.json",
+        "role": "dump_index",
+        "sha256": "1bd7b3d4b56fe2b742026c5cb21396df0f3ff9434507d51745f4a36614c0f149"
+      },
+      {
+        "bytes": 8821472,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.md",
+        "role": "canonical_md",
+        "sha256": "5b788402acf624f100d9119095544ca1d07f461e38b3c798d7ba1b5756020011"
+      },
+      {
+        "bytes": 3007190,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.chunk_index.jsonl",
+        "role": "chunk_index_jsonl",
+        "sha256": "1cb4fb060b089d73cecae9ea533ada0eabfa716f85fc9ec25c6ae1d33f5ba435"
+      },
+      {
+        "bytes": 2780416,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.citation_map.jsonl",
+        "role": "citation_map_jsonl",
+        "sha256": "e02ebf80f82f309267afcdc0e0415e5862ec149bbb61741d2fbdff5193a36d0c"
+      },
+      {
+        "bytes": 12890112,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.chunk_index.index.sqlite",
+        "role": "sqlite_index",
+        "sha256": "556c44ae4c2c7ca9fcbf533e95cc1cfb395ffc8ecfc350733cb301d6d98844c2"
+      },
+      {
+        "bytes": 37134,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.graph_index.json",
+        "role": "graph_index",
+        "sha256": "d87983354fea89e1691149f13e293f2e0ec7ded01780c7fe67a97dccc358ce2c"
+      },
+      {
+        "bytes": 40990,
+        "path": "/home/alex/repos/merges/repobrief-auto/heimgewebe__lenskit/main/20260708T152502Z/heimgewebe__lenskit__main-max-260708-1525_merge.retrieval_eval.json",
+        "role": "retrieval_eval",
+        "sha256": "307b9adc2c75cdae3eb543253e3b022c2ac421555376c7c9190170a5b01bb5d1"
+      }
+    ],
+    "kind": "lenskit.retrieval_v2_default_promotion_measurement",
+    "measured_at": "2026-07-08T15:25:02Z",
+    "repo": "heimgewebe/lenskit",
+    "repo_commit": "43d97b2b7cd26d7cc1d5ce2cc53df8a4f2eb8912",
+    "repo_dirty": false,
+    "repo_remote": "org-236528253@github.com:heimgewebe/lenskit.git",
+    "run_id": "20260708T152502Z"
+  },
+  "produced_reports": [
+    {
+      "bytes": 302995,
+      "path": "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+      "role": "legacy_report",
+      "sha256": "18066240f57ede8c554dc4aaf44404e57e5afaa70fa58578b065c857e3996e4d"
+    },
+    {
+      "bytes": 285875,
+      "path": "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+      "role": "review_intent_report",
+      "sha256": "9a8e08673e232d1625453971fbad519e64c2c1aae9b5c2f1646c940da865a749"
+    },
+    {
+      "bytes": 1284,
+      "path": "docs/diagnostics/retrieval-v2-default-promotion-graph-health-20260708T152502Z.json",
+      "role": "graph_health",
+      "sha256": "56aae7951507de9e3c86ae0e89d99c957b533a5ea78370062b31df337f6585ab"
+    },
+    {
+      "bytes": 1474,
+      "path": "docs/diagnostics/retrieval-v2-default-promotion-range-health-20260708T152502Z.json",
+      "role": "range_citation_health",
+      "sha256": "d7aaff87d62f9406aa40dce18f2d524b11a594f475ec7b8e9cd3d90968159076"
+    }
+  ],
+  "promote_default": false,
+  "status": "passed",
+  "version": "1.0"
+}
