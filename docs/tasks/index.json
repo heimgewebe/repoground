@@ -1214,21 +1214,24 @@
     {
       "id": "TASK-RUNTIME-ARTIFACT-RETENTION-001",
       "title": "Runtime Artifact Retention and GC Policy",
-      "status": "open",
-      "description": "Define and implement or explicitly defer retention, TTL, and garbage-collection behavior for runtime artifacts such as query_trace, context_bundle, and agent_query_session. Current lifecycle metadata is groundwork only and must not be read as active cleanup.",
+      "status": "done",
+      "description": "Closed by RepoBrief Runtime Artifact Retention Policy v1: retention, TTL and GC behavior for query_trace, context_bundle and agent_query_session is now explicit and machine-readable. Current policy remains unbounded_currently with ttl_enabled=false, gc_enabled=false and no automatic deletion; legacy artifacts are backfilled on read without rewrite.",
       "evidence": [
+        "merger/lenskit/service/runtime_artifact_retention.py",
+        "merger/lenskit/service/query_artifact_store.py",
+        "merger/lenskit/tests/test_runtime_artifact_retention.py",
+        "docs/proofs/runtime-artifact-retention-policy-v1-proof.md",
         "docs/architecture/runtime-matrix.md",
         "docs/architecture/artifact-inventory.md",
         "docs/service-api.md",
-        "docs/proofs/runtime-artifact-metadata-gap-audit.md",
         "merger/lenskit/contracts/artifact-lookup.v1.schema.json",
         "merger/lenskit/contracts/context-lookup.v1.schema.json",
         "merger/lenskit/contracts/trace-lookup.v1.schema.json"
       ],
       "missing_evidence": [
-        "No GC, TTL, or automatic deletion behavior is implemented.",
-        "No retention decision is encoded as an enforceable policy.",
-        "No migration/backward-compatibility proof for stored runtime artifacts exists."
+        "No GC, TTL, or automatic deletion behavior is implemented by design in v1.",
+        "No bounded storage guarantee is established.",
+        "No operator cleanup safety is established."
       ]
     },
     {

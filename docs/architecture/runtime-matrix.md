@@ -41,15 +41,22 @@ Hinweis: `artifact_refs.agent_query_session_id` ist **immer null** in gespeicher
 -   **Phase 5 (Cross-Repo-Föderation):** `federation_index.json` und föderierte Queries (`/api/federation/query`) sind implementiert (minimale Multi-Bundle-Aggregation). `federation_conflicts.json` ist heuristisch/minimal implementiert: Runtime-Emission in `federation_query.py`, CLI-Persistenz in `cmd_federation.py`, schema-validiert per `test_federation_cli.py`; offen bleibt eine belastbare Identity-Engine jenseits einfacher Heuristiken. `cross_repo_links.json` hat einen vorhandenen Contract (`cross-repo-links.v1.schema.json`, Root-Type: `array`) und einen minimalen heuristischen Runtime-Producer (`_build_cross_repo_links` in `federation_query.py`): emittiert `co_occurrence`-Links mit `confidence: "inferred"` für jedes eindeutige Repo-Paar in den finalen zurückgegebenen `results` (nicht im Kandidatensatz); CLI-Persistenz als `cross_repo_links.json` bei `--trace`; ganzes Artefakt schema-validiert. Bei `output_profile`-Projektion bleiben `cross_repo_links` in föderierten Antworten erhalten (Wrapper-Form mit `context_bundle`). **`co_occurrence` beweist ausschließlich: mehrere Repos lieferten Treffer zur selben Query. Es beweist keine Identität, keine Abhängigkeit, keine semantische Gleichheit. Ranking unverändert.** `federation_trace` existiert in zwei strukturell verschiedenen Formen unter demselben Namen — **Shape-Dissonanz ist bekannt und dokumentiert**: (1) **CLI-Dateiartefakt** `federation_trace.json` (geschrieben von `cmd_federation.py` bei `--trace`): Schema-validiert gegen `federation-trace.v1.schema.json` (`additionalProperties: false`); Felder: `query`, `timestamp`, `total_results`, `bundles[]`. (2) **Runtime-Inline-Form** (aus `execute_federated_query` mit `trace=True`, weitergereicht durch `output_projection.py` in den API-Wrapper): kein eigenes JSON-Schema; Felder: `queried_bundles_total`, `queried_bundles_effective`, `bundle_status` (dict), `bundle_errors`, `bundle_traces`. `federation-trace.v1.schema.json` gilt ausschließlich für die Datei-Form; die Runtime-Form ist schemalos (kein Drift in den Contract hinein). **`federation_trace` beweist Ausführungs- und Aggregationsspur — keine semantische Identität.** Offen: durchgängige `cross_repo_links`-Semantik jenseits der Heuristik, vollständige föderierte Ranking-Semantik, Latenz-Telemetrie pro Bundle.
 -   **Agent Control Surface (Phase 6):** `agent_query_session` Provenienz-Härtung und `/api/artifact_lookup`-Roundtrip sind belegt. Offen: Agent-Orchestrierung, Feedback-Schleifen, MCP-Anbindung.
 
-### Runtime-Artefakt-Lebensdauer (Lifecycle Metadata v1)
+### Runtime-Artefakt-Lebensdauer (Retention Policy v1)
 
-Runtime-Artefakte (`query_trace`, `context_bundle`, `agent_query_session`) tragen aktuell folgende Lifecycle-Felder:
+Runtime-Artefakte (`query_trace`, `context_bundle`, `agent_query_session`) tragen aktuell folgende Lifecycle- und Retention-Felder:
 
 | Feld | Wert |
 | :--- | :--- |
 | `retention_policy` | `"unbounded_currently"` |
 | `lifecycle_status` | `"active"` |
 | `expires_at` | `null` |
+| `ttl_enabled` | `false` |
+| `ttl_seconds` | `null` |
+| `gc_enabled` | `false` |
+| `gc_mode` | `"not_implemented"` |
+| `deletion_mode` | `"not_supported_by_policy"` |
 
-**Noch kein GC. Noch keine TTL. Noch keine automatische Löschung.**
-Lifecycle-Felder sind Vorarbeit für spätere Retention-, MCP- und Agent-Orchestrierungslogik.
+Die maschinenlesbare Policy liegt in `merger/lenskit/service/runtime_artifact_retention.py` (`policy_id: "runtime-artifact-retention.v1"`, `status: "explicitly_deferred"`).
+
+**Kein GC. Keine TTL. Keine automatische Löschung.**
+Die Policy macht die Deferral-Entscheidung explizit; sie ist keine Cleanup-Engine.

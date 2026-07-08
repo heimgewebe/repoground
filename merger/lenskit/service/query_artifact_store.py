@@ -7,62 +7,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .runtime_artifact_retention import (
+    RETENTION_POLICY_ID,
+    runtime_artifact_metadata_table,
+    runtime_artifact_retention_policy,
+)
+
 logger = logging.getLogger(__name__)
 
 _STORE_FILENAME = "query_artifacts.json"
 
 # Per-type classification metadata injected into every stored entry.
-# authority/canonicality use the vocabulary from bundle-manifest.v1.schema.json.
-# artifact_shape encodes the stored data form:
-#   "raw"       — unmodified internal execute_query() output (query_trace)
-#   "projected" — API-projected form after output-profile filtering (context_bundle)
-#   "wrapper"   — session wrapper built from the projected context bundle (agent_query_session)
-# retention_policy reflects the store's current behaviour (no GC; unbounded growth).
-_RUNTIME_ARTIFACT_METADATA: Dict[str, Dict[str, Any]] = {
-    "query_trace": {
-        "authority": "runtime_observation",
-        "canonicality": "observation",
-        "artifact_shape": "raw",
-        "retention_policy": "unbounded_currently",
-        "lifecycle_status": "active",
-        "expires_at": None,
-        "claim_boundaries": {
-            "does_not_prove": [
-                "Artifact ID stability is limited to this store location.",
-                "Runtime artifact does not prove live repository state.",
-            ]
-        },
-    },
-    "context_bundle": {
-        "authority": "runtime_observation",
-        "canonicality": "observation",
-        "artifact_shape": "projected",
-        "retention_policy": "unbounded_currently",
-        "lifecycle_status": "active",
-        "expires_at": None,
-        "claim_boundaries": {
-            "does_not_prove": [
-                "Artifact ID stability is limited to this store location.",
-                "Runtime artifact does not prove live repository state.",
-                "Context bundle is stored in projected API form, not raw execute_query form.",
-            ]
-        },
-    },
-    "agent_query_session": {
-        "authority": "runtime_observation",
-        "canonicality": "observation",
-        "artifact_shape": "wrapper",
-        "retention_policy": "unbounded_currently",
-        "lifecycle_status": "active",
-        "expires_at": None,
-        "claim_boundaries": {
-            "does_not_prove": [
-                "Artifact ID stability is limited to this store location.",
-                "Runtime artifact does not prove live repository state.",
-            ]
-        },
-    },
-}
+# The table is derived from the machine-readable retention policy so lookup
+# payloads, diagnostics and docs cannot drift into different lifecycle claims.
+_RUNTIME_ARTIFACT_METADATA: Dict[str, Dict[str, Any]] = runtime_artifact_metadata_table()
 
 # Derived from _RUNTIME_ARTIFACT_METADATA so it can never drift out of sync.
 VALID_ARTIFACT_TYPES = frozenset(_RUNTIME_ARTIFACT_METADATA.keys())
@@ -126,11 +84,10 @@ class QueryArtifactStore:
     of the underlying JSON file.  They are not guaranteed to be resolvable
     after the store location changes (e.g. different merges_dir).
 
-    Known limitations (open, not in scope for this PR):
-    - No retention/GC policy: the store grows unbounded.
+    Known limitations:
+    - Retention policy is explicit and machine-readable, but TTL and GC are
+      deliberately disabled: the store grows unbounded.
     - No federation artifact support.
-    - No raw-vs-projected artifact distinction (context_bundle is stored in
-      the projected API form, not the internal execute_query() form).
 
     Storage format: JSON list at {storage_dir}/query_artifacts.json.
     All writes use tmp-file replacement.
@@ -272,6 +229,7 @@ class QueryArtifactStore:
                 ``retention_policy``        — const ``"unbounded_currently"``
                 ``gc_enabled``              — const ``False``
                 ``ttl_enabled``             — const ``False``
+                ``retention_policy_id``  — machine-readable policy id
         """
         with self._lock:
             total = len(self._cache)
@@ -315,6 +273,8 @@ class QueryArtifactStore:
             "newest_created_at": newest,
             "store_file_size_bytes": store_file_size,
             "retention_policy": "unbounded_currently",
+            "retention_policy_id": RETENTION_POLICY_ID,
+            "retention_policy_status": runtime_artifact_retention_policy()["status"],
             "gc_enabled": False,
             "ttl_enabled": False,
         }

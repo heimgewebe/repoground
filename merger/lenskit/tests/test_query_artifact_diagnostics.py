@@ -9,6 +9,7 @@ import time
 import pytest
 
 from merger.lenskit.service.query_artifact_store import QueryArtifactStore
+from merger.lenskit.service.runtime_artifact_retention import RETENTION_POLICY_ID
 
 
 _DIAGNOSTIC_FIELDS = {
@@ -18,6 +19,8 @@ _DIAGNOSTIC_FIELDS = {
     "newest_created_at",
     "store_file_size_bytes",
     "retention_policy",
+    "retention_policy_id",
+    "retention_policy_status",
     "gc_enabled",
     "ttl_enabled",
 }
@@ -53,6 +56,8 @@ class TestQueryArtifactStoreDiagnosticsEmpty:
     def test_empty_store_carries_retention_constants(self, store):
         diag = store.diagnostics()
         assert diag["retention_policy"] == "unbounded_currently"
+        assert diag["retention_policy_id"] == RETENTION_POLICY_ID
+        assert diag["retention_policy_status"] == "explicitly_deferred"
         assert diag["gc_enabled"] is False
         assert diag["ttl_enabled"] is False
 

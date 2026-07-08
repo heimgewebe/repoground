@@ -75,11 +75,14 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 
    Folgepunkte: Vollständige Authority/Canonicality-Annotation für `query_trace` und `query_context_bundle` (Phase 4); föderierte Artefakte (`cross_repo_links.json` Contract vorhanden, Runtime-Producer implementiert (heuristisch/minimal); `federation_conflicts.json` Contract vorhanden, heuristisch/minimal emittiert, Phase 5); `agent_query_session` ist als Phase-6-Runtime-Artefakt in diesem Inventar eingetragen (siehe Anmerkung 3).
 
-7. **Runtime-Artefakt-Lifecycle (Phase 6 Vorbereitung — Lifecycle Metadata v1):**
-   Runtime-Artefakte tragen seit Lifecycle Metadata v1 explizite Lebensdauer-Felder:
+7. **Runtime-Artefakt-Lifecycle (Retention Policy v1):**
+   Runtime-Artefakte tragen explizite Lebensdauer-Felder und eine maschinenlesbare Retention-Policy (`runtime-artifact-retention.v1`):
    - `lifecycle_status`: aktuell `"active"` für alle Runtime-Artefakte.
    - `expires_at`: aktuell `null` — kein TTL gesetzt.
    - `retention_policy`: weiterhin `"unbounded_currently"`.
+   - `ttl_enabled`: `false`.
+   - `gc_enabled`: `false`.
+   - `deletion_mode`: `"not_supported_by_policy"`.
 
-   Legacy-Einträge (ohne `lifecycle_status`/`expires_at`) werden beim Lookup via `_with_runtime_metadata()` transparent backgefüllt.
-   **Noch kein GC, kein TTL, kein automatisches Löschen.** Lifecycle-Felder sind Vorarbeit für spätere Retention-, MCP- und Agent-Orchestrierungslogik.
+   Legacy-Einträge (ohne Lifecycle-/Retention-Felder) werden beim Lookup via `_with_runtime_metadata()` transparent backgefüllt und dabei nicht auf Platte zurückgeschrieben.
+   **Kein GC, kein TTL, kein automatisches Löschen.** Diese Entscheidung ist jetzt explizit und maschinenlesbar in `merger/lenskit/service/runtime_artifact_retention.py` dokumentiert; sie ist keine Cleanup-Engine.

@@ -222,21 +222,28 @@ Storage entries below assume `query_artifact_store` is configured. If the store 
 
 **Schema:** `merger/lenskit/contracts/agent-query-session.v2.schema.json`
 
-**Runtime Artifact Lifecycle Metadata (v1):**
+**Runtime Artifact Lifecycle / Retention Policy (v1):**
 
-All runtime artifacts stored in the `QueryArtifactStore` (`query_trace`, `context_bundle`, `agent_query_session`) carry explicit lifecycle metadata:
+All runtime artifacts stored in the `QueryArtifactStore` (`query_trace`, `context_bundle`, `agent_query_session`) carry explicit lifecycle metadata derived from the machine-readable policy in `merger/lenskit/service/runtime_artifact_retention.py`:
 
 | Field | Value |
 |---|---|
 | `retention_policy` | `"unbounded_currently"` |
 | `lifecycle_status` | `"active"` |
 | `expires_at` | `null` |
+| `ttl_enabled` | `false` |
+| `ttl_seconds` | `null` |
+| `gc_enabled` | `false` |
+| `gc_mode` | `"not_implemented"` |
+| `deletion_mode` | `"not_supported_by_policy"` |
 
+- Policy ID: `runtime-artifact-retention.v1`.
+- Policy status: `explicitly_deferred`.
 - No GC (Garbage Collection) is applied.
 - No TTL (Time-to-Live) is set.
 - No automatic deletion occurs.
-- Legacy entries missing these fields are transparently backfilled on read.
-- These fields are groundwork for future Retention, MCP, and Agent-Orchestration logic.
+- Store diagnostics expose the policy ID and status without rewriting the store.
+- Legacy entries missing these fields are transparently backfilled on read and are not rewritten by lookup.
 
 ## Admin Restart
 
