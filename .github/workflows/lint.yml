@@ -29,7 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "ruff==0.15.13"
 
-      # Scope is pinned in ruff.toml: F401/F811 only, fixtures excluded.
-      # Wider default Ruff findings remain outside the gate until a later ratchet.
+      # Repo-wide ratchet scope is intentionally isolated in ruff-ci.toml.
+      # Bare path-scoped Ruff jobs keep Ruff's default rule selection.
       - name: Check pinned Ruff scope
-        run: ruff check .
+        run: ruff check --config ruff-ci.toml .
