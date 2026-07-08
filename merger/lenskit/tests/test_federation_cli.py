@@ -511,6 +511,51 @@ def _make_two_bundle_fed(tmp_path, fed_id="crl-fed"):
     return out_path
 
 
+def test_federation_query_cli_inline_bundles(tmp_path: Path, monkeypatch, capsys):
+    """CLI query can use repeated --bundle inputs without writing federation_index.json."""
+    monkeypatch.chdir(tmp_path)
+    fed_path = _make_two_bundle_fed(tmp_path, fed_id="unused-index")
+    fed_path.unlink()
+
+    from merger.lenskit.cli import main
+
+    ret = main.main([
+        "federation",
+        "query",
+        "--bundle",
+        f"repo1={tmp_path / 'b1'}",
+        "--bundle",
+        f"repo2={tmp_path / 'b2'}",
+        "--federation-id",
+        "inline-cli",
+        "-q",
+        "hello",
+        "--trace",
+    ])
+    assert ret == 0
+
+    parsed = json.loads(capsys.readouterr().out)
+    assert parsed["federation_id"] == "inline-cli"
+    assert parsed["count"] == 2
+    for hit in parsed["results"]:
+        assert hit["federation_origin"]["repo_id"] in {"repo1", "repo2"}
+        assert hit["federation_origin"]["availability_status"] == "ok"
+        assert hit["federation_origin"]["freshness_status"] == "unverified"
+
+    trace_file = tmp_path / "federation_trace.json"
+    assert trace_file.exists()
+    trace_data = json.loads(trace_file.read_text(encoding="utf-8"))
+    assert {b["repo_id"] for b in trace_data["bundles"]} == {"repo1", "repo2"}
+
+
+def test_federation_query_cli_requires_one_query_source(tmp_path: Path, capsys):
+    from merger.lenskit.cli import main
+
+    ret = main.main(["federation", "query", "-q", "hello"])
+    assert ret == 1
+    assert "provide exactly one query source" in capsys.readouterr().err
+
+
 def test_federation_query_trace_writes_cross_repo_links_json(tmp_path: Path, monkeypatch):
     """CLI --trace with multi-bundle results writes cross_repo_links.json."""
     monkeypatch.chdir(tmp_path)

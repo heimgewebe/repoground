@@ -4,6 +4,7 @@ from pathlib import Path
 
 from merger.lenskit.core.federation import init_federation, add_bundle
 from merger.lenskit.retrieval.federation_query import execute_federated_query
+from merger.lenskit.retrieval.federation_query import execute_federated_query_from_bundles
 from merger.lenskit.retrieval import index_db
 
 @pytest.fixture
@@ -67,6 +68,39 @@ def test_execute_federated_query(federated_setup):
     # Minimal provenance preservation via federation_bundle tagging
     repos = {h["federation_bundle"] for h in res["results"]}
     assert repos == {"repo1", "repo2"}
+
+    for hit in res["results"]:
+        assert hit["federation_bundle_status"] == "ok"
+        assert hit["federation_freshness_status"] == "unverified"
+        assert hit["federation_origin"]["repo_id"] == hit["federation_bundle"]
+        assert hit["federation_origin"]["availability_status"] == "ok"
+        assert hit["federation_origin"]["freshness_status"] == "unverified"
+
+
+def test_execute_federated_query_from_inline_bundles(federated_setup):
+    res = execute_federated_query_from_bundles(
+        [
+            {"repo_id": "repo1", "bundle_path": "repo1"},
+            {"repo_id": "repo2", "bundle_path": "repo2"},
+        ],
+        query_text="hello",
+        k=10,
+        trace=True,
+        federation_id="inline-test",
+        base_path=federated_setup.parent,
+    )
+
+    assert res["federation_id"] == "inline-test"
+    assert res["count"] == 2
+    repos = {h["federation_origin"]["repo_id"] for h in res["results"]}
+    assert repos == {"repo1", "repo2"}
+    for hit in res["results"]:
+        assert hit["derived_range_ref"]
+        assert hit["federation_bundle"] in {"repo1", "repo2"}
+        assert hit["federation_bundle_status"] == "ok"
+        assert hit["federation_freshness_status"] == "unverified"
+    assert res["federation_trace"]["bundle_status"] == {"repo1": "ok", "repo2": "ok"}
+
 
 def test_execute_federated_query_with_repo_filter(federated_setup):
     res = execute_federated_query(
@@ -415,6 +449,16 @@ def test_stale_bundle_is_marked_in_federation_trace(federated_setup):
     assert trace["bundle_status"]["repo2"] == "ok"
     assert trace["queried_bundles_effective"] == 2
 
+    stale_hits = [hit for hit in res["results"] if hit["federation_bundle"] == "repo1"]
+    assert stale_hits, "stale bundle still returns hits, but they must be explicitly marked"
+    for hit in stale_hits:
+        assert hit["federation_bundle_status"] == "stale"
+        assert hit["federation_freshness_status"] == "stale"
+        assert hit["federation_origin"]["availability_status"] == "stale"
+        assert hit["federation_origin"]["freshness_status"] == "stale"
+        assert hit["federation_origin"]["expected_fingerprint"] == "stale_hash"
+        assert hit["federation_origin"]["observed_fingerprint"] == "actual_hash"
+
 def test_execute_federated_query_rejects_falsy_provenance(federated_setup, monkeypatch):
     from merger.lenskit.retrieval import federation_query
 
@@ -659,7 +703,7 @@ def test_build_cross_repo_links_directly():
     ]
     links3 = _build_cross_repo_links(hits_three_repos)
     assert len(links3) == 3
-    pairs = {(l["source_repo"], l["target_repo"]) for l in links3}
+    pairs = {(link["source_repo"], link["target_repo"]) for link in links3}
     assert ("repo1", "repo2") in pairs
     assert ("repo1", "repo3") in pairs
     assert ("repo2", "repo3") in pairs

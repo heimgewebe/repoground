@@ -1,4 +1,8 @@
+import datetime
 import json
+from pathlib import Path
+from typing import Any, Optional
+
 try:
     import jsonschema
     from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
@@ -6,13 +10,11 @@ except ImportError:
     jsonschema = None
     JsonSchemaValidationError = None
 
+
 def _require_jsonschema() -> None:
     if jsonschema is None:
         raise RuntimeError("jsonschema is required for federation schema validation but is not installed.")
 
-import datetime
-from pathlib import Path
-from typing import Optional
 
 FEDERATION_KIND = "repolens.federation.index"
 FEDERATION_VERSION = "1.0"
@@ -65,22 +67,19 @@ def init_federation(federation_id: str, out_path: Path) -> dict:
 
     return fed_data
 
-def validate_federation(index_path: Path) -> bool:
+def validate_federation_data(fed_data: dict[str, Any]) -> bool:
     """
-    Validates a federation index against its schema and additional logical constraints.
-    Returns True if valid, raises an exception otherwise.
-    """
-    if not index_path.exists():
-        raise FileNotFoundError(f"Federation index not found at: {index_path.resolve().as_posix()}")
+    Validates a federation index object against its schema and logical constraints.
 
+    This is shared by persisted federation_index.json files and transient, read-only
+    bundle lists built by callers such as the CLI. It validates only structure and
+    identifiers; it does not inspect bundle contents, run refreshes, touch Git or
+    establish runtime correctness.
+    """
     schema = load_federation_schema()
     if not schema:
         raise RuntimeError("Federation schema missing at expected path (contracts/federation-index.v1.schema.json)")
 
-    with index_path.open("r", encoding="utf-8") as f:
-        fed_data = json.load(f)
-
-    # 1. Schema Validation
     _require_jsonschema()
 
     try:
@@ -88,7 +87,6 @@ def validate_federation(index_path: Path) -> bool:
     except JsonSchemaValidationError as e:
         raise ValueError(f"Schema validation failed: {e.message} at path {list(e.path)}")
 
-    # 2. Logical Constraints
     bundles = fed_data.get("bundles", [])
     repo_ids = set()
     for b in bundles:
@@ -100,11 +98,31 @@ def validate_federation(index_path: Path) -> bool:
         if not bundle_path:
             raise ValueError("Invalid bundle: missing 'bundle_path'.")
 
-        # check uniqueness
         if repo_id in repo_ids:
             raise ValueError(f"Duplicate 'repo_id' found: {repo_id}")
         repo_ids.add(repo_id)
 
+    return True
+
+
+def load_federation_index_data(index_path: Path) -> dict[str, Any]:
+    """Load and validate a persisted federation index JSON file."""
+    if not index_path.exists():
+        raise FileNotFoundError(f"Federation index not found at: {index_path.resolve().as_posix()}")
+
+    with index_path.open("r", encoding="utf-8") as f:
+        fed_data = json.load(f)
+
+    validate_federation_data(fed_data)
+    return fed_data
+
+
+def validate_federation(index_path: Path) -> bool:
+    """
+    Validates a federation index against its schema and additional logical constraints.
+    Returns True if valid, raises an exception otherwise.
+    """
+    load_federation_index_data(index_path)
     return True
 
 def inspect_federation(index_path: Path) -> dict:

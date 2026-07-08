@@ -1,10 +1,12 @@
-import json
+import datetime
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .query_core import execute_query
-from ..core.federation import validate_federation
+from ..core.federation import FEDERATION_KIND, FEDERATION_VERSION
+from ..core.federation import load_federation_index_data
+from ..core.federation import validate_federation_data
 
 def _build_cross_repo_links(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -87,8 +89,65 @@ def _find_bundle_index(bundle_path: Path) -> Optional[Path]:
 
     return None
 
-def execute_federated_query(
-    federation_index_path: Path,
+def _resolve_existing_local_path(raw_path: str, base_path: Path) -> Path:
+    """Resolve a caller-supplied local path without creating or refreshing anything."""
+    if "://" in raw_path:
+        raise ValueError("inline --bundle paths must be local filesystem paths")
+    candidate = Path(raw_path)
+    if not candidate.is_absolute():
+        candidate = base_path / candidate
+    resolved = candidate.resolve(strict=True)
+    if not resolved.is_dir() and not (resolved.is_file() and resolved.name.endswith(".index.sqlite")):
+        raise ValueError("inline --bundle path must be an existing bundle directory or .index.sqlite file")
+    return resolved
+
+
+
+def _build_transient_federation_index(
+    bundle_specs: List[Dict[str, str]],
+    federation_id: str = "inline-bundle-set",
+    base_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Builds a schema-valid, read-only federation index object from bundle specs."""
+    resolved_base = (base_path or Path.cwd()).resolve(strict=True)
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat()
+    bundles: List[Dict[str, str]] = []
+    for spec in bundle_specs:
+        item = {
+            "repo_id": spec["repo_id"],
+            "bundle_path": _resolve_existing_local_path(spec["bundle_path"], resolved_base).as_posix(),
+        }
+        if spec.get("last_fingerprint"):
+            item["last_fingerprint"] = spec["last_fingerprint"]
+        bundles.append(item)
+    bundles.sort(key=lambda x: x["repo_id"])
+    fed_data = {
+        "kind": FEDERATION_KIND,
+        "version": FEDERATION_VERSION,
+        "federation_id": federation_id,
+        "created_at": now,
+        "updated_at": now,
+        "bundles": bundles,
+    }
+    validate_federation_data(fed_data)
+    return fed_data
+
+
+def _freshness_status(expected_fingerprint: Optional[str], observed_fingerprint: Optional[str], bundle_status: str) -> str:
+    if bundle_status == "stale":
+        return "stale"
+    if not expected_fingerprint:
+        return "unverified"
+    if observed_fingerprint is None:
+        return "unverified"
+    if observed_fingerprint == expected_fingerprint:
+        return "current"
+    return "stale"
+
+
+def _execute_federated_query_data(
+    fed_data: Dict[str, Any],
+    federation_base_path: Path,
     query_text: str,
     k: int = 10,
     filters: Optional[Dict[str, Optional[str]]] = None,
@@ -97,19 +156,8 @@ def execute_federated_query(
     trace: bool = False,
     build_context: bool = False
 ) -> Dict[str, Any]:
-    """
-    Executes a minimal federated query aggregation across local bundles referenced by a federation index.
-    This is not a full federated ranking system, but a fan-out mechanism that collects results and sorts them globally.
-    """
-    if not federation_index_path.exists():
-        raise FileNotFoundError(f"Federation index not found at: {federation_index_path.resolve().as_posix()}")
-
-    # Diagnose-Gate: Validate structural integrity before accessing keys to avoid KeyErrors mid-flight.
-    # This is a deliberate safety check for the minimal fan-out, not intended as a highly optimized performance model.
-    validate_federation(federation_index_path)
-
-    with federation_index_path.open("r", encoding="utf-8") as f:
-        fed_data = json.load(f)
+    """Executes federated query aggregation over a validated federation object."""
+    validate_federation_data(fed_data)
 
     bundles = fed_data.get("bundles", [])
 
@@ -147,7 +195,7 @@ def execute_federated_query(
 
             bundle_path = Path(bundle_path_str)
             if not bundle_path.is_absolute():
-                bundle_path = federation_index_path.parent / bundle_path
+                bundle_path = federation_base_path / bundle_path
 
             db_path = _find_bundle_index(bundle_path)
             if not db_path:
@@ -198,8 +246,20 @@ def execute_federated_query(
                     if not hit.get("range_ref") and not hit.get("derived_range_ref"):
                         continue
 
-                    # Tag results with bundle origin (Provenance)
+                    # Tag results with bundle origin, availability and freshness provenance.
+                    status = bundle_status.get(repo_id, "ok")
+                    freshness = _freshness_status(expected_fingerprint, db_fingerprint, status)
                     hit["federation_bundle"] = repo_id
+                    hit["federation_bundle_status"] = status
+                    hit["federation_freshness_status"] = freshness
+                    hit["federation_origin"] = {
+                        "repo_id": repo_id,
+                        "bundle_path": bundle_path_str,
+                        "availability_status": status,
+                        "freshness_status": freshness,
+                        "expected_fingerprint": expected_fingerprint,
+                        "observed_fingerprint": db_fingerprint,
+                    }
                     all_results.append(hit)
 
             if repo_id not in bundle_status:
@@ -314,3 +374,71 @@ def execute_federated_query(
         }
 
     return out
+
+def execute_federated_query(
+    federation_index_path: Path,
+    query_text: str,
+    k: int = 10,
+    filters: Optional[Dict[str, Optional[str]]] = None,
+    embedding_policy: Optional[Dict[str, Any]] = None,
+    explain: bool = False,
+    trace: bool = False,
+    build_context: bool = False,
+) -> Dict[str, Any]:
+    """
+    Executes a minimal federated query aggregation across local bundles referenced by a federation index.
+
+    The federation index is a read-only registry input. This function does not create snapshots,
+    refresh bundles, mutate Git, run shells or assert global repository truth.
+    """
+    fed_data = load_federation_index_data(federation_index_path)
+
+    return _execute_federated_query_data(
+        fed_data=fed_data,
+        federation_base_path=federation_index_path.parent,
+        query_text=query_text,
+        k=k,
+        filters=filters,
+        embedding_policy=embedding_policy,
+        explain=explain,
+        trace=trace,
+        build_context=build_context,
+    )
+
+
+def execute_federated_query_from_bundles(
+    bundle_specs: List[Dict[str, str]],
+    query_text: str,
+    k: int = 10,
+    filters: Optional[Dict[str, Optional[str]]] = None,
+    embedding_policy: Optional[Dict[str, Any]] = None,
+    explain: bool = False,
+    trace: bool = False,
+    build_context: bool = False,
+    federation_id: str = "inline-bundle-set",
+    base_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Executes the same read-only federation query over an explicit list of bundle roots.
+
+    `bundle_specs` items require `repo_id` and `bundle_path`, and may include
+    `last_fingerprint`. Relative bundle paths resolve against `base_path` (or CWD).
+    No federation_index.json is written.
+    """
+    resolved_base = (base_path or Path.cwd()).resolve(strict=True)
+    fed_data = _build_transient_federation_index(
+        bundle_specs,
+        federation_id=federation_id,
+        base_path=resolved_base,
+    )
+    return _execute_federated_query_data(
+        fed_data=fed_data,
+        federation_base_path=resolved_base,
+        query_text=query_text,
+        k=k,
+        filters=filters,
+        embedding_policy=embedding_policy,
+        explain=explain,
+        trace=trace,
+        build_context=build_context,
+    )

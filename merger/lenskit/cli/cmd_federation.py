@@ -29,12 +29,38 @@ def register_federation_commands(subparsers) -> None:
 
     # query
     query_parser = federation_subparsers.add_parser("query", help="Execute a minimal federated query fan-out across local bundles")
-    query_parser.add_argument("--index", required=True, help="Path to federation index")
+    query_parser.add_argument("--index", help="Path to federation index")
+    query_parser.add_argument(
+        "--bundle",
+        action="append",
+        default=[],
+        metavar="REPO_ID=PATH",
+        help="Inline bundle root or index file. May be repeated instead of --index.",
+    )
+    query_parser.add_argument(
+        "--federation-id",
+        default="inline-bundle-set",
+        help="Federation ID used for inline --bundle queries.",
+    )
     query_parser.add_argument("-q", "--query", required=True, help="Query string")
     query_parser.add_argument("-k", type=int, default=10, help="Number of final results to return (top-k across all bundles)")
     query_parser.add_argument("--repo", type=str, help="Filter by repository ID (currently the only supported filter)")
     query_parser.add_argument("--trace", action="store_true", help="Include diagnostic trace and generate federation_trace.json (and federation_conflicts.json if applicable) in CWD")
 
+
+
+def _parse_inline_bundle_specs(bundle_args: list[str]) -> list[dict[str, str]]:
+    specs: list[dict[str, str]] = []
+    for raw in bundle_args:
+        if "=" not in raw:
+            raise ValueError("--bundle must use REPO_ID=PATH")
+        repo_id, bundle_path = raw.split("=", 1)
+        repo_id = repo_id.strip()
+        bundle_path = bundle_path.strip()
+        if not repo_id or not bundle_path:
+            raise ValueError("--bundle requires non-empty REPO_ID and PATH")
+        specs.append({"repo_id": repo_id, "bundle_path": bundle_path})
+    return specs
 
 def handle_federation_command(args: argparse.Namespace) -> int:
     """Dispatches federation commands to their respective handlers."""
@@ -89,19 +115,35 @@ def handle_federation_command(args: argparse.Namespace) -> int:
 
     elif args.federation_command == "query":
         from merger.lenskit.retrieval.federation_query import execute_federated_query
-        index_path = Path(args.index)
+        from merger.lenskit.retrieval.federation_query import execute_federated_query_from_bundles
+        index_path = Path(args.index) if args.index else None
+        inline_bundles = getattr(args, "bundle", []) or []
         filters = None
         if args.repo:
             filters = {"repo": args.repo}
 
         try:
-            res = execute_federated_query(
-                index_path,
-                query_text=args.query,
-                k=args.k,
-                filters=filters,
-                trace=args.trace
-            )
+            if bool(index_path) == bool(inline_bundles):
+                raise ValueError("provide exactly one query source: --index or one or more --bundle REPO_ID=PATH")
+
+            if index_path:
+                res = execute_federated_query(
+                    index_path,
+                    query_text=args.query,
+                    k=args.k,
+                    filters=filters,
+                    trace=args.trace
+                )
+            else:
+                res = execute_federated_query_from_bundles(
+                    _parse_inline_bundle_specs(inline_bundles),
+                    query_text=args.query,
+                    k=args.k,
+                    filters=filters,
+                    trace=args.trace,
+                    federation_id=args.federation_id,
+                    base_path=Path.cwd(),
+                )
             print(json.dumps(res, indent=2))
 
             # Write trace if requested
@@ -117,9 +159,14 @@ def handle_federation_command(args: argparse.Namespace) -> int:
                     "bundles": []
                 }
 
-                # Fetch original bundles from index to get full info
-                with index_path.open("r", encoding="utf-8") as f:
-                    fed_data = json.load(f)
+                # Fetch original bundles from the persisted index or from inline specs.
+                if index_path:
+                    with index_path.open("r", encoding="utf-8") as f:
+                        fed_data = json.load(f)
+                else:
+                    fed_data = {
+                        "bundles": _parse_inline_bundle_specs(inline_bundles),
+                    }
 
                 status_map = res["federation_trace"].get("bundle_status", {})
                 error_map = res["federation_trace"].get("bundle_errors", {})

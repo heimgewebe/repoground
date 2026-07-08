@@ -114,6 +114,12 @@ Weitere Subkommandos: `eval`, `architecture`, `atlas`, `federation`,
 `context-quality`, `governance`, `parity`, `artifact`, `rlens-client`, `verify`,
 `pr-explain`. Jeweils `--help` für Details.
 
+Federierte Query ohne persistierten Index:
+
+```bash
+lenskit federation query --bundle repo_a=/path/to/bundle-a --bundle repo_b=/path/to/bundle-b -q "symbol" --trace
+```
+
 ## 6. Fehlerbehebung (Kurz)
 
 - **„range_ref failed schema" / Hash mismatch:** Der `range_ref` passt nicht
