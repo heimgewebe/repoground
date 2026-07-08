@@ -295,6 +295,25 @@ def register_repobrief_command_groups(repobrief_parser: argparse.ArgumentParser)
         help="Do not add the compact source citation projection",
     )
 
+    symbol_parser = repobrief_subparsers.add_parser(
+        "symbol",
+        help="Read-only Python symbol-index consumer commands",
+    )
+    symbol_subparsers = symbol_parser.add_subparsers(
+        dest="symbol_cmd",
+        required=True,
+        help="Symbol commands",
+    )
+    symbol_search_parser = symbol_subparsers.add_parser(
+        "search",
+        help="Search an existing python_symbol_index_json artifact without importing target code",
+    )
+    symbol_search_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    symbol_search_parser.add_argument("--q", default="", help="Search text over name, qualified name, module, path and kind")
+    symbol_search_parser.add_argument("--k", type=int, default=25, help="Maximum symbol hits")
+    symbol_search_parser.add_argument("--kind", choices=["class", "function", "async_function"], help="Filter by symbol kind")
+    symbol_search_parser.add_argument("--path", help="Filter by source path substring")
+
     external_parser = repobrief_subparsers.add_parser(
         "external-manifest",
         help="Write bounded external manifest references from existing bundle manifests",
@@ -423,6 +442,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_required_reading_resolve(args)
     if args.repobrief_cmd == "query":
         return run_query_existing_index(args)
+    if args.repobrief_cmd == "symbol" and args.symbol_cmd == "search":
+        return run_symbol_search(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "write":
         return run_external_manifest_write(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "publish":
@@ -676,6 +697,24 @@ def run_query_existing_index(args: argparse.Namespace) -> int:
         )
     except ValueError as exc:
         print("repobrief query: " + str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") == "available" else 1
+
+
+def run_symbol_search(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_access import search_symbol_index
+
+    try:
+        result = search_symbol_index(
+            args.bundle_manifest,
+            args.q,
+            k=args.k,
+            kind=args.kind,
+            path=args.path,
+        )
+    except ValueError as exc:
+        print("repobrief symbol search: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "available" else 1

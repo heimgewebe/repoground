@@ -236,6 +236,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.CONCEPT_CARDS_JSONL: {"id": "concept-card", "version": "v1"},
     ArtifactRole.RELATION_CARDS_JSONL: {"id": "relation-card", "version": "v1"},
     ArtifactRole.PR_DELTA_CARDS_JSONL: {"id": "pr-delta-card", "version": "v1"},
+    ArtifactRole.PYTHON_SYMBOL_INDEX_JSON: {"id": "python-symbol-index", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -388,6 +389,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "authority": "diagnostic_signal",
         "canonicality": "diagnostic",
         "risk_class": "diagnostic",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.PYTHON_SYMBOL_INDEX_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
         "regenerable": True,
         "staleness_sensitive": True,
     },
@@ -658,6 +666,7 @@ class MergeArtifacts:
     relation_cards: Optional[Path] = None
     delta_json: Optional[Path] = None
     pr_delta_cards: Optional[Path] = None
+    python_symbol_index: Optional[Path] = None
     other: List[Path] = None
 
     def __post_init__(self):
@@ -705,6 +714,8 @@ class MergeArtifacts:
             paths.append(self.delta_json)
         if self.pr_delta_cards and self.pr_delta_cards not in paths:
             paths.append(self.pr_delta_cards)
+        if self.python_symbol_index and self.python_symbol_index not in paths:
+            paths.append(self.python_symbol_index)
         if self.bundle_manifest:
             paths.append(self.bundle_manifest)
 
@@ -6298,6 +6309,41 @@ def write_reports_v2(
     if derived_manifests:
         _add_artifact(derived_manifests[-1], ArtifactRole.DERIVED_MANIFEST_JSON, "application/json")
 
+    def _write_python_symbol_index_json(base_manifest_path: Path) -> Optional[Path]:
+        """Emit Python Symbol Index v1 for single-repo bundles as navigation only."""
+        if len(repo_summaries) != 1 or not final_dump_index or not final_dump_index.exists():
+            return None
+        repo_root = repo_summaries[0].get("root")
+        if repo_root is None:
+            return None
+        from merger.lenskit.architecture.symbol_index import generate_symbol_index_document
+
+        canonical_sha = _compute_file_sha256(final_dump_index)
+        if not canonical_sha:
+            return None
+        document = generate_symbol_index_document(Path(repo_root), run_id, canonical_sha)
+        out_path = base_manifest_path.with_name(
+            base_manifest_path.name.replace(
+                ".bundle.manifest.json", ".python_symbol_index.json"
+            )
+        )
+        _write_text_atomic(
+            out_path,
+            json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        )
+        return out_path
+
+    python_symbol_index_path = _write_python_symbol_index_json(bundle_manifest_path)
+    if python_symbol_index_path is not None:
+        out_paths.append(python_symbol_index_path)
+        if python_symbol_index_path not in other_paths:
+            other_paths.append(python_symbol_index_path)
+        _add_artifact(
+            python_symbol_index_path,
+            ArtifactRole.PYTHON_SYMBOL_INDEX_JSON,
+            "application/json",
+        )
+
 
     def _write_lens_cards_jsonl(base_manifest_path: Path) -> Optional[Path]:
         """Emit Lens Cards v1 as deterministic JSONL navigation."""
@@ -6824,6 +6870,7 @@ def write_reports_v2(
             relation_cards=relation_cards_path,
             delta_json=delta_json_path,
             pr_delta_cards=pr_delta_cards_path,
+            python_symbol_index=python_symbol_index_path,
             other=other_paths
         )
     else:
@@ -6847,5 +6894,6 @@ def write_reports_v2(
             relation_cards=relation_cards_path,
             delta_json=delta_json_path,
             pr_delta_cards=pr_delta_cards_path,
+            python_symbol_index=python_symbol_index_path,
             other=other_paths
         )

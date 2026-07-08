@@ -104,7 +104,7 @@ def test_profile_output_mode_plan_is_machine_readable():
     assert public_default["selected_output_mode"] == "archive"
     assert public_default["defaulted"] is True
     assert public_default["conflicts"] == []
-    assert public_default["excluded_roles"] == ["sqlite_index"]
+    assert public_default["excluded_roles"] == ["sqlite_index", "python_symbol_index_json"]
 
     public_dual = profile_output_mode_plan("public-share", "dual")
     assert public_dual["selected_output_mode"] == "dual"

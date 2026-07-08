@@ -1153,6 +1153,173 @@ def query_existing_index(
     }
 
 
+SYMBOL_INDEX_ROLE = "python_symbol_index_json"
+SYMBOL_SEARCH_KIND = "repobrief.symbol_search"
+MAX_SYMBOL_SEARCH_K = 200
+
+
+def _symbol_source_range(symbol: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": symbol.get("path"),
+        "start_line": symbol.get("start_line"),
+        "end_line": symbol.get("end_line"),
+        "range_ref": symbol.get("range_ref"),
+        "coordinate_basis": "source_lines",
+    }
+
+
+def _symbol_record(symbol: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": symbol.get("id"),
+        "kind": symbol.get("kind"),
+        "name": symbol.get("name"),
+        "qualified_name": symbol.get("qualified_name"),
+        "module": symbol.get("module"),
+        "path": symbol.get("path"),
+        "start_line": symbol.get("start_line"),
+        "end_line": symbol.get("end_line"),
+        "range_ref": symbol.get("range_ref"),
+        "source_range": _symbol_source_range(symbol),
+        "decorators": symbol.get("decorators") if isinstance(symbol.get("decorators"), list) else [],
+    }
+
+
+def _load_symbol_index(manifest_path: Path) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    artifact_result = get_artifact(manifest_path, SYMBOL_INDEX_ROLE)
+    artifact = artifact_result.get("artifact") if isinstance(artifact_result, dict) else None
+    if not isinstance(artifact, dict) or not artifact.get("absolute_path"):
+        return None, artifact, {
+            "status": "missing",
+            "error_code": "python_symbol_index_json_missing",
+            "error": "python_symbol_index_json artifact is not present in the bundle manifest",
+        }
+    index_path = Path(str(artifact["absolute_path"]))
+    if not index_path.exists():
+        return None, artifact, {
+            "status": "missing",
+            "error_code": "python_symbol_index_json_file_missing",
+            "error": "python_symbol_index_json artifact file does not exist",
+        }
+    try:
+        data = json.loads(index_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, artifact, {
+            "status": "invalid",
+            "error_code": "python_symbol_index_json_unreadable",
+            "error": str(exc),
+        }
+    if not isinstance(data, dict) or data.get("kind") != "lenskit.python_symbol_index":
+        return None, artifact, {
+            "status": "invalid",
+            "error_code": "python_symbol_index_json_invalid_kind",
+            "error": "python_symbol_index_json must be a lenskit.python_symbol_index object",
+        }
+    symbols = data.get("symbols")
+    if not isinstance(symbols, list):
+        return None, artifact, {
+            "status": "invalid",
+            "error_code": "python_symbol_index_symbols_invalid",
+            "error": "python_symbol_index_json symbols must be an array",
+        }
+    return data, artifact, None
+
+
+def search_symbol_index(
+    bundle_manifest: str | Path,
+    query: str = "",
+    *,
+    k: int = 25,
+    kind: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    if not isinstance(query, str):
+        return _invalid_read_result(
+            kind=SYMBOL_SEARCH_KIND,
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error="query must be a string",
+            error_code="query_invalid",
+            extra={"query": query, "k": k, "symbol_index": None, "hits": []},
+        )
+    if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > MAX_SYMBOL_SEARCH_K:
+        return _invalid_read_result(
+            kind=SYMBOL_SEARCH_KIND,
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error=f"k must be an integer between 1 and {MAX_SYMBOL_SEARCH_K}",
+            error_code="k_out_of_bounds",
+            extra={"query": query, "k": k, "symbol_index": None, "hits": []},
+        )
+    data, artifact, error = _load_symbol_index(manifest_path)
+    if error is not None:
+        return _invalid_read_result(
+            kind=SYMBOL_SEARCH_KIND,
+            bundle_manifest=manifest_path,
+            status=error["status"],
+            error=error["error"],
+            error_code=error["error_code"],
+            extra={"query": query, "k": k, "symbol_index": artifact, "hits": []},
+        )
+    assert data is not None
+    symbols = [item for item in data.get("symbols", []) if isinstance(item, dict)]
+    q = query.strip().casefold()
+    kind_filter = kind.strip() if isinstance(kind, str) and kind.strip() else None
+    path_filter = path.strip().casefold() if isinstance(path, str) and path.strip() else None
+    matched: list[dict[str, Any]] = []
+    omitted_by_filter = 0
+    for symbol in symbols:
+        haystack = " ".join(
+            str(symbol.get(field, ""))
+            for field in ("name", "qualified_name", "module", "path", "kind")
+        ).casefold()
+        if q and q not in haystack:
+            omitted_by_filter += 1
+            continue
+        if kind_filter and symbol.get("kind") != kind_filter:
+            omitted_by_filter += 1
+            continue
+        if path_filter and path_filter not in str(symbol.get("path", "")).casefold():
+            omitted_by_filter += 1
+            continue
+        matched.append(_symbol_record(symbol))
+        if len(matched) > k:
+            break
+    hits = matched[:k]
+    availability = _availability_model_for_manifest(manifest_path)
+    return {
+        "kind": SYMBOL_SEARCH_KIND,
+        "version": "v1",
+        "status": "available",
+        "bundle_manifest": str(manifest_path),
+        "query": query,
+        "k": k,
+        "filters": {"kind": kind, "path": path},
+        "symbol_index": artifact,
+        "symbol_index_metadata": {
+            "language": data.get("language"),
+            "symbol_kinds": data.get("symbol_kinds"),
+            "skipped_files_count": data.get("skipped_files_count"),
+            "skipped_errors": data.get("skipped_errors"),
+            "canonical_dump_index_sha256": data.get("canonical_dump_index_sha256"),
+        },
+        "availability": availability,
+        "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
+        "hit_count": len(hits),
+        "omitted_by_filter_count": omitted_by_filter,
+        "truncated": len(matched) > k,
+        "hits": hits,
+        "mutation_boundary": _read_only_mutation_boundary(),
+        "does_not_establish": list(_DOES_NOT_ESTABLISH) + [
+            "call_graph_completeness",
+            "dependency_completeness",
+            "import_success",
+            "review_impact",
+            "merge_readiness",
+        ],
+    }
+
+
 def snapshot_check(
     bundle_manifest: str | Path,
     task_profile: str = "basic_repo_question",

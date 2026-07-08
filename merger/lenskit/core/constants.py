@@ -30,6 +30,7 @@ class ArtifactRole(str, Enum):
     CONCEPT_CARDS_JSONL = "concept_cards_jsonl"
     RELATION_CARDS_JSONL = "relation_cards_jsonl"
     PR_DELTA_CARDS_JSONL = "pr_delta_cards_jsonl"
+    PYTHON_SYMBOL_INDEX_JSON = "python_symbol_index_json"
 
 
 CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY = "claim_evidence_map_absence_reason"

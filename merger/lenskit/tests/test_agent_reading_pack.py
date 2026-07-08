@@ -1169,3 +1169,55 @@ def test_reading_pack_surfaces_snapshot_plan_report(tmp_path):
     assert "demo.snapshot_plan.json" in section
     assert "do not prove repo understanding" in section
     assert "`snapshot_plan_json` / `repobrief.snapshot_plan`" in body
+
+
+
+def test_pack_renders_symbol_index_guidance(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    symbol_index = tmp_path / "demo.python_symbol_index.json"
+    symbol_index.write_text(
+        json.dumps(
+            {
+                "kind": "lenskit.python_symbol_index",
+                "version": "1.0",
+                "run_id": "demo-run",
+                "canonical_dump_index_sha256": "a" * 64,
+                "language": "python",
+                "symbol_kinds": ["class", "function", "async_function"],
+                "symbols": [],
+                "skipped_files_count": 0,
+                "skipped_errors": [],
+                "does_not_establish": [
+                    "call_graph_completeness",
+                    "dependency_completeness",
+                    "runtime_behavior",
+                    "import_success",
+                    "test_sufficiency",
+                    "review_impact",
+                    "merge_readiness",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["artifacts"].append(
+        {
+            "role": "python_symbol_index_json",
+            "path": symbol_index.name,
+            "content_type": "application/json",
+            "bytes": symbol_index.stat().st_size,
+            "sha256": _sha256(symbol_index.read_bytes()),
+            "authority": "navigation_index",
+            "canonicality": "derived",
+        }
+    )
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    report = produce_agent_reading_pack(str(manifest))
+    body = Path(report["output_path"]).read_text(encoding="utf-8")
+
+    assert "## SYMBOL_INDEX" in body
+    assert "python_symbol_index_json" in body
+    assert "repobrief symbol search" in body
+    assert "does_not_establish: call graph completeness" in body
