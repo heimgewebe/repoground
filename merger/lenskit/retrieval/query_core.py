@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, List
 
 from .router import route_query
 from ..core.range_resolver import build_derived_range_ref
+from ..core.graph_degradation import graph_load_degradation
 from ..architecture.graph_index import load_graph_index
 
 WHY_ZERO_TOKENS = "tokens too restrictive"
@@ -501,7 +502,8 @@ def execute_query(
                     "graph_status": graph_status,
                     "node_id": node_id,
                     "distance": dist,
-                    "graph_bonus": graph_bonus
+                    "graph_bonus": graph_bonus,
+                    "degradation": graph_load_degradation(graph_status, graph_used=graph_used),
                 }
 
             start_line = r["start_line"]
@@ -708,6 +710,7 @@ def execute_query(
             "Ranking does not prove semantic importance.",
             "Snapshot query does not prove live repository state.",
             "Best-effort explain output is diagnostic, not canonical truth.",
+            "Graph diagnostics do not prove runtime reachability, runtime causality, change impact, graph completeness or default-promotion readiness.",
         ]
         if normalized_excluded_paths:
             does_not_prove.append(

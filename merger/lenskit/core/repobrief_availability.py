@@ -6,14 +6,18 @@ from typing import Any, Mapping
 
 from merger.lenskit.core.repobrief_profiles import ARTIFACT_ORDER, PROFILE_ARTIFACT_RULES, REQ_EXCLUDED, REQ_NA, REQ_RECOMMENDED, REQ_REQUIRED
 from merger.lenskit.architecture.graph_index import load_graph_index
+from merger.lenskit.core.graph_degradation import (
+    GRAPH_AVAILABILITY_STATUS_VALUES,
+    GRAPH_DOES_NOT_ESTABLISH,
+    graph_availability_degradation,
+)
 
 KIND = "repobrief.snapshot_availability"
 VERSION = "v1"
 AVAILABILITY_VALUES = ("available", "missing", "missing_required", "not_applicable", "profile_excluded", "degraded", "blocked_by_missing_dependency", "blocked_by_missing_provenance", "blocked_by_missing_source", "invalid")
 FRESHNESS_VALUES = ("fresh", "stale", "unknown", "not_comparable")
 DOES_NOT_ESTABLISH = ("truth", "correctness", "completeness", "runtime_behavior", "test_sufficiency", "regression_absence", "repo_understood", "claims_true", "forensic_ready", "freshness_against_remote", "merge_readiness")
-GRAPH_AVAILABILITY_VALUES = ("available", "stale", "not_generated", "profile_excluded", "blocked_by_missing_source", "blocked_by_missing_provenance", "invalid")
-GRAPH_DOES_NOT_ESTABLISH = ("graph_completeness", "dependency_completeness", "test_sufficiency", "runtime_behavior", "review_impact", "retrieval_improvement", "merge_readiness")
+GRAPH_AVAILABILITY_VALUES = GRAPH_AVAILABILITY_STATUS_VALUES
 LINKED_SIDECAR_ROLES = {"post_emit_health_path": "post_emit_health", "bundle_surface_validation_path": "bundle_surface_validation", "surface_validation_path": "bundle_surface_validation", "export_safety_report_path": "export_safety_report"}
 
 
@@ -109,6 +113,18 @@ def _graph_record_state(record: dict[str, Any] | None) -> tuple[str, str]:
     return "present", "artifact is listed and file-backed"
 
 
+
+def _complete_graph_availability(base: dict[str, Any], *, status: str, reason: str, load_status: str | None = None) -> dict[str, Any]:
+    degradation = graph_availability_degradation(status, load_status=load_status, reason=reason)
+    base.update({
+        "status": status,
+        "reason": reason,
+        "retrieval_eligible": degradation["retrieval_eligible"],
+        "degradation": degradation,
+    })
+    return base
+
+
 def graph_availability_model(manifest_path: str | Path, manifest: Mapping[str, Any], *, profile: str | None = None) -> dict[str, Any]:
     """Report graph availability without promoting graph evidence to truth.
 
@@ -152,44 +168,38 @@ def graph_availability_model(manifest_path: str | Path, manifest: Mapping[str, A
     }
 
     if effective_profile == "public-share":
-        base.update({"status": "profile_excluded", "reason": "graph surfaces are excluded for public-share profile"})
-        return base
+        return _complete_graph_availability(base, status="profile_excluded", reason="graph surfaces are excluded for public-share profile")
 
     if graph_record is None and index_record is None:
-        base.update({"status": "not_generated", "reason": "graph artifacts are not listed in the bundle manifest"})
-        return base
+        return _complete_graph_availability(base, status="not_generated", reason="graph artifacts are not listed in the bundle manifest")
 
     if graph_state == "invalid" or index_state == "invalid":
-        base.update({"status": "invalid", "reason": "one or more graph artifact paths are invalid"})
-        return base
+        return _complete_graph_availability(base, status="invalid", reason="one or more graph artifact paths are invalid")
 
     if graph_state == "missing" or index_state == "missing":
-        base.update({"status": "blocked_by_missing_source", "reason": "one or more listed graph artifacts are missing on disk"})
-        return base
+        return _complete_graph_availability(base, status="blocked_by_missing_source", reason="one or more listed graph artifacts are missing on disk")
 
     if index_record is None:
-        base.update({"status": "not_generated", "reason": "graph index artifact is not listed"})
-        return base
+        return _complete_graph_availability(base, status="not_generated", reason="graph index artifact is not listed")
 
     expected_sha = None
     links = manifest.get("links")
     if isinstance(links, dict) and isinstance(links.get("canonical_dump_index_sha256"), str):
         expected_sha = links["canonical_dump_index_sha256"]
     if not expected_sha:
-        base.update({"status": "blocked_by_missing_provenance", "reason": "canonical dump index sha256 is unavailable for graph staleness check"})
-        return base
+        return _complete_graph_availability(base, status="blocked_by_missing_provenance", reason="canonical dump index sha256 is unavailable for graph staleness check")
 
     load_status = load_graph_index(path.parent, str(index_record.get("path")), expected_sha)
     graph_status = load_status.get("status")
     base["graph_index"]["load_status"] = graph_status
     if graph_status == "ok":
-        base.update({"status": "available", "reason": "graph index is file-backed, schema-valid and provenance-coherent", "retrieval_eligible": True})
+        _complete_graph_availability(base, status="available", reason="graph index is file-backed, schema-valid and provenance-coherent", load_status=graph_status)
     elif graph_status == "stale_or_mismatched":
-        base.update({"status": "stale", "reason": "graph index canonical dump hash does not match this snapshot", "retrieval_eligible": False})
+        _complete_graph_availability(base, status="stale", reason="graph index canonical dump hash does not match this snapshot", load_status=graph_status)
     elif graph_status in {"not_found", "unreadable"}:
-        base.update({"status": "blocked_by_missing_source", "reason": f"graph index load status is {graph_status}"})
+        _complete_graph_availability(base, status="blocked_by_missing_source", reason=f"graph index load status is {graph_status}", load_status=graph_status)
     else:
-        base.update({"status": "invalid", "reason": f"graph index load status is {graph_status}"})
+        _complete_graph_availability(base, status="invalid", reason=f"graph index load status is {graph_status}", load_status=graph_status)
     return base
 
 def snapshot_freshness_model(manifest: Mapping[str, Any], *, max_age_seconds: int | None = None, as_of: datetime.datetime | None = None) -> dict[str, Any]:

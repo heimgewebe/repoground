@@ -12,6 +12,7 @@ import math
 from pathlib import Path
 from typing import Any, Mapping
 
+from merger.lenskit.core.graph_degradation import graph_gap_from_availability
 from merger.lenskit.core.repobrief_access import (
     query_existing_index,
     resolve_required_reading_for_bundle,
@@ -519,7 +520,7 @@ def compile_context_plan(
     if isinstance(freshness, dict) and freshness.get("status") not in {"fresh", "not_comparable"}:
         gaps.append({"source": "freshness", "status": freshness.get("status"), "reason": freshness.get("reason")})
     if isinstance(graph_availability, dict) and graph_availability.get("status") != "available":
-        gaps.append({"source": "graph_availability", "status": graph_availability.get("status"), "reason": graph_availability.get("reason")})
+        gaps.append(graph_gap_from_availability("graph_availability", graph_availability))
 
     retrieval_candidates, retrieval_signal, retrieval_gaps = _retrieval_candidates(
         manifest_path,

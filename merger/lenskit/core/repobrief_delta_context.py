@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping
 
+from merger.lenskit.core.graph_degradation import graph_gap_from_availability
 from merger.lenskit.core.lens_cards import produce_lens_card
 from merger.lenskit.core.repobrief_access import query_existing_index, search_symbol_index, snapshot_status
 
@@ -371,12 +372,7 @@ def _bundle_signals(bundle_manifest: str | Path | None) -> tuple[dict[str, Any],
         ))
     graph_status = graph.get("status") if isinstance(graph, dict) else None
     if graph_status not in {None, "available", "profile_excluded"}:
-        gaps.append(_gap(
-            "graph_availability",
-            str(graph_status),
-            graph.get("reason") if isinstance(graph, dict) else "graph availability is unknown",
-            severity="warn",
-        ))
+        gaps.append(graph_gap_from_availability("graph_availability", graph))
     return signal, gaps, status
 
 

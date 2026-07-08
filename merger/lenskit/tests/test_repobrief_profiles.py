@@ -188,7 +188,13 @@ def test_graph_availability_is_exposed_when_not_generated(tmp_path):
     assert graph["status"] == "not_generated"
     assert graph["retrieval_eligible"] is False
     assert graph["stale_graph_must_not_influence_retrieval"] is True
+    assert graph["degradation"]["degradation"] == "missing"
+    assert graph["degradation"]["severity"] == "info"
+    assert graph["degradation"]["graph_must_not_influence_retrieval"] is True
     assert "test_sufficiency" in graph["does_not_establish"]
+    assert "runtime_reachability" in graph["does_not_establish"]
+    assert "runtime_causality" in graph["does_not_establish"]
+    assert "change_impact" in graph["does_not_establish"]
 
 
 def test_graph_availability_reports_available_and_stale(tmp_path):
@@ -216,6 +222,8 @@ def test_graph_availability_reports_available_and_stale(tmp_path):
     assert graph["status"] == "available"
     assert graph["graph_index"]["load_status"] == "ok"
     assert graph["retrieval_eligible"] is True
+    assert graph["degradation"]["degradation"] == "none"
+    assert graph["degradation"]["retrieval_eligible"] is True
 
     stale = dict(data)
     stale["links"] = {"canonical_dump_index_sha256": "b" * 64}
@@ -223,6 +231,9 @@ def test_graph_availability_reports_available_and_stale(tmp_path):
     assert stale_graph["status"] == "stale"
     assert stale_graph["graph_index"]["load_status"] == "stale_or_mismatched"
     assert stale_graph["retrieval_eligible"] is False
+    assert stale_graph["degradation"]["degradation"] == "stale"
+    assert stale_graph["degradation"]["severity"] == "warn"
+    assert stale_graph["degradation"]["graph_must_not_influence_retrieval"] is True
 
 
 def test_graph_availability_profile_excluded_for_public_share(tmp_path):
@@ -241,3 +252,5 @@ def test_graph_availability_profile_excluded_for_public_share(tmp_path):
     graph = snapshot_availability_model(path, data)["graph_availability"]
     assert graph["status"] == "profile_excluded"
     assert graph["retrieval_eligible"] is False
+    assert graph["degradation"]["degradation"] == "profile_excluded"
+    assert graph["degradation"]["severity"] == "info"

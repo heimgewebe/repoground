@@ -1275,19 +1275,25 @@
     {
       "id": "TASK-GRAPH-DEGRADATION-SEMANTICS-HARDENING-001",
       "title": "Graph Degradation Semantics Hardening",
-      "status": "open",
-      "description": "Audit and harden graph-related outputs so stale, missing, invalid, degraded, or unavailable graph evidence is reported consistently and cannot be read as runtime reachability, causality, impact, completeness, or default-promotion readiness. Focus on diagnostics and consumer wording, not new graph inference.",
+      "status": "done",
+      "description": "Closed by Graph Degradation Semantics v1: graph load, availability, query explain, context compiler and delta-context graph gaps now share a diagnostic vocabulary. Only ok/available graph evidence is retrieval-eligible; stale, missing, invalid, degraded or profile-excluded graph evidence is explicitly non-promotional and does not establish runtime reachability, causality, change impact, completeness or default-promotion readiness.",
       "evidence": [
-        "docs/diagnostics/graph-current-state-audit.md",
-        "docs/architecture/system-map.lenskit.md",
-        "docs/architecture/runtime-matrix.md",
-        "merger/lenskit/architecture/graph_index.py",
-        "merger/lenskit/architecture/graph_source_validation.py"
+        "merger/lenskit/core/graph_degradation.py",
+        "merger/lenskit/core/repobrief_availability.py",
+        "merger/lenskit/retrieval/query_core.py",
+        "merger/lenskit/core/repobrief_context_compiler.py",
+        "merger/lenskit/core/repobrief_delta_context.py",
+        "merger/lenskit/tests/test_graph_degradation_semantics.py",
+        "merger/lenskit/tests/test_repobrief_profiles.py",
+        "merger/lenskit/tests/test_retrieval_query.py",
+        "docs/proofs/graph-degradation-semantics-v1-proof.md"
       ],
       "missing_evidence": [
-        "No current proof that every graph consumer uses the same degradation vocabulary.",
-        "No claim of graph completeness, import correctness, runtime reachability, causality, or impact.",
-        "No promotion of graph-conditioned ranking to default."
+        "No graph completeness proof is established.",
+        "No runtime reachability or causality proof is established.",
+        "No change-impact completeness proof is established.",
+        "No promotion of graph-conditioned ranking to default is established.",
+        "No retrieval-quality improvement is established."
       ]
     },
     {
