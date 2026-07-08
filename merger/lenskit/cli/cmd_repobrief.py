@@ -314,6 +314,28 @@ def register_repobrief_command_groups(repobrief_parser: argparse.ArgumentParser)
     symbol_search_parser.add_argument("--kind", choices=["class", "function", "async_function"], help="Filter by symbol kind")
     symbol_search_parser.add_argument("--path", help="Filter by source path substring")
 
+    context_parser = repobrief_subparsers.add_parser(
+        "context",
+        help="Compile bounded RepoBrief context plans for a task and token budget",
+    )
+    context_subparsers = context_parser.add_subparsers(
+        dest="context_cmd",
+        required=True,
+        help="Context commands",
+    )
+    context_compile = context_subparsers.add_parser(
+        "compile",
+        help="Select ordered context from existing bundle artifacts without refreshing them",
+    )
+    context_compile.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    context_compile.add_argument("--task", required=True, help="Natural-language task description")
+    context_compile.add_argument("--task-profile", default="basic_repo_question", help="Required-reading task profile")
+    context_compile.add_argument("--query", help="Optional retrieval/symbol query; defaults to --task")
+    context_compile.add_argument("--context-budget", type=int, default=8000, help="Token budget for selected context")
+    context_compile.add_argument("--signal-k", type=int, default=10, help="Maximum retrieval/symbol signal hits")
+    context_compile.add_argument("--bytes-per-token", type=float, default=4.0, help="Byte divisor used for rough token estimate")
+    context_compile.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
+
     external_parser = repobrief_subparsers.add_parser(
         "external-manifest",
         help="Write bounded external manifest references from existing bundle manifests",
@@ -444,6 +466,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_query_existing_index(args)
     if args.repobrief_cmd == "symbol" and args.symbol_cmd == "search":
         return run_symbol_search(args)
+    if args.repobrief_cmd == "context" and args.context_cmd == "compile":
+        return run_context_compile(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "write":
         return run_external_manifest_write(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "publish":
@@ -718,6 +742,29 @@ def run_symbol_search(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "available" else 1
+
+
+def run_context_compile(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_context_compiler import compile_context_plan
+
+    result = compile_context_plan(
+        args.bundle_manifest,
+        task=args.task,
+        task_profile=args.task_profile,
+        context_budget_tokens=args.context_budget,
+        query=args.query,
+        signal_k=args.signal_k,
+        bytes_per_token=args.bytes_per_token,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    status = result.get("status")
+    if status == "pass":
+        return 0
+    if status == "warn":
+        return 1 if args.strict else 0
+    if status in {"fail", "invalid"}:
+        return 1
+    return 2
 
 
 def run_preflight(args: argparse.Namespace) -> int:
