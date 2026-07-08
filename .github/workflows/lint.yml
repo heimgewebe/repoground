@@ -29,8 +29,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "ruff==0.15.13"
 
-      # F401: unused imports. F811: redefined-while-unused.
-      # Test fixtures are excluded because they intentionally hold
-      # invalid/unused-import code used by the linter/graph tests.
-      - name: Check unused/redefined imports
-        run: ruff check --select=F401,F811 --exclude='**/fixtures/**' .
+      # Repo-wide ratchet scope is intentionally isolated in ruff-ci.toml.
+      # Bare path-scoped Ruff jobs keep Ruff's default rule selection.
+      - name: Check pinned Ruff scope
+        run: ruff check --config ruff-ci.toml .

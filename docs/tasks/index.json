@@ -1146,10 +1146,20 @@
     {
       "id": "TASK-LINT-RUFF-SCOPE-001",
       "title": "Ruff Lint Scope Ratchet",
-      "status": "open",
-      "description": "CI lint gates only F401/F811; a full ruff run reports ~120 findings outside the gate (E701, E402, E741, E731 and friends) and there is no ruff config file, so local runs diverge from CI. Introduce a checked-in ruff configuration mirroring the CI selection and decide on a stepwise ratchet for the wider rule set.",
+      "status": "done",
+      "description": "Closed by the Ruff Scope Ratchet v1 slice: a checked-in ruff-ci.toml now mirrors the repo-wide CI gate (F401/F811 only, fixtures excluded), and both CI and CONTRIBUTING.md call `ruff check --config ruff-ci.toml .`. The narrow selection is not global, so path-scoped bare Ruff jobs keep Ruff default rules. The broader repo-wide Ruff default findings remain intentionally outside this ratchet.",
       "evidence": [
-        ".github/workflows/lint.yml"
+        "ruff-ci.toml",
+        ".github/workflows/lint.yml",
+        "CONTRIBUTING.md",
+        "docs/proofs/ruff-scope-ratchet-v1-proof.md",
+        "docs/architecture/inconsistencies.md"
+      ],
+      "missing_evidence": [
+        "This closeout does not claim the full Ruff default rule set is clean repository-wide.",
+        "E701/E402/E741/E731 and other wider Ruff findings remain outside this PR.",
+        "No formatting policy or broad lint cleanup is introduced.",
+        "Path-scoped Ruff jobs are not moved onto the narrow repo-wide ratchet config."
       ]
     }
   ]
