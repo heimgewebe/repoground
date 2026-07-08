@@ -268,6 +268,29 @@ def register_repobrief_command_groups(repobrief_parser: argparse.ArgumentParser)
     resolve_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
     resolve_parser.add_argument("--task-profile", required=True, help="Required-reading task profile")
 
+    query_parser = repobrief_subparsers.add_parser(
+        "query",
+        help="Run a read-only resolved evidence query against an existing Brief Bundle",
+    )
+    query_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    query_parser.add_argument("--q", default="", help="Search query text")
+    query_parser.add_argument("--k", type=int, default=10, help="Maximum resolved hits")
+    query_parser.add_argument("--repo", help="Filter by repo_id")
+    query_parser.add_argument("--path", help="Filter by path substring")
+    query_parser.add_argument("--ext", help="Filter by file extension")
+    query_parser.add_argument("--layer", help="Filter by layer")
+    query_parser.add_argument("--artifact-type", help="Filter by artifact_type")
+    query_parser.add_argument(
+        "--raw-index-result",
+        action="store_true",
+        help="Disable resolved evidence and return only the bounded raw index result",
+    )
+    query_parser.add_argument(
+        "--no-project-sources",
+        action="store_true",
+        help="Do not add the compact source citation projection",
+    )
+
     external_parser = repobrief_subparsers.add_parser(
         "external-manifest",
         help="Write bounded external manifest references from existing bundle manifests",
@@ -372,6 +395,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_artifact_list(args)
     if args.repobrief_cmd == "required-reading" and args.required_reading_cmd == "resolve":
         return run_required_reading_resolve(args)
+    if args.repobrief_cmd == "query":
+        return run_query_existing_index(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "write":
         return run_external_manifest_write(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "publish":
@@ -574,6 +599,32 @@ def run_required_reading_resolve(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") in {"pass", "warn"} else 1
+
+def run_query_existing_index(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_access import query_existing_index
+
+    filters = {
+        "repo": args.repo,
+        "path": args.path,
+        "ext": args.ext,
+        "layer": args.layer,
+        "artifact_type": getattr(args, "artifact_type", None),
+    }
+    try:
+        result = query_existing_index(
+            args.bundle_manifest,
+            args.q,
+            k=args.k,
+            filters=filters,
+            resolve_evidence=not args.raw_index_result,
+            project_sources=not args.raw_index_result and not args.no_project_sources,
+        )
+    except ValueError as exc:
+        print("repobrief query: " + str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0 if result.get("status") == "available" else 1
+
 
 def run_preflight(args: argparse.Namespace) -> int:
     from merger.lenskit.core.repobrief_preflight import run_consumption_preflight
