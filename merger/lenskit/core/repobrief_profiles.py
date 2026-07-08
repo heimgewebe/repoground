@@ -43,6 +43,7 @@ ARTIFACT_ORDER = (
     "pr_delta_cards_jsonl",
     "relation_cards_jsonl",
     "retrieval_eval_json",
+    "python_symbol_index_json",
 )
 
 BASE_RULES = {
@@ -60,6 +61,7 @@ BASE_RULES = {
     "pr_delta_cards_jsonl": REQ_NA,
     "relation_cards_jsonl": REQ_OPTIONAL,
     "retrieval_eval_json": REQ_OPTIONAL,
+    "python_symbol_index_json": REQ_OPTIONAL,
 }
 
 PROFILE_ARTIFACT_RULES = {
@@ -74,6 +76,7 @@ PROFILE_ARTIFACT_RULES = {
         "sqlite_index": REQ_RECOMMENDED,
         "export_safety_report": REQ_REQUIRED,
         "retrieval_eval_json": REQ_RECOMMENDED,
+        "python_symbol_index_json": REQ_RECOMMENDED,
     },
     "full-max": {
         **BASE_RULES,
@@ -82,6 +85,7 @@ PROFILE_ARTIFACT_RULES = {
         "pr_delta_cards_jsonl": REQ_OPTIONAL,
         "relation_cards_jsonl": REQ_RECOMMENDED,
         "retrieval_eval_json": REQ_RECOMMENDED,
+        "python_symbol_index_json": REQ_RECOMMENDED,
     },
     "pr-review": {
         **BASE_RULES,
@@ -101,12 +105,14 @@ PROFILE_ARTIFACT_RULES = {
         "sqlite_index": REQ_EXCLUDED,
         "export_safety_report": REQ_REQUIRED,
         "retrieval_eval_json": REQ_NA,
+        "python_symbol_index_json": REQ_EXCLUDED,
     },
     "ci-artifact": {
         **BASE_RULES,
         "citation_map_jsonl": REQ_RECOMMENDED,
         "export_safety_report": REQ_RECOMMENDED,
         "retrieval_eval_json": REQ_RECOMMENDED,
+        "python_symbol_index_json": REQ_RECOMMENDED,
     },
 }
 

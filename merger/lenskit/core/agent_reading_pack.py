@@ -71,6 +71,7 @@ _LENS_CARD_ROLES = ("lens_cards_jsonl", "lens_card_jsonl", "lens_cards")
 _CONCEPT_CARD_ROLES = ("concept_cards_jsonl", "concept_card_jsonl", "concept_cards")
 _PR_DELTA_CARD_ROLES = ("pr_delta_cards_jsonl", "pr_delta_card_jsonl", "pr_delta_cards")
 _RELATION_CARD_ROLES = ("relation_cards_jsonl", "relation_card_jsonl", "relation_cards")
+_SYMBOL_INDEX_ROLES = ("python_symbol_index_json", "python_symbol_index")
 
 
 class AgentReadingPackError(Exception):
@@ -424,6 +425,7 @@ _ROLE_GUIDE = {
     "delta_json": "diagnostic change delta vs a prior run",
     "concept_cards_jsonl": "Concept Card navigation index over explicit task concepts, dependencies, failures and queries",
     "relation_cards_jsonl": "Relation Card navigation index over supported local import edges",
+    "python_symbol_index_json": "Python AST symbol navigation index; static parse only, not runtime truth",
 }
 
 
@@ -699,6 +701,28 @@ def render_agent_reading_pack(model: PackModel) -> str:
     lines.append(
         "- Relation Cards, when present, expose formal or heuristic links. They do "
         "not prove impact, causality, test sufficiency, runtime behavior or regression absence."
+    )
+    lines.append("")
+
+    # ── SYMBOL_INDEX ────────────────────────────────────────────────────
+    lines.append("## SYMBOL_INDEX")
+    symbol_index_artifacts = _artifacts_by_roles(model, _SYMBOL_INDEX_ROLES)
+    if symbol_index_artifacts:
+        for artifact in symbol_index_artifacts:
+            _append_artifact_bullet(lines, artifact)
+        lines.append(
+            "- CLI: `python3 -m merger.lenskit.cli.main repobrief symbol search "
+            "--bundle-manifest <manifest> --q <name>`"
+        )
+    else:
+        lines.append("- No bundle-registered Python Symbol Index artifact is present in this manifest.")
+    lines.append(
+        "- Symbol Index records are parsed from Python AST without importing or executing "
+        "target code. They are navigation hints only."
+    )
+    lines.append(
+        "- does_not_establish: call graph completeness, dependency completeness, import "
+        "success, runtime behavior, test sufficiency, review impact or merge readiness."
     )
     lines.append("")
 

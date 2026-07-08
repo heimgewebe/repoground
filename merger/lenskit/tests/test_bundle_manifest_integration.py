@@ -1997,3 +1997,45 @@ def test_agent_entry_manifest_file_exists_and_schema_valid(tmp_path):
     assert payload["authority"] == "navigation_index"
     assert payload["canonicality"] == "derived"
     assert "repo_understood" in payload["does_not_establish"]
+
+
+
+def test_bundle_manifest_registers_python_symbol_index_json(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "tool.py").write_text("def build_context():\n    return None\n", encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[scan_repo(src_dir)],
+        detail="test",
+        mode="gesamt",
+        max_bytes=1000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+    manifest = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    schema = json.loads(_BUNDLE_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=manifest, schema=schema)
+    entry = _artifact_by_role(manifest, ArtifactRole.PYTHON_SYMBOL_INDEX_JSON.value)
+
+    assert entry is not None
+    assert entry["contract"] == {"id": "python-symbol-index", "version": "v1"}
+    assert entry["interpretation"]["mode"] == "contract"
+    assert entry["authority"] == "navigation_index"
+    assert entry["canonicality"] == "derived"
+    assert entry["risk_class"] == "navigation"
+    symbol_path = artifacts.bundle_manifest.parent / entry["path"]
+    symbol_doc = json.loads(symbol_path.read_text(encoding="utf-8"))
+    symbol_schema = json.loads((_CONTRACTS_DIR / "python-symbol-index.v1.schema.json").read_text(encoding="utf-8"))
+    jsonschema.validate(instance=symbol_doc, schema=symbol_schema)
+    assert symbol_doc["symbols"][0]["qualified_name"] == "build_context"
+    assert artifacts.python_symbol_index == symbol_path

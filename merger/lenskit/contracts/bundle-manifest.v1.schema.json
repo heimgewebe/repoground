@@ -146,7 +146,8 @@
               "lens_cards_jsonl",
               "concept_cards_jsonl",
               "relation_cards_jsonl",
-              "pr_delta_cards_jsonl"
+              "pr_delta_cards_jsonl",
+              "python_symbol_index_json"
             ],
             "description": "Machine-readable enum role for this artifact."
           },
@@ -314,7 +315,8 @@
                     "concept_cards_jsonl",
                     "relation_cards_jsonl",
                     "pr_delta_cards_jsonl",
-                    "snapshot_plan_json"
+                    "snapshot_plan_json",
+                    "python_symbol_index_json"
                   ]
                 }
               },
