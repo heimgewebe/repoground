@@ -2,7 +2,7 @@
 
 Task: `TASK-GRAPH-DEGRADATION-SEMANTICS-HARDENING-001` / Bureau `RPU-V1-T010`.
 
-Status: shared diagnostic vocabulary and consumer wiring for stale, missing, invalid, degraded or unavailable graph evidence.
+Status: shared diagnostic vocabulary and consumer wiring for stale, missing, invalid, validation-unavailable, degraded or unavailable graph evidence.
 
 ## Implemented surface
 
@@ -52,6 +52,7 @@ missing_provenance
 stale
 profile_excluded
 invalid
+validation_unavailable
 degraded
 ```
 
@@ -100,7 +101,7 @@ Tests cover:
 - stale graph use is flagged inconsistent;
 - availability degradation vocabulary for stale, missing, available and profile-excluded states;
 - gap projection preserving negative semantics;
-- graph availability model output for available, stale, missing and profile-excluded bundles;
+- graph availability model output for available, stale, missing, validation-unavailable and profile-excluded bundles;
 - query explain output for stale graph diagnostics;
 - query claim-boundary language.
 

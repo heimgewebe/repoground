@@ -9,6 +9,7 @@ GRAPH_AVAILABILITY_STATUS_VALUES = (
     "profile_excluded",
     "blocked_by_missing_source",
     "blocked_by_missing_provenance",
+    "validation_unavailable",
     "invalid",
 )
 
@@ -56,6 +57,7 @@ _AVAILABILITY_STATUS_MAP: dict[str, tuple[str, str]] = {
     "profile_excluded": ("profile_excluded", "info"),
     "blocked_by_missing_source": ("missing_source", "warn"),
     "blocked_by_missing_provenance": ("missing_provenance", "warn"),
+    "validation_unavailable": ("degraded", "warn"),
     "invalid": ("invalid", "error"),
 }
 

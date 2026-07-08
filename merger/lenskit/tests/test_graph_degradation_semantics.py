@@ -34,12 +34,16 @@ def test_graph_load_degradation_flags_inconsistent_use():
 def test_graph_availability_degradation_vocabulary():
     stale = graph_availability_degradation("stale", load_status="stale_or_mismatched")
     missing = graph_availability_degradation("not_generated")
+    validation_unavailable = graph_availability_degradation("validation_unavailable", load_status="validation_unavailable")
     available = graph_availability_degradation("available", load_status="ok")
     assert stale["degradation"] == "stale"
     assert stale["severity"] == "warn"
     assert stale["retrieval_eligible"] is False
     assert missing["degradation"] == "missing"
     assert missing["severity"] == "info"
+    assert validation_unavailable["degradation"] == "degraded"
+    assert validation_unavailable["severity"] == "warn"
+    assert validation_unavailable["retrieval_eligible"] is False
     assert available["degradation"] == "none"
     assert available["retrieval_eligible"] is True
 

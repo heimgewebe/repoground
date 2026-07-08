@@ -198,6 +198,8 @@ def graph_availability_model(manifest_path: str | Path, manifest: Mapping[str, A
         _complete_graph_availability(base, status="stale", reason="graph index canonical dump hash does not match this snapshot", load_status=graph_status)
     elif graph_status in {"not_found", "unreadable"}:
         _complete_graph_availability(base, status="blocked_by_missing_source", reason=f"graph index load status is {graph_status}", load_status=graph_status)
+    elif graph_status == "validation_unavailable":
+        _complete_graph_availability(base, status="validation_unavailable", reason="graph index validation is unavailable in this runtime", load_status=graph_status)
     else:
         _complete_graph_availability(base, status="invalid", reason=f"graph index load status is {graph_status}", load_status=graph_status)
     return base

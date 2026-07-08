@@ -236,6 +236,43 @@ def test_graph_availability_reports_available_and_stale(tmp_path):
     assert stale_graph["degradation"]["graph_must_not_influence_retrieval"] is True
 
 
+def test_graph_availability_reports_validation_unavailable_as_degraded(tmp_path, monkeypatch):
+    import json
+    from merger.lenskit.core import repobrief_availability as availability
+
+    graph_path = tmp_path / "x.architecture_graph.json"
+    graph_path.write_text('{"kind":"placeholder"}', encoding="utf-8")
+    graph_index = tmp_path / "x.graph_index.json"
+    graph_index.write_text('{"kind":"placeholder"}', encoding="utf-8")
+    expected_sha = "a" * 64
+    data = {
+        "created_at": "2026-07-06T10:00:00Z",
+        "artifacts": [
+            {"role": "architecture_graph_json", "path": graph_path.name},
+            {"role": "graph_index_json", "path": graph_index.name},
+        ],
+        "links": {"canonical_dump_index_sha256": expected_sha},
+        "capabilities": {"repobrief_profile": "agent-portable"},
+    }
+    path = tmp_path / "bundle.manifest.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    monkeypatch.setattr(
+        availability,
+        "load_graph_index",
+        lambda *_args, **_kwargs: {"status": "validation_unavailable", "graph": None},
+    )
+
+    graph = availability.snapshot_availability_model(path, data)["graph_availability"]
+
+    assert graph["status"] == "validation_unavailable"
+    assert graph["graph_index"]["load_status"] == "validation_unavailable"
+    assert graph["retrieval_eligible"] is False
+    assert graph["degradation"]["degradation"] == "degraded"
+    assert graph["degradation"]["severity"] == "warn"
+    assert graph["degradation"]["graph_must_not_influence_retrieval"] is True
+
+
 def test_graph_availability_profile_excluded_for_public_share(tmp_path):
     import json
     from merger.lenskit.core.repobrief_availability import snapshot_availability_model
