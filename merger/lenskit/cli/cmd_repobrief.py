@@ -336,6 +336,28 @@ def register_repobrief_command_groups(repobrief_parser: argparse.ArgumentParser)
     context_compile.add_argument("--bytes-per-token", type=float, default=4.0, help="Byte divisor used for rough token estimate")
     context_compile.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
 
+    delta_context_parser = repobrief_subparsers.add_parser(
+        "delta-context",
+        help="Compile bounded PR/revision delta context without emitting a review verdict",
+    )
+    delta_context_subparsers = delta_context_parser.add_subparsers(
+        dest="delta_context_cmd",
+        required=True,
+        help="Delta-context commands",
+    )
+    delta_context_compile = delta_context_subparsers.add_parser(
+        "compile",
+        help="Read a unified diff and optional bundle signals into review context",
+    )
+    delta_context_compile.add_argument("--diff", required=True, help="Path to a unified git diff")
+    delta_context_compile.add_argument("--bundle-manifest", help="Optional existing Brief Bundle manifest")
+    delta_context_compile.add_argument("--task", default="Review pull request delta", help="Natural-language review task")
+    delta_context_compile.add_argument("--context-budget", type=int, default=8000, help="Token budget for selected context")
+    delta_context_compile.add_argument("--signal-k", type=int, default=10, help="Maximum symbol/relation/citation hints")
+    delta_context_compile.add_argument("--context-window-lines", type=int, default=20, help="Lines around each changed hunk to report")
+    delta_context_compile.add_argument("--bytes-per-token", type=float, default=4.0, help="Byte divisor used for rough token estimate")
+    delta_context_compile.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
+
     external_parser = repobrief_subparsers.add_parser(
         "external-manifest",
         help="Write bounded external manifest references from existing bundle manifests",
@@ -468,6 +490,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_symbol_search(args)
     if args.repobrief_cmd == "context" and args.context_cmd == "compile":
         return run_context_compile(args)
+    if args.repobrief_cmd == "delta-context" and args.delta_context_cmd == "compile":
+        return run_delta_context_compile(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "write":
         return run_external_manifest_write(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "publish":
@@ -742,6 +766,29 @@ def run_symbol_search(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "available" else 1
+
+
+def run_delta_context_compile(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_delta_context import compile_delta_context
+
+    result = compile_delta_context(
+        diff_path=args.diff,
+        bundle_manifest=args.bundle_manifest,
+        task=args.task,
+        context_budget_tokens=args.context_budget,
+        signal_k=args.signal_k,
+        context_window_lines=args.context_window_lines,
+        bytes_per_token=args.bytes_per_token,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    status = result.get("status")
+    if status == "pass":
+        return 0
+    if status == "warn":
+        return 1 if args.strict else 0
+    if status in {"fail", "invalid"}:
+        return 1
+    return 2
 
 
 def run_context_compile(args: argparse.Namespace) -> int:
