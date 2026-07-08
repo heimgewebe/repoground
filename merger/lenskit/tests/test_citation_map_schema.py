@@ -14,6 +14,9 @@ EXAMPLE_PATH = (
     / "examples"
     / "citation_map_minimal.jsonl"
 )
+RANGE_REF_SCHEMA_PATH = (
+    Path(__file__).parent.parent / "contracts" / "range-ref.v1.schema.json"
+)
 
 CANONICAL_SHA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 SOURCE_SHA = "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
@@ -52,6 +55,49 @@ def _minimal_entry():
 
 def test_valid_citation_id_accepted(schema):
     jsonschema.validate(instance=_minimal_entry(), schema=schema)
+
+
+def test_range_ref_is_directly_valid_range_ref(schema):
+    entry = _minimal_entry()
+    cr = entry["canonical_range"]
+    entry["range_ref"] = {
+        "artifact_role": "canonical_md",
+        "repo_id": entry["repo_id"],
+        "file_path": cr["file_path"],
+        "start_byte": cr["start_byte"],
+        "end_byte": cr["end_byte"],
+        "start_line": cr["start_line"],
+        "end_line": cr["end_line"],
+        "content_sha256": cr["content_sha256"],
+        "chunk_id": "chunk-1",
+    }
+    jsonschema.validate(instance=entry, schema=schema)
+    with RANGE_REF_SCHEMA_PATH.open("r", encoding="utf-8") as f:
+        range_ref_schema = json.load(f)
+    jsonschema.validate(instance=entry["range_ref"], schema=range_ref_schema)
+
+
+def test_range_ref_absent_remains_backwards_compatible(schema):
+    entry = _minimal_entry()
+    entry.pop("range_ref", None)
+    jsonschema.validate(instance=entry, schema=schema)
+
+
+def test_range_ref_wrong_artifact_role_rejected(schema):
+    entry = _minimal_entry()
+    cr = entry["canonical_range"]
+    entry["range_ref"] = {
+        "artifact_role": "source_file",
+        "repo_id": entry["repo_id"],
+        "file_path": cr["file_path"],
+        "start_byte": cr["start_byte"],
+        "end_byte": cr["end_byte"],
+        "start_line": cr["start_line"],
+        "end_line": cr["end_line"],
+        "content_sha256": cr["content_sha256"],
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=entry, schema=schema)
 
 
 def test_citation_id_empty_rejected(schema):

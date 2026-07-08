@@ -197,6 +197,8 @@ class PackModel:
     artifacts: Tuple[ArtifactView, ...]
     health: HealthSummary
     top_files: Tuple[TopFile, ...]
+    top_chunk_spans_status: str
+    top_chunk_spans_reason: Optional[str]
     indexed_chunk_count: int
     repo_ids: Tuple[str, ...]
     bundle_manifest_path: str
@@ -961,6 +963,9 @@ def render_agent_reading_pack(model: PackModel) -> str:
         "}\n"
         "```"
     )
+    lines.append(f"- status: `{model.top_chunk_spans_status}`")
+    if model.top_chunk_spans_reason:
+        lines.append(f"- reason_code: `{model.top_chunk_spans_reason}`")
     if model.top_files:
         lines.append(
             "Largest aggregated canonical spans by chunk coverage. Navigation aid only; "
@@ -983,8 +988,8 @@ def render_agent_reading_pack(model: PackModel) -> str:
             )
     else:
         lines.append(
-            "- _No canonical file spans available "
-            "(requires both `canonical_md` and `chunk_index_jsonl`)._"
+            "- _No canonical file spans available; this is an explicit "
+            "`not_applicable` surface with a machine-readable reason_code above._"
         )
     lines.append("")
 
@@ -1299,6 +1304,8 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
 
     # --- top files (needs canonical_md bytes + chunk index) ---
     top_files: List[TopFile] = []
+    top_chunk_spans_status = "not_applicable"
+    top_chunk_spans_reason: Optional[str] = "top_chunk_spans_missing_required_inputs"
     repo_ids: List[str] = []
     indexed_chunk_count = 0
     absent_notes: List[str] = []
@@ -1313,6 +1320,11 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
             top_files, repo_ids, indexed_chunk_count = compute_top_files(
                 chunk_index_path, canonical_md_bytes, canonical_md_rel
             )
+            if top_files:
+                top_chunk_spans_status = "available"
+                top_chunk_spans_reason = None
+            else:
+                top_chunk_spans_reason = "top_chunk_spans_no_canonical_chunk_ranges"
         except (OSError, ValueError) as e:
             return _fail_report(
                 production_run_id, manifest_path_str,
@@ -1384,6 +1396,8 @@ def produce_agent_reading_pack(  # lenskit:requires-authority=canonical_content
         artifacts=tuple(artifact_views),
         health=health,
         top_files=tuple(top_files),
+        top_chunk_spans_status=top_chunk_spans_status,
+        top_chunk_spans_reason=top_chunk_spans_reason,
         indexed_chunk_count=indexed_chunk_count,
         repo_ids=tuple(repo_ids),
         bundle_manifest_path=bundle_manifest_for_pack,

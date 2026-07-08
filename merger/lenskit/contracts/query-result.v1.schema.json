@@ -195,6 +195,65 @@
             "items": {
               "type": "string"
             }
+          },
+          "source_path": {
+            "type": "string"
+          },
+          "line_range": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start_line",
+              "end_line",
+              "display"
+            ],
+            "properties": {
+              "start_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_line": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "display": {
+                "type": "string"
+              }
+            }
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_line": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "byte_range": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "start_byte",
+              "end_byte"
+            ],
+            "properties": {
+              "start_byte": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end_byte": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "start_byte": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_byte": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

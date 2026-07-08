@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+from merger.lenskit.core import repobrief_access
 from merger.lenskit.core.citation_id import make_citation_id
 from merger.lenskit.core.citation_map import (
     CitationMapError,
@@ -531,8 +532,19 @@ class TestRangeNormalisation:
         report = produce_citation_map(str(manifest_path))
         assert report["status"] == "ok", report["errors"]
         row = report["sample_rows"][0]
-        assert row["canonical_range"]["start_byte"] == 0
-        assert row["canonical_range"]["end_byte"] == 5
+        range_ref = row["range_ref"]
+        assert range_ref["artifact_role"] == "canonical_md"
+        assert range_ref["repo_id"] == row["repo_id"]
+        assert range_ref["file_path"] == row["canonical_range"]["file_path"]
+        assert range_ref["start_byte"] == row["canonical_range"]["start_byte"]
+        assert range_ref["end_byte"] == row["canonical_range"]["end_byte"]
+        assert range_ref["start_line"] == row["canonical_range"]["start_line"]
+        assert range_ref["end_line"] == row["canonical_range"]["end_line"]
+        assert range_ref["content_sha256"] == row["canonical_range"]["content_sha256"]
+        assert range_ref["chunk_id"] == row["chunk_id"]
+        resolved = repobrief_access.range_get(manifest_path, range_ref)
+        assert resolved["status"] == "available"
+        assert resolved["range"]["text"] == "ABCDE"
 
     def test_content_range_ref_fallback(self, tmp_path):
         content = b"ABCDEFGHIJ"

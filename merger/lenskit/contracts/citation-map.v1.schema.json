@@ -258,6 +258,58 @@
           "minItems": 1
         }
       }
+    },
+    "range_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_role",
+        "repo_id",
+        "file_path",
+        "start_byte",
+        "end_byte",
+        "start_line",
+        "end_line",
+        "content_sha256"
+      ],
+      "description": "Directly resolvable range-ref v1 for the canonical_range. Optional for backwards compatibility with existing citation maps; new producers should emit it.",
+      "properties": {
+        "artifact_role": {
+          "type": "string",
+          "const": "canonical_md"
+        },
+        "repo_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_byte": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_byte": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "chunk_id": {
+          "type": "string"
+        }
+      }
     }
   }
 }

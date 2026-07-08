@@ -140,11 +140,36 @@ def test_query_existing_index_resolves_hit_evidence_and_citation(tmp_path):
     assert hit["range_status"] == "resolved"
     assert hit["range"]["text"] == bundle["chunk_text"]
     assert hit["range_error_code"] is None
-    assert hit["citation_status"] == "resolved"
-    assert hit["citation_id"] == bundle["citation_id"]
-    assert hit["citation"]["canonical_range"]["file_path"] == bundle["canonical"].name
+    citation_range_ref = hit["citation"]["range_ref"]
+    assert citation_range_ref["artifact_role"] == "canonical_md"
+    assert citation_range_ref["repo_id"] == "demo"
+    assert citation_range_ref["file_path"] == bundle["canonical"].name
+    assert citation_range_ref["chunk_id"] == "c1"
+    resolved_range = repobrief_access.range_get(bundle["manifest"], citation_range_ref)
+    assert resolved_range["status"] == "available"
+    assert resolved_range["range"]["text"] == bundle["chunk_text"]
     assert resolved["does_not_establish"] == result["does_not_establish"]
     assert result["mutation_boundary"]["writes"] == []
+
+
+def test_query_existing_index_synthesizes_legacy_citation_range_ref(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+    citation_map_path = tmp_path / "demo.citation_map.jsonl"
+    row = json.loads(citation_map_path.read_text(encoding="utf-8"))
+    row.pop("range_ref", None)
+    citation_map_path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+
+    result = repobrief_access.query_existing_index(
+        bundle["manifest"], "hello", k=5, resolve_evidence=True
+    )
+
+    hit = result["resolved_evidence"]["hits"][0]
+    citation_range_ref = hit["citation"]["range_ref"]
+    assert citation_range_ref["artifact_role"] == "canonical_md"
+    assert citation_range_ref["repo_id"] == "demo"
+    assert citation_range_ref["file_path"] == bundle["canonical"].name
+    assert citation_range_ref["chunk_id"] == "c1"
+    assert repobrief_access.range_get(bundle["manifest"], citation_range_ref)["status"] == "available"
 
 
 def test_query_existing_index_degrades_when_citation_map_missing(tmp_path):

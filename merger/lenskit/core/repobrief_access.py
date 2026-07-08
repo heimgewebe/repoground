@@ -371,6 +371,47 @@ def _citation_range_key(value: Any) -> tuple[Any, ...] | None:
     return (file_path, start_byte, end_byte, content_sha256)
 
 
+def _range_ref_from_citation_row(row: dict[str, Any]) -> dict[str, Any] | None:
+    citation_id = row.get("citation_id")
+    repo_id = row.get("repo_id")
+    canonical_range = row.get("canonical_range")
+    if not isinstance(canonical_range, dict) or not _is_non_empty_string(repo_id):
+        return None
+    result = {
+        "artifact_role": "canonical_md",
+        "repo_id": repo_id,
+        "file_path": canonical_range.get("file_path"),
+        "start_byte": canonical_range.get("start_byte"),
+        "end_byte": canonical_range.get("end_byte"),
+        "start_line": canonical_range.get("start_line"),
+        "end_line": canonical_range.get("end_line"),
+        "content_sha256": canonical_range.get("content_sha256"),
+    }
+    chunk_id = row.get("chunk_id")
+    if _is_non_empty_string(chunk_id):
+        result["chunk_id"] = chunk_id
+    # Preserve citation identity outside the strict range_ref itself; range-ref.v1
+    # does not allow citation_id as an additional property.
+    if not _is_non_empty_string(citation_id):
+        return None
+    return result
+
+
+def _range_ref_is_valid_for_citation_row(value: Any, row: dict[str, Any]) -> bool:
+    if not isinstance(value, dict):
+        return False
+    expected = _range_ref_from_citation_row(row)
+    if expected is None:
+        return False
+    for key, expected_value in expected.items():
+        if value.get(key) != expected_value:
+            return False
+    allowed_keys = set(expected) | {"chunk_id"}
+    if set(value) - allowed_keys:
+        return False
+    return True
+
+
 def _citation_row_is_valid(row: dict[str, Any]) -> bool:
     citation_id = row.get("citation_id")
     if not isinstance(citation_id, str) or _CITATION_ID_RE.fullmatch(citation_id) is None:
@@ -403,8 +444,10 @@ def _citation_row_is_valid(row: dict[str, Any]) -> bool:
     chunk_id = row.get("chunk_id")
     if chunk_id is not None and not _is_non_empty_string(chunk_id):
         return False
+    range_ref = row.get("range_ref")
+    if range_ref is not None and not _range_ref_is_valid_for_citation_row(range_ref, row):
+        return False
     return True
-
 
 def _load_citation_lookup(
     manifest_path: Path,
@@ -469,12 +512,19 @@ def _load_citation_lookup(
 
 
 def _citation_record(row: dict[str, Any]) -> dict[str, Any]:
+    emitted_range_ref = row.get("range_ref")
+    range_ref = (
+        emitted_range_ref
+        if _range_ref_is_valid_for_citation_row(emitted_range_ref, row)
+        else _range_ref_from_citation_row(row)
+    )
     return {
         "citation_id": row.get("citation_id"),
         "repo_id": row.get("repo_id"),
         "chunk_id": row.get("chunk_id"),
         "snapshot": row.get("snapshot"),
         "canonical_range": row.get("canonical_range"),
+        "range_ref": range_ref,
         "source_range": row.get("source_range") if isinstance(row.get("source_range"), dict) else None,
         "live_repo_address": row.get("live_repo_address") if isinstance(row.get("live_repo_address"), dict) else None,
         "produced_by": row.get("produced_by"),

@@ -621,6 +621,17 @@ def iter_chunk_results(
                 )
                 continue
 
+            range_ref: Dict[str, Any] = {
+                "artifact_role": "canonical_md",
+                "repo_id": repo_id,
+                "file_path": canonical_md_rel,
+                "start_byte": start_byte,
+                "end_byte": end_byte,
+                "start_line": start_line,
+                "end_line": end_line,
+                "content_sha256": actual_sha,
+            }
+
             row: Dict[str, Any] = {
                 "citation_id": citation_id,
                 "repo_id": repo_id,
@@ -633,6 +644,7 @@ def iter_chunk_results(
                     "end_line": end_line,
                     "content_sha256": actual_sha,
                 },
+                "range_ref": range_ref,
                 "produced_by": PRODUCED_BY,
             }
 
@@ -652,6 +664,7 @@ def iter_chunk_results(
             chunk_id = chunk.get("chunk_id")
             if chunk_id is not None:
                 row["chunk_id"] = str(chunk_id)
+                range_ref["chunk_id"] = str(chunk_id)
 
             yield _ChunkResult(row, None, repo_id_src)
 

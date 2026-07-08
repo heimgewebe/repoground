@@ -504,11 +504,33 @@ def execute_query(
                     "graph_bonus": graph_bonus
                 }
 
+            start_line = r["start_line"]
+            end_line = r["end_line"]
+            start_byte = r["start_byte"]
+            end_byte = r["end_byte"]
+            try:
+                source_path = r["source_file"] or r["path"]
+            except IndexError:
+                source_path = r["path"]
             hit = {
                 "chunk_id": r["chunk_id"],
                 "repo_id": r["repo_id"],
                 "path": r["path"],
-                "range": f"{r['start_line']}-{r['end_line']}",
+                "source_path": source_path,
+                "range": f"{start_line}-{end_line}",
+                "line_range": {
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "display": f"{start_line}-{end_line}",
+                },
+                "start_line": start_line,
+                "end_line": end_line,
+                "byte_range": {
+                    "start_byte": start_byte,
+                    "end_byte": end_byte,
+                },
+                "start_byte": start_byte,
+                "end_byte": end_byte,
                 "score": r["score"],
                 "final_score": final_score,
                 "layer": r["layer"],

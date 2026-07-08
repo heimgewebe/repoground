@@ -824,6 +824,8 @@ def test_render_is_pure_from_model():
         artifacts=(),
         health=HealthSummary(present=False),
         top_files=(),
+        top_chunk_spans_status="not_applicable",
+        top_chunk_spans_reason="top_chunk_spans_missing_required_inputs",
         indexed_chunk_count=0,
         repo_ids=(),
         bundle_manifest_path="demo.bundle.manifest.json",
@@ -926,6 +928,47 @@ def test_agent_pack_uses_top_chunk_spans(tmp_path):
     manifest = _make_bundle(tmp_path)
     body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
     assert "## TOP_CHUNK_SPANS" in body
+
+
+def test_agent_pack_top_chunk_spans_status_available(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    body = Path(produce_agent_reading_pack(str(manifest))["output_path"]).read_text()
+    section = _section(body, "TOP_CHUNK_SPANS (top 30 by chunk coverage)")
+    assert "- status: `available`" in section
+    assert "reason_code" not in section
+    assert "| `README.md` |" in section
+
+
+def test_agent_pack_top_chunk_spans_not_applicable_has_reason():
+    model = PackModel(
+        run_id="run-1",
+        created_at="2026-07-08T00:00:00Z",
+        generator_name="test",
+        generator_version="1",
+        redaction=None,
+        fts5_bm25=None,
+        artifacts=(),
+        health=HealthSummary(present=False),
+        top_files=(),
+        top_chunk_spans_status="not_applicable",
+        top_chunk_spans_reason="top_chunk_spans_missing_required_inputs",
+        indexed_chunk_count=0,
+        repo_ids=(),
+        bundle_manifest_path="demo.bundle.manifest.json",
+        canonical_md_path=None,
+        chunk_index_path=None,
+        dump_index_path=None,
+        sqlite_index_path=None,
+        citation_map_path=None,
+        claim_evidence_map_path=None,
+        claim_count=None,
+        claim_evidence_ref_count=None,
+        claim_requires_live_check_count=None,
+    )
+    section = _section(render_agent_reading_pack(model), "TOP_CHUNK_SPANS (top 30 by chunk coverage)")
+    assert "- status: `not_applicable`" in section
+    assert "- reason_code: `top_chunk_spans_missing_required_inputs`" in section
+    assert "explicit `not_applicable` surface" in section
 
 
 def test_agent_pack_no_top_files_heading(tmp_path):
@@ -1040,6 +1083,8 @@ def test_agent_reading_pack_v2_indexes_present_artifacts():
         artifacts=artifacts,
         health=HealthSummary(present=False),
         top_files=(),
+        top_chunk_spans_status="not_applicable",
+        top_chunk_spans_reason="top_chunk_spans_missing_required_inputs",
         indexed_chunk_count=0,
         repo_ids=(),
         bundle_manifest_path="demo.bundle.manifest.json",

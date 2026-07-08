@@ -336,9 +336,15 @@ def test_cmd_query_json_emit(mini_index, capsys):
     captured = capsys.readouterr()
     assert captured.err == "", f"Expected empty stderr, got: {captured.err}"
     parsed = json.loads(captured.out)
-    assert isinstance(parsed, dict)
-    assert "results" in parsed
-    assert "explain" in parsed
+    assert parsed["results"]
+    hit = parsed["results"][0]
+    assert hit["source_path"] == hit["path"]
+    assert hit["start_line"] == hit["line_range"]["start_line"]
+    assert hit["end_line"] == hit["line_range"]["end_line"]
+    assert hit["line_range"]["display"] == hit["range"]
+    assert hit["start_byte"] == hit["byte_range"]["start_byte"]
+    assert hit["end_byte"] == hit["byte_range"]["end_byte"]
+
 
 def test_query_semantic_reranking(mini_index, monkeypatch):
     # Create a mock semantic model that produces deterministic vectors
