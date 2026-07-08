@@ -1237,19 +1237,21 @@
     {
       "id": "TASK-GUARD-RELATION-PERSISTENCE-DECISION-001",
       "title": "Guard Relation Persistence Decision",
-      "status": "open",
-      "description": "Re-evaluate whether Guard Relation Cards should be persisted after the diagnostic goldset showed false-positive and unresolved-case risk. A decision must identify a concrete consumer need, acceptable precision/recall thresholds, negative semantics, and whether persistence remains blocked.",
+      "status": "done",
+      "description": "Closed by Guard Relation Persistence Decision v1: persistent Guard Relation Cards remain blocked. No concrete current consumer requires persistence, current goldset precision is 0.666667 for both tests_by_name and validates_schema, false-positive rate is 1.0 on resolved negative controls, and unresolved cases remain present. Persistence may be reconsidered only with a named consumer and thresholds: precision >=0.95, resolved-positive recall >=0.95, false-positive rate <=0.05, zero unresolved cases per relation type, and preserved negative semantics.",
       "evidence": [
+        "docs/proofs/guard-relation-persistence-decision.v1.json",
+        "docs/proofs/guard-relation-persistence-decision-v1-proof.md",
         "docs/retrieval/guard_relation_goldset.v1.json",
-        "docs/proofs/guard-relation-goldset-proof.md",
-        "docs/proofs/guard-relation-cards-v1a-target-proof.md",
-        "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md",
-        "docs/architecture/lens-model.md"
+        "scripts/proofs/guard_relation_goldset_eval.py",
+        "merger/lenskit/tests/test_guard_relation_persistence_decision.py",
+        "merger/lenskit/tests/test_grg_goldset.py"
       ],
       "missing_evidence": [
-        "No established consumer currently requires persistent Guard Relation Cards.",
-        "Existing diagnostic precision and unresolved cases do not justify persistence by themselves.",
-        "No proof that consumers would not overread Guard Relations as test sufficiency or runtime correctness."
+        "No established concrete consumer currently requires persistent Guard Relation Cards.",
+        "Current diagnostic goldset does not meet precision or false-positive thresholds for persistence.",
+        "Unresolved cases remain present for each evaluated relation type.",
+        "No retrieval-quality improvement from persistent Guard Relation Cards is established."
       ]
     },
     {

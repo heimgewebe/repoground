@@ -1,0 +1,129 @@
+{
+  "kind": "lenskit.guard_relation_persistence_decision",
+  "version": "1.0",
+  "task": "TASK-GUARD-RELATION-PERSISTENCE-DECISION-001",
+  "bureau_task": "RPU-V1-T009",
+  "status": "blocked",
+  "decision": {
+    "persist_guard_relation_cards": false,
+    "reason": "No concrete consumer currently justifies persistent Guard Relation Cards, and the diagnostic goldset still shows false-positive and unresolved-case risk.",
+    "decision_class": "keep_blocked",
+    "revisit_when": [
+      "A concrete consumer is named and requires persistent cards rather than on-demand diagnostics.",
+      "The goldset reaches all required quality thresholds below on representative cases.",
+      "Unresolved candidates have explicit disposition and do not leak into persisted cards.",
+      "Negative semantics are preserved in any producer, manifest and consumer surface."
+    ]
+  },
+  "consumer_need": {
+    "concrete_consumer": null,
+    "consumer_status": "not_established",
+    "reviewed_possible_consumers": [
+      {
+        "name": "Retrieval v2 relation-aware ranking",
+        "status": "possible_future_consumer",
+        "reason": "Roadmap/proof language mentions possible relation-aware ranking, but no current implementation or acceptance criterion requires persistent Guard Relation Cards."
+      },
+      {
+        "name": "RepoBrief context and delta compilers",
+        "status": "not_required",
+        "reason": "Current consumers use existing bundle Relation Cards as bounded navigation hints; they do not require persistent Guard Relation Cards."
+      },
+      {
+        "name": "Bureau task verification",
+        "status": "not_required",
+        "reason": "Bureau can consume diagnostic reports and proof documents; it does not need persisted Guard Relation Cards as a source of truth."
+      }
+    ]
+  },
+  "required_thresholds_before_persistence": {
+    "minimum_precision": 0.95,
+    "minimum_resolved_positive_recall": 0.95,
+    "maximum_false_positive_rate_on_resolved_negative_cases": 0.05,
+    "maximum_unresolved_cases_per_relation_type": 0,
+    "unresolved_candidates_must_be_explained": true,
+    "consumer_must_be_named": true,
+    "negative_semantics_must_be_preserved": true
+  },
+  "current_evidence": {
+    "source_goldset": "docs/retrieval/guard_relation_goldset.v1.json",
+    "source_evaluator": "scripts/proofs/guard_relation_goldset_eval.py",
+    "goldset_scope": "diagnostic_only",
+    "relation_types": [
+      "tests_by_name",
+      "validates_schema"
+    ],
+    "by_relation": {
+      "tests_by_name": {
+        "total": 4,
+        "true_positive": 2,
+        "false_positive": 1,
+        "false_negative": 0,
+        "true_negative": 0,
+        "unresolved": 1,
+        "precision": 0.666667,
+        "recall_on_resolved_positive_cases": 1.0,
+        "false_positive_rate_on_resolved_negative_cases": 1.0
+      },
+      "validates_schema": {
+        "total": 4,
+        "true_positive": 2,
+        "false_positive": 1,
+        "false_negative": 0,
+        "true_negative": 0,
+        "unresolved": 1,
+        "precision": 0.666667,
+        "recall_on_resolved_positive_cases": 1.0,
+        "false_positive_rate_on_resolved_negative_cases": 1.0
+      }
+    },
+    "threshold_evaluation": {
+      "consumer_named": false,
+      "precision_threshold_met": false,
+      "resolved_positive_recall_threshold_met": true,
+      "false_positive_rate_threshold_met": false,
+      "unresolved_case_threshold_met": false,
+      "negative_semantics_available": true
+    },
+    "block_reasons": [
+      "no_concrete_consumer",
+      "precision_below_threshold",
+      "false_positive_rate_above_threshold",
+      "unresolved_cases_present",
+      "overread_risk_as_test_sufficiency_or_runtime_correctness"
+    ]
+  },
+  "negative_semantics": [
+    "test_sufficiency",
+    "runtime_correctness",
+    "regression_absence",
+    "review_impact",
+    "schema_runtime_equivalence",
+    "coverage_completeness",
+    "guard_effectiveness",
+    "causality"
+  ],
+  "allowed_current_use": [
+    "diagnostic_goldset",
+    "target_proof",
+    "manual_review_navigation",
+    "future_threshold_evaluation"
+  ],
+  "blocked_current_use": [
+    "persistent_guard_relation_cards",
+    "bundle_artifact_emission_for_guard_relations",
+    "default_retrieval_ranking_signal",
+    "review_or_merge_gate",
+    "test_sufficiency_claim"
+  ],
+  "does_not_establish": [
+    "test_sufficiency",
+    "runtime_correctness",
+    "regression_absence",
+    "schema_runtime_equivalence",
+    "review_completeness",
+    "need_for_persistent_guard_relation_cards",
+    "retrieval_quality_improvement",
+    "merge_readiness"
+  ]
+}
