@@ -479,12 +479,133 @@ def _citation_record(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _artifact_availability(availability_model: dict[str, Any] | None, role: str) -> dict[str, Any]:
+    if not isinstance(availability_model, dict):
+        return {
+            "role": role,
+            "availability": "unknown",
+            "requirement": None,
+            "reason": "availability_model_unavailable",
+        }
+    artifacts = availability_model.get("artifacts")
+    if isinstance(artifacts, list):
+        for artifact in artifacts:
+            if isinstance(artifact, dict) and artifact.get("role") == role:
+                return {
+                    "role": role,
+                    "availability": artifact.get("availability"),
+                    "requirement": artifact.get("requirement"),
+                    "reason": artifact.get("reason"),
+                }
+    return {
+        "role": role,
+        "availability": "missing",
+        "requirement": None,
+        "reason": "role_not_reported_in_availability_model",
+    }
+
+
+def _line_range(start_line: Any, end_line: Any) -> dict[str, Any] | None:
+    if not _is_int_not_bool(start_line) or not _is_int_not_bool(end_line):
+        return None
+    if start_line < 1 or end_line < start_line:
+        return None
+    return {
+        "start_line": start_line,
+        "end_line": end_line,
+        "display": f"{start_line}-{end_line}",
+    }
+
+
+def _enrich_resolved_hit_for_direct_use(
+    hit: dict[str, Any],
+    *,
+    availability_model: dict[str, Any] | None,
+) -> None:
+    range_value = hit.get("range")
+    text = range_value.get("text") if isinstance(range_value, dict) else None
+    raw_citation = hit.get("citation")
+    citation = raw_citation if isinstance(raw_citation, dict) else None
+    citation_range = _source_range_projection(
+        citation.get("canonical_range") if citation else None
+    )
+    range_ref_projection = (
+        _source_range_projection(hit.get("range_ref"))
+        if hit.get("range_status") == "resolved"
+        else None
+    )
+    range_projection = _source_range_projection(range_value)
+    candidates = [range_ref_projection, citation_range, range_projection]
+    source_range = next(
+        (candidate for candidate in candidates if _has_range_identity(candidate)),
+        None,
+    )
+    if source_range is None:
+        source_range = next(
+            (candidate for candidate in candidates if isinstance(candidate, dict)),
+            None,
+        )
+
+    source_path = None
+    source_line_range = None
+    artifact_path = None
+    artifact_line_range = None
+    artifact_role = None
+    if isinstance(source_range, dict):
+        source_path = _first_not_none(
+            source_range.get("source_file_path"),
+            source_range.get("file_path"),
+            hit.get("path"),
+        )
+        source_line_range = _line_range(
+            _first_not_none(source_range.get("source_start_line"), source_range.get("start_line")),
+            _first_not_none(source_range.get("source_end_line"), source_range.get("end_line")),
+        )
+        artifact_path = _first_not_none(source_range.get("artifact_path"), source_range.get("file_path"))
+        artifact_line_range = _line_range(
+            _first_not_none(source_range.get("artifact_start_line"), source_range.get("start_line")),
+            _first_not_none(source_range.get("artifact_end_line"), source_range.get("end_line")),
+        )
+        artifact_role = source_range.get("artifact_role")
+    if source_path is None:
+        source_path = hit.get("path")
+
+    hit["text_excerpt"] = text[:TEXT_EXCERPT_MAX_CHARS] if isinstance(text, str) else None
+    hit["text_truncated"] = isinstance(text, str) and len(text) > TEXT_EXCERPT_MAX_CHARS
+    hit["source_path"] = source_path
+    hit["line_range"] = source_line_range or artifact_line_range
+    hit["source_line_range"] = source_line_range
+    hit["artifact_path"] = artifact_path
+    hit["artifact_role"] = artifact_role
+    hit["artifact_line_range"] = artifact_line_range
+    hit["range_ref_verified"] = hit.get("range_status") == "resolved"
+    hit["citation_verified"] = hit.get("citation_status") == "resolved" and isinstance(
+        hit.get("citation_id"),
+        str,
+    )
+    hit["availability"] = {
+        "snapshot_status": availability_model.get("status")
+        if isinstance(availability_model, dict)
+        else "unknown",
+        "artifact": _artifact_availability(
+            availability_model,
+            str(artifact_role or "canonical_md"),
+        ),
+        "index_artifact": _artifact_availability(availability_model, "sqlite_index"),
+    }
+    hit["freshness"] = (
+        availability_model.get("freshness") if isinstance(availability_model, dict) else None
+    )
+
+
 def _resolve_hit_evidence(
     manifest_path: Path,
     hit: dict[str, Any],
     by_chunk_id: dict[str, dict[str, Any]],
     by_range: dict[tuple[Any, ...], dict[str, Any]],
     citation_map_available: bool,
+    *,
+    availability_model: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     range_candidates: list[tuple[str, dict[str, Any]]] = []
     range_ref = hit.get("range_ref")
@@ -541,16 +662,34 @@ def _resolve_hit_evidence(
             record["citation_id"] = row.get("citation_id")
             record["citation"] = _citation_record(row)
 
+    _enrich_resolved_hit_for_direct_use(record, availability_model=availability_model)
     return record
 
 
-def _resolve_query_evidence(manifest_path: Path, query_result: Any) -> dict[str, Any]:
+def _availability_model_for_manifest(manifest_path: Path) -> dict[str, Any]:
+    from merger.lenskit.core.repobrief_availability import snapshot_availability_model
+
+    manifest = _read_json_object(manifest_path)
+    return snapshot_availability_model(manifest_path, manifest)
+
+
+def _resolve_query_evidence(
+    manifest_path: Path,
+    query_result: Any,
+    *,
+    availability_model: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     hits = query_result.get("results") if isinstance(query_result, dict) else None
     hit_list = [hit for hit in (hits if isinstance(hits, list) else []) if isinstance(hit, dict)]
+    if availability_model is None:
+        availability_model = _availability_model_for_manifest(manifest_path)
+    freshness = availability_model.get("freshness") if isinstance(availability_model, dict) else None
     if not hit_list:
         return {
             "kind": RESOLVED_EVIDENCE_KIND,
             "version": RESOLVED_EVIDENCE_VERSION,
+            "availability": availability_model,
+            "freshness": freshness,
             "citation_map": {
                 "status": "skipped",
                 "error_code": None,
@@ -567,12 +706,21 @@ def _resolve_query_evidence(manifest_path: Path, query_result: Any) -> dict[str,
     by_chunk_id, by_range, citation_map_status = _load_citation_lookup(manifest_path)
     citation_map_available = citation_map_status["status"] == "available"
     resolved_hits = [
-        _resolve_hit_evidence(manifest_path, hit, by_chunk_id, by_range, citation_map_available)
+        _resolve_hit_evidence(
+            manifest_path,
+            hit,
+            by_chunk_id,
+            by_range,
+            citation_map_available,
+            availability_model=availability_model,
+        )
         for hit in hit_list
     ]
     return {
         "kind": RESOLVED_EVIDENCE_KIND,
         "version": RESOLVED_EVIDENCE_VERSION,
+        "availability": availability_model,
+        "freshness": freshness,
         "citation_map": citation_map_status,
         "hit_count": len(resolved_hits),
         "hits": resolved_hits,
@@ -868,8 +1016,14 @@ def query_existing_index(
             extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
         )
 
+    availability_model = _availability_model_for_manifest(manifest_path)
+    freshness = availability_model.get("freshness") if isinstance(availability_model, dict) else None
     resolved_evidence = (
-        _resolve_query_evidence(manifest_path, query_result)
+        _resolve_query_evidence(
+            manifest_path,
+            query_result,
+            availability_model=availability_model,
+        )
         if (resolve_evidence or project_sources)
         else None
     )
@@ -888,6 +1042,8 @@ def query_existing_index(
         "resolve_evidence": resolve_evidence,
         "project_sources": project_sources,
         "index_artifact": artifact,
+        "availability": availability_model,
+        "freshness": freshness,
         "query_result": query_result,
         "evidence_resolution_used": resolve_evidence or project_sources,
         "resolved_evidence": resolved_evidence if resolve_evidence else None,

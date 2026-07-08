@@ -370,3 +370,96 @@ def test_resolved_evidence_matches_v2_range_ref_without_chunk_id(tmp_path):
     assert resolved_hit["range_ref_source"] == "range_ref"
     assert resolved_hit["citation_status"] == "resolved"
     assert resolved_hit["citation_id"] == bundle["citation_id"]
+
+
+def test_resolved_evidence_hits_are_directly_usable(tmp_path):
+    bundle = _build_resolved_bundle(tmp_path)
+
+    result = repobrief_access.query_existing_index(
+        bundle["manifest"], "hello", k=1, resolve_evidence=True
+    )
+
+    assert result["availability"]["kind"] == "repobrief.snapshot_availability"
+    assert result["freshness"]["status"] == "unknown"
+    resolved = result["resolved_evidence"]
+    assert resolved["availability"] == result["availability"]
+    assert resolved["freshness"] == result["freshness"]
+    hit = resolved["hits"][0]
+    assert hit["text_excerpt"] == bundle["chunk_text"]
+    assert hit["text_truncated"] is False
+    assert hit["source_path"] == bundle["canonical"].name
+    assert hit["line_range"] == {"start_line": 3, "end_line": 3, "display": "3-3"}
+    assert hit["source_line_range"] == {"start_line": 3, "end_line": 3, "display": "3-3"}
+    assert hit["artifact_role"] == "canonical_md"
+    assert hit["artifact_path"] == bundle["canonical"].name
+    assert hit["range_ref_verified"] is True
+    assert hit["citation_verified"] is True
+    assert hit["availability"]["snapshot_status"] == result["availability"]["status"]
+    assert hit["availability"]["artifact"]["role"] == "canonical_md"
+    assert hit["availability"]["artifact"]["availability"] == "available"
+    assert hit["availability"]["index_artifact"]["role"] == "sqlite_index"
+    assert hit["availability"]["index_artifact"]["availability"] == "available"
+    assert hit["freshness"] == result["freshness"]
+
+
+def test_repobrief_query_cli_defaults_to_resolved_evidence(tmp_path, capsys):
+    from merger.lenskit.cli.main import main
+
+    bundle = _build_resolved_bundle(tmp_path)
+
+    rc = main([
+        "repobrief",
+        "query",
+        "--bundle-manifest",
+        str(bundle["manifest"]),
+        "--q",
+        "hello",
+        "--k",
+        "1",
+    ])
+
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["kind"] == "repobrief.query_existing_index"
+    assert data["status"] == "available"
+    assert data["resolve_evidence"] is True
+    assert data["project_sources"] is True
+    assert data["evidence_resolution_used"] is True
+    assert data["freshness"]["status"] == "unknown"
+    assert data["availability"]["kind"] == "repobrief.snapshot_availability"
+    hit = data["resolved_evidence"]["hits"][0]
+    assert hit["text_excerpt"] == bundle["chunk_text"]
+    assert hit["source_path"] == bundle["canonical"].name
+    assert hit["line_range"]["display"] == "3-3"
+    assert hit["citation_id"] == bundle["citation_id"]
+    assert data["source_citation_projection"]["items"][0]["citation_id"] == bundle["citation_id"]
+    assert data["mutation_boundary"]["writes"] == []
+    assert data["mutation_boundary"]["read_paths_do_not_refresh"] is True
+
+
+def test_repobrief_query_cli_can_emit_raw_bounded_index_result(tmp_path, capsys):
+    from merger.lenskit.cli.main import main
+
+    bundle = _build_resolved_bundle(tmp_path)
+
+    rc = main([
+        "repobrief",
+        "query",
+        "--bundle-manifest",
+        str(bundle["manifest"]),
+        "--q",
+        "hello",
+        "--k",
+        "1",
+        "--raw-index-result",
+    ])
+
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["resolve_evidence"] is False
+    assert data["project_sources"] is False
+    assert data["evidence_resolution_used"] is False
+    assert data["resolved_evidence"] is None
+    assert data["source_citation_projection"] is None
+    assert data["query_result"]["count"] == 1
+    assert data["freshness"]["status"] == "unknown"
