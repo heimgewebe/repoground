@@ -358,6 +358,24 @@ def register_repobrief_command_groups(repobrief_parser: argparse.ArgumentParser)
     delta_context_compile.add_argument("--bytes-per-token", type=float, default=4.0, help="Byte divisor used for rough token estimate")
     delta_context_compile.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
 
+    review_coverage_parser = repobrief_subparsers.add_parser(
+        "review-coverage",
+        help="Measure proof-of-reading citation coverage for delta reviews",
+    )
+    review_coverage_subparsers = review_coverage_parser.add_subparsers(
+        dest="review_coverage_cmd",
+        required=True,
+        help="Review-coverage commands",
+    )
+    review_coverage_compile = review_coverage_subparsers.add_parser(
+        "compile",
+        help="Compare a delta-context report with citations in a review artifact",
+    )
+    review_coverage_compile.add_argument("--delta-context", required=True, help="Path to a repobrief delta-context JSON report")
+    review_coverage_compile.add_argument("--review", required=True, help="Path to review text or JSON")
+    review_coverage_compile.add_argument("--min-range-coverage", type=float, default=0.6, help="Advisory minimum covered relevant range ratio")
+    review_coverage_compile.add_argument("--policy-name", default="advisory", help="Label for the advisory threshold policy")
+
     external_parser = repobrief_subparsers.add_parser(
         "external-manifest",
         help="Write bounded external manifest references from existing bundle manifests",
@@ -492,6 +510,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_context_compile(args)
     if args.repobrief_cmd == "delta-context" and args.delta_context_cmd == "compile":
         return run_delta_context_compile(args)
+    if args.repobrief_cmd == "review-coverage" and args.review_coverage_cmd == "compile":
+        return run_review_coverage_compile(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "write":
         return run_external_manifest_write(args)
     if args.repobrief_cmd == "external-manifest" and args.external_manifest_cmd == "publish":
@@ -766,6 +786,19 @@ def run_symbol_search(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "available" else 1
+
+
+def run_review_coverage_compile(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_review_coverage import compile_review_coverage
+
+    result = compile_review_coverage(
+        delta_context_path=args.delta_context,
+        review_path=args.review,
+        min_range_coverage=args.min_range_coverage,
+        policy_name=args.policy_name,
+    )
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 1 if result.get("status") == "invalid" else 0
 
 
 def run_delta_context_compile(args: argparse.Namespace) -> int:
