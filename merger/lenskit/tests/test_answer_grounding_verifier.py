@@ -4,7 +4,11 @@ from pathlib import Path
 
 import jsonschema
 
-from merger.lenskit.core.answer_grounding import NON_CLAIMS, verify_answer_grounding
+from merger.lenskit.core.answer_grounding import (
+    NON_CLAIMS,
+    verify_answer_grounding,
+    verify_answer_grounding_for_task_profile,
+)
 
 SHA = "a" * 64
 
@@ -200,6 +204,93 @@ def test_verify_answer_grounding_not_applicable_without_evidence(tmp_path):
     declaration["used_citations"] = []
 
     verdict = verify_answer_grounding(declaration, bundle_manifest=manifest, citation_map=citation_map)
+
+    _validate_verdict(verdict)
+    assert verdict["status"] == "not_applicable"
+    assert any(d["code"] == "not_applicable" for d in verdict["diagnostics"])
+
+
+def test_task_profile_missing_required_evidence_fails(tmp_path):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    declaration["task_profile"] = "pr_review"
+    declaration["declared_artifacts"] = ["agent_reading_pack", "canonical_md", "citation_map_jsonl"]
+
+    verdict = verify_answer_grounding_for_task_profile(
+        declaration,
+        bundle_manifest=manifest,
+        citation_map=citation_map,
+    )
+
+    _validate_verdict(verdict)
+    assert verdict["status"] == "fail"
+    assert any(
+        check["artifact_role"] == "post_emit_health" and check["status"] == "missing_required"
+        for check in verdict["required_reading_checks"]
+    )
+
+
+def test_task_profile_missing_recommended_evidence_warns(tmp_path):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    declaration["task_profile"] = "basic_repo_question"
+    declaration["declared_artifacts"] = ["agent_reading_pack", "canonical_md", "citation_map_jsonl"]
+
+    verdict = verify_answer_grounding_for_task_profile(
+        declaration,
+        bundle_manifest=manifest,
+        citation_map=citation_map,
+    )
+
+    _validate_verdict(verdict)
+    assert verdict["status"] == "warn"
+    assert any(
+        check["artifact_role"] == "snapshot_plan_json" and check["status"] == "missing_recommended"
+        for check in verdict["required_reading_checks"]
+    )
+
+
+def test_task_profile_carries_freshness_availability_and_non_claims(tmp_path):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    declaration["task_profile"] = "basic_repo_question"
+    declaration["declared_artifacts"] = [
+        "agent_reading_pack",
+        "canonical_md",
+        "citation_map_jsonl",
+        "snapshot_plan_json",
+    ]
+    declaration["freshness_caveats"] = [
+        {"kind": "unknown_freshness", "detail": "Snapshot freshness was not compared."}
+    ]
+    declaration["availability_caveats"] = [
+        {"kind": "missing_artifact", "detail": "Optional browser screenshot was unavailable."}
+    ]
+
+    verdict = verify_answer_grounding_for_task_profile(
+        declaration,
+        bundle_manifest=manifest,
+        citation_map=citation_map,
+    )
+
+    _validate_verdict(verdict)
+    assert verdict["status"] == "pass"
+    assert verdict["freshness_caveats"] == declaration["freshness_caveats"]
+    assert verdict["availability_caveats"] == declaration["availability_caveats"]
+    assert "actual_reading_proven" in verdict["does_not_establish"]
+    assert "repo_understood" in verdict["does_not_establish"]
+
+
+def test_unknown_task_profile_is_not_applicable(tmp_path):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    declaration["task_profile"] = "not-a-profile"
+
+    verdict = verify_answer_grounding_for_task_profile(
+        declaration,
+        bundle_manifest=manifest,
+        citation_map=citation_map,
+    )
 
     _validate_verdict(verdict)
     assert verdict["status"] == "not_applicable"

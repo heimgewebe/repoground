@@ -86,6 +86,13 @@
     },
     "does_not_establish": {
       "$ref": "#/definitions/does_not_establish_array"
+    },
+    "availability_caveats": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/caveat"
+      },
+      "description": "Availability caveats carried by the answer declaration and later mirrored into the grounding verdict."
     }
   },
   "definitions": {

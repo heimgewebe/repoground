@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from merger.lenskit.core.range_resolver import resolve_range_ref
+from merger.lenskit.core.required_reading import default_required_reading_protocol, resolve_required_reading
 
 KIND = "repobrief.answer_grounding_verdict"
 VERSION = "1.0"
@@ -159,6 +160,73 @@ def _resolve_range(manifest_path: Path, range_ref: Mapping[str, Any]) -> tuple[b
     return True, "resolved", f"Range resolved ({result.get('bytes', 'unknown')} bytes)."
 
 
+
+def _declared_evidence_roles(
+    declaration: Mapping[str, Any],
+    *,
+    used_citations: Sequence[Any] | None = None,
+    used_ranges: Sequence[Any] | None = None,
+) -> set[str]:
+    declared_roles = {str(role) for role in declaration.get("declared_artifacts") or []}
+    ranges = used_ranges if used_ranges is not None else declaration.get("used_ranges") or []
+    declared_roles.update(
+        str(item.get("artifact_role"))
+        for item in ranges
+        if isinstance(item, Mapping) and item.get("artifact_role")
+    )
+    citations = used_citations if used_citations is not None else declaration.get("used_citations") or []
+    if citations:
+        declared_roles.add("citation_map_jsonl")
+    return declared_roles
+
+
+def _profile_artifacts(task_profile: str, declared_roles: set[str]) -> tuple[list[str], list[str], dict[str, Any]]:
+    protocol = default_required_reading_protocol()
+    resolution = resolve_required_reading(protocol, declared_roles, task_profile)
+    return (
+        list(resolution.get("required") or []),
+        list(resolution.get("recommended") or []),
+        resolution,
+    )
+
+
+def verify_answer_grounding_for_task_profile(
+    declaration: Mapping[str, Any],
+    *,
+    bundle_manifest: str | Path,
+    citation_map: str | Path | None = None,
+    task_profile: str | None = None,
+) -> dict[str, Any]:
+    """Verify answer grounding using the Required Reading task-profile matrix.
+
+    The profile controls required and recommended evidence roles. Missing required
+    roles become failing required-reading checks; missing recommended roles become
+    warnings. This still does not prove that the model actually read or understood
+    the declared evidence.
+    """
+    profile = task_profile or str(declaration.get("task_profile") or "basic_repo_question")
+    declared_roles = _declared_evidence_roles(declaration)
+    required, recommended, profile_resolution = _profile_artifacts(profile, declared_roles)
+    verdict = verify_answer_grounding(
+        declaration,
+        bundle_manifest=bundle_manifest,
+        citation_map=citation_map,
+        required_artifacts=required,
+        recommended_artifacts=recommended,
+    )
+    if profile_resolution.get("status") == "not_applicable":
+        verdict["diagnostics"].append(
+            _diagnostic(
+                "not_applicable",
+                "info",
+                f"Unknown required-reading task profile: {profile}",
+                profile,
+            )
+        )
+        if verdict["status"] == "pass":
+            verdict["status"] = "not_applicable"
+    return verdict
+
 def verify_answer_grounding(
     declaration: Mapping[str, Any],
     *,
@@ -181,7 +249,7 @@ def verify_answer_grounding(
     required_checks: list[dict[str, Any]] = []
     diagnostics: list[dict[str, Any]] = []
     freshness_caveats = list(declaration.get("freshness_caveats") or [])
-    availability_caveats: list[dict[str, Any]] = []
+    availability_caveats = list(declaration.get("availability_caveats") or [])
 
     if not manifest_path.exists():
         diagnostics.append(
@@ -279,15 +347,7 @@ def verify_answer_grounding(
                 )
             )
 
-    declared_roles = set(declaration.get("declared_artifacts") or [])
-    # Grounding declarations may not carry declared_artifacts yet; infer roles from evidence.
-    declared_roles.update(
-        str(r.get("artifact_role"))
-        for r in used_ranges
-        if isinstance(r, Mapping) and r.get("artifact_role")
-    )
-    if used_citations:
-        declared_roles.add("citation_map_jsonl")
+    declared_roles = _declared_evidence_roles(declaration, used_citations=used_citations, used_ranges=used_ranges)
 
     for role in required_artifacts:
         if role in declared_roles:
