@@ -1165,19 +1165,25 @@
     {
       "id": "TASK-REPOBRIEF-SYMBOL-INDEX-CONSUMER-001",
       "title": "RepoBrief Symbol Index Consumer Wiring",
-      "status": "open",
-      "description": "Wire the existing deterministic Python AST symbol index into RepoBrief consumer surfaces as a read-only navigation aid: decide whether and how it appears in bundle manifests, Agent Reading Pack indexes, CLI/read-access commands, availability reporting, and query helpers. Preserve the existing non-claims: symbol presence does not prove reachability, runtime behavior, dependency completeness, test sufficiency, review impact, or merge readiness.",
+      "status": "done",
+      "description": "Closed by this slice: the existing deterministic Python AST symbol index is now emitted as `python_symbol_index_json`, registered in bundle manifests, surfaced in Agent Reading Pack guidance, covered by profile availability rules, and searchable through a read-only `repobrief symbol search` consumer. Operator/cache directories are excluded to reduce local-state pollution. The surface remains navigation-only.",
       "evidence": [
         "merger/lenskit/architecture/symbol_index.py",
         "merger/lenskit/contracts/python-symbol-index.v1.schema.json",
+        "merger/lenskit/core/merge.py",
+        "merger/lenskit/core/repobrief_access.py",
+        "merger/lenskit/core/agent_reading_pack.py",
+        "merger/lenskit/cli/cmd_repobrief.py",
         "merger/lenskit/tests/test_python_symbol_index.py",
-        "docs/proofs/python-symbol-index-proof.md",
-        "docs/architecture/repobrief-agent-optimization-triage.md"
+        "merger/lenskit/tests/test_repobrief_symbol_index_consumer.py",
+        "merger/lenskit/tests/test_bundle_manifest_integration.py::test_bundle_manifest_registers_python_symbol_index_json",
+        "merger/lenskit/tests/test_agent_reading_pack.py::test_pack_renders_symbol_index_guidance",
+        "docs/proofs/repobrief-symbol-index-consumer-v1-proof.md"
       ],
       "missing_evidence": [
-        "No proof yet that the symbol index is registered as a bundle artifact or surfaced in Agent Reading Pack / CLI consumers.",
-        "No claim that symbol data improves retrieval or agent edit quality.",
-        "No runtime reachability, call graph completeness, or import success claim."
+        "No claim that symbol data improves retrieval quality, agent edit quality, or review correctness.",
+        "No call graph completeness, dependency completeness, import success, runtime behavior, test sufficiency, review impact, or merge-readiness claim.",
+        "No MCP resource surface is implemented by this task; that remains TASK-REPOBRIEF-MCP-READONLY-RESOURCES-001."
       ]
     },
     {

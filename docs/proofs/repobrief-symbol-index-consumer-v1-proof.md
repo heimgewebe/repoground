@@ -79,7 +79,8 @@ Tests cover:
 - missing artifact diagnostics without creation;
 - kind and path filters;
 - public-share profile exclusion;
-- static AST symbol extraction remains deterministic.
+- static AST symbol extraction remains deterministic;
+- operator/cache directory exclusion so local `.grabowski`, `.claude`, pytest, Ruff, mypy and tox state does not pollute navigation symbols.
 
 ## Non-claims
 
