@@ -162,7 +162,29 @@ def _base_result(uri: str, manifest: Path | None, *, status: str, reason: str | 
     }
 
 
+def _safe_bundle_file(manifest: Path, artifact: dict[str, Any]) -> Path | None:
+    raw_absolute_path = artifact.get("absolute_path")
+    if not isinstance(raw_absolute_path, str) or not raw_absolute_path:
+        return None
+    path = Path(raw_absolute_path).expanduser().resolve()
+    try:
+        path.relative_to(manifest.parent.resolve())
+    except ValueError:
+        return None
+    return path
+
+
 def _read_artifact_resource(uri: str, manifest: Path, role: str) -> dict[str, Any]:
+    if role == "bundle_manifest":
+        text, parsed = _artifact_text(manifest)
+        result = _base_result(uri, manifest, status="available")
+        result.update({"resource_role": "bundle_manifest", "content_type": "application/json"})
+        if text is not None:
+            result["content_text"] = text
+        if parsed is not None:
+            result["content_json"] = parsed
+        return result
+
     ref = repobrief_access.get_artifact(manifest, role)
     result = _base_result(uri, manifest, status=ref.get("status", "unknown"))
     result.update({"resource_role": role, "artifact_ref": ref.get("artifact")})
@@ -170,9 +192,11 @@ def _read_artifact_resource(uri: str, manifest: Path, role: str) -> dict[str, An
     if not isinstance(artifact, dict) or not artifact.get("path"):
         result["reason"] = f"artifact role not available: {role}"
         return result
-    raw_path = Path(str(artifact["path"])).expanduser()
-    path = raw_path if raw_path.is_absolute() else (manifest.parent / raw_path)
-    path = path.resolve()
+    path = _safe_bundle_file(manifest, artifact)
+    if path is None:
+        result["status"] = "blocked"
+        result["reason"] = f"artifact path escapes bundle root for role: {role}"
+        return result
     if not path.is_file():
         result["status"] = "missing"
         result["reason"] = f"artifact file missing: {path}"

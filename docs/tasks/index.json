@@ -1189,17 +1189,21 @@
     {
       "id": "TASK-REPOBRIEF-MCP-READONLY-RESOURCES-001",
       "title": "RepoBrief MCP Read-only Resources",
-      "status": "open",
-      "description": "Implement the first RepoBrief MCP surface as resources over existing Brief Bundles only: manifest, canonical source, reading pack, health, availability, and artifact-by-role. Reads must not create snapshots, refresh bundles, touch Git, run shells, inspect secrets, open PRs, apply patches, or produce review verdicts.",
+      "status": "done",
+      "description": "Closed by RepoBrief MCP Read-only Resources v1: code-level resource templates and reads now expose existing Brief Bundle manifest, canonical source, Agent Reading Pack, health, availability, and artifact-by-role resources. Reads are bounded to existing bundle files, carry health/freshness/availability context, block artifact paths that escape the bundle root, and retain read-only/non-claim semantics. This is not an MCP protocol server.",
       "evidence": [
+        "merger/lenskit/core/repobrief_mcp_resources.py",
+        "merger/lenskit/tests/test_repobrief_mcp_resources.py",
         "docs/architecture/repobrief-mcp-boundary.md",
         "docs/architecture/repobrief-agent-workbench-boundary.md",
-        "merger/lenskit/tests/test_repobrief_mcp_boundary_doc.py"
+        "merger/lenskit/tests/test_repobrief_mcp_boundary_doc.py",
+        "docs/proofs/repobrief-mcp-readonly-resources-v1-proof.md",
+        "docs/proofs/repobrief-mcp-readonly-resources-v1.self-review.md"
       ],
       "missing_evidence": [
-        "No MCP server/resources implementation exists yet.",
-        "No read-only resource contract tests exist yet.",
-        "No evidence that MCP access preserves RepoBrief negative semantics at runtime."
+        "No MCP protocol server, network transport, authentication layer, deployment, or scheduler integration is established.",
+        "No snapshot_create side effect is introduced by resource reads; explicit snapshot_create remains separate.",
+        "No claim that MCP access proves artifact truth, repository understanding, review completeness, runtime behavior, security correctness, test sufficiency, regression absence, or merge readiness."
       ]
     },
     {

@@ -104,6 +104,44 @@ def test_mcp_read_arbitrary_artifact_resource(tmp_path):
     assert "mcp_server_available" in result["does_not_establish"]
 
 
+def test_mcp_read_bundle_manifest_artifact_role_is_available(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/bundle_manifest",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "available"
+    assert result["resource_role"] == "bundle_manifest"
+    assert result["content_json"]["run_id"] == "run-1"
+
+
+def test_mcp_artifact_resource_blocks_paths_outside_bundle_root(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    outside = tmp_path.parent / "secret.txt"
+    outside.write_text("do not read me\n", encoding="utf-8")
+    data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    data["artifacts"].append({
+        "role": "escape_attempt",
+        "path": str(outside),
+        "content_type": "text/plain",
+        "bytes": outside.stat().st_size,
+        "sha256": "0" * 64,
+    })
+    bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/escape_attempt",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "blocked"
+    assert "content_text" not in result
+    assert "do not read me" not in json.dumps(result)
+    assert result["reason"] == "artifact path escapes bundle root for role: escape_attempt"
+
+
 def test_each_listed_mcp_resource_read_carries_context(tmp_path):
     bundle = _bundle_with_health(tmp_path)
     listed = list_mcp_resources(bundle["manifest"].parent)

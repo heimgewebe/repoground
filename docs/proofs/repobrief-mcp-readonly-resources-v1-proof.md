@@ -1,7 +1,7 @@
 # RepoBrief MCP Read-only Resources v1 Proof
 
-Status: review_ready
-Task: `RPU-V1-T020`
+Status: complete
+Task: `TASK-REPOBRIEF-MCP-READONLY-RESOURCES-001`
 
 ## Result
 
@@ -23,7 +23,7 @@ Implemented resource templates:
 
 The adapter is read-only. It lists and reads existing bundle artifacts only. It does not create snapshots, refresh bundles, touch Git, run shells, inspect secrets, open PRs, apply patches, run reviews, run fixes or authorize merges.
 
-Every resource read returns snapshot context for health, freshness and availability, or explains why that context is unavailable.
+Every resource read returns snapshot context for health, freshness and availability, or explains why that context is unavailable. Artifact reads are constrained to files resolved inside the bundle directory; manifest paths that escape that root are blocked rather than read.
 
 ## Validation
 
