@@ -1,0 +1,242 @@
+{
+  "kind": "lenskit.repobrief_workbench_usefulness_diagnostic",
+  "version": "1.1",
+  "run_id": "20260709T030000Z",
+  "created_at": "2026-07-09T03:00:00Z",
+  "authority": "diagnostic_signal",
+  "canonicality": "diagnostic",
+  "risk_class": "diagnostic",
+  "task": "TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001",
+  "task_closeout": {
+    "state": "closeout_candidate",
+    "registry_reconciled": false,
+    "reason": "This report supplies diagnostic evidence for review, but the task registry remains open until an explicit registry reconciliation patch lands."
+  },
+  "scope": {
+    "repository": "heimgewebe/lenskit",
+    "evaluation_mode": "diagnostic classification over current committed RepoBrief/Agent Workbench surfaces",
+    "evidence_basis": [
+      "docs/architecture/repobrief-agent-optimization-triage.md",
+      "docs/architecture/repobrief-agent-workbench-boundary.md",
+      "docs/architecture/agent-consumption-contract.md",
+      "docs/proofs/agent-surface-real-dump-smoke-proof.md",
+      "docs/proofs/retrieval-v2-default-promotion-decision-20260708T152502Z-proof.md",
+      "docs/tasks/index.json",
+      "docs/tasks/board.md"
+    ],
+    "bundle_execution": "not_performed",
+    "agent_answer_comparison": "not_performed",
+    "local_test_execution": "not_available_in_connector_session",
+    "runtime_execution": "not_performed"
+  },
+  "criteria": [
+    "evidence_usefulness",
+    "navigation_value",
+    "false_confidence_risk",
+    "missing_evidence_visibility",
+    "answer_compliance_value"
+  ],
+  "score_scale": {
+    "0": "absent or not useful for the criterion",
+    "1": "low or indirect value",
+    "2": "useful with caveats",
+    "3": "high value for the criterion"
+  },
+  "aggregate_decision": {
+    "primary_recommendation": "Add or reuse a task-filtered Workbench shortlist before adding more raw surfaces.",
+    "required_agent_frontdoor": [
+      "canonical_md",
+      "agent_reading_pack",
+      "bundle_manifest",
+      "citation_map_jsonl when claims need citations",
+      "output_health_and_post_emit_health",
+      "bundle_surface_validation for surface review"
+    ],
+    "task_scoped_optional_surfaces": [
+      "claim_evidence_map_json for roadmap/status claims",
+      "python_symbol_index_json for symbol/file lookup",
+      "relation_cards_and_graph_signals for static adjacency",
+      "lens_cards_and_concept_cards when summarized or task-filtered",
+      "query_trace/context_bundle/session artifacts for debugging"
+    ],
+    "deprioritize_as_default_required_reading": [
+      "raw lens/concept/relation card volume",
+      "raw health check arrays when compact projections exist",
+      "retrieval metric reports as direct evidence for answer correctness"
+    ]
+  },
+  "surface_scores": [
+    {
+      "surface": "canonical_md",
+      "classification": "keep_required",
+      "evidence_usefulness": 3,
+      "navigation_value": 1,
+      "false_confidence_risk": 1,
+      "missing_evidence_visibility": 1,
+      "answer_compliance_value": 2,
+      "decision": "Keep as the content truth anchor; never replace with sidecars.",
+      "noise_or_risk": "Low noise, but weak navigation by itself on large repositories."
+    },
+    {
+      "surface": "agent_reading_pack",
+      "classification": "keep_required",
+      "evidence_usefulness": 2,
+      "navigation_value": 3,
+      "false_confidence_risk": 2,
+      "missing_evidence_visibility": 3,
+      "answer_compliance_value": 3,
+      "decision": "Keep as the primary agent front door and task-orientation surface.",
+      "noise_or_risk": "Can be overread as repository understanding unless it repeats navigation-only boundaries."
+    },
+    {
+      "surface": "bundle_manifest",
+      "classification": "keep_required",
+      "evidence_usefulness": 2,
+      "navigation_value": 3,
+      "false_confidence_risk": 1,
+      "missing_evidence_visibility": 3,
+      "answer_compliance_value": 2,
+      "decision": "Keep as the artifact inventory and role/authority routing surface.",
+      "noise_or_risk": "Mostly structural; not a content-evidence substitute."
+    },
+    {
+      "surface": "citation_map_jsonl",
+      "classification": "keep_required_for_cited_answers",
+      "evidence_usefulness": 3,
+      "navigation_value": 3,
+      "false_confidence_risk": 1,
+      "missing_evidence_visibility": 2,
+      "answer_compliance_value": 3,
+      "decision": "Keep and prefer for cited answers and review workflows.",
+      "noise_or_risk": "Citation availability does not prove semantic correctness of a claim."
+    },
+    {
+      "surface": "claim_evidence_map_json",
+      "classification": "keep_for_status_and_roadmap_claims",
+      "evidence_usefulness": 3,
+      "navigation_value": 2,
+      "false_confidence_risk": 2,
+      "missing_evidence_visibility": 3,
+      "answer_compliance_value": 2,
+      "decision": "Keep for roadmap/status claims; absence must stay visible.",
+      "noise_or_risk": "Claim-to-evidence links are navigation, not automatic proof that claims are true."
+    },
+    {
+      "surface": "output_health_and_post_emit_health",
+      "classification": "keep_required_diagnostics",
+      "evidence_usefulness": 2,
+      "navigation_value": 2,
+      "false_confidence_risk": 2,
+      "missing_evidence_visibility": 3,
+      "answer_compliance_value": 2,
+      "decision": "Keep as diagnostic gates; expose compact summaries first.",
+      "noise_or_risk": "A pass/warn result can be overread as forensic readiness or repo correctness."
+    },
+    {
+      "surface": "bundle_surface_validation",
+      "classification": "keep_required_for_surface_review",
+      "evidence_usefulness": 2,
+      "navigation_value": 2,
+      "false_confidence_risk": 2,
+      "missing_evidence_visibility": 3,
+      "answer_compliance_value": 2,
+      "decision": "Keep for artifact-surface review and bundle coherence checks.",
+      "noise_or_risk": "Surface coherence does not prove artifact content is sufficient or true."
+    },
+    {
+      "surface": "agent_entry_manifest",
+      "classification": "keep_navigation_index",
+      "evidence_usefulness": 1,
+      "navigation_value": 3,
+      "false_confidence_risk": 1,
+      "missing_evidence_visibility": 2,
+      "answer_compliance_value": 2,
+      "decision": "Keep as a low-noise entry map, especially for agents starting from bundles.",
+      "noise_or_risk": "It inventories entry surfaces but does not prove that an agent used them."
+    },
+    {
+      "surface": "lens_cards_and_concept_cards",
+      "classification": "keep_when_task_filtered",
+      "evidence_usefulness": 1,
+      "navigation_value": 2,
+      "false_confidence_risk": 3,
+      "missing_evidence_visibility": 1,
+      "answer_compliance_value": 1,
+      "decision": "Keep only when task-filtered or summarized; do not push raw card volume as required reading.",
+      "noise_or_risk": "High false-confidence and noise risk if relation/proximity cards are read as semantic importance."
+    },
+    {
+      "surface": "relation_cards_and_graph_signals",
+      "classification": "conditional",
+      "evidence_usefulness": 2,
+      "navigation_value": 3,
+      "false_confidence_risk": 3,
+      "missing_evidence_visibility": 2,
+      "answer_compliance_value": 1,
+      "decision": "Use as opt-in static navigation; require availability/degradation status and non-claims.",
+      "noise_or_risk": "Static proximity is often mistaken for runtime dependency, coverage, or change impact."
+    },
+    {
+      "surface": "python_symbol_index_json",
+      "classification": "conditional_high_value",
+      "evidence_usefulness": 3,
+      "navigation_value": 3,
+      "false_confidence_risk": 2,
+      "missing_evidence_visibility": 2,
+      "answer_compliance_value": 2,
+      "decision": "Promote as a read-only lookup/navigation aid once consumer wiring is reconciled.",
+      "noise_or_risk": "Symbol presence does not prove reachability, call graph completeness, or runtime behavior."
+    },
+    {
+      "surface": "retrieval_eval_and_promotion_reports",
+      "classification": "diagnostic_only",
+      "evidence_usefulness": 2,
+      "navigation_value": 1,
+      "false_confidence_risk": 3,
+      "missing_evidence_visibility": 2,
+      "answer_compliance_value": 1,
+      "decision": "Keep as diagnostic measurement, not as a default behavior authorization or answer evidence.",
+      "noise_or_risk": "Strong-looking recall/MRR numbers are easy to overread beyond their measured goldset."
+    },
+    {
+      "surface": "query_trace_context_bundle_agent_query_session",
+      "classification": "debug_and_replay",
+      "evidence_usefulness": 2,
+      "navigation_value": 2,
+      "false_confidence_risk": 2,
+      "missing_evidence_visibility": 2,
+      "answer_compliance_value": 2,
+      "decision": "Keep for debugging and replay; do not make long traces mandatory reading by default.",
+      "noise_or_risk": "Useful for diagnosing a session, noisy as general-purpose context."
+    }
+  ],
+  "follow_up_candidates": [
+    {
+      "id": "TASK-REPOBRIEF-WORKBENCH-SHORTLIST-001",
+      "status": "not_registered",
+      "reason": "A compact task-filtered surface shortlist would reduce card/diagnostic noise without changing authority boundaries."
+    },
+    {
+      "id": "TASK-REPOBRIEF-SYMBOL-INDEX-CONSUMER-001",
+      "status": "already_registered",
+      "reason": "Symbol index has high navigation value but should remain explicitly read-only and non-runtime."
+    },
+    {
+      "id": "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
+      "status": "already_registered",
+      "reason": "A broad read-only adapter can expose selected helpful surfaces without mirror authority."
+    }
+  ],
+  "does_not_establish": [
+    "repo_understood",
+    "agent_correctness",
+    "answer_correctness",
+    "review_completeness",
+    "test_sufficiency",
+    "runtime_correctness",
+    "retrieval_quality_in_general",
+    "merge_readiness",
+    "security_correctness",
+    "forensic_ready"
+  ]
+}
