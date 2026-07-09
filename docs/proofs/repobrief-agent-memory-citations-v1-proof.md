@@ -31,8 +31,9 @@ A memory record has:
 2. Current freshness status is `fresh`.
 3. Every recorded citation id is present in current evidence.
 4. Every recorded citation range content hash still matches.
+5. Every recorded citation range identity still matches, including path, byte range, optional line/source fields and optional `repo_id`.
 
-Missing, stale, changed or unverifiable evidence returns `unusable` and `presentation_policy=do_not_present_as_source_truth`.
+Missing, stale, changed, conflicting or unverifiable evidence returns `unusable` and `presentation_policy=do_not_present_as_source_truth`. Projection imports fail closed when unresolved or malformed projection items are present.
 
 ## Boundary
 
@@ -46,3 +47,5 @@ Does not establish:
 - test sufficiency
 - review completeness
 - freshness against remote beyond the supplied freshness evidence
+- persistence-store behavior
+- cross-process memory lifecycle behavior

@@ -1,3 +1,5 @@
+import pytest
+
 from merger.lenskit.core import repobrief_memory
 
 
@@ -125,7 +127,7 @@ def test_recall_check_blocks_changed_snapshot_hash():
     assert {issue["code"] for issue in result["issues"]} == {"snapshot_hash_changed"}
 
 
-def test_memory_record_from_projection_uses_only_resolved_citations():
+def test_memory_record_from_projection_preserves_resolved_citation_identity():
     projection = {
         "items": [
             {
@@ -133,13 +135,9 @@ def test_memory_record_from_projection_uses_only_resolved_citations():
                 "citation_id": "cit_0000000000000001",
                 "chunk_id": "chunk-1",
                 "path": "demo.md",
+                "repo_id": "demo-repo",
                 "source_range": _range(),
                 "citation_range": _range(),
-            },
-            {
-                "citation_resolved": False,
-                "citation_id": None,
-                "source_range": _range(),
             },
         ]
     }
@@ -152,8 +150,35 @@ def test_memory_record_from_projection_uses_only_resolved_citations():
         freshness_status="fresh",
     )
 
-    assert len(record["evidence"]["citations"]) == 1
-    assert record["evidence"]["citations"][0]["citation_id"] == "cit_0000000000000001"
+    citation = record["evidence"]["citations"][0]
+    assert citation["citation_id"] == "cit_0000000000000001"
+    assert citation["repo_id"] == "demo-repo"
+
+
+def test_memory_record_from_projection_blocks_unresolved_citations():
+    projection = {
+        "items": [
+            {
+                "citation_resolved": True,
+                "citation_id": "cit_0000000000000001",
+                "source_range": _range(),
+            },
+            {
+                "citation_resolved": False,
+                "citation_id": "cit_0000000000000002",
+                "source_range": _range(),
+            },
+        ]
+    }
+
+    with pytest.raises(ValueError, match="unresolved citations"):
+        repobrief_memory.memory_record_from_projection(
+            claim_text="Projection-backed memory claim.",
+            source_citation_projection=projection,
+            snapshot_stem="demo-260709-1700",
+            snapshot_hash="b" * 64,
+            freshness_status="fresh",
+        )
 
 
 def test_memory_record_accepts_artifact_axis_when_byte_aliases_are_none():
@@ -182,3 +207,90 @@ def test_memory_record_accepts_artifact_axis_when_byte_aliases_are_none():
     assert source_range["end_byte"] == 5
     assert source_range["start_line"] == 1
     assert source_range["end_line"] == 1
+
+
+def test_recall_check_blocks_same_hash_different_file_path():
+    record = _memory_record()
+    current_range = _range()
+    current_range["file_path"] = "other.md"
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="b" * 64,
+        current_freshness_status="fresh",
+        current_citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": current_range,
+        }],
+    )
+
+    assert result["status"] == "unusable"
+    assert result["citation_checks"][0]["status"] == "changed"
+    assert {issue["code"] for issue in result["issues"]} == {"citation_range_identity_changed"}
+
+
+def test_recall_check_blocks_same_hash_different_byte_range():
+    record = _memory_record()
+    current_range = _range()
+    current_range["end_byte"] = 13
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="b" * 64,
+        current_freshness_status="fresh",
+        current_citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": current_range,
+        }],
+    )
+
+    assert result["status"] == "unusable"
+    assert result["citation_checks"][0]["status"] == "changed"
+    assert {issue["code"] for issue in result["issues"]} == {"citation_range_identity_changed"}
+
+
+def test_recall_check_blocks_mapping_key_and_inner_citation_id_conflict():
+    record = _memory_record()
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="b" * 64,
+        current_freshness_status="fresh",
+        current_citations={
+            "cit_0000000000000001": {
+                "citation_id": "cit_0000000000000002",
+                "source_range": _range(),
+            }
+        },
+    )
+
+    assert result["status"] == "unusable"
+    assert result["citation_checks"][0]["status"] == "conflict"
+    assert {issue["code"] for issue in result["issues"]} == {"citation_id_conflict"}
+
+
+def test_recall_check_blocks_same_hash_different_repo_id():
+    record = repobrief_memory.build_memory_record(
+        claim_text="Repo-scoped memory claim.",
+        snapshot_stem="demo-260709-1700",
+        snapshot_hash="b" * 64,
+        freshness_status="fresh",
+        citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": {**_range(), "repo_id": "repo-a"},
+        }],
+    )
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="b" * 64,
+        current_freshness_status="fresh",
+        current_citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": {**_range(), "repo_id": "repo-b"},
+        }],
+    )
+
+    assert result["status"] == "unusable"
+    assert result["citation_checks"][0]["status"] == "changed"
+    assert {issue["code"] for issue in result["issues"]} == {"citation_range_identity_changed"}

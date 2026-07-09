@@ -93,6 +93,9 @@ def _range_identity(range_value: Mapping[str, Any] | None) -> dict[str, Any] | N
         "end_byte": int(end_byte),
         "content_sha256": content_sha256,
     }
+    repo_id = range_value.get("repo_id")
+    if _is_non_empty_string(repo_id):
+        identity["repo_id"] = str(repo_id)
     start_line = _first_not_none(range_value.get("start_line"), range_value.get("artifact_start_line"))
     end_line = _first_not_none(range_value.get("end_line"), range_value.get("artifact_end_line"))
     if _is_int_not_bool(start_line) and _is_int_not_bool(end_line) and start_line >= 1 and end_line >= start_line:
@@ -167,6 +170,7 @@ def citation_from_projection_item(item: Mapping[str, Any]) -> dict[str, Any]:
         "citation_id": citation_id,
         "chunk_id": item.get("chunk_id"),
         "path": item.get("path"),
+        "repo_id": item.get("repo_id"),
         "source_range": source_range,
         "citation_range": item.get("citation_range"),
     })
@@ -240,11 +244,21 @@ def memory_record_from_projection(
     items = source_citation_projection.get("items")
     if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
         raise ValueError("source_citation_projection.items must be a sequence")
-    citations = [
-        citation_from_projection_item(item)
-        for item in items
-        if isinstance(item, Mapping) and item.get("citation_resolved") is True
-    ]
+    unresolved_count = 0
+    malformed_count = 0
+    citations = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            malformed_count += 1
+            continue
+        if item.get("citation_resolved") is not True:
+            unresolved_count += 1
+            continue
+        citations.append(citation_from_projection_item(item))
+    if malformed_count:
+        raise ValueError("source_citation_projection.items must contain only mappings")
+    if unresolved_count:
+        raise ValueError("source_citation_projection contains unresolved citations")
     return build_memory_record(
         claim_text=claim_text,
         citations=citations,
@@ -285,6 +299,27 @@ def _current_range_hash(citation: Mapping[str, Any] | None) -> str | None:
             return content_hash
     content_hash = citation.get("range_content_sha256") or citation.get("content_sha256")
     return str(content_hash) if _is_sha256(content_hash) else None
+
+
+def _current_range_identity(citation: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if citation is None:
+        return None
+    for candidate in _candidate_ranges(citation):
+        identity = _range_identity(candidate)
+        if identity is not None:
+            return identity
+    return None
+
+
+def _range_identity_matches(recorded: Mapping[str, Any], current: Mapping[str, Any]) -> bool:
+    for key in ("file_path", "start_byte", "end_byte", "content_sha256"):
+        if recorded.get(key) != current.get(key):
+            return False
+    for key in ("repo_id", "start_line", "end_line", "source_file_path", "source_start_line", "source_end_line"):
+        if key in recorded or key in current:
+            if recorded.get(key) != current.get(key):
+                return False
+    return True
 
 
 def check_memory_recall(
@@ -348,16 +383,27 @@ def check_memory_recall(
         else:
             current = lookup.get(citation_id)
             current_hash = _current_range_hash(current)
+            current_identity = _current_range_identity(current)
             check["current_range_content_sha256"] = current_hash
+            check["current_source_range"] = current_identity
             if current is None:
                 check["status"] = "missing"
                 issues.append({"code": "citation_missing", "citation_id": citation_id, "severity": "blocking"})
+            elif current.get("citation_id") not in (None, citation_id):
+                check["status"] = "conflict"
+                issues.append({"code": "citation_id_conflict", "citation_id": citation_id, "severity": "blocking"})
+            elif current_identity is None:
+                check["status"] = "unverified"
+                issues.append({"code": "citation_range_missing", "citation_id": citation_id, "severity": "blocking"})
             elif current_hash is None:
                 check["status"] = "unverified"
                 issues.append({"code": "citation_hash_missing", "citation_id": citation_id, "severity": "blocking"})
             elif current_hash != recorded_hash:
                 check["status"] = "changed"
                 issues.append({"code": "citation_hash_changed", "citation_id": citation_id, "severity": "blocking"})
+            elif not _range_identity_matches(citation["source_range"], current_identity):
+                check["status"] = "changed"
+                issues.append({"code": "citation_range_identity_changed", "citation_id": citation_id, "severity": "blocking"})
         citation_checks.append(check)
 
     if not citation_checks:
