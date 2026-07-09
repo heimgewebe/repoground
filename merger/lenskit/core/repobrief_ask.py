@@ -109,16 +109,28 @@ def _snapshot_ref(snapshot: dict[str, Any], manifest_path: Path, freshness: dict
 def _retrieval_hits(query_result: dict[str, Any]) -> list[dict[str, Any]]:
     raw = query_result.get("query_result") if isinstance(query_result, dict) else None
     hits = raw.get("results") if isinstance(raw, dict) else []
+    projection = query_result.get("source_citation_projection") if isinstance(query_result, dict) else None
+    projected_items = projection.get("items") if isinstance(projection, dict) else []
+    citations_by_ref = {
+        str(item.get("chunk_id")): item.get("citation_id")
+        for item in (projected_items if isinstance(projected_items, list) else [])
+        if isinstance(item, dict) and item.get("chunk_id") is not None
+    }
     result = []
     for idx, hit in enumerate(hits if isinstance(hits, list) else []):
         if not isinstance(hit, dict):
             continue
-        result.append({
+        ref = str(hit.get("chunk_id") or hit.get("id") or f"hit-{idx + 1}")
+        item = {
             "artifact_role": str(hit.get("artifact_role") or hit.get("artifact_type") or "sqlite_index"),
-            "ref": str(hit.get("chunk_id") or hit.get("id") or f"hit-{idx + 1}"),
+            "ref": ref,
             "score": float(hit.get("score") or hit.get("bm25_score") or 0.0),
             "purpose": "retrieval candidate for ask context",
-        })
+        }
+        citation_id = citations_by_ref.get(ref)
+        if isinstance(citation_id, str) and citation_id.startswith("cit_"):
+            item["citation_id"] = citation_id
+        result.append(item)
     return result
 
 

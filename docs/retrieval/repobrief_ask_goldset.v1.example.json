@@ -1,0 +1,19 @@
+{
+  "kind": "repobrief.ask_goldset",
+  "version": "1.0",
+  "queries": [
+    {
+      "id": "ask-demo-1",
+      "query": "Where is the demonstrated resolved world text?",
+      "task_profile": "basic_repo_question",
+      "expected_paths": ["brief.md"],
+      "expected_citation_ids": []
+    }
+  ],
+  "does_not_establish": [
+    "answer_correctness",
+    "repo_understood",
+    "retrieval_quality_sufficient",
+    "default_promotion_safe"
+  ]
+}

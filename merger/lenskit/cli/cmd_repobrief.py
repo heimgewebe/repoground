@@ -308,6 +308,17 @@ def register_repobrief_command_groups(repobrief_parser: argparse.ArgumentParser)
     ask_parser.add_argument("--emit", choices=["json", "text"], default="json", help="Output format")
     ask_parser.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
 
+    ask_eval_parser = repobrief_subparsers.add_parser(
+        "ask-eval",
+        help="Evaluate repobrief ask context packs against a gold-query set",
+    )
+    ask_eval_parser.add_argument("--bundle-manifest", required=True, help="Path to a Brief Bundle manifest")
+    ask_eval_parser.add_argument("--goldset", required=True, help="Path to repobrief ask goldset JSON")
+    ask_eval_parser.add_argument("--baseline", help="Optional previous eval JSON or metrics JSON for promotion gating")
+    ask_eval_parser.add_argument("--k", type=int, default=5, help="Maximum retrieval hits per query")
+    ask_eval_parser.add_argument("--context-budget", type=int, default=8000, help="Maximum context token budget")
+    ask_eval_parser.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
+
     symbol_parser = repobrief_subparsers.add_parser(
         "symbol",
         help="Read-only Python symbol-index consumer commands",
@@ -519,6 +530,8 @@ def run_repobrief(args: argparse.Namespace) -> int:
         return run_query_existing_index(args)
     if args.repobrief_cmd == "ask":
         return run_ask(args)
+    if args.repobrief_cmd == "ask-eval":
+        return run_ask_eval(args)
     if args.repobrief_cmd == "symbol" and args.symbol_cmd == "search":
         return run_symbol_search(args)
     if args.repobrief_cmd == "context" and args.context_cmd == "compile":
@@ -808,6 +821,29 @@ def run_ask(args: argparse.Namespace) -> int:
     else:
         print(json.dumps(result, indent=2, sort_keys=True))
     status = result.get("required_reading", {}).get("status")
+    if status == "fail":
+        return 1
+    if status == "warn" and args.strict:
+        return 1
+    return 0
+
+
+def run_ask_eval(args: argparse.Namespace) -> int:
+    from merger.lenskit.core.repobrief_ask_eval import evaluate_ask_goldset
+
+    try:
+        result = evaluate_ask_goldset(
+            args.bundle_manifest,
+            args.goldset,
+            k=args.k,
+            max_context_tokens=args.context_budget,
+            baseline_path=args.baseline,
+        )
+    except ValueError as exc:
+        print("repobrief ask-eval: " + str(exc), file=sys.stderr)
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    status = result.get("status")
     if status == "fail":
         return 1
     if status == "warn" and args.strict:
