@@ -1,0 +1,240 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/repobrief-ask-request.v1.schema.json",
+  "title": "RepoBrief Ask Request (repobrief-ask-request v1.0)",
+  "description": "Read-only frontdoor request for preparing an answer context from existing RepoBrief artifacts. It forbids implicit refresh, Git mutation and snapshot creation on read.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "request_id",
+    "query",
+    "task_profile",
+    "token_budget",
+    "snapshot_policy",
+    "output_mode",
+    "forbidden_operations",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "repobrief.ask_request"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "query": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "token_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_context_tokens",
+        "max_answer_tokens"
+      ],
+      "properties": {
+        "max_context_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_answer_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "truncation_policy": {
+          "type": "string",
+          "enum": [
+            "fail",
+            "truncate_with_caveat",
+            "summarize_with_caveat"
+          ]
+        }
+      }
+    },
+    "snapshot_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "freshness_policy"
+      ],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "existing_snapshot_only"
+          ]
+        },
+        "freshness_policy": {
+          "type": "string",
+          "enum": [
+            "use_existing_only",
+            "require_fresh_or_fail",
+            "allow_stale_with_caveat",
+            "unknown_ok_with_caveat"
+          ]
+        },
+        "bundle_manifest": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "output_mode": {
+      "type": "string",
+      "enum": [
+        "context_pack",
+        "answer_scaffold",
+        "context_pack_and_scaffold"
+      ]
+    },
+    "forbidden_operations": {
+      "type": "array",
+      "minItems": 7,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "implicit_refresh",
+          "git_mutation",
+          "snapshot_creation_on_read",
+          "patch_application",
+          "pull_request_mutation",
+          "shell_execution",
+          "merge_authorization"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "implicit_refresh"
+          }
+        },
+        {
+          "contains": {
+            "const": "git_mutation"
+          }
+        },
+        {
+          "contains": {
+            "const": "snapshot_creation_on_read"
+          }
+        },
+        {
+          "contains": {
+            "const": "patch_application"
+          }
+        },
+        {
+          "contains": {
+            "const": "pull_request_mutation"
+          }
+        },
+        {
+          "contains": {
+            "const": "shell_execution"
+          }
+        },
+        {
+          "contains": {
+            "const": "merge_authorization"
+          }
+        }
+      ],
+      "description": "Operations forbidden for the read-only ask frontdoor."
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "actual_reading_proven",
+          "answer_correct",
+          "repo_understood",
+          "all_relevant_context_used",
+          "claims_true",
+          "test_sufficiency",
+          "regression_absence",
+          "runtime_behavior",
+          "forensic_ready",
+          "merge_readiness",
+          "security_correctness"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "actual_reading_proven"
+          }
+        },
+        {
+          "contains": {
+            "const": "answer_correct"
+          }
+        },
+        {
+          "contains": {
+            "const": "repo_understood"
+          }
+        },
+        {
+          "contains": {
+            "const": "all_relevant_context_used"
+          }
+        },
+        {
+          "contains": {
+            "const": "claims_true"
+          }
+        },
+        {
+          "contains": {
+            "const": "test_sufficiency"
+          }
+        },
+        {
+          "contains": {
+            "const": "regression_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime_behavior"
+          }
+        },
+        {
+          "contains": {
+            "const": "forensic_ready"
+          }
+        },
+        {
+          "contains": {
+            "const": "merge_readiness"
+          }
+        },
+        {
+          "contains": {
+            "const": "security_correctness"
+          }
+        }
+      ],
+      "description": "Boundaries the ask request does not establish."
+    }
+  }
+}
