@@ -20,9 +20,11 @@ The adapter now applies additional read-side guards before returning resource co
 
 - a file-valued `bundle_root` is accepted only when it is a bounded `*.bundle.manifest.json` with RepoLens bundle-manifest shape;
 - arbitrary non-manifest files and fake manifest-shaped files are not exposed as manifest resources;
-- artifact content is capped by `MAX_RESOURCE_BYTES` (`16 MiB`) before hashing or text read;
-- artifact `bytes` and `sha256` metadata are checked before content is returned;
+- artifact content is capped by `MAX_RESOURCE_BYTES` (`16 MiB`) by reading at most `MAX_RESOURCE_BYTES + 1` bytes;
+- artifact `bytes` and `sha256` metadata are required and checked against the same bounded byte buffer that may be returned;
+- missing or malformed integrity metadata returns `integrity_unavailable` without returning `content_text`;
 - byte or hash drift returns `integrity_mismatch` without returning `content_text`;
+- file-valued invalid bundle roots return `blocked` with an explicit reason instead of looking like a missing snapshot;
 - relative path escapes and symlink escapes remain blocked before content read;
 - `artifact/bundle_manifest` now returns a consistent `artifact_ref` shape.
 

@@ -93,15 +93,16 @@ def test_mcp_read_canonical_reading_pack_health_and_availability_resources(tmp_p
 
 def test_mcp_read_arbitrary_artifact_resource(tmp_path):
     bundle = _complete_basic_bundle(tmp_path)
+    _add_artifact(bundle, "extra_json", "extra.json", "{\"ok\": true}\n")
 
     result = read_mcp_resource(
-        "repobrief://snapshot/demo/artifact/citation_map_jsonl",
+        "repobrief://snapshot/demo/artifact/extra_json",
         bundle_root=bundle["manifest"].parent,
     )
 
     assert result["status"] == "available"
-    assert result["resource_role"] == "citation_map_jsonl"
-    assert "cit_" in result["content_text"]
+    assert result["resource_role"] == "extra_json"
+    assert result["content_json"] == {"ok": True}
     assert "mcp_server_available" in result["does_not_establish"]
 
 
@@ -130,7 +131,8 @@ def test_mcp_file_bundle_root_accepts_only_real_bundle_manifest(tmp_path):
     secret.write_text("plain secret\n", encoding="utf-8")
     missing = read_mcp_resource("repobrief://snapshot/demo/manifest", bundle_root=secret)
 
-    assert missing["status"] == "missing"
+    assert missing["status"] == "blocked"
+    assert missing["reason"] == "bundle root is not a RepoLens bundle manifest file"
     assert "content_text" not in missing
 
 
@@ -140,7 +142,8 @@ def test_mcp_file_bundle_root_rejects_fake_manifest_shape(tmp_path):
 
     result = read_mcp_resource("repobrief://snapshot/fake/manifest", bundle_root=fake)
 
-    assert result["status"] == "missing"
+    assert result["status"] == "blocked"
+    assert result["reason"] == "bundle root is not a valid RepoLens bundle manifest"
     assert "content_text" not in result
 
 
@@ -238,6 +241,52 @@ def test_mcp_artifact_resource_blocks_integrity_mismatch(tmp_path):
         "artifact byte size does not match manifest",
         "artifact sha256 does not match manifest",
     }
+
+
+def test_mcp_artifact_resource_blocks_missing_integrity_metadata(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    data["artifacts"].append({
+        "role": "no_integrity",
+        "path": "no_integrity.txt",
+        "content_type": "text/plain",
+    })
+    (bundle["manifest"].parent / "no_integrity.txt").write_text("not trusted\n", encoding="utf-8")
+    bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/no_integrity",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "integrity_unavailable"
+    assert result["reason"] == "artifact byte size is missing or invalid in manifest"
+    assert "content_text" not in result
+
+
+def test_mcp_artifact_resource_blocks_invalid_sha_metadata(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    content = "not trusted\n"
+    artifact = bundle["manifest"].parent / "bad_sha.txt"
+    artifact.write_text(content, encoding="utf-8")
+    data["artifacts"].append({
+        "role": "bad_sha",
+        "path": artifact.name,
+        "content_type": "text/plain",
+        "bytes": artifact.stat().st_size,
+        "sha256": "not-a-sha",
+    })
+    bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/bad_sha",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "integrity_unavailable"
+    assert result["reason"] == "artifact sha256 is missing or invalid in manifest"
+    assert "content_text" not in result
 
 
 def test_mcp_artifact_resource_blocks_oversized_content(tmp_path, monkeypatch):
