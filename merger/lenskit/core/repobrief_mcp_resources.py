@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,9 @@ KIND = "repobrief.mcp.resource_read"
 LIST_KIND = "repobrief.mcp.resource_list"
 VERSION = "v1"
 RESOURCE_PREFIX = "repobrief://snapshot/"
+MANIFEST_SUFFIX = ".bundle.manifest.json"
+MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+MAX_RESOURCE_BYTES = 16 * 1024 * 1024
 FIXED_RESOURCE_KINDS = {
     "manifest": "bundle_manifest",
     "canonical": "canonical_md",
@@ -72,19 +76,35 @@ def _read_only_boundary() -> dict[str, Any]:
 
 def _manifest_stem(path: Path) -> str:
     name = path.name
-    suffix = ".bundle.manifest.json"
-    if name.endswith(suffix):
-        return name[: -len(suffix)]
+    if name.endswith(MANIFEST_SUFFIX):
+        return name[: -len(MANIFEST_SUFFIX)]
     return path.stem
+
+
+def _is_bundle_manifest_file(path: Path) -> bool:
+    if not path.is_file() or not path.name.endswith(MANIFEST_SUFFIX):
+        return False
+    try:
+        if path.stat().st_size > MAX_MANIFEST_BYTES:
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(data, dict)
+        and data.get("kind") == "repolens.bundle.manifest"
+        and isinstance(data.get("run_id"), str)
+        and isinstance(data.get("artifacts"), list)
+    )
 
 
 def _manifest_candidates(bundle_root: str | Path) -> list[Path]:
     root = Path(bundle_root).expanduser().resolve()
     if root.is_file():
-        return [root]
-    if not root.exists():
+        return [root] if _is_bundle_manifest_file(root) else []
+    if not root.exists() or not root.is_dir():
         return []
-    return sorted(root.glob("*.bundle.manifest.json"))
+    return [path for path in sorted(root.glob(f"*{MANIFEST_SUFFIX}")) if _is_bundle_manifest_file(path)]
 
 
 def _find_manifest(bundle_root: str | Path, stem: str) -> Path | None:
@@ -117,15 +137,79 @@ def _parse_resource_uri(uri: str) -> tuple[str, str, str | None]:
     return stem, resource_name, None
 
 
-def _artifact_text(path: Path) -> tuple[str | None, dict[str, Any] | None]:
+def _artifact_size_issue(path: Path) -> dict[str, Any] | None:
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        return {"status": "missing", "reason": f"artifact file unavailable: {exc}"}
+    if size > MAX_RESOURCE_BYTES:
+        return {
+            "status": "blocked",
+            "reason": "artifact exceeds MCP resource size limit",
+            "bytes": size,
+            "max_bytes": MAX_RESOURCE_BYTES,
+        }
+    return None
+
+
+def _artifact_text(path: Path) -> tuple[str | None, dict[str, Any] | None, dict[str, Any] | None]:
+    size_issue = _artifact_size_issue(path)
+    if size_issue is not None:
+        return None, None, size_issue
     try:
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        return None, None
+        return None, None, None
     try:
-        return text, json.loads(text)
+        return text, json.loads(text), None
     except json.JSONDecodeError:
-        return text, None
+        return text, None, None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _artifact_integrity_issue(path: Path, artifact: dict[str, Any]) -> dict[str, Any] | None:
+    expected_bytes = artifact.get("bytes")
+    if isinstance(expected_bytes, int):
+        actual_bytes = path.stat().st_size
+        if actual_bytes != expected_bytes:
+            return {
+                "status": "integrity_mismatch",
+                "reason": "artifact byte size does not match manifest",
+                "expected_bytes": expected_bytes,
+                "actual_bytes": actual_bytes,
+            }
+    expected_sha256 = artifact.get("sha256")
+    if isinstance(expected_sha256, str) and expected_sha256:
+        actual_sha256 = _sha256(path)
+        if actual_sha256 != expected_sha256:
+            return {
+                "status": "integrity_mismatch",
+                "reason": "artifact sha256 does not match manifest",
+                "expected_sha256": expected_sha256,
+                "actual_sha256": actual_sha256,
+            }
+    return None
+
+
+def _apply_artifact_content(result: dict[str, Any], path: Path) -> dict[str, Any]:
+    text, parsed, issue = _artifact_text(path)
+    if issue is not None:
+        result.update(issue)
+        return result
+    if text is not None:
+        result["content_text"] = text
+    else:
+        result["binary_unreadable"] = True
+    if parsed is not None:
+        result["content_json"] = parsed
+    return result
 
 
 def _context_for_manifest(manifest: Path | None, *, reason: str | None = None) -> dict[str, Any]:
@@ -176,14 +260,19 @@ def _safe_bundle_file(manifest: Path, artifact: dict[str, Any]) -> Path | None:
 
 def _read_artifact_resource(uri: str, manifest: Path, role: str) -> dict[str, Any]:
     if role == "bundle_manifest":
-        text, parsed = _artifact_text(manifest)
         result = _base_result(uri, manifest, status="available")
-        result.update({"resource_role": "bundle_manifest", "content_type": "application/json"})
-        if text is not None:
-            result["content_text"] = text
-        if parsed is not None:
-            result["content_json"] = parsed
-        return result
+        result.update({
+            "resource_role": "bundle_manifest",
+            "content_type": "application/json",
+            "artifact_ref": {
+                "role": "bundle_manifest",
+                "path": manifest.name,
+                "absolute_path": str(manifest),
+                "file_exists": manifest.is_file(),
+                "bytes": manifest.stat().st_size if manifest.is_file() else None,
+            },
+        })
+        return _apply_artifact_content(result, manifest)
 
     ref = repobrief_access.get_artifact(manifest, role)
     result = _base_result(uri, manifest, status=ref.get("status", "unknown"))
@@ -201,15 +290,16 @@ def _read_artifact_resource(uri: str, manifest: Path, role: str) -> dict[str, An
         result["status"] = "missing"
         result["reason"] = f"artifact file missing: {path}"
         return result
-    text, parsed = _artifact_text(path)
+    size_issue = _artifact_size_issue(path)
+    if size_issue is not None:
+        result.update(size_issue)
+        return result
+    integrity_issue = _artifact_integrity_issue(path, artifact)
+    if integrity_issue is not None:
+        result.update(integrity_issue)
+        return result
     result["content_type"] = artifact.get("content_type") or "application/octet-stream"
-    if text is not None:
-        result["content_text"] = text
-    else:
-        result["binary_unreadable"] = True
-    if parsed is not None:
-        result["content_json"] = parsed
-    return result
+    return _apply_artifact_content(result, path)
 
 
 def resource_templates() -> dict[str, Any]:
@@ -260,14 +350,7 @@ def read_mcp_resource(uri: str, *, bundle_root: str | Path) -> dict[str, Any]:
     if manifest is None:
         return _base_result(uri, None, status="missing", reason=f"snapshot stem not found: {stem}")
     if resource_name == "manifest":
-        text, parsed = _artifact_text(manifest)
-        result = _base_result(uri, manifest, status="available")
-        result.update({"resource_role": "bundle_manifest", "content_type": "application/json"})
-        if text is not None:
-            result["content_text"] = text
-        if parsed is not None:
-            result["content_json"] = parsed
-        return result
+        return _read_artifact_resource(uri, manifest, "bundle_manifest")
     if resource_name == "availability":
         result = _base_result(uri, manifest, status="available")
         result.update({

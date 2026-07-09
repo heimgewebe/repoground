@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from merger.lenskit.core import repobrief_mcp_resources as mcp_resources
 from merger.lenskit.core.repobrief_mcp_resources import (
     RepoBriefMcpResourceError,
     list_mcp_resources,
@@ -117,6 +118,32 @@ def test_mcp_read_bundle_manifest_artifact_role_is_available(tmp_path):
     assert result["content_json"]["run_id"] == "run-1"
 
 
+def test_mcp_file_bundle_root_accepts_only_real_bundle_manifest(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+
+    ok = read_mcp_resource("repobrief://snapshot/demo/manifest", bundle_root=bundle["manifest"])
+
+    assert ok["status"] == "available"
+    assert ok["content_json"]["kind"] == "repolens.bundle.manifest"
+
+    secret = tmp_path / "demo.txt"
+    secret.write_text("plain secret\n", encoding="utf-8")
+    missing = read_mcp_resource("repobrief://snapshot/demo/manifest", bundle_root=secret)
+
+    assert missing["status"] == "missing"
+    assert "content_text" not in missing
+
+
+def test_mcp_file_bundle_root_rejects_fake_manifest_shape(tmp_path):
+    fake = tmp_path / "fake.bundle.manifest.json"
+    fake.write_text(json.dumps({"kind": "not-a-repolens-manifest", "run_id": "fake", "artifacts": []}), encoding="utf-8")
+
+    result = read_mcp_resource("repobrief://snapshot/fake/manifest", bundle_root=fake)
+
+    assert result["status"] == "missing"
+    assert "content_text" not in result
+
+
 def test_mcp_artifact_resource_blocks_paths_outside_bundle_root(tmp_path):
     bundle = _complete_basic_bundle(tmp_path)
     outside = tmp_path.parent / "secret.txt"
@@ -140,6 +167,92 @@ def test_mcp_artifact_resource_blocks_paths_outside_bundle_root(tmp_path):
     assert "content_text" not in result
     assert "do not read me" not in json.dumps(result)
     assert result["reason"] == "artifact path escapes bundle root for role: escape_attempt"
+
+
+def test_mcp_artifact_resource_blocks_relative_escape_paths(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-relative-secret.txt"
+    outside.write_text("relative secret\n", encoding="utf-8")
+    data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    data["artifacts"].append({
+        "role": "relative_escape",
+        "path": f"../{outside.name}",
+        "content_type": "text/plain",
+        "bytes": outside.stat().st_size,
+        "sha256": "0" * 64,
+    })
+    bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/relative_escape",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "blocked"
+    assert "content_text" not in result
+    assert "relative secret" not in json.dumps(result)
+
+
+def test_mcp_artifact_resource_blocks_symlink_escape_paths(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-symlink-secret.txt"
+    outside.write_text("symlink secret\n", encoding="utf-8")
+    link = tmp_path / "linked_secret.txt"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation not supported on this platform")
+    data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    data["artifacts"].append({
+        "role": "symlink_escape",
+        "path": link.name,
+        "content_type": "text/plain",
+        "bytes": outside.stat().st_size,
+        "sha256": "0" * 64,
+    })
+    bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/symlink_escape",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "blocked"
+    assert "content_text" not in result
+    assert "symlink secret" not in json.dumps(result)
+
+
+def test_mcp_artifact_resource_blocks_integrity_mismatch(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    _add_artifact(bundle, "mutable", "mutable.txt", "before\n")
+    (bundle["manifest"].parent / "mutable.txt").write_text("after\n", encoding="utf-8")
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/mutable",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "integrity_mismatch"
+    assert "content_text" not in result
+    assert result["reason"] in {
+        "artifact byte size does not match manifest",
+        "artifact sha256 does not match manifest",
+    }
+
+
+def test_mcp_artifact_resource_blocks_oversized_content(tmp_path, monkeypatch):
+    bundle = _complete_basic_bundle(tmp_path)
+    _add_artifact(bundle, "oversized", "oversized.txt", "0123456789\n")
+    monkeypatch.setattr(mcp_resources, "MAX_RESOURCE_BYTES", 4)
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/oversized",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "artifact exceeds MCP resource size limit"
+    assert "content_text" not in result
 
 
 def test_each_listed_mcp_resource_read_carries_context(tmp_path):

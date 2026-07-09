@@ -1207,6 +1207,22 @@
       ]
     },
     {
+      "id": "TASK-REPOBRIEF-MCP-RESOURCE-READ-HARDENING-001",
+      "title": "RepoBrief MCP Resource Read Hardening",
+      "status": "done",
+      "description": "Closed by RepoBrief MCP Resource Read Hardening v1: the code-level read-only MCP resource adapter now rejects non-manifest file bundle roots, requires RepoLens bundle-manifest shape, caps returned artifact content, verifies bytes/sha256 before returning content, preserves path-escape blocking for absolute/relative/symlink escapes, and returns a consistent bundle_manifest artifact_ref. This remains a code-level adapter, not an MCP protocol server.",
+      "evidence": [
+        "merger/lenskit/core/repobrief_mcp_resources.py",
+        "merger/lenskit/tests/test_repobrief_mcp_resources.py",
+        "docs/proofs/repobrief-mcp-resource-read-hardening-v1-proof.md",
+        "docs/proofs/repobrief-mcp-resource-read-hardening-v1.self-review.md"
+      ],
+      "missing_evidence": [
+        "No MCP protocol server, network transport, authentication layer, deployment, or scheduler integration is established.",
+        "No claim that the adapter proves artifact truth, repository understanding, runtime behavior, complete security correctness, test sufficiency, regression absence, review completeness, or merge readiness."
+      ]
+    },
+    {
       "id": "TASK-REPOBRIEF-MCP-SNAPSHOT-CREATE-001",
       "title": "RepoBrief MCP Explicit Snapshot Create",
       "status": "open",
