@@ -131,3 +131,12 @@ def test_repobrief_doc_links_to_mcp_boundary_without_claiming_implementation() -
     assert "[RepoBrief MCP Boundary](repobrief-mcp-boundary.md)" in text
     assert "code-level `snapshot_create` tool handler exists" in text
     assert "does not assert that an MCP server" in text
+
+
+def test_mcp_boundary_doc_names_concrete_readonly_resource_adapter() -> None:
+    text = _read(MCP_BOUNDARY_DOC)
+
+    assert "merger.lenskit.core.repobrief_mcp_resources" in text
+    assert "manifest`, `canonical`, `reading-pack`, `health`, `availability`" in text
+    assert "not a networked MCP protocol server" in text
+    assert "health, freshness, and availability context" in text

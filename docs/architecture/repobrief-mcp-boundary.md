@@ -21,6 +21,8 @@ RepoBrief MCP should expose stable resources before tools. Planned resources are
 
 These resources are read-only views over files that already exist in a Brief Bundle.
 
+The concrete code-level resource adapter lives in `merger.lenskit.core.repobrief_mcp_resources`. It implements resource template listing and resource reads for `manifest`, `canonical`, `reading-pack`, `health`, `availability`, and arbitrary `artifact/{role}` resources. Each read returns snapshot health, freshness, and availability context or an explicit explanation when the manifest is unavailable. The adapter is still not a networked MCP protocol server.
+
 ## Read-only tools
 
 The initial MCP tools are read-only helpers:
