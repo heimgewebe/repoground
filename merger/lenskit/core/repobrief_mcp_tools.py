@@ -247,3 +247,99 @@ def snapshot_create(
         "mutation_boundary": _mutation_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
+
+READ_ONLY_KIND = "repobrief.mcp.read_only_frontdoor"
+READ_ONLY_VERSION = "v1"
+READ_ONLY_FORBIDDEN_OPERATIONS = (
+    "git_push",
+    "git_pull",
+    "git_fetch",
+    "create_pr",
+    "apply_patch",
+    "run_shell",
+    "auto_review",
+    "auto_fix",
+    "auto_merge",
+    "secret_read",
+    "snapshot_create_side_effect",
+)
+
+
+def _read_only_boundary() -> dict[str, Any]:
+    return {
+        "writes": [],
+        "does_not_mutate": [
+            "git",
+            "pull_requests",
+            "patches",
+            "source_working_tree",
+            "brief_bundle_artifacts",
+            "secrets",
+        ],
+        "read_paths_do_not_refresh": True,
+        "explicit_write_tool": False,
+        "not_reachable_from_snapshot_create": True,
+        "forbidden_operations": list(READ_ONLY_FORBIDDEN_OPERATIONS),
+    }
+
+
+def ask_context(
+    *,
+    bundle_manifest: str | Path,
+    query: str,
+    task_profile: str = "basic_repo_question",
+    max_context_tokens: int = 8000,
+    max_answer_tokens: int = 1200,
+    k: int = 5,
+) -> dict[str, Any]:
+    """MCP-shaped read-only frontdoor for RepoBrief ask context packs."""
+    from merger.lenskit.core.repobrief_ask import build_ask_context_pack
+
+    context_pack = build_ask_context_pack(
+        bundle_manifest,
+        query=query,
+        task_profile=task_profile,
+        max_context_tokens=max_context_tokens,
+        max_answer_tokens=max_answer_tokens,
+        k=k,
+    )
+    return {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "ask_context",
+        "status": "ok",
+        "context_pack": context_pack,
+        "request_semantics": "repobrief.ask_request.v1",
+        "context_pack_semantics": "repobrief.ask_context_pack.v1",
+        "mutation_boundary": _read_only_boundary(),
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+    }
+
+
+def grounding_verify(
+    *,
+    declaration: dict[str, Any],
+    bundle_manifest: str | Path,
+    citation_map: str | Path | None = None,
+    task_profile: str | None = None,
+) -> dict[str, Any]:
+    """MCP-shaped read-only frontdoor for Answer Grounding verification."""
+    from merger.lenskit.core.answer_grounding import verify_answer_grounding_for_task_profile
+
+    verdict = verify_answer_grounding_for_task_profile(
+        declaration,
+        bundle_manifest=bundle_manifest,
+        citation_map=citation_map,
+        task_profile=task_profile,
+    )
+    return {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "grounding_verify",
+        "status": verdict.get("status", "degraded"),
+        "verdict": verdict,
+        "declaration_semantics": "repobrief.answer_grounding_declaration.v1",
+        "verdict_semantics": "repobrief.answer_grounding_verdict.v1",
+        "mutation_boundary": _read_only_boundary(),
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+    }

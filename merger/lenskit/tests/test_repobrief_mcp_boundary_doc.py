@@ -21,6 +21,8 @@ READ_ONLY_TOOLS = (
     "required_reading_resolve",
     "range_get",
     "query_existing_index",
+    "ask_context",
+    "grounding_verify",
 )
 
 FORBIDDEN_OPERATIONS = (
@@ -34,6 +36,7 @@ FORBIDDEN_OPERATIONS = (
     "auto_fix",
     "auto_merge",
     "secret_read",
+    "snapshot_create_side_effect",
 )
 
 NEGATIVE_SEMANTICS = (

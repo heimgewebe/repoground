@@ -31,8 +31,18 @@ The initial MCP tools are read-only helpers:
 - `required_reading_resolve`
 - `range_get`
 - `query_existing_index`
+- `ask_context`
+- `grounding_verify`
 
 Read-only tools must not write files, refresh bundles, create snapshots, mutate Git state, open pull requests, apply patches, run shells, execute reviews, execute fixes, merge changes, or read secrets. A stale, missing, degraded, or invalid snapshot must be reported as such instead of being silently regenerated.
+
+## Read-only frontdoor tools
+
+`ask_context` exposes the same request/context-pack semantics as `repobrief ask`: it builds a context pack from existing artifacts and must not create or refresh snapshots.
+
+`grounding_verify` exposes the same declaration/verdict semantics as the Answer Grounding verifier: it checks declared citations, ranges, task-profile evidence and caveats against existing inputs. It must not run reviews, apply fixes, mutate Git, read secrets, or authorize merges.
+
+Both tools are code-level MCP-shaped handlers only. Their presence does not establish MCP server availability, transport security, authentication, runtime correctness or answer correctness.
 
 ## Explicit write path
 
@@ -66,6 +76,7 @@ RepoBrief MCP must not expose or indirectly trigger these operations:
 - `auto_fix`
 - `auto_merge`
 - `secret_read`
+- `snapshot_create_side_effect`
 
 The forbidden list applies to resource reads, read-only tools, and future write-tool orchestration unless a later architecture document explicitly narrows a safe operation. By default, absence of permission is the design.
 
