@@ -1,7 +1,7 @@
 # Self-review — RepoBrief MCP Resource Read Hardening v1
 
 Status: complete
-Head: local branch `fix/mcp-resource-atomic-read-v1`
+Head: local branch `fix/mcp-resource-error-contract-v1`
 Scope:
 
 - `merger/lenskit/core/repobrief_mcp_resources.py`
@@ -26,14 +26,17 @@ No blocking issue found in this hardening slice.
 | Symlink escapes are blocked before content read | Pass |
 | Oversized artifact content is blocked by bounded byte read before hashing/content decode | Pass |
 | Byte/SHA drift is checked against the same bounded byte buffer that may be returned | Pass |
-| Missing or malformed integrity metadata returns `integrity_unavailable` without `content_text` | Pass |
+| Missing or malformed artifact integrity metadata returns `integrity_unavailable` without `content_text` | Pass |
+| Uppercase SHA-256 hex metadata is accepted after normalization | Pass |
+| Invalid JSON manifests produce a precise blocked reason | Pass |
+| File-valued bundle-root stem mismatch reports a precise blocked reason | Pass |
 | Invalid file-valued bundle roots return explicit `blocked` status | Pass |
 | `artifact/bundle_manifest` returns an `artifact_ref` shape | Pass |
 | Read-only/non-claim semantics remain explicit | Pass |
 
 ## Notes
 
-The `MAX_RESOURCE_BYTES` cap remains `16 MiB`: high enough for the current Lenskit canonical bundle observed locally, but now enforced by a bounded byte read rather than a separate `stat()`/`read_text()` sequence.
+The `MAX_RESOURCE_BYTES` cap remains `16 MiB`: high enough for the current Lenskit canonical bundle observed locally, but now enforced by a bounded byte read rather than a separate `stat()`/`read_text()` sequence. Manifest reads are size/shape checked; artifact content is additionally checked against manifest `bytes`/`sha256` metadata.
 
 ## Does not establish
 
