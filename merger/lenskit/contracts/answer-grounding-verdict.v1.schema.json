@@ -1,0 +1,400 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/answer-grounding-verdict.v1.schema.json",
+  "title": "RepoBrief Answer Grounding Verdict (answer-grounding-verdict v1.0)",
+  "description": "Technical grounding-verification result for declared citations and ranges. A pass status means the checked grounding contract was satisfied; it does not mean the answer is semantically true, complete, safe, or merge-ready.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "checked_declaration",
+    "snapshot_ref",
+    "citation_checks",
+    "range_checks",
+    "required_reading_checks",
+    "diagnostics",
+    "freshness_caveats",
+    "availability_caveats",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "repobrief.answer_grounding_verdict"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "degraded",
+        "not_applicable"
+      ],
+      "description": "pass: declared grounding resolved in checked scope. warn: checked grounding resolved but caveats/recommended gaps exist. fail: required evidence, citation or range check failed. degraded: verifier could not complete all required checks. not_applicable: task/profile does not require grounding verification."
+    },
+    "checked_declaration": {
+      "$ref": "#/definitions/declaration_ref"
+    },
+    "snapshot_ref": {
+      "$ref": "#/definitions/snapshot_ref"
+    },
+    "citation_checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/evidence_check"
+      }
+    },
+    "range_checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/evidence_check"
+      }
+    },
+    "required_reading_checks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/required_reading_check"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/diagnostic"
+      }
+    },
+    "freshness_caveats": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/caveat"
+      }
+    },
+    "availability_caveats": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/caveat"
+      }
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish_array"
+    }
+  },
+  "definitions": {
+    "declaration_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "answer_id",
+        "question_hash",
+        "answer_hash"
+      ],
+      "properties": {
+        "answer_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "question_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "answer_hash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "declaration_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "snapshot_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stem",
+        "manifest_path"
+      ],
+      "properties": {
+        "stem": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "git_commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "freshness_status": {
+          "type": "string",
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "not_comparable",
+            "not_applicable"
+          ]
+        }
+      }
+    },
+    "evidence_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ref",
+        "status",
+        "severity",
+        "detail"
+      ],
+      "properties": {
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "resolved",
+            "missing",
+            "drifted",
+            "invalid",
+            "degraded",
+            "not_applicable"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "fail"
+          ]
+        },
+        "artifact_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authority": {
+          "type": "string",
+          "enum": [
+            "canonical_snapshot",
+            "artifact_metadata",
+            "navigation",
+            "diagnostic",
+            "static_analysis",
+            "external_evidence",
+            "debugging"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "required_reading_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_role",
+        "status",
+        "severity",
+        "detail"
+      ],
+      "properties": {
+        "artifact_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "declared",
+            "missing_required",
+            "missing_recommended",
+            "unread_required",
+            "unread_recommended",
+            "not_applicable",
+            "degraded"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "fail"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "severity",
+        "detail"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "citation_not_found",
+            "range_not_resolved",
+            "content_hash_mismatch",
+            "missing_required_artifact",
+            "missing_recommended_artifact",
+            "unread_required_artifact",
+            "stale_snapshot",
+            "unknown_freshness",
+            "degraded_dependency",
+            "missing_non_claim",
+            "ungrounded_strong_claim_marker",
+            "not_applicable"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warn",
+            "fail"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "caveat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "stale_snapshot",
+            "unknown_freshness",
+            "live_state_not_checked",
+            "missing_artifact",
+            "degraded_validation",
+            "other"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "actual_reading_proven",
+          "answer_correct",
+          "repo_understood",
+          "all_relevant_context_used",
+          "claims_true",
+          "test_sufficiency",
+          "regression_absence",
+          "runtime_behavior",
+          "forensic_ready",
+          "merge_readiness",
+          "security_correctness"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "actual_reading_proven"
+          }
+        },
+        {
+          "contains": {
+            "const": "answer_correct"
+          }
+        },
+        {
+          "contains": {
+            "const": "repo_understood"
+          }
+        },
+        {
+          "contains": {
+            "const": "all_relevant_context_used"
+          }
+        },
+        {
+          "contains": {
+            "const": "claims_true"
+          }
+        },
+        {
+          "contains": {
+            "const": "test_sufficiency"
+          }
+        },
+        {
+          "contains": {
+            "const": "regression_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime_behavior"
+          }
+        },
+        {
+          "contains": {
+            "const": "forensic_ready"
+          }
+        },
+        {
+          "contains": {
+            "const": "merge_readiness"
+          }
+        },
+        {
+          "contains": {
+            "const": "security_correctness"
+          }
+        }
+      ],
+      "description": "Boundaries this grounding verdict does not establish. A pass is only a technical grounding-contract result."
+    }
+  }
+}

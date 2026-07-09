@@ -1,0 +1,376 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/answer-grounding-declaration.v1.schema.json",
+  "title": "RepoBrief Answer Grounding Declaration (answer-grounding-declaration v1.0)",
+  "description": "Machine-readable declaration of an answer's cited evidence for later grounding verification. Declaration layer only; it does not prove actual reading, answer correctness, claim truth, completeness, runtime behavior, test sufficiency, security correctness, merge readiness, or repository understanding.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "answer_id",
+    "snapshot_ref",
+    "task_profile",
+    "question_hash",
+    "answer_hash",
+    "used_citations",
+    "used_ranges",
+    "declared_non_claims",
+    "freshness_caveats",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "repobrief.answer_grounding_declaration"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "answer_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "snapshot_ref": {
+      "$ref": "#/definitions/snapshot_ref"
+    },
+    "task_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "question_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "answer_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "used_citations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/citation_use"
+      },
+      "description": "Citation IDs the answer declares it used. Declaration only; not proof of actual reading."
+    },
+    "used_ranges": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/range_use"
+      },
+      "description": "Ranges the answer declares it used. Declaration only; not proof of actual reading."
+    },
+    "strong_claims": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/strong_claim_marker"
+      },
+      "description": "Optional markers for answer claims that downstream checks may require to be grounded. v1 records markers; it does not decide semantic truth."
+    },
+    "declared_non_claims": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "description": "Non-claims the answer explicitly carries forward for the user/agent."
+    },
+    "freshness_caveats": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/caveat"
+      },
+      "description": "Freshness or live-state caveats carried by the answer."
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish_array"
+    }
+  },
+  "definitions": {
+    "snapshot_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stem",
+        "manifest_path"
+      ],
+      "properties": {
+        "stem": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "git_commit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "freshness_status": {
+          "type": "string",
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "not_comparable",
+            "not_applicable"
+          ]
+        }
+      }
+    },
+    "citation_use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "citation_id",
+        "purpose"
+      ],
+      "properties": {
+        "citation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "range_use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_role",
+        "range_ref",
+        "purpose"
+      ],
+      "properties": {
+        "artifact_role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "range_ref": {
+          "type": "object",
+          "additionalProperties": true,
+          "anyOf": [
+            {
+              "required": [
+                "file_path",
+                "start_line",
+                "end_line"
+              ],
+              "properties": {
+                "file_path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "start_line": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "end_line": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            {
+              "required": [
+                "artifact_path",
+                "artifact_line_start",
+                "artifact_line_end",
+                "source_file_path",
+                "source_line_start",
+                "source_line_end"
+              ],
+              "properties": {
+                "artifact_path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "artifact_line_start": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "artifact_line_end": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "source_file_path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source_line_start": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "source_line_end": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          ]
+        },
+        "range_content_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claim_ref": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "strong_claim_marker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_ref",
+        "summary",
+        "expected_evidence"
+      ],
+      "properties": {
+        "claim_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_evidence": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "caveat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "detail"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "stale_snapshot",
+            "unknown_freshness",
+            "live_state_not_checked",
+            "missing_artifact",
+            "degraded_validation",
+            "other"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 11,
+      "maxItems": 11,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "actual_reading_proven",
+          "answer_correct",
+          "repo_understood",
+          "all_relevant_context_used",
+          "claims_true",
+          "test_sufficiency",
+          "regression_absence",
+          "runtime_behavior",
+          "forensic_ready",
+          "merge_readiness",
+          "security_correctness"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "actual_reading_proven"
+          }
+        },
+        {
+          "contains": {
+            "const": "answer_correct"
+          }
+        },
+        {
+          "contains": {
+            "const": "repo_understood"
+          }
+        },
+        {
+          "contains": {
+            "const": "all_relevant_context_used"
+          }
+        },
+        {
+          "contains": {
+            "const": "claims_true"
+          }
+        },
+        {
+          "contains": {
+            "const": "test_sufficiency"
+          }
+        },
+        {
+          "contains": {
+            "const": "regression_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime_behavior"
+          }
+        },
+        {
+          "contains": {
+            "const": "forensic_ready"
+          }
+        },
+        {
+          "contains": {
+            "const": "merge_readiness"
+          }
+        },
+        {
+          "contains": {
+            "const": "security_correctness"
+          }
+        }
+      ],
+      "description": "Boundaries this answer grounding declaration does not establish."
+    }
+  }
+}
