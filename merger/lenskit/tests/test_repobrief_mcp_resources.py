@@ -147,6 +147,28 @@ def test_mcp_file_bundle_root_rejects_fake_manifest_shape(tmp_path):
     assert "content_text" not in result
 
 
+def test_mcp_file_bundle_root_rejects_invalid_json_manifest(tmp_path):
+    bad = tmp_path / "bad.bundle.manifest.json"
+    bad.write_text("{not-json\n", encoding="utf-8")
+
+    result = read_mcp_resource("repobrief://snapshot/bad/manifest", bundle_root=bad)
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "bundle manifest is not valid JSON"
+    assert "content_text" not in result
+
+
+def test_mcp_file_bundle_root_reports_stem_mismatch(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+
+    result = read_mcp_resource("repobrief://snapshot/other/manifest", bundle_root=bundle["manifest"])
+
+    assert result["status"] == "blocked"
+    assert result["reason"] == "bundle root file stem does not match requested snapshot stem"
+    assert result["bundle_root_stem"] == "demo"
+    assert result["requested_stem"] == "other"
+
+
 def test_mcp_artifact_resource_blocks_paths_outside_bundle_root(tmp_path):
     bundle = _complete_basic_bundle(tmp_path)
     outside = tmp_path.parent / "secret.txt"
@@ -286,6 +308,40 @@ def test_mcp_artifact_resource_blocks_invalid_sha_metadata(tmp_path):
 
     assert result["status"] == "integrity_unavailable"
     assert result["reason"] == "artifact sha256 is missing or invalid in manifest"
+    assert "content_text" not in result
+
+
+def test_mcp_artifact_resource_accepts_uppercase_sha_metadata(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    _add_artifact(bundle, "upper_sha", "upper_sha.txt", "trusted\n")
+    data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    for artifact in data["artifacts"]:
+        if artifact["role"] == "upper_sha":
+            artifact["sha256"] = artifact["sha256"].upper()
+            break
+    else:
+        raise AssertionError("upper_sha artifact missing")
+    bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/upper_sha",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "available"
+    assert result["content_text"] == "trusted\n"
+
+
+def test_mcp_existing_minimal_artifact_without_integrity_is_blocked(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+
+    result = read_mcp_resource(
+        "repobrief://snapshot/demo/artifact/citation_map_jsonl",
+        bundle_root=bundle["manifest"].parent,
+    )
+
+    assert result["status"] == "integrity_unavailable"
+    assert result["reason"] == "artifact byte size is missing or invalid in manifest"
     assert "content_text" not in result
 
 
