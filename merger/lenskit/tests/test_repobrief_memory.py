@@ -1,0 +1,184 @@
+from merger.lenskit.core import repobrief_memory
+
+
+def _range(content_hash="a" * 64):
+    return {
+        "file_path": "demo.md",
+        "start_byte": 0,
+        "end_byte": 12,
+        "start_line": 1,
+        "end_line": 2,
+        "content_sha256": content_hash,
+    }
+
+
+def _memory_record():
+    return repobrief_memory.build_memory_record(
+        claim_text="RepoBrief source citations must be revalidated before reuse.",
+        snapshot_stem="demo-260709-1700",
+        snapshot_hash="b" * 64,
+        freshness_status="fresh",
+        citations=[{
+            "citation_id": "cit_0000000000000001",
+            "chunk_id": "chunk-1",
+            "path": "demo.md",
+            "source_range": _range(),
+        }],
+    )
+
+
+def test_memory_record_shape_binds_claim_citations_snapshot_and_freshness():
+    record = _memory_record()
+
+    assert record["kind"] == "repobrief.agent_memory_claim"
+    assert record["status"] == "recorded_requires_recall_check"
+    assert record["claim_text"].startswith("RepoBrief source citations")
+    assert record["evidence"]["snapshot"] == {
+        "stem": "demo-260709-1700",
+        "hash": "b" * 64,
+        "freshness_status": "fresh",
+    }
+    citation = record["evidence"]["citations"][0]
+    assert citation["citation_id"] == "cit_0000000000000001"
+    assert citation["source_range"]["file_path"] == "demo.md"
+    assert citation["source_range"]["start_byte"] == 0
+    assert citation["source_range"]["end_byte"] == 12
+    assert citation["range_content_sha256"] == "a" * 64
+    assert record["recall_policy"]["requires_revalidation"] is True
+    assert "truth" in record["does_not_establish"]
+
+
+def test_recall_check_allows_use_only_when_snapshot_freshness_and_citation_match():
+    record = _memory_record()
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="b" * 64,
+        current_freshness_status="fresh",
+        current_citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": _range(),
+        }],
+    )
+
+    assert result["status"] == "usable"
+    assert result["usable_as_source_backed_memory"] is True
+    assert result["presentation_policy"] == "may_present_with_verified_citations"
+    assert result["memory_is_source_truth"] is False
+    assert result["citation_checks"][0]["status"] == "verified"
+    assert result["issue_count"] == 0
+
+
+def test_recall_check_blocks_changed_citation_hash():
+    record = _memory_record()
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="b" * 64,
+        current_freshness_status="fresh",
+        current_citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": _range("c" * 64),
+        }],
+    )
+
+    assert result["status"] == "unusable"
+    assert result["usable_as_source_backed_memory"] is False
+    assert result["presentation_policy"] == "do_not_present_as_source_truth"
+    assert result["citation_checks"][0]["status"] == "changed"
+    assert result["issues"][0]["code"] == "citation_hash_changed"
+
+
+def test_recall_check_blocks_missing_citation_and_missing_current_freshness():
+    record = _memory_record()
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="b" * 64,
+        current_freshness_status=None,
+        current_citations=[],
+    )
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert result["status"] == "unusable"
+    assert "freshness_status_missing" in codes
+    assert "citation_missing" in codes
+    assert result["freshness_check"]["status"] == "stale_or_unverified"
+    assert result["presentation_policy"] == "do_not_present_as_source_truth"
+
+
+def test_recall_check_blocks_changed_snapshot_hash():
+    record = _memory_record()
+
+    result = repobrief_memory.check_memory_recall(
+        record,
+        current_snapshot_hash="d" * 64,
+        current_freshness_status="fresh",
+        current_citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": _range(),
+        }],
+    )
+
+    assert result["status"] == "unusable"
+    assert result["snapshot_check"]["status"] == "changed"
+    assert {issue["code"] for issue in result["issues"]} == {"snapshot_hash_changed"}
+
+
+def test_memory_record_from_projection_uses_only_resolved_citations():
+    projection = {
+        "items": [
+            {
+                "citation_resolved": True,
+                "citation_id": "cit_0000000000000001",
+                "chunk_id": "chunk-1",
+                "path": "demo.md",
+                "source_range": _range(),
+                "citation_range": _range(),
+            },
+            {
+                "citation_resolved": False,
+                "citation_id": None,
+                "source_range": _range(),
+            },
+        ]
+    }
+
+    record = repobrief_memory.memory_record_from_projection(
+        claim_text="Projection-backed memory claim.",
+        source_citation_projection=projection,
+        snapshot_stem="demo-260709-1700",
+        snapshot_hash="b" * 64,
+        freshness_status="fresh",
+    )
+
+    assert len(record["evidence"]["citations"]) == 1
+    assert record["evidence"]["citations"][0]["citation_id"] == "cit_0000000000000001"
+
+
+def test_memory_record_accepts_artifact_axis_when_byte_aliases_are_none():
+    record = repobrief_memory.build_memory_record(
+        claim_text="Artifact-axis memory claim.",
+        snapshot_stem="demo-260709-1700",
+        snapshot_hash="b" * 64,
+        freshness_status="fresh",
+        citations=[{
+            "citation_id": "cit_0000000000000001",
+            "source_range": {
+                "file_path": "merged.md",
+                "start_byte": None,
+                "end_byte": None,
+                "artifact_start_byte": 0,
+                "artifact_end_byte": 5,
+                "artifact_start_line": 1,
+                "artifact_end_line": 1,
+                "content_sha256": "a" * 64,
+            },
+        }],
+    )
+
+    source_range = record["evidence"]["citations"][0]["source_range"]
+    assert source_range["start_byte"] == 0
+    assert source_range["end_byte"] == 5
+    assert source_range["start_line"] == 1
+    assert source_range["end_line"] == 1

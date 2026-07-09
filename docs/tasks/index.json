@@ -1378,6 +1378,21 @@
         "No proof that consumers can access the needed surfaces without hidden refresh or Git mutation.",
         "No compatibility contract exists across CLI, MCP, and library consumers."
       ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-AGENT-MEMORY-CITATIONS-001",
+      "title": "RepoBrief Agent Memory Citations",
+      "status": "done",
+      "description": "Defines durable agent memory as a claim plus RepoBrief citation ids/ranges, snapshot stem/hash and freshness status, with a recall check that blocks changed, stale, missing or unverifiable evidence before reuse. Memory is never treated as source truth without verified citations.",
+      "evidence": [
+        "merger/lenskit/core/repobrief_memory.py",
+        "merger/lenskit/tests/test_repobrief_memory.py",
+        "docs/proofs/repobrief-agent-memory-citations-v1-proof.md"
+      ],
+      "missing_evidence": [
+        "No persistence store, CLI, MCP surface, runtime scheduler or automatic memory backend is introduced.",
+        "No claim truth, repository completeness, answer correctness, review completeness, test sufficiency or remote freshness is established."
+      ]
     }
   ]
 }
