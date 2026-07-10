@@ -36,7 +36,8 @@ def list_allowed_roots(hub: Optional[Path], merges_dir: Optional[Path]) -> List[
             sys_root = sec.validate_path(sec.home_preset_root)
             roots.append({"id": "system", "path": str(sys_root)})
         except SecurityViolationError:
-            pass
+            # The Home preset is optional; preserve explicit Hub/Merges roots.
+            return roots
     return roots
 
 def _b64url(data: bytes) -> str:
