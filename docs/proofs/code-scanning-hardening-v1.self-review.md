@@ -2,10 +2,10 @@
 
 PR: #952
 Base: `0cbd961bb0159f4c00773180b3fa53459a33d8b4`
-Reviewed implementation head: `9b33171cda08534609d9c751f044e5e15ad8ea77`
+Reviewed implementation head: `1991887446044cc7263f6b29a7bfd6ddd138d413`
 Reviewed packet: complete changed-line diff with eight context lines per hunk
-Reviewed packet SHA-256: `52afbcb9e568d7572f907370960e2c8b5bd7539c64b1a6833f5690e36cba90d0`
-Reviewed packet bytes: `93244`
+Reviewed packet SHA-256: `8a80de7097164d9c79828fdb6db4d969c3df6f38fdfbe40bd9d418ce1d75e278`
+Reviewed packet bytes: `93205`
 
 ## Verdict
 
@@ -72,9 +72,14 @@ Every implementation, contract, documentation, and regression-test file in the r
 - JSON contract parsing: passed.
 - `git diff --check`: passed.
 
+## Review findings and triage
+
+- GitHub Code Quality reported one low-severity dead assignment after semantic encoding fallback. The assignment was removed; 64 adjacent query/semantic/API tests passed.
+- No security or compatibility finding remained after the correction.
+
 ## Independent review
 
-Gemini through Antigravity CLI reviewed the immutable packet without repository or tool access.
+Gemini through Antigravity CLI reviewed the corrected immutable packet without repository or tool access.
 
 Verdict: **PASS**, no findings.
 
@@ -84,4 +89,5 @@ The review specifically covered API traversal and symlink escapes, Federation AP
 
 - Local tests do not reproduce GitHub's CodeQL database. PR and post-merge SARIF are separate mandatory evidence.
 - Filesystem state can change between validation and use; the design reduces and tests this risk but cannot claim elimination of every OS-level race.
+- Staleness fingerprint reads remain best-effort; a fingerprint read failure does not itself reject an otherwise queryable index.
 - Green static analysis does not establish absence of unrelated vulnerabilities, runtime correctness, deployment state, or merge readiness by itself.
