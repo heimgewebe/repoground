@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feat/rpu-v1-t015-agent-memory-citations
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
