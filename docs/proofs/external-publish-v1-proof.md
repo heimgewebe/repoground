@@ -37,8 +37,12 @@ The external reference also includes linked post-emit sidecars from the bundle m
 Additional regression coverage:
 
 - `test_publish_rejects_bundle_manifest_outside_publication_root`
+- `test_external_manifest_refresh_rejects_output_outside_publication_root`
+- `test_external_manifest_refresh_creates_portable_bundle_and_references`
 - `test_build_includes_linked_post_emit_health_sidecar`
 - `test_linked_sidecar_must_remain_inside_bundle_directory`
+
+The refresh path now validates containment before generating a snapshot. A caller must place `--out` at or below the explicit publication root; the portable publisher boundary is not weakened to accommodate legacy callers that generated bundles elsewhere.
 
 ## Target proof
 

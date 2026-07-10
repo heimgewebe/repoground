@@ -218,3 +218,78 @@ def test_linked_sidecar_must_remain_inside_bundle_directory(tmp_path: Path) -> N
 
     with pytest.raises(ExternalManifestReferenceError, match="inside the bundle directory"):
         build_external_manifest_reference(bundle_path, repository="cabinet", ref="main")
+
+
+def test_external_manifest_refresh_rejects_output_outside_publication_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from merger.lenskit.cli.repobrief import main as repobrief_main
+
+    repo = tmp_path / "source"
+    repo.mkdir()
+    (repo / "README.md").write_text("# source\n", encoding="utf-8")
+    publication_root = tmp_path / "published"
+    outside = tmp_path / "legacy-output"
+
+    rc = repobrief_main([
+        "external-manifest",
+        "refresh",
+        "--repo",
+        str(repo),
+        "--out",
+        str(outside),
+        "--publication-root",
+        str(publication_root),
+        "--repository",
+        "source",
+        "--ref",
+        "main",
+    ])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "output directory must be inside publication_root" in captured.err
+    assert not outside.exists()
+
+
+def test_external_manifest_refresh_creates_portable_bundle_and_references(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from merger.lenskit.cli.repobrief import main as repobrief_main
+
+    repo = tmp_path / "source"
+    repo.mkdir()
+    (repo / "README.md").write_text("# source\n", encoding="utf-8")
+    publication_root = tmp_path / "published"
+    out = publication_root / "bundles" / "source" / "main" / "run-1"
+
+    rc = repobrief_main([
+        "external-manifest",
+        "refresh",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--publication-root",
+        str(publication_root),
+        "--repository",
+        "source",
+        "--ref",
+        "main",
+        "--profile",
+        "agent-portable",
+        "--redact-secrets",
+    ])
+
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    bundle_manifest = Path(result["snapshot"]["bundle_manifest"])
+    assert rc == 0
+    assert bundle_manifest.is_file()
+    assert bundle_manifest.is_relative_to(publication_root)
+    for family in ("lenskit", "repobrief"):
+        manifest = publication_root / "external" / family / "source" / "main" / "manifest.json"
+        assert manifest.is_file()
+        published = json.loads(manifest.read_text(encoding="utf-8"))
+        resolved_bundle = (manifest.parent / published["bundleManifest"]["path"]).resolve()
+        assert resolved_bundle == bundle_manifest.resolve()
