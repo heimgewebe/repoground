@@ -1,6 +1,6 @@
 # rLens Home Preset Startup Policy v1 Self-Review
 
-PR: pending
+PR: #951
 Reviewed implementation head: `1f7e79c99a04c04a13a6f9868a5b18742da42a3e`
 Base: `292b9a7d22630e31dc2203be294f20700f39a629`
 Reviewed implementation diff SHA-256: `0db2df960fb955326cb66183b56ec20e8171dec59336efeef090c11e63f2ab19`
