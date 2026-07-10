@@ -1226,16 +1226,21 @@
     {
       "id": "TASK-REPOBRIEF-MCP-SNAPSHOT-CREATE-001",
       "title": "RepoBrief MCP Explicit Snapshot Create",
-      "status": "open",
-      "description": "After read-only MCP resources are stable, add a single explicit MCP write tool for Brief Bundle generation only: snapshot_create. It must require explicit repo, explicit profile, controlled output root, timeout guard, and size guard, and it must never be reachable as a side effect of resource reads or read-only tools.",
+      "status": "done",
+      "description": "Closed by merged PR #914 at commit 34f0b46706992a4120c6c6886691005afe86fa37. The code-level RepoBrief MCP snapshot_create handler requires an explicit repository, an allowed profile, a controlled output root, bounded timeout and repository-size guards, and delegates to the existing explicit snapshot generator. Read-only MCP resource and access paths remain unable to invoke the write tool. This closes the defined code-level tool slice, not an MCP protocol server or deployment.",
       "evidence": [
+        "merger/lenskit/core/repobrief_mcp_tools.py",
+        "merger/lenskit/tests/test_repobrief_mcp_snapshot_create.py",
+        "merger/lenskit/tests/test_repobrief_mcp_frontdoor.py",
+        "merger/lenskit/tests/test_repobrief_mcp_boundary_doc.py",
         "docs/architecture/repobrief-mcp-boundary.md",
-        "docs/architecture/repobrief.md"
+        "docs/architecture/repobrief.md",
+        "docs/proofs/repobrief-mcp-snapshot-create-tool-v1-proof.md"
       ],
       "missing_evidence": [
-        "Blocked until read-only MCP resources are implemented and validated.",
-        "No MCP snapshot_create implementation exists yet.",
-        "No tool-level guard tests for repo/profile/output-root/timeout/size constraints exist yet."
+        "No MCP protocol server, network transport, authentication layer, deployment, scheduler integration, or remote runtime proof is established.",
+        "No claim that snapshot creation proves artifact truth, repository understanding, test sufficiency, regression absence, review completeness, or merge readiness.",
+        "No automatic or read-triggered snapshot creation is introduced; the mutation remains an explicit guarded tool call."
       ]
     },
     {
