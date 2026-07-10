@@ -1,5 +1,6 @@
 target-version = "py312"
-exclude = ["**/fixtures/**"]
+# Add Lenskit fixtures without replacing Ruff defaults such as .git.
+extend-exclude = ["**/fixtures/**"]
 
 [lint]
 select = ["F401", "F811"]

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "kind": "lenskit.external_review",
+  "repository": "heimgewebe/lenskit",
+  "reviewer": {
+    "tool": "codex-cli",
+    "version": "0.142.2",
+    "model": "gpt-5.5",
+    "mode": "isolated_diff_packet_no_tools"
+  },
+  "reviewed_implementation": {
+    "head_sha": "6f4dd2ae75699d556b0ebb8913df68997019dcb4",
+    "base_sha": "b08733158ec5614e58771ef2230829ff51fe7da3",
+    "diff_sha256": "bd09c443d548dbde8d16496eb571a4892921019e7b7940721631a5eed9c28943",
+    "diff_bytes": 15945
+  },
+  "verdict": "PASS",
+  "summary": "No critical, high, or medium issues found in the submitted diff. The Ruff config change correctly uses `extend-exclude` to add fixture exclusions while preserving Ruff's built-in exclusions such as `.git`, and the focused regression test is a reasonable guard for that behavior.",
+  "findings": [],
+  "coverage": [
+    "Reviewed Ruff configuration semantics for `exclude` versus `extend-exclude`.",
+    "Reviewed regression test behavior, including `.git`, fixture, and ordinary source discovery assertions.",
+    "Reviewed path portability of `Path`, `cwd`, relative config name, and `--show-files` output normalization.",
+    "Reviewed CI/local command parity as documented in CONTRIBUTING and the proof document.",
+    "Reviewed task board/index and architecture/proof documentation consistency."
+  ],
+  "residual_risks": [
+    "I did not run commands or inspect repository files, per instruction, so this review is limited to the stdin diff.",
+    "The regression test depends on Ruff being installed in the pytest environment, but that appears consistent with the lint-focused scope being tested."
+  ],
+  "does_not_establish": [
+    "full_test_sufficiency",
+    "runtime_correctness",
+    "merge_authorization"
+  ],
+  "pull_request": 950
+}

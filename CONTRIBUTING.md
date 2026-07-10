@@ -55,8 +55,10 @@ ruff check --config ruff-ci.toml .
 python3 tools/parity_guard.py
 ```
 
-Test-Fixtures unter `**/fixtures/**` sind im repo-weiten `ruff-ci.toml` absichtlich vom CI-Lint ausgenommen
-(sie enthalten bewusst „kaputten" Code für Linter-/Graph-Tests).
+Test-Fixtures unter `**/fixtures/**` sind im repo-weiten `ruff-ci.toml` absichtlich zusätzlich
+vom CI-Lint ausgenommen (sie enthalten bewusst „kaputten" Code für Linter-/Graph-Tests).
+`extend-exclude` bewahrt dabei Ruffs eingebaute Ausschlüsse, insbesondere `.git`; Git-Referenzen
+oder Git-Logs mit einem auf `.py` endenden Namen werden daher nicht als Quellcode geprüft.
 
 Wichtig: `ruff-ci.toml` ist kein globaler Ruff-Default. Path-scoped CI-Jobs mit nacktem
 `ruff check <pfade>` behalten Ruffs Default-Regelauswahl, sofern sie nicht explizit eine
