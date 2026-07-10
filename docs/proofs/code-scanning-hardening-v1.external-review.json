@@ -1,0 +1,44 @@
+{
+  "schema": "lenskit.external_security_review.v1",
+  "pull_request": null,
+  "reviewer": "gemini-via-antigravity-cli",
+  "review_mode": "immutable_diff_only_no_tools",
+  "reviewed_base": "0cbd961bb0159f4c00773180b3fa53459a33d8b4",
+  "reviewed_implementation_head": "9b33171cda08534609d9c751f044e5e15ad8ea77",
+  "reviewed_packet": {
+    "context_lines": 8,
+    "sha256": "52afbcb9e568d7572f907370960e2c8b5bd7539c64b1a6833f5690e36cba90d0",
+    "bytes": 93244
+  },
+  "result": {
+    "verdict": "PASS",
+    "summary": "The code-scanning hardening implementation successfully addresses path injection, symlink escapes, and error disclosure risks. Root-bounded resolution barriers are correctly placed before filesystem sinks, TOCTOU risks are mitigated via strict resolution and relative path validation, and API exceptions are properly redacted. Tests and contracts accurately reflect the changes.",
+    "findings": [],
+    "coverage": [
+      "API path traversal and symlink escape prevention",
+      "Federation bundle API/CLI trust separation",
+      "CodeQL lgtm annotations placement",
+      "Error string disclosure redaction",
+      "SQLite read-only mode enforcement",
+      "Workflow token authority reduction"
+    ],
+    "residual_risks": [
+      "The CodeQL database cannot be perfectly reproduced locally, meaning the ultimate confirmation of alert closure relies on GitHub's subsequent analysis.",
+      "Path security relies on `Path.relative_to` evaluating subpaths securely against strict roots, which is solid but assumes no manual OS-level mutation during execution (TOCTOU remains possible at the OS level, though minimized)."
+    ]
+  },
+  "authority_boundary": {
+    "proves": [
+      "independent_review_was_performed_on_the_bound_packet",
+      "reviewer_reported_no_critical_high_or_medium_finding"
+    ],
+    "does_not_prove": [
+      "codeql_alert_closure",
+      "runtime_correctness",
+      "test_sufficiency",
+      "absence_of_other_vulnerabilities",
+      "merge_readiness",
+      "deployment_state"
+    ]
+  }
+}
