@@ -23,9 +23,14 @@ class SecurityConfig:
     # Absolute, normalized roots only. Anything else is rejected at registration.
     allowlist_roots: List[Path] = field(default_factory=list)
     token: str | None = None
+    sensitive_fs_access: bool = False
 
     def set_token(self, token: Optional[str]):
         self.token = token
+
+    def set_sensitive_fs_access(self, enabled: bool) -> None:
+        """Record whether broad system/home browsing was explicitly granted."""
+        self.sensitive_fs_access = bool(enabled)
 
     def add_allowlist_root(self, path: Path) -> None:
         """

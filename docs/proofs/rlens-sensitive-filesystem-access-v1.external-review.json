@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "kind": "lenskit.external_security_review",
+  "authority": "independent_diff_review_evidence",
+  "repository": "heimgewebe/lenskit",
+  "pull_request": 949,
+  "reviewer": {
+    "tool": "codex-cli",
+    "version": "0.142.2",
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh",
+    "mode": "isolated_packet_no_tools"
+  },
+  "reviewed_implementation": {
+    "head_sha": "a2bcb176b0f12865562f74c2cc3a627a622df80e",
+    "base_sha": "beeb2f14318577177b69d1699fe0aef8078c7fe7",
+    "diff_sha256": "c199feadc6d2dff693d659389bdfe7f7ea0353c7bccaecddcad3bb822071ba26",
+    "diff_bytes": 24015,
+    "diff_hash_basis": "git diff --binary origin/main...a2bcb176b0f12865562f74c2cc3a627a622df80e -- . ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.self-review.md' ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.external-review.json'"
+  },
+  "supporting_context": [
+    {
+      "path": "merger/lenskit/adapters/security.py",
+      "sha256": "c9ee1de691130cd1cac0810f31464b2dbe44f82a3f76852b991ac92eab84a1d9",
+      "purpose": "Verify exception inheritance and two-stage canonical path validation."
+    }
+  ],
+  "packet_sha256": "979e63e020f8fc083a3ebeed5046b51eb76fdc49f28aeab8da91616666fe39f6",
+  "reviewed_at": "2026-07-10T11:37:13.605447+00:00",
+  "verdict": "PASS",
+  "summary": "No critical, high, or medium security findings in the supplied diff. The patch closes the main authorization gap by separating the `system` capability from mere path allowlisting, resets sensitive state on reinitialization, and routes `abs_path` through canonical allowlist validation so symlink escapes are denied.",
+  "findings": [],
+  "coverage": [
+    "Reviewed sensitive filesystem authorization semantics for `system`, `/`, and `abs_path`.",
+    "Checked reinitialization behavior for stale root/home grants and the new `sensitive_fs_access` flag.",
+    "Checked path canonicalization flow against the supplied `SecurityConfig.validate_path` two-stage prefix and canonical checks.",
+    "Reviewed symlink escape coverage and compatibility implications from the updated tests and docs."
+  ],
+  "residual_risks": [
+    "The diff does not show endpoint dependency wiring, so this review assumes existing bearer enforcement is correctly applied to sensitive API routes when `sec.token` is configured.",
+    "Tests cover key symlink and reinitialization cases, but cross-platform edge cases such as case-insensitive filesystems or Windows drive behavior are not demonstrated in this packet."
+  ],
+  "historical_review_triage": [
+    {
+      "source": "prior_review_iteration",
+      "severity": "low",
+      "disposition": "deferred_follow_up",
+      "bureau_event_id": 33,
+      "reason": "Unusual Home-resolution startup failure remains a bounded compatibility question and does not reopen the authorization boundary."
+    }
+  ],
+  "does_not_establish": [
+    "runtime_deployment_correctness",
+    "full_test_sufficiency",
+    "cross_platform_filesystem_correctness",
+    "absence_of_all_filesystem_side_channels",
+    "merge_authorization"
+  ]
+}

@@ -18,7 +18,7 @@ The server guarantees:
 ## File System
 
 ### `/api/fs/roots`
-Returns a list of allowed root entry points.
+Returns a list of allowed root entry points. `hub` and a configured `merges` root are ordinary service roots. The `system` root (the service user's home directory) is returned only when the service runs on loopback with bearer authentication enabled; merely configuring an overlapping Hub or merges root does not mint the `system` alias.
 
 **Contract:**
 Each entry in the `roots` list guarantees the following fields:

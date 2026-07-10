@@ -12,7 +12,11 @@ from fastapi import HTTPException
 from dataclasses import dataclass
 import os
 
-from .security import get_security_config
+from .security import (
+    AccessDeniedError,
+    SecurityViolationError,
+    get_security_config,
+)
 
 @dataclass(frozen=True)
 class TrustedPath:
@@ -25,13 +29,18 @@ def list_allowed_roots(hub: Optional[Path], merges_dir: Optional[Path]) -> List[
         roots.append({"id": "hub", "path": str(hub.resolve())})
     if merges_dir:
         roots.append({"id": "merges", "path": str(merges_dir.resolve())})
-    try:
-        # System root maps to User Home (e.g. /home/alex)
-        sys_root = Path.home().resolve()
-        sec.validate_path(sys_root)
-        roots.append({"id": "system", "path": str(sys_root)})
-    except HTTPException:
-        pass
+    if sec.sensitive_fs_access:
+        try:
+            # The "system" preset maps to the service user's home directory.
+            # It is present only when init_service granted sensitive filesystem
+            # access (loopback + bearer auth). Validation failures omit only
+            # this optional root; ordinary Hub/Merges roots remain available.
+            sys_root = Path.home().resolve()
+            sec.validate_path(sys_root)
+            roots.append({"id": "system", "path": str(sys_root)})
+        except (SecurityViolationError, OSError, RuntimeError):
+            # `system` is optional; its failure must not hide explicit Hub/Merges roots.
+            pass
     return roots
 
 def _b64url(data: bytes) -> str:
@@ -109,6 +118,8 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
             raise HTTPException(status_code=400, detail="Unknown root id")
 
         sec = get_security_config()
+        if root_id == "system" and not sec.sensitive_fs_access:
+            raise AccessDeniedError("System root requires loopback plus bearer authentication")
         # validate base
         base_resolved = sec.validate_path(base.resolve())
 

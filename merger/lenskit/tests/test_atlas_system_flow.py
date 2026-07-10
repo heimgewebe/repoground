@@ -2,7 +2,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
-from merger.lenskit.service.app import app, init_service, state
+from merger.lenskit.service.app import app, init_service, state, verify_token
 
 client = TestClient(app)
 
@@ -14,7 +14,8 @@ def mock_state():
     mock_merges = Path("/tmp/mock_merges")
     mock_merges.mkdir(parents=True, exist_ok=True)
 
-    init_service(hub_path=mock_hub, merges_dir=mock_merges)
+    init_service(hub_path=mock_hub, merges_dir=mock_merges, token="test-token")
+    app.dependency_overrides[verify_token] = lambda: True
 
     # Mock Security Config
     with patch("merger.lenskit.service.app.get_security_config") as mock_get_sec:
@@ -25,6 +26,7 @@ def mock_state():
         yield state
 
     # Cleanup
+    app.dependency_overrides.pop(verify_token, None)
     import shutil
     shutil.rmtree(mock_hub, ignore_errors=True)
     shutil.rmtree(mock_merges, ignore_errors=True)
