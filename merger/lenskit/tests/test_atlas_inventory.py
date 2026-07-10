@@ -1,5 +1,7 @@
 import json
-from merger.lenskit.adapters.atlas import AtlasScanner
+from merger.lenskit.adapters import atlas as atlas_module
+
+AtlasScanner = atlas_module.AtlasScanner
 
 def test_atlas_inventory_includes_all_titles(tmp_path):
     # Setup: Create folder structure
@@ -146,8 +148,6 @@ def test_atlas_dirs_inventory_excludes_files(tmp_path):
 
 
 def test_atlas_reports_apparent_allocated_and_sparse_bytes(tmp_path, monkeypatch):
-    import merger.lenskit.adapters.atlas as atlas_module
-
     root = tmp_path / "source"
     root.mkdir()
     target = root / "sparse.bin"
@@ -175,14 +175,10 @@ def test_atlas_reports_apparent_allocated_and_sparse_bytes(tmp_path, monkeypatch
 def test_allocated_bytes_falls_back_to_apparent_size_without_st_blocks():
     from types import SimpleNamespace
 
-    from merger.lenskit.adapters.atlas import allocated_bytes_from_stat
-
-    assert allocated_bytes_from_stat(SimpleNamespace(st_size=1234)) == 1234
+    assert atlas_module.allocated_bytes_from_stat(SimpleNamespace(st_size=1234)) == 1234
 
 
 def test_atlas_directory_rollups_include_allocated_bytes(tmp_path, monkeypatch):
-    import merger.lenskit.adapters.atlas as atlas_module
-
     root = tmp_path / "source"
     nested = root / "nested"
     nested.mkdir(parents=True)
