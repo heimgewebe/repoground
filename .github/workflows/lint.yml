@@ -33,3 +33,25 @@ jobs:
       # Bare path-scoped Ruff jobs keep Ruff's default rule selection.
       - name: Check pinned Ruff scope
         run: ruff check --config ruff-ci.toml .
+
+  self-review-hash:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute implementation diff hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          git diff origin/main...HEAD -- . \
+            ':(exclude)docs/proofs/repobrief-agent-memory-citations-v1.self-review.md' \
+            ':(exclude).github/workflows/repobrief-self-review-hash.yml' \
+            ':(exclude).github/workflows/lint.yml' \
+            > /tmp/repobrief-implementation.diff
+          echo "IMPLEMENTATION_HEAD=${GITHUB_SHA}"
+          echo "IMPLEMENTATION_DIFF_SHA256=$(sha256sum /tmp/repobrief-implementation.diff | awk '{print $1}')"
+          echo "IMPLEMENTATION_DIFF_BYTES=$(wc -c < /tmp/repobrief-implementation.diff)"
