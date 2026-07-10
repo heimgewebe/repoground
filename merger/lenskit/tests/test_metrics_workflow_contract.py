@@ -42,6 +42,8 @@ def test_metrics_workflow_verifies_download_before_ajv_validation() -> None:
     assert '"$METRICS_SCHEMA_URL"' in fetch_script
     assert '"$METRICS_SCHEMA_SHA256"' in fetch_script
     assert "sha256sum --check --strict" in fetch_script
+    assert "--connect-timeout 5" in fetch_script
+    assert "--max-time 30" in fetch_script
     assert "npx --yes ajv-cli@5.0.0 validate" in validate_script
     assert "--spec=draft2020" in validate_script
     assert "--strict=false" in validate_script
@@ -55,3 +57,5 @@ def test_optional_hauski_post_remains_non_blocking() -> None:
 
     assert post["continue-on-error"] is True
     assert "HAUSKI_POST_URL" in str(post["if"])
+    assert "--connect-timeout 5" in post["run"]
+    assert "--max-time 30" in post["run"]
