@@ -278,8 +278,11 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     state.runner = JobRunner(state.job_store)
     state.log_provider = FileLogProvider(state.job_store)
 
-    # Configure Security
+    # Configure Security from scratch. init_service may be called repeatedly
+    # in one process (tests, embedded use, controlled reconfiguration); roots
+    # from an earlier configuration must not remain authorized.
     sec = get_security_config()
+    sec.allowlist_roots.clear()
     sec.set_token(token)
 
     # Allowlist the Hub
@@ -295,16 +298,26 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     except Exception as e:
         logger.debug("Could not allow system root: %s", e, exc_info=True)
 
-    # Root Access: enabled by default on loopback with auth
+    # Root Access: enabled by default on loopback with auth.
+    # Gate strictly on the bearer token that verify_token actually enforces
+    # (sec.token), so the invariant "root allowlisted ⟹ auth active" always
+    # holds. Env secrets like RLENS_FS_TOKEN_SECRET sign FS download tokens but
+    # do NOT enable bearer auth, so they must not, on their own, widen the jail.
     is_loopback = _is_loopback_host(host)
-    has_token = bool(token or os.getenv("RLENS_TOKEN") or os.getenv("RLENS_FS_TOKEN_SECRET"))
+    has_token = bool(sec.token)
+    root = Path("/").resolve()
 
     if is_loopback and has_token:
-        root = Path("/").resolve()
         if root not in getattr(sec, "allowlist_roots", []):
             logger.warning("Root allowlisted (loopback + auth).")
             sec.add_allowlist_root(root)
     else:
+        # init_service can be called repeatedly in-process. Remove a root grant
+        # left by an earlier authenticated loopback initialization so the
+        # allowlist cannot outlive the authorization condition that created it.
+        roots = getattr(sec, "allowlist_roots", None)
+        if isinstance(roots, list):
+            roots[:] = [allowed for allowed in roots if allowed != root]
         logger.warning(
             "Root browsing refused (loopback=%s, has_token=%s).",
             is_loopback,

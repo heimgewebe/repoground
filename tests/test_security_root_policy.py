@@ -33,17 +33,20 @@ def setup_mocks():
         sys.modules["starlette"] = MagicMock()
         sys.modules["starlette.concurrency"] = MagicMock()
 
-    # Mock heavy service components if not present
-    # BUT DO NOT mock merger.lenskit.adapters.security
-    sys.modules.setdefault("merger.lenskit.service.jobstore", MagicMock())
-    sys.modules.setdefault("merger.lenskit.service.runner", MagicMock())
-    sys.modules.setdefault("merger.lenskit.service.logging_provider", MagicMock())
-    sys.modules.setdefault("merger.lenskit.service.auth", MagicMock())
-    sys.modules.setdefault("merger.lenskit.adapters.atlas", MagicMock())
-    sys.modules.setdefault("merger.lenskit.adapters.metarepo", MagicMock())
-    sys.modules.setdefault("merger.lenskit.adapters.sources", MagicMock())
-    sys.modules.setdefault("merger.lenskit.adapters.diagnostics", MagicMock())
-    sys.modules.setdefault("merger.lenskit.core.merge", MagicMock())
+        # In a dependency-minimal environment, mock the service's heavy
+        # imports as a group. When FastAPI/Pydantic are available, import the
+        # real modules: process-global MagicMocks would contaminate later tests
+        # in the same pytest session.
+        # BUT DO NOT mock merger.lenskit.adapters.security.
+        sys.modules.setdefault("merger.lenskit.service.jobstore", MagicMock())
+        sys.modules.setdefault("merger.lenskit.service.runner", MagicMock())
+        sys.modules.setdefault("merger.lenskit.service.logging_provider", MagicMock())
+        sys.modules.setdefault("merger.lenskit.service.auth", MagicMock())
+        sys.modules.setdefault("merger.lenskit.adapters.atlas", MagicMock())
+        sys.modules.setdefault("merger.lenskit.adapters.metarepo", MagicMock())
+        sys.modules.setdefault("merger.lenskit.adapters.sources", MagicMock())
+        sys.modules.setdefault("merger.lenskit.adapters.diagnostics", MagicMock())
+        sys.modules.setdefault("merger.lenskit.core.merge", MagicMock())
 
 setup_mocks()
 # Ensure repo root is in path
@@ -130,6 +133,76 @@ def test_init_service_non_loopback_with_token_refuses_root(monkeypatch, tmp_path
     root_path = Path("/").resolve()
     assert root_path not in sec.allowlist_roots
 
+def test_init_service_replaces_previous_allowlist_configuration(tmp_path):
+    """Reinitialization must revoke roots belonging to the previous hub."""
+    first_hub = tmp_path / "first-hub"
+    second_hub = tmp_path / "second-hub"
+    first_hub.mkdir()
+    second_hub.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+
+    init_service(first_hub, host="127.0.0.1", token=None)
+    assert first_hub.resolve() in sec.allowlist_roots
+
+    init_service(second_hub, host="127.0.0.1", token=None)
+    assert first_hub.resolve() not in sec.allowlist_roots
+    assert second_hub.resolve() in sec.allowlist_roots
+
+
+def test_init_service_removes_stale_root_when_auth_is_disabled(tmp_path):
+    """A prior authenticated init must not leave root enabled after auth is removed."""
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+
+    init_service(hub, host="127.0.0.1", token="secret")
+    assert Path("/").resolve() in sec.allowlist_roots
+
+    init_service(hub, host="127.0.0.1", token=None)
+    assert Path("/").resolve() not in sec.allowlist_roots
+    assert hub.resolve() in sec.allowlist_roots
+    assert Path.home().resolve() in sec.allowlist_roots
+
+
+def test_init_service_removes_stale_root_when_binding_becomes_non_loopback(tmp_path):
+    """Changing to a non-loopback bind must revoke an earlier root grant."""
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+
+    init_service(hub, host="127.0.0.1", token="secret")
+    assert Path("/").resolve() in sec.allowlist_roots
+
+    init_service(hub, host="192.168.1.1", token="secret")
+    assert Path("/").resolve() not in sec.allowlist_roots
+
+
+def test_init_service_fs_token_secret_without_bearer_refuses_root(monkeypatch, tmp_path):
+    """
+    Regression: RLENS_FS_TOKEN_SECRET signs FS download tokens but does NOT
+    enable bearer auth. On its own it must not widen the jail to system root,
+    otherwise root browsing would be reachable with auth effectively disabled.
+    Invariant: root allowlisted <=> verify_token is actually enforced.
+    """
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+    sec.set_token(None)
+
+    monkeypatch.delenv("RLENS_TOKEN", raising=False)
+    monkeypatch.setenv("RLENS_FS_TOKEN_SECRET", "fs-signing-secret")
+
+    init_service(hub, host="127.0.0.1", token=None)
+
+    root_path = Path("/").resolve()
+    assert root_path not in sec.allowlist_roots
+    # Auth is not active (no bearer token), so root must remain refused.
+    assert not sec.token
+
 def test_static_source_check_app_py():
     app_path = Path("merger/lenskit/service/app.py")
     content = app_path.read_text(encoding="utf-8")
@@ -162,3 +235,5 @@ def test_static_source_check_adr():
     assert "Loopback-Scoped Root Access" in content
     assert "enabled by default only when the service is bound to a loopback interface" in content
     assert "optionally including system root on loopback + auth" in content
+    assert "does not activate bearer authentication" in content
+    assert "cannot authorize root browsing" in content

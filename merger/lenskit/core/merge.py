@@ -500,8 +500,9 @@ def _stable_file_id(fi: "FileInfo") -> str:
     path = unicodedata.normalize("NFC", path)
 
     raw = f"{repo}:{path}".encode("utf-8", errors="ignore")
-    # Updated in v2.4 (PR1) to include FILE: prefix
-    return "FILE:f_" + hashlib.sha1(raw).hexdigest()[:12]
+    # Updated in v2.4 (PR1) to include FILE: prefix.
+    # Content addressing only (not security); flag keeps FIPS builds happy.
+    return "FILE:f_" + hashlib.sha1(raw, usedforsecurity=False).hexdigest()[:12]
 
 
 def resolve_canonical_md(md_parts: List[Path]) -> Optional[Path]:  # lenskit:requires-authority=canonical_content

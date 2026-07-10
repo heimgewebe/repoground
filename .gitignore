@@ -49,6 +49,9 @@ atlas_scan_*.md
 .claude/settings.local.json
 .claude/worktrees/
 
+# Local Grabowski runtime/worktree state
+.grabowski/
+
 # Root core dumps
 /core
 /core.*

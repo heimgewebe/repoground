@@ -13,7 +13,7 @@ However, standard implementation of absolute path browsing poses significant sec
 We implement a "Secure Capability" architecture that balances functionality with strict governance and scanner compliance.
 
 ### 1. Loopback-Scoped Root Access
-Browsing the system root (`/`) via API is enabled by default only when the service is bound to a loopback interface (`localhost` / `127.0.0.1`) and authentication is configured (via the `token` parameter, `RLENS_TOKEN`, or `RLENS_FS_TOKEN_SECRET`).
+Browsing the system root (`/`) via API is enabled by default only when the service is bound to a loopback interface (`localhost` / `127.0.0.1`) and bearer authentication is configured (via the `token` parameter or `RLENS_TOKEN`). `RLENS_FS_TOKEN_SECRET` only signs filesystem navigation tokens; it does not activate bearer authentication and cannot authorize root browsing.
 
 If the service is bound to any non-loopback interface, root browsing is automatically refused.
 
@@ -38,7 +38,7 @@ This creates a visible type boundary between "untrusted user input" and "safe fi
 ## Consequences
 *   **Positive**: CodeQL "path injection" warnings are resolved by design. Filesystem access is limited to authorized roots (optionally including system root on loopback + auth).
 *   **Negative**: "Quick and dirty" API calls using manual path strings are no longer possible; clients must obtain a valid token first (e.g., via `/api/fs/roots`).
-*   **Maintenance**: Requires `RLENS_FS_TOKEN_SECRET` (or `RLENS_TOKEN` fallback) to be managed securely.
+*   **Maintenance**: Filesystem navigation tokens require `RLENS_FS_TOKEN_SECRET` (or `RLENS_TOKEN` fallback) to be managed securely. This signing secret is not bearer authorization.
 
 ## References
 *   `merger/repoLens/service/fs_resolver.py`
