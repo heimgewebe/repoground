@@ -12,7 +12,11 @@ from fastapi import HTTPException
 from dataclasses import dataclass
 import os
 
-from .security import get_security_config
+from .security import (
+    AccessDeniedError,
+    SecurityViolationError,
+    get_security_config,
+)
 
 @dataclass(frozen=True)
 class TrustedPath:
@@ -26,11 +30,15 @@ def list_allowed_roots(hub: Optional[Path], merges_dir: Optional[Path]) -> List[
     if merges_dir:
         roots.append({"id": "merges", "path": str(merges_dir.resolve())})
     try:
-        # System root maps to User Home (e.g. /home/alex)
+        if not sec.sensitive_fs_access:
+            raise AccessDeniedError("Sensitive filesystem access is not enabled")
+        # The "system" preset maps to the service user's home directory.
+        # It is present only when init_service granted sensitive filesystem
+        # access (loopback + bearer auth). Policy denial is an expected outcome.
         sys_root = Path.home().resolve()
         sec.validate_path(sys_root)
         roots.append({"id": "system", "path": str(sys_root)})
-    except HTTPException:
+    except (SecurityViolationError, OSError, RuntimeError):
         pass
     return roots
 
@@ -109,6 +117,8 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
             raise HTTPException(status_code=400, detail="Unknown root id")
 
         sec = get_security_config()
+        if root_id == "system" and not sec.sensitive_fs_access:
+            raise AccessDeniedError("System root requires loopback plus bearer authentication")
         # validate base
         base_resolved = sec.validate_path(base.resolve())
 

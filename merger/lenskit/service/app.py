@@ -284,6 +284,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     sec = get_security_config()
     sec.allowlist_roots.clear()
     sec.set_token(token)
+    sec.set_sensitive_fs_access(False)
 
     # Allowlist the Hub
     sec.add_allowlist_root(hub_path)
@@ -291,37 +292,24 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     if merges_dir:
         sec.add_allowlist_root(merges_dir)
 
-    # Allow System Root (Home) for Atlas
-    # "System" root maps to user home (e.g. /home/alex), not /
-    try:
-        sec.add_allowlist_root(Path.home().resolve())
-    except Exception as e:
-        logger.debug("Could not allow system root: %s", e, exc_info=True)
-
-    # Root Access: enabled by default on loopback with auth.
-    # Gate strictly on the bearer token that verify_token actually enforces
-    # (sec.token), so the invariant "root allowlisted ⟹ auth active" always
-    # holds. Env secrets like RLENS_FS_TOKEN_SECRET sign FS download tokens but
-    # do NOT enable bearer auth, so they must not, on their own, widen the jail.
+    # Sensitive filesystem access is available only on loopback with the
+    # bearer token that verify_token actually enforces. Loopback alone is not
+    # an authorization boundary: other local processes or users can connect.
+    # RLENS_FS_TOKEN_SECRET signs navigation tokens but is not request auth.
     is_loopback = _is_loopback_host(host)
     has_token = bool(sec.token)
     root = Path("/").resolve()
 
     if is_loopback and has_token:
-        if root not in getattr(sec, "allowlist_roots", []):
-            logger.warning("Root allowlisted (loopback + auth).")
-            sec.add_allowlist_root(root)
+        sec.set_sensitive_fs_access(True)
+        sec.add_allowlist_root(Path.home().resolve())
+        sec.add_allowlist_root(root)
+        logger.warning("Sensitive filesystem browsing enabled (home + root; loopback + auth).")
     else:
-        # init_service can be called repeatedly in-process. Remove a root grant
-        # left by an earlier authenticated loopback initialization so the
-        # allowlist cannot outlive the authorization condition that created it.
-        roots = getattr(sec, "allowlist_roots", None)
-        if isinstance(roots, list):
-            roots[:] = [allowed for allowed in roots if allowed != root]
         logger.warning(
-            "Root browsing refused (loopback=%s, has_token=%s).",
+            "Sensitive filesystem browsing refused (home + root; loopback=%s, has_token=%s).",
             is_loopback,
-            has_token
+            has_token,
         )
 
     # Apply CORS based on host
@@ -1600,14 +1588,20 @@ def resolve_atlas_root(request: AtlasRequest, hub_dir: Path, merges_dir: Optiona
             if not p.is_absolute():
                 raise ValueError("Path must be absolute")
 
-            # Return the validated absolute path directly.
-            # We explicitly avoid p.resolve() here to maintain the exact user input structure,
-            # avoiding unnecessary symlink expansions that alter semantic intent.
-            return ResolvedAtlasRoot(scan_root=p, root_kind="abs_path", is_internal_abs_path=True)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid absolute path: {e}")
-        except Exception:
+        except (TypeError, OSError):
             raise HTTPException(status_code=400, detail="Invalid absolute path for root_kind='abs_path'")
+
+        # Absolute-path mode is not an authorization bypass. Canonicalize and
+        # enforce the same allowlist used by presets and signed navigation
+        # tokens. AccessDeniedError intentionally propagates to the 403 handler.
+        validated = get_security_config().validate_path(p)
+        return ResolvedAtlasRoot(
+            scan_root=validated,
+            root_kind="abs_path",
+            is_internal_abs_path=True,
+        )
 
     else:
         raise HTTPException(status_code=400, detail=f"Invalid root_kind: {root_kind}")

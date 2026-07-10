@@ -136,7 +136,13 @@ def main():
         sys.exit(1)
 
     if not _is_loopback_host(args.host):
-        print("[rlens] Notice: Root browsing will be refused by policy (non-loopback host).", file=sys.stderr)
+        print("[rlens] Notice: Home and root browsing will be refused by policy (non-loopback host).", file=sys.stderr)
+    elif not token:
+        print(
+            "[rlens] Notice: Home and root browsing are disabled without bearer authentication; "
+            "hub and merges remain available.",
+            file=sys.stderr,
+        )
 
     # 4. Initialize Service
     init_service(

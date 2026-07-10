@@ -52,8 +52,10 @@ setup_mocks()
 # Ensure repo root is in path
 sys.path.insert(0, os.getcwd())
 
-from merger.lenskit.service.app import init_service
-from merger.lenskit.adapters.security import get_security_config
+from merger.lenskit.service.app import init_service, resolve_atlas_root
+from merger.lenskit.service.models import AtlasRequest
+from merger.lenskit.adapters.security import get_security_config, AccessDeniedError
+from merger.lenskit.adapters.filesystem import list_allowed_roots, resolve_fs_path
 
 def test_security_config_allowlist_invariant(tmp_path):
     """
@@ -99,7 +101,10 @@ def test_init_service_loopback_with_token_allows_root(monkeypatch, tmp_path):
     init_service(hub, host="127.0.0.1", token="secret")
 
     root_path = Path("/").resolve()
+    home_path = Path.home().resolve()
     assert root_path in sec.allowlist_roots
+    assert home_path in sec.allowlist_roots
+    assert sec.sensitive_fs_access is True
 
 def test_init_service_loopback_without_token_refuses_root(monkeypatch, tmp_path):
     """
@@ -117,7 +122,54 @@ def test_init_service_loopback_without_token_refuses_root(monkeypatch, tmp_path)
     init_service(hub, host="127.0.0.1", token=None)
 
     root_path = Path("/").resolve()
+    home_path = Path.home().resolve()
     assert root_path not in sec.allowlist_roots
+    assert home_path not in sec.allowlist_roots
+    assert sec.sensitive_fs_access is False
+
+    roots = list_allowed_roots(hub, None)
+    assert {entry["id"] for entry in roots} == {"hub"}
+    with pytest.raises(AccessDeniedError):
+        resolve_fs_path(hub=hub, merges_dir=None, root_id="system", rel_path="")
+
+def test_system_alias_requires_capability_not_only_path_allowlist(tmp_path):
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    init_service(hub, host="127.0.0.1", token=None)
+    sec = get_security_config()
+
+    # Simulate an explicitly configured root that happens to include Home.
+    # That must not silently mint the broader `system` capability.
+    sec.add_allowlist_root(Path.home().resolve())
+
+    roots = list_allowed_roots(hub, None)
+    assert "system" not in {entry["id"] for entry in roots}
+    with pytest.raises(AccessDeniedError):
+        resolve_fs_path(hub=hub, merges_dir=None, root_id="system", rel_path="")
+
+
+def test_atlas_abs_path_cannot_bypass_sensitive_root_policy(tmp_path):
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    init_service(hub, host="127.0.0.1", token=None)
+
+    request = AtlasRequest(root_kind="abs_path", root_value=str(Path.home().resolve()))
+
+    with pytest.raises(AccessDeniedError):
+        resolve_atlas_root(request, hub, None)
+
+
+def test_atlas_abs_path_within_hub_remains_available_without_auth(tmp_path):
+    hub = tmp_path / "hub"
+    child = hub / "project"
+    child.mkdir(parents=True)
+    init_service(hub, host="127.0.0.1", token=None)
+
+    request = AtlasRequest(root_kind="abs_path", root_value=str(child))
+    resolved = resolve_atlas_root(request, hub, None)
+
+    assert resolved.scan_root == child.resolve()
+
 
 def test_init_service_non_loopback_with_token_refuses_root(monkeypatch, tmp_path):
     """
@@ -131,7 +183,9 @@ def test_init_service_non_loopback_with_token_refuses_root(monkeypatch, tmp_path
     init_service(hub, host="192.168.1.1", token="secret")
 
     root_path = Path("/").resolve()
+    home_path = Path.home().resolve()
     assert root_path not in sec.allowlist_roots
+    assert home_path not in sec.allowlist_roots
 
 def test_init_service_replaces_previous_allowlist_configuration(tmp_path):
     """Reinitialization must revoke roots belonging to the previous hub."""
@@ -162,8 +216,8 @@ def test_init_service_removes_stale_root_when_auth_is_disabled(tmp_path):
 
     init_service(hub, host="127.0.0.1", token=None)
     assert Path("/").resolve() not in sec.allowlist_roots
+    assert Path.home().resolve() not in sec.allowlist_roots
     assert hub.resolve() in sec.allowlist_roots
-    assert Path.home().resolve() in sec.allowlist_roots
 
 
 def test_init_service_removes_stale_root_when_binding_becomes_non_loopback(tmp_path):
@@ -200,7 +254,8 @@ def test_init_service_fs_token_secret_without_bearer_refuses_root(monkeypatch, t
 
     root_path = Path("/").resolve()
     assert root_path not in sec.allowlist_roots
-    # Auth is not active (no bearer token), so root must remain refused.
+    assert Path.home().resolve() not in sec.allowlist_roots
+    # Auth is not active (no bearer token), so sensitive roots remain refused.
     assert not sec.token
 
 def test_static_source_check_app_py():
@@ -226,14 +281,16 @@ def test_static_source_check_rlens_cli():
     assert "RLENS_OPERATOR_MODE" not in content
 
     # Notice for non-loopback should be present
-    assert "Root browsing will be refused by policy (non-loopback host)" in content
+    assert "Home and root browsing will be refused by policy (non-loopback host)" in content
+    assert "Home and root browsing are disabled without bearer authentication" in content
 
 def test_static_source_check_adr():
     adr_path = Path("docs/adr/001-secure-fs-navigation.md")
     content = adr_path.read_text(encoding="utf-8")
 
-    assert "Loopback-Scoped Root Access" in content
-    assert "enabled by default only when the service is bound to a loopback interface" in content
-    assert "optionally including system root on loopback + auth" in content
+    assert "Loopback- and Auth-Scoped Sensitive Access" in content
+    assert "home directory (`system`) or the filesystem root (`/`)" in content
+    assert "only the explicitly configured Hub and merges directory are allowlisted" in content
     assert "does not activate bearer authentication" in content
-    assert "cannot authorize root browsing" in content
+    assert "cannot authorize sensitive filesystem browsing" in content
+    assert "other local processes or users" in content
