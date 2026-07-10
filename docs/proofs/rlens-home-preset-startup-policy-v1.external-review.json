@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "kind": "lenskit.external_review",
+  "repository": "heimgewebe/lenskit",
+  "pull_request": null,
+  "reviewer": {
+    "tool": "agy-antigravity-cli",
+    "version": "1.1.1",
+    "provider": "Gemini subscription",
+    "model": "default model; exact identifier not surfaced by print mode",
+    "mode": "isolated_diff_packet_no_tools"
+  },
+  "reviewed_implementation": {
+    "head_sha": "1f7e79c99a04c04a13a6f9868a5b18742da42a3e",
+    "base_sha": "292b9a7d22630e31dc2203be294f20700f39a629",
+    "diff_sha256": "0db2df960fb955326cb66183b56ec20e8171dec59336efeef090c11e63f2ab19",
+    "diff_bytes": 24746
+  },
+  "verdict": "PASS",
+  "summary": "The implementation successfully separates the broad authenticated root-level capability from the optional `system` preset. Startup resolution of Home prevents runtime drift and gracefully falls back to explicit root-only operation if the user's home directory is unresolvable or unregistered. State is properly synchronized, exceptions are handled explicitly, tests assert all edge cases correctly, and Webmaschine export behavior stays aligned with runtime availability.",
+  "findings": [],
+  "coverage": [
+    "merger/lenskit/adapters/filesystem.py",
+    "merger/lenskit/adapters/security.py",
+    "merger/lenskit/service/app.py",
+    "tests/test_security_root_policy.py",
+    "docs/adr/001-secure-fs-navigation.md",
+    "docs/proofs/rlens-home-preset-startup-policy-v1-proof.md",
+    "docs/service-api.md"
+  ],
+  "residual_risks": [],
+  "excluded_attempts": [
+    {
+      "tool": "codex-cli",
+      "reason": "usage_limit_before_review_output",
+      "counted_as_evidence": false
+    }
+  ],
+  "does_not_establish": [
+    "full_test_sufficiency",
+    "deployment_state",
+    "runtime_correctness_on_all_platforms",
+    "merge_authorization"
+  ]
+}
