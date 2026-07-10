@@ -20,7 +20,6 @@ defaults:
 env:
   FAIL_ON_NO_BASE: "1"
   ALLOW_REMOVALS: "0"
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   version-sync-check:
@@ -28,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
           persist-credentials: false
@@ -137,7 +136,7 @@ jobs:
       GH_PUSH_BEFORE: ${{ github.event.before }}
       PROTECTED_REGEX: '^(merger/lenskit/contracts/|docs/contracts/)'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false

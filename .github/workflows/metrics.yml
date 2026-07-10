@@ -13,18 +13,16 @@ env:
   METRICS_SCHEMA_SHA256: 1b1de44ea326ce8de36da6fc6d8f2da0abe279df8c47ab10e58ddc2cf604b914
   HAUSKI_POST_URL: ${{ secrets.HAUSKI_METRICS_URL }}
 
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   snapshot:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Ensure Node for ajv-cli
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
 
@@ -52,7 +50,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload metrics.json artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: metrics-snapshot
           path: metrics.json

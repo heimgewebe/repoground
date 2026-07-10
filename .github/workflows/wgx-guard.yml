@@ -11,9 +11,6 @@ name: wgx-guard
 permissions:
   contents: read
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   guard:
     # Fleet-Repos, die von metarepo aus via wgx up Templates beziehen,
