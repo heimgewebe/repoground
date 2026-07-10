@@ -130,6 +130,29 @@ def test_init_service_non_loopback_with_token_refuses_root(monkeypatch, tmp_path
     root_path = Path("/").resolve()
     assert root_path not in sec.allowlist_roots
 
+def test_init_service_fs_token_secret_without_bearer_refuses_root(monkeypatch, tmp_path):
+    """
+    Regression: RLENS_FS_TOKEN_SECRET signs FS download tokens but does NOT
+    enable bearer auth. On its own it must not widen the jail to system root,
+    otherwise root browsing would be reachable with auth effectively disabled.
+    Invariant: root allowlisted <=> verify_token is actually enforced.
+    """
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+    sec.set_token(None)
+
+    monkeypatch.delenv("RLENS_TOKEN", raising=False)
+    monkeypatch.setenv("RLENS_FS_TOKEN_SECRET", "fs-signing-secret")
+
+    init_service(hub, host="127.0.0.1", token=None)
+
+    root_path = Path("/").resolve()
+    assert root_path not in sec.allowlist_roots
+    # Auth is not active (no bearer token), so root must remain refused.
+    assert not sec.token
+
 def test_static_source_check_app_py():
     app_path = Path("merger/lenskit/service/app.py")
     content = app_path.read_text(encoding="utf-8")

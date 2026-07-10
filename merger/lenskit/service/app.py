@@ -295,9 +295,13 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     except Exception as e:
         logger.debug("Could not allow system root: %s", e, exc_info=True)
 
-    # Root Access: enabled by default on loopback with auth
+    # Root Access: enabled by default on loopback with auth.
+    # Gate strictly on the bearer token that verify_token actually enforces
+    # (sec.token), so the invariant "root allowlisted ⟹ auth active" always
+    # holds. Env secrets like RLENS_FS_TOKEN_SECRET sign FS download tokens but
+    # do NOT enable bearer auth, so they must not, on their own, widen the jail.
     is_loopback = _is_loopback_host(host)
-    has_token = bool(token or os.getenv("RLENS_TOKEN") or os.getenv("RLENS_FS_TOKEN_SECRET"))
+    has_token = bool(sec.token)
 
     if is_loopback and has_token:
         root = Path("/").resolve()

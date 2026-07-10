@@ -11,8 +11,9 @@ class Redactor:
         (r"(?i)(password|passwd|pwd)[\s:=]+([\"']?)([\w-]{6,})", r"\1\2[REDACTED]"),
         # AWS Key ID (AKIA...)
         (r"(AKIA[0-9A-Z]{16})", "[AWS_KEY_REDACTED]"),
-        # Private Key block (multiline match)
-        (r"-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----", "[PRIVATE_KEY_BLOCK_REDACTED]"),
+        # Private Key block (multiline match); covers PKCS#8 (PRIVATE KEY) plus
+        # the common labelled variants (RSA/EC/DSA/OPENSSH/PGP).
+        (r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----", "[PRIVATE_KEY_BLOCK_REDACTED]"),
     ]
 
     def redact(self, content: str) -> Tuple[str, bool]:

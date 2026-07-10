@@ -159,6 +159,10 @@ def main():
         host=args.host,
         port=args.port,
         log_level="info",
+        # Disabled so query-string auth tokens (used by EventSource / direct
+        # download clients that cannot set an Authorization header) are never
+        # written to the request log.
+        access_log=False,
     )
 
 if __name__ == "__main__":

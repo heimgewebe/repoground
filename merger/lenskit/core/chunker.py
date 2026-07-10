@@ -100,7 +100,8 @@ class Chunker:
         # Truncate to 20 hex chars (80 bits) to keep JSONL size manageable.
         # This provides sufficient collision resistance for repo-scale retrieval.
         chunk_hash_input = f"{path_key}\n{start_line}\n{sha256}".encode('utf-8')
-        chunk_id = hashlib.sha1(chunk_hash_input).hexdigest()[:20]
+        # Content addressing only (not security); flag keeps FIPS builds happy.
+        chunk_id = hashlib.sha1(chunk_hash_input, usedforsecurity=False).hexdigest()[:20]
 
         chunks.append(Chunk(
             chunk_id=chunk_id,
