@@ -1,0 +1,44 @@
+{
+  "schema": "lenskit.external_security_review.v1",
+  "pull_request": null,
+  "reviewer": "gemini-via-antigravity-cli",
+  "review_mode": "immutable_diff_only_no_tools",
+  "reviewed_base": "2f75253bc77c4329d1aa0f2b71466197bae350f6",
+  "reviewed_implementation_head": "0ccb856d21533df1500a0e0a859c71815c622ef9",
+  "reviewed_packet": {
+    "context_lines": 12,
+    "sha256": "8b20bfbb5a930eb7a7ae913b30097729acdcdcabbe8cf43a0a2eeceef40e6fb6",
+    "bytes": 21753
+  },
+  "result": {
+    "verdict": "PASS",
+    "summary": "The central allowlist refactor strongly improves path handling by eliminating direct filesystem sinks (like .resolve()) on request-controlled full paths. It correctly decomposes paths lexically, enforces least authority for overlapping roots by failing closed without fallback, and implements a robust, fail-closed SARIF gate for CI.",
+    "findings": [],
+    "coverage": [
+      "Traversal and symlink-escape resistance (improved via decomposition and `resolve_secure_path`)",
+      "Overlapping-root behavior and least authority (correctly enforced by sorting and hard-failing on canonical check)",
+      "File vs directory contracts (correctly extracted to `validate_directory`)",
+      "Cross-platform path handling (safe use of `os.path` and `Path`, strict `.` and `..` segment rejection)",
+      "Raw CodeQL SARIF gate (robust, fails closed on missing/malformed output, catches undetected alerts)",
+      "Regressions in `_find_repos` (removed code was safely unreachable)"
+    ],
+    "residual_risks": [
+      "Lexical matching relies on exact string prefix equivalence, which may fail safe (reject valid paths) on case-insensitive filesystems (Windows/macOS) if the user provides a path with different casing than the registered root."
+    ]
+  },
+  "authority_boundary": {
+    "proves": [
+      "independent_review_was_performed_on_the_bound_packet",
+      "reviewer_reported_no_critical_high_or_medium_finding"
+    ],
+    "does_not_prove": [
+      "raw_sarif_gate_runtime_success",
+      "codeql_alert_closure",
+      "runtime_correctness",
+      "test_sufficiency",
+      "absence_of_other_vulnerabilities",
+      "merge_readiness",
+      "deployment_state"
+    ]
+  }
+}
