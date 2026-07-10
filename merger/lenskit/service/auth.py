@@ -26,7 +26,8 @@ def verify_token(
 
     # Bearer header is the preferred channel. The query parameter is retained
     # only for browser-native clients that cannot set headers (EventSource /
-    # direct downloads); server access logging is disabled so it is not logged.
+    # direct downloads).  Uvicorn's raw URL logger remains disabled and the
+    # service's bounded access logger never reads the query string.
     if _token_matches(creds.credentials if creds else None, config.token):
         return
 

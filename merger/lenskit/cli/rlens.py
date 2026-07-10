@@ -165,9 +165,9 @@ def main():
         host=args.host,
         port=args.port,
         log_level="info",
-        # Disabled so query-string auth tokens (used by EventSource / direct
-        # download clients that cannot set an Authorization header) are never
-        # written to the request log.
+        # Keep Uvicorn's raw URL logger disabled.  The application emits a
+        # bounded structured access record from static route metadata without
+        # reading query strings, headers, cookies, client addresses, or bodies.
         access_log=False,
     )
 

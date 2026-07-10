@@ -25,6 +25,7 @@ from .runner import JobRunner
 from .source_acquisition import resolve_effective_source_mode
 from .logging_provider import LogProvider, FileLogProvider
 from .auth import verify_token
+from .access_log import SafeAccessLogMiddleware
 from ..adapters.security import (
     get_security_config,
     validate_hub_path,
@@ -199,6 +200,7 @@ def _schedule_service_restart(unit: str) -> None:
         raise RuntimeError(detail) from exc
 
 app = FastAPI(title="rLens", version=SERVER_VERSION)
+app.add_middleware(SafeAccessLogMiddleware)
 
 @app.exception_handler(InvalidPathError)
 async def invalid_path_handler(request: Request, exc: InvalidPathError):
