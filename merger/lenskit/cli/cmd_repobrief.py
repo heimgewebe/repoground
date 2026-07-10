@@ -602,9 +602,17 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
     import io
 
     repo_path = Path(args.repo).expanduser().resolve()
+    out_path = Path(args.out).expanduser().resolve()
     publication_root = Path(args.publication_root).expanduser().resolve()
     if publication_root == repo_path or repo_path in publication_root.parents:
         print("repobrief external-manifest refresh: publication root must not be inside the source repo", file=sys.stderr)
+        return 2
+    if out_path != publication_root and publication_root not in out_path.parents:
+        print(
+            "repobrief external-manifest refresh: output directory must be inside "
+            "publication_root for portable external publication",
+            file=sys.stderr,
+        )
         return 2
 
     from merger.lenskit.core.external_manifest_reference import (
@@ -626,7 +634,7 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
         return 2
 
     snapshot_args = argparse.Namespace(
-        repo=args.repo, out=args.out, profile=args.profile, mode=args.mode,
+        repo=args.repo, out=str(out_path), profile=args.profile, mode=args.mode,
         max_bytes=args.max_bytes, split_size=args.split_size, path_filter=args.path_filter,
         ext=args.ext, output_mode=args.output_mode, redact_secrets=args.redact_secrets,
         include_hidden=args.include_hidden,

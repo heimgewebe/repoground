@@ -133,6 +133,8 @@ The migration is deliberately narrow:
 
 Create-style RepoBrief commands, such as `snapshot create` and `external-manifest publish`, may write explicit output artifacts selected by their arguments. Read-style RepoBrief commands, such as `snapshot status`, `artifact list`, `artifact get`, `required-reading resolve`, `snapshot check`, `range get`, and `query`, must not refresh snapshots, mutate Git, create pull requests, apply patches, or infer approval.
 
+`external-manifest refresh` combines explicit snapshot creation and portable publication. Its `--out` directory must be the publication root itself or a descendant such as `<publication-root>/bundles/<repository>/<ref>/<generation>`. This is checked before snapshot generation. The stable manifests remain under `<publication-root>/external/...`, and their relative bundle paths therefore stay resolvable when the whole publication root is moved or synchronized.
+
 A successful CLI command or alias smoke test does not establish source freshness, runtime correctness, test sufficiency, review completeness, regression absence, repo understanding, or merge readiness.
 
 ## Read-only access CLI
