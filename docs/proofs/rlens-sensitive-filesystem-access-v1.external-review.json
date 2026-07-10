@@ -12,11 +12,11 @@
     "mode": "isolated_packet_no_tools"
   },
   "reviewed_implementation": {
-    "head_sha": "9bf1358febd7d0e146a12080ab8c8c1afc854510",
+    "head_sha": "a2bcb176b0f12865562f74c2cc3a627a622df80e",
     "base_sha": "beeb2f14318577177b69d1699fe0aef8078c7fe7",
-    "diff_sha256": "63e83a4399ca97f5f5efdbdcaefe7b7516dc6f412cd02d1c20449f0b6cc76af8",
-    "diff_bytes": 23925,
-    "diff_hash_basis": "git diff --binary origin/main...9bf1358febd7d0e146a12080ab8c8c1afc854510 -- . ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.self-review.md'"
+    "diff_sha256": "c199feadc6d2dff693d659389bdfe7f7ea0353c7bccaecddcad3bb822071ba26",
+    "diff_bytes": 24015,
+    "diff_hash_basis": "git diff --binary origin/main...a2bcb176b0f12865562f74c2cc3a627a622df80e -- . ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.self-review.md' ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.external-review.json'"
   },
   "supporting_context": [
     {
@@ -25,41 +25,34 @@
       "purpose": "Verify exception inheritance and two-stage canonical path validation."
     }
   ],
-  "packet_sha256": "1834da3e984621e8081ae0cc353f5839a11f20a02e9384573d36edd154e5901f",
-  "reviewed_at": "2026-07-10T11:30:04.837501+00:00",
+  "packet_sha256": "979e63e020f8fc083a3ebeed5046b51eb76fdc49f28aeab8da91616666fe39f6",
+  "reviewed_at": "2026-07-10T11:37:13.605447+00:00",
   "verdict": "PASS",
-  "summary": "No critical, high, or medium findings. The patch closes the main authorization bypass surfaces called out in the packet: `system` is now capability-gated separately from path allowlisting, stale sensitive grants are reset on reinitialization, and `abs_path` now goes through the central canonicalizing allowlist check instead of returning raw absolute paths.",
-  "findings": [
-    {
-      "severity": "low",
-      "file": "merger/lenskit/service/app.py",
-      "location": "init_service sensitive access block",
-      "problem": "Sensitive-mode startup can now fail if `Path.home().resolve()` or root allowlist registration raises.",
-      "rationale": "The previous home-root registration was best-effort and caught exceptions. The new loopback+token branch calls `sec.add_allowlist_root(Path.home().resolve())` and `sec.add_allowlist_root(root)` without handling resolution or registration failures. This is not an authorization bypass, but it is a compatibility/regression risk in unusual service-account or platform configurations.",
-      "recommendation": "Consider preserving best-effort behavior for the optional home preset while still granting `/` when appropriate, or fail with an explicit startup error that documents the configuration problem."
-    }
-  ],
+  "summary": "No critical, high, or medium security findings in the supplied diff. The patch closes the main authorization gap by separating the `system` capability from mere path allowlisting, resets sensitive state on reinitialization, and routes `abs_path` through canonical allowlist validation so symlink escapes are denied.",
+  "findings": [],
   "coverage": [
-    "Reviewed the supplied implementation diff only; no commands, file access, or modifications were performed.",
-    "Checked authorization gating for `system`, `/`, and `abs_path`.",
-    "Checked path canonicalization and symlink escape handling against the supplied `SecurityConfig.validate_path` context.",
-    "Checked reinitialization behavior for stale sensitive grants.",
-    "Checked allowlist versus capability semantics and related tests."
+    "Reviewed sensitive filesystem authorization semantics for `system`, `/`, and `abs_path`.",
+    "Checked reinitialization behavior for stale root/home grants and the new `sensitive_fs_access` flag.",
+    "Checked path canonicalization flow against the supplied `SecurityConfig.validate_path` two-stage prefix and canonical checks.",
+    "Reviewed symlink escape coverage and compatibility implications from the updated tests and docs."
   ],
   "residual_risks": [
-    "The review relies on the supplied packet and supporting context; route-level exception handlers and full model validation were not independently inspected.",
-    "No runtime verification was performed, per instruction."
+    "The diff does not show endpoint dependency wiring, so this review assumes existing bearer enforcement is correctly applied to sensitive API routes when `sec.token` is configured.",
+    "Tests cover key symlink and reinitialization cases, but cross-platform edge cases such as case-insensitive filesystems or Windows drive behavior are not demonstrated in this packet."
   ],
-  "finding_triage": [
+  "historical_review_triage": [
     {
+      "source": "prior_review_iteration",
       "severity": "low",
       "disposition": "deferred_follow_up",
-      "reason": "Unusual Home-resolution startup failure is bounded and does not reopen the authorization boundary; tracked separately in Bureau."
+      "bureau_event_id": 33,
+      "reason": "Unusual Home-resolution startup failure remains a bounded compatibility question and does not reopen the authorization boundary."
     }
   ],
   "does_not_establish": [
     "runtime_deployment_correctness",
     "full_test_sufficiency",
+    "cross_platform_filesystem_correctness",
     "absence_of_all_filesystem_side_channels",
     "merge_authorization"
   ]

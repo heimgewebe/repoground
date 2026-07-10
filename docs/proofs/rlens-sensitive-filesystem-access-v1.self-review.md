@@ -1,10 +1,10 @@
 # rLens Sensitive Filesystem Access v1 Self-Review
 
 PR: #949
-Reviewed implementation head SHA: `9bf1358febd7d0e146a12080ab8c8c1afc854510`
-Reviewed implementation diff SHA256: `63e83a4399ca97f5f5efdbdcaefe7b7516dc6f412cd02d1c20449f0b6cc76af8`
-Reviewed implementation diff bytes: `23925`
-Diff hash basis: `git diff --binary origin/main...9bf1358febd7d0e146a12080ab8c8c1afc854510 -- . ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.self-review.md'`
+Reviewed implementation head SHA: `a2bcb176b0f12865562f74c2cc3a627a622df80e`
+Reviewed implementation diff SHA256: `c199feadc6d2dff693d659389bdfe7f7ea0353c7bccaecddcad3bb822071ba26`
+Reviewed implementation diff bytes: `24015`
+Diff hash basis: `git diff --binary origin/main...a2bcb176b0f12865562f74c2cc3a627a622df80e -- . ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.self-review.md' ':(exclude)docs/proofs/rlens-sensitive-filesystem-access-v1.external-review.json'`
 Base: `origin/main` / `beeb2f14318577177b69d1699fe0aef8078c7fe7`
 Source finding: Bureau live-register event `27`.
 
@@ -69,10 +69,11 @@ Coverage: all implementation-diff files reviewed.
 ### Independent review
 
 - Codex CLI `0.142.2`, model `gpt-5.5`, reasoning effort `xhigh`, reviewed an isolated immutable packet without tools or repository access.
-- Reviewed implementation head: `9bf1358febd7d0e146a12080ab8c8c1afc854510`.
-- Reviewed implementation diff SHA256: `63e83a4399ca97f5f5efdbdcaefe7b7516dc6f412cd02d1c20449f0b6cc76af8`.
-- Verdict: **PASS** with no critical, high or medium finding.
-- One low finding remains: authenticated startup can fail in unusual environments if the service user Home cannot be resolved or registered. This does not reopen the authorization boundary and is registered as a separate Bureau candidate.
+- Reviewed implementation head: `a2bcb176b0f12865562f74c2cc3a627a622df80e`.
+- Reviewed implementation diff SHA256: `c199feadc6d2dff693d659389bdfe7f7ea0353c7bccaecddcad3bb822071ba26`.
+- Final verdict: **PASS** with no critical, high, medium or low finding.
+- A low compatibility observation from an earlier review iteration about unusual Home-resolution failures remains conservatively tracked as Bureau event `33`; it was not repeated as a finding in the final review.
+- The current platform code-quality comment was resolved by documenting why failure of the optional `system` root must not hide explicit Hub/Merges roots.
 - Claude CLI was unavailable for review because the authenticated subscription session quota returned HTTP 429 before any review tokens were used; it is not counted as review evidence.
 
 ### Integration
