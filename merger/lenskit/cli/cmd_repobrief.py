@@ -634,7 +634,7 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
         return 2
 
     snapshot_args = argparse.Namespace(
-        repo=args.repo, out=args.out, profile=args.profile, mode=args.mode,
+        repo=args.repo, out=str(out_path), profile=args.profile, mode=args.mode,
         max_bytes=args.max_bytes, split_size=args.split_size, path_filter=args.path_filter,
         ext=args.ext, output_mode=args.output_mode, redact_secrets=args.redact_secrets,
         include_hidden=args.include_hidden,

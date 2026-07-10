@@ -293,3 +293,39 @@ def test_external_manifest_refresh_creates_portable_bundle_and_references(
         published = json.loads(manifest.read_text(encoding="utf-8"))
         resolved_bundle = (manifest.parent / published["bundleManifest"]["path"]).resolve()
         assert resolved_bundle == bundle_manifest.resolve()
+
+
+def test_external_manifest_refresh_rejects_symlink_escape_from_publication_root(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from merger.lenskit.cli.repobrief import main as repobrief_main
+
+    repo = tmp_path / "source"
+    repo.mkdir()
+    (repo / "README.md").write_text("# source\n", encoding="utf-8")
+    publication_root = tmp_path / "published"
+    publication_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    escaped = publication_root / "bundles"
+    escaped.symlink_to(outside, target_is_directory=True)
+
+    rc = repobrief_main([
+        "external-manifest",
+        "refresh",
+        "--repo",
+        str(repo),
+        "--out",
+        str(escaped / "source" / "main" / "run-1"),
+        "--publication-root",
+        str(publication_root),
+        "--repository",
+        "source",
+        "--ref",
+        "main",
+    ])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "output directory must be inside publication_root" in captured.err
+    assert list(outside.iterdir()) == []
