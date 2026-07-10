@@ -19,10 +19,10 @@ def _resolve_policy_file(path: Path) -> Path:
     if path.suffix.lower() != ".json":
         raise EmbeddingPolicyError("Embedding policy must be a JSON file")
     try:
-        resolved = path.resolve(strict=True)  # lgtm[py/path-injection]
+        resolved = path.resolve(strict=True)  # lgtm[py/path-injection] codeql-boundary:embedding-policy-file
     except (OSError, RuntimeError) as exc:
         raise EmbeddingPolicyError(f"Embedding policy file not found: {path}") from exc
-    if not resolved.is_file():  # lgtm[py/path-injection]
+    if not resolved.is_file():  # lgtm[py/path-injection] codeql-boundary:embedding-policy-file
         raise EmbeddingPolicyError("Embedding policy path is not a regular file")
     return resolved
 
@@ -32,7 +32,7 @@ def load_and_validate_embedding_policy(path: Path) -> Dict[str, Any]:
     resolved_policy = _resolve_policy_file(path)
 
     try:
-        with resolved_policy.open("r", encoding="utf-8") as handle:  # lgtm[py/path-injection]
+        with resolved_policy.open("r", encoding="utf-8") as handle:  # lgtm[py/path-injection] codeql-boundary:embedding-policy-file
             policy_instance = json.load(handle)
     except json.JSONDecodeError as exc:
         raise EmbeddingPolicyError(

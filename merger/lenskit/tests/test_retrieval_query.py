@@ -27,6 +27,32 @@ def mini_index(tmp_path):
 
     return db_path
 
+def test_query_read_only_uses_immutable_sqlite_uri(mini_index, monkeypatch):
+    canonical_index = mini_index.with_name("chunk.index.sqlite")
+    mini_index.replace(canonical_index)
+    canonical_index = canonical_index.resolve()
+    real_connect = sqlite3.connect
+    calls = []
+
+    def recording_connect(database, *args, **kwargs):
+        calls.append((database, kwargs.get("uri")))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(query_core.sqlite3, "connect", recording_connect)
+
+    result = query_core.execute_query(
+        canonical_index,
+        query_text="",
+        k=1,
+        read_only=True,
+    )
+
+    assert result["count"] == 1
+    assert calls == [
+        (f"{canonical_index.as_uri()}?mode=ro&immutable=1", True),
+    ]
+
+
 def test_query_metadata_filter(mini_index):
     # Filter by layer
     res = query_core.execute_query(mini_index, query_text="", k=10, filters={"layer": "core"})

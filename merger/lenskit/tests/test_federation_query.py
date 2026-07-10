@@ -415,7 +415,7 @@ def test_conflicts_are_reported_not_merged(federated_setup):
         assert "conflict_refs" in h
         assert c["conflict_id"] in h["conflict_refs"]
 
-def test_stale_bundle_is_marked_in_federation_trace(federated_setup):
+def test_stale_bundle_is_marked_in_federation_trace(federated_setup, monkeypatch):
     import sqlite3
 
     # Set fingerprint in federation.json that mismatches the actual index
@@ -436,6 +436,15 @@ def test_stale_bundle_is_marked_in_federation_trace(federated_setup):
     conn.commit()
     conn.close()
 
+    real_connect = sqlite3.connect
+    calls = []
+
+    def recording_connect(database, *args, **kwargs):
+        calls.append((database, kwargs.get("uri")))
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", recording_connect)
+
     res = execute_federated_query(
         federation_index_path=federated_setup,
         query_text="hello",
@@ -448,6 +457,8 @@ def test_stale_bundle_is_marked_in_federation_trace(federated_setup):
     assert trace["bundle_status"]["repo1"] == "stale"
     assert trace["bundle_status"]["repo2"] == "ok"
     assert trace["queried_bundles_effective"] == 2
+    repo1_uri = f"{repo1_db.resolve().as_uri()}?mode=ro&immutable=1"
+    assert calls.count((repo1_uri, True)) == 2
 
     stale_hits = [hit for hit in res["results"] if hit["federation_bundle"] == "repo1"]
     assert stale_hits, "stale bundle still returns hits, but they must be explicitly marked"

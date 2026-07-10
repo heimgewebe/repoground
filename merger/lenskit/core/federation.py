@@ -27,7 +27,7 @@ def _resolve_new_federation_index(index_path: Path) -> Path:
     if index_path.suffix.lower() != ".json":
         raise ValueError("Federation index must be a JSON file")
     try:
-        parent = index_path.parent.resolve(strict=True)  # lgtm[py/path-injection]
+        parent = index_path.parent.resolve(strict=True)  # lgtm[py/path-injection] codeql-boundary:federation-index-file
     except (OSError, RuntimeError) as exc:
         raise FileNotFoundError("Federation index parent directory not found") from exc
     if not parent.is_dir():
@@ -42,10 +42,10 @@ def _resolve_existing_federation_index(index_path: Path) -> Path:
     if index_path.suffix.lower() != ".json":
         raise ValueError("Federation index must be a JSON file")
     try:
-        resolved = index_path.resolve(strict=True)  # lgtm[py/path-injection]
+        resolved = index_path.resolve(strict=True)  # lgtm[py/path-injection] codeql-boundary:federation-index-file
     except (OSError, RuntimeError) as exc:
         raise FileNotFoundError(f"Federation index not found at: {index_path}") from exc
-    if not resolved.is_file():  # lgtm[py/path-injection]
+    if not resolved.is_file():  # lgtm[py/path-injection] codeql-boundary:federation-index-file
         raise ValueError("Federation index path is not a regular file")
     return resolved
 
@@ -94,7 +94,7 @@ def init_federation(federation_id: str, out_path: Path) -> dict:
     try:
         # Exclusive creation prevents overwrite and rejects existing symlinks,
         # including dangling links, at the filesystem operation itself.
-        with out_path.open("x", encoding="utf-8") as handle:  # lgtm[py/path-injection]
+        with out_path.open("x", encoding="utf-8") as handle:  # lgtm[py/path-injection] codeql-boundary:federation-index-file
             json.dump(fed_data, handle, indent=2, sort_keys=True)
     except FileExistsError as exc:
         raise FileExistsError(
@@ -144,7 +144,7 @@ def validate_federation_data(fed_data: dict[str, Any]) -> bool:
 def load_federation_index_data(index_path: Path) -> dict[str, Any]:
     """Load and validate a persisted federation index JSON file."""
     resolved_index = _resolve_existing_federation_index(index_path)
-    with resolved_index.open("r", encoding="utf-8") as handle:  # lgtm[py/path-injection]
+    with resolved_index.open("r", encoding="utf-8") as handle:  # lgtm[py/path-injection] codeql-boundary:federation-index-file
         fed_data = json.load(handle)
 
     validate_federation_data(fed_data)
@@ -189,7 +189,7 @@ def add_bundle(index_path: Path, repo_id: str, bundle_path: str) -> dict:
     if not schema:
         raise RuntimeError("Federation schema missing at expected path (contracts/federation-index.v1.schema.json)")
 
-    with index_path.open("r", encoding="utf-8") as handle:  # lgtm[py/path-injection]
+    with index_path.open("r", encoding="utf-8") as handle:  # lgtm[py/path-injection] codeql-boundary:federation-index-file
         fed_data = json.load(handle)
 
     # Pre-validate existing data to prevent poor failure modes (e.g. KeyError on missing repo_id)
@@ -231,7 +231,7 @@ def add_bundle(index_path: Path, repo_id: str, bundle_path: str) -> dict:
     except JsonSchemaValidationError as e:
         raise ValueError(f"Failed to generate valid federation index schema after modification: {e}")
 
-    with index_path.open("w", encoding="utf-8") as handle:  # lgtm[py/path-injection]
+    with index_path.open("w", encoding="utf-8") as handle:  # lgtm[py/path-injection] codeql-boundary:federation-index-file
         json.dump(fed_data, handle, indent=2, sort_keys=True)
 
     return fed_data

@@ -22,6 +22,9 @@ jobs:
           fetch-depth: 1
           persist-credentials: true
 
+      - name: Validate CodeQL suppression inventory
+        run: python3 scripts/ci/check_codeql_suppressions.py
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:

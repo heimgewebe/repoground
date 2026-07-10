@@ -5,6 +5,7 @@ import pytest
 import yaml
 
 from merger.lenskit.core.federation import add_bundle, init_federation
+from merger.lenskit.core.merge import prescan_repo
 from merger.lenskit.core.path_security import resolve_secure_path
 from merger.lenskit.retrieval.federation_query import execute_federated_query
 
@@ -39,6 +40,30 @@ def test_resolve_secure_path_rejects_symlink_escape(tmp_path):
 
     with pytest.raises(ValueError, match="Path resolution failed"):
         resolve_secure_path(root, "escape/secret.json")
+
+
+def test_prescan_skips_internal_directory_symlink(tmp_path):
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    repo.mkdir()
+    outside.mkdir()
+    (repo / "visible.txt").write_text("visible", encoding="utf-8")
+    (outside / "secret.txt").write_text("secret", encoding="utf-8")
+    (repo / "linked-outside").symlink_to(outside, target_is_directory=True)
+
+    result = prescan_repo(repo, max_depth=3)
+    paths: set[str] = set()
+
+    def collect(node):
+        for child in node.get("children", []):
+            paths.add(child["path"])
+            collect(child)
+
+    collect(result["tree"])
+
+    assert paths == {"visible.txt"}
+    assert result["file_count"] == 1
+    assert "secret.txt" not in json.dumps(result)
 
 
 def test_prescan_api_rejects_repo_symlink_escape(service_client, tmp_path):
