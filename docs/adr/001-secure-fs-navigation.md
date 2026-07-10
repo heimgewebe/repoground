@@ -17,6 +17,8 @@ Browsing the service user's home directory (`system`) or the filesystem root (`/
 
 Without that combined condition, only the explicitly configured Hub and merges directory are allowlisted. Those operator-selected roots remain authoritative even if they are broad; they do not implicitly mint the separate `system` preset. Non-loopback bindings never receive the `system` or `/` capability, even when bearer authentication is present.
 
+Within authenticated loopback mode, filesystem root (`/`) is the core broad capability and the `system` Home preset is optional convenience state. The service resolves Home once during startup and stores that canonical path. If Home resolution or allowlist registration fails, startup continues in a logged **root-only** mode: `/` remains authorized, `system` is omitted from root discovery, and stale direct `system` requests return `503`. If the core filesystem-root grant itself cannot be initialized, startup fails closed with an explicit error. Later requests never recompute Home, avoiding runtime drift from the startup authorization decision.
+
 This ensures:
 - Full operator capability in authenticated local deployments
 - No unauthenticated exposure of the service user's home directory to other local clients
@@ -37,7 +39,8 @@ We introduced a `TrustedPath` dataclass in the backend.
 This creates a visible type boundary between "untrusted user input" and "safe filesystem operations", aiding both code review and static analysis.
 
 ## Consequences
-*   **Positive**: CodeQL "path injection" warnings are resolved by design. Filesystem access is limited to authorized roots; the `system` home preset and `/` require loopback plus bearer authentication.
+*   **Positive**: CodeQL "path injection" warnings are resolved by design. Filesystem access is limited to authorized roots; broad `/` access requires loopback plus configured Bearer authentication, and `system` additionally requires a successfully resolved startup Home.
+*   **Resilience**: An unusual or unavailable service-account Home degrades only the `system` convenience preset; authenticated root browsing and ordinary Hub/Merges operation remain available. Core root-grant failure remains fail-closed.
 *   **Negative**: "Quick and dirty" API calls using manual path strings are no longer possible; clients must obtain a valid token first (e.g., via `/api/fs/roots`).
 *   **Maintenance**: Filesystem navigation tokens require `RLENS_FS_TOKEN_SECRET` (or `RLENS_TOKEN` fallback) to be managed securely. This signing secret is not bearer authorization.
 

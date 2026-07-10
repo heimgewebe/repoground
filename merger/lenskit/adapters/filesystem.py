@@ -29,17 +29,13 @@ def list_allowed_roots(hub: Optional[Path], merges_dir: Optional[Path]) -> List[
         roots.append({"id": "hub", "path": str(hub.resolve())})
     if merges_dir:
         roots.append({"id": "merges", "path": str(merges_dir.resolve())})
-    if sec.sensitive_fs_access:
+    if sec.sensitive_fs_access and sec.home_preset_root is not None:
         try:
-            # The "system" preset maps to the service user's home directory.
-            # It is present only when init_service granted sensitive filesystem
-            # access (loopback + bearer auth). Validation failures omit only
-            # this optional root; ordinary Hub/Merges roots remain available.
-            sys_root = Path.home().resolve()
-            sec.validate_path(sys_root)
+            # Use the Home path resolved once during service startup. A missing
+            # optional preset must not hide explicit Hub/Merges roots.
+            sys_root = sec.validate_path(sec.home_preset_root)
             roots.append({"id": "system", "path": str(sys_root)})
-        except (SecurityViolationError, OSError, RuntimeError):
-            # `system` is optional; its failure must not hide explicit Hub/Merges roots.
+        except SecurityViolationError:
             pass
     return roots
 
@@ -108,18 +104,25 @@ def resolve_fs_path(hub: Optional[Path], merges_dir: Optional[Path], root_id: Op
         return TrustedPath(resolve_fs_token(token))
 
     if root_id is not None:
-        root_map: Dict[str, Optional[Path]] = {
-            "hub": hub,
-            "merges": merges_dir,
-            "system": Path.home().resolve(),
-        }
-        base = root_map.get(root_id)
-        if base is None:
-            raise HTTPException(status_code=400, detail="Unknown root id")
-
         sec = get_security_config()
-        if root_id == "system" and not sec.sensitive_fs_access:
-            raise AccessDeniedError("System root requires loopback plus bearer authentication")
+        if root_id == "system":
+            if not sec.sensitive_fs_access:
+                raise AccessDeniedError("System root requires loopback plus Bearer <REDACTED>")
+            base = sec.home_preset_root
+            if base is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Home preset is unavailable in this service configuration",
+                )
+        else:
+            root_map: Dict[str, Optional[Path]] = {
+                "hub": hub,
+                "merges": merges_dir,
+            }
+            if root_id not in root_map or root_map[root_id] is None:
+                raise HTTPException(status_code=400, detail="Unknown root id")
+            base = root_map[root_id]
+
         # validate base
         base_resolved = sec.validate_path(base.resolve())
 

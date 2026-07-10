@@ -18,7 +18,9 @@ The server guarantees:
 ## File System
 
 ### `/api/fs/roots`
-Returns a list of allowed root entry points. `hub` and a configured `merges` root are ordinary service roots. The `system` root (the service user's home directory) is returned only when the service runs on loopback with bearer authentication enabled; merely configuring an overlapping Hub or merges root does not mint the `system` alias.
+Returns a list of allowed root entry points. `hub` and a configured `merges` root are ordinary service roots. The `system` root (the service user's home directory) is returned only when the service runs on loopback with configured Bearer authentication **and** Home was resolved and registered successfully during startup; merely configuring an overlapping Hub or merges root does not mint the `system` alias.
+
+Home is an optional convenience preset, while authenticated filesystem-root access is the core broad capability. If Home resolution or registration fails, startup continues in explicit root-only mode: `system` is omitted from this response, the startup log records the degradation, and a stale direct request using `root=system` returns `503 Service Unavailable`. Failure to initialize the authenticated filesystem root itself remains fatal and fails startup closed.
 
 **Contract:**
 Each entry in the `roots` list guarantees the following fields:

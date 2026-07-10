@@ -1,3 +1,5 @@
+import json
+import logging
 import os
 import sys
 import pytest
@@ -91,6 +93,22 @@ def _reset_allowlist(sec):
     # fallback: replace with empty list
     sec.allowlist_roots = []
 
+def test_sensitive_home_preset_must_already_be_allowlisted(tmp_path):
+    from merger.lenskit.adapters.security import SecurityConfig
+
+    sec = SecurityConfig()
+    untrusted_home = (tmp_path / "untrusted-home").resolve()
+
+    with pytest.raises(
+        ValueError,
+        match="Home preset root must be allowlisted before activation",
+    ):
+        sec.set_sensitive_fs_access(True, home_preset_root=untrusted_home)
+
+    assert sec.sensitive_fs_access is False
+    assert sec.home_preset_root is None
+
+
 def test_init_service_loopback_with_token_allows_root(monkeypatch, tmp_path):
     """
     Behavioral: Loopback + Token -> Root IS allowlisted.
@@ -107,6 +125,170 @@ def test_init_service_loopback_with_token_allows_root(monkeypatch, tmp_path):
     assert root_path in sec.allowlist_roots
     assert home_path in sec.allowlist_roots
     assert sec.sensitive_fs_access is True
+
+def test_init_service_home_resolution_failure_degrades_to_root_only(
+    monkeypatch, tmp_path, caplog
+):
+    """An unavailable Home preset must not abort authenticated root access."""
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+
+    def fail_home():
+        raise RuntimeError("synthetic home lookup failure")
+
+    monkeypatch.setattr(Path, "home", fail_home)
+    with caplog.at_level(logging.WARNING):
+        init_service(hub, host="127.0.0.1", token="secret")
+
+    assert Path("/").resolve() in sec.allowlist_roots
+    assert sec.sensitive_fs_access is True
+    assert sec.home_preset_root is None
+    assert {entry["id"] for entry in list_allowed_roots(hub, None)} == {"hub"}
+    assert "Home preset unavailable" in caplog.text
+    assert "root only" in caplog.text
+
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_fs_path(hub=hub, merges_dir=None, root_id="system", rel_path="")
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == (
+        "Home preset is unavailable in this service configuration"
+    )
+
+    with pytest.raises(HTTPException) as atlas_exc:
+        resolve_atlas_root(
+            AtlasRequest(root_kind="preset", root_value="system"),
+            hub,
+            None,
+        )
+    assert atlas_exc.value.status_code == 503
+
+    root_request = AtlasRequest(root_kind="abs_path", root_value=str(Path("/")))
+    assert resolve_atlas_root(root_request, hub, None).scan_root == Path("/").resolve()
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/fs/list",
+            params={"root": "system", "rel": ""},
+            headers={"Authorization": "Bearer secret"},
+        )
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Home preset is unavailable in this service configuration"
+    }
+
+    with TestClient(app) as client:
+        export_response = client.post(
+            "/api/export/webmaschine",
+            headers={"Authorization": "Bearer secret"},
+        )
+    assert export_response.status_code == 200
+    machine_path = Path(export_response.json()["path"]) / "machine.json"
+    machine = json.loads(machine_path.read_text(encoding="utf-8"))
+    assert machine["roots"] == []
+
+
+def test_init_service_home_registration_failure_degrades_to_root_only(
+    monkeypatch, tmp_path
+):
+    """A rejected Home registration must not leave a stale preset path active."""
+    hub = tmp_path / "hub"
+    fake_home = tmp_path / "service-home"
+    hub.mkdir()
+    fake_home.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+    original_add_root = sec.add_allowlist_root
+
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+    def reject_home(path):
+        if path == fake_home.resolve():
+            raise ValueError("synthetic Home registration failure")
+        original_add_root(path)
+
+    monkeypatch.setattr(sec, "add_allowlist_root", reject_home)
+    init_service(hub, host="127.0.0.1", token="secret")
+
+    assert Path("/").resolve() in sec.allowlist_roots
+    assert fake_home.resolve() not in sec.allowlist_roots
+    assert sec.sensitive_fs_access is True
+    assert sec.home_preset_root is None
+    assert {entry["id"] for entry in list_allowed_roots(hub, None)} == {"hub"}
+
+
+def test_init_service_root_registration_failure_is_explicit_and_fail_closed(
+    monkeypatch, tmp_path
+):
+    """A failed reinit must revoke every earlier sensitive grant."""
+    previous_hub = tmp_path / "previous-hub"
+    hub = tmp_path / "hub"
+    previous_hub.mkdir()
+    hub.mkdir()
+    sec = get_security_config()
+    _reset_allowlist(sec)
+    root = Path("/").resolve()
+    home = Path.home().resolve()
+
+    init_service(previous_hub, host="127.0.0.1", token="secret")
+    assert sec.sensitive_fs_access is True
+    assert sec.home_preset_root == home
+
+    original_add_root = sec.add_allowlist_root
+
+    def reject_root(path):
+        if path == root:
+            raise ValueError("synthetic root registration failure")
+        original_add_root(path)
+
+    monkeypatch.setattr(sec, "add_allowlist_root", reject_root)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Authenticated filesystem-root access could not be initialized",
+    ):
+        init_service(hub, host="127.0.0.1", token="secret")
+
+    assert sec.sensitive_fs_access is False
+    assert sec.home_preset_root is None
+    assert root not in sec.allowlist_roots
+    assert home not in sec.allowlist_roots
+    assert previous_hub.resolve() not in sec.allowlist_roots
+    assert sec.allowlist_roots == [hub.resolve()]
+
+
+def test_home_preset_uses_startup_resolved_path_without_recomputing(
+    monkeypatch, tmp_path
+):
+    """Later Home lookup failures must not invalidate a successful startup grant."""
+    hub = tmp_path / "hub"
+    fake_home = tmp_path / "service-home"
+    hub.mkdir()
+    fake_home.mkdir()
+
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    init_service(hub, host="127.0.0.1", token="secret")
+    sec = get_security_config()
+    assert sec.home_preset_root == fake_home.resolve()
+
+    def fail_home():
+        raise RuntimeError("Home must not be recomputed after startup")
+
+    monkeypatch.setattr(Path, "home", fail_home)
+
+    roots = list_allowed_roots(hub, None)
+    system = next(entry for entry in roots if entry["id"] == "system")
+    assert system["path"] == str(fake_home.resolve())
+    trusted = resolve_fs_path(
+        hub=hub,
+        merges_dir=None,
+        root_id="system",
+        rel_path="",
+    )
+    assert trusted.path == fake_home.resolve()
+
 
 def test_init_service_loopback_without_token_refuses_root(monkeypatch, tmp_path):
     """
@@ -299,6 +481,7 @@ def test_init_service_removes_stale_root_when_auth_is_disabled(tmp_path):
     init_service(hub, host="127.0.0.1", token=None)
     assert Path("/").resolve() not in sec.allowlist_roots
     assert Path.home().resolve() not in sec.allowlist_roots
+    assert sec.home_preset_root is None
     assert hub.resolve() in sec.allowlist_roots
 
 

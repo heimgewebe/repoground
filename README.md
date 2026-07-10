@@ -71,7 +71,7 @@ Pseudo-filesystems and volatile paths (`/proc`, `/sys`, `/dev`, `/run`, etc.) ar
 
 **Atlas Root Model:**
 Atlas employs a formalized root model internally, permitting execution against different types of targets without implicitly falling back or hiding behaviors. The `root_kind` in API requests must be one of:
-* `preset`: Used to refer to predefined, trusted directories like `hub`, `merges`, or `system` (the service user's home directory). The `system` preset is available only on loopback with bearer authentication.
+* `preset`: Used to refer to predefined, trusted directories like `hub`, `merges`, or `system` (the service user's home directory). The `system` preset requires loopback, configured Bearer authentication, and a Home path resolved successfully during startup. If Home is unavailable, the service starts in authenticated root-only mode, omits `system` from `/api/fs/roots`, and keeps explicit filesystem-root access available.
 * `token`: Used with an opaque, server-signed token, primarily meant for file pickers and external integrations.
 * `abs_path`: Explicitly targets an absolute file system path (e.g., `/home/user/project`). This is an explicit internal mode. Traversal exploits (`..`) or relative paths are strictly rejected. Note that the WebUI catches invalid manual path inputs (like "home" instead of "/home") before creating an API request, preventing unnecessary Bad Requests.
 

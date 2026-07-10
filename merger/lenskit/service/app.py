@@ -298,13 +298,36 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     # RLENS_FS_TOKEN_SECRET signs navigation tokens but is not request auth.
     is_loopback = _is_loopback_host(host)
     has_token = bool(sec.token)
-    root = Path("/").resolve()
 
     if is_loopback and has_token:
-        sec.set_sensitive_fs_access(True)
-        sec.add_allowlist_root(Path.home().resolve())
-        sec.add_allowlist_root(root)
-        logger.warning("Sensitive filesystem browsing enabled (home + root; loopback + auth).")
+        try:
+            root = Path("/").resolve()
+            sec.add_allowlist_root(root)
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise RuntimeError(
+                "Authenticated filesystem-root access could not be initialized"
+            ) from exc
+
+        home_root: Optional[Path] = None
+        try:
+            home_root = Path.home().resolve()
+            sec.add_allowlist_root(home_root)
+        except (OSError, RuntimeError, ValueError) as exc:
+            home_root = None
+            logger.warning(
+                "Home preset unavailable; authenticated filesystem-root browsing remains enabled (%s).",
+                type(exc).__name__,
+            )
+
+        sec.set_sensitive_fs_access(True, home_preset_root=home_root)
+        if home_root is None:
+            logger.warning(
+                "Sensitive filesystem browsing enabled (root only; loopback + auth)."
+            )
+        else:
+            logger.warning(
+                "Sensitive filesystem browsing enabled (home + root; loopback + auth)."
+            )
     else:
         logger.warning(
             "Sensitive filesystem browsing refused (home + root; loopback=%s, has_token=%s).",
@@ -2179,13 +2202,14 @@ def export_webmaschine():
         # 3. Machine Definition (machine.json)
         machine_roots = []
         try:
-            # Check if system is allowed/resolved (maps to Home)
-            sys_root = Path.home().resolve()
+            # Export only the Home preset resolved and stored during startup.
             sec = get_security_config()
-            sec.validate_path(sys_root)
-            machine_roots.append(str(sys_root))
-        except Exception as e:
-            logger.debug("System root not available for export: %s", e, exc_info=True)
+            sys_root = sec.home_preset_root
+            if sys_root is not None:
+                sec.validate_path(sys_root)
+                machine_roots.append(str(sys_root))
+        except (InvalidPathError, AccessDeniedError, OSError, RuntimeError) as exc:
+            logger.debug("System root not available for export: %s", exc, exc_info=True)
 
         machine_def = {
             "hub": str(hub.resolve()),

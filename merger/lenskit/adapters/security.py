@@ -24,13 +24,29 @@ class SecurityConfig:
     allowlist_roots: List[Path] = field(default_factory=list)
     token: str | None = None
     sensitive_fs_access: bool = False
+    home_preset_root: Optional[Path] = None
 
     def set_token(self, token: Optional[str]):
         self.token = token
 
-    def set_sensitive_fs_access(self, enabled: bool) -> None:
-        """Record whether broad system/home browsing was explicitly granted."""
-        self.sensitive_fs_access = bool(enabled)
+    def set_sensitive_fs_access(
+        self,
+        enabled: bool,
+        *,
+        home_preset_root: Optional[Path] = None,
+    ) -> None:
+        """Record broad access and the optional, startup-resolved Home preset."""
+        enabled = bool(enabled)
+        if not enabled:
+            self.sensitive_fs_access = False
+            self.home_preset_root = None
+            return
+
+        if home_preset_root is not None and home_preset_root not in self.allowlist_roots:
+            raise ValueError("Home preset root must be allowlisted before activation")
+
+        self.sensitive_fs_access = True
+        self.home_preset_root = home_preset_root
 
     def add_allowlist_root(self, path: Path) -> None:
         """
