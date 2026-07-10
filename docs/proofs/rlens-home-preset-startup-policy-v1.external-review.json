@@ -10,30 +10,49 @@
     "model": "default model; exact identifier not surfaced by print mode",
     "mode": "isolated_diff_packet_no_tools"
   },
-  "reviewed_implementation": {
-    "head_sha": "1f7e79c99a04c04a13a6f9868a5b18742da42a3e",
+  "reviewed_code": {
+    "head_sha": "217e192e9ee6fe4a0c100fa9957864bd3723ccd5",
     "base_sha": "292b9a7d22630e31dc2203be294f20700f39a629",
-    "diff_sha256": "0db2df960fb955326cb66183b56ec20e8171dec59336efeef090c11e63f2ab19",
-    "diff_bytes": 24746
+    "packet_sha256": "da4213a8c0d78e5bf10af2a301e01a8c2d1a033b4885bbb610ccee7791c36e99",
+    "packet_bytes": 51646,
+    "unified_context_lines": 40,
+    "excluded_evidence_files": [
+      "docs/proofs/rlens-home-preset-startup-policy-v1.self-review.md",
+      "docs/proofs/rlens-home-preset-startup-policy-v1.external-review.json"
+    ]
   },
   "verdict": "PASS",
-  "summary": "The implementation successfully separates the broad authenticated root-level capability from the optional `system` preset. Startup resolution of Home prevents runtime drift and gracefully falls back to explicit root-only operation if the user's home directory is unresolvable or unregistered. State is properly synchronized, exceptions are handled explicitly, tests assert all edge cases correctly, and Webmaschine export behavior stays aligned with runtime availability.",
+  "summary": "The diff implements the authenticated Home preset startup policy correctly. State resets, exception handling, capability degradation, and documentation all look solid and correctly preserve invariants without widening authorization domains. Test coverage accurately reflects the edge cases.",
   "findings": [],
   "coverage": [
-    "merger/lenskit/adapters/filesystem.py",
-    "merger/lenskit/adapters/security.py",
-    "merger/lenskit/service/app.py",
-    "tests/test_security_root_policy.py",
-    "docs/adr/001-secure-fs-navigation.md",
-    "docs/proofs/rlens-home-preset-startup-policy-v1-proof.md",
-    "docs/service-api.md"
+    "authorization invariants",
+    "partial initialization",
+    "stale global state across failed reinitialization",
+    "root-only degradation",
+    "cached Home path correctness",
+    "HTTP status semantics",
+    "exception handling including cached-Home I/O failure",
+    "optional error suppression",
+    "Webmaschine export",
+    "tests",
+    "documentation consistency"
   ],
   "residual_risks": [],
-  "excluded_attempts": [
+  "prior_attempts": [
     {
       "tool": "codex-cli",
-      "reason": "usage_limit_before_review_output",
+      "outcome": "usage_limit_before_review_output",
       "counted_as_evidence": false
+    },
+    {
+      "tool": "agy-antigravity-cli",
+      "outcome": "medium_cached_home_io_finding_addressed",
+      "counted_as_final_evidence": false
+    },
+    {
+      "tool": "agy-antigravity-cli",
+      "outcome": "false_positive_stale_state_due_to_insufficient_diff_context",
+      "counted_as_final_evidence": false
     }
   ],
   "does_not_establish": [

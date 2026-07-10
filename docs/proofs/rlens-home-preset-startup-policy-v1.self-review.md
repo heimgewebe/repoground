@@ -1,15 +1,16 @@
 # rLens Home Preset Startup Policy v1 Self-Review
 
 PR: #951
-Reviewed implementation head: `1f7e79c99a04c04a13a6f9868a5b18742da42a3e`
+Reviewed code head: `217e192e9ee6fe4a0c100fa9957864bd3723ccd5`
 Base: `292b9a7d22630e31dc2203be294f20700f39a629`
-Reviewed implementation diff SHA-256: `0db2df960fb955326cb66183b56ec20e8171dec59336efeef090c11e63f2ab19`
-Reviewed implementation diff bytes: `24746`
+Reviewed code packet: unified diff with 40 context lines, excluding review-evidence files
+Reviewed packet SHA-256: `da4213a8c0d78e5bf10af2a301e01a8c2d1a033b4885bbb610ccee7791c36e99`
+Reviewed packet bytes: `51646`
 Source: Bureau live-register event `33`.
 
 ## Verdict
 
-**PASS**, conditional on an unchanged live PR diff and green GitHub CI.
+**PASS**, conditional on an unchanged live PR code diff and green GitHub CI.
 
 ## Reviewed files
 
@@ -22,7 +23,7 @@ Source: Bureau live-register event `33`.
 - `merger/lenskit/service/app.py`
 - `tests/test_security_root_policy.py`
 
-Coverage: every implementation-diff file reviewed.
+Coverage: every code/proof file in the reviewed packet.
 
 ## Correctness
 
@@ -37,20 +38,29 @@ Coverage: every implementation-diff file reviewed.
 - `home_preset_root` cannot be activated until the same canonical path is in the central allowlist.
 - Home resolution or registration failure clears the candidate before capability activation, preventing a stale or unregistered alias.
 - Core root-registration failure raises explicitly while sensitive access stays disabled.
-- A failed reinitialization revokes the previous hub, Home and root grants before leaving only the new explicit Hub root.
+- `init_service` clears roots and calls `set_sensitive_fs_access(False)` before any new root registration. A failed reinitialization therefore revokes the previous hub, Home and root grants before leaving only the new explicit Hub root.
 - `RLENS_FS_TOKEN_SECRET` remains unrelated to Bearer request authorization.
 
 ## Regression and integration risk
 
 - Hub/Merges behavior and unauthenticated/non-loopback policy are unchanged.
 - `system` remains a compatibility alias when Home is available.
-- The new `503` distinguishes a configured but temporarily unavailable preset from an unknown root (`400`) and unauthorized sensitive access (`403`).
+- The new `503` distinguishes a configured but unavailable preset from an unknown root (`400`) and unauthorized sensitive access (`403`).
 - Webmaschine export omits unavailable Home instead of inventing or recomputing it.
 - Atlas explicit absolute-root operation remains available in authenticated root-only mode.
+- I/O or runtime failure while validating the optional cached Home preserves explicit Hub/Merges roots.
+
+## Findings and triage
+
+1. GitHub Code Quality reported an empty optional exception handler. Addressed by an explanatory comment and explicit return of existing roots.
+2. Independent review found that cached-Home I/O errors could escape after exception narrowing. Addressed by restoring `(SecurityViolationError, OSError, RuntimeError)` and adding a regression test.
+3. A later standard-context review claimed stale sensitive state after failed reinitialization. This was a false positive caused by the three-line diff context omitting the existing reset immediately above the hunk. The actual code and dedicated failed-reinitialization test prove revocation. The review was repeated with 40 context lines and returned PASS.
+4. A Codex attempt stopped at its usage limit before producing output and is not counted as evidence.
 
 ## Validation
 
-- Focused and adjacent policy/service/Atlas suite: `51 passed`.
+- Focused and adjacent policy/service/Atlas suite: `52 passed`.
+- Focused root-policy suite: `25 passed`.
 - Production-file Ruff default rules: passed.
 - Existing repo-wide Ruff ratchet on the legacy root-policy test: passed.
 - Python byte-compilation: passed.
@@ -61,9 +71,7 @@ The existing `test_create_atlas_system_root` performs a real scan of the operato
 
 ## Independent review
 
-Gemini through Antigravity CLI reviewed only the immutable diff packet, without repository or tool access. Verdict: **PASS**, no findings.
-
-A separate Codex attempt ended at the quota boundary before producing any review and is not counted as evidence.
+Gemini through Antigravity CLI reviewed the immutable 40-context-line packet without repository or tool access. Verdict: **PASS**, no findings.
 
 ## Residual limits
 
