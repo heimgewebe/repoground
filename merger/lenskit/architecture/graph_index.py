@@ -38,10 +38,10 @@ def load_graph_index(
         logger.warning("Graph index path rejected: %s", exc)
         return {"status": "invalid_path", "graph": None}
 
-    if not path.exists():
+    if not path.exists():  # lgtm[py/path-injection]
         return {"status": "not_found", "graph": None}
     try:
-        with path.open(encoding="utf-8") as handle:
+        with path.open(encoding="utf-8") as handle:  # lgtm[py/path-injection]
             data = json.load(handle)
     except json.JSONDecodeError:
         return {"status": "invalid_json", "graph": None}

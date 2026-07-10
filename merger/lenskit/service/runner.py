@@ -52,9 +52,9 @@ def _find_repos(hub: Path) -> List[str]:
     from ..adapters.security import validate_source_dir
     hub = validate_source_dir(hub)
     repos = []
-    if not hub.exists():
+    if not hub.exists():  # lgtm[py/path-injection]
         return []
-    for child in sorted(hub.iterdir(), key=lambda p: p.name.lower()):
+    for child in sorted(hub.iterdir(), key=lambda p: p.name.lower()):  # lgtm[py/path-injection]
         if not child.is_dir():
             continue
         if child.name in SKIP_ROOTS:

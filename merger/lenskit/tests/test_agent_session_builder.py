@@ -34,7 +34,7 @@ federation_trace shape (from federation_query.execute_federated_query() with tra
     "bundle_traces": {repo_id: {...}, ...}
   }
   Successful statuses: "ok", "stale"
-  Skip/error statuses: "filtered_out", "bundle_path_unsupported", "index_missing", "query_error"
+  Skip/error statuses: "filtered_out", "bundle_path_unsupported", "bundle_path_rejected", "index_missing", "query_error"
 """
 
 import json
@@ -194,6 +194,7 @@ def test_build_session_all_bundles_failed():
         "repo-x": "query_error",
         "repo-y": "filtered_out",
         "repo-z": "bundle_path_unsupported",
+        "repo-rejected": "bundle_path_rejected",
     })
     session = build_agent_query_session_v2("all bad", federation_trace=trace)
 

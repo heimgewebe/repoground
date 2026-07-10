@@ -777,3 +777,30 @@ def test_api_query_guardrail_sufficient_coverage(mini_index):
     # The warnings key might not exist, or if it does, it should not contain the specific warning
     warnings = data.get("warnings", [])
     assert "Low result coverage" not in warnings
+
+
+def test_api_query_runtime_error_is_redacted(mini_index, monkeypatch):
+    art = setup_test_artifact(mini_index)
+    secret = "/home/operator/.secrets/query-token"
+
+    def fail_query(*args, **kwargs):
+        raise RuntimeError(f"database failure at {secret}")
+
+    from merger.lenskit.retrieval import query_core
+
+    monkeypatch.setattr(query_core, "execute_query", fail_query)
+    response = client.post(
+        "/api/query",
+        json={
+            "index_id": art.id,
+            "q": "hello",
+            "k": 1,
+            "stale_policy": "ignore",
+        },
+        headers={"Authorization": "Bearer test_token"},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Query execution failed"}
+    assert secret not in response.text
+    assert "database failure" not in response.text

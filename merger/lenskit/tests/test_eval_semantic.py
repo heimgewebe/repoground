@@ -218,10 +218,17 @@ def test_eval_semantic_failure_isolation(mini_index_for_eval, tmp_path, capsys, 
     d = details[0]
 
     assert "error" in d
-    assert "The model crashed!" in d["error"]
+    assert d["error"] == (
+        "Semantic Run Error: Semantic re-ranking failed during encoding "
+        "(fallback_behavior=fail)."
+    )
+    assert "The model crashed!" not in d["error"]
     assert "semantic" in d
     assert "error" in d["semantic"]
-    assert "The model crashed!" in d["semantic"]["error"]
+    assert d["semantic"]["error"] == (
+        "Semantic re-ranking failed during encoding (fallback_behavior=fail)."
+    )
+    assert "The model crashed!" not in d["semantic"]["error"]
 
     # Assert baseline was preserved
     assert d["baseline"]["is_relevant"] is True

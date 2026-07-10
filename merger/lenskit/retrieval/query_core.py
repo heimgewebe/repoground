@@ -1,3 +1,4 @@
+import logging
 import sqlite3
 from pathlib import Path, PurePosixPath
 import json
@@ -16,6 +17,7 @@ WHY_ZERO_NONE = "no results"
 _REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX = ".index.sqlite"
 _ALLOWED_SQLITE_INDEX_SUFFIXES = (_REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX, ".sqlite", ".sqlite3", ".db")
 _MODEL_CACHE = {}
+logger = logging.getLogger(__name__)
 
 
 def normalize_excluded_paths(excluded_paths: Optional[List[str]]) -> List[str]:
@@ -357,15 +359,22 @@ def execute_query(
                             "error": "sentence-transformers not installed",
                             "fallback_behavior": fallback
                         }
-                except Exception as e:
+                except Exception as exc:
+                    logger.warning(
+                        "Semantic model initialization failed: %s",
+                        type(exc).__name__,
+                        exc_info=True,
+                    )
                     if fallback == "fail":
-                        raise RuntimeError(f"Semantic re-ranking failed to load model (fallback_behavior=fail): {e}") from e
-                    else:
-                        base_diagnostics["semantic"] = {
-                            "enabled": False,
-                            "error": str(e),
-                            "fallback_behavior": fallback
-                        }
+                        raise RuntimeError(
+                            "Semantic re-ranking failed to load model "
+                            "(fallback_behavior=fail)."
+                        ) from exc
+                    base_diagnostics["semantic"] = {
+                        "enabled": False,
+                        "error": "semantic model unavailable",
+                        "fallback_behavior": fallback,
+                    }
 
         graph_index = None
         graph_status = "not_found"
@@ -645,13 +654,20 @@ def execute_query(
                         hit["why"]["rank_features"] = hit["why"].get("rank_features", {})
                         hit["why"]["rank_features"]["semantic_score"] = float(cosine_scores[i])
                         hit["why"]["rank_features"]["original_bm25"] = old_score
-            except Exception as e:
+            except Exception as exc:
+                logger.warning(
+                    "Semantic encoding failed: %s",
+                    type(exc).__name__,
+                    exc_info=True,
+                )
                 if fallback == "fail":
-                    raise RuntimeError(f"Semantic re-ranking failed during encoding (fallback_behavior=fail): {e}") from e
-                else:
-                    base_diagnostics["semantic"]["error"] = f"Encoding failed: {e}"
-                    base_diagnostics["semantic"]["enabled"] = False
-                    semantic_model = None
+                    raise RuntimeError(
+                        "Semantic re-ranking failed during encoding "
+                        "(fallback_behavior=fail)."
+                    ) from exc
+                base_diagnostics["semantic"]["error"] = "semantic encoding unavailable"
+                base_diagnostics["semantic"]["enabled"] = False
+                semantic_model = None
 
         # Sort results deterministically to avoid random tie flips.
         results.sort(key=lambda x: (-x.get("final_score", 0), x["path"]))
@@ -782,7 +798,8 @@ def execute_query(
         elif "syntax error" in msg:
             raise RuntimeError(f"FTS syntax error. original='{query_text}', routed='{routed_query_raw}'") from e
         else:
-            raise RuntimeError(f"Database error executing query: {e}") from e
+            logger.warning("SQLite query failed: %s", type(e).__name__, exc_info=True)
+            raise RuntimeError("Database error executing query.") from e
     finally:
         if conn:
             conn.close()

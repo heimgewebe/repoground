@@ -937,3 +937,62 @@ def test_claim_boundaries_schema_rejects_missing_required_subfield(mini_index):
     }
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=invalid, schema=schema)
+
+
+def test_semantic_model_failure_is_redacted_from_diagnostics(mini_index, monkeypatch):
+    secret = "/home/operator/.secrets/model-token"
+
+    def fail_model(_name):
+        raise RuntimeError(f"model load failed at {secret}")
+
+    monkeypatch.setattr(query_core, "_get_semantic_model", fail_model)
+    policy = {
+        "model_name": "broken-model",
+        "provider": "local",
+        "fallback_behavior": "ignore",
+        "similarity_metric": "cosine",
+        "dimensions": 2,
+    }
+
+    result = query_core.execute_query(
+        mini_index,
+        query_text="def",
+        k=2,
+        embedding_policy=policy,
+    )
+
+    serialized = json.dumps(result)
+    assert secret not in serialized
+    assert "model load failed" not in serialized
+    diagnostic = result["results"][0]["why"]["diagnostics"]["semantic"]
+    assert diagnostic["error"] == "semantic model unavailable"
+
+
+def test_semantic_model_fail_policy_raises_generic_error(mini_index, monkeypatch):
+    secret = "/home/operator/.secrets/model-token"
+
+    def fail_model(_name):
+        raise RuntimeError(f"model load failed at {secret}")
+
+    monkeypatch.setattr(query_core, "_get_semantic_model", fail_model)
+    policy = {
+        "model_name": "broken-model",
+        "provider": "local",
+        "fallback_behavior": "fail",
+        "similarity_metric": "cosine",
+        "dimensions": 2,
+    }
+
+    with pytest.raises(RuntimeError) as exc_info:
+        query_core.execute_query(
+            mini_index,
+            query_text="def",
+            k=2,
+            embedding_policy=policy,
+        )
+
+    message = str(exc_info.value)
+    assert message == (
+        "Semantic re-ranking failed to load model (fallback_behavior=fail)."
+    )
+    assert secret not in message

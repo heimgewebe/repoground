@@ -517,3 +517,16 @@ with `--remote-ref` / `--remote-ref-policy`; WebUI "Quelle" dropdown (+ ref
 policy/ref fields for remote-snapshot); repoLens headless `--source-mode` /
 `--remote-ref` / `--remote-ref-policy`. Contradictory `--source-mode`/`--pre-pull`
 combinations are rejected before any network access.
+
+## Query Filesystem Boundary
+
+`/api/query`, `/api/federation/query`, and `/api/prescan` treat every request-controlled path as an untrusted relative path beneath an already configured service root.
+
+- absolute paths, `..`, dot segments, empty path segments, backslashes, NUL bytes, and surrounding whitespace are rejected;
+- paths are canonicalized after validation, and the resolved target must remain beneath the configured root, so symlink escapes are rejected;
+- query indexes are opened read-only;
+- embedding policies and graph indexes must remain beside the selected query artifact;
+- federation indexes must remain beneath the configured merges directory;
+- in service/API mode, bundle paths contained in a federation index must remain beneath that federation index directory. Arbitrary external local bundle paths remain available only to an explicit local CLI invocation.
+
+Internal exception details are written to server logs. HTTP clients receive stable generic errors instead of raw exception text, local paths, database diagnostics, or model-loader details.

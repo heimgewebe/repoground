@@ -41,6 +41,7 @@ from ..adapters import sources as sources_refresh
 from ..adapters import diagnostics as diagnostics_rebuild
 
 from merger.lenskit.core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
+from merger.lenskit.core.path_security import resolve_secure_path
 
 # Global Version Info
 SERVER_START_TIME = datetime.now(timezone.utc).isoformat()
@@ -679,8 +680,8 @@ def api_prescan(request: PrescanRequest):
 
     # Resolve repo
     repo_name = validate_repo_name(request.repo)
-    repo_root = state.hub / repo_name
-    if not repo_root.exists() or not repo_root.is_dir():
+    repo_root = _resolve_request_path(state.hub, repo_name, label="repository")
+    if not repo_root.exists() or not repo_root.is_dir():  # lgtm[py/path-injection]
         raise HTTPException(status_code=404, detail=f"Repo {repo_name} not found")
 
     try:
@@ -698,9 +699,9 @@ def api_prescan(request: PrescanRequest):
             file_count=result["file_count"],
             total_bytes=result["total_bytes"]
         )
-    except Exception as e:
-        logger.exception("Prescan failed")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        logger.exception("Prescan failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Prescan failed") from exc
 
 
 def _is_safe_filename(name: str) -> bool:
@@ -710,6 +711,14 @@ def _is_safe_filename(name: str) -> bool:
         return False
     p = Path(name)
     return p.name == name and not p.is_absolute()
+
+
+def _resolve_request_path(root: Path, relative_path: str, *, label: str) -> Path:
+    """Resolve one API-controlled relative path beneath an established service root."""
+    try:
+        return resolve_secure_path(root, relative_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid {label} path") from exc
 
 
 def _extract_projected_context_bundle(projected: Any) -> Optional[Dict[str, Any]]:
@@ -747,9 +756,13 @@ def api_federation_query(request: FederationQueryRequest):
         raise HTTPException(status_code=400, detail="Invalid federation_index path")
 
     merges_dir = state.merges_dir or get_merges_dir(state.hub)
-    fed_index_path = merges_dir / request.federation_index
+    fed_index_path = _resolve_request_path(
+        merges_dir,
+        request.federation_index,
+        label="federation index",
+    )
 
-    if not fed_index_path.exists():
+    if not fed_index_path.exists():  # lgtm[py/path-injection]
         raise HTTPException(status_code=404, detail="Federation index not found")
 
 
@@ -765,11 +778,16 @@ def api_federation_query(request: FederationQueryRequest):
     if request.embedding_policy:
         if not _is_safe_filename(request.embedding_policy):
             raise HTTPException(status_code=400, detail="Invalid embedding_policy path")
-        policy_path = fed_index_path.parent / request.embedding_policy
+        policy_path = _resolve_request_path(
+            fed_index_path.parent,
+            request.embedding_policy,
+            label="embedding policy",
+        )
         try:
             policy_instance = load_and_validate_embedding_policy(policy_path)
-        except EmbeddingPolicyError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        except EmbeddingPolicyError as exc:
+            logger.warning("Embedding policy rejected: %s", type(exc).__name__)
+            raise HTTPException(status_code=400, detail="Invalid embedding policy") from exc
 
     try:
         result = execute_federated_query(
@@ -780,14 +798,18 @@ def api_federation_query(request: FederationQueryRequest):
             embedding_policy=policy_instance,
             explain=request.explain,
             trace=request.trace,
-            build_context=request.build_context_bundle or bool(request.output_profile)
+            build_context=request.build_context_bundle or bool(request.output_profile),
+            allow_external_bundle_paths=False,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as exc:
+        logger.warning("Federation query rejected: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail="Invalid federation query") from exc
+    except FileNotFoundError as exc:
+        logger.warning("Federation query input missing: %s", type(exc).__name__)
+        raise HTTPException(status_code=404, detail="Federation query input not found") from exc
+    except RuntimeError as exc:
+        logger.exception("Federation query failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Federation query failed") from exc
 
     projected = project_output(result, request.output_profile)
 
@@ -898,8 +920,8 @@ def api_query(request: QueryRequest):
         merges_dir = Path(art.hub) / "merges"
     merges_dir = merges_dir.resolve()
 
-    index_path = merges_dir / filename
-    if not index_path.exists():
+    index_path = _resolve_request_path(merges_dir, filename, label="index artifact")
+    if not index_path.exists():  # lgtm[py/path-injection]
          raise HTTPException(status_code=404, detail="Index file missing on disk")
 
     is_stale = check_stale_index(index_path, stale_policy=request.stale_policy)
@@ -919,18 +941,27 @@ def api_query(request: QueryRequest):
     if request.embedding_policy:
         if not _is_safe_filename(request.embedding_policy):
             raise HTTPException(status_code=400, detail="Invalid embedding_policy path")
-        policy_path = index_path.parent / request.embedding_policy
+        policy_path = _resolve_request_path(
+            index_path.parent,
+            request.embedding_policy,
+            label="embedding policy",
+        )
         try:
             policy_instance = load_and_validate_embedding_policy(policy_path)
-        except EmbeddingPolicyError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        except EmbeddingPolicyError as exc:
+            logger.warning("Embedding policy rejected: %s", type(exc).__name__)
+            raise HTTPException(status_code=400, detail="Invalid embedding policy") from exc
 
     graph_index_path = None
     if request.graph_index:
         if not _is_safe_filename(request.graph_index):
             raise HTTPException(status_code=400, detail="Invalid graph_index path")
-        graph_index_path = index_path.parent / request.graph_index
-        if not graph_index_path.exists():
+        graph_index_path = _resolve_request_path(
+            index_path.parent,
+            request.graph_index,
+            label="graph index",
+        )
+        if not graph_index_path.exists():  # lgtm[py/path-injection]
             raise HTTPException(status_code=404, detail="Explicitly provided graph index file does not exist")
 
     if request.context_mode == "window" and request.context_window_lines <= 0:
@@ -961,14 +992,18 @@ def api_query(request: QueryRequest):
             trace=request.trace,
             build_context=build_context,
             context_mode=request.context_mode,
-            context_window_lines=request.context_window_lines
+            context_window_lines=request.context_window_lines,
+            read_only=True,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError as exc:
+        logger.warning("Query rejected: %s", type(exc).__name__)
+        raise HTTPException(status_code=400, detail="Invalid query request") from exc
+    except FileNotFoundError as exc:
+        logger.warning("Query input missing: %s", type(exc).__name__)
+        raise HTTPException(status_code=404, detail="Query input not found") from exc
+    except RuntimeError as exc:
+        logger.exception("Query execution failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=500, detail="Query execution failed") from exc
 
     projected = project_output(result, request.output_profile)
 

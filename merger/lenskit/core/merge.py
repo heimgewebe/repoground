@@ -2230,7 +2230,9 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
     Lightweight scan for structure visualization (Prescan).
     Returns a nested dict representing the tree.
     """
-    repo_root = repo_root.resolve()
+    repo_root = repo_root.resolve(strict=True)  # lgtm[py/path-injection]
+    if not repo_root.is_dir():
+        raise ValueError("Prescan root must be an existing directory")
     root_label = repo_root.name
 
     # Build ignores
@@ -2279,7 +2281,7 @@ def prescan_repo(repo_root: Path, max_depth: int = 10, ignore_globs: Optional[Li
 
         try:
             # Sort for deterministic output
-            with os.scandir(path) as it:
+            with os.scandir(path) as it:  # lgtm[py/path-injection]
                 entries = sorted(it, key=lambda e: e.name)
         except OSError:
             return node

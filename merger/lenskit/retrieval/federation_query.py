@@ -1,4 +1,5 @@
 import datetime
+import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -7,6 +8,10 @@ from .query_core import execute_query
 from ..core.federation import FEDERATION_KIND, FEDERATION_VERSION
 from ..core.federation import load_federation_index_data
 from ..core.federation import validate_federation_data
+from ..core.path_security import resolve_secure_path
+
+logger = logging.getLogger(__name__)
+
 
 def _build_cross_repo_links(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
@@ -62,17 +67,18 @@ def _find_bundle_index(bundle_path: Path) -> Optional[Path]:
     3. If none found, look for exactly one generic *.index.sqlite.
     4. If ambiguous (multiple matches at the same level), return None safely.
     """
-    if bundle_path.is_file() and bundle_path.name.endswith(".index.sqlite"):
+    # The caller resolves and confines this path before discovery.
+    if bundle_path.is_file() and bundle_path.name.endswith(".index.sqlite"):  # lgtm[py/path-injection]
         return bundle_path
 
-    if not bundle_path.is_dir():
+    if not bundle_path.is_dir():  # lgtm[py/path-injection]
         return None
 
     # Search for canonical chunk index
-    chunk_indices = list(bundle_path.glob("*.chunk_index.index.sqlite"))
+    chunk_indices = list(bundle_path.glob("*.chunk_index.index.sqlite"))  # lgtm[py/path-injection]
     if len(chunk_indices) == 1:
         # Also ensure there isn't another generic index lying around competing for canonical truth
-        generic_indices = list(bundle_path.glob("*.index.sqlite"))
+        generic_indices = list(bundle_path.glob("*.index.sqlite"))  # lgtm[py/path-injection]
         # We expect exactly 1 generic index too (the same one we just found). If there are more, it's ambiguous.
         if len(generic_indices) > 1:
             return None
@@ -81,7 +87,7 @@ def _find_bundle_index(bundle_path: Path) -> Optional[Path]:
         return None
 
     # Search for generic index as fallback
-    generic_indices = list(bundle_path.glob("*.index.sqlite"))
+    generic_indices = list(bundle_path.glob("*.index.sqlite"))  # lgtm[py/path-injection]
     if len(generic_indices) == 1:
         return generic_indices[0]
     elif len(generic_indices) > 1:
@@ -90,16 +96,44 @@ def _find_bundle_index(bundle_path: Path) -> Optional[Path]:
     return None
 
 def _resolve_existing_local_path(raw_path: str, base_path: Path) -> Path:
-    """Resolve a caller-supplied local path without creating or refreshing anything."""
-    if "://" in raw_path:
+    """Resolve an explicit local-operator path without creating or refreshing anything."""
+    if "://" in raw_path or "\x00" in raw_path:
         raise ValueError("inline --bundle paths must be local filesystem paths")
     candidate = Path(raw_path)
     if not candidate.is_absolute():
         candidate = base_path / candidate
-    resolved = candidate.resolve(strict=True)
-    if not resolved.is_dir() and not (resolved.is_file() and resolved.name.endswith(".index.sqlite")):
-        raise ValueError("inline --bundle path must be an existing bundle directory or .index.sqlite file")
+    resolved = candidate.resolve(strict=True)  # lgtm[py/path-injection]
+    if not resolved.is_dir() and not (
+        resolved.is_file() and resolved.name.endswith(".index.sqlite")
+    ):
+        raise ValueError(
+            "inline --bundle path must be an existing bundle directory or .index.sqlite file"
+        )
     return resolved
+
+
+def _resolve_persisted_bundle_path(
+    raw_path: str,
+    base_path: Path,
+    *,
+    allow_external: bool,
+) -> Path:
+    """Resolve one persisted bundle path under the API boundary or explicit CLI authority."""
+    if "://" in raw_path or "\x00" in raw_path:
+        raise ValueError("bundle path must be a local filesystem path")
+    if allow_external:
+        return _resolve_existing_local_path(raw_path, base_path)
+
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        base_resolved = base_path.resolve(strict=True)
+        resolved = candidate.resolve(strict=True)  # lgtm[py/path-injection]
+        try:
+            resolved.relative_to(base_resolved)
+        except ValueError as exc:
+            raise ValueError("bundle path escapes the federation directory") from exc
+        return resolved
+    return resolve_secure_path(base_path, raw_path)
 
 
 
@@ -154,7 +188,8 @@ def _execute_federated_query_data(
     embedding_policy: Optional[Dict[str, Any]] = None,
     explain: bool = False,
     trace: bool = False,
-    build_context: bool = False
+    build_context: bool = False,
+    allow_external_bundle_paths: bool = True,
 ) -> Dict[str, Any]:
     """Executes federated query aggregation over a validated federation object."""
     validate_federation_data(fed_data)
@@ -193,9 +228,15 @@ def _execute_federated_query_data(
                 bundle_status[repo_id] = "bundle_path_unsupported"
                 continue
 
-            bundle_path = Path(bundle_path_str)
-            if not bundle_path.is_absolute():
-                bundle_path = federation_base_path / bundle_path
+            try:
+                bundle_path = _resolve_persisted_bundle_path(
+                    bundle_path_str,
+                    federation_base_path,
+                    allow_external=allow_external_bundle_paths,
+                )
+            except (ValueError, OSError, RuntimeError):
+                bundle_status[repo_id] = "bundle_path_rejected"
+                continue
 
             db_path = _find_bundle_index(bundle_path)
             if not db_path:
@@ -209,7 +250,8 @@ def _execute_federated_query_data(
             db_fingerprint = None
             if expected_fingerprint:
                 try:
-                    with sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True) as conn:
+                    db_uri = f"{db_path.resolve().as_uri()}?mode=ro&immutable=1"
+                    with sqlite3.connect(db_uri, uri=True) as conn:  # lgtm[py/path-injection]
                         cursor = conn.execute("SELECT value FROM index_meta WHERE key='canonical_dump_index_sha256'")
                         row = cursor.fetchone()
                         if row:
@@ -230,7 +272,8 @@ def _execute_federated_query_data(
                 embedding_policy=embedding_policy,
                 explain=explain,
                 trace=trace,
-                build_context=build_context
+                build_context=build_context,
+                read_only=True,
             )
 
             # Score normalisation and integration per bundle
@@ -268,9 +311,15 @@ def _execute_federated_query_data(
             if trace and "query_trace" in res:
                 bundle_traces[repo_id] = res["query_trace"]
 
-        except Exception as e:
+        except Exception as exc:
+            logger.warning(
+                "Federated bundle query failed for %s: %s",
+                repo_id,
+                type(exc).__name__,
+                exc_info=True,
+            )
             bundle_status[repo_id] = "query_error"
-            bundle_errors[repo_id] = str(e)
+            bundle_errors[repo_id] = "bundle query failed"
         finally:
             bundle_latency_ms[repo_id] = (time.perf_counter() - bundle_start) * 1000.0
 
@@ -384,6 +433,8 @@ def execute_federated_query(
     explain: bool = False,
     trace: bool = False,
     build_context: bool = False,
+    *,
+    allow_external_bundle_paths: bool = True,
 ) -> Dict[str, Any]:
     """
     Executes a minimal federated query aggregation across local bundles referenced by a federation index.
@@ -391,11 +442,12 @@ def execute_federated_query(
     The federation index is a read-only registry input. This function does not create snapshots,
     refresh bundles, mutate Git, run shells or assert global repository truth.
     """
-    fed_data = load_federation_index_data(federation_index_path)
+    resolved_federation_index = federation_index_path.resolve(strict=True)  # lgtm[py/path-injection]
+    fed_data = load_federation_index_data(resolved_federation_index)
 
     return _execute_federated_query_data(
         fed_data=fed_data,
-        federation_base_path=federation_index_path.parent,
+        federation_base_path=resolved_federation_index.parent,
         query_text=query_text,
         k=k,
         filters=filters,
@@ -403,6 +455,7 @@ def execute_federated_query(
         explain=explain,
         trace=trace,
         build_context=build_context,
+        allow_external_bundle_paths=allow_external_bundle_paths,
     )
 
 
@@ -441,4 +494,5 @@ def execute_federated_query_from_bundles(
         explain=explain,
         trace=trace,
         build_context=build_context,
+        allow_external_bundle_paths=True,
     )

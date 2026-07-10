@@ -518,7 +518,8 @@ def test_execute_federated_query_handles_query_error(federated_setup, monkeypatc
 
     trace = res["federation_trace"]
     assert trace["bundle_status"]["repo1"] == "query_error"
-    assert "Database corruption" in trace["bundle_errors"]["repo1"]
+    assert trace["bundle_errors"]["repo1"] == "bundle query failed"
+    assert "Database corruption" not in trace["bundle_errors"]["repo1"]
     assert isinstance(trace["bundle_latency_ms"]["repo1"], float)
     assert trace["bundle_latency_ms"]["repo1"] >= 0.0
     assert trace["bundle_status"]["repo2"] == "ok"

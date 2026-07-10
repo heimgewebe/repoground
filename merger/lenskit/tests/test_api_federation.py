@@ -21,10 +21,12 @@ def fed_setup(tmp_path):
     merges_dir = tmp_path / "merges"
     merges_dir.mkdir()
 
-    # repo 1
-    dump_path1 = tmp_path / "dump1.json"
-    chunk_path1 = tmp_path / "chunks1.jsonl"
-    db_path1 = tmp_path / "1.chunk_index.index.sqlite"
+    # repo 1: API-visible bundle content stays beneath the federation directory.
+    bundle_dir1 = merges_dir / "bundle-r1"
+    bundle_dir1.mkdir()
+    dump_path1 = bundle_dir1 / "dump1.json"
+    chunk_path1 = bundle_dir1 / "chunks1.jsonl"
+    db_path1 = bundle_dir1 / "1.chunk_index.index.sqlite"
 
     chunk_data1 = [{"chunk_id": "c1", "repo_id": "r1", "path": "src/main.py", "content": "def main(): print('hello r1')", "start_line": 1, "end_line": 2, "layer": "core", "artifact_type": "code", "content_sha256": "h1"}]
     with chunk_path1.open("w", encoding="utf-8") as f:
@@ -36,7 +38,7 @@ def fed_setup(tmp_path):
     fed_data = {
         "kind": "repolens.federation.index", "version": "1.0", "created_at": "2026-04-03T16:30:36.125043+00:00", "updated_at": "2026-04-03T16:30:55.046944+00:00", "federation_id": "fed1",
         "bundles": [
-            {"repo_id": "r1", "bundle_path": str(tmp_path)}
+            {"repo_id": "r1", "bundle_path": "bundle-r1"}
         ]
     }
     fed_index.write_text(json.dumps(fed_data), encoding="utf-8")
@@ -339,7 +341,7 @@ def fed_setup_multi(tmp_path):
     merges_dir.mkdir()
 
     # Bundle 1
-    b1_dir = tmp_path / "repo1"
+    b1_dir = merges_dir / "repo1"
     b1_dir.mkdir()
     b1_dump = b1_dir / "dump.json"
     b1_chunks = b1_dir / "chunks.jsonl"
@@ -368,7 +370,7 @@ def fed_setup_multi(tmp_path):
     index_db.build_index(b1_dump, b1_chunks, b1_db)
 
     # Bundle 2 (different path to avoid federation_conflicts and isolate cross_repo_links wrapper trigger)
-    b2_dir = tmp_path / "repo2"
+    b2_dir = merges_dir / "repo2"
     b2_dir.mkdir()
     b2_dump = b2_dir / "dump.json"
     b2_chunks = b2_dir / "chunks.jsonl"
@@ -404,8 +406,8 @@ def fed_setup_multi(tmp_path):
         "updated_at": "2026-04-03T16:30:55.046944+00:00",
         "federation_id": "fed-multi",
         "bundles": [
-            {"repo_id": "repo1", "bundle_path": str(b1_dir)},
-            {"repo_id": "repo2", "bundle_path": str(b2_dir)},
+            {"repo_id": "repo1", "bundle_path": "repo1"},
+            {"repo_id": "repo2", "bundle_path": "repo2"},
         ],
     }
     fed_index.write_text(json.dumps(fed_data), encoding="utf-8")
@@ -522,3 +524,24 @@ def test_api_federation_query_profile_preserves_federation_trace(fed_setup):
         assert status in valid_statuses, (
             f"bundle_status[{repo_id!r}]={status!r} is not a valid status enum value"
         )
+
+
+def test_api_federation_runtime_error_is_redacted(fed_setup, monkeypatch):
+    secret = "/home/operator/.secrets/federation-token"
+
+    def fail_query(*args, **kwargs):
+        raise RuntimeError(f"federation failure at {secret}")
+
+    from merger.lenskit.retrieval import federation_query
+
+    monkeypatch.setattr(federation_query, "execute_federated_query", fail_query)
+    response = client.post(
+        "/api/federation/query",
+        json={"federation_index": "federation.json", "q": "hello", "k": 1},
+        headers={"Authorization": "Bearer test_token"},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Federation query failed"}
+    assert secret not in response.text
+    assert "federation failure" not in response.text

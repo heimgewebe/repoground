@@ -4,7 +4,12 @@
   "title": "Lenskit Federation Trace",
   "description": "Diagnostic execution trace of a federated query across multiple bundles.",
   "type": "object",
-  "required": ["query", "bundles", "total_results", "timestamp"],
+  "required": [
+    "query",
+    "bundles",
+    "total_results",
+    "timestamp"
+  ],
   "additionalProperties": false,
   "properties": {
     "query": {
@@ -25,7 +30,11 @@
       "description": "Status trace for each queried bundle.",
       "items": {
         "type": "object",
-        "required": ["repo_id", "bundle_path", "status"],
+        "required": [
+          "repo_id",
+          "bundle_path",
+          "status"
+        ],
         "additionalProperties": false,
         "properties": {
           "repo_id": {
@@ -38,7 +47,17 @@
           },
           "status": {
             "type": "string",
-            "enum": ["ok", "missing", "stale", "error", "filtered_out", "bundle_path_unsupported", "index_missing", "query_error"],
+            "enum": [
+              "ok",
+              "missing",
+              "stale",
+              "error",
+              "filtered_out",
+              "bundle_path_unsupported",
+              "bundle_path_rejected",
+              "index_missing",
+              "query_error"
+            ],
             "description": "Execution status of the bundle query."
           },
           "fingerprint": {

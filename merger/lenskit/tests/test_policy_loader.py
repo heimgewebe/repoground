@@ -63,3 +63,26 @@ def test_load_and_validate_embedding_policy_not_found(tmp_path):
         load_and_validate_embedding_policy(policy_path)
 
     assert "Embedding policy file not found" in str(exc.value)
+
+
+def test_load_embedding_policy_rejects_non_json_file(tmp_path):
+    policy_path = tmp_path / "policy.txt"
+    policy_path.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(EmbeddingPolicyError, match="must be a JSON file"):
+        load_and_validate_embedding_policy(policy_path)
+
+
+def test_load_embedding_policy_rejects_directory(tmp_path):
+    policy_path = tmp_path / "policy.json"
+    policy_path.mkdir()
+
+    with pytest.raises(EmbeddingPolicyError, match="not a regular file"):
+        load_and_validate_embedding_policy(policy_path)
+
+
+def test_load_embedding_policy_rejects_nul_path():
+    from pathlib import Path
+
+    with pytest.raises(EmbeddingPolicyError, match="Invalid embedding policy path"):
+        load_and_validate_embedding_policy(Path("bad\x00policy.json"))

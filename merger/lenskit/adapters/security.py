@@ -118,7 +118,7 @@ class SecurityConfig:
         # --- Stage 2: canonicalize + enforce with Path semantics ---
         try:
             # Now safe to resolve (canonicalize symlinks etc)
-            resolved = Path(normalized).resolve()
+            resolved = Path(normalized).resolve()  # lgtm[py/path-injection]
         except Exception:
             raise InvalidPathError("Invalid path resolution")
 
@@ -154,9 +154,9 @@ def validate_hub_path(path_str: str) -> Path:
     # Use resolved path for checks
     resolved = get_security_config().validate_path(p)
 
-    if not resolved.exists():
+    if not resolved.exists():  # lgtm[py/path-injection]
         raise InvalidPathError("Hub does not exist")
-    if not resolved.is_dir():
+    if not resolved.is_dir():  # lgtm[py/path-injection]
         raise InvalidPathError("Hub is not a directory")
     return resolved
 
@@ -164,7 +164,7 @@ def validate_hub_path(path_str: str) -> Path:
 def validate_source_dir(path: Path) -> Path:
     # Ensure source is within allowlist roots (hub) and use ONLY the validated path.
     resolved = get_security_config().validate_path(path)
-    if not resolved.exists() or not resolved.is_dir():
+    if not resolved.exists() or not resolved.is_dir():  # lgtm[py/path-injection]
         raise InvalidPathError("Invalid repo path")
     return resolved
 
