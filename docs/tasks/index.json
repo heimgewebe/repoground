@@ -1147,13 +1147,14 @@
       "id": "TASK-LINT-RUFF-SCOPE-001",
       "title": "Ruff Lint Scope Ratchet",
       "status": "done",
-      "description": "Closed by the Ruff Scope Ratchet v1 slice: a checked-in ruff-ci.toml now mirrors the repo-wide CI gate (F401/F811 only, fixtures excluded), and both CI and CONTRIBUTING.md call `ruff check --config ruff-ci.toml .`. The narrow selection is not global, so path-scoped bare Ruff jobs keep Ruff default rules. The broader repo-wide Ruff default findings remain intentionally outside this ratchet.",
+      "description": "Closed by the Ruff Scope Ratchet v1 slice: a checked-in ruff-ci.toml mirrors the repo-wide CI gate (F401/F811 only), while extend-exclude adds intentional fixtures without replacing Ruff built-in exclusions such as .git. Both CI and CONTRIBUTING.md call `ruff check --config ruff-ci.toml .`. The narrow selection is not global, so path-scoped bare Ruff jobs keep Ruff default rules. The broader repo-wide Ruff default findings remain intentionally outside this ratchet.",
       "evidence": [
         "ruff-ci.toml",
         ".github/workflows/lint.yml",
         "CONTRIBUTING.md",
         "docs/proofs/ruff-scope-ratchet-v1-proof.md",
-        "docs/architecture/inconsistencies.md"
+        "docs/architecture/inconsistencies.md",
+        "merger/lenskit/tests/test_ruff_ci_config.py"
       ],
       "missing_evidence": [
         "This closeout does not claim the full Ruff default rule set is clean repository-wide.",
