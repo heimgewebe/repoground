@@ -1,6 +1,6 @@
 # Ruff Git Metadata Exclusion v1 Self-Review
 
-PR: pending
+PR: #950
 Reviewed implementation head: `6f4dd2ae75699d556b0ebb8913df68997019dcb4`
 Base: `b08733158ec5614e58771ef2230829ff51fe7da3`
 Reviewed diff SHA-256: `bd09c443d548dbde8d16496eb571a4892921019e7b7940721631a5eed9c28943`
