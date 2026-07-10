@@ -36,11 +36,11 @@ def resolve_secure_path(root: Path, relpath: str) -> Path:
         # `root` is chosen by the application/operator, and `relpath` has passed the
         # strict component allowlist above. The comments document the custom barrier
         # for CodeQL, which cannot infer the component-level validation.
-        root_abs = Path(root).resolve(strict=True)  # lgtm[py/path-injection]
+        root_abs = Path(root).resolve(strict=True)  # lgtm[py/path-injection] codeql-boundary:root-bounded-relative-path
         if not root_abs.is_dir():
             raise ValueError("Root must be an existing directory")
         candidate = root_abs.joinpath(*parts)
-        resolved = candidate.resolve(strict=False)  # lgtm[py/path-injection]
+        resolved = candidate.resolve(strict=False)  # lgtm[py/path-injection] codeql-boundary:root-bounded-relative-path
         resolved.relative_to(root_abs)
         return resolved
     except (ValueError, RuntimeError, OSError) as exc:

@@ -133,8 +133,8 @@ def execute_query(
             if not resolved_index_path.is_absolute():
                 raise ValueError("Invalid index path: expected an absolute read-only index path.")
             db_uri = f"{resolved_index_path.as_uri()}?mode=ro&immutable=1"
-            # lgtm[py/path-injection] callers validate and confine the index path.
-            conn = sqlite3.connect(db_uri, uri=True)
+            # Callers validate and confine the index path before read-only execution.
+            conn = sqlite3.connect(db_uri, uri=True)  # lgtm[py/path-injection] codeql-boundary:query-readonly-index
         else:
             conn = sqlite3.connect(str(resolved_index_path))
         conn.row_factory = sqlite3.Row

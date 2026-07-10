@@ -681,7 +681,7 @@ def api_prescan(request: PrescanRequest):
     # Resolve repo
     repo_name = validate_repo_name(request.repo)
     repo_root = _resolve_request_path(state.hub, repo_name, label="repository")
-    if not repo_root.exists() or not repo_root.is_dir():  # lgtm[py/path-injection]
+    if not repo_root.exists() or not repo_root.is_dir():  # lgtm[py/path-injection] codeql-boundary:service-api-root-bounded-files
         raise HTTPException(status_code=404, detail=f"Repo {repo_name} not found")
 
     try:
@@ -762,7 +762,7 @@ def api_federation_query(request: FederationQueryRequest):
         label="federation index",
     )
 
-    if not fed_index_path.exists():  # lgtm[py/path-injection]
+    if not fed_index_path.exists():  # lgtm[py/path-injection] codeql-boundary:service-api-root-bounded-files
         raise HTTPException(status_code=404, detail="Federation index not found")
 
 
@@ -921,7 +921,7 @@ def api_query(request: QueryRequest):
     merges_dir = merges_dir.resolve()
 
     index_path = _resolve_request_path(merges_dir, filename, label="index artifact")
-    if not index_path.exists():  # lgtm[py/path-injection]
+    if not index_path.exists():  # lgtm[py/path-injection] codeql-boundary:service-api-root-bounded-files
          raise HTTPException(status_code=404, detail="Index file missing on disk")
 
     is_stale = check_stale_index(index_path, stale_policy=request.stale_policy)
@@ -961,7 +961,7 @@ def api_query(request: QueryRequest):
             request.graph_index,
             label="graph index",
         )
-        if not graph_index_path.exists():  # lgtm[py/path-injection]
+        if not graph_index_path.exists():  # lgtm[py/path-injection] codeql-boundary:service-api-root-bounded-files
             raise HTTPException(status_code=404, detail="Explicitly provided graph index file does not exist")
 
     if request.context_mode == "window" and request.context_window_lines <= 0:

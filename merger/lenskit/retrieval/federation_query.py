@@ -68,17 +68,17 @@ def _find_bundle_index(bundle_path: Path) -> Optional[Path]:
     4. If ambiguous (multiple matches at the same level), return None safely.
     """
     # The caller resolves and confines this path before discovery.
-    if bundle_path.is_file() and bundle_path.name.endswith(".index.sqlite"):  # lgtm[py/path-injection]
+    if bundle_path.is_file() and bundle_path.name.endswith(".index.sqlite"):  # lgtm[py/path-injection] codeql-boundary:federation-bundle-index-discovery
         return bundle_path
 
-    if not bundle_path.is_dir():  # lgtm[py/path-injection]
+    if not bundle_path.is_dir():  # lgtm[py/path-injection] codeql-boundary:federation-bundle-index-discovery
         return None
 
     # Search for canonical chunk index
-    chunk_indices = list(bundle_path.glob("*.chunk_index.index.sqlite"))  # lgtm[py/path-injection]
+    chunk_indices = list(bundle_path.glob("*.chunk_index.index.sqlite"))  # lgtm[py/path-injection] codeql-boundary:federation-bundle-index-discovery
     if len(chunk_indices) == 1:
         # Also ensure there isn't another generic index lying around competing for canonical truth
-        generic_indices = list(bundle_path.glob("*.index.sqlite"))  # lgtm[py/path-injection]
+        generic_indices = list(bundle_path.glob("*.index.sqlite"))  # lgtm[py/path-injection] codeql-boundary:federation-bundle-index-discovery
         # We expect exactly 1 generic index too (the same one we just found). If there are more, it's ambiguous.
         if len(generic_indices) > 1:
             return None
@@ -87,7 +87,7 @@ def _find_bundle_index(bundle_path: Path) -> Optional[Path]:
         return None
 
     # Search for generic index as fallback
-    generic_indices = list(bundle_path.glob("*.index.sqlite"))  # lgtm[py/path-injection]
+    generic_indices = list(bundle_path.glob("*.index.sqlite"))  # lgtm[py/path-injection] codeql-boundary:federation-bundle-index-discovery
     if len(generic_indices) == 1:
         return generic_indices[0]
     elif len(generic_indices) > 1:
@@ -102,7 +102,7 @@ def _resolve_existing_local_path(raw_path: str, base_path: Path) -> Path:
     candidate = Path(raw_path)
     if not candidate.is_absolute():
         candidate = base_path / candidate
-    resolved = candidate.resolve(strict=True)  # lgtm[py/path-injection]
+    resolved = candidate.resolve(strict=True)  # lgtm[py/path-injection] codeql-boundary:federation-inline-operator-path
     if not resolved.is_dir() and not (
         resolved.is_file() and resolved.name.endswith(".index.sqlite")
     ):
@@ -127,7 +127,7 @@ def _resolve_persisted_bundle_path(
     candidate = Path(raw_path)
     if candidate.is_absolute():
         base_resolved = base_path.resolve(strict=True)
-        resolved = candidate.resolve(strict=True)  # lgtm[py/path-injection]
+        resolved = candidate.resolve(strict=True)  # lgtm[py/path-injection] codeql-boundary:federation-api-contained-path
         try:
             resolved.relative_to(base_resolved)
         except ValueError as exc:
@@ -251,7 +251,7 @@ def _execute_federated_query_data(
             if expected_fingerprint:
                 try:
                     db_uri = f"{db_path.resolve().as_uri()}?mode=ro&immutable=1"
-                    with sqlite3.connect(db_uri, uri=True) as conn:  # lgtm[py/path-injection]
+                    with sqlite3.connect(db_uri, uri=True) as conn:  # lgtm[py/path-injection] codeql-boundary:federation-readonly-sqlite
                         cursor = conn.execute("SELECT value FROM index_meta WHERE key='canonical_dump_index_sha256'")
                         row = cursor.fetchone()
                         if row:
@@ -442,7 +442,7 @@ def execute_federated_query(
     The federation index is a read-only registry input. This function does not create snapshots,
     refresh bundles, mutate Git, run shells or assert global repository truth.
     """
-    resolved_federation_index = federation_index_path.resolve(strict=True)  # lgtm[py/path-injection]
+    resolved_federation_index = federation_index_path.resolve(strict=True)  # lgtm[py/path-injection] codeql-boundary:federation-index-entry
     fed_data = load_federation_index_data(resolved_federation_index)
 
     return _execute_federated_query_data(

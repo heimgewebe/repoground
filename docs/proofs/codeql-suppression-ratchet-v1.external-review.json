@@ -1,0 +1,79 @@
+{
+  "authority_boundary": {
+    "does_not_prove": [
+      "github_codeql_runtime_success",
+      "raw_sarif_gate_runtime_success",
+      "test_sufficiency",
+      "runtime_correctness",
+      "absence_of_other_vulnerabilities",
+      "merge_readiness",
+      "deployment_state"
+    ],
+    "proves": [
+      "independent_review_was_performed_on_the_bound_packet",
+      "the_initial_material_finding_was_corrected_before_the_final_review",
+      "the_final_reviewer_reported_no_critical_high_or_medium_finding"
+    ]
+  },
+  "result": {
+    "coverage": [
+      "Suppression scanner tokenizer and regex logic",
+      "Inventory boundary and scope validation",
+      "Directory escape and path resolution constraints",
+      "Tracked file coverage (`git ls-files`) validation",
+      "Test reference AST parsing"
+    ],
+    "findings": [],
+    "residual_risks": [
+      "The ratchet proves tests exist in the AST but cannot evaluate their runtime thoroughness or correctness.",
+      "Upstream validation logic could conceptually regress without triggering the ratchet if the exact suppression site and scope remain unchanged.",
+      "CodeQL's Python extractor could hypothetically process edge-case files that the ratchet ignores (e.g., specific tracked extensionless symlinks pointing to external valid python code), though standard auto-build behavior makes this practically non-exploitable."
+    ],
+    "summary": "The CodeQL suppression ratchet is robust, fail-closed, and highly bypass-resistant. It correctly enforces the exact suppression inventory, validates boundaries, and ensures test references exist without altering runtime logic.",
+    "verdict": "PASS"
+  },
+  "review_history": [
+    {
+      "findings": [
+        {
+          "disposition": "addressed by broad variant detection plus canonical-form enforcement",
+          "severity": "HIGH",
+          "title": "Strict marker parsing could miss suppression syntax variants"
+        },
+        {
+          "disposition": "addressed by .pyi/.pyw and extensionless Python-shebang coverage",
+          "severity": "LOW",
+          "title": "Python source discovery covered only .py files"
+        }
+      ],
+      "implementation_head": "bf0644965cc1aa25c07fb62cac80b47043b00166",
+      "round": 1,
+      "verdict": "FAIL"
+    },
+    {
+      "findings": [],
+      "implementation_head": "b85cc35445d72f6b90f896f509488a4e69f734a6",
+      "packet_sha256": "12a5b090cbba63b99d7420e3194a9b74cc9a8ecb9226fa4bf9520e18ce20643e",
+      "round": 2,
+      "verdict": "PASS"
+    }
+  ],
+  "review_mode": "immutable_diff_only_no_tools",
+  "reviewed_base": "f0a652bd9ad9a1e155ffb69e7c27fdbb826aca1b",
+  "reviewed_implementation_head": "b85cc35445d72f6b90f896f509488a4e69f734a6",
+  "reviewed_packet": {
+    "bytes": 100555,
+    "context_lines": 20,
+    "excluded_files": [
+      "docs/proofs/codeql-suppression-ratchet-v1.self-review.md",
+      "docs/proofs/codeql-suppression-ratchet-v1.external-review.json"
+    ],
+    "sha256": "12a5b090cbba63b99d7420e3194a9b74cc9a8ecb9226fa4bf9520e18ce20643e"
+  },
+  "reviewer": "gemini-cli-direct",
+  "schema": "lenskit.external_security_review.v1",
+  "tool_notes": [
+    "The Antigravity wrapper failed before review with a Node virtual-memory reservation error.",
+    "Both recorded review rounds used the direct Gemini CLI in sandboxed print mode without tools."
+  ]
+}
