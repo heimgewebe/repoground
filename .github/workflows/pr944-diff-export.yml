@@ -1,0 +1,39 @@
+name: PR 944 diff export
+
+on:
+  push:
+    branches:
+      - feat/rpu-v1-t015-agent-memory-citations
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Export reviewed implementation diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --no-tags
+          git diff origin/main...HEAD -- . \
+            ':(exclude)docs/proofs/repobrief-agent-memory-citations-v1.self-review.md' \
+            ':(exclude).github/workflows/pr944-diff-export.yml' \
+            > lenskit-pr-944-implementation.diff
+          sha256sum lenskit-pr-944-implementation.diff > lenskit-pr-944-implementation.diff.sha256
+      - name: Upload reviewed implementation diff
+        uses: actions/upload-artifact@v4
+        with:
+          name: lenskit-pr-944-implementation-diff
+          path: |
+            lenskit-pr-944-implementation.diff
+            lenskit-pr-944-implementation.diff.sha256
+          if-no-files-found: error
+          retention-days: 1
