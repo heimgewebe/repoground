@@ -106,7 +106,12 @@ def _range_identity(range_value: Mapping[str, Any] | None) -> dict[str, Any] | N
         identity["repo_id"] = str(repo_id)
     start_line = _first_not_none(range_value.get("start_line"), range_value.get("artifact_start_line"))
     end_line = _first_not_none(range_value.get("end_line"), range_value.get("artifact_end_line"))
-    if _is_int_not_bool(start_line) and _is_int_not_bool(end_line) and start_line >= 1 and end_line >= start_line:
+    if (
+        _is_int_not_bool(start_line)
+        and _is_int_not_bool(end_line)
+        and start_line >= 1
+        and end_line >= start_line
+    ):
         identity["start_line"] = int(start_line)
         identity["end_line"] = int(end_line)
     source_file_path = range_value.get("source_file_path")
@@ -114,7 +119,12 @@ def _range_identity(range_value: Mapping[str, Any] | None) -> dict[str, Any] | N
         identity["source_file_path"] = str(source_file_path)
         source_start_line = range_value.get("source_start_line")
         source_end_line = range_value.get("source_end_line")
-        if _is_int_not_bool(source_start_line) and _is_int_not_bool(source_end_line) and source_start_line >= 1 and source_end_line >= source_start_line:
+        if (
+            _is_int_not_bool(source_start_line)
+            and _is_int_not_bool(source_end_line)
+            and source_start_line >= 1
+            and source_end_line >= source_start_line
+        ):
             identity["source_start_line"] = int(source_start_line)
             identity["source_end_line"] = int(source_end_line)
     return identity
@@ -162,6 +172,20 @@ def _normalize_memory_citation(citation: Mapping[str, Any]) -> dict[str, Any]:
     if raw_source_range is not None:
         normalized["recorded_range"] = raw_source_range
     return normalized
+
+
+def _duplicate_citation_ids(citations: Sequence[Mapping[str, Any]]) -> set[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for citation in citations:
+        citation_id = citation.get("citation_id")
+        if not isinstance(citation_id, str):
+            continue
+        if citation_id in seen:
+            duplicates.add(citation_id)
+        else:
+            seen.add(citation_id)
+    return duplicates
 
 
 def citation_from_projection_item(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -218,6 +242,10 @@ def build_memory_record(
     normalized_citations = [_normalize_memory_citation(citation) for citation in citations]
     if not normalized_citations:
         raise ValueError("at least one citation is required")
+    duplicate_ids = _duplicate_citation_ids(normalized_citations)
+    if duplicate_ids:
+        duplicate_list = ", ".join(sorted(duplicate_ids))
+        raise ValueError(f"duplicate citation_id values are not allowed: {duplicate_list}")
     record: dict[str, Any] = {
         "kind": KIND,
         "version": VERSION,
@@ -284,24 +312,36 @@ def memory_record_from_projection(
     )
 
 
-def _citation_lookup(current_citations: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None) -> dict[str, Mapping[str, Any]]:
+def _citation_lookup(
+    current_citations: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None,
+) -> tuple[dict[str, Mapping[str, Any]], set[str]]:
+    lookup: dict[str, Mapping[str, Any]] = {}
+    conflicts: set[str] = set()
     if current_citations is None:
-        return {}
+        return lookup, conflicts
     if isinstance(current_citations, Mapping):
-        lookup: dict[str, Mapping[str, Any]] = {}
         for key, value in current_citations.items():
-            if isinstance(key, str) and isinstance(value, Mapping):
-                lookup[key] = value
-        return lookup
-    lookup = {}
+            if not isinstance(key, str) or not isinstance(value, Mapping):
+                continue
+            inner_id = value.get("citation_id")
+            if inner_id not in (None, key):
+                conflicts.add(key)
+                if isinstance(inner_id, str):
+                    conflicts.add(inner_id)
+            lookup[key] = value
+        return lookup, conflicts
     if isinstance(current_citations, Sequence) and not isinstance(current_citations, (str, bytes)):
         for citation in current_citations:
             if not isinstance(citation, Mapping):
                 continue
             citation_id = citation.get("citation_id")
-            if isinstance(citation_id, str) and citation_id not in lookup:
-                lookup[citation_id] = citation
-    return lookup
+            if not isinstance(citation_id, str):
+                continue
+            if citation_id in lookup:
+                conflicts.add(citation_id)
+                continue
+            lookup[citation_id] = citation
+    return lookup, conflicts
 
 
 def _current_range_hash(citation: Mapping[str, Any] | None) -> str | None:
@@ -333,7 +373,14 @@ def _range_identity_matches(recorded: Mapping[str, Any], current: Mapping[str, A
     for key in ("file_path", "start_byte", "end_byte", "content_sha256"):
         if recorded.get(key) != current.get(key):
             return False
-    for key in ("repo_id", "start_line", "end_line", "source_file_path", "source_start_line", "source_end_line"):
+    for key in (
+        "repo_id",
+        "start_line",
+        "end_line",
+        "source_file_path",
+        "source_start_line",
+        "source_end_line",
+    ):
         if key in recorded or key in current:
             if recorded.get(key) != current.get(key):
                 return False
@@ -396,7 +443,15 @@ def check_memory_recall(
     recorded_snapshot_stem = snapshot.get("stem") if isinstance(snapshot, Mapping) else None
     recorded_freshness_status = snapshot.get("freshness_status") if isinstance(snapshot, Mapping) else None
     citations = evidence.get("citations") if isinstance(evidence, Mapping) else None
-    citation_list = [citation for citation in (citations if isinstance(citations, Sequence) and not isinstance(citations, (str, bytes)) else []) if isinstance(citation, Mapping)]
+    citation_list = [
+        citation
+        for citation in (
+            citations
+            if isinstance(citations, Sequence) and not isinstance(citations, (str, bytes))
+            else []
+        )
+        if isinstance(citation, Mapping)
+    ]
 
     issues: list[dict[str, Any]] = []
     if not isinstance(memory_record, Mapping):
@@ -408,6 +463,14 @@ def check_memory_recall(
             issues.append({"code": "memory_record_version_invalid", "severity": "blocking"})
         if not _is_non_empty_string(memory_record.get("claim_text")):
             issues.append({"code": "claim_text_invalid", "severity": "blocking"})
+
+    recorded_conflicts = _duplicate_citation_ids(citation_list)
+    for citation_id in sorted(recorded_conflicts):
+        issues.append({
+            "code": "recorded_citation_id_conflict",
+            "citation_id": citation_id,
+            "severity": "blocking",
+        })
 
     snapshot_status = "verified"
     if not _is_sha256(recorded_snapshot_hash) or not _is_non_empty_string(recorded_snapshot_stem):
@@ -422,31 +485,62 @@ def check_memory_recall(
 
     effective_freshness = current_freshness_status
     freshness_basis = "current" if current_freshness_status is not None else "missing_current"
-    freshness_status = "fresh" if effective_freshness in USABLE_FRESHNESS_STATUSES else "stale_or_unverified"
+    freshness_status = (
+        "fresh" if effective_freshness in USABLE_FRESHNESS_STATUSES else "stale_or_unverified"
+    )
     if effective_freshness not in USABLE_FRESHNESS_STATUSES:
         issues.append({
-            "code": "freshness_not_fresh" if effective_freshness is not None else "freshness_status_missing",
+            "code": (
+                "freshness_not_fresh"
+                if effective_freshness is not None
+                else "freshness_status_missing"
+            ),
             "severity": "blocking",
         })
 
-    lookup = _citation_lookup(current_citations)
+    lookup, current_conflicts = _citation_lookup(current_citations)
+    for citation_id in sorted(current_conflicts):
+        issues.append({
+            "code": "citation_id_conflict",
+            "citation_id": citation_id,
+            "severity": "blocking",
+        })
+
     citation_checks: list[dict[str, Any]] = []
     for citation in citation_list:
         citation_id = citation.get("citation_id")
-        recorded_hash = citation.get("range_content_sha256") or _range_hash(citation.get("source_range") if isinstance(citation.get("source_range"), Mapping) else None)
+        recorded_hash = citation.get("range_content_sha256") or _range_hash(
+            citation.get("source_range")
+            if isinstance(citation.get("source_range"), Mapping)
+            else None
+        )
         check: dict[str, Any] = {
             "citation_id": citation_id,
             "status": "verified",
             "recorded_range_content_sha256": recorded_hash,
             "current_range_content_sha256": None,
         }
-        recorded_identity = citation.get("source_range") if isinstance(citation.get("source_range"), Mapping) else None
-        if not _citation_id_is_valid(citation_id) or not _is_sha256(recorded_hash):
+        recorded_identity = (
+            citation.get("source_range")
+            if isinstance(citation.get("source_range"), Mapping)
+            else None
+        )
+        if citation_id in recorded_conflicts or citation_id in current_conflicts:
+            check["status"] = "conflict"
+        elif not _citation_id_is_valid(citation_id) or not _is_sha256(recorded_hash):
             check["status"] = "invalid_record"
-            issues.append({"code": "citation_record_invalid", "citation_id": citation_id, "severity": "blocking"})
+            issues.append({
+                "code": "citation_record_invalid",
+                "citation_id": citation_id,
+                "severity": "blocking",
+            })
         elif not _stored_range_identity_is_valid(recorded_identity):
             check["status"] = "invalid_record"
-            issues.append({"code": "citation_range_identity_missing", "citation_id": citation_id, "severity": "blocking"})
+            issues.append({
+                "code": "citation_range_identity_missing",
+                "citation_id": citation_id,
+                "severity": "blocking",
+            })
         else:
             current = lookup.get(citation_id)
             current_hash = _current_range_hash(current)
@@ -455,22 +549,46 @@ def check_memory_recall(
             check["current_source_range"] = current_identity
             if current is None:
                 check["status"] = "missing"
-                issues.append({"code": "citation_missing", "citation_id": citation_id, "severity": "blocking"})
+                issues.append({
+                    "code": "citation_missing",
+                    "citation_id": citation_id,
+                    "severity": "blocking",
+                })
             elif current.get("citation_id") not in (None, citation_id):
                 check["status"] = "conflict"
-                issues.append({"code": "citation_id_conflict", "citation_id": citation_id, "severity": "blocking"})
+                issues.append({
+                    "code": "citation_id_conflict",
+                    "citation_id": citation_id,
+                    "severity": "blocking",
+                })
             elif current_identity is None:
                 check["status"] = "unverified"
-                issues.append({"code": "citation_range_missing", "citation_id": citation_id, "severity": "blocking"})
+                issues.append({
+                    "code": "citation_range_missing",
+                    "citation_id": citation_id,
+                    "severity": "blocking",
+                })
             elif current_hash is None:
                 check["status"] = "unverified"
-                issues.append({"code": "citation_hash_missing", "citation_id": citation_id, "severity": "blocking"})
+                issues.append({
+                    "code": "citation_hash_missing",
+                    "citation_id": citation_id,
+                    "severity": "blocking",
+                })
             elif current_hash != recorded_hash:
                 check["status"] = "changed"
-                issues.append({"code": "citation_hash_changed", "citation_id": citation_id, "severity": "blocking"})
+                issues.append({
+                    "code": "citation_hash_changed",
+                    "citation_id": citation_id,
+                    "severity": "blocking",
+                })
             elif not _range_identity_matches(recorded_identity, current_identity):
                 check["status"] = "changed"
-                issues.append({"code": "citation_range_identity_changed", "citation_id": citation_id, "severity": "blocking"})
+                issues.append({
+                    "code": "citation_range_identity_changed",
+                    "citation_id": citation_id,
+                    "severity": "blocking",
+                })
         citation_checks.append(check)
 
     if not citation_checks:
@@ -482,7 +600,9 @@ def check_memory_recall(
         "version": VERSION,
         "status": "usable" if usable else "unusable",
         "usable_as_source_backed_memory": usable,
-        "claim_text": memory_record.get("claim_text") if isinstance(memory_record, Mapping) else None,
+        "claim_text": (
+            memory_record.get("claim_text") if isinstance(memory_record, Mapping) else None
+        ),
         "snapshot_check": {
             "status": snapshot_status,
             "stem": recorded_snapshot_stem,
@@ -499,7 +619,11 @@ def check_memory_recall(
         "citation_checks": citation_checks,
         "issue_count": len(issues),
         "issues": issues,
-        "presentation_policy": "may_present_with_verified_citations" if usable else "do_not_present_as_source_truth",
+        "presentation_policy": (
+            "may_present_with_verified_citations"
+            if usable
+            else "do_not_present_as_source_truth"
+        ),
         "memory_is_source_truth": False,
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
