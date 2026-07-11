@@ -1539,8 +1539,8 @@
     {
       "id": "TASK-REPOBRIEF-AUDIT-STATUS-TRUTH-001",
       "title": "RepoBrief Status Truth Reconciliation",
-      "status": "in_progress",
-      "description": "Reconciles task index, board, roadmap/blueprint acceptance semantics and selected claim-freshness coverage without treating health reports as product readiness. Adds a bounded status-truth projection and CI drift check; PR and post-merge verification remain before closure.",
+      "status": "done",
+      "description": "Closed with PR and post-merge Main evidence. Task index remains canonical; the board is parity-checked; roadmap checkboxes are item-local; seven selected freshness claims remain diagnostic only; and the governance projection prevents health or bounded task completion from being read as product or release readiness. PR #976 and Main task-index run 29149005468 passed the status-truth ratchet with 90 tasks, 90 board rows, 7 claims and 0 findings.",
       "evidence": [
         "docs/status/repobrief-status-truth.v1.json",
         "merger/lenskit/contracts/repobrief-status-truth.v1.schema.json",
@@ -1555,8 +1555,8 @@
         "docs/doc-freshness-registry.yml"
       ],
       "missing_evidence": [
-        "The final GitHub PR head and post-merge Main run have not yet verified the new drift check.",
-        "The projection does not establish documentation completeness, semantic truth, product readiness or release readiness."
+        "The projection does not establish documentation completeness, semantic truth of every claim, complete evidence sufficiency for every task, product readiness or release readiness.",
+        "Canonical retrieval promotion, release packaging, graph maintainability and transitive upstream Action pinning remain separately tracked."
       ]
     },
     {
