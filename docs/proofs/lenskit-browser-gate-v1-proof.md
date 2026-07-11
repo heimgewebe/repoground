@@ -45,7 +45,9 @@ mcr.microsoft.com/playwright/python:v1.61.0-noble
 
 Der Digest verhindert, dass der Workflow bei unverändertem Lenskit-Commit
 später still ein anderes Image lädt. Der erweiterte Actions-Pin-Ratchet weist
-zukünftig auch bewegliche `container:`- und `image:`-Verweise zurück.
+zukünftig auch bewegliche `container:`- und `image:`-Verweise zurück. Die
+Erkennung ist auf echte Job- und Service-Container begrenzt; Action-Argumente
+mit einem gleichnamigen Feld erzeugen kein False Positive.
 
 ## CI-Gate
 
@@ -87,7 +89,7 @@ Arbeitsbaum nach Test               unverändert
 ## Statische Validierung vor dem Nachweiscommit
 
 ```text
-Browser-/Workflow-/Ruleset-Fokustests       30 passed
+Browser-/Workflow-/Ruleset-Fokustests       31 passed
 Ruff auf geänderten Python-Dateien          pass
 Workflow-YAML-Parse                         pass
 GitHub-Actions-Pin-Ratchet                  pass

@@ -41,6 +41,21 @@ def test_full_sha_local_action_and_digest_are_accepted(tmp_path: Path) -> None:
     assert scan(tmp_path) == []
 
 
+def test_action_input_named_image_is_not_a_container_reference(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        ".github/workflows/test.yml",
+        """jobs:
+  test:
+    steps:
+      - uses: owner/action@0123456789abcdef0123456789abcdef01234567
+        with:
+          image: example.invalid/application:latest
+""",
+    )
+    assert scan(tmp_path) == []
+
+
 def test_mutable_workflow_container_images_are_rejected(tmp_path: Path) -> None:
     _write(
         tmp_path,

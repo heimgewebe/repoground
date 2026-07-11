@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 USES_RE = re.compile(r"^(?P<indent>\s*)(?:-\s*)?uses:\s*(?P<value>[^#\s]+)")
-CONTAINER_RE = re.compile(r"^(?P<indent>\s*)container:\s*(?P<value>[^#\s]+)")
-IMAGE_RE = re.compile(r"^(?P<indent>\s*)image:\s*(?P<value>[^#\s]+)")
+YAML_KEY_RE = re.compile(
+    r"^(?P<indent>\s*)(?:-\s+)?(?P<key>[A-Za-z0-9_-]+):"
+    r"(?:\s*(?P<value>[^#\s]+))?"
+)
 BLOCK_RE = re.compile(r"^(?P<indent>\s*)(?:-\s*)?(?:run|script):\s*[|>]\s*[+-]?\s*$")
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 DOCKER_DIGEST_RE = re.compile(r"^docker://.+@sha256:[0-9a-f]{64}$")
@@ -59,6 +61,7 @@ def _uses_entries(path: Path) -> Iterator[tuple[int, str]]:
 
 
 def _workflow_image_entries(path: Path) -> Iterator[tuple[int, str]]:
+    stack: list[tuple[int, str]] = []
     block_indent: int | None = None
     for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip() or line.lstrip().startswith("#"):
@@ -72,11 +75,34 @@ def _workflow_image_entries(path: Path) -> Iterator[tuple[int, str]]:
         if block_match:
             block_indent = len(block_match.group("indent"))
             continue
-        for pattern in (CONTAINER_RE, IMAGE_RE):
-            match = pattern.match(line)
-            if match:
-                yield line_no, match.group("value").strip("'\"")
-                break
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        match = YAML_KEY_RE.match(line)
+        if match is None:
+            continue
+        key = match.group("key")
+        value = (match.group("value") or "").strip("'\"")
+        parent_keys = [item[1] for item in stack]
+
+        is_job_container = (
+            key == "container"
+            and len(parent_keys) >= 2
+            and parent_keys[-2] == "jobs"
+        )
+        is_container_image = (
+            key == "image" and parent_keys and parent_keys[-1] == "container"
+        )
+        is_service_image = (
+            key == "image"
+            and len(parent_keys) >= 2
+            and parent_keys[-2] == "services"
+        )
+        if value and (is_job_container or is_container_image or is_service_image):
+            yield line_no, value
+
+        if not value:
+            stack.append((indent, key))
 
 
 def _image_finding(path: Path, root: Path, line: int, image: str) -> Finding | None:

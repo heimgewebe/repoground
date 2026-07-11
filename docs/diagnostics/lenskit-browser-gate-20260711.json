@@ -1,76 +1,5 @@
 {
-  "kind": "lenskit.browser_gate_evidence",
-  "version": "1.0",
-  "repository": "heimgewebe/lenskit",
-  "observed_on": "2026-07-11",
   "base_commit": "78237d69e4d87274b73ba619eb7da71b6eb77d08",
-  "implementation_commit": "6095fd4b3d74d72e0106699721a69b59715f1433",
-  "implementation_tree": "12022c0f393a831ea6e29864dcb6e9240d1fdf8d",
-  "initial_findings": [
-    {
-      "classification": "python_dependency_conflict",
-      "requirements": [
-        "pytest==9.0.3",
-        "pytest-playwright==0.7.1"
-      ],
-      "result": "ResolutionImpossible",
-      "cause": "pytest-playwright 0.7.1 requires pytest below 9"
-    },
-    {
-      "classification": "local_host_playwright_driver_failure",
-      "environment": "heim-pc native Python 3.10 virtual environment",
-      "playwright": "1.61.0",
-      "result": "bundled Node driver aborted before browser installation",
-      "signature": "V8 OS::SetPermissions check failure",
-      "scope": "host-local environment; not classified as a browser-test failure"
-    }
-  ],
-  "selected_contract": {
-    "python_top_level_pins": {
-      "pytest": "9.0.3",
-      "pytest-asyncio": "1.4.0",
-      "pytest-playwright": "0.8.0",
-      "playwright": "1.61.0",
-      "pytest-base-url": "2.1.0"
-    },
-    "container_image": "mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69",
-    "manifest_digest": "sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69",
-    "linux_amd64_manifest_digest": "sha256:80fd7c1aad9600ea348572dd46ca00b9ea31d890831f5838fc61319ab79900d2",
-    "linux_arm64_manifest_digest": "sha256:ad879d1a9e49a94f6f8c99f6890f684b909498509c0494502320b70ddab655cf",
-    "browser_root": "/ms-playwright",
-    "ipc_option": "--ipc=host",
-    "workflow_job": "browser-tests",
-    "workflow": ".github/workflows/test-suite.yml"
-  },
-  "local_container_evidence": {
-    "repository_mount": "read-only",
-    "python": "3.12.3",
-    "chromium_executable": "/ms-playwright/chromium-1228/chrome-linux64/chrome",
-    "chromium_version": "149.0.7827.55",
-    "runtime_smoke": "pass",
-    "browser_test_file": "merger/lenskit/tests/test_webui_payload.py",
-    "browser_test_count": 10,
-    "browser_tests_passed": 10,
-    "browser_tests_failed": 0,
-    "duration_seconds": 8.68,
-    "worktree_mutated_by_test": false
-  },
-  "static_validation": {
-    "focused_tests_passed": 30,
-    "ruff": "pass",
-    "yaml_parse": "pass",
-    "git_diff_check": "pass",
-    "github_actions_pin_ratchet": "pass",
-    "reusable_workflow_contract_ratchet": "pass"
-  },
-  "rollout_state": {
-    "task_status": "in_progress",
-    "pr_browser_job": "pending",
-    "post_merge_main_browser_job": "pending",
-    "policy_contains_browser_tests": true,
-    "live_ruleset_contains_browser_tests": false,
-    "live_ruleset_update": "deferred until successful post-merge main browser job"
-  },
   "does_not_establish": [
     "complete transitive Python dependency locking",
     "safety or correctness of the container image contents",
@@ -80,5 +9,77 @@
     "test completeness",
     "regression absence",
     "release readiness"
-  ]
+  ],
+  "implementation_commit": "6095fd4b3d74d72e0106699721a69b59715f1433",
+  "implementation_tree": "12022c0f393a831ea6e29864dcb6e9240d1fdf8d",
+  "initial_findings": [
+    {
+      "cause": "pytest-playwright 0.7.1 requires pytest below 9",
+      "classification": "python_dependency_conflict",
+      "requirements": [
+        "pytest==9.0.3",
+        "pytest-playwright==0.7.1"
+      ],
+      "result": "ResolutionImpossible"
+    },
+    {
+      "classification": "local_host_playwright_driver_failure",
+      "environment": "heim-pc native Python 3.10 virtual environment",
+      "playwright": "1.61.0",
+      "result": "bundled Node driver aborted before browser installation",
+      "scope": "host-local environment; not classified as a browser-test failure",
+      "signature": "V8 OS::SetPermissions check failure"
+    }
+  ],
+  "kind": "lenskit.browser_gate_evidence",
+  "local_container_evidence": {
+    "browser_test_count": 10,
+    "browser_test_file": "merger/lenskit/tests/test_webui_payload.py",
+    "browser_tests_failed": 0,
+    "browser_tests_passed": 10,
+    "chromium_executable": "/ms-playwright/chromium-1228/chrome-linux64/chrome",
+    "chromium_version": "149.0.7827.55",
+    "duration_seconds": 8.68,
+    "python": "3.12.3",
+    "repository_mount": "read-only",
+    "runtime_smoke": "pass",
+    "worktree_mutated_by_test": false
+  },
+  "observed_on": "2026-07-11",
+  "repository": "heimgewebe/lenskit",
+  "rollout_state": {
+    "live_ruleset_contains_browser_tests": false,
+    "live_ruleset_update": "deferred until successful post-merge main browser job",
+    "policy_contains_browser_tests": true,
+    "post_merge_main_browser_job": "pending",
+    "pr_browser_job": "pending",
+    "task_status": "in_progress"
+  },
+  "selected_contract": {
+    "browser_root": "/ms-playwright",
+    "container_image": "mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69",
+    "ipc_option": "--ipc=host",
+    "linux_amd64_manifest_digest": "sha256:80fd7c1aad9600ea348572dd46ca00b9ea31d890831f5838fc61319ab79900d2",
+    "linux_arm64_manifest_digest": "sha256:ad879d1a9e49a94f6f8c99f6890f684b909498509c0494502320b70ddab655cf",
+    "manifest_digest": "sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69",
+    "python_top_level_pins": {
+      "playwright": "1.61.0",
+      "pytest": "9.0.3",
+      "pytest-asyncio": "1.4.0",
+      "pytest-base-url": "2.1.0",
+      "pytest-playwright": "0.8.0"
+    },
+    "workflow": ".github/workflows/test-suite.yml",
+    "workflow_job": "browser-tests"
+  },
+  "static_validation": {
+    "focused_tests_passed": 31,
+    "git_diff_check": "pass",
+    "github_actions_pin_ratchet": "pass",
+    "reusable_workflow_contract_ratchet": "pass",
+    "ruff": "pass",
+    "workflow_container_false_positive_guard": "pass",
+    "yaml_parse": "pass"
+  },
+  "version": "1.0"
 }
