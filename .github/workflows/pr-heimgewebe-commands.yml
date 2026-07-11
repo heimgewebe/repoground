@@ -7,10 +7,12 @@ name: PR Heimgewebe commands
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   dispatch:
-    if: github.event.issue.pull_request != null
+    if: github.event.issue.pull_request != null && github.event.comment.user.type != 'Bot'
     uses: heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@10daa1c84469dce76e93cdc24c47c1dfc5e156d6  # main resolved 2026-07-11
     secrets:
       HEIMGEWEBE_APP_ID: ${{ secrets.HEIMGEWEBE_APP_ID }}

@@ -1,6 +1,7 @@
 {
   "base_commit": "174a865cd8577c152ca30a61618a0f4b8cdf0482",
   "direct_surface": {
+    "caller_contract_ratchet": "scripts/ci/check_reusable_workflow_contracts.py",
     "changed_to_full_commit_count": 55,
     "ci_job": ".github/workflows/contracts-validate.yml#immutable-ci-supply-chain",
     "external_reference_count": 57,
@@ -455,9 +456,11 @@
         "HEIMGEWEBE_APP_PRIVATE_KEY"
       ],
       "after_token_permissions": [
-        "contents: read"
+        "contents: read",
+        "issues: write",
+        "pull-requests: write"
       ],
-      "basis": "the pinned reusable workflow performs writes with its short-lived GitHub App token and declares exactly these two input secrets",
+      "basis": "The pinned reusable workflow declares the same three GITHUB_TOKEN permissions. Reusable workflows cannot elevate beyond the caller ceiling; writes still use the short-lived GitHub App token, while the caller ceiling must satisfy workflow compilation.",
       "before_secret_forwarding": "inherit",
       "before_token_permissions": [
         "contents: read",
@@ -470,6 +473,28 @@
         "token_step": "success"
       },
       "workflow": ".github/workflows/pr-heimgewebe-commands.yml"
+    }
+  ],
+  "post_merge_findings": [
+    {
+      "actor": "dependabot[bot]",
+      "classification": "reusable_workflow_caller_contract_mismatch",
+      "conclusion": "startup_failure",
+      "diagnosis": "The caller granted only contents:read while the pinned called workflow declares contents:read, issues:write and pull-requests:write. GitHub reusable workflows cannot elevate permissions through the call chain.",
+      "diagnosis_confidence": 0.9,
+      "event": "issue_comment",
+      "head_sha": "adc3927c7c48f5974a455bdc89f9afc6adb5c39e",
+      "jobs_created": 0,
+      "logs_available": false,
+      "remediation": [
+        "restore only the three permissions declared by the pinned called workflow",
+        "retain explicit forwarding of exactly two required secrets",
+        "skip Bot comments at the caller",
+        "add a hash-bound local caller-contract ratchet",
+        "group GitHub Actions Dependabot updates and cap open update PRs at one"
+      ],
+      "run_id": 29144781543,
+      "runtime_retest_status": "pending_post_merge"
     }
   ],
   "repository": "heimgewebe/lenskit",

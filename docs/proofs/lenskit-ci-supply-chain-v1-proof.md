@@ -65,9 +65,10 @@ beabsichtigte Funktion ändern, nicht nur härten.
 
 ### Heimgewebe-Befehle
 
-Der aufrufende Lenskit-Workflow behält nur `contents: read`. Statt alle Secrets
-zu vererben, übergibt er explizit die beiden vom gepinnten Reusable-Workflow
-deklarierten Namen:
+Der aufrufende Lenskit-Workflow gewährt die vom gepinnten Reusable-Workflow
+deklarierten Token-Rechte `contents: read`, `issues: write` und
+`pull-requests: write`. Statt alle Secrets zu vererben, übergibt er explizit
+die beiden dort deklarierten Namen:
 
 ```text
 HEIMGEWEBE_APP_ID
@@ -114,3 +115,32 @@ Der Nachweis etabliert weder Schadcodefreiheit noch Fehlerfreiheit der
 gepinnten Abhängigkeiten. Er beweist keine vollständige Least-Privilege-Lage,
 keine Workflowkorrektheit für jedes Ereignis, keine Testvollständigkeit, keine
 Regressionsfreiheit, keine Runtime-Korrektheit und keine Release-Reife.
+
+## Post-Merge-Korrektur: Reusable-Workflow-Rechte
+
+Der erste Main-Nachlauf von PR #967 erzeugte für den Workflow
+`PR Heimgewebe commands` den Lauf `29144781543`. Er endete vor Anlage eines
+Jobs mit `startup_failure`; GitHub stellte deshalb kein Joblog bereit.
+
+Die stärkste vertragsnahe Diagnose ist eine zu niedrige Rechteobergrenze des
+Aufrufers: Der gepinnte Metarepo-Workflow deklariert `contents: read`,
+`issues: write` und `pull-requests: write`, während Lenskit nach PR #967 nur
+`contents: read` gewährte. Ein aufgerufener Workflow kann seine
+`GITHUB_TOKEN`-Rechte nicht über die Obergrenze des Aufrufers erhöhen.
+Diagnosesicherheit vor dem Laufzeittest: `0.9`.
+
+Die Korrektur:
+
+- stellt nur die drei vom gepinnten Fremdworkflow deklarierten Rechte bereit;
+- behält die explizite Weitergabe genau der zwei GitHub-App-Secrets;
+- überspringt Bot-Kommentare bereits im Lenskit-Aufrufer;
+- bindet Aufruferpfad, Job, exakten Fremdworkflow-SHA, Rechte, Secret-Namen und
+  Filterbedingung in `.github/reusable-workflow-contracts.json`;
+- prüft diesen Vertrag in `contracts-validate` und in Negativtests;
+- gruppiert Dependabot-Actions-Updates und begrenzt sie auf höchstens einen
+  offenen Update-PR.
+
+Die drei unmittelbar durch die Erstkonfiguration erzeugten Dependabot-PRs
+#968, #969 und #970 werden nach Veröffentlichung der Gruppierungsregel
+geschlossen. Ein echter, harmloser `issue_comment`-Smoke auf dem Default-Branch
+bleibt vor der erneuten Task-Schließung erforderlich.

@@ -1,0 +1,31 @@
+{
+  "kind": "lenskit.reusable_workflow_caller_contracts",
+  "version": "1.0",
+  "contracts": [
+    {
+      "caller_path": ".github/workflows/pr-heimgewebe-commands.yml",
+      "job": "dispatch",
+      "uses": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@10daa1c84469dce76e93cdc24c47c1dfc5e156d6",
+      "source_content_sha256": "7ff27d0834ccf764f94937771eaa0c60e5eaad4edafab6eba8e4b2ab27d44f18",
+      "required_permissions": {
+        "contents": "read",
+        "issues": "write",
+        "pull-requests": "write"
+      },
+      "required_secrets": [
+        "HEIMGEWEBE_APP_ID",
+        "HEIMGEWEBE_APP_PRIVATE_KEY"
+      ],
+      "required_if_fragments": [
+        "github.event.issue.pull_request != null",
+        "github.event.comment.user.type != 'Bot'"
+      ]
+    }
+  ],
+  "does_not_establish": [
+    "runtime success of the called reusable workflow",
+    "least privilege inside the called reusable workflow",
+    "validity of secrets or GitHub App installation state",
+    "transitive immutability of nested Actions"
+  ]
+}
