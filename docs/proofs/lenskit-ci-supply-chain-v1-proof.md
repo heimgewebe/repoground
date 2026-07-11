@@ -76,9 +76,8 @@ HEIMGEWEBE_APP_PRIVATE_KEY
 ```
 
 Der fremde Workflow führt seine Schreiboperationen mit einem kurzlebigen
-GitHub-App-Token aus. Der letzte belegte Vorlauf `29126802947` erzeugte dieses
-Token erfolgreich. Ein neuer Lauf des geänderten Issue-Comment-Workflows ist
-erst nach Veröffentlichung auf dem Default-Branch sinnvoll möglich.
+GitHub-App-Token aus. Der Laufzeitnachweis nach der Korrektur ist im Abschnitt
+„Runtime-Closeout“ dokumentiert.
 
 ## Tests vor dem Nachweiscommit
 
@@ -140,7 +139,35 @@ Die Korrektur:
 - gruppiert Dependabot-Actions-Updates und begrenzt sie auf höchstens einen
   offenen Update-PR.
 
-Die drei unmittelbar durch die Erstkonfiguration erzeugten Dependabot-PRs
-#968, #969 und #970 werden nach Veröffentlichung der Gruppierungsregel
-geschlossen. Ein echter, harmloser `issue_comment`-Smoke auf dem Default-Branch
-bleibt vor der erneuten Task-Schließung erforderlich.
+Die Laufzeitkorrektur und die Update-PR-Bereinigung sind im folgenden
+Closeout belegt.
+
+## Runtime-Closeout
+
+PR #971 wurde als Squash-Commit
+`3834609ae3f1212919c028a5a5120a7c70df4b3c` gemergt. Sein Git-Baum entsprach
+exakt dem geprüften Head. Die Main-Pflichtchecks bestanden; `ai-context-guard`
+wurde tatsächlich erzeugt, und der Ruleset-Validator meldete `pass`.
+
+Der harmlose HTML-Kommentar ohne Heimgewebe-Befehl auf PR #968 löste den
+`issue_comment`-Lauf `29145242612` auf dem Merge-Commit aus. Ergebnis:
+
+```text
+Workflow conclusion                  success
+Job dispatch                         success
+Create GitHub App token              success
+Parse and dispatch command           success
+Post Create GitHub App token         success
+```
+
+Damit sind die frühere `startup_failure`-Diagnose und ihre Korrektur im
+betroffenen No-op-Pfad praktisch bestätigt: Der Aufrufer kompilierte, die zwei
+explizit weitergereichten App-Secrets waren nutzbar, und der gepinnte
+Fremdworkflow lief erfolgreich. Dieser Smoke deckt nicht sämtliche Befehle,
+Rechtekombinationen oder Secret-Rotationen ab.
+
+Die Einzel-Update-PRs #968, #969 und #970 wurden durch die Gruppierungsregel
+geschlossen. Dependabot erzeugte genau einen gruppierten Ersatz-PR #972; dieser
+wurde während des laufenden Auditballs ebenfalls geschlossen. Danach bestanden
+keine offenen Lenskit-PRs. Der nächste Wochenlauf darf höchstens einen
+gruppierten Updatevorschlag erzeugen.
