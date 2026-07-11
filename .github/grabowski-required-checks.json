@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "required_checks": [
+    "ai-context-guard",
+    "browser-tests",
+    "CodeQL",
+    "Lenskit CodeQL policy (python)",
+    "pytest-full",
+    "release-candidate",
+    "ruff",
+    "webui-js-tests"
+  ]
+}
