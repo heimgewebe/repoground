@@ -85,7 +85,7 @@
     ],
     "green_means": "Every tracked claim matches the evidence declared for that claim.",
     "path": "docs/doc-freshness-registry.yml",
-    "tracked_claim_count": 3
+    "tracked_claim_count": 7
   },
   "does_not_establish": [
     "complete repository understanding",

@@ -35,7 +35,7 @@ entries:
     status: done
     normative: true
     owner: repolens-spec
-    last_verified: "2026-06-02"
+    last_verified: "2026-07-11"
     evidence:
       - kind: symbol
         target: "merger/lenskit/core/merge.py::ExtrasConfig"
@@ -61,7 +61,7 @@ entries:
     status: done
     normative: false
     owner: architecture
-    last_verified: "2026-06-02"
+    last_verified: "2026-07-11"
     evidence:
       - kind: symbol
         target: "merger/lenskit/core/federation.py::init_federation"
@@ -80,7 +80,7 @@ entries:
     status: done
     normative: false
     owner: roadmap
-    last_verified: "2026-06-02"
+    last_verified: "2026-07-11"
     evidence:
       - kind: symbol
         target: "merger/lenskit/core/claim_evidence_map.py::produce_claim_evidence_map"
@@ -94,3 +94,68 @@ entries:
       claim_evidence_map v1 is now produced from doc-freshness registry,
       emitted in bundle manifests, and summarized by agent_reading_pack when
       present as a reference-only navigation/evidence index.
+
+  - id: task-board-done-scope-local
+    doc: docs/tasks/board.md
+    locator: Status-Legende
+    claim: Task status done is scoped to the declared task and does not imply phase, system, product or release completion
+    status: done
+    normative: true
+    owner: task-control
+    last_verified: "2026-07-11"
+    evidence:
+      - kind: text
+        target: "docs/tasks/board.md::der deklarierte Task-Scope ist abgeschlossen und belegt"
+      - kind: test
+        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+      - kind: proof
+        target: docs/proofs/repobrief-status-truth-v1-proof.md
+    notes: Board is a human projection of docs/tasks/index.json, not an independent authority.
+
+  - id: upgrade-blueprint-target-architecture-boundary
+    doc: docs/lenskit-upgrade-blaupause.md
+    locator: Statuswahrheit
+    claim: Upgrade blueprint checkboxes are item-local and do not constitute canonical task or product-readiness status
+    status: done
+    normative: false
+    owner: architecture
+    last_verified: "2026-07-11"
+    evidence:
+      - kind: text
+        target: "docs/lenskit-upgrade-blaupause.md::Häkchen gelten nur für den jeweiligen Arbeitspunkt"
+      - kind: test
+        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+      - kind: proof
+        target: docs/proofs/repobrief-status-truth-v1-proof.md
+
+  - id: master-roadmap-item-local-boundary
+    doc: docs/roadmap/lenskit-master-roadmap.md
+    locator: Statuswahrheit
+    claim: Master-roadmap checkboxes are item-local and task status remains authoritative in the task index
+    status: done
+    normative: true
+    owner: roadmap
+    last_verified: "2026-07-11"
+    evidence:
+      - kind: text
+        target: "docs/roadmap/lenskit-master-roadmap.md::Kanonische Taskstatus: `docs/tasks/index.json`"
+      - kind: test
+        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+      - kind: proof
+        target: docs/proofs/repobrief-status-truth-v1-proof.md
+
+  - id: agent-operationalization-plan-boundary
+    doc: docs/roadmap/lenskit-agent-operationalization-roadmap.md
+    locator: Statuswahrheit
+    claim: Agent operationalization roadmap is a plan surface and does not independently establish implementation or readiness
+    status: done
+    normative: false
+    owner: roadmap
+    last_verified: "2026-07-11"
+    evidence:
+      - kind: text
+        target: "docs/roadmap/lenskit-agent-operationalization-roadmap.md::Diese Datei ist ein Ordnungs- oder Zieldokument und keine zweite Taskstatus-Autorität"
+      - kind: test
+        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+      - kind: proof
+        target: docs/proofs/repobrief-status-truth-v1-proof.md
