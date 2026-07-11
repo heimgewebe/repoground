@@ -7,6 +7,22 @@ Das Projekt führt (noch) **keine** formalen Versions-Tags; Einträge sind daher
 datums- und Track-basiert. Roadmap-Phasen/Tracks: siehe
 [`docs/roadmap/lenskit-master-roadmap.md`](docs/roadmap/lenskit-master-roadmap.md).
 
+## [2.4.0-rc.1] - 2026-07-11
+
+### Added
+
+- Deterministic, commit-bound RepoBrief source-candidate archives.
+- SHA-256 manifest and checksum verification.
+- Hash-locked runtime, development and browser dependency sets.
+- Explicit upgrade and rollback procedure.
+- Fail-closed licensing boundary for public distribution.
+
+### Distribution boundary
+
+This is an internal verification candidate, not a public software release. The
+repository remains governed by `LicenseRef-RepoBrief-All-Rights-Reserved` until
+a later owner decision explicitly replaces that boundary.
+
 ## [Unreleased]
 
 ### Added

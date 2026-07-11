@@ -54,13 +54,15 @@
     },
     {
       "limitations": [
-        "No repository license file, complete lock strategy, versioned release or rollback proof exists yet."
+        "Public distribution is blocked by LicenseRef-RepoBrief-All-Rights-Reserved pending a separate owner decision.",
+        "The optional semantic/Torch dependency closure is excluded pending a platform-specific hash-lock task.",
+        "PR, main and live ruleset verification remain outstanding."
       ],
       "promotion": "blocked",
       "scope": "license, reproducible dependency, release and rollback evidence",
-      "status": "open",
+      "status": "in_progress",
       "task_id": "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
-      "verification": "not_started"
+      "verification": "local_validated"
     },
     {
       "limitations": [
@@ -116,7 +118,9 @@
     "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
     "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
     "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
-    "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001"
+    "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
+    "TASK-LENSKIT-SEMANTIC-LOCK-001",
+    "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001"
   ],
   "roadmap_surfaces": [
     {
@@ -182,7 +186,8 @@
     "reasons": [
       "The final control plane and browser gate are runtime-verified for their bounded scopes.",
       "Canonical review retrieval remains measured below its acceptance thresholds and default promotion is blocked.",
-      "Release packaging and license evidence remain open.",
+      "An internal deterministic release-candidate path is locally implemented; PR/main/ruleset verification remains open and public distribution stays blocked.",
+      "The optional semantic/Torch dependency closure is not hash-locked and remains outside the candidate contract.",
       "Graph maintainability ratchets remain open.",
       "Transitive mutable Actions remain inside two pinned upstream reusable workflows."
     ],
@@ -192,11 +197,11 @@
   "task_summary": {
     "by_status": {
       "done": 84,
-      "in_progress": 0,
-      "open": 6,
+      "in_progress": 1,
+      "open": 7,
       "partial": 0
     },
-    "total": 90
+    "total": 92
   },
   "version": "1.0"
 }

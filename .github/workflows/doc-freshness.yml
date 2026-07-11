@@ -25,6 +25,7 @@ on:
       - ".github/workflows/doc-freshness.yml"
       - "merger/lenskit/repoLens-spec.md"
       - "docs/**.md"
+      - "requirements/repobrief-dev.lock.txt"
   pull_request:
     branches: [ "main", "master" ]
     paths:
@@ -41,6 +42,7 @@ on:
       - "merger/lenskit/repoLens-spec.md"
       - "docs/**.md"
 
+      - "requirements/repobrief-dev.lock.txt"
 permissions:
   contents: read
 
@@ -57,8 +59,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Doc-freshness inspect (diagnostic, non-blocking)
         # Surfaces drift in the run log without failing the build (v0). Exit 1

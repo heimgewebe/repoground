@@ -40,7 +40,10 @@ def test_browser_job_uses_digest_pinned_matching_playwright_image() -> None:
         "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd"
     )
     commands = "\n".join(str(step.get("run", "")) for step in steps)
-    assert "-r requirements-browser.txt" in commands
+    assert (
+        "--require-hashes -r requirements/repobrief-browser.lock.txt"
+        in commands
+    )
     assert "scripts/ci/check_browser_gate_environment.py" in commands
     assert "-m browser merger/lenskit/tests/test_webui_payload.py" in commands
     assert "--browser chromium" in commands

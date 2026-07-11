@@ -1562,15 +1562,29 @@
     {
       "id": "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
       "title": "Lenskit Release Packaging and License Decision",
-      "status": "open",
+      "status": "in_progress",
       "description": "Resolve Audit F-09 with an explicit license decision, reproducible dependency strategy, versioned release artifacts, hashes, changelog, upgrade and rollback instructions.",
       "evidence": [
-        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
-        "requirements-dev.txt",
-        "merger/lenskit/requirements.txt"
+        "LICENSE",
+        "RELEASE_VERSION",
+        "CHANGELOG.md",
+        "requirements/repobrief-runtime.lock.txt",
+        "requirements/repobrief-dev.lock.txt",
+        "requirements/repobrief-browser.lock.txt",
+        "requirements/repobrief-lock-tools.lock.txt",
+        "scripts/release/build_release_candidate.py",
+        "scripts/release/verify_release_candidate.py",
+        "scripts/release/check_release_contract.py",
+        "docs/release/release-policy.md",
+        "docs/release/upgrade-rollback.md",
+        "merger/lenskit/contracts/repobrief-release-candidate.v1.schema.json",
+        ".github/workflows/test-suite.yml"
       ],
       "missing_evidence": [
-        "No repository license file, complete lock strategy, versioned release or rollback proof exists yet."
+        "PR and main release-candidate jobs have not been observed yet.",
+        "The live main ruleset does not require release-candidate yet.",
+        "Public distribution remains blocked and is tracked separately.",
+        "The optional semantic/Torch dependency closure remains outside this candidate and is tracked separately."
       ]
     },
     {
@@ -1585,6 +1599,32 @@
       ],
       "missing_evidence": [
         "No real-repository graph-noise threshold or no-new-complexity ratchet is active yet."
+      ]
+    },
+    {
+      "id": "TASK-LENSKIT-SEMANTIC-LOCK-001",
+      "title": "Lenskit Semantic Extension Dependency Lock",
+      "status": "open",
+      "description": "Resolve and hash-lock the platform-specific sentence-transformers and Torch dependency closure, define supported platforms, and validate installation without widening the core release candidate silently.",
+      "evidence": [
+        "merger/lenskit/requirements-semantic.txt",
+        "docs/release/release-policy.md"
+      ],
+      "missing_evidence": [
+        "No platform matrix, complete hash lock, installation proof or promotion decision exists for the semantic extension."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001",
+      "title": "RepoBrief Public Distribution License Decision",
+      "status": "open",
+      "description": "Decide whether RepoBrief should receive a public distribution license, review third-party obligations, and replace the restrictive LicenseRef only through an explicit owner decision.",
+      "evidence": [
+        "LICENSE",
+        "docs/release/licensing.md"
+      ],
+      "missing_evidence": [
+        "No owner-approved public license, third-party obligation review or publication authorization exists."
       ]
     }
   ]

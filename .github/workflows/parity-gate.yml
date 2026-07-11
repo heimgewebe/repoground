@@ -26,6 +26,7 @@ on:
       - "merger/lenskit/requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/parity-gate.yml"
+      - "requirements/repobrief-dev.lock.txt"
   pull_request:
     branches: [ "main", "master" ]
     paths:
@@ -45,6 +46,7 @@ on:
       - "requirements-dev.txt"
       - ".github/workflows/parity-gate.yml"
 
+      - "requirements/repobrief-dev.lock.txt"
 permissions:
   contents: read
 
@@ -67,8 +69,7 @@ jobs:
         # validates citation_map_jsonl against its contract schema and fails
         # closed if jsonschema is unavailable.
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Run Parity Gate Suite
         run: |

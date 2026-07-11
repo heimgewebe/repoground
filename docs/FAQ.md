@@ -95,7 +95,7 @@ Atlas akzeptiert nur `preset`, server-signierte `token` oder absolute Pfade
 
 ### Wie führe ich Tests und Lint lokal aus?
 ```bash
-python3 -m pip install -r requirements-dev.txt
+python3 -m pip install --require-hashes -r requirements/repobrief-dev.lock.txt
 python3 -m pytest
 ruff check --select=F401,F811 --exclude='**/fixtures/**' .
 ```

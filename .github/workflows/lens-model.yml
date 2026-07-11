@@ -64,6 +64,7 @@ name: Lens Model
       - "requirements-dev.txt"
       - "pytest.ini"
       - ".github/workflows/lens-model.yml"
+      - "requirements/repobrief-dev.lock.txt"
   pull_request:
     branches: ["main", "master"]
     paths:
@@ -117,6 +118,7 @@ name: Lens Model
       - "pytest.ini"
       - ".github/workflows/lens-model.yml"
 
+      - "requirements/repobrief-dev.lock.txt"
 permissions:
   contents: read
 
@@ -139,8 +141,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Lint audit script and falsification tests
         run: |
@@ -230,8 +231,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Require jsonschema (contract tests must run, not skip)
         run: |

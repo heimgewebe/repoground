@@ -31,6 +31,7 @@ name: Graph Model
       - "requirements-dev.txt"
       - "pytest.ini"
       - ".github/workflows/graph-model.yml"
+      - "requirements/repobrief-dev.lock.txt"
   pull_request:
     branches: ["main", "master"]
     paths:
@@ -61,6 +62,7 @@ name: Graph Model
       - "pytest.ini"
       - ".github/workflows/graph-model.yml"
 
+      - "requirements/repobrief-dev.lock.txt"
 permissions:
   contents: read
 
@@ -78,8 +80,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Require jsonschema
         run: |

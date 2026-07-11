@@ -13,6 +13,7 @@ name: Graph Quality Goldset
       - "merger/lenskit/tests/fixtures/graph_quality_goldset/**"
       - "merger/lenskit/tests/test_graph_quality_goldset.py"
       - ".github/workflows/graph-quality-goldset.yml"
+      - "requirements/repobrief-dev.lock.txt"
   pull_request:
     branches: ["main", "master"]
     paths:
@@ -25,6 +26,7 @@ name: Graph Quality Goldset
       - "merger/lenskit/tests/test_graph_quality_goldset.py"
       - ".github/workflows/graph-quality-goldset.yml"
 
+      - "requirements/repobrief-dev.lock.txt"
 permissions:
   contents: read
 
@@ -41,8 +43,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Validate JSON surfaces
         run: |

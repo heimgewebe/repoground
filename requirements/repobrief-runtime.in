@@ -1,0 +1,2 @@
+# Runtime inputs for the non-semantic RepoBrief core.
+-r ../merger/lenskit/requirements.txt

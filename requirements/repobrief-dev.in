@@ -1,0 +1,3 @@
+# Runtime plus test, lint and service-development inputs.
+-r repobrief-runtime.in
+-r ../requirements-dev.txt

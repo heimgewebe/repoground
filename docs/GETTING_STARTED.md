@@ -26,15 +26,15 @@ Alle anderen Artefakte (Index, Citation-Map, Agent Reading Pack, Health) sind
 
 ## 2. Voraussetzungen
 
-- Python 3.12 empfohlen / CI-verifiziert; lokale Aufrufe erfolgen über `python3`
-  (ältere 3.x-Versionen können funktionieren, werden aber nicht systematisch
-  getestet; kein `requires-python`-Pin im Projekt)
+- Python 3.12 ist die CI- und Release-Kandidaten-Basis; lokale Aufrufe erfolgen
+  über `python3` (ältere 3.x-Versionen können funktionieren, gehören aber nicht
+  zum reproduzierbaren Lockvertrag)
 - Kern-Pipeline läuft ohne Drittpakete. Für Validierung/Service/Tests:
 
 ```bash
-python3 -m pip install -r requirements-dev.txt          # pytest, ruff, fastapi, …
-python3 -m pip install -r merger/lenskit/requirements.txt
-# optional (Semantic Re-Ranking): merger/lenskit/requirements-semantic.txt
+python3 -m pip install --require-hashes -r requirements/repobrief-dev.lock.txt
+# optional und noch nicht Teil des Release-Lockvertrags:
+# merger/lenskit/requirements-semantic.txt
 ```
 
 ## 3. Minimalbeispiel: einen Dump erzeugen

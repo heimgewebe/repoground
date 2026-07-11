@@ -1,0 +1,253 @@
+{
+  "$id": "https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "description": "Commit-bound, deterministic RepoBrief source-candidate manifest. It is an internal verification artifact and does not grant distribution permission.",
+  "properties": {
+    "$schema": {
+      "const": "https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json"
+    },
+    "archive": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "format": {
+          "const": "tar.gz"
+        },
+        "normalization": {
+          "additionalProperties": false,
+          "properties": {
+            "gid": {
+              "const": 0
+            },
+            "gzip_mtime": {
+              "const": 0
+            },
+            "mtime": {
+              "const": 0
+            },
+            "path_order": {
+              "const": "git_path_bytes_ascending"
+            },
+            "uid": {
+              "const": 0
+            }
+          },
+          "required": [
+            "uid",
+            "gid",
+            "mtime",
+            "gzip_mtime",
+            "path_order"
+          ],
+          "type": "object"
+        },
+        "path": {
+          "pattern": "^repobrief-[0-9A-Za-z.-]+-g[0-9a-f]{12}\\.tar\\.gz$",
+          "type": "string"
+        },
+        "prefix": {
+          "pattern": "^repobrief-[0-9A-Za-z.-]+-g[0-9a-f]{12}/$",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "tracked_entry_count": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "prefix",
+        "format",
+        "bytes",
+        "sha256",
+        "tracked_entry_count",
+        "normalization"
+      ],
+      "type": "object"
+    },
+    "dependency_locks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "path": {
+            "enum": [
+              "requirements/repobrief-runtime.lock.txt",
+              "requirements/repobrief-dev.lock.txt",
+              "requirements/repobrief-browser.lock.txt",
+              "requirements/repobrief-lock-tools.lock.txt"
+            ]
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "bytes",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "maxItems": 4,
+      "minItems": 4,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "does_not_establish": {
+      "contains": {
+        "const": "public_distribution_permission"
+      },
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 6,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "kind": {
+      "const": "repobrief.release_candidate"
+    },
+    "license": {
+      "additionalProperties": false,
+      "properties": {
+        "distribution_status": {
+          "const": "blocked_without_separate_written_permission"
+        },
+        "expression": {
+          "const": "LicenseRef-RepoBrief-All-Rights-Reserved"
+        },
+        "file": {
+          "const": "LICENSE"
+        }
+      },
+      "required": [
+        "expression",
+        "file",
+        "distribution_status"
+      ],
+      "type": "object"
+    },
+    "project": {
+      "additionalProperties": false,
+      "properties": {
+        "candidate_id": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?-g[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "name": {
+          "const": "RepoBrief"
+        },
+        "release_version": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+          "type": "string"
+        },
+        "repository": {
+          "const": "heimgewebe/lenskit"
+        }
+      },
+      "required": [
+        "name",
+        "repository",
+        "release_version",
+        "candidate_id"
+      ],
+      "type": "object"
+    },
+    "semantic_extension": {
+      "additionalProperties": false,
+      "properties": {
+        "input": {
+          "const": "merger/lenskit/requirements-semantic.txt"
+        },
+        "reason": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "status": {
+          "const": "excluded"
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "input"
+      ],
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "archive_timestamp": {
+          "const": 0
+        },
+        "git_commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        },
+        "git_dirty": {
+          "const": false
+        },
+        "git_tree": {
+          "pattern": "^[0-9a-f]{40}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "git_commit",
+        "git_tree",
+        "git_dirty",
+        "archive_timestamp"
+      ],
+      "type": "object"
+    },
+    "verification": {
+      "additionalProperties": false,
+      "properties": {
+        "self_contained_command": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "source_bound_command": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "self_contained_command",
+        "source_bound_command"
+      ],
+      "type": "object"
+    },
+    "version": {
+      "const": "v1"
+    }
+  },
+  "required": [
+    "$schema",
+    "kind",
+    "version",
+    "project",
+    "source",
+    "license",
+    "archive",
+    "dependency_locks",
+    "semantic_extension",
+    "verification",
+    "does_not_establish"
+  ],
+  "type": "object"
+}

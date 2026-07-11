@@ -37,12 +37,38 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install -r merger/lenskit/requirements.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Run full pytest suite
         run: pytest -q -m "not browser and not doc_freshness_live"
+
+
+  release-candidate:
+    name: release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.12"
+
+      - name: Check release contracts
+        run: python scripts/release/check_release_contract.py
+
+      - name: Build and compare deterministic source candidates
+        run: |
+          rm -rf /tmp/repobrief-release-a /tmp/repobrief-release-b
+          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repobrief-release-a
+          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repobrief-release-b
+          diff --recursive --brief /tmp/repobrief-release-a /tmp/repobrief-release-b
+          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repobrief-release-a --repo .
+          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repobrief-release-b --repo .
 
   browser-tests:
     runs-on: ubuntu-latest
@@ -56,7 +82,7 @@ jobs:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
 
       - name: Install pinned browser-test dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements-browser.txt
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-browser.lock.txt
 
       - name: Verify pinned Chromium runtime
         run: python scripts/ci/check_browser_gate_environment.py

@@ -6,6 +6,7 @@ on:
       - "merges/**.md"
       - "merger/lenskit/**"
       - ".github/workflows/validate-merges.yml"
+      - "requirements/repobrief-runtime.lock.txt"
   workflow_dispatch: {}
 
 permissions:
@@ -26,8 +27,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml jsonschema
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-runtime.lock.txt
 
       - name: Validate merge meta blocks
         working-directory: merger/lenskit

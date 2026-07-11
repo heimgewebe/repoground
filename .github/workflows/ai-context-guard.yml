@@ -22,8 +22,7 @@ jobs:
 
       - name: Install validator deps
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyyaml
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-runtime.lock.txt
 
       - name: Validate repo .ai-context.yml (if present)
         run: |
@@ -53,8 +52,7 @@ jobs:
 
       - name: Install validator deps
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyyaml
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-runtime.lock.txt
 
       - name: Validate templates (metarepo only)
         run: |

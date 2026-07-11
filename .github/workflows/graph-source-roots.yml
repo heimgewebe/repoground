@@ -11,6 +11,7 @@ name: Graph Source Roots Contract
       - "docs/architecture/graph-source-roots.md"
       - "docs/proofs/graph-source-roots-contract-proof.md"
       - ".github/workflows/graph-source-roots.yml"
+      - "requirements/repobrief-dev.lock.txt"
   pull_request:
     branches: ["main", "master"]
     paths:
@@ -21,6 +22,7 @@ name: Graph Source Roots Contract
       - "docs/proofs/graph-source-roots-contract-proof.md"
       - ".github/workflows/graph-source-roots.yml"
 
+      - "requirements/repobrief-dev.lock.txt"
 permissions:
   contents: read
 
@@ -35,8 +37,7 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
       - name: Validate JSON
         run: |
           python3 -m json.tool merger/lenskit/contracts/architecture.source_roots.v1.schema.json >/dev/null

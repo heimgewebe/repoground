@@ -21,6 +21,7 @@ name: Graph Bundle Sources
       - "docs/tasks/board.md"
       - "docs/tasks/index.json"
       - ".github/workflows/graph-bundle-sources.yml"
+      - "requirements/repobrief-dev.lock.txt"
   pull_request:
     branches: ["main", "master"]
     paths:
@@ -41,6 +42,7 @@ name: Graph Bundle Sources
       - "docs/tasks/index.json"
       - ".github/workflows/graph-bundle-sources.yml"
 
+      - "requirements/repobrief-dev.lock.txt"
 permissions:
   contents: read
 
@@ -57,8 +59,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r merger/lenskit/requirements.txt
-          pip install -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
 
       - name: Validate schemas
         run: |

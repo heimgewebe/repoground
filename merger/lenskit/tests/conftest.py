@@ -11,13 +11,17 @@ def pytest_collection_modifyitems(config, items):
 
     The `browser` marker (see pytest.ini) covers WebUI tests that need the
     playwright `page` fixture. Without this hook, a runtime that lacks
-    pytest-playwright (e.g. plain `pip install -r requirements-dev.txt`)
+    pytest-playwright (for example the core development lock without the
+    separate browser lock)
     reports hard fixture errors instead of skips.
     """
     if config.pluginmanager.hasplugin("playwright"):
         return
     skip_browser = pytest.mark.skip(
-        reason="pytest-playwright not installed (see requirements-browser.txt)"
+        reason=(
+            "pytest-playwright not installed "
+            "(see requirements/repobrief-browser.lock.txt)"
+        )
     )
     for item in items:
         if "browser" in item.keywords:

@@ -45,7 +45,7 @@ und JS-Payload-Keys (`app.js`). Details: [`docs/PARITY_GUARD.md`](docs/PARITY_GU
 
 ```bash
 # Tests (pytest.ini konfiguriert die Pfade)
-python3 -m pip install -r requirements-dev.txt
+python3 -m pip install --require-hashes -r requirements/repobrief-dev.lock.txt
 python3 -m pytest
 
 # Repo-weiter CI-Lint (exakt wie die CI; Scope steht in ruff-ci.toml)
