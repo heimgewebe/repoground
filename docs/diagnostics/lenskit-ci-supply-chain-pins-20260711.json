@@ -1,5 +1,27 @@
 {
   "base_commit": "174a865cd8577c152ca30a61618a0f4b8cdf0482",
+  "dependabot_cleanup": {
+    "grouped_pr": {
+      "number": 972,
+      "state": "closed"
+    },
+    "individual_prs": [
+      {
+        "number": 968,
+        "state": "closed"
+      },
+      {
+        "number": 969,
+        "state": "closed"
+      },
+      {
+        "number": 970,
+        "state": "closed"
+      }
+    ],
+    "open_lenskit_prs_after_cleanup": 0,
+    "policy": "one grouped github-actions proposal, at most one open update PR"
+  },
   "direct_surface": {
     "caller_contract_ratchet": "scripts/ci/check_reusable_workflow_contracts.py",
     "changed_to_full_commit_count": 55,
@@ -423,6 +445,17 @@
   "follow_up_task": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
   "implementation_commit": "f6e0b91bde72641797465475ec2691aa82558e18",
   "kind": "lenskit.ci_supply_chain_pin_inventory",
+  "main_follow_up": {
+    "ai_context_guard_generated": true,
+    "codeql": "success",
+    "lenskit_codeql_policy_python": "success",
+    "merge_commit": "3834609ae3f1212919c028a5a5120a7c70df4b3c",
+    "pytest_full": "success",
+    "required_checks_status": "pass",
+    "ruff": "success",
+    "ruleset_validator_status": "pass",
+    "webui_js_tests": "success"
+  },
   "observed_on": "2026-07-11",
   "permission_changes": [
     {
@@ -494,7 +527,43 @@
         "group GitHub Actions Dependabot updates and cap open update PRs at one"
       ],
       "run_id": 29144781543,
-      "runtime_retest_status": "pending_post_merge"
+      "runtime_retest": {
+        "completed_at": "2026-07-11T07:53:43Z",
+        "conclusion": "success",
+        "created_at": "2026-07-11T07:53:32Z",
+        "does_not_establish": [
+          "all command paths",
+          "all permission combinations",
+          "secret rotation correctness",
+          "upstream transitive immutability"
+        ],
+        "establishes": [
+          "caller workflow compiled",
+          "called job started",
+          "explicit GitHub App secrets were available",
+          "no-command dispatch completed successfully"
+        ],
+        "event": "issue_comment",
+        "head_sha": "3834609ae3f1212919c028a5a5120a7c70df4b3c",
+        "job": "dispatch / Parse and dispatch Heimgewebe command",
+        "run_id": 29145242612,
+        "smoke_input": "HTML comment without a Heimgewebe command on PR #968",
+        "steps": [
+          {
+            "conclusion": "success",
+            "name": "Create GitHub App token"
+          },
+          {
+            "conclusion": "success",
+            "name": "Parse and dispatch command"
+          },
+          {
+            "conclusion": "success",
+            "name": "Post Create GitHub App token"
+          }
+        ]
+      },
+      "runtime_retest_status": "pass"
     }
   ],
   "repository": "heimgewebe/lenskit",
