@@ -155,7 +155,9 @@ def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
     if truth.get("authority") != "governance_projection":
         findings.append(Finding("STATUS_TRUTH_AUTHORITY", status_path.as_posix(), "must remain a projection"))
 
-    counts = Counter(item.get("status") for item in tasks)
+    counts = Counter(
+        item.get("status") for item in tasks if isinstance(item, dict)
+    )
     expected_summary = {
         "total": len(tasks),
         "by_status": {status: counts.get(status, 0) for status in ("open", "in_progress", "partial", "done")},
@@ -169,9 +171,31 @@ def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
     if not required_non_implied.issubset(non_implied):
         findings.append(Finding("STATUS_TRUTH_DONE_BOUNDARY", status_path.as_posix(), "done boundary incomplete"))
 
-    maturity = truth.get("system_maturity") if isinstance(truth.get("system_maturity"), dict) else {}
-    if maturity.get("product_readiness") != "not_established" or maturity.get("release_readiness") != "not_established":
-        findings.append(Finding("STATUS_TRUTH_READINESS_OVERCLAIM", status_path.as_posix(), "product/release readiness must remain not_established while release task is open"))
+    maturity = (
+        truth.get("system_maturity")
+        if isinstance(truth.get("system_maturity"), dict)
+        else {}
+    )
+    release_task = task_by_id.get("TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001")
+    if (
+        maturity.get("release_readiness") == "established"
+        and (release_task is None or release_task.get("status") != "done")
+    ):
+        findings.append(
+            Finding(
+                "STATUS_TRUTH_READINESS_OVERCLAIM",
+                status_path.as_posix(),
+                "release readiness requires a present and completed release-packaging task",
+            )
+        )
+    if maturity.get("product_readiness") == "established":
+        findings.append(
+            Finding(
+                "STATUS_TRUTH_PRODUCT_READINESS_UNSUPPORTED",
+                status_path.as_posix(),
+                "v1 has no declared product-readiness evidence package",
+            )
+        )
 
     roadmap_records = truth.get("roadmap_surfaces") if isinstance(truth.get("roadmap_surfaces"), list) else []
     for record in roadmap_records:
@@ -201,7 +225,20 @@ def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
     if claim_truth.get("tracked_claim_count") != len(registry.get("entry_ids", [])):
         findings.append(Finding("STATUS_TRUTH_CLAIM_COUNT", status_path.as_posix(), f"expected {len(registry.get('entry_ids', []))}"))
 
-    packages = truth.get("audit_packages") if isinstance(truth.get("audit_packages"), list) else []
+    if truth.get("audit_package_coverage") != "selected_remediation_packages":
+        findings.append(
+            Finding(
+                "STATUS_TRUTH_AUDIT_COVERAGE",
+                status_path.as_posix(),
+                "audit packages must remain explicitly selected, not exhaustive",
+            )
+        )
+
+    packages = (
+        truth.get("audit_packages")
+        if isinstance(truth.get("audit_packages"), list)
+        else []
+    )
     package_ids: set[str] = set()
     for package in packages:
         if not isinstance(package, dict) or not isinstance(package.get("task_id"), str):

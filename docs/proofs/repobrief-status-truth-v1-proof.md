@@ -59,7 +59,7 @@ Grenzen dürfen weiter offen sein.
 - explizite Nichtfolgerungen aus `done`;
 - Roadmaps als nicht-kanonische Statusflächen;
 - Freshness-Coverage `selected_declared_claims_only`;
-- Auditpakete mit Scope, Verifikationsgrad, Promotion und Begrenzungen;
+- ausdrücklich ausgewählte Auditpakete mit Scope, Verifikationsgrad, Promotion und Begrenzungen;
 - Health-Pass ohne Ableitung von Produktreife, Release-Reife,
   Reviewvollständigkeit, Testvollständigkeit, semantischer Wahrheit oder
   allgemeiner Runtime-Korrektheit.
@@ -87,7 +87,7 @@ Daraus folgt ausdrücklich **keine** Produkt- oder Release-Reife.
 - Taskzählungen der Reifeprojektion;
 - Roadmap-Markierungen und fehlende Statusautorität;
 - Begrenzung und Anzahl der verfolgten Freshness-Claims;
-- Statusbindung der ausgewählten Auditpakete;
+- Statusbindung der ausdrücklich ausgewählten Auditpakete;
 - offene Folgetasks gegen den Taskindex;
 - verbotene Health- und Readiness-Inferenzen.
 
@@ -97,7 +97,9 @@ Negativtests belegen mindestens:
 - Statusabweichung wird blockiert;
 - fehlende Roadmap-Grenze wird blockiert;
 - falsche Freshness-Claimzahl wird blockiert;
-- überhöhte Release-Reife wird blockiert.
+- überhöhte Release-Reife wird blockiert;
+- abgeschlossene Release-Evidenz kann spätere Release-Reife zulassen;
+- unbelegte Produktreife bleibt separat blockiert.
 
 Der Check erzeugt keinen neuen GitHub-Checknamen. Er läuft im bestehenden
 `planning-registration`-Job und vermeidet damit eine zweite Merge-Gate-Welt.
@@ -119,7 +121,7 @@ dass diese sieben Claims zu ihrer jeweils deklarierten Evidenz passen.
 ```text
 Status Truth Ratchet                 pass, 0 Findings
 Schema validation                    pass
-Status-Truth Positiv-/Negativtests   8 passed
+Status-Truth Positiv-/Negativtests  12 passed
 Nachbar-/Workflow-/Freshness-Tests 157 passed
 Planning Registration Ratchet        0 Findings
 Workflow YAML parse                  pass

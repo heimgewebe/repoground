@@ -1,5 +1,6 @@
 {
   "$schema": "../../merger/lenskit/contracts/repobrief-status-truth.v1.schema.json",
+  "audit_package_coverage": "selected_remediation_packages",
   "audit_packages": [
     {
       "limitations": [
@@ -125,8 +126,8 @@
       "phase_gate_independent": true,
       "required_markers": [
         "Kanonische Taskstatus: `docs/tasks/index.json`",
-        "H\u00e4kchen gelten nur f\u00fcr den jeweiligen Arbeitspunkt",
-        "Ein gr\u00fcner Health- oder CI-Status beweist keine Produkt- oder Release-Reife"
+        "Häkchen gelten nur für den jeweiligen Arbeitspunkt",
+        "Ein grüner Health- oder CI-Status beweist keine Produkt- oder Release-Reife"
       ],
       "role": "target_architecture"
     },
@@ -137,8 +138,8 @@
       "phase_gate_independent": true,
       "required_markers": [
         "Kanonische Taskstatus: `docs/tasks/index.json`",
-        "H\u00e4kchen gelten nur f\u00fcr den jeweiligen Arbeitspunkt",
-        "Ein gr\u00fcner Health- oder CI-Status beweist keine Produkt- oder Release-Reife"
+        "Häkchen gelten nur für den jeweiligen Arbeitspunkt",
+        "Ein grüner Health- oder CI-Status beweist keine Produkt- oder Release-Reife"
       ],
       "role": "ordered_roadmap"
     },
@@ -149,8 +150,8 @@
       "phase_gate_independent": true,
       "required_markers": [
         "Kanonische Taskstatus: `docs/tasks/index.json`",
-        "H\u00e4kchen gelten nur f\u00fcr den jeweiligen Arbeitspunkt",
-        "Ein gr\u00fcner Health- oder CI-Status beweist keine Produkt- oder Release-Reife"
+        "Häkchen gelten nur für den jeweiligen Arbeitspunkt",
+        "Ein grüner Health- oder CI-Status beweist keine Produkt- oder Release-Reife"
       ],
       "role": "operationalization_plan"
     }

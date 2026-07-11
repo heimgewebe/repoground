@@ -7,6 +7,9 @@
     "$schema": {
       "const": "../../merger/lenskit/contracts/repobrief-status-truth.v1.schema.json"
     },
+    "audit_package_coverage": {
+      "const": "selected_remediation_packages"
+    },
     "audit_packages": {
       "items": {
         "additionalProperties": false,
@@ -390,6 +393,7 @@
     "system_maturity",
     "roadmap_surfaces",
     "claim_freshness",
+    "audit_package_coverage",
     "audit_packages",
     "open_followups",
     "health_semantics",

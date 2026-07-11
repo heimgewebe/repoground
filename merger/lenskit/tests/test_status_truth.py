@@ -153,6 +153,24 @@ def test_claim_count_mismatch_is_rejected(tmp_path: Path) -> None:
     assert "STATUS_TRUTH_CLAIM_COUNT" in _codes(tmp_path)
 
 
+def test_invalid_task_entry_is_reported_without_crashing(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "docs/tasks/index.json"
+    data = json.loads(path.read_text())
+    data["tasks"].append("invalid")
+    path.write_text(json.dumps(data))
+    assert "TASK_INDEX_INVALID_ENTRY" in _codes(tmp_path)
+
+
+def test_selected_audit_coverage_is_required(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
+    truth = json.loads(path.read_text())
+    truth["audit_package_coverage"] = "all_audits"
+    path.write_text(json.dumps(truth))
+    assert "STATUS_TRUTH_AUDIT_COVERAGE" in _codes(tmp_path)
+
+
 def test_readiness_overclaim_is_rejected(tmp_path: Path) -> None:
     _fixture(tmp_path)
     path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
@@ -160,6 +178,60 @@ def test_readiness_overclaim_is_rejected(tmp_path: Path) -> None:
     truth["system_maturity"]["release_readiness"] = "established"
     path.write_text(json.dumps(truth))
     assert "STATUS_TRUTH_READINESS_OVERCLAIM" in _codes(tmp_path)
+
+
+def test_product_readiness_without_declared_basis_is_rejected(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
+    truth = json.loads(path.read_text())
+    truth["system_maturity"]["product_readiness"] = "established"
+    path.write_text(json.dumps(truth))
+    assert "STATUS_TRUTH_PRODUCT_READINESS_UNSUPPORTED" in _codes(tmp_path)
+
+
+def test_release_readiness_can_progress_after_release_task_done(
+    tmp_path: Path,
+) -> None:
+    _fixture(tmp_path)
+    index_path = tmp_path / "docs/tasks/index.json"
+    index = json.loads(index_path.read_text())
+    release_task = {
+        "id": "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
+        "title": "Release packaging",
+        "status": "done",
+        "description": "Synthetic completed release task.",
+        "evidence": ["docs/release-proof.md"],
+        "missing_evidence": ["No product-readiness claim."],
+    }
+    index["tasks"].append(release_task)
+    index_path.write_text(json.dumps(index))
+
+    board_path = tmp_path / "docs/tasks/board.md"
+    board_path.write_text(
+        board_path.read_text()
+        + "| TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001 | Release packaging | done | `docs/release-proof.md` | Product readiness remains separate. |\n"
+    )
+
+    status_path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
+    truth = json.loads(status_path.read_text())
+    truth["task_summary"] = {
+        "total": 2,
+        "by_status": {"open": 1, "in_progress": 0, "partial": 0, "done": 1},
+    }
+    truth["audit_packages"].append(
+        {
+            "task_id": "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
+            "status": "done",
+            "scope": "synthetic release evidence",
+            "verification": "main_verified",
+            "promotion": "allowed",
+            "limitations": ["Product readiness remains separate."],
+        }
+    )
+    truth["system_maturity"]["release_readiness"] = "established"
+    status_path.write_text(json.dumps(truth))
+    report = scan(tmp_path)
+    assert report["status"] == "pass", report["findings"]
 
 
 def test_task_workflow_runs_status_truth_check() -> None:
