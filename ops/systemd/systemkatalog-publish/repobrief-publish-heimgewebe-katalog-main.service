@@ -1,0 +1,10 @@
+[Unit]
+Description=RepoBrief publish Heimgewebe-Systemkatalog external manifests
+Documentation=https://github.com/heimgewebe/lenskit/pull/980
+
+[Service]
+Type=oneshot
+ExecStart=/home/alex/.local/bin/repobrief-publish-heimgewebe-katalog-main
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6

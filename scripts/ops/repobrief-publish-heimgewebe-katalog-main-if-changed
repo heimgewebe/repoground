@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LOCK=/tmp/repobrief-publish-heimgewebe-katalog-main-if-changed.lock
+exec 9>"$LOCK"
+flock -n 9 || { echo "repobrief-publish-heimgewebe-katalog-main-if-changed: already running" >&2; exit 0; }
+
+SYSTEMKATALOG_REPO=/home/alex/repos/heimgewebe-katalog
+PUBLISH=/home/alex/.local/bin/repobrief-publish-heimgewebe-katalog-main
+STATE_DIR=/home/alex/.local/state/repobrief-publish
+LOG=/home/alex/logs/repobrief-publish/heimgewebe-katalog-main-watch.log
+LAST_SHA_FILE="$STATE_DIR/heimgewebe-katalog-main.last-sha"
+
+mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
+{
+  echo "== repobrief-publish-heimgewebe-katalog-main-if-changed $(date -u +%Y%m%dT%H%M%SZ) =="
+  git -C "$SYSTEMKATALOG_REPO" fetch origin main --prune
+  current=$(git -C "$SYSTEMKATALOG_REPO" rev-parse origin/main)
+  previous=""
+  if [[ -f "$LAST_SHA_FILE" ]]; then
+    previous=$(cat "$LAST_SHA_FILE")
+  fi
+  echo "previous=$previous"
+  echo "current=$current"
+  if [[ "$current" == "$previous" ]]; then
+    echo "unchanged"
+    exit 0
+  fi
+  echo "changed: publishing"
+  "$PUBLISH"
+  printf '%s\n' "$current" > "$LAST_SHA_FILE.tmp"
+  mv "$LAST_SHA_FILE.tmp" "$LAST_SHA_FILE"
+  echo "state-updated=$current"
+} >> "$LOG" 2>&1
