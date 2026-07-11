@@ -14,8 +14,12 @@ MINIMUM_NODE24_MAJORS = {
     "github/codeql-action/autobuild": 4,
     "github/codeql-action/init": 4,
 }
-USES_RE = re.compile(r"\buses:\s*([^\s#]+)")
-MAJOR_RE = re.compile(r"^v(\d+)$")
+USES_LINE_RE = re.compile(
+    r"^\s*(?:-\s*)?uses:\s*([^\s#]+)(?:\s+#\s*(.*?))?\s*$",
+    re.MULTILINE,
+)
+SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+MAJOR_COMMENT_RE = re.compile(r"^v(\d+)(?:\s|$)")
 
 
 def _workflow_texts() -> dict[Path, str]:
@@ -37,21 +41,28 @@ def test_known_javascript_actions_use_node24_native_majors() -> None:
     invalid: list[str] = []
 
     for path, text in _workflow_texts().items():
-        for raw_use in USES_RE.findall(text):
+        for raw_use, comment in USES_LINE_RE.findall(text):
             if "@" not in raw_use:
                 continue
             action, ref = raw_use.rsplit("@", 1)
             if action not in MINIMUM_NODE24_MAJORS:
                 continue
-            match = MAJOR_RE.fullmatch(ref)
+            if SHA40_RE.fullmatch(ref) is None:
+                invalid.append(f"{path}: {raw_use} is not pinned to a full commit SHA")
+                continue
+            match = MAJOR_COMMENT_RE.match(comment)
             if match is None:
-                invalid.append(f"{path}: {raw_use} is not a reviewable major tag")
+                invalid.append(
+                    f"{path}: {raw_use} lacks a reviewable '# vN' major comment"
+                )
                 continue
             major = int(match.group(1))
             seen[action].add(major)
             minimum = MINIMUM_NODE24_MAJORS[action]
             if major < minimum:
-                invalid.append(f"{path}: {raw_use} is below Node-24 major v{minimum}")
+                invalid.append(
+                    f"{path}: {raw_use} claims a major below Node-24 v{minimum}"
+                )
 
     missing = sorted(action for action, majors in seen.items() if not majors)
     assert missing == []
