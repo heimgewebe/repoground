@@ -17,6 +17,18 @@ class FakeArtifacts:
         return [self.bundle_manifest, self.canonical_md]
 
 
+def _stub_successful_finalization(bundle_manifest: Path, profile: str):
+    export_path = cmd_repobrief.emit_export_safety_report(bundle_manifest, profile)
+    evaluation = cmd_repobrief.mark_bundle_manifest_profile(bundle_manifest, profile)
+    return {
+        "status": "pass",
+        "errors": [],
+        "profile_evaluation": evaluation,
+        "control_paths": [str(export_path)] if export_path is not None else [],
+        "refreshed_paths": [],
+    }
+
+
 def test_manifest_profile_marker_uses_capabilities_extension(tmp_path):
     manifest = tmp_path / "bundle.manifest.json"
     manifest.write_text(
@@ -54,6 +66,9 @@ def test_snapshot_create_dispatches_existing_generator(monkeypatch, tmp_path, ca
 
     monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
     monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_repobrief, "finalize_snapshot_bundle", _stub_successful_finalization
+    )
 
     rc = main([
         "repobrief",
@@ -145,6 +160,9 @@ def test_local_private_does_not_emit_optional_export_safety(monkeypatch, tmp_pat
 
     monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
     monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_repobrief, "finalize_snapshot_bundle", _stub_successful_finalization
+    )
 
     rc = main([
         "repobrief",
@@ -199,6 +217,9 @@ def test_public_share_removes_profile_excluded_sqlite(monkeypatch, tmp_path, cap
 
     monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
     monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_repobrief, "finalize_snapshot_bundle", _stub_successful_finalization
+    )
 
     rc = main([
         "repobrief",
@@ -237,6 +258,7 @@ def test_snapshot_create_graph_index_is_not_verified_as_primary_json(tmp_path, c
         str(out),
         "--profile",
         "agent-portable",
+        "--redact-secrets",
     ])
     captured = capsys.readouterr()
     assert rc == 0
@@ -265,6 +287,9 @@ def test_public_share_uses_archive_output_mode_by_default(monkeypatch, tmp_path,
 
     monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
     monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_repobrief, "finalize_snapshot_bundle", _stub_successful_finalization
+    )
 
     rc = main([
         "repobrief",
@@ -323,6 +348,7 @@ def test_snapshot_create_emits_snapshot_plan_report(tmp_path, capsys):
         str(out),
         "--profile",
         "public-share",
+        "--redact-secrets",
     ])
 
     emitted = json.loads(capsys.readouterr().out)
@@ -866,3 +892,164 @@ def test_legacy_lenskit_repobrief_subcommand_still_dispatches_snapshot_status(tm
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
     assert out["kind"] == "repobrief.snapshot_status"
+
+
+def test_snapshot_create_finalizes_every_manifest_artifact(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# finalization\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "agent-portable",
+        "--redact-secrets",
+    ])
+
+    result = json.loads(capsys.readouterr().out)
+    finalization = result["finalization"]
+    assert rc == 0
+    assert result["status"] == "ok"
+    assert finalization["status"] == "pass"
+    assert finalization["errors"] == []
+    assert finalization["post_emit_health_status"] == "pass"
+    assert finalization["agent_export_gate_status"] == "pass"
+    assert finalization["export_safety_status"] == "pass"
+    assert finalization["bundle_surface_validation_status"] == "pass"
+    assert finalization["manifest_artifact_count"] == finalization[
+        "post_emit_health_artifact_count"
+    ]
+    assert finalization["manifest_sha256_at_final_health"] == finalization[
+        "final_manifest_sha256"
+    ]
+
+
+def test_snapshot_create_blocks_agent_export_without_redaction(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("# blocked\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "agent-portable",
+    ])
+
+    result = json.loads(capsys.readouterr().out)
+    finalization = result["finalization"]
+    assert rc == 1
+    assert result["status"] == "fail"
+    assert finalization["post_emit_health_status"] == "pass"
+    assert finalization["agent_export_gate_status"] == "fail"
+    assert finalization["export_safety_status"] == "fail"
+    assert "agent_export_gate:fail" in finalization["errors"]
+    assert "export_safety_report:fail" in finalization["errors"]
+
+
+def test_add_manifest_artifact_preserves_existing_contract_metadata(tmp_path):
+    artifact = tmp_path / "entry.json"
+    artifact.write_text('{"value": 2}\n', encoding="utf-8")
+    manifest = tmp_path / "bundle.manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "role": "agent_entry_manifest",
+                        "path": artifact.name,
+                        "content_type": "application/json",
+                        "bytes": 1,
+                        "sha256": "0" * 64,
+                        "contract": {"id": "agent-entry-manifest", "version": "v1"},
+                        "interpretation": {"mode": "contract"},
+                        "authority": "navigation",
+                        "canonicality": "derived",
+                        "risk_class": "navigation",
+                        "regenerable": True,
+                        "staleness_sensitive": True,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    cmd_repobrief._add_manifest_artifact(
+        manifest,
+        artifact,
+        "agent_entry_manifest",
+        "application/json",
+    )
+
+    entry = json.loads(manifest.read_text(encoding="utf-8"))["artifacts"][0]
+    assert entry["contract"] == {"id": "agent-entry-manifest", "version": "v1"}
+    assert entry["interpretation"] == {"mode": "contract"}
+    assert entry["authority"] == "navigation"
+    assert entry["bytes"] == artifact.stat().st_size
+    assert entry["sha256"] != "0" * 64
+
+
+def test_snapshot_finalization_rejects_surface_link_escape(tmp_path):
+    outside = tmp_path / "outside.json"
+    outside.write_text(
+        json.dumps({"require_claim_evidence_map": False}), encoding="utf-8"
+    )
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    manifest = bundle / "demo.bundle.manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "kind": "repolens.bundle.manifest",
+                "artifacts": [],
+                "links": {"bundle_surface_validation_path": "../outside.json"},
+                "capabilities": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    before = outside.read_bytes()
+
+    result = cmd_repobrief.finalize_snapshot_bundle(manifest, "local-private")
+
+    assert result["status"] == "fail"
+    assert result["errors"] == [
+        "bundle_surface_validation_path_escapes_bundle"
+    ]
+    assert result["phases"] == 0
+    assert outside.read_bytes() == before
+
+
+def test_snapshot_finalization_rejects_unreadable_linked_surface(tmp_path):
+    manifest = tmp_path / "demo.bundle.manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "kind": "repolens.bundle.manifest",
+                "artifacts": [],
+                "links": {"bundle_surface_validation_path": "missing.json"},
+                "capabilities": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = cmd_repobrief.finalize_snapshot_bundle(manifest, "local-private")
+
+    assert result["status"] == "fail"
+    assert result["errors"] == ["bundle_surface_validation_unreadable"]
+    assert result["control_paths"] == []

@@ -28,6 +28,68 @@ PROFILE_LEVELS = {
     "ci-artifact": "dev",
 }
 
+# Export semantics are part of the snapshot profile contract. Keeping them
+# beside the artifact rules prevents the export gate and export report from
+# drifting into separate, incomplete profile vocabularies.
+PROFILE_EXPORT_SEMANTICS = {
+    "local-private": {
+        "agent_facing": False,
+        "public_facing": False,
+        "redaction_required": False,
+        "post_emit_health_required": False,
+        "agent_export_gate_required": False,
+        "exportable": True,
+    },
+    "agent-portable": {
+        "agent_facing": True,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+        "exportable": True,
+    },
+    "full-max": {
+        "agent_facing": True,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+        "exportable": True,
+    },
+    "pr-review": {
+        "agent_facing": True,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+        "exportable": True,
+    },
+    "security-export-review": {
+        "agent_facing": False,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+        "exportable": True,
+    },
+    "public-share": {
+        "agent_facing": False,
+        "public_facing": True,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+        "exportable": True,
+    },
+    "ci-artifact": {
+        "agent_facing": True,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+        "exportable": True,
+    },
+}
+
 ARTIFACT_ORDER = (
     "canonical_md",
     "bundle_manifest",
@@ -147,6 +209,15 @@ def profile_level(profile: str) -> str:
         raise ValueError(f"unknown RepoBrief profile: {profile}") from exc
 
 
+def profile_export_semantics(profile: str) -> dict[str, bool]:
+    _rules(profile)
+    try:
+        semantics = PROFILE_EXPORT_SEMANTICS[profile]
+    except KeyError as exc:
+        raise ValueError(f"missing RepoBrief export semantics: {profile}") from exc
+    return {key: bool(value) for key, value in semantics.items()}
+
+
 def profile_policy(profile: str) -> dict[str, Any]:
     rules = _rules(profile)
     return {
@@ -154,6 +225,7 @@ def profile_policy(profile: str) -> dict[str, Any]:
         "generator_level": profile_level(profile),
         "artifact_rules": {role: rules[role] for role in ARTIFACT_ORDER},
         "valid_requirements": list(VALID_REQUIREMENTS),
+        "export_semantics": profile_export_semantics(profile),
     }
 
 

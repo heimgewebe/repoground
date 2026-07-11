@@ -195,6 +195,7 @@ def test_public_share_snapshot_excludes_python_symbol_index(tmp_path, capsys):
         str(out),
         "--profile",
         "public-share",
+        "--redact-secrets",
     ])
 
     emitted = json.loads(capsys.readouterr().out)

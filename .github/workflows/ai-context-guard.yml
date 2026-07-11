@@ -5,8 +5,6 @@ on:
   push:
     branches: [ main ]
 
-env:
-
 permissions:
   contents: read
 
@@ -65,3 +63,17 @@ jobs:
           else
             echo "INFO: ai-contexts/ not present -> skipping template validation."
           fi
+
+  ai-context-guard:
+    name: ai-context-guard
+    if: ${{ always() }}
+    needs: [repo-root, templates]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful context validation jobs
+        env:
+          REPO_ROOT_RESULT: ${{ needs.repo-root.result }}
+          TEMPLATES_RESULT: ${{ needs.templates.result }}
+        run: |
+          test "$REPO_ROOT_RESULT" = "success"
+          test "$TEMPLATES_RESULT" = "success"

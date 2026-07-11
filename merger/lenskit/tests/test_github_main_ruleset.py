@@ -38,6 +38,7 @@ def test_required_checks_policy_matches_observed_ruleset():
         "pytest-full",
         "ruff",
         "webui-js-tests",
+        "ai-context-guard",
     }
     assert "github_runtime_enforcement" in report["does_not_establish"]
 

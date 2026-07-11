@@ -280,6 +280,17 @@ def test_snapshot_create_can_explicitly_write_latest_complete_registry(monkeypat
 
     monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
     monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_repobrief,
+        "finalize_snapshot_bundle",
+        lambda manifest, profile: {
+            "status": "pass",
+            "errors": [],
+            "profile_evaluation": {"status": "pass", "profile": profile},
+            "control_paths": [],
+            "refreshed_paths": [],
+        },
+    )
 
     rc = main([
         "repobrief",
@@ -302,3 +313,71 @@ def test_snapshot_create_can_explicitly_write_latest_complete_registry(monkeypat
     registry = json.loads(registry_path.read_text(encoding="utf-8"))
     assert registry["source"]["commit"] == commit
     assert registry["mutation_boundary"]["writes"] == ["latest_complete_registry"]
+
+
+def test_snapshot_create_does_not_advance_latest_registry_when_finalization_fails(
+    monkeypatch, tmp_path, capsys
+):
+    repo, _ = _git_repo(tmp_path)
+    out = tmp_path / "briefs"
+    registry_path = tmp_path / "latest" / "registry.json"
+
+    def fake_scan_repo(*args, **kwargs):
+        return {
+            "name": "repo",
+            "root": repo,
+            "files": [],
+            "total_files": 0,
+            "total_bytes": 0,
+            "ext_hist": {},
+        }
+
+    def fake_write_reports_v2(*args, **kwargs):
+        manifest = out / "repo_merge.bundle.manifest.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps(
+                {
+                    "kind": "repolens.bundle.manifest",
+                    "artifacts": [],
+                    "links": {},
+                    "capabilities": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return _FakeArtifacts(manifest)
+
+    monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
+    monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_repobrief,
+        "finalize_snapshot_bundle",
+        lambda manifest, profile: {
+            "status": "fail",
+            "errors": ["agent_export_gate:fail"],
+            "profile_evaluation": {"status": "pass", "profile": profile},
+            "control_paths": [],
+            "refreshed_paths": [],
+        },
+    )
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "agent-portable",
+        "--latest-complete-registry",
+        str(registry_path),
+    ])
+
+    emitted = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert emitted["status"] == "fail"
+    assert emitted["latest_complete_registry"] is None
+    assert not registry_path.exists()

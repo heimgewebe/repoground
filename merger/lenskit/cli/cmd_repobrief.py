@@ -18,6 +18,7 @@ from merger.lenskit.core.repobrief_profiles import (
     profile_output_mode_plan,
     profile_policy,
     profile_excluded_roles,
+    profile_export_semantics,
 )
 
 DOES_NOT_ESTABLISH = [
@@ -104,8 +105,21 @@ def _add_manifest_artifact(
     if not isinstance(artifacts, list):
         artifacts = []
         data["artifacts"] = artifacts
-    artifacts[:] = [a for a in artifacts if not (isinstance(a, dict) and a.get("role") == role)]
+    previous = next(
+        (
+            dict(artifact)
+            for artifact in artifacts
+            if isinstance(artifact, dict) and artifact.get("role") == role
+        ),
+        {},
+    )
+    artifacts[:] = [
+        artifact
+        for artifact in artifacts
+        if not (isinstance(artifact, dict) and artifact.get("role") == role)
+    ]
     entry = {
+        **previous,
         "path": artifact_path.name,
         "role": role,
         "content_type": content_type,
@@ -135,14 +149,26 @@ def emit_export_safety_report(bundle_manifest: Path | None, profile: str) -> Pat
     report = build_export_safety_report_from_bundle_manifest(
         bundle_manifest,
         profile=profile,
-        agent_facing=True if profile in {"agent-portable", "full-max", "pr-review", "ci-artifact"} else None,
-        public_facing=True if profile == "public-share" else None,
     )
     out = bundle_manifest.with_name(
         bundle_manifest.name.replace(".bundle.manifest.json", ".export_safety_report.json")
     )
     _json_write_atomic(out, report)
-    _add_manifest_artifact(bundle_manifest, out, "export_safety_report", "application/json")
+    _add_manifest_artifact(
+        bundle_manifest,
+        out,
+        "export_safety_report",
+        "application/json",
+        extra={
+            "contract": {"id": "export-safety-report", "version": "v1"},
+            "interpretation": {"mode": "contract"},
+            "authority": "diagnostic_signal",
+            "canonicality": "diagnostic",
+            "risk_class": "diagnostic",
+            "regenerable": True,
+            "staleness_sensitive": True,
+        },
+    )
     return out
 
 
@@ -187,6 +213,259 @@ def emit_snapshot_plan_report(
         },
     )
     return out
+
+
+def _set_manifest_links(bundle_manifest: Path, **updates: Any) -> None:
+    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    links = data.setdefault("links", {})
+    if not isinstance(links, dict):
+        links = {}
+        data["links"] = links
+    for key, value in updates.items():
+        if value is None:
+            links.pop(key, None)
+        else:
+            links[key] = value
+    _json_write_atomic(bundle_manifest, data)
+
+
+def _linked_surface_claim_requirement(
+    bundle_manifest: Path,
+) -> tuple[bool, str | None]:
+    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    links = data.get("links")
+    if not isinstance(links, dict):
+        return False, None
+    raw_path = links.get("bundle_surface_validation_path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return False, None
+    candidate = (bundle_manifest.parent / raw_path).resolve()
+    try:
+        candidate.relative_to(bundle_manifest.parent.resolve())
+    except ValueError:
+        return False, "bundle_surface_validation_path_escapes_bundle"
+    try:
+        report = json.loads(candidate.read_text(encoding="utf-8"))
+    except OSError:
+        return False, "bundle_surface_validation_unreadable"
+    except json.JSONDecodeError:
+        return False, "bundle_surface_validation_invalid_json"
+    if not isinstance(report, dict):
+        return False, "bundle_surface_validation_not_object"
+    requirement = report.get("require_claim_evidence_map")
+    if not isinstance(requirement, bool):
+        return False, "bundle_surface_claim_requirement_missing"
+    return requirement, None
+
+
+def _persist_post_health(bundle_manifest: Path) -> tuple[Path, dict[str, Any]]:
+    from merger.lenskit.core.post_emit_health import write_post_emit_health
+
+    path, report = write_post_emit_health(str(bundle_manifest))
+    _set_manifest_links(bundle_manifest, post_emit_health_path=path.name)
+    return path, report
+
+
+def _persist_agent_export_gate(
+    bundle_manifest: Path,
+    profile: str,
+    *,
+    required: bool,
+) -> tuple[Path | None, dict[str, Any]]:
+    if not required:
+        return None, {"status": "not_required"}
+
+    from merger.lenskit.core.agent_export_gate import write_agent_export_gate
+
+    path, report = write_agent_export_gate(bundle_manifest, profile=profile)
+    _set_manifest_links(
+        bundle_manifest,
+        agent_export_gate_path=path.name,
+        agent_export_gate_status=report.get("status"),
+    )
+    return path, report
+
+
+def _persist_export_safety(
+    bundle_manifest: Path,
+    profile: str,
+) -> tuple[Path | None, dict[str, Any]]:
+    path = emit_export_safety_report(bundle_manifest, profile)
+    if path is None:
+        return None, {"status": "not_emitted"}
+
+    report = json.loads(path.read_text(encoding="utf-8"))
+    _set_manifest_links(
+        bundle_manifest,
+        export_safety_report_path=path.name,
+        export_safety_report_status=report.get("status"),
+    )
+    return path, report
+
+
+def _persist_surface_validation(
+    bundle_manifest: Path,
+    *,
+    require_claim_evidence_map: bool,
+) -> tuple[Path, dict[str, Any]]:
+    from merger.lenskit.core.bundle_surface_validate import (
+        write_bundle_surface_validation,
+    )
+
+    path, report = write_bundle_surface_validation(
+        bundle_manifest,
+        require_claim_evidence_map=require_claim_evidence_map,
+    )
+    _set_manifest_links(
+        bundle_manifest,
+        bundle_surface_validation_path=path.name,
+        bundle_surface_validation_status=report.get("status"),
+    )
+    return path, report
+
+
+def _manifest_artifact_count(bundle_manifest: Path) -> int:
+    data = json.loads(bundle_manifest.read_text(encoding="utf-8"))
+    artifacts = data.get("artifacts")
+    return len(artifacts) if isinstance(artifacts, list) else 0
+
+
+def _finalization_errors(
+    *,
+    final_manifest_sha: str,
+    manifest_sha_at_final_health: str,
+    artifact_count: int,
+    post_report: dict[str, Any],
+    gate_report: dict[str, Any],
+    gate_required: bool,
+    export_path: Path | None,
+    export_report: dict[str, Any],
+    surface_report: dict[str, Any],
+    profile_evaluation: dict[str, Any] | None,
+) -> list[str]:
+    errors: list[str] = []
+    if final_manifest_sha != manifest_sha_at_final_health:
+        errors.append("manifest_mutated_after_final_health")
+    if post_report.get("status") != "pass":
+        errors.append(f"post_emit_health:{post_report.get('status')}")
+    if post_report.get("artifact_count_checked") != artifact_count:
+        errors.append(
+            "post_emit_health_artifact_count_mismatch:"
+            f"{post_report.get('artifact_count_checked')}!={artifact_count}"
+        )
+    if gate_required and gate_report.get("status") != "pass":
+        errors.append(f"agent_export_gate:{gate_report.get('status')}")
+    if export_path is not None and export_report.get("status") != "pass":
+        errors.append(f"export_safety_report:{export_report.get('status')}")
+    if surface_report.get("status") not in {"pass", "warn"}:
+        errors.append(f"bundle_surface_validation:{surface_report.get('status')}")
+    if (
+        not isinstance(profile_evaluation, dict)
+        or profile_evaluation.get("status") == "fail"
+    ):
+        status = (
+            profile_evaluation.get("status")
+            if isinstance(profile_evaluation, dict)
+            else "missing"
+        )
+        errors.append(f"profile_evaluation:{status}")
+    return errors
+
+
+def finalize_snapshot_bundle(
+    bundle_manifest: Path | None,
+    profile: str,
+) -> dict[str, Any]:
+    if bundle_manifest is None:
+        return {
+            "status": "fail",
+            "errors": ["bundle_manifest_missing"],
+            "phases": 0,
+            "control_paths": [],
+            "refreshed_paths": [],
+        }
+
+    semantics = profile_export_semantics(profile)
+    gate_required = semantics["agent_export_gate_required"]
+    require_claim_map, claim_requirement_error = (
+        _linked_surface_claim_requirement(bundle_manifest)
+    )
+    if claim_requirement_error is not None:
+        return {
+            "status": "fail",
+            "errors": [claim_requirement_error],
+            "phases": 0,
+            "control_paths": [],
+            "refreshed_paths": [],
+        }
+    refreshed_paths = refresh_entry(bundle_manifest)
+    mark_bundle_manifest_profile(bundle_manifest, profile)
+
+    # Phase 1 establishes every control surface after the content artifacts are
+    # fixed. The second phase can therefore validate the complete artifact set.
+    post_path, _ = _persist_post_health(bundle_manifest)
+    gate_path, _ = _persist_agent_export_gate(
+        bundle_manifest, profile, required=gate_required
+    )
+    export_path, _ = _persist_export_safety(bundle_manifest, profile)
+    surface_path, _ = _persist_surface_validation(
+        bundle_manifest, require_claim_evidence_map=require_claim_map
+    )
+    mark_bundle_manifest_profile(bundle_manifest, profile)
+
+    # Phase 2 is authoritative. Later control refreshes may rewrite sidecars, but
+    # they must not alter the manifest that the final health pass inspected.
+    manifest_sha_at_final_health = hashlib.sha256(
+        bundle_manifest.read_bytes()
+    ).hexdigest()
+    _, post_report = _persist_post_health(bundle_manifest)
+    _, gate_report = _persist_agent_export_gate(
+        bundle_manifest, profile, required=gate_required
+    )
+    export_path, export_report = _persist_export_safety(bundle_manifest, profile)
+    _, surface_report = _persist_surface_validation(
+        bundle_manifest, require_claim_evidence_map=require_claim_map
+    )
+    profile_evaluation = mark_bundle_manifest_profile(bundle_manifest, profile)
+    final_manifest_sha = hashlib.sha256(bundle_manifest.read_bytes()).hexdigest()
+    artifact_count = _manifest_artifact_count(bundle_manifest)
+    errors = _finalization_errors(
+        final_manifest_sha=final_manifest_sha,
+        manifest_sha_at_final_health=manifest_sha_at_final_health,
+        artifact_count=artifact_count,
+        post_report=post_report,
+        gate_report=gate_report,
+        gate_required=gate_required,
+        export_path=export_path,
+        export_report=export_report,
+        surface_report=surface_report,
+        profile_evaluation=profile_evaluation,
+    )
+    control_paths = [post_path, surface_path]
+    if gate_path is not None:
+        control_paths.append(gate_path)
+    if export_path is not None:
+        control_paths.append(export_path)
+
+    return {
+        "status": "pass" if not errors else "fail",
+        "errors": errors,
+        "phases": 2,
+        "manifest_sha256_at_final_health": manifest_sha_at_final_health,
+        "final_manifest_sha256": final_manifest_sha,
+        "manifest_artifact_count": artifact_count,
+        "post_emit_health_artifact_count": post_report.get(
+            "artifact_count_checked"
+        ),
+        "post_emit_health_status": post_report.get("status"),
+        "agent_export_gate_status": gate_report.get("status"),
+        "export_safety_status": export_report.get("status"),
+        "bundle_surface_validation_status": surface_report.get("status"),
+        "profile_evaluation": profile_evaluation,
+        "control_paths": [str(path) for path in control_paths],
+        "refreshed_paths": [str(path) for path in refreshed_paths],
+    }
+
 
 def parse_extensions(values: Iterable[str] | None) -> list[str] | None:
     if not values:
@@ -1008,27 +1287,40 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         generator_info=generator_info,
     )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
-    snapshot_plan_path = emit_snapshot_plan_report(artifacts.bundle_manifest, profile, output_plan)
-    export_safety_path = emit_export_safety_report(artifacts.bundle_manifest, profile)
-    refreshed_paths = refresh_entry(artifacts.bundle_manifest)
-    profile_evaluation = mark_bundle_manifest_profile(artifacts.bundle_manifest, profile, output_plan)
+    snapshot_plan_path = emit_snapshot_plan_report(
+        artifacts.bundle_manifest, profile, output_plan
+    )
+    finalization = finalize_snapshot_bundle(artifacts.bundle_manifest, profile)
+    profile_evaluation = finalization.get("profile_evaluation")
     latest_registry_result = None
     latest_registry_arg = getattr(args, "latest_complete_registry", None)
-    if latest_registry_arg and artifacts.bundle_manifest is not None:
-        from merger.lenskit.core.repobrief_latest_complete import write_latest_complete_registry
+    if (
+        latest_registry_arg
+        and artifacts.bundle_manifest is not None
+        and finalization.get("status") == "pass"
+    ):
+        from merger.lenskit.core.repobrief_latest_complete import (
+            write_latest_complete_registry,
+        )
 
         latest_registry_result = write_latest_complete_registry(
             artifacts.bundle_manifest,
             latest_registry_arg,
         )
-    artifact_paths = [path for path in artifacts.get_all_paths() if path not in dropped_profile_paths]
+    artifact_paths = [
+        path
+        for path in artifacts.get_all_paths()
+        if path not in dropped_profile_paths
+    ]
     if snapshot_plan_path is not None and snapshot_plan_path not in artifact_paths:
         artifact_paths.append(snapshot_plan_path)
-    if export_safety_path is not None and export_safety_path not in artifact_paths:
-        artifact_paths.append(export_safety_path)
+    for raw_path in finalization.get("control_paths", []):
+        path = Path(raw_path)
+        if path not in artifact_paths:
+            artifact_paths.append(path)
 
     return {
-        "status": "ok",
+        "status": "ok" if finalization.get("status") == "pass" else "fail",
         "command": "repobrief snapshot create",
         "profile": profile,
         "output_mode": output_mode,
@@ -1038,9 +1330,17 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         "bundle_manifest": str(artifacts.bundle_manifest) if artifacts.bundle_manifest else None,
         "profile_evaluation": profile_evaluation,
         "snapshot_plan_report": str(snapshot_plan_path) if snapshot_plan_path else None,
-        "export_safety_report": str(export_safety_path) if export_safety_path else None,
+        "export_safety_report": next(
+            (
+                path
+                for path in finalization.get("control_paths", [])
+                if path.endswith(".export_safety_report.json")
+            ),
+            None,
+        ),
+        "finalization": finalization,
         "latest_complete_registry": latest_registry_result,
-        "refreshed_agent_entrypoints": [str(path) for path in refreshed_paths],
+        "refreshed_agent_entrypoints": finalization.get("refreshed_paths", []),
         "removed_profile_excluded_artifacts": [str(path) for path in dropped_profile_paths],
         "artifacts": [str(path) for path in artifact_paths],
         "mutation_boundary": {
@@ -1059,7 +1359,7 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         print(f"repobrief snapshot create: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+    return 0 if result.get("status") == "ok" else 1
 
 
 def _drop_manifest_role(bundle_manifest: Path, role: str) -> list[Path]:

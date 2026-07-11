@@ -138,7 +138,15 @@ def test_ai_context_workflow_has_read_only_permissions():
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
 
     assert workflow["permissions"] == {"contents": "read"}
-    assert set(workflow["jobs"]) == {"repo-root", "templates"}
+    assert workflow.get("env", {}) is not None
+    assert set(workflow["jobs"]) == {
+        "repo-root",
+        "templates",
+        "ai-context-guard",
+    }
+    aggregate = workflow["jobs"]["ai-context-guard"]
+    assert aggregate["needs"] == ["repo-root", "templates"]
+    assert aggregate["name"] == "ai-context-guard"
 
 
 def test_init_federation_rejects_non_json_output(tmp_path):

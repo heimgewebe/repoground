@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from merger.lenskit.core.check_view import compact_check_projection
+from merger.lenskit.core.repobrief_profiles import profile_export_semantics
 
 _DOES_NOT_ESTABLISH = [
     "claims_true",
@@ -61,7 +62,37 @@ def _observe_redaction(post_emit_health: Any, output_health: Any) -> Tuple[bool 
 
 
 _KNOWN_POST_EMIT_STATUSES = {"pass", "warn", "fail", "error", "missing", "blocked"}
-_AGENT_FACING_PROFILES = {"agent_minimal", "agent-portable", "agent-safe"}
+_LEGACY_PROFILE_SEMANTICS = {
+    "debug-full": {
+        "agent_facing": False,
+        "public_facing": False,
+        "redaction_required": False,
+        "post_emit_health_required": False,
+        "agent_export_gate_required": False,
+    },
+    "agent_minimal": {
+        "agent_facing": True,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+    },
+    "agent-safe": {
+        "agent_facing": True,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+    },
+}
+
+
+def _profile_semantics(profile: str) -> Dict[str, bool] | None:
+    try:
+        return profile_export_semantics(profile)
+    except ValueError:
+        legacy = _LEGACY_PROFILE_SEMANTICS.get(profile)
+        return dict(legacy) if legacy is not None else None
 
 
 def _post_emit_status(post_emit_health: Any) -> str:
@@ -118,38 +149,17 @@ def build_export_safety_report(
     post_emit_health_required = False
     agent_export_gate_required = False
 
-    if profile == "local-private":
-        profile_known = True
-        agent_facing_val = False
-        public_facing_val = False
-    elif profile == "debug-full":
-        profile_known = True
-        agent_facing_val = False
-        public_facing_val = False
-    elif profile in _AGENT_FACING_PROFILES:
-        profile_known = True
-        agent_facing_val = True
-        public_facing_val = False
-        redaction_required = True
-        post_emit_health_required = True
-        agent_export_gate_required = True
-    elif profile == "public-share":
-        profile_known = True
-        agent_facing_val = False
-        public_facing_val = True
-        redaction_required = True
-        post_emit_health_required = True
-        agent_export_gate_required = True
-    elif profile == "ci-artifact":
-        profile_known = True
-        agent_facing_val = True
-        public_facing_val = False
-        redaction_required = True
-        post_emit_health_required = True
-        agent_export_gate_required = True
-    else:
+    semantics = _profile_semantics(profile)
+    if semantics is None:
         profile_known = False
         errors.append(f"unknown_profile:{profile}")
+    else:
+        profile_known = True
+        agent_facing_val = semantics["agent_facing"]
+        public_facing_val = semantics["public_facing"]
+        redaction_required = semantics["redaction_required"]
+        post_emit_health_required = semantics["post_emit_health_required"]
+        agent_export_gate_required = semantics["agent_export_gate_required"]
 
     if agent_facing is not None:
         agent_facing_val = agent_facing

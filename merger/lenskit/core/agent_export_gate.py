@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional, Tuple
 from .clock import now_utc
 from .path_security import resolve_secure_path
 from .post_emit_health import derive_post_health_path
+from .repobrief_profiles import profile_export_semantics
 
 try:
     import jsonschema
@@ -54,7 +55,20 @@ _NON_EXPORTABLE_PROFILES = {
     "max-private",
     "forensic-strict",
 }
-_KNOWN_PROFILES = _AGENT_FACING_PROFILES | _NON_AGENT_PROFILES
+def _profile_semantics(profile: Optional[str]) -> Optional[Dict[str, bool]]:
+    if not profile:
+        return None
+    try:
+        return profile_export_semantics(profile)
+    except ValueError:
+        if profile in _AGENT_FACING_PROFILES:
+            return {"agent_facing": True, "exportable": True}
+        if profile in _NON_AGENT_PROFILES:
+            return {
+                "agent_facing": False,
+                "exportable": profile not in _NON_EXPORTABLE_PROFILES,
+            }
+        return None
 
 _DOES_NOT_MEAN = [
     "repo_understood",
@@ -108,9 +122,8 @@ def _load_json(path: Path) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
 
 
 def _is_agent_facing(profile: Optional[str]) -> bool:
-    if not profile:
-        return False
-    return profile in _AGENT_FACING_PROFILES
+    semantics = _profile_semantics(profile)
+    return bool(semantics and semantics.get("agent_facing"))
 
 
 def _find_output_health_verdict(manifest: Dict[str, Any], manifest_dir: Path) -> Optional[str]:
@@ -371,10 +384,15 @@ def evaluate_agent_export_gate(
     manifest_run_id_valid = isinstance(manifest_run_id, str) and bool(manifest_run_id.strip())
 
     profile_missing = profile is None
-    profile_unknown = isinstance(profile, str) and profile not in _KNOWN_PROFILES
+    profile_semantics = _profile_semantics(profile)
+    profile_unknown = isinstance(profile, str) and profile_semantics is None
     agent_facing = _is_agent_facing(profile)
     redaction_required = bool(agent_facing)
-    profile_non_exportable = isinstance(profile, str) and profile in _NON_EXPORTABLE_PROFILES
+    profile_non_exportable = bool(
+        isinstance(profile, str)
+        and profile_semantics is not None
+        and not profile_semantics.get("exportable", False)
+    )
 
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     redaction_value = capabilities.get("redaction")
@@ -508,3 +526,34 @@ def evaluate_agent_export_gate(
         "warnings": warnings,
         "does_not_mean": list(_DOES_NOT_MEAN),
     }
+
+
+def derive_agent_export_gate_path(manifest_path: Path) -> Path:
+    suffix = ".bundle.manifest.json"
+    stem = (
+        manifest_path.name[: -len(suffix)]
+        if manifest_path.name.endswith(suffix)
+        else manifest_path.stem
+    )
+    return manifest_path.parent / f"{stem}.agent_export_gate.json"
+
+
+def write_agent_export_gate(
+    manifest_path: str | Path,
+    *,
+    profile: str,
+    output_path: str | Path | None = None,
+) -> tuple[Path, Dict[str, Any]]:
+    resolved_manifest = Path(manifest_path).resolve()
+    report = evaluate_agent_export_gate(str(resolved_manifest), profile=profile)
+    out = (
+        Path(output_path).resolve()
+        if output_path is not None
+        else derive_agent_export_gate_path(resolved_manifest)
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return out, report

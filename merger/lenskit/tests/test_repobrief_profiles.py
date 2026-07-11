@@ -291,3 +291,25 @@ def test_graph_availability_profile_excluded_for_public_share(tmp_path):
     assert graph["retrieval_eligible"] is False
     assert graph["degradation"]["degradation"] == "profile_excluded"
     assert graph["degradation"]["severity"] == "info"
+
+
+def test_all_snapshot_profiles_have_explicit_export_semantics():
+    from merger.lenskit.core.repobrief_profiles import (
+        PROFILE_LEVELS,
+        profile_export_semantics,
+    )
+
+    for profile in PROFILE_LEVELS:
+        semantics = profile_export_semantics(profile)
+        assert set(semantics) == {
+            "agent_facing",
+            "public_facing",
+            "redaction_required",
+            "post_emit_health_required",
+            "agent_export_gate_required",
+            "exportable",
+        }
+        assert semantics["exportable"] is True
+
+    assert profile_export_semantics("full-max")["agent_facing"] is True
+    assert profile_export_semantics("public-share")["public_facing"] is True

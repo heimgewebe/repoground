@@ -1212,6 +1212,34 @@
         "post_emit_health_path": {
           "type": "string",
           "description": "Bundle-relative path to the persisted post_emit_health sidecar. Unregistered as an artifact to avoid self-hash circularity."
+        },
+        "agent_export_gate_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the unregistered agent export gate sidecar."
+        },
+        "agent_export_gate_status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "blocked"
+          ],
+          "description": "Observed status of the agent export gate sidecar."
+        },
+        "export_safety_report_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the export safety report."
+        },
+        "export_safety_report_status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "blocked"
+          ],
+          "description": "Observed status of the export safety report."
         }
       }
     },

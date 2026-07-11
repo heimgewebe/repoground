@@ -1418,6 +1418,111 @@
         "No protection against future administrator edits, GitHub outages, or unobserved permission paths is established.",
         "The checked-in validator proves API structure only; merge-time enforcement requires separate positive and negative GitHub evidence."
       ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-AUDIT-FINAL-CONTROL-001",
+      "title": "RepoBrief Final Control Plane v1",
+      "status": "in-progress",
+      "description": "Implements Audit F-01/F-02/F-04: central profile export semantics, fail-closed snapshot finalization, exact final manifest artifact coverage, post-health mutation detection, preserved typed manifest metadata, and a repaired aggregate ai-context-guard desired check. Live ruleset mutation and post-merge proof remain operational closeout steps.",
+      "evidence": [
+        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "docs/proofs/repobrief-final-control-plane-v1-proof.md",
+        "merger/lenskit/cli/cmd_repobrief.py",
+        "merger/lenskit/core/repobrief_profiles.py",
+        "merger/lenskit/core/agent_export_gate.py",
+        "merger/lenskit/core/export_safety_report.py",
+        "merger/lenskit/tests/test_repobrief_snapshot_cli.py",
+        ".github/workflows/ai-context-guard.yml",
+        "config/github-main-required-checks.v1.json"
+      ],
+      "missing_evidence": [
+        "No claim truth, repository understanding, test completeness, runtime correctness, complete secret detection, or regression absence is established.",
+        "The desired GitHub ruleset change is not live until post-merge API update and read-back."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-AUDIT-RETRIEVAL-MEASUREMENT-001",
+      "title": "RepoBrief Canonical Review Retrieval Measurement",
+      "status": "open",
+      "description": "Resolve Audit F-03 by wiring the repository-specific 20-query review goldset into snapshot diagnostics, reporting query recall and expected-target recall separately, and keeping generic sample evaluation explicitly diagnostic.",
+      "evidence": [
+        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "docs/retrieval/review_queries.v1.json",
+        "merger/lenskit/retrieval/review_eval.py"
+      ],
+      "missing_evidence": [
+        "Current snapshot retrieval_eval still does not establish repository-specific review utility or sufficient expected-target coverage."
+      ]
+    },
+    {
+      "id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-001",
+      "title": "Lenskit Immutable CI Supply Chain",
+      "status": "open",
+      "description": "Resolve Audit F-05 by pinning external and cross-repository Actions/workflows to immutable commit SHAs, minimizing write permissions, and adding a ratchet against new mutable references.",
+      "evidence": [
+        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        ".github/workflows/"
+      ],
+      "missing_evidence": [
+        "No immutable pin inventory or completed write-permission audit exists yet."
+      ]
+    },
+    {
+      "id": "TASK-LENSKIT-AUDIT-BROWSER-GATE-001",
+      "title": "Lenskit Reproducible Playwright Browser Gate",
+      "status": "open",
+      "description": "Resolve Audit F-08 by reconciling pytest and pytest-playwright versions, installing a reproducible browser runtime, and executing all browser-marked tests in a dedicated required CI job.",
+      "evidence": [
+        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "requirements-browser.txt",
+        "merger/lenskit/tests/test_webui_payload.py",
+        ".github/workflows/test-suite.yml"
+      ],
+      "missing_evidence": [
+        "The ten Playwright flows are currently excluded from required CI and lack a successful browser-runtime proof."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-AUDIT-STATUS-TRUTH-001",
+      "title": "RepoBrief Status Truth Reconciliation",
+      "status": "open",
+      "description": "Resolve Audit F-06 by reconciling task index, roadmap/blueprint acceptance gates, and claim-evidence freshness, then adding a bounded drift check without treating health reports as product-readiness.",
+      "evidence": [
+        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "docs/tasks/index.json",
+        "docs/lenskit-upgrade-blaupause.md"
+      ],
+      "missing_evidence": [
+        "Task, roadmap and claim-evidence surfaces do not yet share one reconciled maturity view."
+      ]
+    },
+    {
+      "id": "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
+      "title": "Lenskit Release Packaging and License Decision",
+      "status": "open",
+      "description": "Resolve Audit F-09 with an explicit license decision, reproducible dependency strategy, versioned release artifacts, hashes, changelog, upgrade and rollback instructions.",
+      "evidence": [
+        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "requirements-dev.txt",
+        "merger/lenskit/requirements.txt"
+      ],
+      "missing_evidence": [
+        "No repository license file, complete lock strategy, versioned release or rollback proof exists yet."
+      ]
+    },
+    {
+      "id": "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
+      "title": "RepoBrief Graph and Maintainability Ratchets",
+      "status": "open",
+      "description": "Resolve Audit F-07/F-10 by separating product/test/script entrypoint projections, bounding unknown-layer noise, preventing new C901 violations, and incrementally decomposing oversized orchestration functions.",
+      "evidence": [
+        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "merger/lenskit/architecture/",
+        "ruff-ci.toml"
+      ],
+      "missing_evidence": [
+        "No real-repository graph-noise threshold or no-new-complexity ratchet is active yet."
+      ]
     }
   ]
 }
