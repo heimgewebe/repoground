@@ -1,0 +1,12 @@
+[Unit]
+Description=RepoBrief Systemkatalog main watcher timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=repobrief-publish-systemkatalog-main-watch.service
+
+[Install]
+WantedBy=timers.target

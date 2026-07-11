@@ -1,9 +1,0 @@
-[Unit]
-Description=RepoBrief Heimgewebe-Systemkatalog main watcher
-
-[Service]
-Type=oneshot
-ExecStart=/home/alex/.local/bin/repobrief-publish-heimgewebe-katalog-main-if-changed
-Nice=10
-IOSchedulingClass=best-effort
-IOSchedulingPriority=6

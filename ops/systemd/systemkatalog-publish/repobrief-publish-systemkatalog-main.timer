@@ -1,0 +1,11 @@
+[Unit]
+Description=RepoBrief Systemkatalog fallback timer
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15min
+Persistent=true
+Unit=repobrief-publish-systemkatalog-main.service
+
+[Install]
+WantedBy=timers.target

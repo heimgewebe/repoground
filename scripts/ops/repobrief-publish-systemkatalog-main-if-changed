@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LOCK=/tmp/repobrief-publish-heimgewebe-katalog-main-if-changed.lock
+LOCK=/tmp/repobrief-publish-systemkatalog-main-if-changed.lock
 exec 9>"$LOCK"
-flock -n 9 || { echo "repobrief-publish-heimgewebe-katalog-main-if-changed: already running" >&2; exit 0; }
+flock -n 9 || { echo "repobrief-publish-systemkatalog-main-if-changed: already running" >&2; exit 0; }
 
-SYSTEMKATALOG_REPO=/home/alex/repos/heimgewebe-katalog
-PUBLISH=/home/alex/.local/bin/repobrief-publish-heimgewebe-katalog-main
+SYSTEMKATALOG_REPO=/home/alex/repos/systemkatalog
+PUBLISH=/home/alex/.local/bin/repobrief-publish-systemkatalog-main
 STATE_DIR=/home/alex/.local/state/repobrief-publish
-LOG=/home/alex/logs/repobrief-publish/heimgewebe-katalog-main-watch.log
-LAST_SHA_FILE="$STATE_DIR/heimgewebe-katalog-main.last-sha"
+LOG=/home/alex/logs/repobrief-publish/systemkatalog-main-watch.log
+LAST_SHA_FILE="$STATE_DIR/systemkatalog-main.last-sha"
 
 mkdir -p "$STATE_DIR" "$(dirname "$LOG")"
 {
-  echo "== repobrief-publish-heimgewebe-katalog-main-if-changed $(date -u +%Y%m%dT%H%M%SZ) =="
+  echo "== repobrief-publish-systemkatalog-main-if-changed $(date -u +%Y%m%dT%H%M%SZ) =="
   git -C "$SYSTEMKATALOG_REPO" fetch origin main --prune
   current=$(git -C "$SYSTEMKATALOG_REPO" rev-parse origin/main)
   previous=""

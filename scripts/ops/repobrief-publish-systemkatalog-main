@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LOCK=/tmp/repobrief-publish-heimgewebe-katalog-main.lock
+LOCK=/tmp/repobrief-publish-systemkatalog-main.lock
 exec 9>"$LOCK"
-flock -n 9 || { echo "repobrief-publish-heimgewebe-katalog-main: already running" >&2; exit 0; }
+flock -n 9 || { echo "repobrief-publish-systemkatalog-main: already running" >&2; exit 0; }
 
 LENSKIT_REPO=/home/alex/repos/lenskit
-SYSTEMKATALOG_REPO=/home/alex/repos/heimgewebe-katalog
+SYSTEMKATALOG_REPO=/home/alex/repos/systemkatalog
 TOOL_WT=/home/alex/repos/.repobrief-tools/lenskit-main
-SOURCE_WT=/home/alex/repos/.repobrief-sources/heimgewebe__heimgewebe-katalog__main
+SOURCE_WT=/home/alex/repos/.repobrief-sources/heimgewebe__systemkatalog__main
 PUB_ROOT=/home/alex/repos/manifest-publications
-OUT_BASE="$PUB_ROOT/repobrief-auto/heimgewebe-katalog-main"
+OUT_BASE="$PUB_ROOT/repobrief-auto/systemkatalog-main"
 LOG_DIR=/home/alex/logs/repobrief-publish
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 OUT="$OUT_BASE/$STAMP"
-TMP_JSON="$LOG_DIR/heimgewebe-katalog-main-$STAMP.json.tmp"
-LAST_JSON="$LOG_DIR/heimgewebe-katalog-main-last.json"
-LOG="$LOG_DIR/heimgewebe-katalog-main.log"
+TMP_JSON="$LOG_DIR/systemkatalog-main-$STAMP.json.tmp"
+LAST_JSON="$LOG_DIR/systemkatalog-main-last.json"
+LOG="$LOG_DIR/systemkatalog-main.log"
 
 mkdir -p "$OUT_BASE" "$PUB_ROOT" "$LOG_DIR"
 {
-  echo "== repobrief-publish-heimgewebe-katalog-main $STAMP =="
+  echo "== repobrief-publish-systemkatalog-main $STAMP =="
   git -C "$LENSKIT_REPO" fetch origin --prune
   if git -C "$TOOL_WT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     git -C "$TOOL_WT" reset --hard origin/main
@@ -46,7 +46,7 @@ mkdir -p "$OUT_BASE" "$PUB_ROOT" "$LOG_DIR"
     --repo "$SOURCE_WT" \
     --out "$OUT" \
     --publication-root "$PUB_ROOT" \
-    --repository heimgewebe-katalog \
+    --repository systemkatalog \
     --ref main \
     --profile full-max \
     --output-mode dual \
@@ -57,7 +57,7 @@ mkdir -p "$OUT_BASE" "$PUB_ROOT" "$LOG_DIR"
   python3 - <<'PY'
 import json
 from pathlib import Path
-path = Path('/home/alex/logs/repobrief-publish/heimgewebe-katalog-main-last.json')
+path = Path('/home/alex/logs/repobrief-publish/systemkatalog-main-last.json')
 data = json.loads(path.read_text())
 print('status=' + str(data.get('status')))
 print('bundle=' + str(data.get('snapshot', {}).get('bundle_manifest')))
