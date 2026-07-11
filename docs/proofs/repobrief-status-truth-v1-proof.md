@@ -138,3 +138,47 @@ Der Nachweis etabliert keine vollständige Dokumenterfassung, keine semantische
 Wahrheit aller Claims, keine vollständige Evidenzbewertung jedes Tasks, keine
 Test- oder Reviewvollständigkeit, keine Regressions- oder Schwachstellenfreiheit,
 keine Produktreife und keine Release-Reife.
+
+## Runtime-Closeout
+
+PR #976 wurde mit unverändertem Head
+`a06329704c92d7a8a87c19b94ecf883cb9487573` als Squash-Commit
+`fc457d97a6ab3f993e7f1ad5a57497a6e42ab263` gemergt. Der Merge-Baum
+`64aa4cb91ec97ecf60271b51cdd84f9755fcf3e7` entsprach exakt dem geprüften
+Head-Baum.
+
+Der Status-Ratchet lief sowohl auf dem PR-Head als auch nach dem Merge auf
+`main` im bestehenden Check `planning-registration`:
+
+```text
+PR task-index run                  29148824288
+Main task-index run                29149005468
+Status                             pass
+Taskindex                          90
+Boardzeilen                        90
+ausgewählte Freshness-Claims        7
+ausgewählte Auditpakete             7
+Findings                            0
+```
+
+Auf dem Merge-Commit bestanden außerdem:
+
+```text
+Test-Suite run                     29149005431
+browser-tests                      success
+pytest-full                        success
+webui-js-tests                     success
+Lenskit CodeQL policy run          29149005462 / success
+CodeQL run                         29149005225 / success
+ai-context guard run               29149005491 / success
+```
+
+Ruleset `18784275` blieb aktiv und validierte ohne Finding gegen die
+Repository-Policy. Damit ist der deklarierte Statuswahrheits-Scope geschlossen:
+Taskindex und Board stimmen überein, Roadmaps sind als nicht-kanonische
+Ordnungsflächen begrenzt, und ein grüner Health- oder CI-Bericht kann nicht ohne
+weiteren Beleg zu Produkt- oder Release-Reife hochgestuft werden.
+
+Der Systemzustand bleibt dennoch `mixed`. Insbesondere bleiben niedrige
+kanonische Retrieval-Messwerte, Release-/Lizenzbelege, Graph-Maintainability und
+transitive Upstream-Action-Pins als getrennte Aufgaben offen.

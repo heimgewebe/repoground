@@ -44,13 +44,13 @@
     },
     {
       "limitations": [
-        "PR and post-merge Main verification are still pending."
+        "The projection remains selected and does not establish documentation completeness, semantic truth, product readiness or release readiness."
       ],
       "promotion": "not_applicable",
       "scope": "task, roadmap and selected claim-freshness reconciliation",
-      "status": "in_progress",
+      "status": "done",
       "task_id": "TASK-REPOBRIEF-AUDIT-STATUS-TRUTH-001",
-      "verification": "local_validated"
+      "verification": "main_verified"
     },
     {
       "limitations": [
@@ -191,8 +191,8 @@
   },
   "task_summary": {
     "by_status": {
-      "done": 83,
-      "in_progress": 1,
+      "done": 84,
+      "in_progress": 0,
       "open": 6,
       "partial": 0
     },
