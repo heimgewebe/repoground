@@ -24,14 +24,14 @@ def write_bundle(tmp_path: Path) -> Path:
         "artifacts": [
             {
                 "role": "canonical_md",
-                "path": "cabinet_merge.md",
+                "path": "heimgewebe_katalog_merge.md",
                 "content_type": "text/markdown",
                 "bytes": 12,
                 "sha256": "b" * 64,
             },
             {
                 "role": "agent_reading_pack",
-                "path": "cabinet_merge.agent_reading_pack.md",
+                "path": "heimgewebe_katalog_merge.agent_reading_pack.md",
                 "content_type": "text/markdown",
                 "bytes": 5,
                 "sha256": "c" * 64,
@@ -43,9 +43,9 @@ def write_bundle(tmp_path: Path) -> Path:
             "version": "v1",
             "repositories": [
                 {
-                    "name": "cabinet",
+                    "name": "heimgewebe-katalog",
                     "repo_root": None,
-                    "repo_remote": "git@github.com:heimgewebe/cabinet.git",
+                    "repo_remote": "git@github.com:heimgewebe/heimgewebe-katalog.git",
                     "git_commit": "d" * 40,
                     "git_dirty": False,
                     "git_branch": "main",
@@ -56,19 +56,19 @@ def write_bundle(tmp_path: Path) -> Path:
             "does_not_establish": ["freshness_against_remote"],
         },
     }
-    path = tmp_path / "bundle" / "cabinet_merge.bundle.manifest.json"
+    path = tmp_path / "bundle" / "heimgewebe_katalog_merge.bundle.manifest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(bundle), encoding="utf-8")
     return path
 
 
-def test_builds_cabinet_compatible_repobrief_manifest_reference(tmp_path: Path) -> None:
+def test_builds_system_catalog_repobrief_manifest_reference(tmp_path: Path) -> None:
     bundle_path = write_bundle(tmp_path)
-    out = tmp_path / "external" / "repobrief" / "cabinet" / "main" / "manifest.json"
+    out = tmp_path / "external" / "repobrief" / "heimgewebe-katalog" / "main" / "manifest.json"
 
     result = build_external_manifest_reference(
         bundle_path,
-        repository="cabinet",
+        repository="heimgewebe-katalog",
         ref="main",
         artifact_family="repobrief",
         output_path=out,
@@ -77,9 +77,9 @@ def test_builds_cabinet_compatible_repobrief_manifest_reference(tmp_path: Path) 
     assert result["kind"] == "repobrief_bundle_manifest"
     assert result["generatedAt"] == "2026-07-06T13:00:00Z"
     assert result["freshnessBasis"] == "bundle_manifest.created_at"
-    assert result["repository"] == "cabinet"
+    assert result["repository"] == "heimgewebe-katalog"
     assert result["ref"] == "main"
-    assert result["bundleManifest"]["path"] == "../../../../bundle/cabinet_merge.bundle.manifest.json"
+    assert result["bundleManifest"]["path"] == "../../../../bundle/heimgewebe_katalog_merge.bundle.manifest.json"
     assert result["snapshotProvenance"]["repositories"][0]["git_commit"] == "d" * 40
     assert [row["role"] for row in result["artifacts"]] == ["agent_reading_pack", "canonical_md"]
     assert "claim_truth" in result["doesNotEstablish"]
@@ -88,12 +88,12 @@ def test_builds_cabinet_compatible_repobrief_manifest_reference(tmp_path: Path) 
 
 def test_writes_manifest_reference_atomically(tmp_path: Path) -> None:
     bundle_path = write_bundle(tmp_path)
-    out = tmp_path / "external" / "lenskit" / "cabinet" / "main" / "manifest.json"
+    out = tmp_path / "external" / "lenskit" / "heimgewebe-katalog" / "main" / "manifest.json"
 
     result = write_external_manifest_reference(
         bundle_path,
         out,
-        repository="cabinet",
+        repository="heimgewebe-katalog",
         ref="main",
         artifact_family="lenskit",
     )
@@ -105,7 +105,7 @@ def test_writes_manifest_reference_atomically(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("repository", "ref"),
-    [("heimgewebe/cabinet", "main"), ("cabinet", "feature/x"), (" cabinet", "main")],
+    [("heimgewebe/heimgewebe-katalog", "main"), ("heimgewebe-katalog", "feature/x"), (" heimgewebe-katalog", "main")],
 )
 def test_rejects_registry_segments_with_slashes_or_whitespace(tmp_path: Path, repository: str, ref: str) -> None:
     bundle_path = write_bundle(tmp_path)
@@ -119,17 +119,17 @@ def test_rejects_non_bundle_manifest(tmp_path: Path) -> None:
     path.write_text(json.dumps({"kind": "other", "created_at": "2026-07-06T13:00:00Z"}), encoding="utf-8")
 
     with pytest.raises(ExternalManifestReferenceError, match="repolens.bundle.manifest"):
-        build_external_manifest_reference(path, repository="cabinet", ref="main")
+        build_external_manifest_reference(path, repository="heimgewebe-katalog", ref="main")
 
 def test_publication_manifest_path_uses_stable_external_layout(tmp_path: Path) -> None:
     path = publication_manifest_path(
         tmp_path / "published",
-        repository="cabinet",
+        repository="heimgewebe-katalog",
         ref="main",
         artifact_family="repobrief",
     )
 
-    assert path == tmp_path / "published" / "external" / "repobrief" / "cabinet" / "main" / "manifest.json"
+    assert path == tmp_path / "published" / "external" / "repobrief" / "heimgewebe-katalog" / "main" / "manifest.json"
 
 
 def test_publish_external_manifest_references_can_publish_one_family(tmp_path: Path) -> None:
@@ -139,14 +139,14 @@ def test_publish_external_manifest_references_can_publish_one_family(tmp_path: P
     result = publish_external_manifest_references(
         bundle_path,
         root,
-        repository="cabinet",
+        repository="heimgewebe-katalog",
         ref="main",
         artifact_families=["repobrief"],
     )
 
     assert [row["artifactFamily"] for row in result["published"]] == ["repobrief"]
-    assert (root / "external" / "repobrief" / "cabinet" / "main" / "manifest.json").is_file()
-    assert not (root / "external" / "lenskit" / "cabinet" / "main" / "manifest.json").exists()
+    assert (root / "external" / "repobrief" / "heimgewebe-katalog" / "main" / "manifest.json").is_file()
+    assert not (root / "external" / "lenskit" / "heimgewebe-katalog" / "main" / "manifest.json").exists()
 
 
 def test_repobrief_cli_publishes_external_manifest_references(tmp_path: Path) -> None:
@@ -163,19 +163,19 @@ def test_repobrief_cli_publishes_external_manifest_references(tmp_path: Path) ->
         "--publication-root",
         str(root),
         "--repository",
-        "cabinet",
+        "heimgewebe-katalog",
         "--ref",
         "main",
     ])
 
     assert rc == 0
-    assert (root / "external" / "repobrief" / "cabinet" / "main" / "manifest.json").is_file()
-    assert (root / "external" / "lenskit" / "cabinet" / "main" / "manifest.json").is_file()
+    assert (root / "external" / "repobrief" / "heimgewebe-katalog" / "main" / "manifest.json").is_file()
+    assert (root / "external" / "lenskit" / "heimgewebe-katalog" / "main" / "manifest.json").is_file()
 
 
 def test_build_includes_linked_post_emit_health_sidecar(tmp_path: Path) -> None:
     bundle_path = write_bundle(tmp_path)
-    sidecar = bundle_path.with_name("cabinet_merge.bundle_health.post.json")
+    sidecar = bundle_path.with_name("heimgewebe_katalog_merge.bundle_health.post.json")
     sidecar.write_text('{"kind":"lenskit.post_emit_health","status":"pass"}\n', encoding="utf-8")
     bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
     bundle["links"]["post_emit_health_path"] = sidecar.name
@@ -183,13 +183,13 @@ def test_build_includes_linked_post_emit_health_sidecar(tmp_path: Path) -> None:
 
     result = build_external_manifest_reference(
         bundle_path,
-        repository="cabinet",
+        repository="heimgewebe-katalog",
         ref="main",
         artifact_family="repobrief",
     )
 
     row = next(artifact for artifact in result["artifacts"] if artifact["role"] == "post_emit_health")
-    assert row["path"] == "cabinet_merge.bundle_health.post.json"
+    assert row["path"] == "heimgewebe_katalog_merge.bundle_health.post.json"
     assert row["contentType"] == "application/json"
     assert row["bytes"] == sidecar.stat().st_size
     assert len(row["sha256"]) == 64
@@ -203,7 +203,7 @@ def test_publish_rejects_bundle_manifest_outside_publication_root(tmp_path: Path
         publish_external_manifest_references(
             bundle_path,
             root,
-            repository="cabinet",
+            repository="heimgewebe-katalog",
             ref="main",
         )
 
@@ -217,7 +217,7 @@ def test_linked_sidecar_must_remain_inside_bundle_directory(tmp_path: Path) -> N
     bundle_path.write_text(json.dumps(bundle), encoding="utf-8")
 
     with pytest.raises(ExternalManifestReferenceError, match="inside the bundle directory"):
-        build_external_manifest_reference(bundle_path, repository="cabinet", ref="main")
+        build_external_manifest_reference(bundle_path, repository="heimgewebe-katalog", ref="main")
 
 
 def test_external_manifest_refresh_rejects_output_outside_publication_root(

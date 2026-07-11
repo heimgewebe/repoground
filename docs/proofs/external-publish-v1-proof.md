@@ -4,7 +4,7 @@ Date: 2026-07-06
 
 ## Decision
 
-External manifest publication belongs to RepoBrief/Lenskit, not Cabinet. Cabinet observes external manifest references; it must not create dumps or publish producer-owned manifests.
+External manifest publication belongs to RepoBrief/Lenskit, not the Heimgewebe-Systemkatalog. The Heimgewebe-Systemkatalog observes external manifest references; it must not create dumps or publish producer-owned manifests.
 
 ## Boundary
 
@@ -25,7 +25,7 @@ The publication root is explicit. RepoBrief does not decide whether that root is
 
 ## Non-goals
 
-The command does not create or refresh a source snapshot, mutate Cabinet, import into Bureau, dispatch agents, or claim semantic truth, merge readiness, runtime correctness, or repo understanding.
+The command does not create or refresh a source snapshot, mutate the Heimgewebe-Systemkatalog, import into Bureau, dispatch agents, or claim semantic truth, merge readiness, runtime correctness, or repo understanding.
 
 
 ## 2026-07-09 hardening follow-up
