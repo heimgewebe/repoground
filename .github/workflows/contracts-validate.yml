@@ -35,6 +35,9 @@ jobs:
       - name: Reject mutable external Action references
         run: python3 scripts/ci/check_github_actions_pins.py
 
+      - name: Validate reusable workflow caller contracts
+        run: python3 scripts/ci/check_reusable_workflow_contracts.py
+
   version-sync-check:
     name: "Security: enforce static pin for contracts reusable workflow"
     runs-on: ubuntu-latest

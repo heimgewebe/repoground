@@ -1480,8 +1480,8 @@
     {
       "id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-001",
       "title": "Lenskit Immutable CI Supply Chain",
-      "status": "done",
-      "description": "Closed for the Lenskit-owned workflow surface: every direct external Action and cross-repository reusable workflow reference is pinned to a full commit SHA, a CI ratchet rejects new mutable references, GitHub Actions updates are proposed separately, and audited token/secret permissions were narrowed. Transitive mutable refs inside pinned upstream reusable workflows remain explicitly out of scope and registered separately.",
+      "status": "in_progress",
+      "description": "Direct Action pins remain intact. Post-merge run 29144781543 exposed a reusable-workflow caller permission regression: the Lenskit caller ceiling was below the pinned called workflow contract. A follow-up restores only the required caller permissions, keeps explicit secrets, filters Bot comments, adds a hash-bound caller-contract ratchet, and groups Dependabot updates while limiting open update PRs. Closure requires a post-merge issue_comment smoke and cleanup of the three initial Dependabot PRs.",
       "evidence": [
         "docs/proofs/lenskit-ci-supply-chain-v1-proof.md",
         "docs/diagnostics/lenskit-ci-supply-chain-pins-20260711.json",
@@ -1490,11 +1490,16 @@
         "merger/lenskit/tests/test_github_actions_node_runtime.py",
         ".github/workflows/contracts-validate.yml",
         ".github/dependabot.yml",
-        ".github/workflows/"
+        ".github/workflows/",
+        ".github/reusable-workflow-contracts.json",
+        "scripts/ci/check_reusable_workflow_contracts.py",
+        "merger/lenskit/tests/test_reusable_workflow_contracts.py"
       ],
       "missing_evidence": [
-        "Transitive immutability inside externally maintained reusable workflows is not established; see TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001.",
-        "This closure does not establish malicious-code absence, complete least privilege, workflow correctness for every event, test completeness, regression absence, runtime correctness, or release readiness."
+        "A successful post-merge issue_comment runtime smoke for the corrected caller is still required.",
+        "The three initial ungrouped Dependabot PRs #968, #969 and #970 remain to be closed after the grouping rule is live.",
+        "Transitive immutability inside externally maintained reusable workflows remains open under TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001.",
+        "This work does not establish malicious-code absence, complete least privilege, workflow correctness for every event, test completeness, regression absence, runtime correctness, or release readiness."
       ]
     },
     {

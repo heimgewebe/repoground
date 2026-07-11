@@ -71,7 +71,11 @@ def test_sensitive_workflows_keep_minimum_permissions_and_explicit_secrets() -> 
             encoding="utf-8"
         )
     )
-    assert command["permissions"] == {"contents": "read"}
+    assert command["permissions"] == {
+        "contents": "read",
+        "issues": "write",
+        "pull-requests": "write",
+    }
     assert set(command["jobs"]["dispatch"]["secrets"]) == {
         "HEIMGEWEBE_APP_ID",
         "HEIMGEWEBE_APP_PRIVATE_KEY",
