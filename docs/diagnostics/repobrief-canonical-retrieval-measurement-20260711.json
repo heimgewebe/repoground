@@ -1,0 +1,120 @@
+{
+  "acceptance": {
+    "criterion": "recall_at_10",
+    "does_not_allow_default_promotion": true,
+    "evaluated_queries": 20,
+    "failed_queries": 19,
+    "passed_queries": 1,
+    "status": "fail"
+  },
+  "artifact_evidence": {
+    "bundle_manifest": {
+      "sha256": "e918b8ef013083d0159743f8f1f6919580cb386722b27bb57e25dcc631860549"
+    },
+    "bundle_surface_validation": {
+      "sha256": "9cc8ab73636d4f9ea19c05a46c6619c02328d0ba95e6ff2a73f72a0a6f6f6550"
+    },
+    "post_emit_health": {
+      "sha256": "a8f94da68f09eef4d6140775313807f4f1ccec63e63268157f32fb87b70601a5"
+    },
+    "retrieval_eval": {
+      "bytes": 156958,
+      "sha256": "18a1817958771fc5b0f58f36bdc4bbccdc94004c256ac8b2252e5592d6f37b3e"
+    }
+  },
+  "authority": "diagnostic_signal",
+  "benchmark": {
+    "canonical": true,
+    "contract": {
+      "id": "review-retrieval-goldset",
+      "version": "v1"
+    },
+    "default_promotion_allowed": false,
+    "does_not_establish": [
+      "The canonical benchmark measures only the committed review questions.",
+      "Passing thresholds would not establish review completeness.",
+      "Snapshot diagnostics do not authorize a retrieval implementation change."
+    ],
+    "evaluation_mode": "default_lexical",
+    "kind": "repository_review_goldset",
+    "promotion_block_reasons": [
+      "default_promotion_requires_separate_comparative_decision",
+      "canonical_acceptance_not_met"
+    ],
+    "promotion_status": "blocked",
+    "query_source": "docs/retrieval/review_queries.v1.json",
+    "query_source_sha256": "7135ee228935ad5758c64fe713261723207881c8a4ab30cc52894a050fa6b7bc",
+    "scope": "repository_specific",
+    "validation_status": "pass"
+  },
+  "command": [
+    "python3",
+    "-m",
+    "merger.lenskit.cli.main",
+    "repobrief",
+    "snapshot",
+    "create",
+    "--repo",
+    "<clean-source-commit-worktree>",
+    "--out",
+    "<temporary-output>",
+    "--profile",
+    "local-private",
+    "--mode",
+    "gesamt",
+    "--output-mode",
+    "dual"
+  ],
+  "does_not_establish": [
+    "review_completeness",
+    "retrieval_sufficiency",
+    "answer_correctness",
+    "regression_absence",
+    "test_completeness",
+    "repository_understanding",
+    "runtime_correctness",
+    "default_promotion_readiness"
+  ],
+  "kind": "repobrief.canonical-review-retrieval-measurement",
+  "measurement_conditions": {
+    "application": "before_order_by_and_limit",
+    "excluded_paths": [
+      "docs/retrieval/review_queries.v1.json"
+    ],
+    "match": "exact_repository_path",
+    "ranking_algorithm_changed": false
+  },
+  "metrics": {
+    "MRR": 0.05,
+    "expected_target_hits": 1,
+    "expected_target_misses": 59,
+    "expected_target_recall@10": 1.666667,
+    "expected_target_total": 60,
+    "question_hits": 1,
+    "question_misses": 19,
+    "question_recall@10": 5.0,
+    "total_queries": 20,
+    "zero_hit_ratio": 0.0
+  },
+  "miss_taxonomy_summary": {
+    "diagnostic_inconclusive": 0,
+    "query_target_ambiguous": 10,
+    "stale_expected_target": 0,
+    "target_exists_not_in_top_k": 48,
+    "target_in_top_k": 1,
+    "target_missing_from_canonical": 0,
+    "target_missing_from_citation_map": 0,
+    "target_missing_from_index": 1
+  },
+  "risk_class": "diagnostic",
+  "snapshot": {
+    "bundle_surface_validation_status": "pass",
+    "finalization_status": "pass",
+    "manifest_artifact_count": 20,
+    "output_mode": "dual",
+    "post_emit_health_status": "pass",
+    "profile": "local-private"
+  },
+  "source_commit": "8f24c2ab55a86a315b5066b4f399c3a1a9fd10f3",
+  "version": "1.0"
+}

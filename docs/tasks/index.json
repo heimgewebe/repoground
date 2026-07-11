@@ -1461,15 +1461,20 @@
     {
       "id": "TASK-REPOBRIEF-AUDIT-RETRIEVAL-MEASUREMENT-001",
       "title": "RepoBrief Canonical Review Retrieval Measurement",
-      "status": "open",
-      "description": "Resolve Audit F-03 by wiring the repository-specific 20-query review goldset into snapshot diagnostics, reporting query recall and expected-target recall separately, and keeping generic sample evaluation explicitly diagnostic.",
+      "status": "done",
+      "description": "Closed by Canonical Review Retrieval Measurement v1: snapshot diagnostics now prefer the schema-validated repository review goldset, separate question recall from expected-target recall, label generic samples as noncanonical diagnostics, and keep default promotion blocked. The commit-bound Lenskit measurement reports 5.0% question recall@10, MRR 0.05, and 1.666667% expected-target recall@10.",
       "evidence": [
-        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "docs/proofs/repobrief-canonical-retrieval-measurement-v1-proof.md",
+        "docs/diagnostics/repobrief-canonical-retrieval-measurement-20260711.json",
         "docs/retrieval/review_queries.v1.json",
-        "merger/lenskit/retrieval/review_eval.py"
+        "merger/lenskit/retrieval/review_eval.py",
+        "merger/lenskit/contracts/retrieval-eval.v1.schema.json",
+        "merger/lenskit/core/merge.py",
+        "merger/lenskit/tests/test_review_retrieval_metrics.py",
+        "merger/lenskit/tests/test_graph_bundle_integration.py"
       ],
       "missing_evidence": [
-        "Current snapshot retrieval_eval still does not establish repository-specific review utility or sufficient expected-target coverage."
+        "The measurement does not establish review completeness, answer correctness, ranking sufficiency, default-promotion readiness, test completeness, runtime correctness, regression absence, or complete repository understanding."
       ]
     },
     {
