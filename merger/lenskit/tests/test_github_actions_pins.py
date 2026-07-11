@@ -33,9 +33,32 @@ def test_full_sha_local_action_and_digest_are_accepted(tmp_path: Path) -> None:
     _write(
         tmp_path,
         ".github/workflows/test.yml",
-        """jobs:\n  test:\n    steps:\n      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567\n      - uses: ./.github/actions/local\n      - uses: docker://example.invalid/tool@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n""",
+        """jobs:\n  test:\n    steps:\n      - uses: actions/checkout@0123456789abcdef0123456789abcdef01234567\n      - uses: ./.github/actions/local\n      - uses: docker://example.invalid/tool@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+    container:
+      image: example.invalid/browser:v1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+""",
     )
     assert scan(tmp_path) == []
+
+
+def test_mutable_workflow_container_images_are_rejected(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        ".github/workflows/test.yml",
+        """jobs:
+  tagged:
+    container: example.invalid/browser:latest
+  service:
+    services:
+      db:
+        image: postgres:18
+""",
+    )
+    findings = scan(tmp_path)
+    assert [item.code for item in findings] == [
+        "mutable_workflow_container_image",
+        "mutable_workflow_container_image",
+    ]
 
 
 def test_mutable_docker_tag_is_rejected(tmp_path: Path) -> None:

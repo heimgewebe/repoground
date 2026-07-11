@@ -5,8 +5,8 @@ name: test-suite
 # breaking an unrelated test file) is invisible until someone runs the whole
 # suite locally. See docs/proofs/repo-complete-audit-2026-07-proof.md.
 #
-# Deselected markers:
-# - browser: needs pytest-playwright + a browser runtime (requirements-browser.txt)
+# Deselected from pytest-full:
+# - browser: executed separately by the required browser-tests job
 # - doc_freshness_live: declared non-blocking by design; run with
 #   continue-on-error in doc-freshness.yml
 
@@ -43,6 +43,41 @@ jobs:
 
       - name: Run full pytest suite
         run: pytest -q -m "not browser and not doc_freshness_live"
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69
+      options: --ipc=host
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Install pinned browser-test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-browser.txt
+
+      - name: Verify pinned Chromium runtime
+        run: python scripts/ci/check_browser_gate_environment.py
+
+      - name: Run Playwright browser tests
+        run: |
+          python -m pytest -q -m browser merger/lenskit/tests/test_webui_payload.py \
+            --browser chromium \
+            --output=test-results \
+            --tracing retain-on-failure \
+            --screenshot only-on-failure \
+            --video retain-on-failure
+
+      - name: Upload browser diagnostics after failure
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+        with:
+          name: browser-test-results-${{ github.run_id }}
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 7
 
   webui-js-tests:
     runs-on: ubuntu-latest
