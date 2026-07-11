@@ -1519,16 +1519,24 @@
     {
       "id": "TASK-LENSKIT-AUDIT-BROWSER-GATE-001",
       "title": "Lenskit Reproducible Playwright Browser Gate",
-      "status": "open",
-      "description": "Resolve Audit F-08 by reconciling pytest and pytest-playwright versions, installing a reproducible browser runtime, and executing all browser-marked tests in a dedicated required CI job.",
+      "status": "in_progress",
+      "description": "A digest-pinned Playwright 1.61.0 container, pytest-playwright 0.8.0 compatible with pytest 9, an explicit Chromium runtime smoke, all ten browser flows, failure diagnostics and workflow-container digest ratchets are implemented. The ruleset policy includes browser-tests, but live enforcement is intentionally deferred until the PR job and post-merge main job have both passed.",
       "evidence": [
-        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "docs/proofs/lenskit-browser-gate-v1-proof.md",
+        "docs/diagnostics/lenskit-browser-gate-20260711.json",
         "requirements-browser.txt",
+        ".github/workflows/test-suite.yml",
+        "scripts/ci/check_browser_gate_environment.py",
+        "scripts/ci/check_github_actions_pins.py",
+        "merger/lenskit/tests/test_browser_gate_contract.py",
         "merger/lenskit/tests/test_webui_payload.py",
-        ".github/workflows/test-suite.yml"
+        "config/github-main-required-checks.v1.json"
       ],
       "missing_evidence": [
-        "The ten Playwright flows are currently excluded from required CI and lack a successful browser-runtime proof."
+        "The browser-tests job has not yet passed on the final GitHub PR head.",
+        "The browser-tests job has not yet passed on the post-merge main commit.",
+        "Active ruleset 18784275 does not yet require browser-tests; update is deferred until the main runtime proof exists.",
+        "This task does not establish complete transitive Python locking, container-content safety, cross-browser compatibility, visual completeness, test completeness, regression absence, or release readiness."
       ]
     },
     {

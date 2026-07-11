@@ -11,9 +11,14 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 USES_RE = re.compile(r"^(?P<indent>\s*)(?:-\s*)?uses:\s*(?P<value>[^#\s]+)")
+YAML_KEY_RE = re.compile(
+    r"^(?P<indent>\s*)(?:-\s+)?(?P<key>[A-Za-z0-9_-]+):"
+    r"(?:\s*(?P<value>[^#\s]+))?"
+)
 BLOCK_RE = re.compile(r"^(?P<indent>\s*)(?:-\s*)?(?:run|script):\s*[|>]\s*[+-]?\s*$")
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 DOCKER_DIGEST_RE = re.compile(r"^docker://.+@sha256:[0-9a-f]{64}$")
+WORKFLOW_IMAGE_DIGEST_RE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
 YAML_SUFFIXES = {".yml", ".yaml"}
 
 
@@ -53,6 +58,65 @@ def _uses_entries(path: Path) -> Iterator[tuple[int, str]]:
         match = USES_RE.match(line)
         if match:
             yield line_no, match.group("value").strip("'\"")
+
+
+def _workflow_image_entries(path: Path) -> Iterator[tuple[int, str]]:
+    stack: list[tuple[int, str]] = []
+    block_indent: int | None = None
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if block_indent is not None:
+            if indent > block_indent:
+                continue
+            block_indent = None
+        block_match = BLOCK_RE.match(line)
+        if block_match:
+            block_indent = len(block_match.group("indent"))
+            continue
+
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        match = YAML_KEY_RE.match(line)
+        if match is None:
+            continue
+        key = match.group("key")
+        value = (match.group("value") or "").strip("'\"")
+        parent_keys = [item[1] for item in stack]
+
+        is_job_container = (
+            key == "container"
+            and len(parent_keys) >= 2
+            and parent_keys[-2] == "jobs"
+        )
+        is_container_image = (
+            key == "image" and parent_keys and parent_keys[-1] == "container"
+        )
+        is_service_image = (
+            key == "image"
+            and len(parent_keys) >= 2
+            and parent_keys[-2] == "services"
+        )
+        if value and (is_job_container or is_container_image or is_service_image):
+            yield line_no, value
+
+        if not value:
+            stack.append((indent, key))
+
+
+def _image_finding(path: Path, root: Path, line: int, image: str) -> Finding | None:
+    relative = path.relative_to(root).as_posix()
+    if WORKFLOW_IMAGE_DIGEST_RE.fullmatch(image):
+        return None
+    code = "dynamic_workflow_container_image" if "${{" in image else "mutable_workflow_container_image"
+    return Finding(
+        relative,
+        line,
+        image,
+        code,
+        "Workflow job and service container images must use an immutable sha256 digest.",
+    )
 
 
 def _finding(path: Path, root: Path, line: int, ref: str) -> Finding | None:
@@ -105,6 +169,11 @@ def scan(root: Path) -> list[Finding]:
             finding = _finding(path, resolved_root, line, ref)
             if finding is not None:
                 findings.append(finding)
+        if path.is_relative_to(resolved_root / ".github" / "workflows"):
+            for line, image in _workflow_image_entries(path):
+                finding = _image_finding(path, resolved_root, line, image)
+                if finding is not None:
+                    findings.append(finding)
     return findings
 
 
@@ -112,7 +181,7 @@ def _report(root: Path, findings: Iterable[Finding]) -> dict[str, object]:
     items = list(findings)
     return {
         "kind": "lenskit.github_actions_pin_check",
-        "version": "1.0",
+        "version": "1.1",
         "root": ".",
         "status": "pass" if not items else "fail",
         "finding_count": len(items),
@@ -122,6 +191,7 @@ def _report(root: Path, findings: Iterable[Finding]) -> dict[str, object]:
             "transitive immutability inside externally maintained reusable workflows",
             "future compatibility of pinned dependencies",
             "workflow correctness or least privilege outside the inspected files",
+            "safety or correctness of content inside digest-pinned workflow container images",
         ],
     }
 
