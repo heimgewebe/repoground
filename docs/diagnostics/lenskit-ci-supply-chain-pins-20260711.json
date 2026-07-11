@@ -1,0 +1,554 @@
+{
+  "base_commit": "174a865cd8577c152ca30a61618a0f4b8cdf0482",
+  "direct_surface": {
+    "ci_job": ".github/workflows/contracts-validate.yml#immutable-ci-supply-chain",
+    "external_reference_count": 57,
+    "mutable_reference_count": 0,
+    "ratchet": "scripts/ci/check_github_actions_pins.py",
+    "references": [
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 16,
+        "path": ".github/workflows/ai-context-guard.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 19,
+        "path": ".github/workflows/ai-context-guard.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 47,
+        "path": ".github/workflows/ai-context-guard.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 50,
+        "path": ".github/workflows/ai-context-guard.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 42,
+        "path": ".github/workflows/anti-hallucination-lint.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 45,
+        "path": ".github/workflows/anti-hallucination-lint.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "df4cb1c069e1874edd31b4311f1884172cec0e10",
+        "line": 31,
+        "path": ".github/workflows/claude.yml",
+        "review_label": "v6",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "e90deca47693f9457b72f2b53c17d7c445a87342",
+        "line": 37,
+        "path": ".github/workflows/claude.yml",
+        "review_label": "v1",
+        "target": "anthropics/claude-code-action"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 19,
+        "path": ".github/workflows/codeql.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "99df26d4f13ea111d4ec1a7dddef6063f76b97e9",
+        "line": 29,
+        "path": ".github/workflows/codeql.yml",
+        "review_label": "v4",
+        "target": "github/codeql-action/init"
+      },
+      {
+        "commit": "99df26d4f13ea111d4ec1a7dddef6063f76b97e9",
+        "line": 34,
+        "path": ".github/workflows/codeql.yml",
+        "review_label": "v4",
+        "target": "github/codeql-action/autobuild"
+      },
+      {
+        "commit": "99df26d4f13ea111d4ec1a7dddef6063f76b97e9",
+        "line": 38,
+        "path": ".github/workflows/codeql.yml",
+        "review_label": "v4",
+        "target": "github/codeql-action/analyze"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 30,
+        "path": ".github/workflows/contracts-validate.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 43,
+        "path": ".github/workflows/contracts-validate.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 152,
+        "path": ".github/workflows/contracts-validate.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "0e5430c72b7948124e2b892da9473bdf8f8a120e",
+        "line": 225,
+        "path": ".github/workflows/contracts-validate.yml",
+        "review_label": null,
+        "target": "heimgewebe/contracts-mirror/.github/workflows/contracts-ajv-reusable.yml"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 51,
+        "path": ".github/workflows/doc-freshness.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 54,
+        "path": ".github/workflows/doc-freshness.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 66,
+        "path": ".github/workflows/forensic-preflight-canary.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 69,
+        "path": ".github/workflows/forensic-preflight-canary.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+        "line": 102,
+        "path": ".github/workflows/forensic-preflight-canary.yml",
+        "review_label": "v6",
+        "target": "actions/upload-artifact"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 52,
+        "path": ".github/workflows/graph-bundle-sources.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 54,
+        "path": ".github/workflows/graph-bundle-sources.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+        "line": 93,
+        "path": ".github/workflows/graph-bundle-sources.yml",
+        "review_label": "v6",
+        "target": "actions/upload-artifact"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 72,
+        "path": ".github/workflows/graph-model.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 75,
+        "path": ".github/workflows/graph-model.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+        "line": 129,
+        "path": ".github/workflows/graph-model.yml",
+        "review_label": "v6",
+        "target": "actions/upload-artifact"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 36,
+        "path": ".github/workflows/graph-quality-goldset.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 38,
+        "path": ".github/workflows/graph-quality-goldset.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+        "line": 62,
+        "path": ".github/workflows/graph-quality-goldset.yml",
+        "review_label": "v6",
+        "target": "actions/upload-artifact"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 32,
+        "path": ".github/workflows/graph-source-roots.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 33,
+        "path": ".github/workflows/graph-source-roots.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 131,
+        "path": ".github/workflows/lens-model.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 136,
+        "path": ".github/workflows/lens-model.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 216,
+        "path": ".github/workflows/lens-model.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 219,
+        "path": ".github/workflows/lens-model.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "a0853c24544627f65ddf259abe73b1d18a591444",
+        "line": 227,
+        "path": ".github/workflows/lens-model.yml",
+        "review_label": "v5",
+        "target": "actions/setup-node"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 17,
+        "path": ".github/workflows/lint.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 20,
+        "path": ".github/workflows/lint.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 20,
+        "path": ".github/workflows/metrics.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "a0853c24544627f65ddf259abe73b1d18a591444",
+        "line": 23,
+        "path": ".github/workflows/metrics.yml",
+        "review_label": "v5",
+        "target": "actions/setup-node"
+      },
+      {
+        "commit": "b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+        "line": 51,
+        "path": ".github/workflows/metrics.yml",
+        "review_label": "v6",
+        "target": "actions/upload-artifact"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 55,
+        "path": ".github/workflows/parity-gate.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 58,
+        "path": ".github/workflows/parity-gate.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 34,
+        "path": ".github/workflows/parity_check.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 37,
+        "path": ".github/workflows/parity_check.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "10daa1c84469dce76e93cdc24c47c1dfc5e156d6",
+        "line": 14,
+        "path": ".github/workflows/pr-heimgewebe-commands.yml",
+        "review_label": "main resolved 2026-07-11",
+        "target": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 17,
+        "path": ".github/workflows/task-index.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 20,
+        "path": ".github/workflows/task-index.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+        "line": 95,
+        "path": ".github/workflows/task-index.yml",
+        "review_label": "v6",
+        "target": "actions/upload-artifact"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 31,
+        "path": ".github/workflows/test-suite.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 34,
+        "path": ".github/workflows/test-suite.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 51,
+        "path": ".github/workflows/test-suite.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "a0853c24544627f65ddf259abe73b1d18a591444",
+        "line": 54,
+        "path": ".github/workflows/test-suite.yml",
+        "review_label": "v5",
+        "target": "actions/setup-node"
+      },
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "line": 20,
+        "path": ".github/workflows/validate-merges.yml",
+        "review_label": "v5",
+        "target": "actions/checkout"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "line": 23,
+        "path": ".github/workflows/validate-merges.yml",
+        "review_label": "v6",
+        "target": "actions/setup-python"
+      },
+      {
+        "commit": "44069602da536e781675a788e8d9d4c45c7c1f75",
+        "line": 18,
+        "path": ".github/workflows/wgx-guard.yml",
+        "review_label": "main resolved 2026-07-11",
+        "target": "heimgewebe/wgx/.github/workflows/wgx-guard.yml"
+      }
+    ],
+    "status": "pass"
+  },
+  "does_not_establish": [
+    "absence of malicious or vulnerable code in pinned dependencies",
+    "transitive immutability inside the two externally maintained reusable workflows",
+    "workflow correctness for every event and permission combination",
+    "future compatibility or automatic safety of Dependabot updates",
+    "complete least privilege outside the audited workflows",
+    "test completeness, regression absence, release readiness, or runtime correctness"
+  ],
+  "follow_up_task": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
+  "implementation_commit": "f6e0b91bde72641797465475ec2691aa82558e18",
+  "kind": "lenskit.ci_supply_chain_pin_inventory",
+  "observed_on": "2026-07-11",
+  "permission_changes": [
+    {
+      "after": [
+        "contents: read"
+      ],
+      "basis": "checkout, local commands and upload-artifact do not require write-scoped GITHUB_TOKEN permissions",
+      "before": [
+        "contents: read",
+        "actions: write",
+        "checks: write"
+      ],
+      "workflow": ".github/workflows/metrics.yml"
+    },
+    {
+      "basis": "the pinned action is configured for interactive changes and OAuth/GitHub-App authentication; its exact-commit setup documentation requires the retained scopes and no additional CI permission is configured",
+      "removed": [
+        "actions: read"
+      ],
+      "retained": [
+        "contents: write",
+        "pull-requests: write",
+        "issues: write",
+        "id-token: write"
+      ],
+      "workflow": ".github/workflows/claude.yml"
+    },
+    {
+      "after_secret_forwarding": [
+        "HEIMGEWEBE_APP_ID",
+        "HEIMGEWEBE_APP_PRIVATE_KEY"
+      ],
+      "after_token_permissions": [
+        "contents: read"
+      ],
+      "basis": "the pinned reusable workflow performs writes with its short-lived GitHub App token and declares exactly these two input secrets",
+      "before_secret_forwarding": "inherit",
+      "before_token_permissions": [
+        "contents: read",
+        "issues: write",
+        "pull-requests: write"
+      ],
+      "prior_runtime_evidence": {
+        "conclusion": "success",
+        "run_id": 29126802947,
+        "token_step": "success"
+      },
+      "workflow": ".github/workflows/pr-heimgewebe-commands.yml"
+    }
+  ],
+  "repository": "heimgewebe/lenskit",
+  "tag_resolution": {
+    "method": "GitHub commits/tags API; annotated tags dereferenced to commit objects",
+    "resolved": [
+      {
+        "commit": "93cb6efe18208431cddfb8368fd83d5badbf9bfd",
+        "commit_date": "2025-11-13T21:22:10Z",
+        "source": "actions/checkout@v5",
+        "tree": "954cb4725509e2106b9f5ecf86e0ec7633262d7c"
+      },
+      {
+        "commit": "df4cb1c069e1874edd31b4311f1884172cec0e10",
+        "commit_date": "2026-06-02T14:31:30Z",
+        "source": "actions/checkout@v6",
+        "tree": "3dbeda02190cba9dcc47a1194c188ed1f3fab468"
+      },
+      {
+        "commit": "ece7cb06caefa5fff74198d8649806c4678c61a1",
+        "commit_date": "2026-06-23T18:01:57Z",
+        "source": "actions/setup-python@v6",
+        "tree": "39217d5f784fb44e42ddb8e5702f05256b29829e"
+      },
+      {
+        "commit": "a0853c24544627f65ddf259abe73b1d18a591444",
+        "commit_date": "2025-09-03T17:47:21Z",
+        "source": "actions/setup-node@v5",
+        "tree": "d0cd4ce22c5222761390a09d32b081708087bdb1"
+      },
+      {
+        "commit": "b7c566a772e6b6bfb58ed0dc250532a479d7789f",
+        "commit_date": "2025-12-12T17:58:04Z",
+        "source": "actions/upload-artifact@v6",
+        "tree": "bb934e399202b45ca0a0ebc508adefb58bb2ae3b"
+      },
+      {
+        "commit": "99df26d4f13ea111d4ec1a7dddef6063f76b97e9",
+        "commit_date": "2026-07-08T12:08:22Z",
+        "source": "github/codeql-action@v4",
+        "tree": "04bbf8a1095aec898bdeb0e9bfe8966a21e0bb2d"
+      },
+      {
+        "commit": "e90deca47693f9457b72f2b53c17d7c445a87342",
+        "commit_date": "2026-07-11T00:52:42Z",
+        "source": "anthropics/claude-code-action@v1",
+        "tree": "eb8e1bb28c863ae935551c95a3144212ed6326c5"
+      },
+      {
+        "commit": "10daa1c84469dce76e93cdc24c47c1dfc5e156d6",
+        "commit_date": "2026-07-11T00:23:14Z",
+        "source": "heimgewebe/metarepo command workflow@main",
+        "tree": "2ec1b9a8b9d476c246747fa8ef12c577acc98752"
+      },
+      {
+        "commit": "44069602da536e781675a788e8d9d4c45c7c1f75",
+        "commit_date": "2026-07-06T16:42:30Z",
+        "source": "heimgewebe/wgx guard workflow@main",
+        "tree": "8fcde0c192c003b4e7fc5e5c5e419cf647058baa"
+      }
+    ],
+    "runtime_rule": "workflow uses fields contain only the resolved full commit, while the former major or branch is retained as a review comment",
+    "update_rule": "Dependabot proposes GitHub Actions updates as reviewable pull requests; runtime references do not follow tags between merges"
+  },
+  "transitive_upstream_findings": [
+    {
+      "caller": ".github/workflows/pr-heimgewebe-commands.yml",
+      "pinned_reusable_commit": "10daa1c84469dce76e93cdc24c47c1dfc5e156d6",
+      "upstream_mutable_refs": [
+        "actions/create-github-app-token@v3",
+        "actions/github-script@v8"
+      ]
+    },
+    {
+      "caller": ".github/workflows/wgx-guard.yml",
+      "pinned_reusable_commit": "44069602da536e781675a788e8d9d4c45c7c1f75",
+      "upstream_mutable_refs": [
+        "actions/checkout@v4",
+        "actions/checkout@v4",
+        "actions/setup-python@v5"
+      ]
+    }
+  ],
+  "version": "1.0"
+}

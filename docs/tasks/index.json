@@ -1480,14 +1480,37 @@
     {
       "id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-001",
       "title": "Lenskit Immutable CI Supply Chain",
-      "status": "open",
-      "description": "Resolve Audit F-05 by pinning external and cross-repository Actions/workflows to immutable commit SHAs, minimizing write permissions, and adding a ratchet against new mutable references.",
+      "status": "done",
+      "description": "Closed for the Lenskit-owned workflow surface: every direct external Action and cross-repository reusable workflow reference is pinned to a full commit SHA, a CI ratchet rejects new mutable references, GitHub Actions updates are proposed separately, and audited token/secret permissions were narrowed. Transitive mutable refs inside pinned upstream reusable workflows remain explicitly out of scope and registered separately.",
       "evidence": [
-        "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
+        "docs/proofs/lenskit-ci-supply-chain-v1-proof.md",
+        "docs/diagnostics/lenskit-ci-supply-chain-pins-20260711.json",
+        "scripts/ci/check_github_actions_pins.py",
+        "merger/lenskit/tests/test_github_actions_pins.py",
+        "merger/lenskit/tests/test_github_actions_node_runtime.py",
+        ".github/workflows/contracts-validate.yml",
+        ".github/dependabot.yml",
         ".github/workflows/"
       ],
       "missing_evidence": [
-        "No immutable pin inventory or completed write-permission audit exists yet."
+        "Transitive immutability inside externally maintained reusable workflows is not established; see TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001.",
+        "This closure does not establish malicious-code absence, complete least privilege, workflow correctness for every event, test completeness, regression absence, runtime correctness, or release readiness."
+      ]
+    },
+    {
+      "id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
+      "title": "Lenskit Transitive Reusable Workflow Pinning",
+      "status": "open",
+      "description": "Close the remaining runtime supply-chain gap by pinning the mutable nested Actions inside the metarepo command-dispatch and WGX guard reusable workflows at their upstream repositories, merging those upstream changes, advancing the Lenskit caller SHAs, and rerunning the direct and transitive inventory. Do not vendor a second copy of the reusable workflow logic into Lenskit.",
+      "evidence": [
+        "docs/diagnostics/lenskit-ci-supply-chain-pins-20260711.json",
+        "docs/proofs/lenskit-ci-supply-chain-v1-proof.md",
+        ".github/workflows/pr-heimgewebe-commands.yml",
+        ".github/workflows/wgx-guard.yml"
+      ],
+      "missing_evidence": [
+        "No merged upstream metarepo or WGX pinning change exists yet.",
+        "Lenskit callers still point to upstream commits whose nested Action refs include mutable major tags."
       ]
     },
     {
