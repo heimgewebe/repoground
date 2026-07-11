@@ -14,6 +14,7 @@ The new ruleset has GitHub ruleset id `18784275`, has no bypass actors, and requ
 | `Lenskit CodeQL policy (python)` | `15368` | The repository CodeQL workflow, including suppression-inventory validation and the post-analysis raw-SARIF clean gate |
 | `CodeQL` | `57789` | GitHub Advanced Security's pull-request CodeQL result |
 | `pytest-full` | `15368` | The full Python test suite excluding explicitly non-blocking markers |
+| `release-candidate` | `15368` | Hash-locked release contract, duplicate deterministic candidate build and source-bound verification |
 | `ruff` | `15368` | The pinned repository-wide Ruff ratchet |
 | `webui-js-tests` | `15368` | The Web UI JavaScript test suite |
 
@@ -72,6 +73,22 @@ GitHub reported `mergeable=MERGEABLE` and `mergeStateStatus=CLEAN` after all con
 The uniquely named Lenskit CodeQL policy job and GitHub's separate default `Analyze (python)` job were both visible, demonstrating that the required context no longer relies on the ambiguous shared name.
 
 The final documentation-only proof commit must repeat the required checks before merge; the merge gate, not this paragraph, remains authoritative for the final head.
+
+
+## Release-candidate extension
+
+After PR [#978](https://github.com/heimgewebe/lenskit/pull/978) merged as
+`50de5cd4c95f473fff5d6420d0e8c99ba92771bf`, the Main job
+`release-candidate` completed successfully in run `29153314855`, job
+`86546260543`. Ruleset `18784275` was then updated to require the same context
+from GitHub Actions integration `15368`. API read-back validation against the
+checked-in desired state passed with no findings.
+
+The source workflow `.github/workflows/test-suite.yml` has unfiltered
+`pull_request` and `push` triggers for `main`, so the context is produced for
+every relevant PR rather than only for release-file changes. The repository
+also carries `.github/grabowski-required-checks.json`, allowing the local
+review gate to derive the same required check names from the target branch.
 
 ## Rollback
 

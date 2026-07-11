@@ -1411,7 +1411,8 @@
         "merger/lenskit/tests/test_github_main_ruleset.py",
         "docs/proofs/lenskit-main-required-checks-v1-proof.md",
         "https://github.com/heimgewebe/lenskit/rules/18784275",
-        "https://github.com/heimgewebe/lenskit/pull/955"
+        "https://github.com/heimgewebe/lenskit/pull/955",
+        ".github/grabowski-required-checks.json"
       ],
       "missing_evidence": [
         "No test-sufficiency, security-correctness, runtime-correctness, or review-completeness claim is established.",
@@ -1562,7 +1563,7 @@
     {
       "id": "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
       "title": "Lenskit Release Packaging and License Decision",
-      "status": "in_progress",
+      "status": "done",
       "description": "Resolve Audit F-09 with an explicit license decision, reproducible dependency strategy, versioned release artifacts, hashes, changelog, upgrade and rollback instructions.",
       "evidence": [
         "LICENSE",
@@ -1579,13 +1580,14 @@
         "docs/release/upgrade-rollback.md",
         "merger/lenskit/contracts/repobrief-release-candidate.v1.schema.json",
         ".github/workflows/test-suite.yml",
-        "docs/proofs/repobrief-release-packaging-v1-proof.md"
+        "docs/proofs/repobrief-release-packaging-v1-proof.md",
+        "config/github-main-required-checks.v1.json",
+        ".github/grabowski-required-checks.json"
       ],
       "missing_evidence": [
-        "PR and main release-candidate jobs have not been observed yet.",
-        "The live main ruleset does not require release-candidate yet.",
-        "Public distribution remains blocked and is tracked separately.",
-        "The optional semantic/Torch dependency closure remains outside this candidate and is tracked separately."
+        "Public distribution remains blocked and is tracked separately by TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001.",
+        "The optional semantic/Torch dependency closure remains outside this candidate and is tracked separately by TASK-LENSKIT-SEMANTIC-LOCK-001.",
+        "This task completion does not establish product readiness, public release readiness, runtime correctness, test completeness or absence of vulnerabilities."
       ]
     },
     {

@@ -54,15 +54,17 @@
     },
     {
       "limitations": [
-        "Public distribution is blocked by LicenseRef-RepoBrief-All-Rights-Reserved pending a separate owner decision.",
-        "The optional semantic/Torch dependency closure is excluded pending a platform-specific hash-lock task.",
-        "PR, main and live ruleset verification remain outstanding."
+        "PR #978 merged as 50de5cd4c95f473fff5d6420d0e8c99ba92771bf after diff-bound self-review; all PR and main checks, including release-candidate, passed.",
+        "Ruleset 18784275 requires release-candidate for future main merges.",
+        "Public distribution remains blocked by LicenseRef-RepoBrief-All-Rights-Reserved pending TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001.",
+        "The optional semantic/Torch dependency closure remains excluded pending TASK-LENSKIT-SEMANTIC-LOCK-001.",
+        "Done does not establish product readiness, public release readiness, runtime correctness, test completeness or absence of vulnerabilities."
       ],
-      "promotion": "blocked",
+      "promotion": "allowed",
       "scope": "license, reproducible dependency, release and rollback evidence",
-      "status": "in_progress",
+      "status": "done",
       "task_id": "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
-      "verification": "local_validated"
+      "verification": "main_verified"
     },
     {
       "limitations": [
@@ -117,7 +119,6 @@
     "TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001",
     "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
     "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
-    "TASK-LENSKIT-AUDIT-RELEASE-PACKAGING-001",
     "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
     "TASK-LENSKIT-SEMANTIC-LOCK-001",
     "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001"
@@ -196,10 +197,10 @@
   },
   "task_summary": {
     "by_status": {
-      "done": 84,
-      "in_progress": 1,
       "open": 7,
-      "partial": 0
+      "in_progress": 0,
+      "partial": 0,
+      "done": 85
     },
     "total": 92
   },

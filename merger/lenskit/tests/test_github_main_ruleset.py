@@ -1,4 +1,5 @@
 import copy
+import json
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,7 @@ def test_required_checks_policy_matches_observed_ruleset():
         "Lenskit CodeQL policy (python)",
         "CodeQL",
         "pytest-full",
+        "release-candidate",
         "ruff",
         "webui-js-tests",
         "ai-context-guard",
@@ -63,6 +65,7 @@ def test_required_checks_policy_detects_missing_or_wrong_source_type():
     assert report["status"] == "fail"
     assert any("source_type mismatch" in finding for finding in report["findings"])
 
+
 def test_required_checks_policy_detects_missing_check():
     policy, observed = _observed()
     observed["rules"][0]["parameters"]["required_status_checks"].pop()
@@ -83,7 +86,9 @@ def test_required_checks_policy_detects_wrong_integration():
 
     assert report["status"] == "fail"
     assert any("missing required checks" in finding for finding in report["findings"])
-    assert any("unexpected required checks" in finding for finding in report["findings"])
+    assert any(
+        "unexpected required checks" in finding for finding in report["findings"]
+    )
 
 
 def test_required_checks_policy_detects_inactive_or_wrong_scope():
@@ -121,7 +126,9 @@ def test_required_checks_policy_detects_bypass_actor():
 
 
 def test_codeql_policy_context_is_unique_and_binds_both_policy_steps():
-    workflow = (ROOT / ".github" / "workflows" / "codeql.yml").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "codeql.yml").read_text(
+        encoding="utf-8"
+    )
 
     assert workflow.count("name: Lenskit CodeQL policy (python)") == 1
     assert "name: Validate CodeQL suppression inventory" in workflow
@@ -134,3 +141,33 @@ def test_required_checks_policy_rejects_invalid_policy_rule_shape():
 
     with pytest.raises(RulesetValidationError, match="exactly one"):
         validate_ruleset(policy, observed)
+
+
+def test_grabowski_required_check_catalog_matches_ruleset_policy():
+    policy = load_policy()
+    expected = [
+        item["context"]
+        for item in policy["ruleset"]["rules"][0]["parameters"][
+            "required_status_checks"
+        ]
+    ]
+    catalog = json.loads(
+        (ROOT / ".github" / "grabowski-required-checks.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert catalog == {"schema_version": 1, "required_checks": expected}
+
+
+def test_release_candidate_required_context_runs_for_every_main_pr():
+    workflow = (ROOT / ".github" / "workflows" / "test-suite.yml").read_text(
+        encoding="utf-8"
+    )
+    trigger_header, jobs = workflow.split("\njobs:", 1)
+
+    assert "pull_request:" in trigger_header
+    assert "branches: [main]" in trigger_header
+    assert "paths:" not in trigger_header
+    assert "\n  release-candidate:" in "\njobs:" + jobs
+    assert "name: release-candidate" in jobs
