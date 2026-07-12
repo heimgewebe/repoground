@@ -84,3 +84,7 @@ A later decision may choose one of these paths:
 4. compatibility bridge: `merger.lenskit` remains while `merger.repobrief` is introduced as a new alias layer.
 
 No later path is selected by this document.
+
+## 2026-07-12 namespace decision
+
+The 2.x line keeps the repository name `lenskit` and Python namespace `merger.lenskit`. RepoBrief remains the product and primary CLI name. The machine-readable consumer inventory and future breaking-major gate are in `../decisions/repobrief-package-namespace-decision.v1.json`.

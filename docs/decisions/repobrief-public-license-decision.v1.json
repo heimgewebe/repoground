@@ -1,0 +1,49 @@
+{
+  "kind": "repobrief.public_license_decision",
+  "version": "1.0",
+  "observed_on": "2026-07-12",
+  "decision": "do_not_grant_public_redistribution_license",
+  "current_license_expression": "LicenseRef-RepoBrief-All-Rights-Reserved",
+  "license_file": "LICENSE",
+  "repository_visibility": "public",
+  "distribution_status": "blocked_without_separate_written_permission",
+  "reasoning": [
+    "Public visibility is not treated as an open-source grant.",
+    "No explicit owner decision selected an OSI-approved license.",
+    "The dependency review is bounded and contains ambiguous metadata entries requiring exact-artifact review before redistribution.",
+    "The current release process is an internal deterministic candidate path, not a public publication workflow."
+  ],
+  "references": [
+    {
+      "title": "GitHub Docs: Licensing a repository",
+      "url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository"
+    },
+    {
+      "title": "SPDX 2.3: Other licensing information detected",
+      "url": "https://spdx.github.io/spdx-spec/v2.3/other-licensing-information-detected/"
+    },
+    {
+      "title": "Python Core Metadata: License-Expression",
+      "url": "https://packaging.python.org/en/latest/specifications/core-metadata/#license-expression"
+    }
+  ],
+  "reviewed_evidence": [
+    "LICENSE",
+    "docs/release/licensing.md",
+    "docs/release/release-policy.md",
+    "docs/release/third-party-license-review.v1.json"
+  ],
+  "reopen_conditions": [
+    "owner explicitly requests public open-source distribution",
+    "proposed license and exact distribution artifact are named",
+    "third-party obligations are re-evaluated for that artifact"
+  ],
+  "does_not_establish": [
+    "legal advice",
+    "that the restrictive terms are enforceable in every jurisdiction",
+    "permission to redistribute",
+    "permanent rejection of open-source publication"
+  ],
+  "status": "decision_complete_public_distribution_blocked",
+  "current_license_notice": "All rights reserved; no public distribution without separate written permission."
+}

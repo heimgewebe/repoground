@@ -25,3 +25,7 @@ The `LicenseRef-...` value is a project-local identifier for a license text
 that is not represented by a standard SPDX short identifier. It is carried in
 release manifests so tooling does not silently infer a permissive license from
 repository visibility.
+
+## Owner decision recorded on 2026-07-12
+
+The public-license decision is closed as **do not grant public redistribution rights at this time**. The controlling `LICENSE` text is unchanged. Third-party metadata review is recorded in `third-party-license-review.v1.json`; it does not authorize redistribution.

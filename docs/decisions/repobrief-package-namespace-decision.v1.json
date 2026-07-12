@@ -1,0 +1,68 @@
+{
+  "kind": "repobrief.package_namespace_decision",
+  "version": "1.0",
+  "observed_on": "2026-07-12",
+  "decision": "keep_lenskit_namespace_for_2_x",
+  "repository_name": "lenskit",
+  "python_namespace": "merger.lenskit",
+  "product_name": "RepoBrief",
+  "primary_cli_name": "repobrief",
+  "compatibility_cli_name": "rlens",
+  "consumer_inventory": {
+    "github_scope": "organization heimgewebe default branches, GitHub code search",
+    "github_queries": [
+      {
+        "query": "\"merger.lenskit\" org:heimgewebe",
+        "result_count": 364,
+        "external_consumers": [
+          "heimgewebe/infra",
+          "heimgewebe/vault-gewebe"
+        ]
+      },
+      {
+        "query": "\"python -m merger.lenskit\" org:heimgewebe",
+        "result_count": 24,
+        "external_consumers": [
+          "heimgewebe/infra"
+        ]
+      },
+      {
+        "query": "\"heimgewebe/lenskit\" org:heimgewebe",
+        "result_count": 39,
+        "external_consumers": [
+          "heimgewebe/metarepo",
+          "heimgewebe/infra",
+          "heimgewebe/vibe-lab"
+        ]
+      }
+    ],
+    "repository_fork_count": 0,
+    "local_merger_lenskit_files": 356,
+    "local_merger_lenskit_occurrences": 1218,
+    "limitations": [
+      "GitHub code search is an indexed default-branch view and may omit private, unindexed, historic or local-only consumers."
+    ]
+  },
+  "rationale": [
+    "RepoBrief is already the user-facing product and CLI name.",
+    "The Python namespace is deeply embedded and has repo-external organization consumers.",
+    "A same-major rename would create broad migration risk without improving runtime behavior.",
+    "Keeping the internal namespace avoids a compatibility alias layer and duplicate import identity."
+  ],
+  "future_rename_gate": {
+    "eligible_release": "next intentional breaking major release only",
+    "required_evidence": [
+      "complete consumer inventory",
+      "tested compatibility/import migration plan",
+      "deprecation window",
+      "rollback plan",
+      "updated service and systemd entrypoints"
+    ]
+  },
+  "does_not_establish": [
+    "permanent prohibition on a future rename",
+    "absence of unknown consumers",
+    "public package publication readiness"
+  ],
+  "status": "decision_complete"
+}
