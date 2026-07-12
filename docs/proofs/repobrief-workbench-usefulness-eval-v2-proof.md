@@ -1,7 +1,7 @@
 # RepoBrief Workbench Usefulness Evaluation v2 — proof
 
 Status: deterministic navigation evaluation complete
-Technical commit: `7801ecc0e13cad70e041556e7ac08c1c7a9daf29`
+Technical commit: `052c1dcd1729d5c22bc7e4c298f7b0d7fa0cddfc`
 
 ## Question
 
@@ -63,10 +63,10 @@ produced, so behavioral false confidence and actual answer compliance remain
 explicitly unmeasured.
 
 Machine-readable report:
-`docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json`
+`docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2053Z.json`
 
 Report SHA-256:
-`673fbee2eb46559569e65b776c15232d7ba89096efa7694c06958304430dc8bc`
+`03b2416c239860a91021c572a5addced7b0194ba6e581742d6ee9d34fd89f326`
 
 ## Non-claims
 

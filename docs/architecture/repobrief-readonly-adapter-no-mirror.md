@@ -31,7 +31,9 @@ Artifact content reads additionally require:
 - UTF-8 text. Binary content is described but not returned.
 
 An integrity mismatch returns `blocked`; it is not smoothed into missing or
-success.
+success. SQLite and Python-symbol indices are hashed both before and after each
+delegated query. If postflight integrity fails, the already computed result is
+discarded.
 
 ## Interface
 
@@ -73,7 +75,7 @@ tool. It is not reachable through adapter dispatch.
 
 ## Runtime evidence
 
-A redacted `full-max` bundle from commit `7801ecc0…` contained 21 manifest
+A redacted `full-max` bundle from commit `052c1dcd…` contained 21 manifest
 artifacts. Post-emit health, surface validation, export safety and agent export
 all passed. Adapter listing, index queries, symbol search and the usefulness
 evaluation were then executed while hashing every bundle file before and after.
@@ -81,7 +83,7 @@ The inventories were byte-identical and no SQLite sidecar appeared.
 
 Machine-readable evidence:
 
-- `docs/diagnostics/repobrief-readonly-adapter-validation-20260712T2036Z.json`
+- `docs/diagnostics/repobrief-readonly-adapter-validation-20260712T2053Z.json`
 
 ## Non-claims
 

@@ -1,18 +1,29 @@
 {
   "kind": "repobrief.readonly_adapter_validation",
-  "version": "1.0",
+  "version": "1.1",
   "observed_on": "2026-07-12",
-  "implementation_commit": "7801ecc0e13cad70e041556e7ac08c1c7a9daf29",
-  "implementation_tree": "f29839c28db176705629157ffd4c63e75b310c5f",
+  "implementation_commit": "052c1dcd1729d5c22bc7e4c298f7b0d7fa0cddfc",
+  "implementation_tree": "8dba34ac2b6bb9562bcce6b499d79ff297dbaa56",
+  "review_remediation": {
+    "pull_request": 989,
+    "finding": "Delegated SQLite and symbol-index reads did not independently verify manifest byte length and SHA-256.",
+    "remediation": "Both indices are verified before and after delegated reads; failed postflight results are discarded.",
+    "negative_tests": [
+      "tampered SQLite before query",
+      "SQLite changed during query",
+      "tampered symbol index before search"
+    ],
+    "status": "corrected"
+  },
   "source_bundle": {
     "profile": "full-max",
     "output_mode": "dual",
     "redaction_enabled": true,
-    "bundle_run_id": "lenskit-workbench-tech-7801ecc0-full-max-260712-2036",
-    "bundle_manifest_name": "lenskit-workbench-tech-7801ecc0-max-260712-2036_merge.bundle.manifest.json",
-    "bundle_manifest_sha256": "f71dabc733670e847570c6bda99e87f83be9f8f575c0eb42b7f6e5d30667e765",
-    "source_commit": "7801ecc0e13cad70e041556e7ac08c1c7a9daf29",
-    "source_tree": "f29839c28db176705629157ffd4c63e75b310c5f",
+    "bundle_run_id": "lenskit-workbench-tech-052c1dcd-full-max-260712-2053",
+    "bundle_manifest_name": "lenskit-workbench-tech-052c1dcd-max-260712-2053_merge.bundle.manifest.json",
+    "bundle_manifest_sha256": "fb6250d5ab39bb0c8fee48067ab3cd67c3eab535745385c28c2cef28f9645df2",
+    "source_commit": "052c1dcd1729d5c22bc7e4c298f7b0d7fa0cddfc",
+    "source_tree": "8dba34ac2b6bb9562bcce6b499d79ff297dbaa56",
     "source_dirty": false,
     "manifest_artifact_count": 21,
     "generated_file_count": 26,
@@ -39,6 +50,9 @@
     "bundle_root_enforced_for_content": true,
     "content_size_limit_bytes": 16777216,
     "content_integrity_requires_manifest_bytes_and_sha256": true,
+    "delegated_index_integrity_preflight": true,
+    "delegated_index_integrity_postflight": true,
+    "failed_postflight_results_discarded": true,
     "binary_content_exposure_blocked": true,
     "hidden_snapshot_discovery": false,
     "implicit_snapshot_refresh": false,
@@ -58,13 +72,13 @@
     ]
   },
   "no_mutation_evidence": {
-    "before_inventory_sha256": "1b9948e1054edb98acf6887efe6d816d5c0e7f9a29c3701a002ab5b2cecd1694",
-    "after_inventory_sha256": "1b9948e1054edb98acf6887efe6d816d5c0e7f9a29c3701a002ab5b2cecd1694",
+    "before_inventory_sha256": "70eafd1c4f3afab68b59868c1c9108d51e26f4393b8c63ed7b57a45c910f7bfa",
+    "after_inventory_sha256": "70eafd1c4f3afab68b59868c1c9108d51e26f4393b8c63ed7b57a45c910f7bfa",
     "inventories_byte_identical": true,
     "sqlite_sidecars_created": false
   },
   "focused_validation": {
-    "adapter_usefulness_and_compatibility_tests_passed": 16,
+    "adapter_usefulness_and_compatibility_tests_passed": 19,
     "ruff": "pass",
     "config_schema": "pass",
     "goldset_schema": "pass",
@@ -73,8 +87,8 @@
     "cli_workbench_eval": "pass"
   },
   "usefulness_report": {
-    "path": "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
-    "sha256": "673fbee2eb46559569e65b776c15232d7ba89096efa7694c06958304430dc8bc",
+    "path": "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2053Z.json",
+    "sha256": "03b2416c239860a91021c572a5addced7b0194ba6e581742d6ee9d34fd89f326",
     "status": "pass",
     "version": "2.1"
   },
@@ -87,7 +101,8 @@
     "natural-language answer correctness",
     "test sufficiency",
     "review completeness",
-    "merge readiness"
+    "merge readiness",
+    "atomic protection against a hostile process that replaces and restores an index between integrity checks"
   ],
   "status": "runtime_validated_local"
 }

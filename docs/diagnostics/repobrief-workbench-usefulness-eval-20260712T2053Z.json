@@ -11,7 +11,7 @@
       "path_recall": 0.375,
       "question_count": 8,
       "question_success_rate": 0.0,
-      "source_bytes_exposed": 23705,
+      "source_bytes_exposed": 23706,
       "symbol_recall": 0.125,
       "target_recall": 0.25
     },
@@ -23,7 +23,7 @@
     "workbench": {
       "guardrail_visibility_rate": 1.0,
       "missing_evidence_visibility_rate": 1.0,
-      "path_mrr_at_k": 0.3521374458874459,
+      "path_mrr_at_k": 0.28859577922077917,
       "path_recall": 1.0,
       "query_availability_rate": 1.0,
       "question_count": 8,
@@ -68,7 +68,7 @@
       "workbench_report_visibility_rate": 1.0
     },
     "navigation_value": {
-      "path_mrr_at_k": 0.3521374458874459,
+      "path_mrr_at_k": 0.28859577922077917,
       "path_recall": 1.0,
       "symbol_mrr_at_k": 1.0,
       "symbol_recall": 1.0
@@ -131,7 +131,9 @@
         "missing_paths": [],
         "missing_symbols": [],
         "observed_paths": [
+          "docs/proofs/repobrief-readonly-adapter-no-mirror-v1-proof.md",
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
           "merger/lenskit/core/repobrief_readonly_adapter.py",
           "merger/lenskit/cli/cmd_repobrief.py"
         ],
@@ -139,7 +141,7 @@
           "RepoBriefReadonlyAdapterError",
           "RepoBriefReadonlyAdapter"
         ],
-        "path_mrr_at_k": 0.5,
+        "path_mrr_at_k": 0.25,
         "path_recall": 1.0,
         "query_guardrails_visible": true,
         "query_status": "available",
@@ -157,7 +159,9 @@
             "default_workbench_promotion"
           ],
           "evidence_paths": [
+            "docs/proofs/repobrief-readonly-adapter-no-mirror-v1-proof.md",
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
             "merger/lenskit/core/repobrief_readonly_adapter.py",
             "merger/lenskit/cli/cmd_repobrief.py"
           ],
@@ -211,16 +215,18 @@
         "missing_symbols": [],
         "observed_paths": [
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
-          "merger/lenskit/tests/test_repobrief_readonly_adapter.py",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
+          "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
           "merger/lenskit/cli/cmd_repobrief.py",
-          "merger/lenskit/core/repobrief_readonly_adapter.py"
+          "merger/lenskit/core/repobrief_readonly_adapter.py",
+          "merger/lenskit/tests/test_repobrief_readonly_adapter.py"
         ],
         "observed_symbols": [
           "dispatch",
           "RepoBriefReadonlyAdapter.dispatch",
           "test_adapter_dispatch_fails_closed_for_unknown_action"
         ],
-        "path_mrr_at_k": 0.25,
+        "path_mrr_at_k": 0.2,
         "path_recall": 1.0,
         "query_guardrails_visible": true,
         "query_status": "available",
@@ -239,9 +245,11 @@
           ],
           "evidence_paths": [
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
-            "merger/lenskit/tests/test_repobrief_readonly_adapter.py",
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
+            "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
             "merger/lenskit/cli/cmd_repobrief.py",
-            "merger/lenskit/core/repobrief_readonly_adapter.py"
+            "merger/lenskit/core/repobrief_readonly_adapter.py",
+            "merger/lenskit/tests/test_repobrief_readonly_adapter.py"
           ],
           "evidence_symbols": [
             "dispatch",
@@ -293,13 +301,13 @@
         "observed_paths": [
           "docs/architecture/repobrief-mcp-boundary.md",
           "docs/architecture/repobrief.md",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
           "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
           "merger/lenskit/cli/cmd_repobrief.py",
           "docs/architecture/repobrief-agent-workbench-boundary.md",
           "merger/lenskit/core/repobrief_readonly_adapter.py",
           "docs/architecture/repobrief-agent-optimization-triage.md",
-          "docs/proofs/repobrief-live-source-citation-address-v1-proof.md",
           "merger/lenskit/atlas/registry.py",
           "merger/lenskit/core/repobrief_access.py",
           "merger/lenskit/tests/test_repobrief_snapshot_cli.py"
@@ -335,13 +343,13 @@
           "evidence_paths": [
             "docs/architecture/repobrief-mcp-boundary.md",
             "docs/architecture/repobrief.md",
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
             "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
             "merger/lenskit/cli/cmd_repobrief.py",
             "docs/architecture/repobrief-agent-workbench-boundary.md",
             "merger/lenskit/core/repobrief_readonly_adapter.py",
             "docs/architecture/repobrief-agent-optimization-triage.md",
-            "docs/proofs/repobrief-live-source-citation-address-v1-proof.md",
             "merger/lenskit/atlas/registry.py",
             "merger/lenskit/core/repobrief_access.py",
             "merger/lenskit/tests/test_repobrief_snapshot_cli.py"
@@ -400,8 +408,8 @@
         "missing_paths": [],
         "missing_symbols": [],
         "observed_paths": [
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
-          "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
           "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
           "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
           "merger/lenskit/cli/cmd_repobrief.py",
@@ -440,8 +448,8 @@
             "default_workbench_promotion"
           ],
           "evidence_paths": [
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
-            "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
             "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
             "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
             "merger/lenskit/cli/cmd_repobrief.py",
@@ -506,6 +514,7 @@
         "missing_symbols": [],
         "observed_paths": [
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
           "merger/lenskit/core/agent_reading_pack.py",
           "merger/lenskit/cli/cmd_repobrief.py",
           "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
@@ -515,7 +524,7 @@
         "observed_symbols": [
           "search_symbol_index"
         ],
-        "path_mrr_at_k": 0.16666666666666666,
+        "path_mrr_at_k": 0.14285714285714285,
         "path_recall": 1.0,
         "query_guardrails_visible": true,
         "query_status": "available",
@@ -534,6 +543,7 @@
           ],
           "evidence_paths": [
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
             "merger/lenskit/core/agent_reading_pack.py",
             "merger/lenskit/cli/cmd_repobrief.py",
             "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
@@ -589,17 +599,18 @@
         "missing_symbols": [],
         "observed_paths": [
           "docs/architecture/repobrief-mcp-boundary.md",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
           "merger/lenskit/tests/test_repobrief_mcp_boundary_doc.py",
+          "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
           "docs/contracts/repobrief-readonly-adapter-compatibility.v1.json",
           "docs/architecture/repobrief-agent-optimization-triage.md",
-          "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
           "merger/lenskit/core/repobrief_mcp_resources.py"
         ],
         "observed_symbols": [
           "list_mcp_resources"
         ],
-        "path_mrr_at_k": 0.14285714285714285,
+        "path_mrr_at_k": 0.125,
         "path_recall": 1.0,
         "query_guardrails_visible": true,
         "query_status": "available",
@@ -618,11 +629,12 @@
           ],
           "evidence_paths": [
             "docs/architecture/repobrief-mcp-boundary.md",
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
             "merger/lenskit/tests/test_repobrief_mcp_boundary_doc.py",
+            "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
             "docs/contracts/repobrief-readonly-adapter-compatibility.v1.json",
             "docs/architecture/repobrief-agent-optimization-triage.md",
-            "docs/architecture/repobrief-readonly-adapter-no-mirror.md",
             "merger/lenskit/core/repobrief_mcp_resources.py"
           ],
           "evidence_symbols": [
@@ -674,12 +686,13 @@
         "missing_symbols": [],
         "observed_paths": [
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
           "merger/lenskit/core/repobrief_latest_complete.py"
         ],
         "observed_symbols": [
           "evaluate_registry_freshness"
         ],
-        "path_mrr_at_k": 0.5,
+        "path_mrr_at_k": 0.3333333333333333,
         "path_recall": 1.0,
         "query_guardrails_visible": true,
         "query_status": "available",
@@ -698,6 +711,7 @@
           ],
           "evidence_paths": [
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json",
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
             "merger/lenskit/core/repobrief_latest_complete.py"
           ],
           "evidence_symbols": [
@@ -747,6 +761,7 @@
         "missing_symbols": [],
         "observed_paths": [
           "scripts/release/check_identity_distribution_decisions.py",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
           "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json"
         ],
         "observed_symbols": [
@@ -772,6 +787,7 @@
           ],
           "evidence_paths": [
             "scripts/release/check_identity_distribution_decisions.py",
+            "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2036Z.json",
             "docs/retrieval/repobrief_workbench_usefulness_goldset.v1.json"
           ],
           "evidence_symbols": [
@@ -793,15 +809,15 @@
   ],
   "scope": "deterministic_navigation_utility",
   "source": {
-    "bundle_created_at": "2026-07-12T20:36:26Z",
-    "bundle_manifest_name": "lenskit-workbench-tech-7801ecc0-max-260712-2036_merge.bundle.manifest.json",
-    "bundle_manifest_sha256": "f71dabc733670e847570c6bda99e87f83be9f8f575c0eb42b7f6e5d30667e765",
-    "bundle_run_id": "lenskit-workbench-tech-7801ecc0-full-max-260712-2036",
+    "bundle_created_at": "2026-07-12T20:53:54Z",
+    "bundle_manifest_name": "lenskit-workbench-tech-052c1dcd-max-260712-2053_merge.bundle.manifest.json",
+    "bundle_manifest_sha256": "fb6250d5ab39bb0c8fee48067ab3cd67c3eab535745385c28c2cef28f9645df2",
+    "bundle_run_id": "lenskit-workbench-tech-052c1dcd-full-max-260712-2053",
     "repositories": [
       {
-        "git_commit": "7801ecc0e13cad70e041556e7ac08c1c7a9daf29",
+        "git_commit": "052c1dcd1729d5c22bc7e4c298f7b0d7fa0cddfc",
         "git_dirty": false,
-        "name": "lenskit-workbench-tech-7801ecc0",
+        "name": "lenskit-workbench-tech-052c1dcd",
         "provenance_status": "present",
         "repo_remote": "git@github.com:heimgewebe/lenskit.git"
       }
