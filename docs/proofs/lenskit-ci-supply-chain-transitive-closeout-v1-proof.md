@@ -102,11 +102,30 @@ Zwei bytegleiche Release-Kandidaten                     pass
 Remote-Git-Objekte gegen Hash und Inventar              pass
 ```
 
-## Noch offen vor dem Taskabschluss
+## Runtime- und Main-Abschluss
 
-Der technische Commit ist fokussiert und breit lokal geprüft. Der Task bleibt
-offen, bis der Lenskit-PR am endgültigen Head und der anschließende Main-Nachlauf
-erfolgreich belegt sind.
+Lenskit PR #985 wurde am geprüften Head `81adf4ba…` gemergt. Der Merge
+`ba09d897ee38fba90a5ad8100291a8f50df1cfd3` bestand 22 Main-Prüfungen,
+darunter den WGX-Guard, dessen Observatory-Unterworkflow, den rekursiven
+Caller-Vertrag, Pytest, Browser, CodeQL und den Release-Kandidaten.
+
+Ein unsichtbarer Kommentar ohne Kommando auf PR #986 erzeugte anschließend
+Workflow-Lauf `29202069888`. Das Laufprotokoll belegt:
+
+- geladen wurde exakt
+  `heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@75ab0d5a5a90b79f2cd527d1b9a263d0f1a24043`;
+- `create-github-app-token` und `github-script` wurden an den aufgezeichneten
+  Commit-SHAs geladen;
+- der Kommentar wurde als `alexdermohr`, Typ `User`, Rolle `MEMBER` erkannt;
+- der Parser meldete `No Heimgewebe command found`;
+- es entstand weder ein Repository-Dispatch noch eine Antwort oder Reaktion;
+- das erzeugte App-Token wurde widerrufen;
+- der Job endete erfolgreich.
+
+Damit ist der abgegrenzte Task runtime-verifiziert abgeschlossen. Der Lauf
+meldete zusätzlich eine nicht blockierende Deprecation-Warnung für den
+`app-id`-Input von `create-github-app-token`; deren Migration ist kein Teil
+dieses Lenskit-Tasks.
 
 ## Nichtaussagen
 

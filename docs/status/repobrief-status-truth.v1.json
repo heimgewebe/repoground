@@ -34,15 +34,15 @@
     },
     {
       "limitations": [
-        "PR #985 and all 22 checks on merge ba09d897ee38fba90a5ad8100291a8f50df1cfd3 pass.",
-        "The pinned issue-comment dispatcher still awaits a real no-command runtime smoke and final closeout verification.",
-        "Pinning does not establish dependency safety, automatic discovery outside the recorded graph, complete workflow correctness, test completeness or readiness."
+        "metarepo PRs #646/#647, WGX PR #639 and Lenskit PR #985 are merged; all 22 checks on Lenskit merge ba09d897ee38fba90a5ad8100291a8f50df1cfd3 pass.",
+        "Issue-comment run 29202069888 loaded the pinned metarepo workflow and pinned Actions, found no command and completed before repository_dispatch, reply or reaction writes.",
+        "The smoke exposed a non-failing app-id deprecation warning; this scoped task does not establish dependency safety, automatic discovery outside the recorded graph, complete workflow correctness, test completeness or readiness."
       ],
       "promotion": "not_applicable",
       "scope": "recursive Actions graph reached through the two pinned upstream reusable workflow callers",
-      "status": "open",
+      "status": "done",
       "task_id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
-      "verification": "main_verified"
+      "verification": "runtime_verified"
     },
     {
       "limitations": [
@@ -130,7 +130,6 @@
     "TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001",
     "TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001",
     "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
-    "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
     "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
     "TASK-LENSKIT-SEMANTIC-LOCK-001",
     "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001"
@@ -202,17 +201,17 @@
       "The internal deterministic release-candidate path is main-verified; public distribution remains blocked pending an owner-approved license decision.",
       "The optional semantic/Torch dependency closure is not hash-locked and remains outside the candidate contract.",
       "Graph maintainability ratchets remain open.",
-      "The reached upstream reusable-workflow graph is recursively commit-pinned, locally hash-verified and broadly validated; final Lenskit PR/main verification remain."
+      "The reached upstream reusable-workflow graph is recursively commit-pinned, hash-verified, main-verified and runtime-verified for the bounded no-command caller path."
     ],
     "release_readiness": "not_established",
     "status": "mixed"
   },
   "task_summary": {
     "by_status": {
-      "open": 7,
+      "open": 6,
       "in_progress": 0,
       "partial": 0,
-      "done": 85
+      "done": 86
     },
     "total": 92
   },

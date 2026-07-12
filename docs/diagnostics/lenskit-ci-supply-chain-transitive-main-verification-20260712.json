@@ -1,6 +1,6 @@
 {
   "kind": "lenskit.ci_supply_chain_recursive_main_verification",
-  "version": "1.0",
+  "version": "1.1",
   "repository": "heimgewebe/lenskit",
   "observed_on": "2026-07-12",
   "task_id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
@@ -148,23 +148,51 @@
   },
   "runtime_smoke": {
     "surface": "issue_comment -> metarepo heimgewebe-command-dispatch reusable workflow",
-    "pull_request": null,
-    "comment_id": null,
-    "workflow_run_id": null,
-    "workflow_run_url": null,
-    "conclusion": null,
-    "status": "pending"
+    "pull_request": 986,
+    "comment_id": 4952101073,
+    "comment_url": "https://github.com/heimgewebe/lenskit/pull/986#issuecomment-4952101073",
+    "comment_created_at": "2026-07-12T17:28:52Z",
+    "commenter": {
+      "login": "alexdermohr",
+      "type": "User",
+      "author_association": "MEMBER"
+    },
+    "comment_body_marker": "lenskit-recursive-pin-runtime-smoke-20260712-1725",
+    "workflow_run_id": 29202069888,
+    "workflow_run_url": "https://github.com/heimgewebe/lenskit/actions/runs/29202069888",
+    "job_id": 86675031715,
+    "job_name": "dispatch / Parse and dispatch Heimgewebe command",
+    "head_sha": "ba09d897ee38fba90a5ad8100291a8f50df1cfd3",
+    "called_workflow": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@75ab0d5a5a90b79f2cd527d1b9a263d0f1a24043",
+    "downloaded_actions": [
+      "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+      "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+    ],
+    "parser_outcome": "No Heimgewebe command found (tolerant pattern did not match).",
+    "repository_dispatch_emitted": false,
+    "acknowledgement_reply_created": false,
+    "reaction_created": false,
+    "app_token_revoked": true,
+    "warning": "create-github-app-token reported that input app-id is deprecated in favor of client-id; this did not fail the bounded smoke and is not remediated by this Lenskit task.",
+    "conclusion": "success",
+    "status": "pass"
   },
-  "pending_verification": [
-    "A non-command issue comment must invoke the pinned metarepo dispatcher from the default branch and complete safely.",
-    "The final closeout head and post-merge main checks remain to be verified."
-  ],
+  "pending_verification": [],
   "does_not_establish": [
     "absence of malicious or vulnerable code in pinned dependencies",
     "correct handling of every supported command and permission combination",
     "validity or future rotation correctness of GitHub App secrets",
     "automatic discovery of dependencies outside the recorded immutable graph",
+    "complete least privilege beyond the audited callers and workflows",
     "test completeness, regression absence, product readiness or release readiness"
   ],
-  "status": "main_verified_runtime_pending"
+  "status": "runtime_verified",
+  "closeout": {
+    "pull_request": 986,
+    "initial_evidence_commit": "8491acb6d3b29d396a4579366560dca4edb5ed8d",
+    "state_commit": null,
+    "state_tree": null,
+    "binding_commit": null,
+    "status": "state_commit_pending"
+  }
 }

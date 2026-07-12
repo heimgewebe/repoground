@@ -1504,8 +1504,8 @@
     {
       "id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
       "title": "Lenskit Transitive Reusable Workflow Pinning",
-      "status": "open",
-      "description": "The recursively pinned workflow graph is merged and all 22 checks on Lenskit main pass. A real issue-comment no-command smoke for the pinned metarepo dispatcher remains before final closure.",
+      "status": "done",
+      "description": "The reached reusable-workflow graph is recursively commit-pinned, hash-bound and runtime-verified. metarepo PRs #646/#647, WGX PR #639 and Lenskit PR #985 are merged; all 22 checks on Lenskit main pass; a real no-command issue-comment invoked the pinned dispatcher and exited before any repository dispatch or acknowledgement write.",
       "evidence": [
         "docs/diagnostics/lenskit-ci-supply-chain-transitive-closeout-20260712.json",
         "docs/proofs/lenskit-ci-supply-chain-transitive-closeout-v1-proof.md",
@@ -1517,9 +1517,8 @@
         "docs/diagnostics/lenskit-ci-supply-chain-transitive-main-verification-20260712.json"
       ],
       "missing_evidence": [
-        "The issue-comment caller has not yet completed its real no-command runtime smoke.",
-        "The final closeout pull-request and post-merge main checks are not yet recorded.",
-        "Pinning does not establish dependency safety, workflow correctness for every path, test completeness, regression absence, product readiness or release readiness."
+        "This scoped completion does not establish malicious-code absence, correctness of every command path, automatic discovery outside the recorded graph, test completeness, regression absence, product readiness or release readiness.",
+        "The dispatcher smoke emitted a non-failing deprecation warning for create-github-app-token input app-id; migration to client-id is outside this Lenskit task."
       ]
     },
     {
