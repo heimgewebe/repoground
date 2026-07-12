@@ -34,15 +34,15 @@
     },
     {
       "limitations": [
-        "metarepo PRs #646/#647 and WGX PR #639 are merged; three workflow files match the recorded SHA-256 values and recursive uses inventories.",
-        "Contract v1.1 closes every recorded reusable-workflow edge and broad local validation passes; final Lenskit PR/main verification remain.",
-        "Commit pinning does not establish dependency safety, automatic discovery outside the recorded graph, complete workflow correctness, test completeness or readiness."
+        "PR #985 and all 22 checks on merge ba09d897ee38fba90a5ad8100291a8f50df1cfd3 pass.",
+        "The pinned issue-comment dispatcher still awaits a real no-command runtime smoke and final closeout verification.",
+        "Pinning does not establish dependency safety, automatic discovery outside the recorded graph, complete workflow correctness, test completeness or readiness."
       ],
       "promotion": "not_applicable",
       "scope": "recursive Actions graph reached through the two pinned upstream reusable workflow callers",
       "status": "open",
       "task_id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
-      "verification": "local_validated"
+      "verification": "main_verified"
     },
     {
       "limitations": [

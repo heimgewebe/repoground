@@ -1,0 +1,170 @@
+{
+  "kind": "lenskit.ci_supply_chain_recursive_main_verification",
+  "version": "1.0",
+  "repository": "heimgewebe/lenskit",
+  "observed_on": "2026-07-12",
+  "task_id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
+  "implementation": {
+    "technical_commit": "f2d059dd581f1197549c07bea0d7e026689bac2c",
+    "evidence_commit": "81adf4ba7c9dff0ff211626eb224c574d9628a37"
+  },
+  "pull_request": {
+    "number": 985,
+    "url": "https://github.com/heimgewebe/lenskit/pull/985",
+    "head": "81adf4ba7c9dff0ff211626eb224c574d9628a37",
+    "base": "5929d595c4786cf877bea3663a6b1cb9f4de9c82",
+    "merge_commit": "ba09d897ee38fba90a5ad8100291a8f50df1cfd3",
+    "merged_at": "2026-07-12T17:23:33Z",
+    "check_count": 29,
+    "failed_check_count": 0,
+    "status": "pass"
+  },
+  "main_verification": {
+    "commit": "ba09d897ee38fba90a5ad8100291a8f50df1cfd3",
+    "check_count": 22,
+    "failed_check_count": 0,
+    "checks": [
+      {
+        "name": "Analyze (javascript-typescript)",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905234/job/86674604064"
+      },
+      {
+        "name": "Analyze (python)",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905234/job/86674604060"
+      },
+      {
+        "name": "Lenskit CodeQL policy (python)",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905744/job/86674603333"
+      },
+      {
+        "name": "Security: enforce static pin for contracts reusable workflow",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905903/job/86674603884"
+      },
+      {
+        "name": "Security: guard deletion policy (contracts)",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905903/job/86674603869"
+      },
+      {
+        "name": "Security: immutable GitHub Actions pins",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905903/job/86674603870"
+      },
+      {
+        "name": "Validate fixtures via reusable workflow / AJV validate fixtures vs. contracts schemas",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905903/job/86674613994"
+      },
+      {
+        "name": "ai-context-guard",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201906029/job/86674620386"
+      },
+      {
+        "name": "browser-tests",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905762/job/86674603581"
+      },
+      {
+        "name": "doc-freshness",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905733/job/86674603259"
+      },
+      {
+        "name": "graph-bundle-sources",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905741/job/86674603281"
+      },
+      {
+        "name": "graph-model",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905721/job/86674603190"
+      },
+      {
+        "name": "guard / validate-observatory / validate",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201906043/job/86674604197"
+      },
+      {
+        "name": "guard / wgx-guard",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201906043/job/86674604133"
+      },
+      {
+        "name": "planning-registration",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905756/job/86674603376"
+      },
+      {
+        "name": "pytest-full",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905762/job/86674603583"
+      },
+      {
+        "name": "release-candidate",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905762/job/86674603562"
+      },
+      {
+        "name": "repo-root",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201906029/job/86674603997"
+      },
+      {
+        "name": "ruff",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905773/job/86674603445"
+      },
+      {
+        "name": "templates",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201906029/job/86674603976"
+      },
+      {
+        "name": "validate-merge-meta",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905739/job/86674603328"
+      },
+      {
+        "name": "webui-js-tests",
+        "conclusion": "success",
+        "details_url": "https://github.com/heimgewebe/lenskit/actions/runs/29201905762/job/86674603571"
+      }
+    ],
+    "required_surfaces": {
+      "recursive_action_pin_contract": "pass",
+      "wgx_guard": "pass",
+      "observatory_validation": "pass",
+      "pytest_full": "pass",
+      "browser_tests": "pass",
+      "codeql": "pass",
+      "release_candidate": "pass"
+    },
+    "status": "pass"
+  },
+  "runtime_smoke": {
+    "surface": "issue_comment -> metarepo heimgewebe-command-dispatch reusable workflow",
+    "pull_request": null,
+    "comment_id": null,
+    "workflow_run_id": null,
+    "workflow_run_url": null,
+    "conclusion": null,
+    "status": "pending"
+  },
+  "pending_verification": [
+    "A non-command issue comment must invoke the pinned metarepo dispatcher from the default branch and complete safely.",
+    "The final closeout head and post-merge main checks remain to be verified."
+  ],
+  "does_not_establish": [
+    "absence of malicious or vulnerable code in pinned dependencies",
+    "correct handling of every supported command and permission combination",
+    "validity or future rotation correctness of GitHub App secrets",
+    "automatic discovery of dependencies outside the recorded immutable graph",
+    "test completeness, regression absence, product readiness or release readiness"
+  ],
+  "status": "main_verified_runtime_pending"
+}
