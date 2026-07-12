@@ -73,6 +73,58 @@
       },
       "additionalProperties": true
     },
+    "eligibility": {
+      "type": "object",
+      "required": ["status", "profile", "manifest_name", "generated_at", "checks", "errors"],
+      "properties": {
+        "status": {"const": "pass"},
+        "profile": {"type": "string", "minLength": 1},
+        "manifest_name": {"type": "string", "minLength": 1},
+        "generated_at": {"type": "string", "minLength": 1},
+        "checks": {"type": "object"},
+        "errors": {"type": "array", "maxItems": 0}
+      },
+      "additionalProperties": true
+    },
+    "selection": {
+      "type": "object",
+      "required": ["basis", "generated_at", "run_id", "manifest_sha256", "source_lane", "order_key"],
+      "properties": {
+        "basis": {"const": "generated_at_fail_closed_ties_v1"},
+        "generated_at": {"type": "string", "minLength": 1},
+        "run_id": {"type": ["string", "null"]},
+        "manifest_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "source_lane": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "items": [{"type": "string"}, {"type": "string"}],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "order_key": {
+          "type": "array",
+          "items": [{"type": "string"}],
+          "minItems": 1,
+          "maxItems": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "publication": {
+      "type": "object",
+      "required": ["serialization", "atomic_replace", "file_fsync", "directory_fsync", "readback_verified"],
+      "properties": {
+        "serialization": {"const": "advisory_file_lock"},
+        "atomic_replace": {"const": true},
+        "file_fsync": {"const": true},
+        "directory_fsync": {"const": true},
+        "readback_verified": {"const": true}
+      },
+      "additionalProperties": false
+    },
     "mutation_boundary": {
       "type": "object",
       "required": ["writes", "does_not_mutate", "read_paths_do_not_refresh", "hidden_refresh_allowed"],
