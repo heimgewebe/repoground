@@ -1,12 +1,12 @@
 {
   "kind": "lenskit.reusable_workflow_caller_contracts",
-  "version": "1.0",
+  "version": "1.1",
   "contracts": [
     {
       "caller_path": ".github/workflows/pr-heimgewebe-commands.yml",
       "job": "dispatch",
-      "uses": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@10daa1c84469dce76e93cdc24c47c1dfc5e156d6",
-      "source_content_sha256": "7ff27d0834ccf764f94937771eaa0c60e5eaad4edafab6eba8e4b2ab27d44f18",
+      "uses": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@75ab0d5a5a90b79f2cd527d1b9a263d0f1a24043",
+      "source_content_sha256": "7914e34042f0cc55308f03dc43ad9ae1f2c5d7c083778f646ee1e12e5d4cd5f0",
       "required_permissions": {
         "contents": "read",
         "issues": "write",
@@ -19,24 +19,48 @@
       "required_if_fragments": [
         "github.event.issue.pull_request != null",
         "github.event.comment.user.type != 'Bot'"
-      ]
+      ],
+      "transitive_uses": [
+        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+      ],
+      "transitive_workflows": []
     },
     {
       "caller_path": ".github/workflows/wgx-guard.yml",
       "job": "guard",
-      "uses": "heimgewebe/wgx/.github/workflows/wgx-guard.yml@3d823f9d26be276eef97742335dee857a64e1715",
-      "source_content_sha256": "d184d82ab3dbc6d956a02b10b2645465bedcb6be2475bb3bee0a9f4aa091e82d",
+      "uses": "heimgewebe/wgx/.github/workflows/wgx-guard.yml@a7466bf2c3cb7fa3b261bfb2d008612abc0f85b1",
+      "source_content_sha256": "33784ef4748427adc0a183d44d118e445121ba91b3bc5f9d457b913bf292e19e",
       "required_permissions": {
         "contents": "read"
       },
       "required_secrets": [],
-      "required_if_fragments": []
+      "required_if_fragments": [],
+      "transitive_uses": [
+        "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+        "heimgewebe/metarepo/.github/workflows/reusable-validate-observatory.yml@dda0d036b3b4db935d3acbaa4c1b0fc76637cea9"
+      ],
+      "transitive_workflows": [
+        {
+          "uses": "heimgewebe/metarepo/.github/workflows/reusable-validate-observatory.yml@dda0d036b3b4db935d3acbaa4c1b0fc76637cea9",
+          "source_content_sha256": "e4b488f5b65e7bea50ea3c84979f162dd461965f782115d578b24bacdcc1eb15",
+          "transitive_uses": [
+            "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+            "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e"
+          ],
+          "transitive_workflows": []
+        }
+      ]
     }
   ],
   "does_not_establish": [
     "runtime success of the called reusable workflow",
     "least privilege inside the called reusable workflow",
     "validity of secrets or GitHub App installation state",
-    "transitive immutability of nested Actions"
+    "identity of remote workflow bytes unless each recorded source hash is independently rechecked",
+    "absence of malicious or vulnerable code in pinned direct or recursive dependencies",
+    "automatic discovery of remote workflow changes outside the recorded immutable commit graph"
   ]
 }

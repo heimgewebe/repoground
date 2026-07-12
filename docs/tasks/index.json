@@ -1505,16 +1505,20 @@
       "id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
       "title": "Lenskit Transitive Reusable Workflow Pinning",
       "status": "open",
-      "description": "Close the remaining runtime supply-chain gap by pinning the mutable nested Actions inside the metarepo command-dispatch and WGX guard reusable workflows at their upstream repositories, merging those upstream changes, advancing the Lenskit caller SHAs, and rerunning the direct and transitive inventory. Do not vendor a second copy of the reusable workflow logic into Lenskit.",
+      "description": "The reached reusable-workflow graph is recursively hash-bound: metarepo PRs #646/#647 and WGX PR #639 are merged, Lenskit advances both callers, and contract v1.1 requires an exact closure inventory for every nested reusable workflow. Focused and broad local validation are complete; final Lenskit PR/main evidence remain before closure.",
       "evidence": [
-        "docs/diagnostics/lenskit-ci-supply-chain-pins-20260711.json",
-        "docs/proofs/lenskit-ci-supply-chain-v1-proof.md",
+        "docs/diagnostics/lenskit-ci-supply-chain-transitive-closeout-20260712.json",
+        "docs/proofs/lenskit-ci-supply-chain-transitive-closeout-v1-proof.md",
         ".github/workflows/pr-heimgewebe-commands.yml",
-        ".github/workflows/wgx-guard.yml"
+        ".github/workflows/wgx-guard.yml",
+        ".github/reusable-workflow-contracts.json",
+        "scripts/ci/check_reusable_workflow_contracts.py",
+        "merger/lenskit/tests/test_reusable_workflow_contracts.py"
       ],
       "missing_evidence": [
-        "No merged upstream metarepo or WGX pinning change exists yet.",
-        "Lenskit callers still point to upstream commits whose nested Action refs include mutable major tags."
+        "Lenskit pull-request checks have not yet passed at the final head.",
+        "Post-merge Lenskit main checks and the final status closeout are not yet recorded.",
+        "Pinning does not establish dependency safety, workflow correctness for every path, test completeness, regression absence, product readiness or release readiness."
       ]
     },
     {
@@ -1557,7 +1561,7 @@
       ],
       "missing_evidence": [
         "The projection does not establish documentation completeness, semantic truth of every claim, complete evidence sufficiency for every task, product readiness or release readiness.",
-        "Canonical retrieval promotion, release packaging, graph maintainability and transitive upstream Action pinning remain separately tracked."
+        "Canonical retrieval promotion, graph maintainability, semantic locking, public licensing and the final recursive upstream Action PR/main verification remain separately tracked."
       ]
     },
     {

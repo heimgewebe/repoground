@@ -1,0 +1,197 @@
+{
+  "kind": "lenskit.ci_supply_chain_recursive_closeout",
+  "version": "1.1",
+  "repository": "heimgewebe/lenskit",
+  "observed_on": "2026-07-12",
+  "base_commit": "5929d595c4786cf877bea3663a6b1cb9f4de9c82",
+  "implementation_commit": "f2d059dd581f1197549c07bea0d7e026689bac2c",
+  "implementation_tree": "a76f3e21df6260b17ab0cfa240cf47a16b455233",
+  "critical_review_correction": {
+    "finding": "The first-level WGX inventory contained a pinned metarepo reusable workflow whose own checkout and setup-node references still used mutable v6 tags.",
+    "impact": "The earlier first-level-only evidence could not establish recursive immutability and was discarded before publication.",
+    "remediation": [
+      "metarepo PR #647 pinned the two inner Actions and added a CI ratchet.",
+      "WGX PR #639 advanced its reusable workflow call to the hardened metarepo merge.",
+      "Lenskit contract version 1.1 now requires a hash-bound closure entry for every recursively reached reusable workflow."
+    ],
+    "status": "corrected_before_lenskit_publication"
+  },
+  "upstream_merges": [
+    {
+      "repository": "heimgewebe/metarepo",
+      "pull_request": 646,
+      "pull_request_head": "866f7e1ead02aaf2e73d76747633ad6151c50771",
+      "merge_commit": "75ab0d5a5a90b79f2cd527d1b9a263d0f1a24043",
+      "merge_tree": "e9e93a657c0461b2bf6bae1fbe9ddb3de39aab85",
+      "merged_at": "2026-07-12T14:52:54Z",
+      "workflow_path": ".github/workflows/heimgewebe-command-dispatch.yml",
+      "workflow_content_sha256": "7914e34042f0cc55308f03dc43ad9ae1f2c5d7c083778f646ee1e12e5d4cd5f0",
+      "direct_uses": [
+        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3"
+      ],
+      "pull_request_checks": {
+        "success": 14,
+        "skipped": 0,
+        "failure": 0,
+        "pending": 0
+      },
+      "status": "pass"
+    },
+    {
+      "repository": "heimgewebe/metarepo",
+      "pull_request": 647,
+      "pull_request_head": "d61b60229b0bfff8265bf96d008473a07eba54f8",
+      "merge_commit": "dda0d036b3b4db935d3acbaa4c1b0fc76637cea9",
+      "merge_tree": "d792b0b74b217eb759c9072f5f915abae62aa07b",
+      "merged_at": "2026-07-12T16:48:51Z",
+      "workflow_path": ".github/workflows/reusable-validate-observatory.yml",
+      "workflow_content_sha256": "e4b488f5b65e7bea50ea3c84979f162dd461965f782115d578b24bacdcc1eb15",
+      "direct_uses": [
+        "actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10",
+        "actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e"
+      ],
+      "pull_request_checks": {
+        "success": 14,
+        "skipped": 1,
+        "failure": 0,
+        "pending": 0
+      },
+      "main_checks": {
+        "success": 11,
+        "skipped": 2,
+        "failure": 0,
+        "pending": 0
+      },
+      "status": "pass"
+    },
+    {
+      "repository": "heimgewebe/wgx",
+      "pull_request": 639,
+      "pull_request_head": "1cb667fee70e3e48968412535342f324849fc64a",
+      "merge_commit": "a7466bf2c3cb7fa3b261bfb2d008612abc0f85b1",
+      "merge_tree": "92e550b5222ae18233c05b387a176011aa0d295f",
+      "merged_at": "2026-07-12T17:01:51Z",
+      "workflow_path": ".github/workflows/wgx-guard.yml",
+      "workflow_content_sha256": "33784ef4748427adc0a183d44d118e445121ba91b3bc5f9d457b913bf292e19e",
+      "direct_uses": [
+        "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+        "heimgewebe/metarepo/.github/workflows/reusable-validate-observatory.yml@dda0d036b3b4db935d3acbaa4c1b0fc76637cea9"
+      ],
+      "pull_request_checks": {
+        "success": 20,
+        "skipped": 4,
+        "failure": 0,
+        "pending": 0
+      },
+      "main_checks": {
+        "success": 12,
+        "skipped": 0,
+        "failure": 0,
+        "pending": 0
+      },
+      "status": "pass"
+    }
+  ],
+  "lenskit_caller_advances": [
+    {
+      "path": ".github/workflows/pr-heimgewebe-commands.yml",
+      "before": "10daa1c84469dce76e93cdc24c47c1dfc5e156d6",
+      "after": "75ab0d5a5a90b79f2cd527d1b9a263d0f1a24043",
+      "source_content_sha256": "7914e34042f0cc55308f03dc43ad9ae1f2c5d7c083778f646ee1e12e5d4cd5f0"
+    },
+    {
+      "path": ".github/workflows/wgx-guard.yml",
+      "before": "3d823f9d26be276eef97742335dee857a64e1715",
+      "after": "a7466bf2c3cb7fa3b261bfb2d008612abc0f85b1",
+      "source_content_sha256": "33784ef4748427adc0a183d44d118e445121ba91b3bc5f9d457b913bf292e19e"
+    }
+  ],
+  "recursive_graph": {
+    "workflow_node_count": 3,
+    "maximum_remote_depth_from_lenskit_caller": 2,
+    "first_level_external_uses_count": 6,
+    "second_level_external_uses_count": 2,
+    "total_recorded_external_uses_count": 8,
+    "recorded_reusable_workflow_edges_count": 1,
+    "mutable_reference_count": 0,
+    "remote_content_hashes_rechecked": true,
+    "remote_inventories_match_contract": true,
+    "unclosed_reusable_workflow_edge_count": 0,
+    "status": "pass"
+  },
+  "inventory": {
+    "direct_lenskit_uses_count": 62,
+    "direct_lenskit_mutable_reference_count": 0,
+    "recursive_contract_version": "1.1",
+    "recursive_contract_finding_count": 0,
+    "status": "pass"
+  },
+  "local_validation": {
+    "focused_contract_and_pin_tests": {
+      "passed": 19,
+      "failed": 0
+    },
+    "github_actions_pin_check": "pass",
+    "recursive_reusable_workflow_contract_check": "pass",
+    "recursive_remote_git_object_recheck": "pass",
+    "workflow_yaml_parse": {
+      "files": 21,
+      "status": "pass"
+    },
+    "pytest_full": {
+      "passed": 3757,
+      "skipped": 1,
+      "deselected": 13,
+      "failed": 0,
+      "status": "pass"
+    },
+    "ruff": "pass",
+    "webui_javascript_tests": {
+      "files": 5,
+      "status": "pass"
+    },
+    "release_candidate_determinism": {
+      "source_commit": "f2d059dd581f1197549c07bea0d7e026689bac2c",
+      "source_tree": "a76f3e21df6260b17ab0cfa240cf47a16b455233",
+      "candidate_id": "2.4.0-rc.1-gf2d059dd581f",
+      "archive_sha256": "30e686f06dc5b0f28da98e661600046553afab172ebf7ca36ddaefc901b171eb",
+      "manifest_sha256": "b6d82b5ff98b35672500c68ab66c1ec67ef4238a199e7c419b1ae53075e16a94",
+      "tracked_entry_count": 934,
+      "member_count": 935,
+      "independent_builds": 2,
+      "byte_identical": true,
+      "verified": true,
+      "distribution_status": "blocked_without_separate_written_permission",
+      "status": "pass"
+    },
+    "git_diff_check": "pass",
+    "status_truth_check": {
+      "tasks": 92,
+      "board_rows": 92,
+      "audit_packages": 8,
+      "findings": 0,
+      "status": "pass"
+    },
+    "planning_registration_check": {
+      "findings": 0,
+      "status": "pass"
+    }
+  },
+  "pending_verification": [
+    "Lenskit pull-request checks at the final head.",
+    "Post-merge Lenskit main checks and final task closeout."
+  ],
+  "does_not_establish": [
+    "absence of malicious or vulnerable code in pinned dependencies",
+    "workflow correctness for every event, command and permission combination",
+    "validity or future rotation correctness of GitHub App secrets",
+    "future compatibility or automatic safety of dependency updates",
+    "complete least privilege outside the audited callers and workflows",
+    "automatic discovery of dependencies outside the recorded immutable workflow graph",
+    "test completeness, regression absence, product readiness or release readiness"
+  ],
+  "status": "local_validated"
+}

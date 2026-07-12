@@ -24,13 +24,25 @@
     },
     {
       "limitations": [
-        "Nested mutable Action refs remain in two pinned upstream reusable workflows under a separate open task."
+        "Direct Lenskit references remain runtime-verified; the separate transitive task is locally validated and still awaits final Lenskit PR/main verification."
       ],
       "promotion": "not_applicable",
       "scope": "direct Lenskit-owned workflow references and caller contract",
       "status": "done",
       "task_id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-001",
       "verification": "runtime_verified"
+    },
+    {
+      "limitations": [
+        "metarepo PRs #646/#647 and WGX PR #639 are merged; three workflow files match the recorded SHA-256 values and recursive uses inventories.",
+        "Contract v1.1 closes every recorded reusable-workflow edge and broad local validation passes; final Lenskit PR/main verification remain.",
+        "Commit pinning does not establish dependency safety, automatic discovery outside the recorded graph, complete workflow correctness, test completeness or readiness."
+      ],
+      "promotion": "not_applicable",
+      "scope": "recursive Actions graph reached through the two pinned upstream reusable workflow callers",
+      "status": "open",
+      "task_id": "TASK-LENSKIT-AUDIT-CI-SUPPLY-CHAIN-UPSTREAM-TRANSITIVE-001",
+      "verification": "local_validated"
     },
     {
       "limitations": [
@@ -113,7 +125,7 @@
     "pass_means": "Only the checks declared by that specific health or CI report passed for the observed artifact or commit."
   },
   "kind": "lenskit.repobrief_status_truth",
-  "observed_on": "2026-07-11",
+  "observed_on": "2026-07-12",
   "open_followups": [
     "TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001",
     "TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001",
@@ -187,10 +199,10 @@
     "reasons": [
       "The final control plane and browser gate are runtime-verified for their bounded scopes.",
       "Canonical review retrieval remains measured below its acceptance thresholds and default promotion is blocked.",
-      "An internal deterministic release-candidate path is locally implemented; PR/main/ruleset verification remains open and public distribution stays blocked.",
+      "The internal deterministic release-candidate path is main-verified; public distribution remains blocked pending an owner-approved license decision.",
       "The optional semantic/Torch dependency closure is not hash-locked and remains outside the candidate contract.",
       "Graph maintainability ratchets remain open.",
-      "Transitive mutable Actions remain inside two pinned upstream reusable workflows."
+      "The reached upstream reusable-workflow graph is recursively commit-pinned, locally hash-verified and broadly validated; final Lenskit PR/main verification remain."
     ],
     "release_readiness": "not_established",
     "status": "mixed"
