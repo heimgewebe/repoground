@@ -1,0 +1,121 @@
+name: temporary PR 1000 diagnostics
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  harden-tests:
+    if: github.head_ref == 'feat/repobrief-agent-benchmark-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.12"
+      - name: Harden benchmark tests deterministically
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("merger/lenskit/tests/test_agent_benchmark.py")
+          text = path.read_text(encoding="utf-8")
+          old_count = text.count("repetitions=1")
+          if old_count:
+              text = text.replace("repetitions=1", "repetitions=2")
+
+          marker = "def test_pair_plan_rejects_non_frozen_repetition_count()"
+          addition = r'''
+
+
+def test_pair_plan_rejects_non_frozen_repetition_count() -> None:
+    taskset = _taskset()
+    with pytest.raises(AgentBenchmarkError, match="requires exactly 2 repetitions"):
+        build_run_requests(
+            taskset,
+            runner=RUNNER,
+            manifest_bindings=BINDINGS,
+            repetitions=1,
+        )
+
+
+def test_entire_missing_pair_remains_visible_and_invalid() -> None:
+    taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.5)
+    missing_pair = requests[0]["pair_id"]
+    filtered_requests = [request for request in requests if request["pair_id"] != missing_pair]
+    valid_request_ids = {request["request_id"] for request in filtered_requests}
+    filtered_receipts = [
+        receipt for receipt in receipts if receipt["request_id"] in valid_request_ids
+    ]
+    result = evaluate_paired_runs(
+        taskset,
+        filtered_requests,
+        filtered_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    assert len(result["cases"]) == 48
+    assert result["run_count"] == 96
+    assert result["invalid_run_count"] >= 2
+    assert result["decision"]["status"] == "insufficient_evidence"
+
+
+def test_request_manipulation_invalidates_matching_receipt() -> None:
+    taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.5)
+    mutated_requests = copy.deepcopy(requests)
+    target = mutated_requests[0]
+    target["prompt"] = "post-hoc prompt"
+    cases = _cases(taskset)
+    receipt_by_id = {receipt["request_id"]: receipt for receipt in receipts}
+    receipt_by_id[target["request_id"]] = _receipt(
+        target,
+        cases[target["case_id"]],
+    )
+    result = evaluate_paired_runs(
+        taskset,
+        mutated_requests,
+        list(receipt_by_id.values()),
+        measurement_scope="real_paired_agent_runs",
+    )
+    affected = next(
+        item
+        for item in result["cases"]
+        if item["case_id"] == target["case_id"]
+        and item["repetition"] == target["repetition"]
+    )
+    condition_score = affected[target["condition"]]
+    assert condition_score["valid"] is False
+    assert "request prompt does not match frozen case" in condition_score["invalid_reasons"]
+    assert result["decision"]["status"] == "insufficient_evidence"
+'''
+          if marker not in text:
+              text = text.rstrip() + addition + "\n"
+          if text.count(marker) != 1:
+              raise SystemExit("expected exactly one repetition-contract test")
+          if text.count("def test_entire_missing_pair_remains_visible_and_invalid()") != 1:
+              raise SystemExit("expected exactly one missing-pair test")
+          if text.count("def test_request_manipulation_invalidates_matching_receipt()") != 1:
+              raise SystemExit("expected exactly one request-integrity test")
+          path.write_text(text, encoding="utf-8")
+          print(f"replaced {old_count} legacy one-repetition calls")
+          PY
+      - name: Commit test hardening when changed
+        shell: bash
+        run: |
+          if git diff --quiet -- merger/lenskit/tests/test_agent_benchmark.py; then
+            echo "tests already hardened"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add merger/lenskit/tests/test_agent_benchmark.py
+          git commit -m "test(repobrief): enforce frozen benchmark integrity"
+          git push origin HEAD:${{ github.head_ref }}
