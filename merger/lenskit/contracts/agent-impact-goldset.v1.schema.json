@@ -91,6 +91,11 @@
       ],
       "type": "string"
     },
+    "minimum_context_path_reduction_at_equal_or_better_recall": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
     "minimum_target_recall_advantage": {
       "maximum": 1,
       "minimum": 0,
@@ -107,6 +112,7 @@
     "id",
     "measurement_scope",
     "minimum_target_recall_advantage",
+    "minimum_context_path_reduction_at_equal_or_better_recall",
     "cases",
     "does_not_establish"
   ],
