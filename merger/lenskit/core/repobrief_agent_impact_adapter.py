@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from merger.lenskit.core.agent_impact_context import build_agent_impact_context
+from merger.lenskit.core.agent_impact_refinement import (
+    refine_agent_impact_context,
+)
 from merger.lenskit.core.repobrief_readonly_adapter import (
     RepoBriefReadonlyAdapter,
     RepoBriefReadonlyAdapterError,
@@ -101,7 +104,9 @@ def _core_json_status(role: str, response: dict[str, Any]) -> dict[str, Any]:
         document.get("kind") == expected_kind
         and document.get("version") == "1.0"
     )
-    valid_arrays = all(isinstance(document.get(field), list) for field in array_fields)
+    valid_arrays = all(
+        isinstance(document.get(field), list) for field in array_fields
+    )
     if not valid_identity or not valid_arrays:
         status.update(
             {
@@ -208,10 +213,11 @@ class RepoBriefAgentImpactAdapter(RepoBriefReadonlyAdapter):
         sources = self._impact_sources(registration.snapshot_id)
         cards, card_errors = _jsonl_documents(sources.cards)
         query = _target_query(target_path, target_symbol, changed_paths)
+        item_limit = _query_limit(max_items)
         query_response = self._impact_query(
             registration.snapshot_id,
             query=query,
-            max_items=max_items,
+            max_items=item_limit,
             include_query_context=include_query_context,
         )
         result = build_agent_impact_context(
@@ -226,6 +232,11 @@ class RepoBriefAgentImpactAdapter(RepoBriefReadonlyAdapter):
             relation_cards=cards,
             query_context=query_response,
             source_statuses=self._source_statuses(sources, query_response),
+        )
+        result = refine_agent_impact_context(
+            result,
+            query_response,
+            max_items=item_limit,
         )
         result.update(
             {
