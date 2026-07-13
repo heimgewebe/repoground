@@ -1,9 +1,8 @@
 name: temporary PR 1000 final review export
 
 on:
-  push:
-    branches:
-      - feat/repobrief-agent-benchmark-v1
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read
