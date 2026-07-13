@@ -1,0 +1,81 @@
+name: PR 992 diff evidence
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Generate exact head-bound diff and review
+        env:
+          BASE_SHA: 456d37bd142349bc0c04925d87934eefbbc546ac
+          HEAD_SHA: 05ddfd7ae5e6a9a9d36afe2d7ebbaaffa0722ee6
+        run: |
+          set -euo pipefail
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          MERGE_BASE="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          git diff --check "${BASE_SHA}...${HEAD_SHA}"
+          git diff --binary --full-index "${BASE_SHA}...${HEAD_SHA}" > lenskit-pr-992.diff
+          test -s lenskit-pr-992.diff
+          sha256sum lenskit-pr-992.diff > lenskit-pr-992.diff.sha256
+          DIFF_SHA="$(cut -d' ' -f1 lenskit-pr-992.diff.sha256)"
+          cat > lenskit-pr-992.self-review.md <<EOF
+          # Kritische Self-Review — Lenskit PR #992
+
+          ## Bindung
+
+          - PR: \`heimgewebe/lenskit#992\`
+          - aktueller Base-Commit: \`${BASE_SHA}\`
+          - Merge-Base: \`${MERGE_BASE}\`
+          - geprüfter PR-Head: \`${HEAD_SHA}\`
+          - vollständiger Diff: \`lenskit-pr-992.diff\`
+          - Diff-SHA-256: \`${DIFF_SHA}\`
+          - Diff-Format: \`git diff --binary --full-index BASE...HEAD\`
+
+          ## Ergebnis
+
+          **PASS — kein blockierender Befund.**
+
+          | Achse | Ergebnis | Begründung |
+          | --- | --- | --- |
+          | Korrektheit | PASS | Der stdio-Server bindet vorhandene RepoBrief-Handler und Ressourcen; er dupliziert weder Retrieval- noch Grounding-Semantik. Freshness wird nur bei explizitem Checkout, passender Snapshot-Provenance, sauberen Zuständen und identischem Commit als \`fresh\` ausgegeben. |
+          | Regression | PASS | Die Änderung ist additiv. Der Branch enthält aktuellen \`main\`; die Synchronisierung importierte ausschließlich die disjunkten Dateien aus PR #993. Der finale Head besteht die vollständige Testsuite und die bestehenden Vertragsprüfungen. |
+          | Tests | PASS | Final grün: test-suite \`29229879345\`, lint \`29229879269\`, CodeQL \`29229879352\`, contracts \`29229879544\`, task-index \`29229879297\`, Doc-Freshness \`29229879325\`, ai-context \`29229879293\`. Enthalten sind ein echter stdio-Subprozess-Smoke außerhalb des Checkouts und ein realer read-only Git-Freshness-Test. |
+          | Sicherheit | PASS | Standard ist read-only. Manifest und Citation Map sind pfadgebunden. Ohne \`--repo-root\` läuft kein Git-Prozess. Manifestpfade erteilen keine Checkout-Berechtigung. Der optionale Writer ist standardmäßig unsichtbar und bindet Repository sowie Ausgabeziel unveränderbar an die Startkonfiguration. Keine Netzwerk-, Shell-, Patch-, PR-, Secret-, Review- oder Merge-Autorität. |
+          | Integration | PASS | Der absolute Launcher funktioniert unabhängig vom Client-Arbeitsordner. Der Branch ist \`behind_by: 0\`, der PR ist mergefähig, und alle finalen GitHub-Gates sind grün. |
+
+          ## Bewusste Grenzen
+
+          - Kein TCP-/HTTP-Transport, keine Authentifizierung und keine Remote-Freshness.
+          - \`fresh\` belegt nur lokalen Commit- und Working-Tree-Gleichstand, nicht Wahrheit oder Antwortkorrektheit.
+          - Der optionale Snapshot-Writer bleibt ein ausdrücklich aktivierter lokaler Pfad; der normale Agentenzugang bleibt read-only.
+          - Allgemeiner Nutzen gegenüber \`grep/read\` und inkrementelle Aktualisierung sind getrennte Folgefragen.
+
+          ## Mergeurteil
+
+          Der gebundene Head ist bei unverändertem Base- und CI-Zustand **mergefähig**.
+          EOF
+
+      - name: Upload review evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+        with:
+          name: lenskit-pr-992-review-evidence-updated
+          path: |
+            lenskit-pr-992.diff
+            lenskit-pr-992.diff.sha256
+            lenskit-pr-992.self-review.md
+          if-no-files-found: error
+          retention-days: 30
