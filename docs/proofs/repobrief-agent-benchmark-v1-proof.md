@@ -1,8 +1,10 @@
 # RepoBrief Agent Benchmark v1 — T001 Proof
 
-Status: implementation candidate validated  
-Bureau task: `RAB-V1-T001`  
-Validated product head before this proof: `bf0b6d570ac3f5b6b1cd82b846b3864b878a2e33`  
+Status: merged and validated
+Bureau task: `RAB-V1-T001`
+Pull request: `#1000`
+Merge commit: `7b729b52b6bf0302029626878ee444e664a0dc08`
+Validated product head before this proof: `9d1e4aaffe2946c741a21807143b6c6d7c18e9fd`
 Default promotion: `false`
 
 ## Ergebnis
@@ -44,8 +46,11 @@ Der Harness verwirft oder invalidiert unter anderem:
 - wiederverwendete Sitzungen oder Arbeitsräume;
 - nicht erlaubte Toolaufrufe;
 - geschätzte statt Provider-gemeldete Tokens;
-- manipulierte, fehlende oder aus dem erlaubten Verzeichnis ausbrechende
-  Transkripte;
+- manipulierte, fehlende, leere, übergroße oder aus dem erlaubten Verzeichnis
+  ausbrechende Transkripte;
+- unbekannte Laufstatus, unstrukturierte Fehlerbelege sowie ungültige,
+  zeitzonenlose oder rückwärts laufende Zeitstempel;
+- unbeschränktes Einlesen externer Transcript-Artefakte;
 - Budgetüberschreitungen;
 - eine andere Wiederholungszahl als zwei.
 
@@ -70,20 +75,21 @@ werden.
 
 ## CI-Evidenz
 
-Auf Head `bf0b6d570ac3f5b6b1cd82b846b3864b878a2e33` bestanden:
+Auf Head `9d1e4aaffe2946c741a21807143b6c6d7c18e9fd` bestanden:
 
-- vollständige Pytest-Suite: Workflow `29242945250`, Job `86793105023`;
-- deterministischer Release-Kandidat: Workflow `29242945250`, Job
-  `86793105042`;
-- Browsertests: Workflow `29242945250`, Job `86793105021`;
-- JavaScript-Tests: Workflow `29242945250`, Job `86793105035`;
-- Lint und Maintainability: Workflow `29242945202`;
-- CodeQL: Workflow `29242945241`;
-- Vertragsprüfung: Workflow `29242945736`;
-- Anti-Hallucination-Vertrag: Workflow `29242945272`;
-- Parity Gate: Workflow `29242945300`;
-- Forensic Preflight: Workflow `29242945416`;
-- AI-Context Guard: Workflow `29242945191`.
+- vollständige Pytest-Suite: Workflow `29243937249`, Job `86796273777`;
+- deterministischer Release-Kandidat: Workflow `29243937249`, Job
+  `86796273762`;
+- Browsertests: Workflow `29243937249`, Job `86796273791`;
+- JavaScript-Tests: Workflow `29243937249`, Job `86796273787`;
+- Lint und Maintainability: Workflow `29243937260`;
+- CodeQL-Richtlinie: Workflow `29243937196`;
+- CodeQL-Analysen: Workflow `29243933919`;
+- Vertragsprüfung: Workflow `29243937734`;
+- Anti-Hallucination-Vertrag: Workflow `29243937202`;
+- Parity Gate: Workflow `29243937329`;
+- Forensic Preflight: Workflow `29243937252`;
+- AI-Context Guard: Workflow `29243937261`.
 
 Der Proof-Commit selbst muss die Dokument- und Repository-Gates erneut
 bestehen. Die oben genannten Produkt-, Test- und Sicherheitsgates sind an den
