@@ -9,6 +9,7 @@
     "version",
     "id",
     "measurement_scope",
+    "repetitions",
     "repositories",
     "tool_policy",
     "budgets",
@@ -22,6 +23,7 @@
     "version": {"const": "1.0"},
     "id": {"type": "string", "minLength": 1},
     "measurement_scope": {"const": "frozen_paired_agent_ab"},
+    "repetitions": {"const": 2},
     "repositories": {
       "type": "array",
       "minItems": 3,
