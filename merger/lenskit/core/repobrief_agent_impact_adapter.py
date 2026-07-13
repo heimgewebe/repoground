@@ -24,7 +24,9 @@ def _json_document(response: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _jsonl_documents(response: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+def _jsonl_documents(
+    response: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str]]:
     text = response.get("content_text")
     if not isinstance(text, str):
         return [], []
@@ -172,33 +174,13 @@ class RepoBriefAgentImpactAdapter(RepoBriefReadonlyAdapter):
                 "relation_card_parse_errors": relation_card_errors,
             }
         )
-
-        source_ranges: list[dict[str, Any]] = []
-        if result.get("status") not in {"invalid", "blocked"} and mode == "edit":
-            for symbol in result.get("target_symbols", []):
-                if not isinstance(symbol, dict):
-                    continue
-                range_ref = symbol.get("range_ref")
-                if not isinstance(range_ref, str) or not range_ref:
-                    continue
-                range_result = self.canonical_range_get(
-                    registration.snapshot_id,
-                    range_ref,
-                )
-                source_ranges.append(
-                    {
-                        "range_ref": range_ref,
-                        "status": range_result.get("status"),
-                        "range_result": range_result.get("range_result"),
-                    }
-                )
-                if len(source_ranges) >= 5:
-                    break
-        result["source_ranges"] = source_ranges
         return result
 
     def dispatch(self, request: Any) -> dict[str, Any]:
-        if isinstance(request, dict) and request.get("action") == "agent_impact_context":
+        if (
+            isinstance(request, dict)
+            and request.get("action") == "agent_impact_context"
+        ):
             try:
                 return self.agent_impact_context(
                     request.get("snapshot_id"),
@@ -207,7 +189,10 @@ class RepoBriefAgentImpactAdapter(RepoBriefReadonlyAdapter):
                     changed_paths=request.get("changed_paths"),
                     mode=request.get("mode", "impact"),
                     max_items=request.get("max_items", 25),
-                    include_query_context=request.get("include_query_context", True),
+                    include_query_context=request.get(
+                        "include_query_context",
+                        True,
+                    ),
                 )
             except (RepoBriefReadonlyAdapterError, TypeError, ValueError) as exc:
                 return self._invalid(
