@@ -102,3 +102,65 @@ RepoBrief snapshot profiles are machine-readable policy labels. Each profile map
 - `recommended`
 - `optional`
 - `not_applicable`
+- `profile_excluded`
+
+Required artifacts that are absent must be reported as `missing_required`. This is a profile-readiness signal, not proof that the repository is incorrect or that the snapshot failed to generate.
+
+## Naming scope
+
+The public system name is RepoBrief.
+
+The legacy implementation namespace remains `lenskit` until a later package and repository rename decision explicitly changes it.
+
+Existing artifact kinds such as `lenskit.*` remain compatible during this phase. Renaming artifact kinds is outside the scope of this document.
+
+## CLI migration and compatibility
+
+RepoBrief now has two supported Python module entry points during the compatibility phase:
+
+```bash
+python -m merger.lenskit.cli.repobrief <repo-brief-command>
+python -m merger.lenskit.cli.main repobrief <repo-brief-command>
+```
+
+The first form is the preferred RepoBrief-facing module entry point. The second form is the legacy `lenskit` CLI subcommand and remains supported so existing scripts do not break. Both forms dispatch to the same RepoBrief command implementation.
+
+Documentation may use `repobrief ...` as a readable command shorthand only when the surrounding text makes the compatibility phase clear. This repository does not use that shorthand as proof that a globally installed shell binary named `repobrief` exists in every environment. If a deployment needs a global binary, that packaging or launcher surface must be validated separately.
+
+The migration is deliberately narrow:
+
+- prefer `python -m merger.lenskit.cli.repobrief ...` for new RepoBrief-oriented examples;
+- keep `python -m merger.lenskit.cli.main repobrief ...` valid for existing automation;
+- do not rename the `merger.lenskit` Python package in this phase;
+- do not rename existing JSON `kind` values in this phase;
+- do not remove legacy `lenskit` CLI commands in this phase.
+
+Create-style RepoBrief commands, such as `snapshot create` and `external-manifest publish`, may write explicit output artifacts selected by their arguments. Read-style RepoBrief commands, such as `snapshot status`, `artifact list`, `artifact get`, `required-reading resolve`, `snapshot check`, `range get`, and `query`, must not refresh snapshots, mutate Git, create pull requests, apply patches, or infer approval.
+
+`external-manifest refresh` combines explicit snapshot creation and portable publication. Its `--out` directory must be the publication root itself or a descendant such as `<publication-root>/bundles/<repository>/<ref>/<generation>`. This is checked before snapshot generation. The stable manifests remain under `<publication-root>/external/...`, and their relative bundle paths therefore stay resolvable when the whole publication root is moved or synchronized.
+
+A successful CLI command or alias smoke test does not establish source freshness, runtime correctness, test sufficiency, review completeness, regression absence, repo understanding, or merge readiness.
+
+## Read-only access CLI
+
+The first RepoBrief read-only access surface is intentionally small. It reads an existing Brief Bundle manifest and reports structured metadata. It must not create a snapshot, refresh a bundle, read artifact contents, mutate Git, create pull requests, or write patch files.
+
+Current read-only commands:
+
+```bash
+repobrief snapshot status --bundle-manifest <path>
+repobrief artifact list --bundle-manifest <path>
+repobrief artifact list --bundle-manifest <path> --roles-only
+repobrief artifact get --bundle-manifest <path> --role <role>
+repobrief artifact get --bundle-manifest <path> --role <role> --path-only
+repobrief required-reading resolve --bundle-manifest <path> --task-profile <profile>
+repobrief snapshot check --bundle-manifest <path> --task-profile <profile>
+```
+
+`artifact list` and `artifact get` expose artifact metadata and resolved paths. They do not print artifact contents.
+
+`required-reading resolve` derives available roles from the bundle manifest, including linked diagnostic surfaces such as post-emit health and bundle surface validation when those links are present. It then resolves the selected task profile against the Required Reading Protocol.
+
+`snapshot check` combines the snapshot status, artifact list, and required-reading resolution. It also propagates an existing failing RepoBrief profile evaluation from the manifest. A green required-reading result must not override a failing snapshot profile evaluation.
+
+These commands are access helpers. They do not establish truth, correctness, completeness, runtime behavior, test sufficiency, regression absence, repository understanding, claim validity, freshness, or forensic readiness.
