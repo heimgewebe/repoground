@@ -42,7 +42,6 @@ jobs:
       - name: Run full pytest suite
         run: pytest -q -m "not browser and not doc_freshness_live"
 
-
   release-candidate:
     name: release-candidate
     runs-on: ubuntu-latest
@@ -123,3 +122,329 @@ jobs:
             echo "=== node $f"
             node "$f"
           done
+
+  rcga-live-calibration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: "3.12"
+
+      - name: Checkout exact repository revisions
+        shell: bash
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          mkdir -p repos
+          clone_at() {
+            name="$1"
+            sha="$2"
+            git clone --filter=blob:none --no-checkout "https://github.com/heimgewebe/${name}.git" "repos/${name}"
+            git -C "repos/${name}" checkout --detach "$sha"
+          }
+          clone_at lenskit bc4afc2e4f4d826f0a8c4a764de8f6bf32275802
+          clone_at grabowski f6eed48752fd2cf32f070dc69b2112e2498872cb
+          clone_at weltgewebe e095903bb71c937d861fa64d7e8a6b593062ca6f
+          for name in lenskit grabowski weltgewebe; do
+            git -C "repos/${name}" status --short
+            git -C "repos/${name}" rev-parse HEAD > "${name}.commit"
+            git -C "repos/${name}" ls-files > "${name}.tracked-paths"
+          done
+
+      - name: Install exact Lenskit runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --require-hashes \
+            -r repos/lenskit/requirements/repobrief-dev.lock.txt
+          echo "PYTHONPATH=$PWD/repos/lenskit" >> "$GITHUB_ENV"
+
+      - name: Create coherent live bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p live-output
+          for name in lenskit grabowski weltgewebe; do
+            mkdir -p "live-output/${name}"
+            python -m merger.lenskit.cli.main repobrief snapshot create \
+              --repo "$PWD/repos/${name}" \
+              --out "$PWD/live-output/${name}" \
+              --profile agent-portable \
+              --mode gesamt \
+              --output-mode dual \
+              --redact-secrets \
+              > "live-output/${name}/snapshot-create.json" \
+              2> "live-output/${name}/snapshot-create.stderr"
+          done
+
+      - name: Run fixed live goldset
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import platform
+          import time
+          from pathlib import Path
+
+          from merger.lenskit.core.agent_impact_eval import evaluate_agent_impact_goldset
+          from merger.lenskit.core.repobrief_agent_impact_adapter import RepoBriefAgentImpactAdapter
+
+          root = Path.cwd()
+          output = root / "live-output"
+          commits = {
+              "lenskit": "bc4afc2e4f4d826f0a8c4a764de8f6bf32275802",
+              "grabowski": "f6eed48752fd2cf32f070dc69b2112e2498872cb",
+              "weltgewebe": "e095903bb71c937d861fa64d7e8a6b593062ca6f",
+          }
+          cases = [
+              {
+                  "id": "lenskit-agent-impact-related-test",
+                  "repository": "lenskit",
+                  "target_path": "merger/lenskit/core/agent_impact_context.py",
+                  "expected_paths": ["merger/lenskit/tests/test_agent_impact_context.py"],
+              },
+              {
+                  "id": "grabowski-job-finalizer-related-test",
+                  "repository": "grabowski",
+                  "target_path": "src/grabowski_job_finalizer.py",
+                  "expected_paths": ["tests/test_job_finalizer.py"],
+              },
+              {
+                  "id": "weltgewebe-review-impact-related-test",
+                  "repository": "weltgewebe",
+                  "target_path": "scripts/docmeta/review_impact.py",
+                  "expected_paths": ["scripts/docmeta/tests/test_review_impact.py"],
+              },
+          ]
+          goldset = {
+              "kind": "repobrief.agent_impact_goldset",
+              "version": "1.0",
+              "id": "repobrief-agent-impact-live-bundles-rerun-2026-07-13",
+              "measurement_scope": "live_bundle",
+              "minimum_target_recall_advantage": 0.2,
+              "minimum_context_path_reduction_at_equal_or_better_recall": 0.2,
+              "cases": [
+                  {
+                      "id": case["id"],
+                      "target": {"path": case["target_path"], "mode": "edit"},
+                      "expected_paths": case["expected_paths"],
+                  }
+                  for case in cases
+              ],
+              "does_not_establish": [
+                  "answer_correctness",
+                  "complete_call_graph",
+                  "complete_blast_radius",
+                  "runtime_dependency",
+                  "test_sufficiency",
+                  "review_completeness",
+                  "merge_readiness",
+                  "default_promotion",
+              ],
+          }
+
+          manifests = {}
+          snapshots = []
+          tracked = {}
+          for name in commits:
+              manifest_paths = sorted((output / name).rglob("*.bundle.manifest.json"))
+              if len(manifest_paths) != 1:
+                  raise SystemExit(
+                      f"{name}: expected one manifest, got {len(manifest_paths)}"
+                  )
+              manifests[name] = manifest_paths[0]
+              snapshots.append({"id": name, "manifest": str(manifest_paths[0])})
+              tracked[name] = set(
+                  (root / f"{name}.tracked-paths").read_text(encoding="utf-8").splitlines()
+              )
+
+          config_path = output / "adapter-config.json"
+          config_path.write_text(
+              json.dumps(
+                  {
+                      "kind": "repobrief.readonly_adapter_config",
+                      "version": "1.0",
+                      "allowed_roots": [str(output)],
+                      "snapshots": snapshots,
+                  },
+                  indent=2,
+                  sort_keys=True,
+              ) + "\n",
+              encoding="utf-8",
+          )
+          adapter = RepoBriefAgentImpactAdapter.from_config(config_path)
+
+          def baseline_paths(response, known_paths):
+              query = response.get("query") if isinstance(response, dict) else None
+              projection = (
+                  query.get("source_citation_projection")
+                  if isinstance(query, dict)
+                  else None
+              )
+              items = projection.get("items") if isinstance(projection, dict) else []
+              paths = []
+              for item in items if isinstance(items, list) else []:
+                  path = item.get("path") if isinstance(item, dict) else None
+                  if isinstance(path, str) and path in known_paths:
+                      paths.append(path)
+              return list(dict.fromkeys(paths))
+
+          observations = {}
+          runtime = {}
+          repositories = {}
+          for name, manifest_path in manifests.items():
+              repositories[name] = {
+                  "repository": f"heimgewebe/{name}",
+                  "commit": commits[name],
+                  "snapshot_id": name,
+                  "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+              }
+
+          for case in cases:
+              name = case["repository"]
+              case_id = case["id"]
+              target_path = case["target_path"]
+
+              started = time.perf_counter_ns()
+              baseline = adapter.query_existing_index(
+                  name,
+                  target_path,
+                  k=30,
+                  resolve_evidence=True,
+                  project_sources=True,
+              )
+              baseline_ms = (time.perf_counter_ns() - started) / 1_000_000
+
+              started = time.perf_counter_ns()
+              impact = adapter.agent_impact_context(
+                  name,
+                  target_path=target_path,
+                  mode="edit",
+                  max_items=30,
+                  include_query_context=True,
+              )
+              impact_ms = (time.perf_counter_ns() - started) / 1_000_000
+              repeated = adapter.agent_impact_context(
+                  name,
+                  target_path=target_path,
+                  mode="edit",
+                  max_items=30,
+                  include_query_context=True,
+              )
+              provenance = impact.get("provenance") or {}
+              if impact.get("status") not in {"available", "partial"}:
+                  raise SystemExit(f"{case_id}: unusable status {impact.get('status')}")
+              if provenance.get("status") != "coherent":
+                  raise SystemExit(f"{case_id}: incoherent provenance")
+              if impact != repeated:
+                  raise SystemExit(f"{case_id}: non-deterministic impact context")
+
+              observations[case_id] = {
+                  "baseline_paths": baseline_paths(baseline, tracked[name]),
+                  "impact_context": impact,
+              }
+              runtime[case_id] = {
+                  "repository": f"heimgewebe/{name}",
+                  "commit": commits[name],
+                  "snapshot_id": name,
+                  "target_path": target_path,
+                  "expected_paths": case["expected_paths"],
+                  "baseline_latency_ms": baseline_ms,
+                  "impact_latency_ms": impact_ms,
+                  "deterministic_equal": True,
+                  "run_id": provenance.get("run_id"),
+                  "canonical_dump_index_sha256": provenance.get(
+                      "canonical_dump_index_sha256"
+                  ),
+                  "source_statuses": impact.get("source_statuses"),
+                  "gaps": impact.get("gaps"),
+                  "composition": impact.get("composition"),
+              }
+
+          report = evaluate_agent_impact_goldset(goldset, observations)
+          report.update(
+              {
+                  "measurement_scope": "live_bundle",
+                  "measured_at": "2026-07-13",
+                  "repositories": repositories,
+                  "case_runtime": runtime,
+                  "environment": {
+                      "python": platform.python_version(),
+                      "platform": platform.platform(),
+                      "lenskit_commit": commits["lenskit"],
+                  },
+                  "promotion": {
+                      "default_promoted": False,
+                      "separate_decision_required": True,
+                  },
+              }
+          )
+          success = (
+              report["metrics"]["no_case_regression"] is True
+              and report["decision"][
+                  "navigation_utility_established_for_goldset"
+              ]
+              is True
+              and all(
+                  case["impact_recall"] == 1.0 for case in report["cases"]
+              )
+          )
+          (output / "live-goldset.json").write_text(
+              json.dumps(goldset, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (output / "live-observations.json").write_text(
+              json.dumps(observations, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (output / "live-evaluation.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (output / "live-success.txt").write_text(
+              "true\n" if success else "false\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(report, indent=2, sort_keys=True))
+          PY
+
+      - name: Prove source repositories stayed clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in lenskit grabowski weltgewebe; do
+            dirty="$(git -C "repos/${name}" status --porcelain)"
+            printf '%s' "$dirty" > "live-output/${name}/source-dirty-state.txt"
+            test -z "$dirty"
+          done
+
+      - name: Upload live calibration evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
+        with:
+          name: rcga-live-rerun-${{ github.sha }}
+          path: |
+            live-output/live-goldset.json
+            live-output/live-observations.json
+            live-output/live-evaluation.json
+            live-output/live-success.txt
+            live-output/adapter-config.json
+            live-output/*/snapshot-create.json
+            live-output/*/snapshot-create.stderr
+            live-output/*/source-dirty-state.txt
+            live-output/*/*.bundle.manifest.json
+            lenskit.commit
+            grabowski.commit
+            weltgewebe.commit
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce registered live threshold
+        shell: bash
+        run: test "$(cat live-output/live-success.txt)" = "true"
