@@ -20,28 +20,23 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install pinned development tools
-        run: |
-          python -m pip install --disable-pip-version-check --require-hashes \
-            -r requirements/repobrief-dev.lock.txt
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
       - name: Capture maintainability report
         shell: bash
         run: |
           set -o pipefail
-          python scripts/ci/check_graph_maintainability.py --root . --format json \
-            2>&1 | tee maintainability.json
-      - name: Capture release-candidate report
+          python scripts/ci/check_graph_maintainability.py --root . --format json 2>&1 | tee maintainability.json
+      - name: Capture focused benchmark tests
         shell: bash
         run: |
           set -o pipefail
-          {
-            python scripts/release/check_release_contract.py
-            rm -rf /tmp/repobrief-release-a /tmp/repobrief-release-b
-            python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repobrief-release-a
-            python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repobrief-release-b
-            diff --recursive --brief /tmp/repobrief-release-a /tmp/repobrief-release-b
-            python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repobrief-release-a --repo .
-            python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repobrief-release-b --repo .
-          } 2>&1 | tee release-candidate.log
+          python -m pytest -vv merger/lenskit/tests/test_agent_benchmark.py 2>&1 | tee agent-benchmark-tests.log
+      - name: Capture release-contract report
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/release/check_release_contract.py 2>&1 | tee release-contract.log
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6
@@ -49,6 +44,7 @@ jobs:
           name: pr1000-diagnostics-${{ github.run_id }}
           path: |
             maintainability.json
-            release-candidate.log
+            agent-benchmark-tests.log
+            release-contract.log
           if-no-files-found: error
           retention-days: 7
