@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lenskit/schema/agent-benchmark-run-receipt.v1.schema.json",
+  "title": "RepoBrief Agent Benchmark Run Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "request_id",
+    "request_sha256",
+    "status",
+    "provider",
+    "started_at",
+    "ended_at",
+    "duration_ms",
+    "exit_code",
+    "tool_calls",
+    "answer",
+    "transcript",
+    "error",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "repobrief.agent_benchmark_run_receipt"},
+    "version": {"const": "1.0"},
+    "request_id": {"type": "string", "minLength": 1},
+    "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"enum": ["success", "failed", "timeout", "invalid"]},
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "model",
+        "sampling",
+        "input_tokens",
+        "output_tokens",
+        "token_source"
+      ],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "model": {"type": "string", "minLength": 1},
+        "sampling": {"type": "object"},
+        "input_tokens": {"type": "integer", "minimum": 0},
+        "output_tokens": {"type": "integer", "minimum": 0},
+        "token_source": {"const": "provider_reported"}
+      }
+    },
+    "started_at": {"type": "string", "format": "date-time"},
+    "ended_at": {"type": "string", "format": "date-time"},
+    "duration_ms": {"type": "integer", "minimum": 0},
+    "exit_code": {"type": ["integer", "null"]},
+    "tool_calls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "name",
+          "status",
+          "duration_ms",
+          "input_bytes",
+          "output_bytes"
+        ],
+        "properties": {
+          "sequence": {"type": "integer", "minimum": 1},
+          "name": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]+$"},
+          "status": {"enum": ["success", "failed", "blocked", "timeout"]},
+          "duration_ms": {"type": "integer", "minimum": 0},
+          "input_bytes": {"type": "integer", "minimum": 0},
+          "output_bytes": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "outcome",
+        "reported_paths",
+        "reported_symbols",
+        "citations",
+        "claims",
+        "asserted_sufficient_evidence"
+      ],
+      "properties": {
+        "text": {"type": "string", "maxLength": 20000},
+        "outcome": {"enum": ["answer", "abstain", "stale", "not_comparable", "invalid_evidence"]},
+        "reported_paths": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "reported_symbols": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "citations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "start_line", "end_line"],
+            "properties": {
+              "path": {"type": "string", "minLength": 1},
+              "start_line": {"type": "integer", "minimum": 1},
+              "end_line": {"type": "integer", "minimum": 1}
+            }
+          }
+        },
+        "claims": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "asserted_sufficient_evidence": {"type": "boolean"}
+      }
+    },
+    "transcript": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["storage", "sha256", "bytes", "inline", "artifact"],
+      "properties": {
+        "storage": {"enum": ["inline", "artifact"]},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "inline": {"type": ["string", "null"], "maxLength": 1000000},
+        "artifact": {"type": ["string", "null"], "minLength": 1, "maxLength": 500}
+      }
+    },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["class", "message"],
+      "properties": {
+        "class": {"type": "string", "minLength": 1, "maxLength": 100},
+        "message": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}
