@@ -80,13 +80,44 @@
     },
     {
       "limitations": [
-        "The ratchets bound measured graph noise and C901 regressions only; they do not establish runtime reachability, complete entrypoint discovery, semantic layer truth, general maintainability, test completeness or absence of problems below the C901 threshold."
+        "The ratchets bound measured graph noise and C901 regressions only; they do not establish runtime reachability, complete entrypoint discovery, semantic layer truth, general maintainability, test completeness or absence of problems below the C901 threshold.",
+        "PR #990 merged as 72c2c7f164eed720de8a802e52b4a493365e8bec; the merged tree matched the reviewed PR tree and the fresh main export passed the ratchet and focused tests."
       ],
       "promotion": "allowed",
       "scope": "graph-noise and complexity ratchets",
       "status": "done",
       "task_id": "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
-      "verification": "local_validated"
+      "verification": "main_verified"
+    },
+    {
+      "task_id": "TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001",
+      "scope": "product, repository and Python namespace compatibility decision",
+      "status": "done",
+      "verification": "main_verified",
+      "promotion": "not_applicable",
+      "limitations": [
+        "The 2.x decision does not establish a complete inventory of unknown consumers, public package readiness or a permanent prohibition on a future breaking-major rename."
+      ]
+    },
+    {
+      "task_id": "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
+      "scope": "protocol-neutral registered-bundle read-only adapter",
+      "status": "done",
+      "verification": "main_verified",
+      "promotion": "allowed",
+      "limitations": [
+        "The code-level adapter does not establish a deployed MCP server, authentication, remote freshness, answer correctness, review completeness or merge readiness."
+      ]
+    },
+    {
+      "task_id": "TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001",
+      "scope": "bounded eight-question Workbench navigation utility evaluation",
+      "status": "done",
+      "verification": "main_verified",
+      "promotion": "allowed",
+      "limitations": [
+        "The fixed-goldset result does not establish general retrieval quality, natural-language answer correctness, actual agent confidence, patch correctness, review completeness or default promotion."
+      ]
     }
   ],
   "authority": "governance_projection",
@@ -127,9 +158,6 @@
   "kind": "lenskit.repobrief_status_truth",
   "observed_on": "2026-07-13",
   "open_followups": [
-    "TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001",
-    "TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001",
-    "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
     "TASK-LENSKIT-SEMANTIC-LOCK-001",
     "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001"
   ],
@@ -200,17 +228,18 @@
       "The internal deterministic release-candidate path is main-verified; public distribution remains blocked pending an owner-approved license decision.",
       "The optional semantic/Torch dependency closure is not hash-locked and remains outside the candidate contract.",
       "The reached upstream reusable-workflow graph is recursively commit-pinned, hash-verified, main-verified and runtime-verified for the bounded no-command caller path.",
-      "Graph maintainability ratchets are locally validated on the PR candidate; main verification remains a post-merge check."
+      "Graph maintainability ratchets are merged and main-verified for their bounded static-analysis scope.",
+      "The package/namespace decision, no-mirror adapter and bounded Workbench navigation utility are main-evidenced; none establishes public distribution or general answer quality."
     ],
     "release_readiness": "not_established",
     "status": "mixed"
   },
   "task_summary": {
     "by_status": {
-      "open": 5,
+      "open": 2,
       "in_progress": 0,
       "partial": 0,
-      "done": 87
+      "done": 90
     },
     "total": 92
   },
