@@ -31,6 +31,105 @@ class McpProtocolError(ValueError):
         self.data = data
 
 
+def _read_annotations() -> dict[str, bool]:
+    return {
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    }
+
+
+def _tool_definitions(enable_snapshot_create: bool) -> list[dict[str, Any]]:
+    tools: list[dict[str, Any]] = [
+        {
+            "name": "ask_context",
+            "title": "RepoBrief context pack",
+            "description": "Build a cited context pack from one existing RepoBrief bundle.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle_manifest": {"type": "string"},
+                    "query": {"type": "string"},
+                    "task_profile": {"type": "string", "default": "basic_repo_question"},
+                    "max_context_tokens": {"type": "integer", "minimum": 1, "default": 8000},
+                    "max_answer_tokens": {"type": "integer", "minimum": 1, "default": 1200},
+                    "k": {"type": "integer", "minimum": 1, "maximum": 100, "default": 5},
+                },
+                "required": ["bundle_manifest", "query"],
+                "additionalProperties": False,
+            },
+            "annotations": _read_annotations(),
+        },
+        {
+            "name": "grounding_verify",
+            "title": "RepoBrief grounding verifier",
+            "description": "Verify declared citations and ranges against an existing RepoBrief bundle.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "declaration": {"type": "object"},
+                    "bundle_manifest": {"type": "string"},
+                    "citation_map": {"type": ["string", "null"]},
+                    "task_profile": {"type": ["string", "null"]},
+                },
+                "required": ["declaration", "bundle_manifest"],
+                "additionalProperties": False,
+            },
+            "annotations": _read_annotations(),
+        },
+        {
+            "name": "live_freshness",
+            "title": "RepoBrief live freshness",
+            "description": (
+                "Compare snapshot Git provenance with the configured local checkout "
+                "without refreshing it."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"bundle_manifest": {"type": "string"}},
+                "required": ["bundle_manifest"],
+                "additionalProperties": False,
+            },
+            "annotations": _read_annotations(),
+        },
+    ]
+    if enable_snapshot_create:
+        tools.append(
+            {
+                "name": "snapshot_create",
+                "title": "RepoBrief snapshot create",
+                "description": (
+                    "Create RepoBrief bundle artifacts for the startup-bound repository "
+                    "inside the startup-bound bundle root."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "profile": {"type": "string"},
+                        "output_subdir": {"type": ["string", "null"]},
+                        "output_mode": {"type": ["string", "null"]},
+                        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
+                        "max_file_bytes": {"type": "string"},
+                        "max_total_bytes": {"type": "string"},
+                        "split_size": {"type": "string"},
+                        "include_hidden": {"type": "boolean"},
+                        "path_filter": {"type": ["string", "null"]},
+                        "ext": {"type": ["array", "null"], "items": {"type": "string"}},
+                        "redact_secrets": {"type": "boolean"},
+                    },
+                    "required": ["profile"],
+                    "additionalProperties": False,
+                },
+                "annotations": {
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                },
+            }
+        )
+    return tools
+
+
 class RepoBriefMcpStdioServer:
     """Bind existing RepoBrief handlers to the MCP JSON-RPC lifecycle."""
 
@@ -49,113 +148,13 @@ class RepoBriefMcpStdioServer:
         self.repo_root = Path(repo_root).expanduser().resolve() if repo_root is not None else None
         if self.repo_root is not None and not self.repo_root.is_dir():
             raise ValueError(f"repo root is not a directory: {self.repo_root}")
+        if enable_snapshot_create and self.repo_root is None:
+            raise ValueError("--enable-snapshot-create requires an explicit --repo-root")
         self.enable_snapshot_create = enable_snapshot_create
+        self.snapshot_output_root = (
+            self.bundle_root if self.bundle_root.is_dir() else self.bundle_root.parent
+        )
         self._negotiated = False
-
-    def _tool_definitions(self) -> list[dict[str, Any]]:
-        tools: list[dict[str, Any]] = [
-            {
-                "name": "ask_context",
-                "title": "RepoBrief context pack",
-                "description": "Build a cited context pack from one existing RepoBrief bundle.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "bundle_manifest": {"type": "string"},
-                        "query": {"type": "string"},
-                        "task_profile": {"type": "string", "default": "basic_repo_question"},
-                        "max_context_tokens": {"type": "integer", "minimum": 1, "default": 8000},
-                        "max_answer_tokens": {"type": "integer", "minimum": 1, "default": 1200},
-                        "k": {"type": "integer", "minimum": 1, "maximum": 100, "default": 5},
-                    },
-                    "required": ["bundle_manifest", "query"],
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                },
-            },
-            {
-                "name": "grounding_verify",
-                "title": "RepoBrief grounding verifier",
-                "description": "Verify declared citations and ranges against an existing RepoBrief bundle.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "declaration": {"type": "object"},
-                        "bundle_manifest": {"type": "string"},
-                        "citation_map": {"type": ["string", "null"]},
-                        "task_profile": {"type": ["string", "null"]},
-                    },
-                    "required": ["declaration", "bundle_manifest"],
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                },
-            },
-            {
-                "name": "live_freshness",
-                "title": "RepoBrief live freshness",
-                "description": (
-                    "Compare snapshot Git provenance with the configured local checkout "
-                    "without refreshing it."
-                ),
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "bundle_manifest": {"type": "string"},
-                    },
-                    "required": ["bundle_manifest"],
-                    "additionalProperties": False,
-                },
-                "annotations": {
-                    "readOnlyHint": True,
-                    "destructiveHint": False,
-                    "idempotentHint": True,
-                },
-            },
-        ]
-        if self.enable_snapshot_create:
-            tools.append(
-                {
-                    "name": "snapshot_create",
-                    "title": "RepoBrief snapshot create",
-                    "description": (
-                        "Explicitly create RepoBrief bundle artifacts under a controlled output root."
-                    ),
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "repo": {"type": "string"},
-                            "output_root": {"type": "string"},
-                            "profile": {"type": "string"},
-                            "output_subdir": {"type": ["string", "null"]},
-                            "output_mode": {"type": ["string", "null"]},
-                            "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
-                            "max_file_bytes": {"type": "string"},
-                            "max_total_bytes": {"type": "string"},
-                            "split_size": {"type": "string"},
-                            "include_hidden": {"type": "boolean"},
-                            "path_filter": {"type": ["string", "null"]},
-                            "ext": {"type": ["array", "null"], "items": {"type": "string"}},
-                            "redact_secrets": {"type": "boolean"},
-                        },
-                        "required": ["repo", "output_root", "profile"],
-                        "additionalProperties": False,
-                    },
-                    "annotations": {
-                        "readOnlyHint": False,
-                        "destructiveHint": False,
-                        "idempotentHint": False,
-                    },
-                }
-            )
-        return tools
 
     def _initialize(self, params: Mapping[str, Any]) -> dict[str, Any]:
         requested = params.get("protocolVersion")
@@ -220,7 +219,8 @@ class RepoBriefMcpStdioServer:
         manifest: str | Path,
         repo_root: str | Path | None = None,
     ) -> dict[str, Any]:
-        if repo_root is None:
+        selected_root = self.repo_root if repo_root is None else repo_root
+        if selected_root is None:
             return {
                 "kind": "repobrief.live_freshness",
                 "version": "v1",
@@ -233,7 +233,7 @@ class RepoBriefMcpStdioServer:
                 "does_not_establish": list(FRESHNESS_DOES_NOT_ESTABLISH),
             }
         try:
-            return evaluate_live_freshness(manifest, repo_root=repo_root)
+            return evaluate_live_freshness(manifest, repo_root=selected_root)
         except Exception as exc:
             return {
                 "kind": "repobrief.live_freshness",
@@ -241,7 +241,7 @@ class RepoBriefMcpStdioServer:
                 "status": "unknown",
                 "reason": str(exc),
                 "bundle_manifest": str(manifest),
-                "repo_root": str(repo_root) if repo_root is not None else None,
+                "repo_root": str(selected_root),
                 "read_only_git_probe": True,
                 "implicit_refresh": False,
                 "does_not_establish": list(FRESHNESS_DOES_NOT_ESTABLISH),
@@ -270,17 +270,19 @@ class RepoBriefMcpStdioServer:
         return {"resources": resources}
 
     def _resource_templates(self) -> dict[str, Any]:
-        templates = []
-        for uri_template in repobrief_mcp_resources.resource_templates().get("templates", []):
-            templates.append(
+        return {
+            "resourceTemplates": [
                 {
                     "uriTemplate": uri_template,
                     "name": uri_template,
                     "description": "Read-only RepoBrief snapshot resource template.",
                     "mimeType": "application/json",
                 }
-            )
-        return {"resourceTemplates": templates}
+                for uri_template in repobrief_mcp_resources.resource_templates().get(
+                    "templates", []
+                )
+            ]
+        }
 
     def _resource_read(self, params: Mapping[str, Any]) -> dict[str, Any]:
         uri = params.get("uri")
@@ -290,8 +292,7 @@ class RepoBriefMcpStdioServer:
         manifest = result.get("bundle_manifest")
         live = None
         if isinstance(manifest, str) and manifest:
-            guarded_manifest = self._guard_manifest(manifest)
-            live = self._safe_live_freshness(guarded_manifest, self.repo_root)
+            live = self._safe_live_freshness(self._guard_manifest(manifest))
         text = result.get("content_text")
         if not isinstance(text, str):
             text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
@@ -309,36 +310,61 @@ class RepoBriefMcpStdioServer:
             },
         }
 
+    def _call_ask_context(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        call_args = dict(arguments)
+        manifest = self._guard_manifest(call_args.get("bundle_manifest"))
+        call_args["bundle_manifest"] = str(manifest)
+        payload = repobrief_mcp_tools.ask_context(**call_args)
+        payload["live_freshness"] = self._safe_live_freshness(manifest)
+        return payload
+
+    def _call_grounding_verify(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        call_args = dict(arguments)
+        manifest = self._guard_manifest(call_args.get("bundle_manifest"))
+        call_args["bundle_manifest"] = str(manifest)
+        call_args["citation_map"] = self._guard_bundle_path(
+            call_args.get("citation_map"),
+            manifest,
+            label="citation_map",
+        )
+        payload = repobrief_mcp_tools.grounding_verify(**call_args)
+        payload["live_freshness"] = self._safe_live_freshness(manifest)
+        return payload
+
+    def _call_snapshot_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if not self.enable_snapshot_create or self.repo_root is None:
+            raise McpProtocolError(-32602, "snapshot_create is disabled")
+        forbidden = sorted({"repo", "output_root"}.intersection(arguments))
+        if forbidden:
+            raise McpProtocolError(
+                -32602,
+                "snapshot_create repository and output roots are fixed at server startup",
+                {"forbidden_arguments": forbidden},
+            )
+        call_args = dict(arguments)
+        call_args["repo"] = str(self.repo_root)
+        call_args["output_root"] = str(self.snapshot_output_root)
+        return repobrief_mcp_tools.snapshot_create(**call_args)
+
+    def _tool_payload(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if name == "ask_context":
+            return self._call_ask_context(arguments)
+        if name == "grounding_verify":
+            return self._call_grounding_verify(arguments)
+        if name == "live_freshness":
+            manifest = self._guard_manifest(arguments.get("bundle_manifest"))
+            return self._safe_live_freshness(manifest)
+        if name == "snapshot_create":
+            return self._call_snapshot_create(arguments)
+        raise McpProtocolError(-32602, f"unknown or disabled tool: {name}")
+
     def _tool_call(self, params: Mapping[str, Any]) -> dict[str, Any]:
         name = params.get("name")
         arguments = params.get("arguments", {})
         if not isinstance(name, str) or not isinstance(arguments, dict):
             raise McpProtocolError(-32602, "tools/call requires name and object arguments")
         try:
-            if name == "ask_context":
-                call_args = dict(arguments)
-                manifest = self._guard_manifest(call_args.get("bundle_manifest"))
-                call_args["bundle_manifest"] = str(manifest)
-                payload = repobrief_mcp_tools.ask_context(**call_args)
-                payload["live_freshness"] = self._safe_live_freshness(manifest, self.repo_root)
-            elif name == "grounding_verify":
-                call_args = dict(arguments)
-                manifest = self._guard_manifest(call_args.get("bundle_manifest"))
-                call_args["bundle_manifest"] = str(manifest)
-                call_args["citation_map"] = self._guard_bundle_path(
-                    call_args.get("citation_map"),
-                    manifest,
-                    label="citation_map",
-                )
-                payload = repobrief_mcp_tools.grounding_verify(**call_args)
-                payload["live_freshness"] = self._safe_live_freshness(manifest, self.repo_root)
-            elif name == "live_freshness":
-                manifest = self._guard_manifest(arguments.get("bundle_manifest"))
-                payload = self._safe_live_freshness(manifest, self.repo_root)
-            elif name == "snapshot_create" and self.enable_snapshot_create:
-                payload = repobrief_mcp_tools.snapshot_create(**arguments)
-            else:
-                raise McpProtocolError(-32602, f"unknown or disabled tool: {name}")
+            payload = self._tool_payload(name, arguments)
         except McpProtocolError:
             raise
         except Exception as exc:
@@ -368,7 +394,7 @@ class RepoBriefMcpStdioServer:
             return {}
         self._require_operation()
         if method == "tools/list":
-            return {"tools": self._tool_definitions()}
+            return {"tools": _tool_definitions(self.enable_snapshot_create)}
         if method == "tools/call":
             return self._tool_call(params)
         if method == "resources/list":
@@ -441,7 +467,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--enable-snapshot-create",
         action="store_true",
-        help="Expose the explicit bundle-writing snapshot_create tool. Disabled by default.",
+        help=(
+            "Expose snapshot_create bound to --repo-root and --bundle-root. "
+            "Requires --repo-root and is disabled by default."
+        ),
     )
     return parser
 
