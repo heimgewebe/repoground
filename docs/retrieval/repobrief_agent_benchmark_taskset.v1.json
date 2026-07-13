@@ -1,0 +1,587 @@
+{
+  "kind": "repobrief.agent_benchmark_taskset",
+  "version": "1.0",
+  "id": "repobrief-agent-benchmark-v1-20260713",
+  "measurement_scope": "frozen_paired_agent_ab",
+  "repositories": [
+    {
+      "id": "lenskit",
+      "repository": "heimgewebe/lenskit",
+      "commit": "dff582f9c4e8b5511d4ce436db81e3e245f725ec",
+      "snapshot_profile": "agent-portable"
+    },
+    {
+      "id": "grabowski",
+      "repository": "heimgewebe/grabowski",
+      "commit": "f6eed48752fd2cf32f070dc69b2112e2498872cb",
+      "snapshot_profile": "agent-portable"
+    },
+    {
+      "id": "weltgewebe",
+      "repository": "heimgewebe/weltgewebe",
+      "commit": "e095903bb71c937d861fa64d7e8a6b593062ca6f",
+      "snapshot_profile": "agent-portable"
+    }
+  ],
+  "tool_policy": {
+    "baseline": ["glob", "grep", "read_file", "search"],
+    "treatment": [
+      "ask_context",
+      "glob",
+      "grep",
+      "grounding_verify",
+      "live_freshness",
+      "read_file",
+      "repobrief_resource_read",
+      "search"
+    ]
+  },
+  "budgets": {
+    "wall_seconds": 300,
+    "input_tokens": 64000,
+    "output_tokens": 6000,
+    "max_tool_calls": 80,
+    "max_tool_input_bytes": 1048576,
+    "max_tool_output_bytes": 8388608
+  },
+  "thresholds": {
+    "minimum_efficiency_improvement": 0.2,
+    "minimum_success_rate_gain": 0.1,
+    "maximum_class_success_regression": 0.05,
+    "maximum_false_confidence_increase": 0.0
+  },
+  "cases": [
+    {
+      "id": "nav-lenskit-mcp-startup",
+      "category": "navigation",
+      "repository_id": "lenskit",
+      "prompt": "Finde den stabilen Starter des lokalen RepoBrief-MCP-Servers und die eigentliche stdio-Implementierung. Nenne nur belegte Repository-Pfade.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["scripts/repobrief-mcp-stdio.py", "merger/lenskit/cli/repobrief_mcp_stdio.py"],
+          "allowed_paths": ["scripts/repobrief-mcp-stdio.py", "merger/lenskit/cli/repobrief_mcp_stdio.py", "docs/usage/repobrief-mcp-stdio.md", "docs/architecture/repobrief-mcp-boundary.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["scripts/repobrief-mcp-stdio.py", "merger/lenskit/cli/repobrief_mcp_stdio.py"],
+          "allowed_paths": ["scripts/repobrief-mcp-stdio.py", "merger/lenskit/cli/repobrief_mcp_stdio.py", "docs/usage/repobrief-mcp-stdio.md", "docs/architecture/repobrief-mcp-boundary.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["mcp", "entrypoint"]
+    },
+    {
+      "id": "nav-lenskit-live-freshness",
+      "category": "navigation",
+      "repository_id": "lenskit",
+      "prompt": "Finde die Implementierung und den direkten Test der lokalen RepoBrief-Live-Freshness-Prüfung.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/repobrief_live_freshness.py", "merger/lenskit/tests/test_repobrief_live_freshness.py"],
+          "allowed_paths": ["merger/lenskit/core/repobrief_live_freshness.py", "merger/lenskit/tests/test_repobrief_live_freshness.py", "merger/lenskit/tests/test_repobrief_mcp_stdio_e2e.py", "docs/usage/repobrief-mcp-stdio.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/repobrief_live_freshness.py", "merger/lenskit/tests/test_repobrief_live_freshness.py"],
+          "allowed_paths": ["merger/lenskit/core/repobrief_live_freshness.py", "merger/lenskit/tests/test_repobrief_live_freshness.py", "merger/lenskit/tests/test_repobrief_mcp_stdio_e2e.py", "docs/usage/repobrief-mcp-stdio.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["freshness", "tests"]
+    },
+    {
+      "id": "nav-lenskit-agent-impact-core",
+      "category": "navigation",
+      "repository_id": "lenskit",
+      "prompt": "Finde den Kern der Agent-Impact-Projektion und ihren primären Test.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/agent_impact_context.py", "merger/lenskit/tests/test_agent_impact_context.py"],
+          "allowed_paths": ["merger/lenskit/core/agent_impact_context.py", "merger/lenskit/tests/test_agent_impact_context.py", "merger/lenskit/core/agent_impact_refinement.py", "docs/architecture/repobrief-agent-impact-context.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/agent_impact_context.py", "merger/lenskit/tests/test_agent_impact_context.py"],
+          "allowed_paths": ["merger/lenskit/core/agent_impact_context.py", "merger/lenskit/tests/test_agent_impact_context.py", "merger/lenskit/core/agent_impact_refinement.py", "docs/architecture/repobrief-agent-impact-context.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["agent-impact", "tests"]
+    },
+    {
+      "id": "nav-lenskit-agent-impact-adapter",
+      "category": "navigation",
+      "repository_id": "lenskit",
+      "prompt": "Finde den read-only Adapter der Agent-Impact-Fläche und die zugehörigen Adaptertests.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/repobrief_agent_impact_adapter.py", "merger/lenskit/tests/test_repobrief_agent_impact_adapter.py"],
+          "allowed_paths": ["merger/lenskit/core/repobrief_agent_impact_adapter.py", "merger/lenskit/tests/test_repobrief_agent_impact_adapter.py", "merger/lenskit/tests/test_repobrief_agent_impact_core_artifact_validation.py", "merger/lenskit/cli/agent_impact.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/repobrief_agent_impact_adapter.py", "merger/lenskit/tests/test_repobrief_agent_impact_adapter.py"],
+          "allowed_paths": ["merger/lenskit/core/repobrief_agent_impact_adapter.py", "merger/lenskit/tests/test_repobrief_agent_impact_adapter.py", "merger/lenskit/tests/test_repobrief_agent_impact_core_artifact_validation.py", "merger/lenskit/cli/agent_impact.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["adapter", "read-only"]
+    },
+    {
+      "id": "nav-grabowski-job-finalizer-test",
+      "category": "navigation",
+      "repository_id": "grabowski",
+      "prompt": "Finde die Job-Finalizer-Implementierung und den realen zugehörigen Test. Rate keinen Testpfad.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py"],
+          "allowed_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py", "tests/test_repository_contract.py", "src/grabowski_operator.py"],
+          "forbidden_paths": ["tests/test_grabowski_job_finalizer.py"], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py"],
+          "allowed_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py", "tests/test_repository_contract.py", "src/grabowski_operator.py"],
+          "forbidden_paths": ["tests/test_grabowski_job_finalizer.py"], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["grabowski", "resolved-test"]
+    },
+    {
+      "id": "nav-grabowski-runtime-entrypoint",
+      "category": "navigation",
+      "repository_id": "grabowski",
+      "prompt": "Finde den konfigurierten Runtime-Einstieg und die Operator-Implementierung von Grabowski.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["config/runtime-entrypoint.json", "src/grabowski_operator.py"],
+          "allowed_paths": ["config/runtime-entrypoint.json", "src/grabowski_operator.py", "pyproject.toml", "tests/test_repository_contract.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["config/runtime-entrypoint.json", "src/grabowski_operator.py"],
+          "allowed_paths": ["config/runtime-entrypoint.json", "src/grabowski_operator.py", "pyproject.toml", "tests/test_repository_contract.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["grabowski", "entrypoint"]
+    },
+    {
+      "id": "nav-weltgewebe-review-impact-test",
+      "category": "navigation",
+      "repository_id": "weltgewebe",
+      "prompt": "Finde das Review-Impact-Skript des Docmeta-Systems und seinen Test.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py"],
+          "allowed_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py", "scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py"],
+          "allowed_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py", "scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["weltgewebe", "docmeta"]
+    },
+    {
+      "id": "nav-weltgewebe-docmeta-contract",
+      "category": "navigation",
+      "repository_id": "weltgewebe",
+      "prompt": "Finde die Docmeta-Implementierung sowie Blueprint und Schema-Dokumentation.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md"],
+          "allowed_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md", "Makefile"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md"],
+          "allowed_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md", "Makefile"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["weltgewebe", "contract"]
+    },
+    {
+      "id": "struct-lenskit-mcp-boundary",
+      "category": "structural",
+      "repository_id": "lenskit",
+      "prompt": "Bestimme die kleinste belegte Dateimenge, die Transport, Freshness und Sicherheitsgrenze des RepoBrief-MCP-Zugangs beschreibt.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_live_freshness.py", "docs/architecture/repobrief-mcp-boundary.md"],
+          "allowed_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_live_freshness.py", "docs/architecture/repobrief-mcp-boundary.md", "docs/usage/repobrief-mcp-stdio.md", "merger/lenskit/tests/test_repobrief_mcp_stdio.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["read_only_default"], "forbidden_claims": ["network_service"]
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_live_freshness.py", "docs/architecture/repobrief-mcp-boundary.md"],
+          "allowed_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_live_freshness.py", "docs/architecture/repobrief-mcp-boundary.md", "docs/usage/repobrief-mcp-stdio.md", "merger/lenskit/tests/test_repobrief_mcp_stdio.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["read_only_default"], "forbidden_claims": ["network_service"]
+        }
+      },
+      "tags": ["boundary", "security"]
+    },
+    {
+      "id": "struct-lenskit-agent-impact-evidence",
+      "category": "structural",
+      "repository_id": "lenskit",
+      "prompt": "Finde die Dateien, die Evidenzordnung, Query-Refinement und Nutzenmessung der Agent-Impact-Fläche festlegen.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/agent_impact_refinement.py", "merger/lenskit/core/agent_impact_eval.py", "docs/architecture/repobrief-agent-impact-context.md"],
+          "allowed_paths": ["merger/lenskit/core/agent_impact_refinement.py", "merger/lenskit/core/agent_impact_eval.py", "docs/architecture/repobrief-agent-impact-context.md", "merger/lenskit/core/agent_impact_context.py", "docs/proofs/repobrief-agent-impact-live-regression-fix-v1-proof.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["default_promoted_false"], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/core/agent_impact_refinement.py", "merger/lenskit/core/agent_impact_eval.py", "docs/architecture/repobrief-agent-impact-context.md"],
+          "allowed_paths": ["merger/lenskit/core/agent_impact_refinement.py", "merger/lenskit/core/agent_impact_eval.py", "docs/architecture/repobrief-agent-impact-context.md", "merger/lenskit/core/agent_impact_context.py", "docs/proofs/repobrief-agent-impact-live-regression-fix-v1-proof.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["default_promoted_false"], "forbidden_claims": []
+        }
+      },
+      "tags": ["evidence", "evaluation"]
+    },
+    {
+      "id": "struct-lenskit-snapshot-write-boundary",
+      "category": "structural",
+      "repository_id": "lenskit",
+      "prompt": "Welche Dateien begrenzen den optionalen snapshot_create-Pfad des MCP-Servers? Behaupte keine allgemeine Schreibautorität.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_mcp_tools.py"],
+          "allowed_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_mcp_tools.py", "docs/architecture/repobrief-mcp-boundary.md", "docs/usage/repobrief-mcp-stdio.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["snapshot_write_opt_in"], "forbidden_claims": ["arbitrary_write_authority"]
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_mcp_tools.py"],
+          "allowed_paths": ["merger/lenskit/cli/repobrief_mcp_stdio.py", "merger/lenskit/core/repobrief_mcp_tools.py", "docs/architecture/repobrief-mcp-boundary.md", "docs/usage/repobrief-mcp-stdio.md"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["snapshot_write_opt_in"], "forbidden_claims": ["arbitrary_write_authority"]
+        }
+      },
+      "tags": ["snapshot", "authority"]
+    },
+    {
+      "id": "struct-grabowski-finalizer-context",
+      "category": "structural",
+      "repository_id": "grabowski",
+      "prompt": "Bestimme das begrenzte Änderungsumfeld des Grabowski-Job-Finalizers aus Implementierung, Test und Repositoryvertrag.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py", "tests/test_repository_contract.py"],
+          "allowed_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py", "tests/test_repository_contract.py", "src/grabowski_operator.py", "config/runtime-entrypoint.json"],
+          "forbidden_paths": ["tests/test_grabowski_job_finalizer.py"], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": ["complete_blast_radius"]
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py", "tests/test_repository_contract.py"],
+          "allowed_paths": ["src/grabowski_job_finalizer.py", "tests/test_job_finalizer.py", "tests/test_repository_contract.py", "src/grabowski_operator.py", "config/runtime-entrypoint.json"],
+          "forbidden_paths": ["tests/test_grabowski_job_finalizer.py"], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": ["complete_blast_radius"]
+        }
+      },
+      "tags": ["grabowski", "impact"]
+    },
+    {
+      "id": "struct-grabowski-consumer-surface",
+      "category": "structural",
+      "repository_id": "grabowski",
+      "prompt": "Finde die erzeugte Operator-Kontextfläche und den zugehörigen Consumer-Surface-Benchmarkbeleg.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["docs/generated/operator-context.v1.json", "docs/proofs/consumer-surface-v2-benchmark-20260713.json"],
+          "allowed_paths": ["docs/generated/operator-context.v1.json", "docs/proofs/consumer-surface-v2-benchmark-20260713.json", "src/grabowski_operator.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["docs/generated/operator-context.v1.json", "docs/proofs/consumer-surface-v2-benchmark-20260713.json"],
+          "allowed_paths": ["docs/generated/operator-context.v1.json", "docs/proofs/consumer-surface-v2-benchmark-20260713.json", "src/grabowski_operator.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["grabowski", "consumer-surface"]
+    },
+    {
+      "id": "struct-grabowski-runtime-contract",
+      "category": "structural",
+      "repository_id": "grabowski",
+      "prompt": "Bestimme die kleinste belegte Konfigurationsfläche für Grabowskis Runtime-Einstieg und Paketdefinition.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["config/runtime-entrypoint.json", "pyproject.toml"],
+          "allowed_paths": ["config/runtime-entrypoint.json", "pyproject.toml", "src/grabowski_operator.py", "tests/test_repository_contract.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["config/runtime-entrypoint.json", "pyproject.toml"],
+          "allowed_paths": ["config/runtime-entrypoint.json", "pyproject.toml", "src/grabowski_operator.py", "tests/test_repository_contract.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": []
+        }
+      },
+      "tags": ["grabowski", "runtime"]
+    },
+    {
+      "id": "struct-weltgewebe-review-impact-context",
+      "category": "structural",
+      "repository_id": "weltgewebe",
+      "prompt": "Bestimme das begrenzte Umfeld des Review-Impact-Skripts einschließlich Test und Aufgabenprojektionen.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py", "docs/tasks/index.json", "docs/tasks/board.md"],
+          "allowed_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py", "docs/tasks/index.json", "docs/tasks/board.md", "scripts/docmeta/docmeta.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": ["complete_blast_radius"]
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py", "docs/tasks/index.json", "docs/tasks/board.md"],
+          "allowed_paths": ["scripts/docmeta/review_impact.py", "scripts/docmeta/tests/test_review_impact.py", "docs/tasks/index.json", "docs/tasks/board.md", "scripts/docmeta/docmeta.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": ["complete_blast_radius"]
+        }
+      },
+      "tags": ["weltgewebe", "impact"]
+    },
+    {
+      "id": "struct-weltgewebe-docmeta-system",
+      "category": "structural",
+      "repository_id": "weltgewebe",
+      "prompt": "Finde Implementierung, Blueprint, Schema und Build-Einstieg des Docmeta-Systems, ohne Vollständigkeit über das ganze Repository zu behaupten.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md", "Makefile"],
+          "allowed_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md", "Makefile", "scripts/docmeta/review_impact.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": ["complete_repository_understanding"]
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md", "Makefile"],
+          "allowed_paths": ["scripts/docmeta/docmeta.py", "architecture/blueprint.docmeta-engine.md", "architecture/docmeta.schema.md", "Makefile", "scripts/docmeta/review_impact.py"],
+          "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": [], "forbidden_claims": ["complete_repository_understanding"]
+        }
+      },
+      "tags": ["weltgewebe", "architecture"]
+    },
+    {
+      "id": "struct-no-complete-call-graph",
+      "category": "structural",
+      "repository_id": "lenskit",
+      "prompt": "Belegt die Agent-Impact-Ausgabe einen vollständigen Laufzeit-Call-Graph und vollständigen Blast Radius? Antworte nur mit der belegbaren Autoritätsgrenze.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": ["docs/architecture/repobrief-agent-impact-context.md"], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["complete_call_graph_not_established"], "forbidden_claims": ["complete_call_graph", "complete_blast_radius"]
+        },
+        "treatment": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": ["docs/architecture/repobrief-agent-impact-context.md"], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["complete_call_graph_not_established"], "forbidden_claims": ["complete_call_graph", "complete_blast_radius"]
+        }
+      },
+      "tags": ["negative", "authority"]
+    },
+    {
+      "id": "grounding-clean-freshness",
+      "category": "grounding_freshness",
+      "repository_id": "lenskit",
+      "prompt": "Prüfe, ob der bereitgestellte RepoBrief-Snapshot zum ausdrücklich konfigurierten sauberen Checkout passt. Ohne Freshness-Werkzeug darfst du keinen Freshness-Status erfinden.",
+      "setup": {"working_tree": "clean", "fixture": "fresh-matching-snapshot"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["freshness_not_established"], "forbidden_claims": ["snapshot_fresh"]
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["snapshot_fresh"], "forbidden_claims": []
+        }
+      },
+      "tags": ["freshness", "clean"]
+    },
+    {
+      "id": "grounding-head-mismatch",
+      "category": "grounding_freshness",
+      "repository_id": "lenskit",
+      "prompt": "Prüfe den Snapshot gegen einen Checkout mit abweichendem HEAD und behaupte keinen frischen Stand.",
+      "setup": {"working_tree": "head_mismatch", "fixture": "stale-head"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["freshness_not_established"], "forbidden_claims": ["snapshot_fresh"]
+        },
+        "treatment": {
+          "outcome": "stale",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["git_head_mismatch"], "forbidden_claims": ["snapshot_fresh"]
+        }
+      },
+      "tags": ["freshness", "stale"]
+    },
+    {
+      "id": "grounding-dirty-working-tree",
+      "category": "grounding_freshness",
+      "repository_id": "grabowski",
+      "prompt": "Prüfe den Snapshot gegen einen Dirty Working Tree. Ein gleicher Commit reicht nicht für fresh.",
+      "setup": {"working_tree": "dirty", "fixture": "dirty-checkout"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["freshness_not_established"], "forbidden_claims": ["snapshot_fresh"]
+        },
+        "treatment": {
+          "outcome": "stale",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["current_working_tree_is_dirty"], "forbidden_claims": ["snapshot_fresh"]
+        }
+      },
+      "tags": ["freshness", "dirty"]
+    },
+    {
+      "id": "grounding-no-repo-root",
+      "category": "grounding_freshness",
+      "repository_id": "weltgewebe",
+      "prompt": "Bewerte die Live-Freshness, wenn der Operator keinen lokalen Checkout freigegeben hat.",
+      "setup": {"working_tree": "no_repo_root", "fixture": "no-repo-root"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["freshness_not_established"], "forbidden_claims": ["snapshot_fresh"]
+        },
+        "treatment": {
+          "outcome": "not_comparable",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["repo_root_not_configured"], "forbidden_claims": ["snapshot_fresh"]
+        }
+      },
+      "tags": ["freshness", "authorization"]
+    },
+    {
+      "id": "grounding-missing-provenance",
+      "category": "grounding_freshness",
+      "repository_id": "lenskit",
+      "prompt": "Bewerte einen Snapshot, dem die erforderliche Git-Provenance fehlt. Fehlende Evidenz ist nicht fresh.",
+      "setup": {"working_tree": "missing_provenance", "fixture": "missing-git-provenance"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["freshness_not_established"], "forbidden_claims": ["snapshot_fresh"]
+        },
+        "treatment": {
+          "outcome": "invalid_evidence",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["snapshot_git_provenance_unavailable"], "forbidden_claims": ["snapshot_fresh"]
+        }
+      },
+      "tags": ["freshness", "missing-evidence"]
+    },
+    {
+      "id": "grounding-invalid-citation",
+      "category": "grounding_freshness",
+      "repository_id": "lenskit",
+      "prompt": "Prüfe eine Erklärung mit einer absichtlich ungültigen RepoBrief-Citation. Akzeptiere den Beleg nicht.",
+      "setup": {"working_tree": "invalid_citation", "fixture": "citation-outside-range"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["citation_not_verified"], "forbidden_claims": ["grounding_valid"]
+        },
+        "treatment": {
+          "outcome": "invalid_evidence",
+          "required_paths": [], "allowed_paths": [], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["citation_invalid"], "forbidden_claims": ["grounding_valid"]
+        }
+      },
+      "tags": ["grounding", "invalid"]
+    },
+    {
+      "id": "grounding-valid-boundary-citation",
+      "category": "grounding_freshness",
+      "repository_id": "lenskit",
+      "prompt": "Belege anhand des Architektur-Dokuments, dass die Agent-Impact-Fläche keine vollständige Call-Graph-Autorität beansprucht, und gib den Titelbereich als Citation an.",
+      "setup": {"working_tree": "clean", "fixture": "valid-boundary-citation"},
+      "expectations": {
+        "baseline": {
+          "outcome": "answer",
+          "required_paths": ["docs/architecture/repobrief-agent-impact-context.md"],
+          "allowed_paths": ["docs/architecture/repobrief-agent-impact-context.md"],
+          "forbidden_paths": [], "required_symbols": [],
+          "required_citations": [{"path": "docs/architecture/repobrief-agent-impact-context.md", "start_line": 1, "end_line": 1}],
+          "required_claims": ["complete_call_graph_not_established"], "forbidden_claims": ["complete_call_graph"]
+        },
+        "treatment": {
+          "outcome": "answer",
+          "required_paths": ["docs/architecture/repobrief-agent-impact-context.md"],
+          "allowed_paths": ["docs/architecture/repobrief-agent-impact-context.md"],
+          "forbidden_paths": [], "required_symbols": [],
+          "required_citations": [{"path": "docs/architecture/repobrief-agent-impact-context.md", "start_line": 1, "end_line": 1}],
+          "required_claims": ["complete_call_graph_not_established"], "forbidden_claims": ["complete_call_graph"]
+        }
+      },
+      "tags": ["grounding", "citation"]
+    },
+    {
+      "id": "grounding-test-sufficiency-abstention",
+      "category": "grounding_freshness",
+      "repository_id": "grabowski",
+      "prompt": "Belegt das Auffinden von tests/test_job_finalizer.py, dass die Tests vollständig und hinreichend sind? Antworte mit der Evidenzgrenze.",
+      "setup": {"working_tree": "clean"},
+      "expectations": {
+        "baseline": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": ["tests/test_job_finalizer.py"], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["test_sufficiency_not_established"], "forbidden_claims": ["test_sufficiency_established"]
+        },
+        "treatment": {
+          "outcome": "abstain",
+          "required_paths": [], "allowed_paths": ["tests/test_job_finalizer.py"], "forbidden_paths": [], "required_symbols": [], "required_citations": [], "required_claims": ["test_sufficiency_not_established"], "forbidden_claims": ["test_sufficiency_established"]
+        }
+      },
+      "tags": ["negative", "test-sufficiency"]
+    }
+  ],
+  "default_promoted": false,
+  "does_not_establish": [
+    "real_agent_usefulness",
+    "answer_correctness_outside_fixed_expectations",
+    "complete_repository_understanding",
+    "test_sufficiency",
+    "review_completeness",
+    "merge_readiness",
+    "default_promotion"
+  ]
+}
