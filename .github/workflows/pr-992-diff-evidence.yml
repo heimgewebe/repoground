@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - evidence/pr-992-diff
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
