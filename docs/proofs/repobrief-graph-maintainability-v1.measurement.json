@@ -1,0 +1,122 @@
+{
+  "baseline_measurement": {
+    "edge_count": 4530,
+    "external_node_count": 251,
+    "file_node_count": 507,
+    "file_unknown_layer_count": 64,
+    "file_unknown_layer_share": 0.126232741617357,
+    "observed_commit": "0d601df241e2dab9915bf3df6ebd023f410b1750",
+    "source_kind": "clean detached checkout of observed_base_commit"
+  },
+  "candidate_report": {
+    "complexity": {
+      "baseline_count": 213,
+      "current_count": 213,
+      "current_max": 170,
+      "new_count": 0,
+      "resolved_count": 0
+    },
+    "does_not_establish": [
+      "absence of maintainability problems below C901 threshold",
+      "semantic correctness of graph classification",
+      "runtime reachability",
+      "architecture quality",
+      "test completeness"
+    ],
+    "findings": [],
+    "kind": "repobrief.graph_maintainability_check",
+    "measurement": {
+      "does_not_establish": [
+        "runtime call reachability",
+        "semantic correctness of inferred layers",
+        "complete entrypoint discovery",
+        "absence of dynamic imports",
+        "overall maintainability"
+      ],
+      "entrypoints": {
+        "counts_by_projection": {
+          "fixture": 3,
+          "product": 15,
+          "script": 23,
+          "test": 20
+        },
+        "projection_sum": 61,
+        "skipped_files_count": 2,
+        "total": 61
+      },
+      "graph": {
+        "edge_count": 4574,
+        "edges_per_parsed_file": 8.93359375,
+        "external_node_count": 251,
+        "external_to_file_ratio": 0.490234375,
+        "file_node_count": 512,
+        "file_unknown_layer_count": 0,
+        "file_unknown_layer_share": 0.0,
+        "files_parsed": 512,
+        "files_seen": 514,
+        "legacy_all_node_unknown_share": 0.3289646133682831,
+        "parse_success_rate": 0.9961089494163424,
+        "projections": {
+          "fixture": {
+            "file_count": 31,
+            "layers": {
+              "test": 31
+            },
+            "unknown_layer_count": 0,
+            "unknown_layer_share": 0.0
+          },
+          "product": {
+            "file_count": 167,
+            "layers": {
+              "adapter": 7,
+              "architecture": 9,
+              "atlas": 8,
+              "benchmark": 2,
+              "cli": 30,
+              "contract": 1,
+              "core": 71,
+              "frontend": 7,
+              "product": 5,
+              "retrieval": 15,
+              "service": 12
+            },
+            "unknown_layer_count": 0,
+            "unknown_layer_share": 0.0
+          },
+          "script": {
+            "file_count": 24,
+            "layers": {
+              "infra": 23,
+              "product": 1
+            },
+            "unknown_layer_count": 0,
+            "unknown_layer_share": 0.0
+          },
+          "test": {
+            "file_count": 290,
+            "layers": {
+              "test": 290
+            },
+            "unknown_layer_count": 0,
+            "unknown_layer_share": 0.0
+          }
+        }
+      },
+      "kind": "repobrief.graph_maintainability_measurement",
+      "version": "1.0"
+    },
+    "status": "pass",
+    "version": "1.0"
+  },
+  "does_not_establish": [
+    "runtime reachability",
+    "complete entrypoint discovery",
+    "semantic truth of inferred layers",
+    "general maintainability",
+    "test completeness",
+    "absence of problems below the C901 threshold"
+  ],
+  "kind": "repobrief.graph_maintainability_bound_measurement",
+  "observed_base_commit": "0d601df241e2dab9915bf3df6ebd023f410b1750",
+  "version": "1.0"
+}

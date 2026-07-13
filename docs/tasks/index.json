@@ -1596,15 +1596,21 @@
     {
       "id": "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
       "title": "RepoBrief Graph and Maintainability Ratchets",
-      "status": "open",
+      "status": "done",
       "description": "Resolve Audit F-07/F-10 by separating product/test/script entrypoint projections, bounding unknown-layer noise, preventing new C901 violations, and incrementally decomposing oversized orchestration functions.",
       "evidence": [
         "docs/blueprints/lenskit-repobrief-audit-remediation-2026-07.md",
-        "merger/lenskit/architecture/",
-        "ruff-ci.toml"
+        "config/repobrief-graph-maintainability.v1.json",
+        "config/repobrief-c901-baseline.v1.json",
+        "scripts/ci/check_graph_maintainability.py",
+        "merger/lenskit/architecture/graph_maintainability.py",
+        "merger/lenskit/architecture/path_classification.py",
+        "merger/lenskit/tests/test_graph_maintainability.py",
+        "docs/proofs/repobrief-graph-maintainability-v1.measurement.json",
+        "docs/proofs/repobrief-graph-maintainability-v1-proof.md"
       ],
       "missing_evidence": [
-        "No real-repository graph-noise threshold or no-new-complexity ratchet is active yet."
+        "Completion does not establish runtime reachability, complete entrypoint discovery, semantic truth of inferred layers, general maintainability, test completeness or absence of problems below the C901 threshold."
       ]
     },
     {
