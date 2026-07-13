@@ -6,21 +6,26 @@ snapshot or grounding implementation.
 
 ## Start
 
+Use the launcher by absolute path. It adds its own Lenskit checkout to the Python import path,
+so the MCP client does not need to start inside the repository:
+
 ```bash
-python3 -m merger.lenskit.cli.repobrief_mcp_stdio \
+python3 /absolute/path/to/lenskit/scripts/repobrief-mcp-stdio.py \
   --bundle-root /absolute/path/to/briefs \
   --repo-root /absolute/path/to/repository
 ```
 
 `--bundle-root` may name either a directory containing `*.bundle.manifest.json` files or
-one exact bundle manifest. `--repo-root` is optional, but without it live freshness is
-reported as `not_comparable` and no Git probe runs.
+one exact bundle manifest. `--repo-root` is optional for the default read-only server, but
+without it live freshness is reported as `not_comparable` and no Git probe runs.
 
-The default server is read-only. The existing explicit bundle-writing tool is exposed only
-when the operator deliberately adds:
+The module form remains valid when the Lenskit checkout or installed package is already on
+Python's import path:
 
-```text
---enable-snapshot-create
+```bash
+python3 -m merger.lenskit.cli.repobrief_mcp_stdio \
+  --bundle-root /absolute/path/to/briefs \
+  --repo-root /absolute/path/to/repository
 ```
 
 ## Generic MCP client configuration
@@ -33,8 +38,7 @@ Clients that accept an MCP stdio command can use this shape:
     "repobrief": {
       "command": "python3",
       "args": [
-        "-m",
-        "merger.lenskit.cli.repobrief_mcp_stdio",
+        "/absolute/path/to/lenskit/scripts/repobrief-mcp-stdio.py",
         "--bundle-root",
         "/absolute/path/to/briefs",
         "--repo-root",
@@ -45,8 +49,8 @@ Clients that accept an MCP stdio command can use this shape:
 }
 ```
 
-The client-specific file location or registration command varies. The command and arguments
-above are the stable RepoBrief side of the contract.
+The client-specific file location or registration command varies. The absolute launcher,
+bundle root, and optional repository root are the stable RepoBrief side of the contract.
 
 ## Exposed tools
 
@@ -58,8 +62,14 @@ Read-only by default:
 
 Optional explicit write tool:
 
-- `snapshot_create`: available only with `--enable-snapshot-create`; it may write Brief Bundle
-  artifacts under its existing output, timeout, and size guards.
+- `snapshot_create`: available only with `--enable-snapshot-create` and an explicit
+  `--repo-root` at server startup.
+
+When enabled, the MCP client may select the snapshot profile and bounded generation options,
+but it cannot choose another source repository or output root. The source remains the startup
+`--repo-root`; output remains the startup `--bundle-root` directory, or the parent directory
+when `--bundle-root` names one exact manifest. Existing timeout, size, path, and output-not-inside-
+repository guards still apply.
 
 ## Exposed resources
 
@@ -79,18 +89,21 @@ metadata. When `--repo-root` is configured, the result metadata also includes li
 
 - `fresh`: snapshot commit equals local `HEAD`, and both the snapshot and current tree are clean;
 - `stale`: the commit differs, the current tree is dirty, or the snapshot was created dirty;
-- `unknown`: required snapshot provenance or cleanliness evidence is missing;
+- `unknown`: required snapshot provenance or cleanliness evidence is missing or does not identify
+  the configured checkout;
 - `not_comparable`: no checkout was configured, Git is unavailable, or current cleanliness
   cannot be established.
 
-A read never invokes `snapshot_create`, `git fetch`, `git pull`, or another repair action.
-Staleness is reported, not hidden.
+A manifest-recorded local path is evidence, not permission. Only the operator-provided
+`--repo-root` authorizes a Git probe. A read never invokes `snapshot_create`, `git fetch`,
+`git pull`, or another repair action. Staleness is reported, not hidden.
 
 ## Security boundary
 
 - tool-supplied manifests must remain inside the configured bundle root;
 - an optional citation map must remain inside the selected bundle directory;
 - the MCP client cannot select an arbitrary Git checkout: the probe is bound to `--repo-root`;
+- optional snapshot writes cannot replace the startup repository or output root;
 - the Git probe disables optional locks, fsmonitor, global Git configuration, system Git
   configuration, and terminal prompts;
 - the server has no TCP or HTTP listener and writes only MCP JSON-RPC messages to stdout;
