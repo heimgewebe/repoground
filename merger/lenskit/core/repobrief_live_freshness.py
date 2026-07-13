@@ -192,6 +192,85 @@ def _base(
     }
 
 
+def _selected_root(
+    snapshot: Mapping[str, Any],
+    explicit_root: Path | None,
+) -> Path | None:
+    if explicit_root is not None:
+        return explicit_root
+    recorded_root = snapshot.get("repo_root")
+    if isinstance(recorded_root, str) and recorded_root:
+        return Path(recorded_root).expanduser().resolve()
+    return None
+
+
+def _snapshot_gate(
+    snapshot: Mapping[str, Any],
+    *,
+    manifest_path: Path,
+    repo_root: Path,
+) -> dict[str, Any] | None:
+    if snapshot.get("provenance_status") != "present" or not snapshot.get("git_commit"):
+        return _base(
+            status="unknown",
+            reason="snapshot_git_provenance_unavailable",
+            manifest_path=manifest_path,
+            repo_root=repo_root,
+            snapshot=snapshot,
+        )
+    if snapshot.get("git_dirty") is True:
+        return _base(
+            status="stale",
+            reason="snapshot_was_created_from_dirty_working_tree",
+            manifest_path=manifest_path,
+            repo_root=repo_root,
+            snapshot=snapshot,
+        )
+    if snapshot.get("git_dirty") is not False:
+        return _base(
+            status="unknown",
+            reason="snapshot_working_tree_cleanliness_unavailable",
+            manifest_path=manifest_path,
+            repo_root=repo_root,
+            snapshot=snapshot,
+        )
+    return None
+
+
+def _current_gate(
+    current: Mapping[str, Any],
+    *,
+    manifest_path: Path,
+    repo_root: Path,
+    snapshot: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    common = {
+        "manifest_path": manifest_path,
+        "repo_root": repo_root,
+        "snapshot": snapshot,
+        "current": current,
+    }
+    if current.get("provenance_status") != "present" or not current.get("git_commit"):
+        return _base(
+            status="not_comparable",
+            reason="current_git_provenance_unavailable",
+            **common,
+        )
+    if current.get("git_dirty") is True:
+        return _base(
+            status="stale",
+            reason="current_working_tree_is_dirty",
+            **common,
+        )
+    if current.get("git_dirty") is not False:
+        return _base(
+            status="not_comparable",
+            reason="current_working_tree_cleanliness_unavailable",
+            **common,
+        )
+    return None
+
+
 def evaluate_live_freshness(
     bundle_manifest: str | Path,
     *,
@@ -200,11 +279,9 @@ def evaluate_live_freshness(
 ) -> dict[str, Any]:
     """Compare snapshot provenance with one local checkout without refreshing it."""
     manifest_path = Path(bundle_manifest).expanduser().resolve()
-    manifest = _load_manifest(manifest_path)
-    records = _repository_records(manifest)
+    records = _repository_records(_load_manifest(manifest_path))
     explicit_root = Path(repo_root).expanduser().resolve() if repo_root is not None else None
     snapshot = _record_for_repo(records, explicit_root)
-
     if snapshot is None:
         reason = "snapshot_provenance_missing" if not records else "repository_selection_ambiguous"
         return _base(
@@ -214,11 +291,7 @@ def evaluate_live_freshness(
             repo_root=explicit_root,
         )
 
-    selected_root = explicit_root
-    if selected_root is None:
-        recorded_root = snapshot.get("repo_root")
-        if isinstance(recorded_root, str) and recorded_root:
-            selected_root = Path(recorded_root).expanduser().resolve()
+    selected_root = _selected_root(snapshot, explicit_root)
     if selected_root is None:
         return _base(
             status="not_comparable",
@@ -228,59 +301,24 @@ def evaluate_live_freshness(
             snapshot=snapshot,
         )
 
-    if snapshot.get("provenance_status") != "present" or not snapshot.get("git_commit"):
-        return _base(
-            status="unknown",
-            reason="snapshot_git_provenance_unavailable",
-            manifest_path=manifest_path,
-            repo_root=selected_root,
-            snapshot=snapshot,
-        )
-    if snapshot.get("git_dirty") is True:
-        return _base(
-            status="stale",
-            reason="snapshot_was_created_from_dirty_working_tree",
-            manifest_path=manifest_path,
-            repo_root=selected_root,
-            snapshot=snapshot,
-        )
-    if snapshot.get("git_dirty") is not False:
-        return _base(
-            status="unknown",
-            reason="snapshot_working_tree_cleanliness_unavailable",
-            manifest_path=manifest_path,
-            repo_root=selected_root,
-            snapshot=snapshot,
-        )
+    blocked = _snapshot_gate(
+        snapshot,
+        manifest_path=manifest_path,
+        repo_root=selected_root,
+    )
+    if blocked is not None:
+        return blocked
 
     current = probe(selected_root)
-    if current.get("provenance_status") != "present" or not current.get("git_commit"):
-        return _base(
-            status="not_comparable",
-            reason="current_git_provenance_unavailable",
-            manifest_path=manifest_path,
-            repo_root=selected_root,
-            snapshot=snapshot,
-            current=current,
-        )
-    if current.get("git_dirty") is True:
-        return _base(
-            status="stale",
-            reason="current_working_tree_is_dirty",
-            manifest_path=manifest_path,
-            repo_root=selected_root,
-            snapshot=snapshot,
-            current=current,
-        )
-    if current.get("git_dirty") is not False:
-        return _base(
-            status="not_comparable",
-            reason="current_working_tree_cleanliness_unavailable",
-            manifest_path=manifest_path,
-            repo_root=selected_root,
-            snapshot=snapshot,
-            current=current,
-        )
+    blocked = _current_gate(
+        current,
+        manifest_path=manifest_path,
+        repo_root=selected_root,
+        snapshot=snapshot,
+    )
+    if blocked is not None:
+        return blocked
+
     if current.get("git_commit") != snapshot.get("git_commit"):
         return _base(
             status="stale",
