@@ -17,7 +17,7 @@ realen Test `tests/test_job_finalizer.py`; die Impact-Fläche erzeugte dagegen
 nur konventionell geratene Pfade wie
 `tests/test_grabowski_job_finalizer.py`.
 
-Kanonische Messbelege liegen im Bureau unter:
+Die Ausgangsevidenz liegt im Bureau unter:
 
 - `docs/evidence/rcga-live-goldset-20260713.json`
 - `docs/evidence/rcga-live-evaluation-20260713.json`
@@ -47,14 +47,17 @@ Testabdeckung oder Testhinlänglichkeit dargestellt.
 
 ### Pfadhygiene
 
-Der Evaluator entfernt vor Recall- und Kontextgrößenmessung:
+Pfadsegmente werden vor jeder `PurePosixPath`-Normalisierung geprüft. Der
+Evaluator und die Refinement-Schicht entfernen beziehungsweise verwerfen:
 
 - leere Pfade;
 - absolute Pfade;
 - Backslash- oder Doppel-Slash-Mehrdeutigkeiten;
-- Punkt- und Parent-Traversal-Segmente.
+- rohe `.`-Segmente am Anfang, in der Mitte oder am Ende;
+- `..`-Segmente.
 
-Damit fließen nur sinnvolle repository-relative Kandidaten in die Metrik ein.
+Damit kann eine Pfadbibliothek verbotene Eingaben nicht unbemerkt in scheinbar
+kanonische Pfade umwandeln.
 
 ### Kontextkompression
 
@@ -73,6 +76,75 @@ und entweder:
 
 `default_promoted` bleibt unabhängig vom Ergebnis `false`.
 
+## Live-Rerun
+
+Der vorab fixierte Drei-Repository-Goldset wurde mit denselben Zielcommits und
+denselben erwarteten Testpfaden erneut ausgeführt. Geändert wurde nur die zu
+prüfende RepoBrief-Implementierung.
+
+### Bindung
+
+- Lenskit PR: `#996`
+- PR-Quellhead beim Lauf: `38e779e1391d49655368766f86e02e4ceae30847`
+- GitHub-PR-Merge-Ref beim Lauf: `1245b59313748088df6a7c18f159257d724a0a7d`
+- Workflow-Run: `29234901905`
+- Actions-Artefakt: `8273035636`
+- Artefakt-Digest: `sha256:9cca7f74c3c46913f664bde5e069cb76bdac9f2e4e9cdca9d0f38ddd0945b7d4`
+- Goldset SHA-256: `08bf2e0a508a033e6f6d0c038375860c0a1db5510dd4dab9f7965644185d8a3a`
+- Rohbeobachtungen SHA-256: `8853366f1f09c167cb5708dc8075ba7b97b6fcdd0083016541c922eced261661`
+- Evaluation SHA-256: `b5f081834138b1d838b2a72183c5c22fbd7f3e805af02e4e98f8a20f7e344e88`
+
+Der GitHub-Merge-Ref ist der von Actions ausgecheckte, konfliktfrei aus
+aktuellem `main` und PR-Head erzeugte Testbaum. Nach dem Lauf werden nur
+Messworkflow und Evidenzdokumente verändert; die geprüften Produktdateien
+bleiben unverändert und werden vor Merge nochmals diffgebunden geprüft.
+
+### Zielrepositories
+
+| Repository | Commit | Manifest SHA-256 | Run-ID | Canonical-Digest |
+|---|---|---|---|---|
+| `heimgewebe/lenskit` | `456d37bd142349bc0c04925d87934eefbbc546ac` | `adea5e5f7d1f1ec49285e5f4e36a80b8a601af1673c7db06340af1ba8c6210a3` | `lenskit-full-max-260713-0817` | `e1bd8223cb9121166a57d9a746c7e809c2cfea4e569e20587ce64ff5e321572b` |
+| `heimgewebe/grabowski` | `f6eed48752fd2cf32f070dc69b2112e2498872cb` | `0b5bf85913d2f587617291689e5c4e8c88b6211d939c2f51d04b898111ee8a39` | `grabowski-full-max-260713-0818` | `34e99958fbad4eaeaf41034a3b28824a484fa66e6b85200467281c6cb42ecc29` |
+| `heimgewebe/weltgewebe` | `e095903bb71c937d861fa64d7e8a6b593062ca6f` | `da6fc7d435fa73a4db9571bd2882577920a17972cd3a5597399937388d74d9d6` | `weltgewebe-full-max-260713-0818` | `1016cd7bd98c5bc6a6f3efb2b6f0b2ffb41802374cd3ce2e2b0401987cb6664a` |
+
+Alle drei Bundles waren kohärent. Die Kernartefakte waren verfügbar. Zwei
+Impact-Aufrufe je Fall waren bytegleich, und alle drei Zielrepositories blieben
+nach Bundle-Erzeugung und Abfragen `git status --porcelain`-sauber.
+
+## Ergebnis
+
+| Fall | Recall Baseline → Impact | Pfade Baseline → Impact | Reduktion |
+|---|---:|---:|---:|
+| Lenskit | `1.0 → 1.0` | `11 → 6` | `45.45 %` |
+| Grabowski | `1.0 → 1.0` | `11 → 5` | `54.55 %` |
+| Weltgewebe | `1.0 → 1.0` | `10 → 5` | `50.00 %` |
+
+Aggregiert:
+
+- Baseline Target Recall: `1.0`
+- Impact Target Recall: `1.0`
+- `no_case_regression=true`
+- mittlere Baseline-Kontextpfade: `10.666666666666666`
+- mittlere Impact-Kontextpfade: `5.333333333333333`
+- aggregierte Kontextpfadreduktion: `0.5`
+- registrierte Mindestkompression: `0.2`
+- Nutzenpfad: `fixed_goldset_compression_threshold_met_at_equal_or_better_recall`
+- `navigation_utility_established_for_goldset=true`
+- `default_promoted=false`
+
+Der reale Grabowski-Test `tests/test_job_finalizer.py` erscheint wieder im
+Impact-Kontext und ist ausdrücklich als `resolved_query` belegt. Damit ist die
+konkrete Live-Regression geschlossen.
+
+Dauerhafte Evidenz im Repository:
+
+- `docs/retrieval/repobrief_agent_impact_live_goldset.rerun.v1.json`
+- `docs/diagnostics/repobrief-agent-impact-live-rerun-v1.json`
+
+Die vollständigen Rohbeobachtungen umfassen rund 190 KB und mehr als 5.000
+Zeilen. Sie werden nicht in die Reviewfläche aufgenommen, sondern über den
+oben gebundenen Actions-Artefakt-Digest und ihren eigenen SHA-256 verifiziert.
+
 ## Tests
 
 Der Slice testet:
@@ -81,19 +153,25 @@ Der Slice testet:
 - Erhalt von Citation- und Range-Metadaten;
 - getrennte Evidenzklassen und deterministische Reihenfolge;
 - Adapterintegration ohne Write-Surface;
+- Ablehnung roher Punkt- und Parentsegmente vor Normalisierung;
 - Filterung leerer und unsicherer Pfade;
 - Kompressionsnutzen bei recall-gleicher Ausgabe;
 - Blockierung eines Nutzenurteils bei Recall-Regression trotz hoher
   Kompression;
-- aktualisierten synthetischen Goldset- und Diagnosevertrag.
+- aktualisierten synthetischen Goldset- und Diagnosevertrag;
+- den festen Drei-Repository-Livererun.
 
-## Noch notwendiger Abschlussbeleg
+## Einordnung
 
-Vor Verifikation muss derselbe vorab registrierte Drei-Repository-Goldset erneut
-auf kohärenten Bundles ausgeführt werden. Der Grabowski-Fall muss
-`tests/test_job_finalizer.py` wiederfinden, kein Fall darf beim Recall
-regressieren, und sämtliche Commit-, Manifest-, Run-ID- und Digest-Bindungen
-müssen dauerhaft dokumentiert werden.
+**Belegt:** Auf diesem vorab fixierten Live-Goldset hält die Impact-Fläche den
+vollständigen Recall und halbiert die gemessene Kontextpfadmenge. Die frühere
+Grabowski-Regression ist behoben.
 
-Dieser Implementierungsnachweis allein belegt noch keine Live-Wirkung und keine
-Standardbeförderung.
+**Plausibel:** Die kompaktere, evidenzgetrennte Erstleseliste kann Agenten bei
+der Navigation Zeit und Kontext sparen.
+
+**Nicht belegt:** allgemeine Agentenverbesserung, Antwortkorrektheit,
+vollständige Call- oder Testbeziehungen, Testhinlänglichkeit,
+Reviewvollständigkeit, Merge-Reife oder Standardbeförderung. Die Fläche bleibt
+opt-in; eine Standardentscheidung benötigt einen getrennten breiteren
+Agenten-Benchmark.
