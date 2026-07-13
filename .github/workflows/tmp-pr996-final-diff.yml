@@ -1,0 +1,31 @@
+name: temporary-pr996-final-diff
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 0
+      - name: Build final review diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          output="lenskit-pr996-final-${GITHUB_SHA}.diff"
+          git diff --binary origin/main...HEAD -- . \
+            ':(exclude).github/workflows/tmp-pr996-final-diff.yml' > "$output"
+          sha256sum "$output" > "$output.sha256"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: lenskit-pr996-final-${{ github.sha }}
+          path: |
+            lenskit-pr996-final-${{ github.sha }}.diff
+            lenskit-pr996-final-${{ github.sha }}.diff.sha256
+          if-no-files-found: error
+          retention-days: 7
