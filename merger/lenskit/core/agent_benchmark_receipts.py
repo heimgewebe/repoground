@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from merger.lenskit.core.agent_benchmark_common import (
+    MAX_JSON_BYTES,
     RECEIPT_KIND,
     VERSION,
     list_value,
@@ -126,7 +128,12 @@ def _inline_transcript(transcript: Mapping[str, Any]) -> tuple[bytes | None, lis
     inline = transcript.get("inline")
     if not isinstance(inline, str) or transcript.get("artifact") is not None:
         return None, ["inline transcript storage is inconsistent"]
-    return inline.encode("utf-8"), []
+    transcript_bytes = inline.encode("utf-8")
+    if not transcript_bytes:
+        return None, ["transcript must not be empty"]
+    if len(transcript_bytes) > MAX_JSON_BYTES:
+        return None, ["transcript exceeds configured limit"]
+    return transcript_bytes, []
 
 
 def _artifact_transcript(
@@ -140,7 +147,16 @@ def _artifact_transcript(
     resolved = _resolve_artifact(artifact, Path(transcript_root).expanduser())
     if resolved is None or not resolved.is_file():
         return None, ["transcript artifact is missing or outside transcript_root"]
-    return resolved.read_bytes(), []
+    try:
+        with resolved.open("rb") as handle:
+            transcript_bytes = handle.read(MAX_JSON_BYTES + 1)
+    except OSError:
+        return None, ["transcript artifact could not be read"]
+    if not transcript_bytes:
+        return None, ["transcript must not be empty"]
+    if len(transcript_bytes) > MAX_JSON_BYTES:
+        return None, ["transcript exceeds configured limit"]
+    return transcript_bytes, []
 
 
 def _validate_transcript(
@@ -163,13 +179,40 @@ def _validate_transcript(
     return errors
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
+    return parsed
+
+
+def _validate_timestamps(receipt: Mapping[str, Any]) -> list[str]:
+    started = _parse_timestamp(receipt.get("started_at"))
+    ended = _parse_timestamp(receipt.get("ended_at"))
+    errors: list[str] = []
+    if started is None:
+        errors.append("receipt started_at is not a timezone-aware date-time")
+    if ended is None:
+        errors.append("receipt ended_at is not a timezone-aware date-time")
+    if started is not None and ended is not None and ended < started:
+        errors.append("receipt ended_at precedes started_at")
+    return errors
+
+
 def _validate_status(receipt: Mapping[str, Any]) -> list[str]:
     status = receipt.get("status")
     exit_code = receipt.get("exit_code")
     error = receipt.get("error")
+    if status not in {"success", "failed", "timeout", "invalid"}:
+        return ["receipt status is invalid"]
     if status == "success" and (exit_code != 0 or error is not None):
         return ["successful receipt must have exit_code 0 and no error"]
-    if status in {"failed", "timeout", "invalid"} and error is None:
+    if status in {"failed", "timeout", "invalid"} and not isinstance(error, Mapping):
         return ["non-success receipt requires structured error evidence"]
     return []
 
@@ -185,6 +228,7 @@ def validate_receipt(
     errors = _validate_identity(request, receipt)
     errors.extend(_validate_provider(request, receipt))
     errors.extend(_validate_tokens(request, receipt))
+    errors.extend(_validate_timestamps(receipt))
     errors.extend(_validate_duration(request, receipt))
     errors.extend(_validate_tool_calls(request, receipt))
     errors.extend(_validate_transcript(receipt, transcript_root))

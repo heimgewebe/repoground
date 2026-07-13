@@ -534,3 +534,65 @@ def test_execute_runner_rejects_oversized_or_invalid_output(tmp_path: Path) -> N
             timeout_seconds=5,
             max_stdout_bytes=1024,
         )
+
+def test_receipt_rejects_invalid_status_and_timestamps() -> None:
+    taskset = _taskset()
+    request = build_run_requests(
+        taskset,
+        runner=RUNNER,
+        manifest_bindings=BINDINGS,
+        repetitions=2,
+    )[0]
+    case = _cases(taskset)[request["case_id"]]
+
+    invalid_status = _receipt(request, case)
+    invalid_status["status"] = "unknown"
+    assert "receipt status is invalid" in validate_receipt(request, invalid_status)
+
+    invalid_time = _receipt(request, case)
+    invalid_time["started_at"] = "not-a-date"
+    invalid_time["ended_at"] = "2026-07-13T09:00:00"
+    errors = validate_receipt(request, invalid_time)
+    assert "receipt started_at is not a timezone-aware date-time" in errors
+    assert "receipt ended_at is not a timezone-aware date-time" in errors
+
+    reversed_time = _receipt(request, case)
+    reversed_time["started_at"] = "2026-07-13T09:00:02Z"
+    reversed_time["ended_at"] = "2026-07-13T09:00:01Z"
+    assert "receipt ended_at precedes started_at" in validate_receipt(
+        request, reversed_time
+    )
+
+
+def test_transcript_content_is_nonempty_and_bounded(tmp_path: Path) -> None:
+    taskset = _taskset()
+    request = build_run_requests(
+        taskset,
+        runner=RUNNER,
+        manifest_bindings=BINDINGS,
+        repetitions=2,
+    )[0]
+    case = _cases(taskset)[request["case_id"]]
+
+    empty = _receipt(request, case)
+    empty["transcript"].update(
+        {"inline": "", "bytes": 0, "sha256": sha256_bytes(b"")}
+    )
+    assert "transcript must not be empty" in validate_receipt(request, empty)
+
+    oversized_path = tmp_path / "oversized-transcript.json"
+    with oversized_path.open("wb") as handle:
+        handle.truncate(16 * 1024 * 1024 + 1)
+    oversized = _receipt(request, case)
+    oversized["transcript"].update(
+        {
+            "storage": "artifact",
+            "inline": None,
+            "artifact": oversized_path.name,
+            "bytes": 16 * 1024 * 1024 + 1,
+            "sha256": "0" * 64,
+        }
+    )
+    assert "transcript exceeds configured limit" in validate_receipt(
+        request, oversized, transcript_root=tmp_path
+    )
