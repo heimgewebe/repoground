@@ -1,0 +1,159 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lenskit/schema/agent-impact-context.v1.schema.json",
+  "title": "RepoBrief Agent Impact Context v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "mode",
+    "target",
+    "target_symbols",
+    "relations",
+    "related_tests",
+    "supporting_context",
+    "entrypoints",
+    "relation_cards",
+    "gaps",
+    "truncation",
+    "mutation_boundary",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "repobrief.agent_impact_context"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "available",
+        "partial",
+        "missing_target",
+        "invalid",
+        "blocked"
+      ]
+    },
+    "mode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "target": {
+      "type": "object"
+    },
+    "provenance": {
+      "type": "object"
+    },
+    "source_statuses": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "target_symbols": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "related_tests": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "supporting_context": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "entrypoints": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "relation_cards": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "truncation": {
+      "type": "object"
+    },
+    "composition": {
+      "type": "object"
+    },
+    "edit_context": {
+      "type": "object"
+    },
+    "mutation_boundary": {
+      "type": "object"
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "error": {
+      "type": "string"
+    },
+    "error_code": {
+      "type": "string"
+    },
+    "action": {
+      "type": "string"
+    },
+    "snapshot_id": {
+      "type": "string"
+    },
+    "bundle_manifest": {
+      "type": "string"
+    },
+    "snapshot": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "query": {
+      "type": "string"
+    },
+    "relation_card_parse_errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source_ranges": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

@@ -1,0 +1,115 @@
+{
+  "$id": "lenskit/schema/agent-impact-goldset.v1.schema.json",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "properties": {
+    "cases": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_paths": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "additionalProperties": false,
+            "anyOf": [
+              {
+                "required": [
+                  "path"
+                ]
+              },
+              {
+                "required": [
+                  "symbol"
+                ]
+              }
+            ],
+            "properties": {
+              "mode": {
+                "enum": [
+                  "impact",
+                  "edit"
+                ],
+                "type": "string"
+              },
+              "path": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "symbol": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "target",
+          "expected_paths"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "does_not_establish": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "kind": {
+      "const": "repobrief.agent_impact_goldset",
+      "type": "string"
+    },
+    "measurement_scope": {
+      "enum": [
+        "synthetic_contract_fixture",
+        "live_bundle"
+      ],
+      "type": "string"
+    },
+    "minimum_target_recall_advantage": {
+      "maximum": 1,
+      "minimum": 0,
+      "type": "number"
+    },
+    "version": {
+      "const": "1.0",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "version",
+    "id",
+    "measurement_scope",
+    "minimum_target_recall_advantage",
+    "cases",
+    "does_not_establish"
+  ],
+  "title": "RepoBrief Agent Impact Goldset v1",
+  "type": "object"
+}

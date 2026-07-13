@@ -1,0 +1,44 @@
+{
+  "cases": [
+    {
+      "expected_paths": [
+        "src/db.py",
+        "tests/test_app.py",
+        "docs/app.md",
+        "contracts/app.schema.json"
+      ],
+      "id": "app-structural-impact",
+      "target": {
+        "mode": "impact",
+        "symbol": "run_app"
+      }
+    },
+    {
+      "expected_paths": [
+        "src/app.py",
+        "tests/test_app.py",
+        "docs/app.md"
+      ],
+      "id": "app-edit-reading-set",
+      "target": {
+        "mode": "edit",
+        "path": "src/app.py"
+      }
+    }
+  ],
+  "does_not_establish": [
+    "real_repository_utility",
+    "general_agent_quality_improvement",
+    "answer_correctness",
+    "complete_blast_radius",
+    "test_sufficiency",
+    "review_completeness",
+    "merge_readiness",
+    "default_promotion"
+  ],
+  "id": "repobrief-agent-impact-synthetic-contract-v1",
+  "kind": "repobrief.agent_impact_goldset",
+  "measurement_scope": "synthetic_contract_fixture",
+  "minimum_target_recall_advantage": 0.2,
+  "version": "1.0"
+}
