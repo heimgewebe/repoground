@@ -8,6 +8,7 @@ Git, tests, pull requests or memory.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from merger.lenskit.core.agent_impact_context import build_agent_impact_context
@@ -17,6 +18,14 @@ from merger.lenskit.core.repobrief_readonly_adapter import (
 )
 
 MAX_RELATION_CARDS = 10_000
+
+
+@dataclass(frozen=True)
+class _SourceResponses:
+    graph: dict[str, Any]
+    symbols: dict[str, Any]
+    entrypoints: dict[str, Any]
+    cards: dict[str, Any]
 
 
 def _json_document(response: dict[str, Any]) -> dict[str, Any]:
@@ -77,8 +86,64 @@ def _target_query(target_path: Any, target_symbol: Any, changed_paths: Any) -> s
     return " ".join(dict.fromkeys(parts))
 
 
+def _query_limit(max_items: Any) -> int:
+    valid = (
+        isinstance(max_items, int)
+        and not isinstance(max_items, bool)
+        and 1 <= max_items <= 200
+    )
+    return int(max_items) if valid else 25
+
+
 class RepoBriefAgentImpactAdapter(RepoBriefReadonlyAdapter):
     """Expose a bounded impact/edit context over registered snapshots."""
+
+    def _impact_sources(self, snapshot_id: str) -> _SourceResponses:
+        return _SourceResponses(
+            graph=self.artifact_get(snapshot_id, "architecture_graph_json"),
+            symbols=self.artifact_get(snapshot_id, "python_symbol_index_json"),
+            entrypoints=self.artifact_get(snapshot_id, "entrypoints_json"),
+            cards=self.artifact_get(snapshot_id, "relation_cards_jsonl"),
+        )
+
+    def _impact_query(
+        self,
+        snapshot_id: str,
+        *,
+        query: str,
+        max_items: Any,
+        include_query_context: bool,
+    ) -> dict[str, Any]:
+        if not include_query_context or not query:
+            return {}
+        return self.query_existing_index(
+            snapshot_id,
+            query,
+            k=_query_limit(max_items),
+            resolve_evidence=True,
+            project_sources=True,
+        )
+
+    @staticmethod
+    def _source_statuses(
+        sources: _SourceResponses,
+        query_response: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        statuses = [
+            _artifact_status("architecture_graph_json", sources.graph),
+            _artifact_status("python_symbol_index_json", sources.symbols),
+            _artifact_status("entrypoints_json", sources.entrypoints),
+            _artifact_status("relation_cards_jsonl", sources.cards),
+        ]
+        if query_response:
+            statuses.append(
+                {
+                    "source": "sqlite_index",
+                    "status": query_response.get("status"),
+                    "error_code": query_response.get("error_code"),
+                }
+            )
+        return statuses
 
     def agent_impact_context(
         self,
@@ -92,86 +157,45 @@ class RepoBriefAgentImpactAdapter(RepoBriefReadonlyAdapter):
         include_query_context: Any = True,
     ) -> dict[str, Any]:
         registration = self._registration(snapshot_id)
-
-        graph_response = self.artifact_get(
-            registration.snapshot_id,
-            "architecture_graph_json",
-        )
-        symbol_response = self.artifact_get(
-            registration.snapshot_id,
-            "python_symbol_index_json",
-        )
-        entrypoint_response = self.artifact_get(
-            registration.snapshot_id,
-            "entrypoints_json",
-        )
-        cards_response = self.artifact_get(
-            registration.snapshot_id,
-            "relation_cards_jsonl",
-        )
-
-        relation_cards, relation_card_errors = _jsonl_documents(cards_response)
-        query_response: dict[str, Any] = {}
-        query = _target_query(target_path, target_symbol, changed_paths)
-        query_limit = (
-            max_items
-            if isinstance(max_items, int)
-            and not isinstance(max_items, bool)
-            and 1 <= max_items <= 200
-            else 25
-        )
-        if include_query_context is True and query:
-            query_response = self.query_existing_index(
-                registration.snapshot_id,
-                query,
-                k=query_limit,
-                resolve_evidence=True,
-                project_sources=True,
-            )
-        elif include_query_context not in {True, False}:
+        if not isinstance(include_query_context, bool):
             return self._invalid(
                 "agent_impact_context",
                 "include_query_context must be a boolean",
                 snapshot_id=registration.snapshot_id,
             )
 
-        snapshot_response = self.snapshot_status(registration.snapshot_id)
-        statuses = [
-            _artifact_status("architecture_graph_json", graph_response),
-            _artifact_status("python_symbol_index_json", symbol_response),
-            _artifact_status("entrypoints_json", entrypoint_response),
-            _artifact_status("relation_cards_jsonl", cards_response),
-        ]
-        if query_response:
-            statuses.append(
-                {
-                    "source": "sqlite_index",
-                    "status": query_response.get("status"),
-                    "error_code": query_response.get("error_code"),
-                }
-            )
-
+        sources = self._impact_sources(registration.snapshot_id)
+        cards, card_errors = _jsonl_documents(sources.cards)
+        query = _target_query(target_path, target_symbol, changed_paths)
+        query_response = self._impact_query(
+            registration.snapshot_id,
+            query=query,
+            max_items=max_items,
+            include_query_context=include_query_context,
+        )
         result = build_agent_impact_context(
             target_path=target_path,
             target_symbol=target_symbol,
             changed_paths=changed_paths,
             mode=mode,
             max_items=max_items,
-            architecture_graph=_json_document(graph_response),
-            symbol_index=_json_document(symbol_response),
-            entrypoints=_json_document(entrypoint_response),
-            relation_cards=relation_cards,
+            architecture_graph=_json_document(sources.graph),
+            symbol_index=_json_document(sources.symbols),
+            entrypoints=_json_document(sources.entrypoints),
+            relation_cards=cards,
             query_context=query_response,
-            source_statuses=statuses,
+            source_statuses=self._source_statuses(sources, query_response),
         )
         result.update(
             {
                 "action": "agent_impact_context",
                 "snapshot_id": registration.snapshot_id,
                 "bundle_manifest": str(registration.manifest),
-                "snapshot": snapshot_response.get("snapshot"),
+                "snapshot": self.snapshot_status(
+                    registration.snapshot_id
+                ).get("snapshot"),
                 "query": query,
-                "relation_card_parse_errors": relation_card_errors,
+                "relation_card_parse_errors": card_errors,
             }
         )
         return result
