@@ -39,6 +39,7 @@
   "id": "repobrief-agent-impact-synthetic-contract-v1",
   "kind": "repobrief.agent_impact_goldset",
   "measurement_scope": "synthetic_contract_fixture",
+  "minimum_context_path_reduction_at_equal_or_better_recall": 0.2,
   "minimum_target_recall_advantage": 0.2,
   "version": "1.0"
 }
