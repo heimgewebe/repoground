@@ -62,6 +62,15 @@ def _cases(taskset: dict) -> dict[str, dict]:
     return {case["id"]: case for case in taskset["cases"]}
 
 
+def _planned_requests(taskset: dict) -> list[dict]:
+    return build_run_requests(
+        taskset,
+        runner=RUNNER,
+        manifest_bindings=BINDINGS,
+        repetitions=2,
+    )
+
+
 def _receipt(
     request: dict,
     case: dict,
@@ -139,12 +148,7 @@ def _requests_and_receipts(
     *, treatment_factor: float = 0.5
 ) -> tuple[dict, list[dict], list[dict]]:
     taskset = _taskset()
-    requests = build_run_requests(
-        taskset,
-        runner=RUNNER,
-        manifest_bindings=BINDINGS,
-        repetitions=2,
-    )
+    requests = _planned_requests(taskset)
     cases = _cases(taskset)
     receipts = []
     for request in requests:
@@ -222,18 +226,8 @@ def test_taskset_semantic_validation_rejects_manipulation(mutation, expected: st
 
 def test_pair_plan_is_deterministic_balanced_and_isolated() -> None:
     taskset = _taskset()
-    first = build_run_requests(
-        taskset,
-        runner=RUNNER,
-        manifest_bindings=BINDINGS,
-        repetitions=2,
-    )
-    second = build_run_requests(
-        taskset,
-        runner=RUNNER,
-        manifest_bindings=BINDINGS,
-        repetitions=2,
-    )
+    first = _planned_requests(taskset)
+    second = _planned_requests(taskset)
     assert first == second
     assert len(first) == 96
     assert len({item["request_id"] for item in first}) == 96
@@ -255,6 +249,17 @@ def test_pair_plan_is_deterministic_balanced_and_isolated() -> None:
     assert orders[2] == {"baseline": 12, "treatment": 12}
 
 
+def test_pair_plan_rejects_non_frozen_repetition_count() -> None:
+    taskset = _taskset()
+    with pytest.raises(AgentBenchmarkError, match="requires exactly 2 repetitions"):
+        build_run_requests(
+            taskset,
+            runner=RUNNER,
+            manifest_bindings=BINDINGS,
+            repetitions=1,
+        )
+
+
 def test_pair_plan_requires_treatment_manifest_binding() -> None:
     taskset = _taskset()
     incomplete = dict(BINDINGS)
@@ -264,18 +269,13 @@ def test_pair_plan_requires_treatment_manifest_binding() -> None:
             taskset,
             runner=RUNNER,
             manifest_bindings=incomplete,
-            repetitions=1,
+            repetitions=2,
         )
 
 
 def test_valid_receipt_matches_schema_and_exact_request() -> None:
     taskset = _taskset()
-    request = build_run_requests(
-        taskset,
-        runner=RUNNER,
-        manifest_bindings=BINDINGS,
-        repetitions=1,
-    )[0]
+    request = _planned_requests(taskset)[0]
     receipt = _receipt(request, _cases(taskset)[request["case_id"]])
     Draft7Validator(_schema("receipt")).validate(receipt)
     assert validate_receipt(request, receipt) == []
@@ -309,12 +309,7 @@ def test_valid_receipt_matches_schema_and_exact_request() -> None:
 )
 def test_receipt_validation_rejects_untrusted_evidence(mutate, expected: str) -> None:
     taskset = _taskset()
-    request = build_run_requests(
-        taskset,
-        runner=RUNNER,
-        manifest_bindings=BINDINGS,
-        repetitions=1,
-    )[0]
+    request = _planned_requests(taskset)[0]
     receipt = _receipt(request, _cases(taskset)[request["case_id"]])
     mutate(receipt)
     assert any(expected in error for error in validate_receipt(request, receipt))
@@ -322,12 +317,7 @@ def test_receipt_validation_rejects_untrusted_evidence(mutate, expected: str) ->
 
 def test_artifact_transcript_cannot_escape_root(tmp_path: Path) -> None:
     taskset = _taskset()
-    request = build_run_requests(
-        taskset,
-        runner=RUNNER,
-        manifest_bindings=BINDINGS,
-        repetitions=1,
-    )[0]
+    request = _planned_requests(taskset)[0]
     receipt = _receipt(request, _cases(taskset)[request["case_id"]])
     receipt["transcript"].update(
         {"storage": "artifact", "inline": None, "artifact": "../outside.json"}
@@ -341,12 +331,7 @@ def test_non_answer_case_detects_false_confidence() -> None:
     case = _cases(taskset)["grounding-head-mismatch"]
     request = next(
         item
-        for item in build_run_requests(
-            taskset,
-            runner=RUNNER,
-            manifest_bindings=BINDINGS,
-            repetitions=1,
-        )
+        for item in _planned_requests(taskset)
         if item["case_id"] == case["id"] and item["condition"] == "treatment"
     )
     receipt = _receipt(
@@ -439,7 +424,7 @@ def test_quality_regression_blocks_benefit_despite_efficiency_gain() -> None:
 
 
 def test_reused_session_or_workspace_invalidates_pair() -> None:
-    taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.5)
+    taskset, requests, _receipts = _requests_and_receipts(treatment_factor=0.5)
     mutated_requests = copy.deepcopy(requests)
     by_pair: dict[str, list[dict]] = defaultdict(list)
     for request in mutated_requests:
@@ -459,6 +444,55 @@ def test_reused_session_or_workspace_invalidates_pair() -> None:
         measurement_scope="real_paired_agent_runs",
     )
     assert result["invalid_run_count"] >= 2
+    assert result["decision"]["status"] == "insufficient_evidence"
+
+
+def test_entire_missing_pair_remains_visible_and_invalid() -> None:
+    taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.5)
+    missing_pair = requests[0]["pair_id"]
+    filtered_requests = [request for request in requests if request["pair_id"] != missing_pair]
+    valid_request_ids = {request["request_id"] for request in filtered_requests}
+    filtered_receipts = [
+        receipt for receipt in receipts if receipt["request_id"] in valid_request_ids
+    ]
+    result = evaluate_paired_runs(
+        taskset,
+        filtered_requests,
+        filtered_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    assert len(result["cases"]) == 48
+    assert result["run_count"] == 96
+    assert result["invalid_run_count"] >= 2
+    assert result["decision"]["status"] == "insufficient_evidence"
+
+
+def test_request_manipulation_invalidates_matching_receipt() -> None:
+    taskset, requests, receipts = _requests_and_receipts(treatment_factor=0.5)
+    mutated_requests = copy.deepcopy(requests)
+    target = mutated_requests[0]
+    target["prompt"] = "post-hoc prompt"
+    cases = _cases(taskset)
+    receipt_by_id = {receipt["request_id"]: receipt for receipt in receipts}
+    receipt_by_id[target["request_id"]] = _receipt(
+        target,
+        cases[target["case_id"]],
+    )
+    result = evaluate_paired_runs(
+        taskset,
+        mutated_requests,
+        list(receipt_by_id.values()),
+        measurement_scope="real_paired_agent_runs",
+    )
+    affected = next(
+        item
+        for item in result["cases"]
+        if item["case_id"] == target["case_id"]
+        and item["repetition"] == target["repetition"]
+    )
+    condition_score = affected[target["condition"]]
+    assert condition_score["valid"] is False
+    assert "request prompt does not match frozen case" in condition_score["invalid_reasons"]
     assert result["decision"]["status"] == "insufficient_evidence"
 
 
