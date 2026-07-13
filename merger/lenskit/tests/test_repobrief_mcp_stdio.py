@@ -2,6 +2,8 @@ import json
 from io import StringIO
 from pathlib import Path
 
+import pytest
+
 from merger.lenskit.cli.repobrief_mcp_stdio import (
     PROTOCOL_VERSION,
     RepoBriefMcpStdioServer,
@@ -43,6 +45,13 @@ def _initialize(server: RepoBriefMcpStdioServer):
     return response
 
 
+def _tools(server: RepoBriefMcpStdioServer) -> list[dict]:
+    response = server.handle_message(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+    )
+    return response["result"]["tools"]
+
+
 def test_mcp_stdio_requires_initialization(tmp_path):
     server = RepoBriefMcpStdioServer(bundle_root=tmp_path)
 
@@ -71,29 +80,96 @@ def test_mcp_stdio_lists_read_tools_and_hides_snapshot_create_by_default(tmp_pat
     server = RepoBriefMcpStdioServer(bundle_root=tmp_path)
     initialized = _initialize(server)
 
-    response = server.handle_message(
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
-    )
-
     assert initialized["result"]["protocolVersion"] == PROTOCOL_VERSION
     assert initialized["result"]["capabilities"]["tools"]["listChanged"] is False
-    names = {tool["name"] for tool in response["result"]["tools"]}
-    assert names == {"ask_context", "grounding_verify", "live_freshness"}
+    assert {tool["name"] for tool in _tools(server)} == {
+        "ask_context",
+        "grounding_verify",
+        "live_freshness",
+    }
 
 
-def test_mcp_stdio_exposes_snapshot_create_only_with_explicit_start_flag(tmp_path):
+def test_snapshot_create_enable_requires_explicit_repo_root(tmp_path):
+    with pytest.raises(ValueError, match="requires an explicit --repo-root"):
+        RepoBriefMcpStdioServer(
+            bundle_root=tmp_path,
+            enable_snapshot_create=True,
+        )
+
+
+def test_mcp_stdio_exposes_startup_bound_snapshot_create_schema(tmp_path):
+    repo = tmp_path / "repo"
+    bundles = tmp_path / "bundles"
+    repo.mkdir()
+    bundles.mkdir()
     server = RepoBriefMcpStdioServer(
-        bundle_root=tmp_path,
+        bundle_root=bundles,
+        repo_root=repo,
         enable_snapshot_create=True,
     )
     _initialize(server)
 
+    definition = next(tool for tool in _tools(server) if tool["name"] == "snapshot_create")
+    properties = definition["inputSchema"]["properties"]
+
+    assert definition["inputSchema"]["required"] == ["profile"]
+    assert "repo" not in properties
+    assert "output_root" not in properties
+
+
+def test_snapshot_create_injects_startup_roots_and_rejects_overrides(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    bundles = tmp_path / "bundles"
+    repo.mkdir()
+    bundles.mkdir()
+    server = RepoBriefMcpStdioServer(
+        bundle_root=bundles,
+        repo_root=repo,
+        enable_snapshot_create=True,
+    )
+    _initialize(server)
+    seen = {}
+
+    def fake_snapshot_create(**arguments):
+        seen.update(arguments)
+        return {"status": "ok"}
+
+    monkeypatch.setattr(repobrief_mcp_tools, "snapshot_create", fake_snapshot_create)
     response = server.handle_message(
-        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "snapshot_create",
+                "arguments": {"profile": "agent-review", "output_subdir": "demo"},
+            },
+        }
     )
 
-    names = {tool["name"] for tool in response["result"]["tools"]}
-    assert "snapshot_create" in names
+    assert response["result"]["isError"] is False
+    assert seen["repo"] == str(repo.resolve())
+    assert seen["output_root"] == str(bundles.resolve())
+    assert seen["profile"] == "agent-review"
+
+    rejected = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "snapshot_create",
+                "arguments": {
+                    "profile": "agent-review",
+                    "repo": str(tmp_path / "other"),
+                    "output_root": str(tmp_path / "outside"),
+                },
+            },
+        }
+    )
+
+    assert rejected["error"]["code"] == -32602
+    assert rejected["error"]["data"]["forbidden_arguments"] == ["output_root", "repo"]
 
 
 def test_mcp_stdio_tool_call_is_bundle_root_bound(tmp_path):
