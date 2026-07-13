@@ -80,13 +80,13 @@
     },
     {
       "limitations": [
-        "No real-repository graph-noise threshold or no-new-complexity ratchet is active yet."
+        "The ratchets bound measured graph noise and C901 regressions only; they do not establish runtime reachability, complete entrypoint discovery, semantic layer truth, general maintainability, test completeness or absence of problems below the C901 threshold."
       ],
-      "promotion": "deferred",
+      "promotion": "allowed",
       "scope": "graph-noise and complexity ratchets",
-      "status": "open",
+      "status": "done",
       "task_id": "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
-      "verification": "not_started"
+      "verification": "local_validated"
     }
   ],
   "authority": "governance_projection",
@@ -125,12 +125,11 @@
     "pass_means": "Only the checks declared by that specific health or CI report passed for the observed artifact or commit."
   },
   "kind": "lenskit.repobrief_status_truth",
-  "observed_on": "2026-07-12",
+  "observed_on": "2026-07-13",
   "open_followups": [
     "TASK-REPOBRIEF-WORKBENCH-USEFULNESS-EVAL-001",
     "TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001",
     "TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001",
-    "TASK-REPOBRIEF-AUDIT-GRAPH-MAINTAINABILITY-001",
     "TASK-LENSKIT-SEMANTIC-LOCK-001",
     "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001"
   ],
@@ -200,18 +199,18 @@
       "Canonical review retrieval remains measured below its acceptance thresholds and default promotion is blocked.",
       "The internal deterministic release-candidate path is main-verified; public distribution remains blocked pending an owner-approved license decision.",
       "The optional semantic/Torch dependency closure is not hash-locked and remains outside the candidate contract.",
-      "Graph maintainability ratchets remain open.",
-      "The reached upstream reusable-workflow graph is recursively commit-pinned, hash-verified, main-verified and runtime-verified for the bounded no-command caller path."
+      "The reached upstream reusable-workflow graph is recursively commit-pinned, hash-verified, main-verified and runtime-verified for the bounded no-command caller path.",
+      "Graph maintainability ratchets are locally validated on the PR candidate; main verification remains a post-merge check."
     ],
     "release_readiness": "not_established",
     "status": "mixed"
   },
   "task_summary": {
     "by_status": {
-      "open": 6,
+      "open": 5,
       "in_progress": 0,
       "partial": 0,
-      "done": 86
+      "done": 87
     },
     "total": 92
   },

@@ -23,10 +23,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
 
+from merger.lenskit.architecture.path_classification import (
+    infer_architecture_layer,
+    is_test_path,
+)
+
 logger = logging.getLogger(__name__)
 
 _SKIP_DIRECTORIES = {"__pycache__", "env", "node_modules", "venv"}
-_INFRA_SEGMENTS = {"infra", "scripts", "tools"}
 
 
 class SourceRootError(ValueError):
@@ -79,21 +83,11 @@ class GraphDocument(TypedDict, total=False):
 
 
 def _is_test_file(path: str) -> bool:
-    name = Path(path).name
-    return name.startswith("test_") or name.endswith("_test.py")
+    return is_test_path(path)
 
 
 def _infer_layer(path: str) -> str:
-    parts = set(Path(path).parts)
-    if _is_test_file(path) or parts.intersection({"test", "tests"}):
-        return "test"
-    if "cli" in parts:
-        return "cli"
-    if "core" in parts:
-        return "core"
-    if parts.intersection(_INFRA_SEGMENTS):
-        return "infra"
-    return "unknown"
+    return infer_architecture_layer(path)
 
 
 def _iter_python_files(repo_root: Path) -> list[Path]:

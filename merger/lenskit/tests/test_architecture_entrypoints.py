@@ -22,6 +22,7 @@ def test_extract_entrypoints():
     cli_py = next((e for e in eps if e["id"] == "cli_cli_py"), None)
     assert cli_py is not None
     assert cli_py["type"] == "cli"
+    assert cli_py["projection"] == "product"
     assert cli_py["path"] == "cli.py"
     assert cli_py["evidence_level"] == "S1"
     assert "start_line" in cli_py["evidence"]
@@ -29,6 +30,7 @@ def test_extract_entrypoints():
     module_main = next((e for e in eps if e["id"] == "module_main_src_module___main___py"), None)
     assert module_main is not None
     assert module_main["type"] == "module_main"
+    assert module_main["projection"] == "product"
     assert module_main["path"] == "src/module/__main__.py"
     assert module_main["evidence_level"] == "S0"
 
@@ -45,5 +47,11 @@ def test_entrypoints_document_matches_schema():
     jsonschema.validate(instance=doc, schema=schema)
 
     assert doc["kind"] == "lenskit.entrypoints"
+    assert doc["entrypoint_counts_by_projection"] == {
+        "product": 2,
+        "test": 0,
+        "fixture": 0,
+        "script": 0,
+    }
     assert len(doc["entrypoints"]) == 2
     assert doc["skipped_files_count"] == 1

@@ -29,3 +29,6 @@ jobs:
       # Bare path-scoped Ruff jobs keep Ruff's default rule selection.
       - name: Check pinned Ruff scope
         run: ruff check --config ruff-ci.toml .
+
+      - name: Check graph and complexity maintainability ratchets
+        run: python scripts/ci/check_graph_maintainability.py --root . --format json

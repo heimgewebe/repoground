@@ -4,16 +4,39 @@
   "title": "Entrypoints (entrypoints v1)",
   "type": "object",
   "additionalProperties": false,
-  "required": ["kind", "version", "run_id", "canonical_dump_index_sha256", "entrypoints"],
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "canonical_dump_index_sha256",
+    "entrypoints"
+  ],
   "properties": {
-    "kind": { "type": "string", "const": "lenskit.entrypoints" },
-    "version": { "type": "string", "const": "1.0" },
-    "run_id": { "type": "string" },
-    "canonical_dump_index_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "skipped_files_count": { "type": "integer", "minimum": 0, "description": "Number of files skipped due to unrecoverable parsing errors" },
+    "kind": {
+      "type": "string",
+      "const": "lenskit.entrypoints"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "canonical_dump_index_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "skipped_files_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of files skipped due to unrecoverable parsing errors"
+    },
     "skipped_errors": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Sample of errors encountered during parsing (capped)"
     },
     "entrypoints": {
@@ -21,20 +44,85 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "type", "path", "evidence_level"],
+        "required": [
+          "id",
+          "type",
+          "path",
+          "evidence_level"
+        ],
         "properties": {
-          "id": { "type": "string", "description": "Path-derived stable identifier (strategy: path_v1)" },
-          "type": { "type": "string", "enum": ["cli", "module_main", "web", "worker", "test"] },
-          "path": { "type": "string" },
-          "symbol": { "type": "string" },
+          "id": {
+            "type": "string",
+            "description": "Path-derived stable identifier (strategy: path_v1)"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "cli",
+              "module_main",
+              "web",
+              "worker",
+              "test"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "symbol": {
+            "type": "string"
+          },
           "evidence_level": {
             "type": "string",
-            "enum": ["S0", "S1", "S2"],
+            "enum": [
+              "S0",
+              "S1",
+              "S2"
+            ],
             "description": "S0 (structural convention), S1 (static heuristic), S2 (runtime/observed)"
           },
-          "evidence": { "type": "object" }
+          "evidence": {
+            "type": "object"
+          },
+          "projection": {
+            "type": "string",
+            "enum": [
+              "product",
+              "test",
+              "fixture",
+              "script"
+            ]
+          }
         }
       }
+    },
+    "entrypoint_counts_by_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product",
+        "test",
+        "fixture",
+        "script"
+      ],
+      "properties": {
+        "product": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "test": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fixture": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "script": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "Producer-emitted split that prevents product entrypoints from being mixed with test, fixture and script execution surfaces."
     }
   }
 }
