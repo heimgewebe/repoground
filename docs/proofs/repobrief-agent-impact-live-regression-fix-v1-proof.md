@@ -45,6 +45,11 @@ Die Kandidaten behalten:
 Sie werden ausdrücklich nicht als Graphkante, Laufzeitabhängigkeit,
 Testabdeckung oder Testhinlänglichkeit dargestellt.
 
+Liegt mindestens ein aufgelöster Testpfad vor, werden bloß konventionell
+geratene Testkandidaten unterdrückt. Ohne `resolved_query`-Treffer bleiben
+Heuristiken als sichtbar schwächerer Fallback erhalten. Die Ausgabe dokumentiert
+die Zahl der unterdrückten Heuristiken in `composition`.
+
 ### Pfadhygiene
 
 Pfadsegmente werden vor jeder `PurePosixPath`-Normalisierung geprüft. Der
@@ -76,7 +81,7 @@ und entweder:
 
 `default_promoted` bleibt unabhängig vom Ergebnis `false`.
 
-## Live-Rerun
+## Kanonischer Regression-Replay
 
 Der vorab fixierte Drei-Repository-Goldset wurde mit denselben Zielcommits und
 denselben erwarteten Testpfaden erneut ausgeführt. Geändert wurde nur die zu
@@ -95,9 +100,9 @@ prüfende RepoBrief-Implementierung.
 - Evaluation SHA-256: `b5f081834138b1d838b2a72183c5c22fbd7f3e805af02e4e98f8a20f7e344e88`
 
 Der GitHub-Merge-Ref ist der von Actions ausgecheckte, konfliktfrei aus
-aktuellem `main` und PR-Head erzeugte Testbaum. Nach dem Lauf werden nur
-Messworkflow und Evidenzdokumente verändert; die geprüften Produktdateien
-bleiben unverändert und werden vor Merge nochmals diffgebunden geprüft.
+aktuellem `main` und PR-Head erzeugte Testbaum. Nach dem Lauf änderten sich nur
+Messinstrumente und Evidenzdokumente. Ein Commitvergleich bis zum bereinigten
+Produktkandidaten zeigte keine Änderung an Evaluator, Refinement oder Adapter.
 
 ### Zielrepositories
 
@@ -145,6 +150,28 @@ Die vollständigen Rohbeobachtungen umfassen rund 190 KB und mehr als 5.000
 Zeilen. Sie werden nicht in die Reviewfläche aufgenommen, sondern über den
 oben gebundenen Actions-Artefakt-Digest und ihren eigenen SHA-256 verifiziert.
 
+## Unabhängige Produktstand-Bestätigung
+
+Ein zweiter, parallel erzeugter Lauf prüfte denselben Goldset mit dem neueren
+Implementierungsstand `bc4afc2e4f4d826f0a8c4a764de8f6bf32275802` und einer
+strengeren Projektion, die nur tatsächlich im Zielrepository vorhandene Pfade
+zählte.
+
+- Workflow-Run: `29234901915`
+- Kalibrierungsjob: `rcga-live-calibration` — `success`
+- Actions-Artefakt: `8273044862`
+- Artefakt-Digest: `sha256:ab72636983fcfeffa1399d58485089fdb38cb7230d3a0219efe47f3af079a0cf`
+- Recall: `1.0 → 1.0`
+- `no_case_regression=true`
+- Kontextpfadreduktion: `32 %`
+- registrierte Schwelle: `20 %`
+- `default_promoted=false`
+
+Dieser Lauf ist eine unabhängige Robustheitsbestätigung. Seine abweichende
+Kompressionszahl entsteht aus einer anderen, strengeren Pfadzählung. Er ersetzt
+nicht den kanonischen Regression-Replay und erzeugt keine zweite
+Dokumentationswahrheit.
+
 ## Tests
 
 Der Slice testet:
@@ -153,6 +180,8 @@ Der Slice testet:
 - Erhalt von Citation- und Range-Metadaten;
 - getrennte Evidenzklassen und deterministische Reihenfolge;
 - Adapterintegration ohne Write-Surface;
+- Unterdrückung bloßer Heuristiken nur bei vorhandener stärkerer Testevidenz;
+- Erhalt heuristischer Fallbacks ohne aufgelösten Testtreffer;
 - Ablehnung roher Punkt- und Parentsegmente vor Normalisierung;
 - Filterung leerer und unsicherer Pfade;
 - Kompressionsnutzen bei recall-gleicher Ausgabe;
@@ -164,8 +193,9 @@ Der Slice testet:
 ## Einordnung
 
 **Belegt:** Auf diesem vorab fixierten Live-Goldset hält die Impact-Fläche den
-vollständigen Recall und halbiert die gemessene Kontextpfadmenge. Die frühere
-Grabowski-Regression ist behoben.
+vollständigen Recall und reduziert die gemessene Kontextpfadmenge je nach
+strenger Zählmethode um `32 %` bis `50 %`. Die frühere Grabowski-Regression ist
+behoben.
 
 **Plausibel:** Die kompaktere, evidenzgetrennte Erstleseliste kann Agenten bei
 der Navigation Zeit und Kontext sparen.
