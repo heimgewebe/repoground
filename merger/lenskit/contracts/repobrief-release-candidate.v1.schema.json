@@ -2,6 +2,31 @@
   "$id": "https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
+  "definitions": {
+    "hashedPathRecord": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "path": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "bytes",
+        "sha256"
+      ],
+      "type": "object"
+    }
+  },
   "description": "Commit-bound, deterministic RepoBrief source-candidate manifest. It is an internal verification artifact and does not grant distribution permission.",
   "properties": {
     "$schema": {
@@ -170,21 +195,54 @@
     "semantic_extension": {
       "additionalProperties": false,
       "properties": {
-        "input": {
-          "const": "merger/lenskit/requirements-semantic.txt"
+        "default_enabled": {
+          "const": false
         },
-        "reason": {
-          "minLength": 1,
-          "type": "string"
+        "platform_contract": {
+          "$ref": "#/definitions/hashedPathRecord"
         },
         "status": {
-          "const": "excluded"
+          "const": "optional_locked"
+        },
+        "targets": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "constraints": {
+                "$ref": "#/definitions/hashedPathRecord"
+              },
+              "id": {
+                "const": "cpython-312-linux-x86_64"
+              },
+              "input": {
+                "$ref": "#/definitions/hashedPathRecord"
+              },
+              "lock": {
+                "$ref": "#/definitions/hashedPathRecord"
+              }
+            },
+            "required": [
+              "id",
+              "input",
+              "constraints",
+              "lock"
+            ],
+            "type": "object"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "type": "array"
+        },
+        "unsupported_target_policy": {
+          "const": "fail_closed"
         }
       },
       "required": [
         "status",
-        "reason",
-        "input"
+        "default_enabled",
+        "unsupported_target_policy",
+        "platform_contract",
+        "targets"
       ],
       "type": "object"
     },

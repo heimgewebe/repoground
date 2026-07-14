@@ -23,6 +23,13 @@ LOCK_PATHS = (
     "requirements/repobrief-browser.lock.txt",
     "requirements/repobrief-lock-tools.lock.txt",
 )
+SEMANTIC_TARGET_ID = "cpython-312-linux-x86_64"
+SEMANTIC_PLATFORM_CONTRACT_PATH = "docs/release/semantic-extension-platforms.v1.json"
+SEMANTIC_INPUT_PATH = "requirements/repobrief-semantic-linux-x86_64-py312.in"
+SEMANTIC_CONSTRAINTS_PATH = (
+    "requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt"
+)
+SEMANTIC_LOCK_PATH = "requirements/repobrief-semantic-linux-x86_64-py312.lock.txt"
 DOES_NOT_ESTABLISH = (
     "public_distribution_permission",
     "open_source_status",
@@ -31,7 +38,9 @@ DOES_NOT_ESTABLISH = (
     "runtime_correctness",
     "test_completeness",
     "absence_of_vulnerabilities",
-    "semantic_extension_reproducibility",
+    "semantic_quality",
+    "cross_platform_semantic_support",
+    "semantic_default_promotion",
 )
 
 
@@ -211,6 +220,32 @@ def _lock_records(repo: Path, commit: str) -> list[dict[str, object]]:
     return records
 
 
+def _hashed_path_record(repo: Path, commit: str, path: str) -> dict[str, object]:
+    data = read_blob(repo, commit, path)
+    return {"path": path, "bytes": len(data), "sha256": _sha256_bytes(data)}
+
+
+def _semantic_extension_record(repo: Path, commit: str) -> dict[str, object]:
+    return {
+        "status": "optional_locked",
+        "default_enabled": False,
+        "unsupported_target_policy": "fail_closed",
+        "platform_contract": _hashed_path_record(
+            repo, commit, SEMANTIC_PLATFORM_CONTRACT_PATH
+        ),
+        "targets": [
+            {
+                "id": SEMANTIC_TARGET_ID,
+                "input": _hashed_path_record(repo, commit, SEMANTIC_INPUT_PATH),
+                "constraints": _hashed_path_record(
+                    repo, commit, SEMANTIC_CONSTRAINTS_PATH
+                ),
+                "lock": _hashed_path_record(repo, commit, SEMANTIC_LOCK_PATH),
+            }
+        ],
+    }
+
+
 def _write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -289,11 +324,7 @@ def build_release_candidate(
             },
         },
         "dependency_locks": _lock_records(repo_path, commit),
-        "semantic_extension": {
-            "status": "excluded",
-            "reason": "platform-specific transitive closure is not hash-locked",
-            "input": "merger/lenskit/requirements-semantic.txt",
-        },
+        "semantic_extension": _semantic_extension_record(repo_path, commit),
         "verification": {
             "self_contained_command": (
                 "python scripts/release/verify_release_candidate.py "

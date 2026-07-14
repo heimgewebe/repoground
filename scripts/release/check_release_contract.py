@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
 from pathlib import Path
+
+import jsonschema
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -12,6 +15,10 @@ if __package__ in {None, ""}:
 from scripts.release.build_release_candidate import (
     LICENSE_EXPRESSION,
     LOCK_PATHS,
+    SEMANTIC_CONSTRAINTS_PATH,
+    SEMANTIC_INPUT_PATH,
+    SEMANTIC_LOCK_PATH,
+    SEMANTIC_PLATFORM_CONTRACT_PATH,
     VERSION_RE,
 )
 
@@ -34,6 +41,14 @@ REQUIRED_FILES = (
     "scripts/release/compile_dependency_locks.sh",
     *INPUT_PATHS,
     *LOCK_PATHS,
+    SEMANTIC_PLATFORM_CONTRACT_PATH,
+    "merger/lenskit/contracts/repobrief-semantic-platforms.v1.schema.json",
+    "merger/lenskit/requirements-semantic.txt",
+    SEMANTIC_INPUT_PATH,
+    SEMANTIC_CONSTRAINTS_PATH,
+    SEMANTIC_LOCK_PATH,
+    "scripts/release/compile_semantic_lock.py",
+    "scripts/release/compile_semantic_lock.sh",
 )
 
 
@@ -89,6 +104,176 @@ def _check_lock(path: Path, relative: str) -> list[dict[str, str]]:
             )
     return findings
 
+
+
+def _load_semantic_contract(
+    repo: Path,
+) -> tuple[dict[str, object] | None, dict[str, str] | None]:
+    contract_path = repo / SEMANTIC_PLATFORM_CONTRACT_PATH
+    schema_path = (
+        repo / "merger/lenskit/contracts/repobrief-semantic-platforms.v1.schema.json"
+    )
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.Draft7Validator(schema).validate(contract)
+    except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as exc:
+        return None, _finding(
+            "SEMANTIC_PLATFORM_CONTRACT_INVALID",
+            SEMANTIC_PLATFORM_CONTRACT_PATH,
+            str(exc),
+        )
+    if not isinstance(contract, dict):
+        return None, _finding(
+            "SEMANTIC_PLATFORM_CONTRACT_INVALID",
+            SEMANTIC_PLATFORM_CONTRACT_PATH,
+            "contract root is not an object",
+        )
+    return contract, None
+
+
+def _semantic_target(
+    contract: dict[str, object],
+) -> tuple[dict[str, object] | None, dict[str, str] | None]:
+    try:
+        target = contract["supported_targets"][0]  # type: ignore[index]
+    except (KeyError, IndexError, TypeError) as exc:
+        return None, _finding(
+            "SEMANTIC_PLATFORM_CONTRACT_INVALID",
+            SEMANTIC_PLATFORM_CONTRACT_PATH,
+            str(exc),
+        )
+    if not isinstance(target, dict):
+        return None, _finding(
+            "SEMANTIC_PLATFORM_CONTRACT_INVALID",
+            SEMANTIC_PLATFORM_CONTRACT_PATH,
+            "semantic target is not an object",
+        )
+    return target, None
+
+
+def _check_semantic_artifacts(
+    repo: Path,
+    target: dict[str, object],
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for key, expected_path in (
+        ("input", SEMANTIC_INPUT_PATH),
+        ("constraints", SEMANTIC_CONSTRAINTS_PATH),
+        ("lock", SEMANTIC_LOCK_PATH),
+    ):
+        record = target.get(key)
+        if not isinstance(record, dict):
+            findings.append(
+                _finding(
+                    "SEMANTIC_PLATFORM_CONTRACT_INVALID",
+                    SEMANTIC_PLATFORM_CONTRACT_PATH,
+                    f"{key} record is not an object",
+                )
+            )
+            continue
+        observed_path = record.get("path")
+        if observed_path != expected_path:
+            findings.append(
+                _finding(
+                    "SEMANTIC_PATH_MISMATCH",
+                    SEMANTIC_PLATFORM_CONTRACT_PATH,
+                    f"{key}: expected={expected_path} observed={observed_path}",
+                )
+            )
+            continue
+        data = (repo / expected_path).read_bytes()
+        observed_hash = hashlib.sha256(data).hexdigest()
+        if record.get("sha256") != observed_hash:
+            findings.append(
+                _finding(
+                    "SEMANTIC_HASH_MISMATCH",
+                    expected_path,
+                    f"contract={record.get('sha256')} observed={observed_hash}",
+                )
+            )
+    return findings
+
+
+def _semantic_package_starts(lock_text: str) -> list[str]:
+    return [
+        line
+        for line in lock_text.splitlines()
+        if line and not line[0].isspace() and not line.startswith(("#", "--"))
+    ]
+
+
+def _check_semantic_lock_boundary(
+    repo: Path,
+    target: dict[str, object],
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    lock_text = (repo / SEMANTIC_LOCK_PATH).read_text(encoding="utf-8")
+    starts = _semantic_package_starts(lock_text)
+    if len(starts) != target.get("package_count"):
+        findings.append(
+            _finding(
+                "SEMANTIC_PACKAGE_COUNT_MISMATCH",
+                SEMANTIC_LOCK_PATH,
+                f"contract={target.get('package_count')} observed={len(starts)}",
+            )
+        )
+    required_fragments = (
+        (
+            "sentence-transformers==5.6.0 \\",
+            "SEMANTIC_ROOT_PIN_MISSING",
+            "sentence-transformers==5.6.0",
+        ),
+        (
+            "torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu",
+            "SEMANTIC_TORCH_TARGET_MISSING",
+            "target-specific CPU Torch wheel is absent",
+        ),
+    )
+    for fragment, code, detail in required_fragments:
+        if fragment not in lock_text:
+            findings.append(_finding(code, SEMANTIC_LOCK_PATH, detail))
+    if lock_text.count("--hash=sha256:") != len(starts):
+        findings.append(
+            _finding(
+                "SEMANTIC_HASH_COUNT_MISMATCH",
+                SEMANTIC_LOCK_PATH,
+                "every selected wheel must have exactly one SHA-256",
+            )
+        )
+    return findings
+
+
+def _check_semantic_core_isolation(repo: Path) -> list[dict[str, str]]:
+    core_lock = (repo / "requirements/repobrief-runtime.lock.txt").read_text(
+        encoding="utf-8"
+    ).lower()
+    leaked = "sentence-transformers" in core_lock or re.search(
+        r"(?m)^torch(?:==|\s@)", core_lock
+    )
+    if not leaked:
+        return []
+    return [
+        _finding(
+            "SEMANTIC_DEPENDENCY_LEAKED_TO_CORE",
+            "requirements/repobrief-runtime.lock.txt",
+            "semantic roots must remain outside the core runtime lock",
+        )
+    ]
+
+
+def _check_semantic_extension(repo: Path) -> list[dict[str, str]]:
+    contract, contract_error = _load_semantic_contract(repo)
+    if contract_error is not None or contract is None:
+        return [contract_error] if contract_error is not None else []
+    target, target_error = _semantic_target(contract)
+    if target_error is not None or target is None:
+        return [target_error] if target_error is not None else []
+    return [
+        *_check_semantic_artifacts(repo, target),
+        *_check_semantic_lock_boundary(repo, target),
+        *_check_semantic_core_isolation(repo),
+    ]
 
 def _path_filter_blocks(header: str) -> list[set[str]]:
     lines = header.splitlines()
@@ -207,6 +392,7 @@ def scan(root: str | Path) -> dict[str, object]:
 
     for relative in LOCK_PATHS:
         findings.extend(_check_lock(repo / relative, relative))
+    findings.extend(_check_semantic_extension(repo))
     findings.extend(_check_workflows(repo))
 
     task_index = json.loads((repo / "docs/tasks/index.json").read_text(encoding="utf-8"))
@@ -230,7 +416,9 @@ def scan(root: str | Path) -> dict[str, object]:
         "does_not_establish": [
             "public_distribution_permission",
             "product_readiness",
-            "semantic_extension_reproducibility",
+            "semantic_quality",
+            "cross_platform_semantic_support",
+            "semantic_default_promotion",
         ],
     }
 
