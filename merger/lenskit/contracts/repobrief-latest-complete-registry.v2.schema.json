@@ -1,0 +1,477 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.github.io/lenskit/contracts/repobrief-latest-complete-registry.v2.schema.json",
+  "title": "RepoBrief Latest Complete Registry v2",
+  "type": "object",
+  "required": [
+    "kind",
+    "version",
+    "updated_at",
+    "bundle",
+    "source",
+    "health",
+    "freshness",
+    "eligibility",
+    "selection",
+    "publication",
+    "mutation_boundary",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repobrief.latest_complete_registry"
+    },
+    "version": {
+      "const": "v2"
+    },
+    "updated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bundle": {
+      "type": "object",
+      "required": [
+        "stem",
+        "manifest_path",
+        "manifest_sha256",
+        "manifest_bytes",
+        "manifest_capture",
+        "run_id",
+        "generated_at"
+      ],
+      "properties": {
+        "stem": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "manifest_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "manifest_capture": {
+          "const": "single_read_bytes_sha256_bound"
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "generated_at": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "commit",
+        "commit_status",
+        "repositories"
+      ],
+      "properties": {
+        "commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "commit_status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "repo_remote",
+              "repo_remote_sanitized",
+              "repo_root_recorded",
+              "repo_root_sha256",
+              "source_identity_basis",
+              "git_commit",
+              "git_dirty",
+              "git_branch",
+              "provenance_status",
+              "freshness_basis"
+            ],
+            "properties": {
+              "name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "repo_remote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "repo_root_recorded": {
+                "type": "boolean"
+              },
+              "repo_root_sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "source_identity_basis": {
+                "enum": [
+                  "repo_remote",
+                  "repo_root_sha256"
+                ]
+              },
+              "repo_remote_sanitized": {
+                "type": "boolean"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "source_identity_basis": {
+                      "const": "repo_remote"
+                    }
+                  },
+                  "required": [
+                    "source_identity_basis"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "repo_remote": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "repo_remote"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "source_identity_basis": {
+                      "const": "repo_root_sha256"
+                    }
+                  },
+                  "required": [
+                    "source_identity_basis"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "repo_root_recorded": {
+                      "const": true
+                    },
+                    "repo_root_sha256": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    }
+                  },
+                  "required": [
+                    "repo_root_recorded",
+                    "repo_root_sha256"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "health": {
+      "type": "object",
+      "required": [
+        "status",
+        "signals",
+        "health_values"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "unknown"
+          ]
+        },
+        "signals": {
+          "type": "object"
+        },
+        "health_values": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "pass",
+              "warn",
+              "fail",
+              "unknown"
+            ]
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "freshness": {
+      "type": "object",
+      "required": [
+        "status",
+        "reason",
+        "snapshot_commit",
+        "live_head",
+        "head_drift",
+        "basis"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "fresh",
+            "stale",
+            "unknown",
+            "not_comparable"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checked_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "snapshot_commit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "live_head": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "head_drift": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
+    },
+    "eligibility": {
+      "type": "object",
+      "required": [
+        "status",
+        "profile",
+        "manifest_name",
+        "generated_at",
+        "checks",
+        "errors"
+      ],
+      "properties": {
+        "status": {
+          "const": "pass"
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "manifest_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generated_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checks": {
+          "type": "object"
+        },
+        "errors": {
+          "type": "array",
+          "maxItems": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "selection": {
+      "type": "object",
+      "required": [
+        "basis",
+        "generated_at",
+        "run_id",
+        "manifest_sha256",
+        "source_lane",
+        "order_key",
+        "registry_version"
+      ],
+      "properties": {
+        "basis": {
+          "const": "generated_at_fail_closed_ties_v2"
+        },
+        "generated_at": {
+          "type": "string",
+          "minLength": 1
+        },
+        "run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "manifest_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "source_lane": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "type": "string"
+              },
+              {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^remote:.+"
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^root-sha256:[a-f0-9]{64}$"
+                  }
+                ]
+              }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "order_key": {
+          "type": "array",
+          "items": [
+            {
+              "type": "string"
+            }
+          ],
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "registry_version": {
+          "const": "v2"
+        }
+      },
+      "additionalProperties": true
+    },
+    "publication": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "serialization",
+        "file_fsync_required",
+        "directory_fsync_required",
+        "readback_required",
+        "uncertain_after_replace_reported",
+        "idempotent_durability_revalidation"
+      ],
+      "properties": {
+        "protocol": {
+          "const": "atomic_replace_with_durability_receipt_v2"
+        },
+        "serialization": {
+          "const": "advisory_directory_lock"
+        },
+        "file_fsync_required": {
+          "const": true
+        },
+        "directory_fsync_required": {
+          "const": true
+        },
+        "readback_required": {
+          "const": true
+        },
+        "uncertain_after_replace_reported": {
+          "const": true
+        },
+        "idempotent_durability_revalidation": {
+          "const": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "mutation_boundary": {
+      "type": "object",
+      "required": [
+        "writes",
+        "does_not_mutate",
+        "read_paths_do_not_refresh",
+        "hidden_refresh_allowed"
+      ],
+      "properties": {
+        "writes": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "latest_complete_registry_parent_directory",
+              "latest_complete_registry_temporary_file",
+              "latest_complete_registry"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "does_not_mutate": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "read_paths_do_not_refresh": {
+          "const": true
+        },
+        "hidden_refresh_allowed": {
+          "const": false
+        }
+      },
+      "additionalProperties": true
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": true
+}

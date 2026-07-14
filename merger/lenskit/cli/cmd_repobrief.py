@@ -1014,14 +1014,81 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
     return 0
 
 
+def _best_effort_display_path(value: str | Path) -> str:
+    path = Path(value).expanduser()
+    try:
+        return str(path.resolve())
+    except (OSError, RuntimeError):
+        return str(path)
+
+
+def _latest_complete_error_document(exc: ValueError, *, out: str) -> dict[str, Any]:
+    receipt = getattr(exc, "receipt", None)
+    if isinstance(receipt, dict):
+        return receipt
+    return {
+        "kind": "repobrief.latest_complete_registry_write",
+        "version": "v2",
+        "status": "error",
+        "publication_result": "not_published",
+        "publication_state": "failed_before_replace",
+        "registry_path": _best_effort_display_path(out),
+        "serialization_resource": _best_effort_display_path(Path(out).parent),
+        "target_directory_created": False,
+        "target_directories_created": [],
+        "error": {
+            "code": "validation_failed",
+            "phase": "preflight",
+            "message": str(exc),
+        },
+        "transaction": {
+            "replace_performed": False,
+            "temporary_file_write": "not_reached",
+            "file_fsync": "not_reached",
+            "atomic_replace": "not_reached",
+            "directory_fsync": "not_reached",
+            "readback": "unavailable",
+            "directory_identity": "not_reached",
+            "temporary_file_created": False,
+            "temporary_file_cleanup": "not_required",
+            "temporary_file_name": None,
+            "target": None,
+        },
+        "recovery": {
+            "required": False,
+            "action": "fix the validation error and retry",
+            "automatic_rollback_claimed": False,
+        },
+        "mutation_boundary": {
+            "writes": [
+                "latest_complete_registry_parent_directory",
+                "latest_complete_registry_temporary_file",
+                "latest_complete_registry",
+            ],
+            "observed_writes": [],
+            "does_not_mutate": [
+                "git",
+                "pull_requests",
+                "patches",
+                "source_working_tree",
+                "brief_bundle_artifacts",
+            ],
+            "read_paths_do_not_refresh": True,
+            "hidden_refresh_allowed": False,
+        },
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+    }
+
+
 def run_latest_complete_write(args: argparse.Namespace) -> int:
     from merger.lenskit.core.repobrief_latest_complete import write_latest_complete_registry
 
     try:
         result = write_latest_complete_registry(args.bundle_manifest, args.out)
     except ValueError as exc:
-        print("repobrief latest-complete write: " + str(exc), file=sys.stderr)
-        return 2
+        error_document = _latest_complete_error_document(exc, out=args.out)
+        print(json.dumps(error_document, indent=2, sort_keys=True), file=sys.stderr)
+        return 1 if error_document.get("publication_result") == "uncertain" else 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
@@ -1474,6 +1541,10 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
     try:
         result = build_snapshot_create_result(args)
     except ValueError as exc:
+        receipt = getattr(exc, "receipt", None)
+        if isinstance(receipt, dict):
+            print(json.dumps(receipt, indent=2, sort_keys=True), file=sys.stderr)
+            return 1 if receipt.get("publication_result") == "uncertain" else 2
         print(f"repobrief snapshot create: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
