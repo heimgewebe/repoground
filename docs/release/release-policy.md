@@ -56,10 +56,41 @@ Every resolved package is exactly versioned and carries SHA-256 hashes. The
 input files remain human-maintained; the lock files are regenerated with
 `scripts/release/compile_dependency_locks.sh` and reviewed as normal source.
 
-The optional semantic reranking stack (`requirements-semantic.txt`, including
-Torch through sentence-transformers) is intentionally outside this first
-candidate contract because its platform-specific dependency closure is not yet
-locked.
+## Optional semantic extension
+
+Semantic reranking remains outside the default/core dependency set. It has one
+explicitly supported reproducible target:
+
+- CPython 3.12;
+- Linux x86-64;
+- CPU-only Torch;
+- selected binary wheels only.
+
+Its 58-package closure is stored in
+`requirements/repobrief-semantic-linux-x86_64-py312.lock.txt`. Every selected
+wheel has exactly one SHA-256, and Torch is bound to a direct target-specific
+CPU wheel URL plus hash. Other platforms fail closed and are not implied by the
+lock.
+
+The machine-readable platform boundary is
+`docs/release/semantic-extension-platforms.v1.json`. Regeneration and
+byte-for-byte checking use the digest-pinned container wrapper:
+
+```bash
+scripts/release/compile_semantic_lock.sh --check
+```
+
+An isolated installation check uses:
+
+```bash
+scripts/release/compile_semantic_lock.sh \
+  --verify-install /tmp/repobrief-semantic-install
+```
+
+The release-candidate manifest records this semantic surface as
+`optional_locked` and `default_enabled: false`. This proves neither semantic
+quality, model availability, vulnerability absence, GPU support nor readiness
+to enable semantic reranking by default.
 
 ## CI boundary
 

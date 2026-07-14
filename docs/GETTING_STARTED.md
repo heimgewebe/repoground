@@ -33,8 +33,10 @@ Alle anderen Artefakte (Index, Citation-Map, Agent Reading Pack, Health) sind
 
 ```bash
 python3 -m pip install --require-hashes -r requirements/repobrief-dev.lock.txt
-# optional und noch nicht Teil des Release-Lockvertrags:
-# merger/lenskit/requirements-semantic.txt
+
+# Optionales semantisches Reranking, nur für CPython 3.12 / Linux x86-64 / CPU:
+python3 -m pip install --only-binary=:all: --require-hashes \
+  -r requirements/repobrief-semantic-linux-x86_64-py312.lock.txt
 ```
 
 ## 3. Minimalbeispiel: einen Dump erzeugen

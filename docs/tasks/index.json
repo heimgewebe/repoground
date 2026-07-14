@@ -1613,15 +1613,20 @@
     {
       "id": "TASK-LENSKIT-SEMANTIC-LOCK-001",
       "title": "Lenskit Semantic Extension Dependency Lock",
-      "status": "open",
+      "status": "done",
       "description": "Resolve and hash-lock the platform-specific sentence-transformers and Torch dependency closure, define supported platforms, and validate installation without widening the core release candidate silently.",
       "evidence": [
-        "merger/lenskit/requirements-semantic.txt",
-        "docs/release/release-policy.md"
+        "requirements/repobrief-semantic-linux-x86_64-py312.in",
+        "requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt",
+        "requirements/repobrief-semantic-linux-x86_64-py312.lock.txt",
+        "docs/release/semantic-extension-platforms.v1.json",
+        "docs/proofs/repobrief-semantic-extension-lock-v1-proof.md",
+        "docs/proofs/repobrief-semantic-extension-install-20260714.v1.json",
+        "scripts/release/compile_semantic_lock.py",
+        "scripts/release/compile_semantic_lock.sh",
+        "merger/lenskit/tests/test_semantic_extension_lock.py"
       ],
-      "missing_evidence": [
-        "No platform matrix, complete hash lock, installation proof or promotion decision exists for the semantic extension."
-      ]
+      "completion_note": "CPython 3.12/Linux x86-64 CPU-only closure is pinned to 58 selected wheels with one SHA-256 each, reproduces byte-for-byte, installs with --require-hashes, and remains optional/default-off. Other targets fail closed."
     },
     {
       "id": "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001",

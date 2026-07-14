@@ -156,9 +156,8 @@
     "pass_means": "Only the checks declared by that specific health or CI report passed for the observed artifact or commit."
   },
   "kind": "lenskit.repobrief_status_truth",
-  "observed_on": "2026-07-13",
+  "observed_on": "2026-07-14",
   "open_followups": [
-    "TASK-LENSKIT-SEMANTIC-LOCK-001",
     "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001"
   ],
   "roadmap_surfaces": [
@@ -235,13 +234,13 @@
     "status": "mixed"
   },
   "task_summary": {
+    "total": 92,
     "by_status": {
-      "open": 2,
+      "open": 1,
       "in_progress": 0,
       "partial": 0,
-      "done": 90
-    },
-    "total": 92
+      "done": 91
+    }
   },
   "version": "1.0"
 }

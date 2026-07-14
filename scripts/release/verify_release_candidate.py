@@ -18,6 +18,11 @@ from scripts.release.build_release_candidate import (
     KIND,
     LICENSE_EXPRESSION,
     LOCK_PATHS,
+    SEMANTIC_CONSTRAINTS_PATH,
+    SEMANTIC_INPUT_PATH,
+    SEMANTIC_LOCK_PATH,
+    SEMANTIC_PLATFORM_CONTRACT_PATH,
+    SEMANTIC_TARGET_ID,
     SCHEMA_URI,
     VERSION_RE,
     list_tree,
@@ -172,6 +177,100 @@ def _read_archive_member(archive_path: Path, name: str) -> bytes:
             return handle.read()
 
 
+
+def _verify_dependency_locks(
+    manifest: dict[str, object],
+    archive_path: Path,
+    expected_prefix: str,
+) -> None:
+    lock_records = manifest.get("dependency_locks")
+    if not isinstance(lock_records, list) or len(lock_records) != len(LOCK_PATHS):
+        raise ValueError("manifest dependency lock count mismatch")
+    observed_paths: list[str] = []
+    for record in lock_records:
+        if not isinstance(record, dict):
+            raise ValueError("manifest dependency lock entry is invalid")
+        path = record.get("path")
+        if not isinstance(path, str):
+            raise ValueError("manifest dependency lock path is invalid")
+        observed_paths.append(path)
+        content = _read_archive_member(archive_path, f"{expected_prefix}{path}")
+        if record.get("bytes") != len(content):
+            raise ValueError(f"dependency lock byte size mismatch: {path}")
+        if record.get("sha256") != hashlib.sha256(content).hexdigest():
+            raise ValueError(f"dependency lock SHA-256 mismatch: {path}")
+    if tuple(observed_paths) != LOCK_PATHS:
+        raise ValueError("manifest dependency lock path/order mismatch")
+
+
+def _verify_semantic_record(
+    archive_path: Path,
+    expected_prefix: str,
+    record: object,
+    expected_path: str,
+) -> None:
+    if not isinstance(record, dict) or set(record) != {"path", "bytes", "sha256"}:
+        raise ValueError(f"semantic extension record is invalid: {expected_path}")
+    if record.get("path") != expected_path:
+        raise ValueError(f"semantic extension path mismatch: {expected_path}")
+    content = _read_archive_member(archive_path, f"{expected_prefix}{expected_path}")
+    if record.get("bytes") != len(content):
+        raise ValueError(f"semantic extension byte size mismatch: {expected_path}")
+    if record.get("sha256") != hashlib.sha256(content).hexdigest():
+        raise ValueError(f"semantic extension SHA-256 mismatch: {expected_path}")
+
+
+def _verify_semantic_target(
+    archive_path: Path,
+    expected_prefix: str,
+    target: object,
+) -> None:
+    if not isinstance(target, dict) or set(target) != {
+        "id", "input", "constraints", "lock"
+    }:
+        raise ValueError("semantic extension target record is invalid")
+    if target.get("id") != SEMANTIC_TARGET_ID:
+        raise ValueError("semantic extension target identity mismatch")
+    _verify_semantic_record(
+        archive_path, expected_prefix, target.get("input"), SEMANTIC_INPUT_PATH
+    )
+    _verify_semantic_record(
+        archive_path,
+        expected_prefix,
+        target.get("constraints"),
+        SEMANTIC_CONSTRAINTS_PATH,
+    )
+    _verify_semantic_record(
+        archive_path, expected_prefix, target.get("lock"), SEMANTIC_LOCK_PATH
+    )
+
+
+def _verify_semantic_extension(
+    manifest: dict[str, object],
+    archive_path: Path,
+    expected_prefix: str,
+) -> None:
+    semantic = manifest.get("semantic_extension")
+    if not isinstance(semantic, dict):
+        raise ValueError("semantic extension boundary is missing")
+    if semantic.get("status") != "optional_locked":
+        raise ValueError("semantic extension status mismatch")
+    if semantic.get("default_enabled") is not False:
+        raise ValueError("semantic extension must remain disabled by default")
+    if semantic.get("unsupported_target_policy") != "fail_closed":
+        raise ValueError("semantic extension unsupported-target policy mismatch")
+    _verify_semantic_record(
+        archive_path,
+        expected_prefix,
+        semantic.get("platform_contract"),
+        SEMANTIC_PLATFORM_CONTRACT_PATH,
+    )
+    targets = semantic.get("targets")
+    if not isinstance(targets, list) or len(targets) != 1:
+        raise ValueError("semantic extension target count mismatch")
+    _verify_semantic_target(archive_path, expected_prefix, targets[0])
+
+
 def _verify_manifest_contract(
     manifest: dict[str, object],
     archive_path: Path,
@@ -195,9 +294,7 @@ def _verify_manifest_contract(
         raise ValueError("manifest project name mismatch")
     if project.get("repository") != "heimgewebe/lenskit":
         raise ValueError("manifest repository mismatch")
-    if not isinstance(release_version, str) or not VERSION_RE.fullmatch(
-        release_version
-    ):
+    if not isinstance(release_version, str) or not VERSION_RE.fullmatch(release_version):
         raise ValueError("manifest release version is invalid")
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("manifest commit is invalid")
@@ -226,24 +323,7 @@ def _verify_manifest_contract(
     }:
         raise ValueError("manifest archive normalization mismatch")
 
-    lock_records = manifest.get("dependency_locks")
-    if not isinstance(lock_records, list) or len(lock_records) != len(LOCK_PATHS):
-        raise ValueError("manifest dependency lock count mismatch")
-    observed_paths: list[str] = []
-    for record in lock_records:
-        if not isinstance(record, dict):
-            raise ValueError("manifest dependency lock entry is invalid")
-        path = record.get("path")
-        if not isinstance(path, str):
-            raise ValueError("manifest dependency lock path is invalid")
-        observed_paths.append(path)
-        content = _read_archive_member(archive_path, f"{expected_prefix}{path}")
-        if record.get("bytes") != len(content):
-            raise ValueError(f"dependency lock byte size mismatch: {path}")
-        if record.get("sha256") != hashlib.sha256(content).hexdigest():
-            raise ValueError(f"dependency lock SHA-256 mismatch: {path}")
-    if tuple(observed_paths) != LOCK_PATHS:
-        raise ValueError("manifest dependency lock path/order mismatch")
+    _verify_dependency_locks(manifest, archive_path, expected_prefix)
 
     license_content = _read_archive_member(
         archive_path, f"{expected_prefix}LICENSE"
@@ -251,18 +331,11 @@ def _verify_manifest_contract(
     if LICENSE_EXPRESSION not in license_content:
         raise ValueError("archived LICENSE does not contain the manifest LicenseRef")
 
-    semantic = manifest.get("semantic_extension")
-    if not isinstance(semantic, dict) or semantic.get("status") != "excluded":
-        raise ValueError("semantic extension boundary mismatch")
-    if semantic.get("input") != "merger/lenskit/requirements-semantic.txt":
-        raise ValueError("semantic extension input mismatch")
+    _verify_semantic_extension(manifest, archive_path, expected_prefix)
 
     nonclaims = manifest.get("does_not_establish")
-    if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(
-        nonclaims
-    ):
+    if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(nonclaims):
         raise ValueError("manifest does_not_establish boundary is incomplete")
-
 
 def _compare_with_repo(
     repo: Path,

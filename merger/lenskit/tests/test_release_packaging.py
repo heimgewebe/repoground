@@ -6,6 +6,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -57,6 +58,41 @@ def _repo(tmp_path: Path) -> Path:
         (locks / f"repobrief-{name}.lock.txt").write_text(
             _minimal_lock(), encoding="utf-8"
         )
+    semantic_input = locks / "repobrief-semantic-linux-x86_64-py312.in"
+    semantic_constraints = (
+        locks / "repobrief-semantic-linux-x86_64-py312.constraints.txt"
+    )
+    semantic_lock = locks / "repobrief-semantic-linux-x86_64-py312.lock.txt"
+    semantic_input.write_text("sentence-transformers==5.6.0\n", encoding="utf-8")
+    semantic_constraints.write_text("sentence-transformers==5.6.0\n", encoding="utf-8")
+    semantic_lock.write_text(_minimal_lock(), encoding="utf-8")
+    semantic_contract = repo / "docs/release/semantic-extension-platforms.v1.json"
+    semantic_contract.parent.mkdir(parents=True)
+    semantic_contract.write_text(
+        json.dumps({"fixture": "semantic-platform-contract"}) + "\n",
+        encoding="utf-8",
+    )
+    semantic_schema = (
+        repo
+        / "merger/lenskit/contracts/repobrief-semantic-platforms.v1.schema.json"
+    )
+    semantic_schema.parent.mkdir(parents=True)
+    semantic_schema.write_text(
+        json.dumps({"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"})
+        + "\n",
+        encoding="utf-8",
+    )
+    (repo / "merger/lenskit/requirements-semantic.txt").write_text(
+        "sentence-transformers==5.6.0\n", encoding="utf-8"
+    )
+    release_scripts = repo / "scripts/release"
+    release_scripts.mkdir(parents=True, exist_ok=True)
+    (release_scripts / "compile_semantic_lock.py").write_text(
+        "# fixture\n", encoding="utf-8"
+    )
+    (release_scripts / "compile_semantic_lock.sh").write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "fixture")
     return repo
@@ -138,6 +174,40 @@ def test_candidate_manifest_validates_against_schema(tmp_path: Path) -> None:
     jsonschema.Draft7Validator(schema).validate(manifest)
 
 
+def test_candidate_manifest_binds_optional_semantic_surface(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    out = tmp_path / "candidate"
+    build_release_candidate(repo, out)
+    manifest = json.loads(next(out.glob("*.release.json")).read_text())
+    semantic = manifest["semantic_extension"]
+    assert semantic["status"] == "optional_locked"
+    assert semantic["default_enabled"] is False
+    assert semantic["unsupported_target_policy"] == "fail_closed"
+    assert semantic["platform_contract"]["path"] == (
+        "docs/release/semantic-extension-platforms.v1.json"
+    )
+    target = semantic["targets"][0]
+    assert target["id"] == "cpython-312-linux-x86_64"
+    assert target["lock"]["path"] == (
+        "requirements/repobrief-semantic-linux-x86_64-py312.lock.txt"
+    )
+
+
+def test_candidate_semantic_lock_claim_must_match_archive(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    out = tmp_path / "candidate"
+    build_release_candidate(repo, out)
+    manifest_path = next(out.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["semantic_extension"]["targets"][0]["lock"]["sha256"] = "0" * 64
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(out)
+    with pytest.raises(ValueError, match="semantic extension SHA-256 mismatch"):
+        verify_release_candidate(out)
+
+
 def test_candidate_tampering_is_rejected(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     out = tmp_path / "candidate"
@@ -216,6 +286,19 @@ def test_symlink_target_must_remain_inside_archive(tmp_path: Path) -> None:
 def test_repository_release_contract_is_consistent() -> None:
     report = scan(ROOT)
     assert report["status"] == "pass", report["findings"]
+
+
+def test_release_contract_gate_runs_without_site_packages() -> None:
+    result = subprocess.run(
+        [sys.executable, "-S", "scripts/release/check_release_contract.py"],
+        cwd=ROOT,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert json.loads(result.stdout)["status"] == "pass"
 
 
 def test_release_contract_rejects_unhashed_lock(tmp_path: Path) -> None:
