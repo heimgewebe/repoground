@@ -1031,6 +1031,7 @@ def query_existing_index(
     filters: dict[str, str | None] | None = None,
     resolve_evidence: bool = False,
     project_sources: bool = False,
+    prepared_fts_query: str | None = None,
 ) -> dict[str, Any]:
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     if not isinstance(query, str):
@@ -1105,6 +1106,7 @@ def query_existing_index(
             trace=False,
             build_context=False,
             read_only=True,
+            _prepared_fts_query=prepared_fts_query,
         )
     except Exception as exc:
         return _invalid_read_result(

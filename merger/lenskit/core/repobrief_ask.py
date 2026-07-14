@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,53 @@ from merger.lenskit.core.repobrief_access import (
     resolve_required_reading_for_bundle,
     snapshot_status,
 )
+
+# Bilingual (EN/DE) function-word stoplist. These words carry no retrieval
+# signal but, because the FTS router AND-joins every term, a single one that is
+# absent from a chunk zeroes an otherwise good match. Removing them for the
+# relaxed OR retry is safe: the set holds only unambiguous function words, never
+# code identifiers or content terms.
+_RETRIEVAL_STOPWORDS = frozenset({
+    # English
+    "how", "does", "do", "did", "is", "are", "was", "were", "be", "been",
+    "the", "a", "an", "of", "to", "into", "in", "on", "for", "and", "or",
+    "with", "what", "which", "where", "when", "why", "who", "that", "this",
+    "these", "those", "its", "it", "as", "at", "by",
+    # German
+    "wie", "was", "welche", "welcher", "welches", "wo", "wann", "warum", "wer",
+    "ist", "sind", "war", "den", "dem", "der", "die", "das", "ein", "eine",
+    "einen", "und", "oder", "mit", "fuer", "von", "zu", "im", "auf", "ob",
+    "des", "als",
+})
+
+
+def _content_tokens(query: str) -> list[str]:
+    """Deterministic, order-preserving content tokens for relaxed retrieval."""
+    tokens: list[str] = []
+    seen: set[str] = set()
+    for token in re.findall(r"[a-z0-9_]+", query.lower()):
+        if token in _RETRIEVAL_STOPWORDS or token in seen:
+            continue
+        seen.add(token)
+        tokens.append(token)
+    return tokens
+
+
+def _or_fts_query(tokens: list[str]) -> str:
+    """Build a safe FTS5 OR query; quoting keeps terms literal (no operators)."""
+    return " OR ".join(f'"{token}"' for token in tokens)
+
+
+def _run_query(manifest_path: Path, query: str, k: int, prepared_fts_query: str | None = None) -> dict[str, Any]:
+    return query_existing_index(
+        manifest_path,
+        query,
+        k=k,
+        filters={},
+        resolve_evidence=True,
+        project_sources=True,
+        prepared_fts_query=prepared_fts_query,
+    )
 
 KIND = "repobrief.ask_context_pack"
 VERSION = "1.0"
@@ -106,6 +154,12 @@ def _snapshot_ref(snapshot: dict[str, Any], manifest_path: Path, freshness: dict
     return result
 
 
+def _fts_query_of(query_result: dict[str, Any]) -> str | None:
+    inner = query_result.get("query_result") if isinstance(query_result, dict) else None
+    fts = inner.get("fts_query") if isinstance(inner, dict) else None
+    return fts if isinstance(fts, str) and fts else None
+
+
 def _retrieval_hits(query_result: dict[str, Any]) -> list[dict[str, Any]]:
     raw = query_result.get("query_result") if isinstance(query_result, dict) else None
     hits = raw.get("results") if isinstance(raw, dict) else []
@@ -132,6 +186,30 @@ def _retrieval_hits(query_result: dict[str, Any]) -> list[dict[str, Any]]:
             item["citation_id"] = citation_id
         result.append(item)
     return result
+
+
+def _source_address_fields(hit: dict[str, Any]) -> dict[str, Any]:
+    """Original repository address for a hit, so navigation tasks need not parse
+    it out of the excerpt. The canonical_md range_ref stays the authority; these
+    are source-address conveniences.
+    """
+    fields: dict[str, Any] = {}
+    source_path = hit.get("source_path") or hit.get("path")
+    if isinstance(source_path, str) and source_path:
+        fields["source_path"] = source_path
+    source_line_range = hit.get("source_line_range")
+    if isinstance(source_line_range, dict):
+        projected = {
+            key: source_line_range[key]
+            for key in ("start_line", "end_line", "display")
+            if key in source_line_range
+        }
+        if projected:
+            fields["source_line_range"] = projected
+    citation_id = hit.get("citation_id")
+    if isinstance(citation_id, str) and citation_id.startswith("cit_"):
+        fields["citation_id"] = citation_id
+    return fields
 
 
 def _resolved_ranges(query_result: dict[str, Any], max_context_tokens: int) -> tuple[list[dict[str, Any]], int, bool]:
@@ -167,6 +245,7 @@ def _resolved_ranges(query_result: dict[str, Any], max_context_tokens: int) -> t
             content_sha = range_value.get("content_sha256") or range_value.get("sha256")
         if isinstance(content_sha, str) and len(content_sha) == 64:
             item["content_sha256"] = content_sha
+        item.update(_source_address_fields(hit))
         result.append(item)
     return result, used_chars, truncated
 
@@ -205,21 +284,62 @@ def build_ask_context_pack(
     freshness = _freshness_block(snapshot)
     availability = _availability_block(snapshot)
     required_reading = _required_reading_block(resolve_required_reading_for_bundle(manifest_path, task_profile))
-    query_result = query_existing_index(
-        manifest_path,
-        query,
-        k=k,
-        filters={},
-        resolve_evidence=True,
-        project_sources=True,
-    )
+    query_result = _run_query(manifest_path, query, k)
     retrieval_hits = _retrieval_hits(query_result)
     resolved_ranges, used_chars, truncated = _resolved_ranges(query_result, max_context_tokens)
+    executed_fts = _fts_query_of(query_result)
+    strategy = "exact_and"
+    relaxed = False
+
+    # Recall fallback: the FTS router AND-joins every term, so one word absent
+    # from a chunk zeroes an otherwise good match (common for natural-language
+    # questions). When the exact match is empty, retry once with a relaxed OR
+    # over content tokens. Adopt only if it recovers ranges, and label it so the
+    # agent treats these as lower-precision candidates rather than exact hits.
+    if not resolved_ranges and query_result.get("status") == "available":
+        tokens = _content_tokens(query)
+        if len(tokens) >= 2:
+            or_query = _or_fts_query(tokens)
+            relaxed_result = _run_query(manifest_path, query, k, prepared_fts_query=or_query)
+            relaxed_ranges, relaxed_chars, relaxed_truncated = _resolved_ranges(relaxed_result, max_context_tokens)
+            if relaxed_ranges:
+                query_result = relaxed_result
+                retrieval_hits = _retrieval_hits(relaxed_result)
+                resolved_ranges, used_chars, truncated = relaxed_ranges, relaxed_chars, relaxed_truncated
+                executed_fts = or_query
+                strategy = "or_relaxed"
+                relaxed = True
+
+    retrieval = {
+        "raw_query": query,
+        "fts_query": executed_fts,
+        "strategy": strategy if resolved_ranges else "none",
+        "match_count": len(resolved_ranges),
+    }
+
     caveats = list(freshness.get("caveats") or []) + list(availability.get("caveats") or [])
     if query_result.get("status") != "available":
         caveats.append({"kind": "missing_artifact", "detail": str(query_result.get("error") or "Query evidence unavailable.")})
     if truncated:
         caveats.append({"kind": "other", "detail": "Context excerpts were truncated to respect max_context_tokens."})
+    if relaxed:
+        caveats.append({
+            "kind": "other",
+            "detail": (
+                "No exact (AND) retrieval match; results are relaxed OR-matches ranked by "
+                "relevance and may be less precise. Rephrase with specific code identifiers "
+                "for a tighter match."
+            ),
+        })
+    elif not resolved_ranges:
+        caveats.append({
+            "kind": "other",
+            "detail": (
+                "No evidence matched the query. RepoBrief retrieval is keyword/identifier-based "
+                f"(executed FTS: {executed_fts or query!r}). Rephrase with concrete code "
+                "identifiers or terms."
+            ),
+        })
     citation_obligations = [
         "Cite every strong repository claim with resolved RepoBrief evidence where available.",
         "Surface freshness, availability and non-claim caveats in the answer.",
@@ -232,6 +352,7 @@ def build_ask_context_pack(
         "freshness": freshness,
         "availability": availability,
         "required_reading": required_reading,
+        "retrieval": retrieval,
         "retrieval_hits": retrieval_hits,
         "resolved_ranges": resolved_ranges,
         "answer_scaffold": {

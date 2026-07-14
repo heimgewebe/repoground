@@ -227,6 +227,35 @@
         }
       }
     },
+    "retrieval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_query",
+        "strategy",
+        "match_count"
+      ],
+      "properties": {
+        "raw_query": {
+          "type": "string"
+        },
+        "fts_query": {
+          "type": ["string", "null"]
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "exact_and",
+            "or_relaxed",
+            "none"
+          ]
+        },
+        "match_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "retrieval_hits": {
       "type": "array",
       "items": {
@@ -294,6 +323,17 @@
           "content_sha256": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "source_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_line_range": {
+            "type": "object"
+          },
+          "citation_id": {
+            "type": "string",
+            "pattern": "^cit_[a-f0-9]{16}$"
           }
         }
       }
