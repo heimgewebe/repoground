@@ -22,6 +22,9 @@ DOES_NOT_ESTABLISH = (
     "dump_generation_permission",
     "repo_understood",
     "merge_readiness",
+    "distributed_consensus",
+    "cross_host_transactionality",
+    "remote_freshness",
 )
 
 
@@ -714,6 +717,58 @@ def build_external_manifest_reference(
     }
 
 
+def publication_generation_pointer_path(
+    publication_root: str | Path,
+    *,
+    repository: str,
+    ref: str,
+) -> Path:
+    """Return the authoritative generation pointer while preserving the public API."""
+    from .external_manifest_generation import (
+        publication_generation_pointer_path as impl,
+    )
+
+    return impl(
+        publication_root,
+        repository=repository,
+        ref=ref,
+    )
+
+
+def read_external_manifest_publication(
+    publication_root: str | Path,
+    *,
+    repository: str,
+    ref: str,
+) -> dict[str, Any]:
+    """Read one verified committed generation through the public API."""
+    from .external_manifest_generation import read_external_manifest_publication as impl
+
+    return impl(
+        publication_root,
+        repository=repository,
+        ref=ref,
+    )
+
+
+def recover_external_manifest_publication(
+    publication_root: str | Path,
+    *,
+    repository: str,
+    ref: str,
+) -> dict[str, Any]:
+    """Rebuild compatibility projections from the committed generation."""
+    from .external_manifest_generation import (
+        recover_external_manifest_publication as impl,
+    )
+
+    return impl(
+        publication_root,
+        repository=repository,
+        ref=ref,
+    )
+
+
 def publication_manifest_path(
     publication_root: str | Path,
     *,
@@ -767,54 +822,18 @@ def publish_external_manifest_references(
     ref: str,
     artifact_families: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    """Publish consumer-local references and a verified content-addressed bundle copy."""
-    families = _normalized_artifact_families(artifact_families)
-    materialization = materialize_external_bundle(
+    """Publish one complete generation while preserving the public API."""
+    from .external_manifest_generation import (
+        publish_external_manifest_references as impl,
+    )
+
+    return impl(
         bundle_manifest_path,
         publication_root,
         repository=repository,
         ref=ref,
+        artifact_families=artifact_families,
     )
-    localized_manifest = materialization["bundleManifest"]
-    published = []
-    for family in families:
-        out = publication_manifest_path(
-            publication_root,
-            repository=repository,
-            ref=ref,
-            artifact_family=family,
-        )
-        manifest = write_external_manifest_reference(
-            localized_manifest,
-            out,
-            repository=repository,
-            ref=ref,
-            artifact_family=family,
-            publication_root=publication_root,
-        )
-        published.append(
-            {
-                "artifactFamily": manifest["artifactFamily"],
-                "kind": manifest["kind"],
-                "path": str(out),
-                "generatedAt": manifest["generatedAt"],
-                "relativePublicationPath": Path(
-                    os.path.relpath(out, Path(publication_root).expanduser().resolve())
-                ).as_posix(),
-            }
-        )
-    return {
-        "kind": "repobrief.external_manifest_publication",
-        "version": "1",
-        "repository": _registry_segment(repository, "repository"),
-        "ref": _registry_segment(ref, "ref"),
-        "publicationRoot": str(Path(publication_root).expanduser().resolve()),
-        "sourceBundleManifest": str(Path(bundle_manifest_path).expanduser().resolve()),
-        "bundleManifest": localized_manifest,
-        "materialization": materialization,
-        "published": published,
-        "doesNotEstablish": list(DOES_NOT_ESTABLISH),
-    }
 
 
 def write_external_manifest_reference(
