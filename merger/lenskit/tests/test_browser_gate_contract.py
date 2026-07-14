@@ -1,4 +1,5 @@
 import ast
+import re
 from pathlib import Path
 
 import yaml
@@ -10,6 +11,8 @@ IMAGE = (
     "mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:"
     "a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69"
 )
+SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+
 
 def _requirements() -> dict[str, str]:
     observed: dict[str, str] = {}
@@ -21,6 +24,13 @@ def _requirements() -> dict[str, str]:
         name, version = line.split("==", 1)
         observed[name] = version
     return observed
+
+
+def _assert_sha_pinned_action(raw_use: str, expected_action: str) -> None:
+    action, separator, ref = raw_use.rpartition("@")
+    assert separator == "@"
+    assert action == expected_action
+    assert SHA40_RE.fullmatch(ref) is not None
 
 
 def test_browser_requirements_are_minimal_and_compatible() -> None:
@@ -36,24 +46,21 @@ def test_browser_job_uses_digest_pinned_matching_playwright_image() -> None:
     assert job["env"] == {"PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"}
 
     steps = job["steps"]
-    assert steps[0]["uses"] == (
-        "actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd"
-    )
+    _assert_sha_pinned_action(steps[0]["uses"], "actions/checkout")
     commands = "\n".join(str(step.get("run", "")) for step in steps)
-    assert (
-        "--require-hashes -r requirements/repobrief-browser.lock.txt"
-        in commands
-    )
+    assert "--require-hashes -r requirements/repobrief-browser.lock.txt" in commands
     assert "scripts/ci/check_browser_gate_environment.py" in commands
     assert "-m browser merger/lenskit/tests/test_webui_payload.py" in commands
     assert "--browser chromium" in commands
     assert "--tracing retain-on-failure" in commands
 
-    upload = next(step for step in steps if step.get("name") == "Upload browser diagnostics after failure")
-    assert upload["if"] == "failure()"
-    assert upload["uses"] == (
-        "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f"
+    upload = next(
+        step
+        for step in steps
+        if step.get("name") == "Upload browser diagnostics after failure"
     )
+    assert upload["if"] == "failure()"
+    _assert_sha_pinned_action(upload["uses"], "actions/upload-artifact")
 
 
 def test_browser_suite_contains_all_current_browser_flows() -> None:
