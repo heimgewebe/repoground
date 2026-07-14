@@ -134,6 +134,30 @@ def test_find_symbol_tool_filters_by_kind(tmp_path):
     assert [hit["qualified_name"] for hit in hits] == ["Runner"]
 
 
+def test_find_symbol_tool_rejects_empty_name(tmp_path):
+    manifest = _symbol_bundle(tmp_path)
+
+    for empty in ("", "   "):
+        payload = repobrief_mcp_tools.find_symbol(bundle_manifest=str(manifest), name=empty)
+        assert payload["status"] == "invalid"
+        assert payload["result"]["error_code"] == "name_invalid"
+        # Fails closed: no symbols are listed for an empty query.
+        assert payload["result"]["hits"] == []
+        assert payload["result"]["hit_count"] == 0
+
+
+def test_find_symbol_tool_rejects_unknown_kind(tmp_path):
+    manifest = _symbol_bundle(tmp_path)
+
+    payload = repobrief_mcp_tools.find_symbol(
+        bundle_manifest=str(manifest), name="run", kind="macro"
+    )
+
+    assert payload["status"] == "invalid"
+    assert payload["result"]["error_code"] == "kind_invalid"
+    assert payload["result"]["hits"] == []
+
+
 def test_find_symbol_tool_reports_missing_symbol_index(tmp_path):
     manifest = tmp_path / "empty.bundle.manifest.json"
     manifest.write_text(

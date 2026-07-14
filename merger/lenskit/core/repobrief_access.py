@@ -1291,9 +1291,10 @@ def search_symbol_index(
             str(symbol.get("name", "")).casefold() == q
             or str(symbol.get("qualified_name", "")).casefold() == q
         ) else 1
-        matched.append((exact, position, _symbol_record(symbol)))
+        matched.append((exact, position, symbol))
     matched.sort(key=lambda item: (item[0], item[1]))
-    hits = [record for _, _, record in matched[:k]]
+    # Build the (heavier) records only for the k rows that are actually returned.
+    hits = [_symbol_record(symbol) for _, _, symbol in matched[:k]]
     availability = _availability_model_for_manifest(manifest_path)
     return {
         "kind": SYMBOL_SEARCH_KIND,

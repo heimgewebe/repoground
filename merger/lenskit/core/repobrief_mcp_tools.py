@@ -345,6 +345,22 @@ def grounding_verify(
     }
 
 
+FIND_SYMBOL_KINDS = ("class", "function", "async_function")
+
+
+def _find_symbol_result(status: str, result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "find_symbol",
+        "status": status,
+        "result": result,
+        "result_semantics": "repobrief.symbol_search.v1",
+        "mutation_boundary": _read_only_boundary(),
+        "does_not_establish": list(DOES_NOT_ESTABLISH),
+    }
+
+
 def find_symbol(
     *,
     bundle_manifest: str | Path,
@@ -360,17 +376,32 @@ def find_symbol(
     "where is X defined?" with a path and line range — the navigation primitive
     that content retrieval (ask_context) does not provide. It does not establish
     that a symbol is called, correct, or fresh against the working tree.
+
+    Fails closed: an empty name or an unknown kind is rejected rather than
+    silently listing the first ``k`` symbols.
     """
     from merger.lenskit.core.repobrief_access import search_symbol_index
 
+    def _invalid(error: str, error_code: str) -> dict[str, Any]:
+        return _find_symbol_result(
+            "invalid",
+            {
+                "kind": "repobrief.symbol_search",
+                "version": "v1",
+                "status": "invalid",
+                "error": error,
+                "error_code": error_code,
+                "hits": [],
+                "hit_count": 0,
+            },
+        )
+
+    if not isinstance(name, str) or not name.strip():
+        return _invalid("name must be a non-empty string", "name_invalid")
+    if kind is not None and kind not in FIND_SYMBOL_KINDS:
+        return _invalid(
+            f"kind must be one of {list(FIND_SYMBOL_KINDS)} or null", "kind_invalid"
+        )
+
     result = search_symbol_index(bundle_manifest, name, k=k, kind=kind, path=path)
-    return {
-        "kind": READ_ONLY_KIND,
-        "version": READ_ONLY_VERSION,
-        "tool": "find_symbol",
-        "status": result.get("status", "invalid"),
-        "result": result,
-        "result_semantics": "repobrief.symbol_search.v1",
-        "mutation_boundary": _read_only_boundary(),
-        "does_not_establish": list(DOES_NOT_ESTABLISH),
-    }
+    return _find_symbol_result(result.get("status", "invalid"), result)
