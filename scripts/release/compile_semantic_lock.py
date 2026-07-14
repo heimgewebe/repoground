@@ -6,7 +6,6 @@ import json
 import os
 import platform
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -272,14 +271,29 @@ def compile_lock(*, check: bool) -> dict[str, object]:
     }
 
 
+def _prepare_install_target(target: Path) -> None:
+    if target.is_symlink():
+        raise RuntimeError("semantic install target must not be a symlink")
+    if target.exists():
+        if not target.is_dir():
+            raise RuntimeError("semantic install target must be a directory")
+        try:
+            next(target.iterdir())
+        except StopIteration:
+            return
+        raise RuntimeError(
+            "semantic install target must be absent or empty; "
+            "existing contents are never removed"
+        )
+    target.mkdir(parents=True, exist_ok=False)
+
+
 def verify_install(target: Path) -> dict[str, object]:
     observed = require_supported_target()
     lock_path = ROOT / LOCK_REL
     if not lock_path.is_file():
         raise RuntimeError(f"semantic lock missing: {LOCK_REL}")
-    if target.exists():
-        shutil.rmtree(target)
-    target.mkdir(parents=True)
+    _prepare_install_target(target)
     command = [
         sys.executable,
         "-m",

@@ -6,9 +6,13 @@ import re
 from pathlib import Path
 
 import jsonschema
+import pytest
 
 from scripts.release.check_release_contract import scan
-from scripts.release.compile_semantic_lock import is_supported_target
+from scripts.release.compile_semantic_lock import (
+    _prepare_install_target,
+    is_supported_target,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 CONTRACT_PATH = ROOT / "docs/release/semantic-extension-platforms.v1.json"
@@ -129,3 +133,40 @@ def test_semantic_dependencies_do_not_leak_into_core_lock() -> None:
     assert re.search(r"(?m)^torch(?:==|\s@)", core) is None
     report = scan(ROOT)
     assert report["status"] == "pass", report["findings"]
+
+
+def test_install_target_preparation_never_removes_existing_content(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "populated"
+    target.mkdir()
+    sentinel = target / "sentinel.txt"
+    sentinel.write_text("keep me\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="existing contents are never removed"):
+        _prepare_install_target(target)
+
+    assert sentinel.read_text(encoding="utf-8") == "keep me\n"
+
+
+def test_install_target_preparation_accepts_safe_targets_and_rejects_links(
+    tmp_path: Path,
+) -> None:
+    new_target = tmp_path / "new"
+    _prepare_install_target(new_target)
+    assert new_target.is_dir()
+
+    empty_target = tmp_path / "empty"
+    empty_target.mkdir()
+    _prepare_install_target(empty_target)
+    assert list(empty_target.iterdir()) == []
+
+    file_target = tmp_path / "file"
+    file_target.write_text("not a directory\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="must be a directory"):
+        _prepare_install_target(file_target)
+
+    link_target = tmp_path / "link"
+    link_target.symlink_to(empty_target, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="must not be a symlink"):
+        _prepare_install_target(link_target)

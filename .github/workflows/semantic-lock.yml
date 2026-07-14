@@ -57,6 +57,6 @@ jobs:
 
       - name: Verify hash-locked isolated installation
         run: |
-          rm -rf /tmp/repobrief-semantic-install
+          target="$(mktemp -d)"
           scripts/release/compile_semantic_lock.sh \
-            --verify-install /tmp/repobrief-semantic-install
+            --verify-install "$target"

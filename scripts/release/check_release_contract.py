@@ -7,8 +7,6 @@ import re
 import sys
 from pathlib import Path
 
-import jsonschema
-
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
@@ -110,14 +108,9 @@ def _load_semantic_contract(
     repo: Path,
 ) -> tuple[dict[str, object] | None, dict[str, str] | None]:
     contract_path = repo / SEMANTIC_PLATFORM_CONTRACT_PATH
-    schema_path = (
-        repo / "merger/lenskit/contracts/repobrief-semantic-platforms.v1.schema.json"
-    )
     try:
         contract = json.loads(contract_path.read_text(encoding="utf-8"))
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        jsonschema.Draft7Validator(schema).validate(contract)
-    except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as exc:
+    except (OSError, json.JSONDecodeError) as exc:
         return None, _finding(
             "SEMANTIC_PLATFORM_CONTRACT_INVALID",
             SEMANTIC_PLATFORM_CONTRACT_PATH,
@@ -130,6 +123,98 @@ def _load_semantic_contract(
             "contract root is not an object",
         )
     return contract, None
+
+
+def _check_semantic_contract_policy(
+    contract: dict[str, object],
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    expected = {
+        "kind": "repobrief.semantic_platforms",
+        "version": "v1",
+        "status": "optional_locked",
+        "default_enabled": False,
+        "unsupported_target_policy": "fail_closed",
+        "core_dependency": False,
+        "snapshot_read_dependency": False,
+        "default_ranking_dependency": False,
+    }
+    for key, value in expected.items():
+        if contract.get(key) != value:
+            findings.append(
+                _finding(
+                    "SEMANTIC_PLATFORM_POLICY_MISMATCH",
+                    SEMANTIC_PLATFORM_CONTRACT_PATH,
+                    f"{key}: expected={value!r} observed={contract.get(key)!r}",
+                )
+            )
+    compiler = contract.get("compiler")
+    expected_compiler = {
+        "script": "scripts/release/compile_semantic_lock.sh",
+        "image": (
+            "mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:"
+            "a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69"
+        ),
+        "reproduction_command": "scripts/release/compile_semantic_lock.sh --check",
+    }
+    if compiler != expected_compiler:
+        findings.append(
+            _finding(
+                "SEMANTIC_COMPILER_POLICY_MISMATCH",
+                SEMANTIC_PLATFORM_CONTRACT_PATH,
+                "compiler identity or reproduction command drifted",
+            )
+        )
+    targets = contract.get("supported_targets")
+    if not isinstance(targets, list) or len(targets) != 1:
+        findings.append(
+            _finding(
+                "SEMANTIC_TARGET_COUNT_MISMATCH",
+                SEMANTIC_PLATFORM_CONTRACT_PATH,
+                "exactly one supported semantic target is required",
+            )
+        )
+    return findings
+
+
+def _check_semantic_target_policy(
+    target: dict[str, object],
+) -> list[dict[str, str]]:
+    expected = {
+        "id": "cpython-312-linux-x86_64",
+        "python_implementation": "CPython",
+        "python_version": "3.12",
+        "operating_system": "linux",
+        "architecture": "x86_64",
+        "accelerator": "cpu_only",
+        "artifact_policy": "selected_binary_wheels_only",
+        "package_count": 58,
+        "install_verification_command": (
+            "scripts/release/compile_semantic_lock.sh --verify-install <empty-target>"
+        ),
+    }
+    findings: list[dict[str, str]] = []
+    for key, value in expected.items():
+        if target.get(key) != value:
+            findings.append(
+                _finding(
+                    "SEMANTIC_TARGET_POLICY_MISMATCH",
+                    SEMANTIC_PLATFORM_CONTRACT_PATH,
+                    f"{key}: expected={value!r} observed={target.get(key)!r}",
+                )
+            )
+    if target.get("root_pins") != {
+        "sentence-transformers": "5.6.0",
+        "torch": "2.13.0+cpu",
+    }:
+        findings.append(
+            _finding(
+                "SEMANTIC_ROOT_POLICY_MISMATCH",
+                SEMANTIC_PLATFORM_CONTRACT_PATH,
+                "semantic root pins drifted",
+            )
+        )
+    return findings
 
 
 def _semantic_target(
@@ -266,10 +351,13 @@ def _check_semantic_extension(repo: Path) -> list[dict[str, str]]:
     contract, contract_error = _load_semantic_contract(repo)
     if contract_error is not None or contract is None:
         return [contract_error] if contract_error is not None else []
+    policy_findings = _check_semantic_contract_policy(contract)
     target, target_error = _semantic_target(contract)
     if target_error is not None or target is None:
-        return [target_error] if target_error is not None else []
+        return [*policy_findings, *([target_error] if target_error is not None else [])]
     return [
+        *policy_findings,
+        *_check_semantic_target_policy(target),
         *_check_semantic_artifacts(repo, target),
         *_check_semantic_lock_boundary(repo, target),
         *_check_semantic_core_isolation(repo),

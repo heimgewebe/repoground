@@ -6,6 +6,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 
@@ -285,6 +286,19 @@ def test_symlink_target_must_remain_inside_archive(tmp_path: Path) -> None:
 def test_repository_release_contract_is_consistent() -> None:
     report = scan(ROOT)
     assert report["status"] == "pass", report["findings"]
+
+
+def test_release_contract_gate_runs_without_site_packages() -> None:
+    result = subprocess.run(
+        [sys.executable, "-S", "scripts/release/check_release_contract.py"],
+        cwd=ROOT,
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert json.loads(result.stdout)["status"] == "pass"
 
 
 def test_release_contract_rejects_unhashed_lock(tmp_path: Path) -> None:
