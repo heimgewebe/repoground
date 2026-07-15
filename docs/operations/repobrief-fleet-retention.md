@@ -7,8 +7,11 @@ The fleet publisher uses a content identity instead of a timestamp as the genera
 - the remote default-branch commit;
 - the Lenskit generator tree under `merger/lenskit`;
 - the explicit publication configuration.
+- the collision-free publication identity (`owner__repository`).
 
 A timestamp remains in the directory name only to order the retained history. It is not sufficient to trigger generation.
+
+Stable external manifests and consumer-local bundle paths use `owner__repository` rather than the repository name alone. This prevents repositories with the same name under different GitHub owners from sharing one publication address. Existing name-only external paths are left in place as frozen compatibility data; the fleet publisher no longer updates them.
 
 ## Retention
 
@@ -37,6 +40,8 @@ Keeping only one version saves more storage but removes useful comparison and re
 The installer leaves automatic publication paused unless invoked with `--enable`. This prevents an installation or migration from silently resuming generation.
 
 Legacy source-only state markers are intentionally not trusted as proof that generator and configuration inputs are unchanged. The first explicit reactivation can therefore produce one controlled publication per repository before normal fingerprint-based skipping begins.
+
+The publication fingerprint schema is now v2 because the owner-qualified publication identity is part of the content decision. Therefore the first enabled fleet cycle after this migration intentionally republishes each inventoried repository once into its collision-free address. A second immediate cycle with unchanged source commits, generator code and configuration must skip every repository.
 
 Dry-run current, legacy, and retired special storage:
 

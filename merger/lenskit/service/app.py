@@ -1108,6 +1108,9 @@ def create_job(request: JobRequest):
 
     # Lazy GC
     state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
+    snapshot_cleanup = state.job_store.cleanup_source_snapshots(apply=True)
+    if snapshot_cleanup.get("status") == "blocked":
+        logger.warning("Source snapshot cleanup blocked: %s", snapshot_cleanup)
 
     existing = state.job_store.find_job_by_hash(content_hash)
     if existing and not request.force_new:

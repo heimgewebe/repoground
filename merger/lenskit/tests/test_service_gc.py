@@ -1,6 +1,7 @@
 
 import uuid
 import logging
+import os
 from pathlib import Path
 from merger.lenskit.service.models import Job, Artifact, JobRequest
 
@@ -151,3 +152,42 @@ def test_cleanup_jobs_logs_warning_for_invalid_created_at(service_client, caplog
 
     assert ctx.store.get_job(job.id) is not None
     assert any("Skipping cleanup age check" in rec.message for rec in caplog.records)
+
+
+def test_snapshot_cleanup_protects_active_jobs_and_removes_terminal_old_jobs(
+    service_client,
+):
+    ctx = service_client
+    root = ctx.merges_dir / ".rlens-source-snapshots"
+    active = Job.create(JobRequest())
+    active.status = "running"
+    terminal = Job.create(JobRequest())
+    terminal.status = "succeeded"
+    ctx.store.add_job(active)
+    ctx.store.add_job(terminal)
+    for job in (active, terminal):
+        directory = root / job.id
+        directory.mkdir(parents=True)
+        (directory / "payload").write_text(job.id, encoding="utf-8")
+        os.utime(directory, (1, 1))
+
+    report = ctx.store.cleanup_source_snapshots(
+        apply=True, keep=0, max_age_hours=0, max_bytes=0
+    )
+
+    assert report["status"] == "ok"
+    assert (root / active.id).is_dir()
+    assert not (root / terminal.id).exists()
+
+
+def test_remove_job_removes_its_source_snapshot(service_client):
+    ctx = service_client
+    job = Job.create(JobRequest())
+    ctx.store.add_job(job)
+    snapshot = ctx.merges_dir / ".rlens-source-snapshots" / job.id
+    snapshot.mkdir(parents=True)
+    (snapshot / "payload").write_text("data", encoding="utf-8")
+
+    ctx.store.remove_job(job.id)
+
+    assert not snapshot.exists()

@@ -21,6 +21,8 @@ from merger.lenskit.service.source_acquisition import (
     SourceStatus,
     SnapshotExtractionError,
     materialize_remote_snapshot,
+    prune_source_snapshots,
+    remove_source_snapshot,
     resolve_remote_ref,
     resolve_effective_source_mode,
     safe_extract_tar,
@@ -914,3 +916,80 @@ def test_safe_extract_tar_wraps_fs_collision_as_extraction_error(tmp_path):
     members = [_reg("a", b"i am a file"), _reg("a/b.txt", b"x")]
     with pytest.raises(SnapshotExtractionError):
         safe_extract_tar(_build_tar(members), dest)
+
+
+def _snapshot_dir(root: Path, job_id: str, *, mtime: float, blocks: int = 1) -> Path:
+    directory = root / ".rlens-source-snapshots" / job_id
+    directory.mkdir(parents=True)
+    (directory / "payload.bin").write_bytes(b"x" * max(1, blocks))
+    os.utime(directory, (mtime, mtime))
+    return directory
+
+
+def test_source_snapshot_retention_is_dry_run_and_protects_active_jobs(tmp_path):
+    now = 10_000.0
+    old = _snapshot_dir(tmp_path, "old", mtime=now - 1000)
+    recent = _snapshot_dir(tmp_path, "recent", mtime=now - 10)
+    active = _snapshot_dir(tmp_path, "active", mtime=now - 5000)
+
+    report = prune_source_snapshots(
+        tmp_path,
+        protected_job_ids={"active"},
+        keep=1,
+        max_age_hours=1,
+        max_bytes=1024 * 1024,
+        apply=False,
+        now=now,
+    )
+
+    assert report["status"] == "ok"
+    assert report["would_remove"] == [str(old)]
+    assert str(active) in report["protected"]
+    assert old.is_dir() and recent.is_dir() and active.is_dir()
+
+
+def test_source_snapshot_retention_applies_count_age_and_size_bounds(tmp_path):
+    now = 20_000.0
+    oldest = _snapshot_dir(tmp_path, "oldest", mtime=now - 7200, blocks=10)
+    middle = _snapshot_dir(tmp_path, "middle", mtime=now - 20, blocks=10)
+    newest = _snapshot_dir(tmp_path, "newest", mtime=now - 10, blocks=10)
+
+    report = prune_source_snapshots(
+        tmp_path,
+        keep=2,
+        max_age_hours=1,
+        max_bytes=0,
+        apply=True,
+        now=now,
+    )
+
+    assert report["status"] == "ok"
+    assert set(report["removed"]) == {str(oldest), str(middle), str(newest)}
+    assert not oldest.exists() and not middle.exists() and not newest.exists()
+    assert report["removed_bytes"] > 0
+
+
+def test_source_snapshot_retention_blocks_before_delete_on_unsafe_child(tmp_path):
+    safe = _snapshot_dir(tmp_path, "safe", mtime=1)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = tmp_path / ".rlens-source-snapshots" / "link"
+    link.symlink_to(outside, target_is_directory=True)
+
+    report = prune_source_snapshots(
+        tmp_path, keep=0, max_age_hours=0, max_bytes=0, apply=True, now=100
+    )
+
+    assert report["status"] == "blocked"
+    assert safe.is_dir()
+    assert outside.is_dir()
+
+
+def test_remove_source_snapshot_is_exact_and_confined(tmp_path):
+    target = _snapshot_dir(tmp_path, "job-1", mtime=1)
+    other = _snapshot_dir(tmp_path, "job-2", mtime=1)
+
+    assert remove_source_snapshot(tmp_path, "job-1") is True
+    assert not target.exists()
+    assert other.is_dir()
+    assert remove_source_snapshot(tmp_path, "missing") is False

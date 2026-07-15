@@ -151,6 +151,18 @@ through an existing symlinked path component, and every symlink, hardlink, FIFO
 or device member outright (v1: security before convenience — links are rejected,
 not followed). `tarfile.extract` is never used.
 
+## Snapshot retention
+
+Remote snapshots are temporary cache material, not permanent history. Cleanup is bounded by three independent defaults:
+
+- retain at most the three newest terminal-job snapshot roots;
+- retain unprotected snapshots for at most 24 hours;
+- retain at most 2 GiB of allocated snapshot data.
+
+Snapshots belonging to jobs in `queued`, `running` or `canceling` state are protected regardless of age or size. Cleanup runs after every job attempt and during lazy job garbage collection; deleting a job also removes exactly that job's snapshot root. If the snapshot root contains a symlink or another unexpected non-directory child, cleanup fails closed and deletes nothing. Every deletion is revalidated as a real direct child of `<merges_dir>/.rlens-source-snapshots` immediately before removal.
+
+These rules bound disk growth while preserving current work. They do not turn snapshots into a version archive; reproducible history belongs in the published RepoBrief bundles and their retention policy.
+
 ## Plan-only semantics
 
 `remote_snapshot + plan_only` is a **dry plan**: ref resolution via remote query
@@ -182,8 +194,7 @@ effective pre-pull). Active identical jobs are still reused.
   locally generated bundle. Reports and logs are credential-redacted via explicit
   redaction gates with tests; this reduces leakage, it is not an absolute
   guarantee that credentials can *never* appear.
-* Job-bound snapshots remain under `merges_dir` for the life of the job output;
-  no persistence/cleanup optimization is in scope for this PR.
+* Snapshot retention is operational cache hygiene, not evidence retention; active jobs are protected, while terminal snapshots can be removed by count, age or size limits.
 
 ## Non-goals
 

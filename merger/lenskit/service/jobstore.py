@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Tuple, Callable
 from .models import Job, Artifact
 
 from merger.lenskit.core.merge import MERGES_DIR_NAME, get_merges_dir
+from .source_acquisition import prune_source_snapshots, remove_source_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ class JobStore:
         self._jobs_cache: Dict[str, Job] = {}
         self._artifacts_cache: Dict[str, Artifact] = {}
         self._log_subscribers: Dict[str, List[Callable[[], None]]] = collections.defaultdict(list)
+        self._snapshot_cleanup_lock = threading.Lock()
 
         self._load()
 
@@ -73,6 +75,10 @@ class JobStore:
     def subscribe_to_logs(self, job_id: str, callback: Callable[[], None]):
         with self._lock:
             self._log_subscribers[job_id].append(callback)
+
+    def log_subscriber_count(self, job_id: str) -> int:
+        with self._lock:
+            return len(self._log_subscribers.get(job_id, []))
 
     def unsubscribe_from_logs(self, job_id: str, callback: Callable[[], None]):
         with self._lock:
@@ -195,6 +201,12 @@ class JobStore:
                     logger.warning("Failed to clean up artifact %s for job %s: %s", art_id, job_id, exc)
                 del self._artifacts_cache[art_id]
 
+        try:
+            with self._snapshot_cleanup_lock:
+                remove_source_snapshot(get_merges_dir(self.hub_path), job_id)
+        except Exception as exc:
+            logger.warning("Failed to delete source snapshot for job %s: %s", job_id, exc)
+
         log_p = self.logs_dir / f"{job_id}.log"
         try:
             if log_p.exists():
@@ -239,6 +251,32 @@ class JobStore:
                 return max(active, key=lambda x: x.created_at)
 
             return max(candidates, key=lambda x: x.created_at)
+
+    def cleanup_source_snapshots(
+        self,
+        *,
+        merges_dir: Path | None = None,
+        apply: bool = True,
+        keep: int = 3,
+        max_age_hours: int = 24,
+        max_bytes: int = 2 * 1024 * 1024 * 1024,
+    ) -> dict:
+        root = Path(merges_dir) if merges_dir is not None else get_merges_dir(self.hub_path)
+        with self._lock:
+            protected = {
+                job.id
+                for job in self._jobs_cache.values()
+                if job.status in {"queued", "running", "canceling"}
+            }
+            with self._snapshot_cleanup_lock:
+                return prune_source_snapshots(
+                    root,
+                    protected_job_ids=protected,
+                    keep=keep,
+                    max_age_hours=max_age_hours,
+                    max_bytes=max_bytes,
+                    apply=apply,
+                )
 
     def cleanup_jobs(self, max_jobs: int = 100, max_age_hours: int = 24):
         now = datetime.now(timezone.utc)
