@@ -5,11 +5,26 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
-import stat
-import tempfile
 from pathlib import Path
 from typing import Any, Iterable
+
+from .rooted_filesystem import (
+    RootedFilesystemError,
+    atomic_write_bytes,
+    bind_directory,
+    copy_verified_file,
+    digest_regular_file,
+    make_directories,
+    make_temporary_directory,
+    open_regular_file,
+    path_exists,
+    path_is_real_directory,
+    read_regular_bytes,
+    read_tree,
+    remove_tree,
+    rename_path,
+    secure_absolute,
+)
 
 SUPPORTED_FAMILIES = {"repobrief", "lenskit"}
 BUNDLE_KIND = "repolens.bundle.manifest"
@@ -25,6 +40,10 @@ DOES_NOT_ESTABLISH = (
     "distributed_consensus",
     "cross_host_transactionality",
     "remote_freshness",
+    "kernel_bug_resistance",
+    "network_filesystem_equivalence",
+    "privilege_boundary_isolation",
+    "untested_platform_security",
 )
 
 
@@ -33,7 +52,9 @@ class ExternalManifestReferenceError(ValueError):
 
 
 def _relative_path(target: Path, base_dir: Path) -> str:
-    return Path(os.path.relpath(target.resolve(), base_dir.resolve())).as_posix()
+    return Path(
+        os.path.relpath(secure_absolute(target), secure_absolute(base_dir))
+    ).as_posix()
 
 
 def _registry_segment(value: str, label: str) -> str:
@@ -53,54 +74,41 @@ def _registry_segment(value: str, label: str) -> str:
 
 
 def _open_regular_file(path: Path, label: str) -> tuple[int, int]:
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(path, flags)
-    except OSError as exc:
+        return open_regular_file(path)
+    except RootedFilesystemError as exc:
         raise ExternalManifestReferenceError(
             f"{label} must be an existing regular file: {path}"
         ) from exc
-    metadata = os.fstat(fd)
-    if not stat.S_ISREG(metadata.st_mode):
-        os.close(fd)
-        raise ExternalManifestReferenceError(
-            f"{label} must be an existing regular file: {path}"
-        )
-    return fd, metadata.st_size
 
 
 def _digest_regular_file(path: Path, label: str) -> tuple[int, str]:
-    fd, _ = _open_regular_file(path, label)
-    digest = hashlib.sha256()
-    observed_bytes = 0
-    with os.fdopen(fd, "rb", closefd=True) as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            observed_bytes += len(chunk)
-            digest.update(chunk)
-    return observed_bytes, digest.hexdigest()
+    try:
+        return digest_regular_file(path)
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"{label} must be an existing stable regular file: {path}"
+        ) from exc
 
 
 def _read_json_object_with_integrity(
     path: Path,
 ) -> tuple[dict[str, Any], int, str]:
-    fd, _ = _open_regular_file(path, "bundle manifest")
-    digest = hashlib.sha256()
-    chunks: list[bytes] = []
-    observed_bytes = 0
-    with os.fdopen(fd, "rb", closefd=True) as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            observed_bytes += len(chunk)
-            digest.update(chunk)
-            chunks.append(chunk)
     try:
-        data = json.loads(b"".join(chunks).decode("utf-8"))
+        payload = read_regular_bytes(path)
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"bundle manifest must be an existing regular file with stable identity: {path}"
+        ) from exc
+    try:
+        data = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ExternalManifestReferenceError(
             f"bundle manifest is not valid UTF-8 JSON: {path}"
         ) from exc
     if not isinstance(data, dict):
         raise ExternalManifestReferenceError("bundle manifest must be a JSON object")
-    return data, observed_bytes, digest.hexdigest()
+    return data, len(payload), hashlib.sha256(payload).hexdigest()
 
 
 def _bundle_member(bundle_dir: Path, raw_path: str, label: str) -> tuple[Path, str]:
@@ -117,15 +125,18 @@ def _bundle_member(bundle_dir: Path, raw_path: str, label: str) -> tuple[Path, s
         raise ExternalManifestReferenceError(
             f"{label} must stay inside the bundle directory"
         )
-    resolved = (bundle_dir / relative).resolve()
+    trusted_bundle_dir = secure_absolute(bundle_dir)
+    resolved = secure_absolute(trusted_bundle_dir / relative)
     try:
-        normalized = resolved.relative_to(bundle_dir)
+        normalized = resolved.relative_to(trusted_bundle_dir)
     except ValueError as exc:
         raise ExternalManifestReferenceError(
             f"{label} must stay inside the bundle directory"
         ) from exc
-    if not resolved.is_file():
+    if not path_exists(resolved):
         raise ExternalManifestReferenceError(f"{label} does not exist: {raw_path}")
+    fd, _ = _open_regular_file(resolved, label)
+    os.close(fd)
     return resolved, normalized.as_posix()
 
 
@@ -138,7 +149,7 @@ def _artifact_rows(
     if not isinstance(artifacts, list):
         raise ExternalManifestReferenceError("bundle manifest artifacts must be a list")
     rows: list[dict[str, Any]] = []
-    bundle_dir = bundle_manifest_path.parent.resolve()
+    bundle_dir = secure_absolute(bundle_manifest_path.parent)
     for artifact in artifacts:
         if not isinstance(artifact, dict):
             continue
@@ -177,7 +188,7 @@ def _linked_sidecar_rows(
         "surface_validation_path": "bundle_surface_validation",
     }
     rows: list[dict[str, Any]] = []
-    bundle_dir = bundle_manifest_path.parent.resolve()
+    bundle_dir = secure_absolute(bundle_manifest_path.parent)
     seen_paths: set[str] = set()
     for link_key, role in linked_roles.items():
         raw_path = links.get(link_key)
@@ -248,52 +259,22 @@ def _copy_verified_file(
     expected_bytes: int,
     label: str,
 ) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    source_fd, source_bytes = _open_regular_file(source, label)
-    if source_bytes != expected_bytes:
-        os.close(source_fd)
-        raise ExternalManifestReferenceError(
-            f"{label} byte count mismatch: expected {expected_bytes}, observed {source_bytes}"
-        )
-    tmp_path: Path | None = None
-    digest = hashlib.sha256()
-    observed_bytes = 0
     try:
-        with (
-            os.fdopen(source_fd, "rb", closefd=True) as source_handle,
-            tempfile.NamedTemporaryFile(
-                mode="wb",
-                delete=False,
-                dir=str(destination.parent),
-                prefix=f".{destination.name}.",
-                suffix=".tmp",
-            ) as tmp_file,
-        ):
-            for chunk in iter(lambda: source_handle.read(1024 * 1024), b""):
-                observed_bytes += len(chunk)
-                digest.update(chunk)
-                tmp_file.write(chunk)
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
-        observed_sha256 = digest.hexdigest()
-        if observed_bytes != expected_bytes:
-            raise ExternalManifestReferenceError(
-                f"{label} byte count mismatch: expected {expected_bytes}, observed {observed_bytes}"
-            )
-        if observed_sha256 != expected_sha256:
-            raise ExternalManifestReferenceError(
-                f"{label} sha256 mismatch: expected {expected_sha256}, observed {observed_sha256}"
-            )
-        os.replace(tmp_path, destination)
-    finally:
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink()
+        copy_verified_file(
+            source,
+            destination,
+            expected_sha256=expected_sha256,
+            expected_bytes=expected_bytes,
+        )
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"{label} could not be copied through trusted directory descriptors: {exc}"
+        ) from exc
 
 
 def _require_path_inside_root(path: Path, root: Path, label: str) -> None:
     try:
-        path.resolve().relative_to(root.resolve())
+        secure_absolute(path).relative_to(secure_absolute(root))
     except ValueError as exc:
         raise ExternalManifestReferenceError(
             f"{label} must stay inside publication_root"
@@ -320,7 +301,7 @@ def _declared_materialization_rows(
     artifacts = bundle.get("artifacts")
     if not isinstance(artifacts, list):
         raise ExternalManifestReferenceError("bundle manifest artifacts must be a list")
-    source_dir = source_manifest.parent.resolve()
+    source_dir = secure_absolute(source_manifest.parent)
     rows: list[dict[str, Any]] = []
     for index, artifact in enumerate(artifacts):
         if not isinstance(artifact, dict):
@@ -417,41 +398,13 @@ def _expected_materialized_entries(
 
 def _observed_materialized_entries(localized_dir: Path) -> tuple[set[str], set[str]]:
     try:
-        root_metadata = localized_dir.lstat()
-    except OSError as exc:
+        files, directories = read_tree(localized_dir)
+    except RootedFilesystemError as exc:
         raise ExternalManifestReferenceError(
-            f"localized bundle path must be an existing directory: {localized_dir}"
+            "localized bundle tree must contain only regular files and directories: "
+            f"{localized_dir}: {exc}"
         ) from exc
-    if not stat.S_ISDIR(root_metadata.st_mode):
-        raise ExternalManifestReferenceError(
-            f"localized bundle path must be an existing directory: {localized_dir}"
-        )
-
-    actual_files: set[str] = set()
-    actual_directories: set[str] = set()
-    for current_root, directory_names, file_names in os.walk(
-        localized_dir, topdown=True, followlinks=False
-    ):
-        current = Path(current_root)
-        for name in directory_names:
-            candidate = current / name
-            metadata = candidate.lstat()
-            if not stat.S_ISDIR(metadata.st_mode):
-                raise ExternalManifestReferenceError(
-                    "localized bundle tree must contain only regular files and "
-                    f"directories: {candidate}"
-                )
-            actual_directories.add(candidate.relative_to(localized_dir).as_posix())
-        for name in file_names:
-            candidate = current / name
-            metadata = candidate.lstat()
-            if not stat.S_ISREG(metadata.st_mode):
-                raise ExternalManifestReferenceError(
-                    "localized bundle tree must contain only regular files and "
-                    f"directories: {candidate}"
-                )
-            actual_files.add(candidate.relative_to(localized_dir).as_posix())
-    return actual_files, actual_directories
+    return set(files), directories
 
 
 def _verify_materialized_tree(
@@ -505,13 +458,19 @@ def _build_materialization_stage(
     manifest_bytes: int,
     members: dict[str, dict[str, Any]],
 ) -> Path:
-    localized_dir.parent.mkdir(parents=True, exist_ok=True)
-    _require_path_inside_root(
-        localized_dir.parent, publication_root, "localized bundle parent"
-    )
-    stage = Path(
-        tempfile.mkdtemp(prefix=f".{manifest_sha256}.", dir=str(localized_dir.parent))
-    )
+    try:
+        make_directories(localized_dir.parent)
+        _require_path_inside_root(
+            localized_dir.parent, publication_root, "localized bundle parent"
+        )
+        stage = make_temporary_directory(
+            localized_dir.parent,
+            prefix=manifest_sha256,
+        )
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"localized bundle stage cannot be prepared safely: {exc}"
+        ) from exc
     try:
         for relative_path, member in sorted(members.items()):
             _copy_verified_file(
@@ -529,7 +488,10 @@ def _build_materialization_stage(
             label="bundle manifest",
         )
     except Exception:
-        shutil.rmtree(stage)
+        try:
+            remove_tree(stage)
+        except RootedFilesystemError:
+            pass
         raise
     return stage
 
@@ -544,8 +506,8 @@ def _install_materialized_tree(
     manifest_bytes: int,
     members: dict[str, dict[str, Any]],
 ) -> bool:
-    if localized_dir.exists():
-        if not localized_dir.is_dir():
+    if path_exists(localized_dir):
+        if not path_is_real_directory(localized_dir):
             raise ExternalManifestReferenceError(
                 f"localized bundle path is not a directory: {localized_dir}"
             )
@@ -568,9 +530,9 @@ def _install_materialized_tree(
     )
     try:
         try:
-            os.replace(stage, localized_dir)
-        except OSError:
-            if not localized_dir.is_dir():
+            rename_path(stage, localized_dir)
+        except RootedFilesystemError:
+            if not path_is_real_directory(localized_dir):
                 raise
             _verify_materialized_tree(
                 localized_dir,
@@ -589,27 +551,23 @@ def _install_materialized_tree(
         )
         return False
     finally:
-        if stage.exists():
-            shutil.rmtree(stage)
+        try:
+            remove_tree(stage)
+        except RootedFilesystemError:
+            pass
 
 
-def materialize_external_bundle(
-    bundle_manifest_path: str | Path,
-    publication_root: str | Path,
+def _materialize_external_bundle_bound(
+    source_manifest: Path,
+    root: Path,
     *,
     repository: str,
     ref: str,
 ) -> dict[str, Any]:
-    """Copy one verified bundle into a consumer-local content-addressed subtree."""
-    repository = _registry_segment(repository, "repository")
-    ref = _registry_segment(ref, "ref")
-    source_manifest = Path(bundle_manifest_path).expanduser().resolve()
     bundle, manifest_bytes, manifest_sha256 = _read_materialization_manifest(
         source_manifest
     )
 
-    root = Path(publication_root).expanduser().resolve()
-    root.mkdir(parents=True, exist_ok=True)
     localized_dir = root / "external" / "_bundles" / repository / ref / manifest_sha256
     localized_manifest = localized_dir / source_manifest.name
     _require_path_inside_root(localized_dir, root, "localized bundle directory")
@@ -639,12 +597,42 @@ def materialize_external_bundle(
     }
 
 
+def materialize_external_bundle(
+    bundle_manifest_path: str | Path,
+    publication_root: str | Path,
+    *,
+    repository: str,
+    ref: str,
+) -> dict[str, Any]:
+    """Copy one bundle through source- and publication-root directory bindings."""
+    repository = _registry_segment(repository, "repository")
+    ref = _registry_segment(ref, "ref")
+    source_manifest = secure_absolute(bundle_manifest_path)
+    root = secure_absolute(publication_root)
+    try:
+        with bind_directory(root, create=True) as root_binding:
+            with bind_directory(source_manifest.parent) as source_binding:
+                result = _materialize_external_bundle_bound(
+                    source_manifest,
+                    root,
+                    repository=repository,
+                    ref=ref,
+                )
+                source_binding.assert_current_path_identity()
+                root_binding.assert_current_path_identity()
+                return result
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"external bundle materialization lost a trusted directory identity: {exc}"
+        ) from exc
+
+
 def _require_inside_publication_root(
     bundle_manifest_path: Path, publication_root: Path | None
 ) -> None:
     if publication_root is None:
         return
-    root = publication_root.expanduser().resolve()
+    root = secure_absolute(publication_root)
     try:
         bundle_manifest_path.relative_to(root)
     except ValueError as exc:
@@ -653,28 +641,14 @@ def _require_inside_publication_root(
         ) from exc
 
 
-def build_external_manifest_reference(
-    bundle_manifest_path: str | Path,
+def _build_external_manifest_reference_bound(
+    manifest_path: Path,
     *,
+    family: str,
     repository: str,
     ref: str,
-    artifact_family: str = "repobrief",
-    output_path: str | Path | None = None,
-    publication_root: str | Path | None = None,
+    output_base: Path,
 ) -> dict[str, Any]:
-    """Build a bounded external manifest reference from an existing bundle manifest."""
-    family = artifact_family.strip().lower() if isinstance(artifact_family, str) else ""
-    if family not in SUPPORTED_FAMILIES:
-        raise ExternalManifestReferenceError(
-            "artifact_family must be repobrief or lenskit"
-        )
-    repository = _registry_segment(repository, "repository")
-    ref = _registry_segment(ref, "ref")
-    manifest_path = Path(bundle_manifest_path).expanduser().resolve()
-    _require_inside_publication_root(
-        manifest_path,
-        Path(publication_root) if publication_root is not None else None,
-    )
     bundle, manifest_bytes, manifest_sha256 = _read_json_object_with_integrity(
         manifest_path
     )
@@ -687,11 +661,6 @@ def build_external_manifest_reference(
         raise ExternalManifestReferenceError(
             "bundle manifest created_at must be present"
         )
-    output_base = (
-        Path(output_path).expanduser().resolve().parent
-        if output_path is not None
-        else manifest_path.parent
-    )
     snapshot_provenance = bundle.get("snapshot_provenance")
     return {
         "kind": f"{family}_bundle_manifest",
@@ -715,6 +684,50 @@ def build_external_manifest_reference(
         "artifacts": _combined_artifact_rows(manifest_path, bundle, output_base),
         "doesNotEstablish": list(DOES_NOT_ESTABLISH),
     }
+
+
+def build_external_manifest_reference(
+    bundle_manifest_path: str | Path,
+    *,
+    repository: str,
+    ref: str,
+    artifact_family: str = "repobrief",
+    output_path: str | Path | None = None,
+    publication_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build a bounded reference while holding one source-directory identity."""
+    family = artifact_family.strip().lower() if isinstance(artifact_family, str) else ""
+    if family not in SUPPORTED_FAMILIES:
+        raise ExternalManifestReferenceError(
+            "artifact_family must be repobrief or lenskit"
+        )
+    repository = _registry_segment(repository, "repository")
+    ref = _registry_segment(ref, "ref")
+    manifest_path = secure_absolute(bundle_manifest_path)
+    _require_inside_publication_root(
+        manifest_path,
+        Path(publication_root) if publication_root is not None else None,
+    )
+    output_base = (
+        secure_absolute(output_path).parent
+        if output_path is not None
+        else manifest_path.parent
+    )
+    try:
+        with bind_directory(manifest_path.parent) as source_binding:
+            result = _build_external_manifest_reference_bound(
+                manifest_path,
+                family=family,
+                repository=repository,
+                ref=ref,
+                output_base=output_base,
+            )
+            source_binding.assert_current_path_identity()
+            return result
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"external manifest build lost its source-directory identity: {manifest_path.parent}: {exc}"
+        ) from exc
 
 
 def publication_generation_pointer_path(
@@ -785,7 +798,7 @@ def publication_manifest_path(
     repository = _registry_segment(repository, "repository")
     ref = _registry_segment(ref, "ref")
     return (
-        Path(publication_root).expanduser().resolve()
+        secure_absolute(publication_root)
         / "external"
         / family
         / repository
@@ -845,40 +858,30 @@ def write_external_manifest_reference(
     artifact_family: str = "repobrief",
     publication_root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Write an external manifest reference atomically and return it."""
-    out = Path(output_path).expanduser().resolve()
-    if publication_root is not None:
-        _require_path_inside_root(
-            out,
-            Path(publication_root).expanduser().resolve(),
-            "external manifest output",
-        )
-    data = build_external_manifest_reference(
-        bundle_manifest_path,
-        repository=repository,
-        ref=ref,
-        artifact_family=artifact_family,
-        output_path=out,
-        publication_root=publication_root,
+    """Write one reference through trusted source and output directory identities."""
+    out = secure_absolute(output_path)
+    root = (
+        secure_absolute(publication_root)
+        if publication_root is not None
+        else out.parent
     )
-    out.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            delete=False,
-            dir=str(out.parent),
-            prefix=f".{out.name}.",
-            suffix=".tmp",
-        ) as tmp_file:
-            json.dump(data, tmp_file, indent=2, sort_keys=True)
-            tmp_file.write("\n")
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
-        os.replace(tmp_path, out)
-    finally:
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink()
-    return data
+        with bind_directory(root, create=True) as root_binding:
+            _require_path_inside_root(out, root, "external manifest output")
+            data = build_external_manifest_reference(
+                bundle_manifest_path,
+                repository=repository,
+                ref=ref,
+                artifact_family=artifact_family,
+                output_path=out,
+                publication_root=publication_root,
+            )
+            atomic_write_bytes(
+                out, (json.dumps(data, indent=2, sort_keys=True) + "\n").encode("utf-8")
+            )
+            root_binding.assert_current_path_identity()
+            return data
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"external manifest write lost a trusted directory identity: {out}: {exc}"
+        ) from exc
