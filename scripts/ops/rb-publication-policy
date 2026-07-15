@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+"""Manage identity-bound RepoBrief publication evidence and retention."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
+from merger.lenskit.core.repobrief_publication_policy import (  # noqa: E402
+    PublicationIdentity,
+    PublicationPolicyError,
+    PublicationPolicyStore,
+    RetentionPolicy,
+    canonical_sha256,
+)
+
+DEFAULT_EVIDENCE_ROOT = Path(
+    os.environ.get(
+        "RB_PUBLICATION_EVIDENCE_ROOT",
+        str(Path.home() / ".local" / "state" / "repobrief-publication-policy"),
+    )
+)
+DEFAULT_PAYLOAD_ROOT = Path(
+    os.environ.get(
+        "RB_PUBLICATION_PAYLOAD_ROOT",
+        str(Path.home() / "repos" / "manifest-publications"),
+    )
+)
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"JSON document is not an object: {path}")
+    return value
+
+
+def identity_from_args(args: argparse.Namespace) -> PublicationIdentity:
+    return PublicationIdentity(
+        repository=args.repository,
+        lane=args.lane,
+        repository_commit=args.repository_commit,
+        profile=args.profile,
+        configuration_sha256=args.configuration_sha256,
+        lenskit_version=args.lenskit_version,
+        bundle_schema=args.bundle_schema,
+        generator_inputs_sha256=args.generator_inputs_sha256,
+    )
+
+
+def policy_from_args(args: argparse.Namespace) -> RetentionPolicy:
+    return RetentionPolicy(
+        recent=args.recent,
+        daily=args.daily,
+        weekly=args.weekly,
+        incomplete_ttl_seconds=args.incomplete_ttl_seconds,
+    )
+
+
+def add_identity_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--lane", required=True)
+    parser.add_argument("--repository-commit", required=True)
+    parser.add_argument("--profile", required=True)
+    parser.add_argument("--configuration-sha256", required=True)
+    parser.add_argument("--lenskit-version", required=True)
+    parser.add_argument("--bundle-schema", required=True)
+    parser.add_argument("--generator-inputs-sha256", required=True)
+
+
+def add_policy_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--recent", type=int, default=3)
+    parser.add_argument("--daily", type=int, default=7)
+    parser.add_argument("--weekly", type=int, default=8)
+    parser.add_argument("--incomplete-ttl-seconds", type=int, default=48 * 60 * 60)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--evidence-root", type=Path, default=DEFAULT_EVIDENCE_ROOT)
+    parser.add_argument("--payload-root", type=Path, default=DEFAULT_PAYLOAD_ROOT)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    identity_parser = subparsers.add_parser(
+        "identity", help="compute the canonical publication identity"
+    )
+    add_identity_arguments(identity_parser)
+
+    begin_parser = subparsers.add_parser(
+        "begin", help="reserve one publication or return noop/in-progress"
+    )
+    add_identity_arguments(begin_parser)
+    begin_parser.add_argument("--payload", type=Path, required=True)
+    begin_parser.add_argument(
+        "--incomplete-ttl-seconds", type=int, default=48 * 60 * 60
+    )
+
+    complete_parser = subparsers.add_parser(
+        "complete", help="bind a completed payload and manifest to durable evidence"
+    )
+    complete_parser.add_argument("--record", type=Path, required=True)
+    complete_parser.add_argument("--manifest", type=Path, required=True)
+
+    fail_parser = subparsers.add_parser("fail", help="mark a publication as failed")
+    fail_parser.add_argument("--record", type=Path, required=True)
+    fail_parser.add_argument("--reason", required=True)
+
+    pin_parser = subparsers.add_parser("pin", help="pin one publication generation")
+    pin_parser.add_argument("--record", type=Path, required=True)
+    pin_parser.add_argument("--reason", required=True)
+
+    unpin_parser = subparsers.add_parser("unpin", help="remove one explicit pin")
+    unpin_parser.add_argument("--record", type=Path, required=True)
+
+    plan_parser = subparsers.add_parser(
+        "plan", help="create a dry-run retention plan"
+    )
+    plan_parser.add_argument("--repository", required=True)
+    plan_parser.add_argument("--lane", required=True)
+    plan_parser.add_argument("--output", type=Path)
+    add_policy_arguments(plan_parser)
+
+    apply_parser = subparsers.add_parser(
+        "apply", help="apply one exact hash-bound retention plan"
+    )
+    apply_parser.add_argument("--plan", type=Path, required=True)
+    apply_parser.add_argument("--expected-plan-sha256", required=True)
+
+    reconcile_parser = subparsers.add_parser(
+        "reconcile", help="reconcile interrupted retention transactions"
+    )
+    reconcile_parser.add_argument("--repository", required=True)
+    reconcile_parser.add_argument("--lane", required=True)
+    add_policy_arguments(reconcile_parser)
+
+    list_parser = subparsers.add_parser(
+        "list", help="list durable records and explicit pins"
+    )
+    list_parser.add_argument("--repository", required=True)
+    list_parser.add_argument("--lane", required=True)
+
+    return parser
+
+
+def run(args: argparse.Namespace) -> dict[str, object]:
+    store = PublicationPolicyStore(
+        evidence_root=args.evidence_root,
+        payload_root=args.payload_root,
+    )
+    if args.command == "identity":
+        identity = identity_from_args(args)
+        return {
+            "schema": "repobrief.publication-identity.v1",
+            "identity": identity.as_dict(),
+            "identity_sha256": identity.sha256,
+        }
+    if args.command == "begin":
+        return store.begin(
+            identity_from_args(args),
+            payload_path=args.payload,
+            incomplete_ttl_seconds=args.incomplete_ttl_seconds,
+        )
+    if args.command == "complete":
+        return store.complete(args.record, manifest_path=args.manifest)
+    if args.command == "fail":
+        return store.fail(args.record, reason=args.reason)
+    if args.command == "pin":
+        return store.pin(args.record, reason=args.reason)
+    if args.command == "unpin":
+        return store.unpin(args.record)
+    if args.command == "plan":
+        plan = store.plan_retention(
+            args.repository,
+            args.lane,
+            policy=policy_from_args(args),
+        )
+        if args.output:
+            store.write_plan(args.output, plan)
+        return plan
+    if args.command == "apply":
+        plan = read_json(args.plan)
+        plan_sha = plan.get("plan_sha256")
+        if plan_sha != args.expected_plan_sha256:
+            raise PublicationPolicyError(
+                "expected plan SHA-256 does not match the plan document"
+            )
+        unhashed = dict(plan)
+        unhashed.pop("plan_sha256", None)
+        if canonical_sha256(unhashed) != plan_sha:
+            raise PublicationPolicyError("retention plan hash mismatch")
+        return store.apply_plan(plan)
+    if args.command == "reconcile":
+        return store.reconcile_transactions(
+            args.repository,
+            args.lane,
+            policy=policy_from_args(args),
+        )
+    if args.command == "list":
+        records = [
+            {"record_path": str(path), "record": record}
+            for path, record in store.list_records(args.repository, args.lane)
+        ]
+        return {
+            "repository": args.repository,
+            "lane": args.lane,
+            "records": records,
+            "pinned_generation_ids": sorted(
+                store.pinned_generation_ids(args.repository, args.lane)
+            ),
+        }
+    raise AssertionError(f"unhandled command: {args.command}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        result = run(args)
+    except (PublicationPolicyError, ValueError, OSError, json.JSONDecodeError) as exc:
+        print(json.dumps({"status": "error", "error": str(exc)}, sort_keys=True))
+        return 2
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
