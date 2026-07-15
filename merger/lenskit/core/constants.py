@@ -31,6 +31,7 @@ class ArtifactRole(str, Enum):
     RELATION_CARDS_JSONL = "relation_cards_jsonl"
     PR_DELTA_CARDS_JSONL = "pr_delta_cards_jsonl"
     PYTHON_SYMBOL_INDEX_JSON = "python_symbol_index_json"
+    PYTHON_CALL_GRAPH_JSON = "python_call_graph_json"
 
 
 CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY = "claim_evidence_map_absence_reason"

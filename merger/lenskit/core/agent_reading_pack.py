@@ -72,6 +72,7 @@ _CONCEPT_CARD_ROLES = ("concept_cards_jsonl", "concept_card_jsonl", "concept_car
 _PR_DELTA_CARD_ROLES = ("pr_delta_cards_jsonl", "pr_delta_card_jsonl", "pr_delta_cards")
 _RELATION_CARD_ROLES = ("relation_cards_jsonl", "relation_card_jsonl", "relation_cards")
 _SYMBOL_INDEX_ROLES = ("python_symbol_index_json", "python_symbol_index")
+_CALL_GRAPH_ROLES = ("python_call_graph_json", "python_call_graph")
 
 
 class AgentReadingPackError(Exception):
@@ -426,7 +427,34 @@ _ROLE_GUIDE = {
     "concept_cards_jsonl": "Concept Card navigation index over explicit task concepts, dependencies, failures and queries",
     "relation_cards_jsonl": "Relation Card navigation index over supported local import edges",
     "python_symbol_index_json": "Python AST symbol navigation index; static parse only, not runtime truth",
+    "python_call_graph_json": "Python AST call-site navigation index; only safe static resolutions, not runtime truth",
 }
+
+
+def _append_call_graph_section(lines: List[str], model: PackModel) -> None:
+    lines.append("## CALL_GRAPH_INDEX")
+    artifacts = _artifacts_by_roles(model, _CALL_GRAPH_ROLES)
+    if artifacts:
+        for artifact in artifacts:
+            _append_artifact_bullet(lines, artifact)
+        lines.append(
+            "- MCP: `find_references` lists bounded S0/S1 call sites; `get_callers` "
+            "selects one exact target symbol and returns only S1 callers; `get_callees` "
+            "selects one exact caller symbol and separates S1 targets from unresolved S0 sites."
+        )
+    else:
+        lines.append("- No bundle-registered Python Call Graph artifact is present in this manifest.")
+    lines.append(
+        "- Call Graph records are static AST call sites. S1 means one unique local target "
+        "under the modelled lexical bindings; shadowed, ambiguous, dynamic, foreign or "
+        "unindexed calls remain explicit S0 evidence."
+    )
+    lines.append(
+        "- does_not_establish: complete call graph, runtime reachability, dynamic "
+        "dispatch resolution, dependency completeness, test sufficiency, review "
+        "completeness or merge readiness."
+    )
+    lines.append("")
 
 
 def render_agent_reading_pack(model: PackModel) -> str:
@@ -725,6 +753,8 @@ def render_agent_reading_pack(model: PackModel) -> str:
         "success, runtime behavior, test sufficiency, review impact or merge readiness."
     )
     lines.append("")
+
+    _append_call_graph_section(lines, model)
 
     # ── GRAPH_DIAGNOSTICS ───────────────────────────────────────────────
     lines.append("## GRAPH_DIAGNOSTICS")

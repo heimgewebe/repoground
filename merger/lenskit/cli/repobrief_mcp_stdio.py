@@ -117,6 +117,73 @@ def _tool_definitions(enable_snapshot_create: bool) -> list[dict[str, Any]]:
             },
             "annotations": _read_annotations(),
         },
+        {
+            "name": "find_references",
+            "title": "RepoBrief call reference locator",
+            "description": (
+                "List static call sites for a callee name from an existing RepoBrief "
+                "bundle's python_call_graph artifact. Exact matches first; bounded, "
+                "read-only, no refresh. Answers 'where is X called?'"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle_manifest": {"type": "string"},
+                    "name": {"type": "string", "minLength": 1},
+                    "path": {"type": ["string", "null"]},
+                    "k": {"type": "integer", "minimum": 1, "maximum": 200, "default": 25},
+                },
+                "required": ["bundle_manifest", "name"],
+                "additionalProperties": False,
+            },
+            "annotations": _read_annotations(),
+        },
+        {
+            "name": "get_callers",
+            "title": "RepoBrief caller locator",
+            "description": (
+                "Select one exact symbol and group only S1 call edges to it by unique "
+                "enclosing caller. Unresolved name similarities stay separate. "
+                "Answers 'who calls X?'"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle_manifest": {"type": "string"},
+                    "name": {"type": "string", "minLength": 1},
+                    "path": {"type": ["string", "null"]},
+                    "k": {"type": "integer", "minimum": 1, "maximum": 200, "default": 25},
+                },
+                "required": ["bundle_manifest", "name"],
+                "additionalProperties": False,
+            },
+            "annotations": _read_annotations(),
+        },
+        {
+            "name": "get_callees",
+            "title": "RepoBrief callee locator",
+            "description": (
+                "Select one exact caller symbol, group its uniquely resolved S1 targets, "
+                "and retain unresolved S0 call sites separately. Answers 'what does X call?'"
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "bundle_manifest": {"type": "string"},
+                    "name": {"type": "string", "minLength": 1},
+                    "path": {"type": ["string", "null"]},
+                    "k": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 25,
+                    },
+                },
+                "required": ["bundle_manifest", "name"],
+                "additionalProperties": False,
+            },
+            "annotations": _read_annotations(),
+        },
     ]
     if enable_snapshot_create:
         tools.append(
@@ -379,6 +446,34 @@ class RepoBriefMcpStdioServer:
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
 
+    def _call_call_navigation(self, tool: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        call_args = dict(arguments)
+        # Fail closed at the transport boundary, independent of client-side
+        # inputSchema enforcement: reject an empty name and an out-of-bounds k.
+        name = call_args.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise McpProtocolError(-32602, f"{tool} requires a non-empty name")
+        k = call_args.get("k", 25)
+        if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > 200:
+            raise McpProtocolError(
+                -32602,
+                f"{tool} k must be an integer between 1 and 200",
+                {"k": k},
+            )
+        manifest = self._guard_manifest(call_args.get("bundle_manifest"))
+        call_args["bundle_manifest"] = str(manifest)
+        handlers = {
+            "find_references": repobrief_mcp_tools.find_references,
+            "get_callers": repobrief_mcp_tools.get_callers,
+            "get_callees": repobrief_mcp_tools.get_callees,
+        }
+        handler = handlers[tool]
+        payload = handler(**call_args)
+        # Call-graph results reflect the snapshot; surface freshness so the agent
+        # knows whether the artifact may lag the live working tree.
+        payload["live_freshness"] = self._safe_live_freshness(manifest)
+        return payload
+
     def _call_snapshot_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if not self.enable_snapshot_create or self.repo_root is None:
             raise McpProtocolError(-32602, "snapshot_create is disabled")
@@ -404,6 +499,8 @@ class RepoBriefMcpStdioServer:
             return self._safe_live_freshness(manifest)
         if name == "find_symbol":
             return self._call_find_symbol(arguments)
+        if name in ("find_references", "get_callers", "get_callees"):
+            return self._call_call_navigation(name, arguments)
         if name == "snapshot_create":
             return self._call_snapshot_create(arguments)
         raise McpProtocolError(-32602, f"unknown or disabled tool: {name}")

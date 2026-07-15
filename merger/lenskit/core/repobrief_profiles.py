@@ -106,6 +106,7 @@ ARTIFACT_ORDER = (
     "relation_cards_jsonl",
     "retrieval_eval_json",
     "python_symbol_index_json",
+    "python_call_graph_json",
 )
 
 BASE_RULES = {
@@ -124,6 +125,7 @@ BASE_RULES = {
     "relation_cards_jsonl": REQ_OPTIONAL,
     "retrieval_eval_json": REQ_OPTIONAL,
     "python_symbol_index_json": REQ_OPTIONAL,
+    "python_call_graph_json": REQ_OPTIONAL,
 }
 
 PROFILE_ARTIFACT_RULES = {
@@ -139,6 +141,7 @@ PROFILE_ARTIFACT_RULES = {
         "export_safety_report": REQ_REQUIRED,
         "retrieval_eval_json": REQ_RECOMMENDED,
         "python_symbol_index_json": REQ_RECOMMENDED,
+        "python_call_graph_json": REQ_RECOMMENDED,
     },
     "full-max": {
         **BASE_RULES,
@@ -148,6 +151,7 @@ PROFILE_ARTIFACT_RULES = {
         "relation_cards_jsonl": REQ_RECOMMENDED,
         "retrieval_eval_json": REQ_RECOMMENDED,
         "python_symbol_index_json": REQ_RECOMMENDED,
+        "python_call_graph_json": REQ_RECOMMENDED,
     },
     "pr-review": {
         **BASE_RULES,
@@ -168,6 +172,7 @@ PROFILE_ARTIFACT_RULES = {
         "export_safety_report": REQ_REQUIRED,
         "retrieval_eval_json": REQ_NA,
         "python_symbol_index_json": REQ_EXCLUDED,
+        "python_call_graph_json": REQ_EXCLUDED,
     },
     "ci-artifact": {
         **BASE_RULES,
@@ -175,6 +180,7 @@ PROFILE_ARTIFACT_RULES = {
         "export_safety_report": REQ_RECOMMENDED,
         "retrieval_eval_json": REQ_RECOMMENDED,
         "python_symbol_index_json": REQ_RECOMMENDED,
+        "python_call_graph_json": REQ_RECOMMENDED,
     },
 }
 

@@ -1,0 +1,219 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lenskit/schema/python-call-graph.v1.schema.json",
+  "title": "Evidence-graded Python Call Graph v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "canonical_dump_index_sha256",
+    "language",
+    "evidence_model",
+    "resolution_statuses",
+    "relation_types",
+    "call_count",
+    "resolution_counts",
+    "evidence_counts",
+    "relation_counts",
+    "calls",
+    "skipped_files_count",
+    "skipped_errors",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "lenskit.python_call_graph"},
+    "version": {"const": "1.0"},
+    "run_id": {"type": "string", "minLength": 1},
+    "canonical_dump_index_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "language": {"const": "python"},
+    "evidence_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["S0", "S1"],
+      "properties": {
+        "S0": {"type": "string", "minLength": 1},
+        "S1": {"type": "string", "minLength": 1}
+      }
+    },
+    "resolution_statuses": {
+      "const": ["resolved", "candidate", "ambiguous", "unresolved"]
+    },
+    "relation_types": {"const": ["calls", "constructs"]},
+    "call_count": {"type": "integer", "minimum": 0},
+    "resolution_counts": {"$ref": "#/$defs/resolutionCounts"},
+    "evidence_counts": {"$ref": "#/$defs/evidenceCounts"},
+    "relation_counts": {"$ref": "#/$defs/relationCounts"},
+    "calls": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/call"}
+    },
+    "skipped_files_count": {"type": "integer", "minimum": 0},
+    "skipped_errors": {
+      "type": "array",
+      "items": {"type": "string"},
+      "maxItems": 20
+    },
+    "does_not_establish": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "complete_call_graph",
+          "runtime_reachability",
+          "dynamic_dispatch_resolution",
+          "dependency_completeness",
+          "import_success",
+          "test_sufficiency",
+          "review_completeness",
+          "merge_readiness"
+        ]
+      },
+      "uniqueItems": true,
+      "allOf": [
+        {"contains": {"const": "complete_call_graph"}},
+        {"contains": {"const": "runtime_reachability"}},
+        {"contains": {"const": "dynamic_dispatch_resolution"}},
+        {"contains": {"const": "dependency_completeness"}},
+        {"contains": {"const": "import_success"}},
+        {"contains": {"const": "test_sufficiency"}},
+        {"contains": {"const": "review_completeness"}},
+        {"contains": {"const": "merge_readiness"}}
+      ]
+    }
+  },
+  "$defs": {
+    "resolutionCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resolved", "candidate", "ambiguous", "unresolved"],
+      "properties": {
+        "resolved": {"type": "integer", "minimum": 0},
+        "candidate": {"type": "integer", "minimum": 0},
+        "ambiguous": {"type": "integer", "minimum": 0},
+        "unresolved": {"type": "integer", "minimum": 0}
+      }
+    },
+    "evidenceCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["S0", "S1"],
+      "properties": {
+        "S0": {"type": "integer", "minimum": 0},
+        "S1": {"type": "integer", "minimum": 0}
+      }
+    },
+    "relationCounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["calls", "constructs"],
+      "properties": {
+        "calls": {"type": "integer", "minimum": 0},
+        "constructs": {"type": "integer", "minimum": 0}
+      }
+    },
+    "targetIds": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "call": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "start_line",
+        "start_col",
+        "end_line",
+        "end_col",
+        "range_ref",
+        "callee_expression",
+        "simple_name",
+        "caller_scope",
+        "caller_symbol_id",
+        "caller_qualified_name",
+        "caller_kind",
+        "caller_start_line",
+        "caller_end_line",
+        "relation_type",
+        "evidence_level",
+        "resolution_status",
+        "resolution_reason",
+        "resolved_target_ids",
+        "candidate_target_ids"
+      ],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "start_line": {"type": "integer", "minimum": 1},
+        "start_col": {"type": "integer", "minimum": 0},
+        "end_line": {"type": "integer", "minimum": 1},
+        "end_col": {"type": "integer", "minimum": 0},
+        "range_ref": {"type": "string", "pattern": "^file:.+#L[1-9][0-9]*-L[1-9][0-9]*$"},
+        "callee_expression": {"type": "string", "minLength": 1},
+        "simple_name": {"type": ["string", "null"], "minLength": 1},
+        "caller_scope": {"enum": ["module", "symbol"]},
+        "caller_symbol_id": {"type": ["string", "null"], "minLength": 1},
+        "caller_qualified_name": {"type": ["string", "null"], "minLength": 1},
+        "caller_kind": {"enum": ["module", "class", "function", "async_function"]},
+        "caller_start_line": {"type": ["integer", "null"], "minimum": 1},
+        "caller_end_line": {"type": ["integer", "null"], "minimum": 1},
+        "relation_type": {"enum": ["calls", "constructs"]},
+        "evidence_level": {"enum": ["S0", "S1"]},
+        "resolution_status": {"enum": ["resolved", "candidate", "ambiguous", "unresolved"]},
+        "resolution_reason": {"type": "string", "minLength": 1},
+        "resolved_target_ids": {"$ref": "#/$defs/targetIds"},
+        "candidate_target_ids": {"$ref": "#/$defs/targetIds"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"caller_scope": {"const": "module"}}},
+          "then": {
+            "properties": {
+              "caller_symbol_id": {"type": "null"},
+              "caller_qualified_name": {"type": "null"},
+              "caller_kind": {"const": "module"},
+              "caller_start_line": {"type": "null"},
+              "caller_end_line": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"caller_scope": {"const": "symbol"}}},
+          "then": {
+            "properties": {
+              "caller_symbol_id": {"type": "string"},
+              "caller_qualified_name": {"type": "string"},
+              "caller_kind": {"enum": ["class", "function", "async_function"]},
+              "caller_start_line": {"type": "integer"},
+              "caller_end_line": {"type": "integer"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"resolution_status": {"const": "resolved"}}},
+          "then": {
+            "properties": {
+              "evidence_level": {"const": "S1"},
+              "resolved_target_ids": {"minItems": 1, "maxItems": 1},
+              "candidate_target_ids": {"maxItems": 0}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "resolution_status": {"enum": ["candidate", "ambiguous", "unresolved"]}
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence_level": {"const": "S0"},
+              "resolved_target_ids": {"maxItems": 0}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

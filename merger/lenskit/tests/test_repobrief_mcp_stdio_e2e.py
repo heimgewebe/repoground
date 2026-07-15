@@ -110,7 +110,15 @@ def test_mcp_stdio_launcher_completes_handshake_outside_checkout(tmp_path: Path)
     assert responses[0]["result"]["protocolVersion"] == PROTOCOL_VERSION
     assert {
         tool["name"] for tool in responses[1]["result"]["tools"]
-    } == {"ask_context", "grounding_verify", "live_freshness", "find_symbol"}
+    } == {
+        "ask_context",
+        "grounding_verify",
+        "live_freshness",
+        "find_symbol",
+        "find_references",
+        "get_callers",
+        "get_callees",
+    }
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git executable unavailable")
@@ -342,3 +350,208 @@ def test_find_symbol_tools_call_rejects_empty_name_and_invalid_kind(tmp_path: Pa
     assert "non-empty name" in by_id[2]["error"]["message"]
     assert by_id[3]["error"]["code"] == -32602
     assert "kind" in by_id[3]["error"]["message"]
+
+
+def _call_navigation_manifest(bundle_root: Path) -> Path:
+    canonical = "a" * 64
+    caller_id = "py:pkg:caller.py:function:caller"
+    target_id = "py:pkg:target.py:function:target"
+    symbol_index = bundle_root / "calls.python_symbol_index.json"
+    symbol_index.write_text(
+        json.dumps(
+            {
+                "kind": "lenskit.python_symbol_index",
+                "version": "1.0",
+                "run_id": "demo",
+                "canonical_dump_index_sha256": canonical,
+                "language": "python",
+                "symbol_kinds": ["class", "function", "async_function"],
+                "symbols": [
+                    {
+                        "id": caller_id,
+                        "kind": "function",
+                        "name": "caller",
+                        "qualified_name": "caller",
+                        "module": "pkg.caller",
+                        "path": "pkg/caller.py",
+                        "start_line": 1,
+                        "end_line": 4,
+                        "range_ref": "file:pkg/caller.py#L1-L4",
+                    },
+                    {
+                        "id": target_id,
+                        "kind": "function",
+                        "name": "target",
+                        "qualified_name": "target",
+                        "module": "pkg.target",
+                        "path": "pkg/target.py",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "range_ref": "file:pkg/target.py#L1-L2",
+                    },
+                ],
+                "skipped_files_count": 0,
+                "skipped_errors": [],
+                "does_not_establish": ["call_graph_completeness"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = [
+        {
+            "path": "pkg/caller.py",
+            "start_line": 2,
+            "start_col": 4,
+            "end_line": 2,
+            "end_col": 12,
+            "range_ref": "file:pkg/caller.py#L2-L2",
+            "callee_expression": "target",
+            "simple_name": "target",
+            "caller_scope": "symbol",
+            "caller_symbol_id": caller_id,
+            "caller_qualified_name": "caller",
+            "caller_kind": "function",
+            "caller_start_line": 1,
+            "caller_end_line": 4,
+            "relation_type": "calls",
+            "evidence_level": "S1",
+            "resolution_status": "resolved",
+            "resolution_reason": "imported_internal_name",
+            "resolved_target_ids": [target_id],
+            "candidate_target_ids": [],
+        },
+        {
+            "path": "pkg/caller.py",
+            "start_line": 3,
+            "start_col": 4,
+            "end_line": 3,
+            "end_col": 17,
+            "range_ref": "file:pkg/caller.py#L3-L3",
+            "callee_expression": "client.send",
+            "simple_name": "send",
+            "caller_scope": "symbol",
+            "caller_symbol_id": caller_id,
+            "caller_qualified_name": "caller",
+            "caller_kind": "function",
+            "caller_start_line": 1,
+            "caller_end_line": 4,
+            "relation_type": "calls",
+            "evidence_level": "S0",
+            "resolution_status": "unresolved",
+            "resolution_reason": "dynamic_attribute_call",
+            "resolved_target_ids": [],
+            "candidate_target_ids": [],
+        },
+    ]
+    call_graph = bundle_root / "calls.python_call_graph.json"
+    call_graph.write_text(
+        json.dumps(
+            {
+                "kind": "lenskit.python_call_graph",
+                "version": "1.0",
+                "run_id": "demo",
+                "canonical_dump_index_sha256": canonical,
+                "language": "python",
+                "evidence_model": {
+                    "S0": "unresolved static call site",
+                    "S1": "one uniquely resolved local target",
+                },
+                "resolution_statuses": [
+                    "resolved",
+                    "candidate",
+                    "ambiguous",
+                    "unresolved",
+                ],
+                "relation_types": ["calls", "constructs"],
+                "call_count": 2,
+                "resolution_counts": {
+                    "resolved": 1,
+                    "candidate": 0,
+                    "ambiguous": 0,
+                    "unresolved": 1,
+                },
+                "evidence_counts": {"S0": 1, "S1": 1},
+                "relation_counts": {"calls": 2, "constructs": 0},
+                "calls": calls,
+                "skipped_files_count": 0,
+                "skipped_errors": [],
+                "does_not_establish": [
+                    "complete_call_graph",
+                    "runtime_reachability",
+                    "dynamic_dispatch_resolution",
+                    "dependency_completeness",
+                    "import_success",
+                    "test_sufficiency",
+                    "review_completeness",
+                    "merge_readiness",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = bundle_root / "calls.bundle.manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "kind": "repolens.bundle.manifest",
+                "run_id": "demo",
+                "artifacts": [
+                    {
+                        "role": "python_symbol_index_json",
+                        "path": symbol_index.name,
+                        "content_type": "application/json",
+                        "bytes": symbol_index.stat().st_size,
+                        "sha256": _sha256(symbol_index),
+                    },
+                    {
+                        "role": "python_call_graph_json",
+                        "path": call_graph.name,
+                        "content_type": "application/json",
+                        "bytes": call_graph.stat().st_size,
+                        "sha256": _sha256(call_graph),
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def test_get_callees_tools_call_round_trips_evidence_over_stdio(tmp_path: Path) -> None:
+    bundle_root = tmp_path / "bundles"
+    bundle_root.mkdir()
+    manifest = _call_navigation_manifest(bundle_root)
+    responses = _run_launcher(
+        bundle_root,
+        None,
+        _handshake(
+            2,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_callees",
+                    "arguments": {
+                        "bundle_manifest": str(manifest),
+                        "name": "caller",
+                        "path": "pkg/caller.py",
+                    },
+                },
+            },
+        ),
+    )
+    response = next(item for item in responses if item.get("id") == 2)
+    assert "error" not in response, response
+    payload = json.loads(response["result"]["content"][0]["text"])
+
+    assert payload["tool"] == "get_callees"
+    assert payload["status"] == "available"
+    result = payload["result"]
+    assert result["caller_symbol"]["qualified_name"] == "caller"
+    assert result["callees"][0]["callee_symbol"]["qualified_name"] == "target"
+    assert result["callees"][0]["call_sites"][0]["evidence_level"] == "S1"
+    assert result["unresolved_call_sites"][0]["callee_expression"] == "client.send"
+    assert result["unresolved_call_sites"][0]["evidence_level"] == "S0"
+    assert payload["live_freshness"]["status"] == "not_comparable"

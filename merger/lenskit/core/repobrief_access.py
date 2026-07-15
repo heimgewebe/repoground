@@ -1329,6 +1329,988 @@ def search_symbol_index(
     }
 
 
+CALL_GRAPH_ROLE = "python_call_graph_json"
+CALL_GRAPH_KIND = "lenskit.python_call_graph"
+CALL_GRAPH_VERSION = "1.0"
+CALL_REFERENCES_KIND = "repobrief.call_reference_search"
+CALL_CALLERS_KIND = "repobrief.call_callers"
+CALL_CALLEES_KIND = "repobrief.call_callees"
+MAX_CALL_SEARCH_K = 200
+CALL_RESOLUTION_STATUSES = ("resolved", "candidate", "ambiguous", "unresolved")
+CALL_EVIDENCE_LEVELS = ("S0", "S1")
+CALL_RELATION_TYPES = ("calls", "constructs")
+_CALL_CALLER_KINDS = ("module", "class", "function", "async_function")
+_CALL_GRAPH_DOES_NOT_ESTABLISH = (
+    "complete_call_graph",
+    "runtime_reachability",
+    "dynamic_dispatch_resolution",
+    "dependency_completeness",
+    "import_success",
+    "test_sufficiency",
+    "review_completeness",
+    "merge_readiness",
+)
+
+
+def _call_nav_does_not_establish() -> list[str]:
+    return list(dict.fromkeys([*_DOES_NOT_ESTABLISH, *_CALL_GRAPH_DOES_NOT_ESTABLISH]))
+
+
+def _string_list_valid(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == len(set(value))
+        and all(_is_non_empty_string(item) for item in value)
+    )
+
+
+def _call_position_fields_valid(row: dict[str, Any]) -> bool:
+    numeric_fields = (
+        ("start_line", 1),
+        ("start_col", 0),
+        ("end_line", 1),
+        ("end_col", 0),
+    )
+    if not all(
+        _is_int_not_bool(row.get(field)) and row[field] >= minimum
+        for field, minimum in numeric_fields
+    ):
+        return False
+    return (
+        row["end_line"] > row["start_line"]
+        or (
+            row["end_line"] == row["start_line"]
+            and row["end_col"] >= row["start_col"]
+        )
+    )
+
+
+def _call_caller_fields_valid(row: dict[str, Any]) -> bool:
+    caller_scope = row.get("caller_scope")
+    caller_kind = row.get("caller_kind")
+    caller_start = row.get("caller_start_line")
+    caller_end = row.get("caller_end_line")
+    if caller_kind not in _CALL_CALLER_KINDS:
+        return False
+    if caller_scope == "module":
+        return (
+            row.get("caller_symbol_id") is None
+            and row.get("caller_qualified_name") is None
+            and caller_kind == "module"
+            and caller_start is None
+            and caller_end is None
+        )
+    if caller_scope == "symbol":
+        return (
+            _is_non_empty_string(row.get("caller_symbol_id"))
+            and _is_non_empty_string(row.get("caller_qualified_name"))
+            and caller_kind != "module"
+            and _is_int_not_bool(caller_start)
+            and _is_int_not_bool(caller_end)
+            and caller_start >= 1
+            and caller_end >= caller_start
+            and caller_start <= row["start_line"] <= caller_end
+        )
+    return False
+
+
+def _call_resolution_fields_valid(row: dict[str, Any]) -> bool:
+    status = row.get("resolution_status")
+    evidence = row.get("evidence_level")
+    relation = row.get("relation_type")
+    resolved = row.get("resolved_target_ids")
+    candidates = row.get("candidate_target_ids")
+    if status not in CALL_RESOLUTION_STATUSES:
+        return False
+    if evidence not in CALL_EVIDENCE_LEVELS or relation not in CALL_RELATION_TYPES:
+        return False
+    if not _is_non_empty_string(row.get("resolution_reason")):
+        return False
+    if not _string_list_valid(resolved) or not _string_list_valid(candidates):
+        return False
+    if status == "resolved":
+        return evidence == "S1" and len(resolved) == 1 and not candidates
+    return evidence == "S0" and not resolved
+
+
+def _call_record_is_valid(row: Any) -> bool:
+    if not isinstance(row, dict) or not _is_non_empty_string(row.get("path")):
+        return False
+    if not _call_position_fields_valid(row):
+        return False
+    expected_range = f"file:{row['path']}#L{row['start_line']}-L{row['end_line']}"
+    return (
+        row.get("range_ref") == expected_range
+        and _is_non_empty_string(row.get("callee_expression"))
+        and (
+            row.get("simple_name") is None
+            or _is_non_empty_string(row.get("simple_name"))
+        )
+        and _call_caller_fields_valid(row)
+        and _call_resolution_fields_valid(row)
+    )
+
+
+def _count_map_valid(value: Any, keys: tuple[str, ...]) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == set(keys)
+        and all(_is_int_not_bool(item) and item >= 0 for item in value.values())
+    )
+
+
+def _call_graph_error(
+    error_code: str, error: str, *, status: str = "invalid"
+) -> dict[str, Any]:
+    return {"status": status, "error_code": error_code, "error": error}
+
+
+def _read_call_graph_artifact(
+    manifest_path: Path,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    artifact_result = get_artifact(manifest_path, CALL_GRAPH_ROLE)
+    artifact = artifact_result.get("artifact") if isinstance(artifact_result, dict) else None
+    if not isinstance(artifact, dict) or not artifact.get("absolute_path"):
+        return None, artifact, _call_graph_error(
+            "python_call_graph_json_missing",
+            "python_call_graph_json artifact is not present in the bundle manifest",
+            status="missing",
+        )
+    graph_path = Path(str(artifact["absolute_path"]))
+    if not graph_path.exists():
+        return None, artifact, _call_graph_error(
+            "python_call_graph_json_file_missing",
+            "python_call_graph_json artifact file does not exist",
+            status="missing",
+        )
+    try:
+        data = json.loads(graph_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, artifact, _call_graph_error(
+            "python_call_graph_json_unreadable", str(exc)
+        )
+    return data, artifact, None
+
+
+def _call_graph_identity_error(data: Any) -> dict[str, Any] | None:
+    if not isinstance(data, dict) or data.get("kind") != CALL_GRAPH_KIND:
+        return _call_graph_error(
+            "python_call_graph_json_invalid_kind",
+            f"python_call_graph_json must be a {CALL_GRAPH_KIND} object",
+        )
+    if data.get("version") != CALL_GRAPH_VERSION:
+        return _call_graph_error(
+            "python_call_graph_json_version_unsupported",
+            f"python_call_graph_json version must be {CALL_GRAPH_VERSION}",
+        )
+    if not _is_non_empty_string(data.get("run_id")) or not _is_sha256(
+        data.get("canonical_dump_index_sha256")
+    ):
+        return _call_graph_error(
+            "python_call_graph_json_binding_invalid",
+            "python_call_graph_json must carry run_id and canonical_dump_index_sha256",
+        )
+    if data.get("language") != "python":
+        return _call_graph_error(
+            "python_call_graph_language_invalid",
+            "python_call_graph_json language must be python",
+        )
+    return None
+
+
+def _call_graph_model_error(data: dict[str, Any]) -> dict[str, Any] | None:
+    if data.get("resolution_statuses") != list(CALL_RESOLUTION_STATUSES):
+        return _call_graph_error(
+            "python_call_graph_resolution_model_invalid",
+            "python_call_graph_json resolution_statuses are not the v1 model",
+        )
+    if data.get("relation_types") != list(CALL_RELATION_TYPES):
+        return _call_graph_error(
+            "python_call_graph_relation_model_invalid",
+            "python_call_graph_json relation_types are not the v1 model",
+        )
+    evidence_model = data.get("evidence_model")
+    if (
+        not isinstance(evidence_model, dict)
+        or set(evidence_model) != set(CALL_EVIDENCE_LEVELS)
+        or not all(_is_non_empty_string(value) for value in evidence_model.values())
+    ):
+        return _call_graph_error(
+            "python_call_graph_evidence_model_invalid",
+            "python_call_graph_json evidence_model must define non-empty S0 and S1 semantics",
+        )
+    diagnostics_valid = (
+        _is_int_not_bool(data.get("skipped_files_count"))
+        and data["skipped_files_count"] >= 0
+        and isinstance(data.get("skipped_errors"), list)
+        and len(data["skipped_errors"]) <= 20
+        and all(isinstance(item, str) for item in data["skipped_errors"])
+    )
+    if not diagnostics_valid:
+        return _call_graph_error(
+            "python_call_graph_parse_diagnostics_invalid",
+            "python_call_graph_json parse diagnostics are invalid",
+        )
+    nonclaims = data.get("does_not_establish")
+    if (
+        not _string_list_valid(nonclaims)
+        or not set(_CALL_GRAPH_DOES_NOT_ESTABLISH).issubset(nonclaims)
+    ):
+        return _call_graph_error(
+            "python_call_graph_nonclaims_invalid",
+            "python_call_graph_json does_not_establish is incomplete",
+        )
+    return None
+
+
+def _call_graph_records_error(data: dict[str, Any]) -> dict[str, Any] | None:
+    calls = data.get("calls")
+    if not isinstance(calls, list):
+        return _call_graph_error(
+            "python_call_graph_calls_invalid",
+            "python_call_graph_json calls must be an array",
+        )
+    for position, row in enumerate(calls):
+        if not _call_record_is_valid(row):
+            return _call_graph_error(
+                "python_call_graph_call_record_invalid",
+                f"python_call_graph_json call record at index {position} is invalid",
+            )
+    if data.get("call_count") != len(calls):
+        return _call_graph_error(
+            "python_call_graph_call_count_invalid",
+            "python_call_graph_json call_count does not match calls",
+        )
+    return None
+
+
+def _call_graph_counts_error(data: dict[str, Any]) -> dict[str, Any] | None:
+    count_specs = (
+        ("resolution_counts", CALL_RESOLUTION_STATUSES, "resolution_status"),
+        ("evidence_counts", CALL_EVIDENCE_LEVELS, "evidence_level"),
+        ("relation_counts", CALL_RELATION_TYPES, "relation_type"),
+    )
+    calls = data["calls"]
+    for field, keys, row_field in count_specs:
+        counts = data.get(field)
+        if not _count_map_valid(counts, keys):
+            return _call_graph_error(
+                f"python_call_graph_{field}_invalid",
+                f"python_call_graph_json {field} is invalid",
+            )
+        actual = {key: 0 for key in keys}
+        for row in calls:
+            actual[row[row_field]] += 1
+        if counts != actual:
+            return _call_graph_error(
+                f"python_call_graph_{field}_mismatch",
+                f"python_call_graph_json {field} does not match calls",
+            )
+    return None
+
+
+def _call_graph_manifest_binding_error(
+    data: dict[str, Any], manifest_path: Path
+) -> dict[str, Any] | None:
+    manifest = _read_json_object(manifest_path)
+    manifest_run_id = manifest.get("run_id")
+    if _is_non_empty_string(manifest_run_id) and manifest_run_id != data["run_id"]:
+        return _call_graph_error(
+            "python_call_graph_json_run_id_mismatch",
+            "python_call_graph_json run_id does not match the bundle manifest run_id",
+        )
+    dump_index = next(
+        (item for item in _artifact_list(manifest) if item.get("role") == "dump_index_json"),
+        None,
+    )
+    if (
+        dump_index is not None
+        and _is_sha256(dump_index.get("sha256"))
+        and dump_index["sha256"] != data["canonical_dump_index_sha256"]
+    ):
+        return _call_graph_error(
+            "python_call_graph_json_canonical_binding_mismatch",
+            "python_call_graph_json canonical_dump_index_sha256 does not match the dump_index_json artifact",
+        )
+    return None
+
+
+def _load_call_graph(
+    manifest_path: Path,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    """Strictly load a registered, integrity-checked Python call graph."""
+    data, artifact, error = _read_call_graph_artifact(manifest_path)
+    if error is not None:
+        return None, artifact, error
+    for validator in (
+        _call_graph_identity_error,
+        _call_graph_model_error,
+        _call_graph_records_error,
+        _call_graph_counts_error,
+    ):
+        error = validator(data)
+        if error is not None:
+            return None, artifact, error
+    error = _call_graph_manifest_binding_error(data, manifest_path)
+    if error is not None:
+        return None, artifact, error
+    return data, artifact, None
+
+
+def _call_source_range(call: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": call.get("path"),
+        "start_line": call.get("start_line"),
+        "end_line": call.get("end_line"),
+        "range_ref": call.get("range_ref"),
+        "coordinate_basis": "source_lines",
+    }
+
+
+def _call_site_record(call: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "path": call.get("path"),
+        "start_line": call.get("start_line"),
+        "start_col": call.get("start_col"),
+        "end_line": call.get("end_line"),
+        "end_col": call.get("end_col"),
+        "range_ref": call.get("range_ref"),
+        "callee_expression": call.get("callee_expression"),
+        "simple_name": call.get("simple_name"),
+        "caller_scope": call.get("caller_scope"),
+        "caller_symbol_id": call.get("caller_symbol_id"),
+        "caller_qualified_name": call.get("caller_qualified_name"),
+        "caller_kind": call.get("caller_kind"),
+        "caller_start_line": call.get("caller_start_line"),
+        "caller_end_line": call.get("caller_end_line"),
+        "relation_type": call.get("relation_type"),
+        "evidence_level": call.get("evidence_level"),
+        "resolution_status": call.get("resolution_status"),
+        "resolution_reason": call.get("resolution_reason"),
+        "resolved_target_ids": call.get("resolved_target_ids"),
+        "candidate_target_ids": call.get("candidate_target_ids"),
+        "source_range": _call_source_range(call),
+    }
+
+
+def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": data.get("run_id"),
+        "canonical_dump_index_sha256": data.get("canonical_dump_index_sha256"),
+        "call_count": data.get("call_count"),
+        "resolution_counts": data.get("resolution_counts"),
+        "evidence_counts": data.get("evidence_counts"),
+        "relation_counts": data.get("relation_counts"),
+        "skipped_files_count": data.get("skipped_files_count"),
+        "skipped_errors": data.get("skipped_errors"),
+    }
+
+
+def _call_empty(kind: str) -> dict[str, Any]:
+    if kind == CALL_REFERENCES_KIND:
+        return {"hits": []}
+    if kind == CALL_CALLERS_KIND:
+        return {"target_symbol": None, "target_candidates": [], "callers": [], "unresolved_references": []}
+    return {"caller_symbol": None, "caller_candidates": [], "callees": [], "unresolved_call_sites": []}
+
+
+def _validated_call_query(
+    *,
+    kind: str,
+    manifest_path: Path,
+    name: Any,
+    k: Any,
+    path: Any,
+) -> tuple[dict[str, Any], dict[str, Any] | None, str, str | None] | dict[str, Any]:
+    def _extra(artifact: dict[str, Any] | None) -> dict[str, Any]:
+        return {"name": name, "k": k, "call_graph": artifact, **_call_empty(kind)}
+
+    if not isinstance(name, str) or not name.strip():
+        return _invalid_read_result(
+            kind=kind,
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error="name must be a non-empty string",
+            error_code="name_invalid",
+            extra=_extra(None),
+        )
+    if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > MAX_CALL_SEARCH_K:
+        return _invalid_read_result(
+            kind=kind,
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error=f"k must be an integer between 1 and {MAX_CALL_SEARCH_K}",
+            error_code="k_out_of_bounds",
+            extra=_extra(None),
+        )
+    if path is not None and not isinstance(path, str):
+        return _invalid_read_result(
+            kind=kind,
+            bundle_manifest=manifest_path,
+            status="invalid",
+            error="path must be null or a string",
+            error_code="path_invalid",
+            extra=_extra(None),
+        )
+    data, artifact, error = _load_call_graph(manifest_path)
+    if error is not None:
+        return _invalid_read_result(
+            kind=kind,
+            bundle_manifest=manifest_path,
+            status=error["status"],
+            error=error["error"],
+            error_code=error["error_code"],
+            extra=_extra(artifact),
+        )
+    assert data is not None
+    path_filter = path.strip().casefold() if isinstance(path, str) and path.strip() else None
+    return data, artifact, name.strip().casefold(), path_filter
+
+
+def _symbol_index_identity_error(
+    symbol_data: dict[str, Any], call_data: dict[str, Any]
+) -> dict[str, Any] | None:
+    if symbol_data.get("version") != "1.0":
+        return _call_graph_error(
+            "python_symbol_index_json_version_unsupported",
+            "python_symbol_index_json version must be 1.0 for call navigation",
+        )
+    if symbol_data.get("run_id") != call_data.get("run_id"):
+        return _call_graph_error(
+            "call_symbol_run_id_mismatch",
+            "python_call_graph_json and python_symbol_index_json run_id differ",
+        )
+    if symbol_data.get("canonical_dump_index_sha256") != call_data.get(
+        "canonical_dump_index_sha256"
+    ):
+        return _call_graph_error(
+            "call_symbol_canonical_binding_mismatch",
+            "call graph and symbol index canonical bindings differ",
+        )
+    return None
+
+
+def _validated_symbol_rows(
+    symbol_data: dict[str, Any],
+) -> tuple[
+    list[dict[str, Any]] | None,
+    dict[str, list[dict[str, Any]]] | None,
+    dict[str, Any] | None,
+]:
+    symbols = symbol_data.get("symbols")
+    if not isinstance(symbols, list):
+        return None, None, _call_graph_error(
+            "python_symbol_index_symbols_invalid",
+            "python_symbol_index_json symbols must be an array",
+        )
+    rows_by_id: dict[str, list[dict[str, Any]]] = {}
+    for position, symbol in enumerate(symbols):
+        if not isinstance(symbol, dict):
+            return None, None, _call_graph_error(
+                "python_symbol_index_symbol_invalid",
+                f"python_symbol_index_json symbol at index {position} is invalid",
+            )
+        if symbol.get("kind") not in ("class", "function", "async_function"):
+            return None, None, _call_graph_error(
+                "python_symbol_index_symbol_kind_invalid",
+                f"python_symbol_index_json symbol at index {position} has invalid kind",
+            )
+        required_fields = ("id", "name", "qualified_name", "path")
+        if not all(_is_non_empty_string(symbol.get(field)) for field in required_fields):
+            return None, None, _call_graph_error(
+                "python_symbol_index_symbol_shape_invalid",
+                f"python_symbol_index_json symbol at index {position} has invalid shape",
+            )
+        start_line = symbol.get("start_line")
+        end_line = symbol.get("end_line")
+        if (
+            not _is_int_not_bool(start_line)
+            or not _is_int_not_bool(end_line)
+            or start_line < 1
+            or end_line < start_line
+        ):
+            return None, None, _call_graph_error(
+                "python_symbol_index_symbol_range_invalid",
+                f"python_symbol_index_json symbol at index {position} has invalid range",
+            )
+        rows_by_id.setdefault(symbol["id"], []).append(symbol)
+    return symbols, rows_by_id, None
+
+
+def _matching_caller_symbol_rows(
+    call: dict[str, Any], rows_by_id: dict[str, list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    caller_id = call.get("caller_symbol_id")
+    if not isinstance(caller_id, str):
+        return []
+    return [
+        row
+        for row in rows_by_id.get(caller_id, [])
+        if row.get("path") == call.get("path")
+        and row.get("qualified_name") == call.get("caller_qualified_name")
+        and row.get("kind") == call.get("caller_kind")
+        and row.get("start_line") == call.get("caller_start_line")
+        and row.get("end_line") == call.get("caller_end_line")
+    ]
+
+
+def _call_symbol_reference_error(
+    call_data: dict[str, Any], rows_by_id: dict[str, list[dict[str, Any]]]
+) -> dict[str, Any] | None:
+    for position, call in enumerate(call_data.get("calls", [])):
+        if call.get("caller_scope") == "symbol":
+            caller_matches = _matching_caller_symbol_rows(call, rows_by_id)
+            if not caller_matches:
+                return _call_graph_error(
+                    "python_call_graph_caller_symbol_mismatch",
+                    f"call record {position} does not match a caller definition range",
+                )
+            if len(caller_matches) > 1:
+                return _call_graph_error(
+                    "python_call_graph_caller_symbol_ambiguous",
+                    f"call record {position} matches more than one caller definition",
+                )
+        for target_id in call.get("resolved_target_ids", []):
+            if target_id not in rows_by_id:
+                return _call_graph_error(
+                    "python_call_graph_target_symbol_missing",
+                    f"call record {position} references an absent target symbol",
+                )
+    return None
+
+
+def _coherent_symbol_index(
+    manifest_path: Path, call_data: dict[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
+    symbol_data, symbol_artifact, error = _load_symbol_index(manifest_path)
+    if error is not None:
+        return None, symbol_artifact, error
+    error = _symbol_index_identity_error(symbol_data, call_data)
+    if error is not None:
+        return None, symbol_artifact, error
+    _, rows_by_id, error = _validated_symbol_rows(symbol_data)
+    if error is not None:
+        return None, symbol_artifact, error
+    assert rows_by_id is not None
+    error = _call_symbol_reference_error(call_data, rows_by_id)
+    if error is not None:
+        return None, symbol_artifact, error
+    return symbol_data, symbol_artifact, None
+
+
+def _symbol_rows_by_id(
+    symbol_data: dict[str, Any],
+) -> dict[str, list[dict[str, Any]]]:
+    rows_by_id: dict[str, list[dict[str, Any]]] = {}
+    for row in symbol_data.get("symbols", []):
+        rows_by_id.setdefault(row["id"], []).append(row)
+    return rows_by_id
+
+
+def _call_belongs_to_symbol(call: dict[str, Any], symbol: dict[str, Any]) -> bool:
+    return (
+        call.get("caller_symbol_id") == symbol.get("id")
+        and call.get("path") == symbol.get("path")
+        and call.get("caller_qualified_name") == symbol.get("qualified_name")
+        and call.get("caller_kind") == symbol.get("kind")
+        and call.get("caller_start_line") == symbol.get("start_line")
+        and call.get("caller_end_line") == symbol.get("end_line")
+    )
+
+
+def _select_symbols(
+    symbol_data: dict[str, Any], query: str, path_filter: str | None
+) -> list[dict[str, Any]]:
+    matches = []
+    for symbol in symbol_data.get("symbols", []):
+        exact = (
+            str(symbol.get("name", "")).casefold() == query
+            or str(symbol.get("qualified_name", "")).casefold() == query
+        )
+        if not exact:
+            continue
+        if path_filter and path_filter not in str(symbol.get("path", "")).casefold():
+            continue
+        matches.append(symbol)
+    return sorted(
+        matches,
+        key=lambda item: (
+            str(item.get("path", "")),
+            int(item.get("start_line", 0) or 0),
+            str(item.get("qualified_name", "")),
+            str(item.get("id", "")),
+        ),
+    )
+
+
+def _selected_symbol_or_error(
+    *,
+    kind: str,
+    manifest_path: Path,
+    name: str,
+    k: int,
+    path: str | None,
+    call_data: dict[str, Any],
+    call_artifact: dict[str, Any] | None,
+    query: str,
+    path_filter: str | None,
+    caller_mode: bool,
+) -> tuple[
+    dict[str, Any], dict[str, Any] | None, dict[str, Any]
+] | dict[str, Any]:
+    symbol_data, symbol_artifact, error = _coherent_symbol_index(manifest_path, call_data)
+    candidate_key = "caller_candidates" if caller_mode else "target_candidates"
+    symbol_key = "caller_symbol" if caller_mode else "target_symbol"
+    empty = _call_empty(kind)
+    if error is not None:
+        return _invalid_read_result(
+            kind=kind,
+            bundle_manifest=manifest_path,
+            status=error["status"],
+            error=error["error"],
+            error_code=error["error_code"],
+            extra={
+                "name": name,
+                "k": k,
+                "filters": {"path": path},
+                "call_graph": call_artifact,
+                "symbol_index": symbol_artifact,
+                **empty,
+            },
+        )
+    assert symbol_data is not None
+    matches = _select_symbols(symbol_data, query, path_filter)
+    if len(matches) != 1:
+        status = "missing" if not matches else "invalid"
+        error_code = "symbol_not_found" if not matches else "symbol_ambiguous"
+        error_text = (
+            "no exact symbol matches name and path"
+            if not matches
+            else "name and path select more than one exact symbol"
+        )
+        empty[symbol_key] = None
+        empty[candidate_key] = [_symbol_record(item) for item in matches]
+        return _invalid_read_result(
+            kind=kind,
+            bundle_manifest=manifest_path,
+            status=status,
+            error=error_text,
+            error_code=error_code,
+            extra={
+                "name": name,
+                "k": k,
+                "filters": {"path": path},
+                "call_graph": call_artifact,
+                "symbol_index": symbol_artifact,
+                **empty,
+            },
+        )
+    return _symbol_record(matches[0]), symbol_artifact, symbol_data
+
+
+def find_references(
+    bundle_manifest: str | Path,
+    name: str,
+    path: str | None = None,
+    k: int = 25,
+) -> dict[str, Any]:
+    """Search call-site text while keeping S0 and S1 evidence explicit."""
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    validated = _validated_call_query(
+        kind=CALL_REFERENCES_KIND,
+        manifest_path=manifest_path,
+        name=name,
+        k=k,
+        path=path,
+    )
+    if isinstance(validated, dict):
+        return validated
+    data, artifact, query, path_filter = validated
+    matched: list[tuple[int, str, int, int, dict[str, Any]]] = []
+    exact_match_count = 0
+    for call in data.get("calls", []):
+        if path_filter and path_filter not in str(call.get("path", "")).casefold():
+            continue
+        simple_name = call.get("simple_name")
+        exact = isinstance(simple_name, str) and simple_name.casefold() == query
+        if not exact and query not in str(call.get("callee_expression", "")).casefold():
+            continue
+        if exact:
+            exact_match_count += 1
+        matched.append(
+            (0 if exact else 1, str(call["path"]), call["start_line"], call["start_col"], call)
+        )
+    matched.sort(key=lambda item: item[:4])
+    hits = [_call_site_record(call) for *_, call in matched[:k]]
+    availability = _availability_model_for_manifest(manifest_path)
+    return {
+        "kind": CALL_REFERENCES_KIND,
+        "version": "v1",
+        "status": "available",
+        "bundle_manifest": str(manifest_path),
+        "name": name,
+        "k": k,
+        "filters": {"path": path},
+        "call_graph": artifact,
+        "call_graph_metadata": _call_graph_metadata(data),
+        "availability": availability,
+        "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
+        "total_match_count": len(matched),
+        "exact_match_count": exact_match_count,
+        "hit_count": len(hits),
+        "truncated": len(matched) > k,
+        "hits": hits,
+        "mutation_boundary": _read_only_mutation_boundary(),
+        "does_not_establish": _call_nav_does_not_establish(),
+    }
+
+
+def get_callers(
+    bundle_manifest: str | Path,
+    name: str,
+    path: str | None = None,
+    k: int = 25,
+) -> dict[str, Any]:
+    """Return only S1 callers of one uniquely selected target symbol."""
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    validated = _validated_call_query(
+        kind=CALL_CALLERS_KIND,
+        manifest_path=manifest_path,
+        name=name,
+        k=k,
+        path=path,
+    )
+    if isinstance(validated, dict):
+        return validated
+    data, artifact, query, path_filter = validated
+    selected = _selected_symbol_or_error(
+        kind=CALL_CALLERS_KIND,
+        manifest_path=manifest_path,
+        name=name,
+        k=k,
+        path=path,
+        call_data=data,
+        call_artifact=artifact,
+        query=query,
+        path_filter=path_filter,
+        caller_mode=False,
+    )
+    if isinstance(selected, dict):
+        return selected
+    target_symbol, symbol_artifact, symbol_data = selected
+    target_id = target_symbol["id"]
+    rows_by_id = _symbol_rows_by_id(symbol_data)
+    groups: dict[str, dict[str, Any]] = {}
+    unresolved_references: list[dict[str, Any]] = []
+    total_call_site_count = 0
+    for call in data.get("calls", []):
+        if target_id in call.get("resolved_target_ids", []):
+            total_call_site_count += 1
+            caller_symbol_id = call.get("caller_symbol_id")
+            if isinstance(caller_symbol_id, str):
+                caller_rows = _matching_caller_symbol_rows(call, rows_by_id)
+                assert len(caller_rows) == 1
+                caller_symbol = _symbol_record(caller_rows[0])
+                group_key = (
+                    f"{caller_symbol_id}@"
+                    f"{call['caller_start_line']}-{call['caller_end_line']}"
+                )
+            else:
+                caller_symbol = None
+                group_key = f"module:{call.get('path')}"
+            group = groups.setdefault(
+                group_key,
+                {
+                    "caller_scope": call.get("caller_scope"),
+                    "caller_symbol_id": caller_symbol_id,
+                    "caller_qualified_name": call.get("caller_qualified_name"),
+                    "caller_kind": call.get("caller_kind"),
+                    "caller_start_line": call.get("caller_start_line"),
+                    "caller_end_line": call.get("caller_end_line"),
+                    "caller_symbol": caller_symbol,
+                    "path": call.get("path"),
+                    "call_sites": [],
+                },
+            )
+            group["call_sites"].append(_call_site_record(call))
+        elif (
+            target_id in call.get("candidate_target_ids", [])
+            or str(call.get("simple_name", "")).casefold() == query
+        ):
+            unresolved = _call_site_record(call)
+            unresolved["relation_to_selected_target"] = (
+                "candidate_target" if target_id in call.get("candidate_target_ids", []) else "textual_name_only"
+            )
+            unresolved_references.append(unresolved)
+    ordered = sorted(
+        groups.items(),
+        key=lambda item: (
+            str(item[1]["path"]),
+            min(site["start_line"] for site in item[1]["call_sites"]),
+            item[0],
+        ),
+    )
+    callers = []
+    for _, group in ordered[:k]:
+        group["call_sites"].sort(key=lambda site: (site["start_line"], site["start_col"]))
+        group["call_site_count"] = len(group["call_sites"])
+        callers.append(group)
+    unresolved_references.sort(
+        key=lambda item: (str(item["path"]), item["start_line"], item["start_col"])
+    )
+    unresolved_visible = unresolved_references[:k]
+    availability = _availability_model_for_manifest(manifest_path)
+    return {
+        "kind": CALL_CALLERS_KIND,
+        "version": "v1",
+        "status": "available",
+        "bundle_manifest": str(manifest_path),
+        "name": name,
+        "k": k,
+        "filters": {"path": path},
+        "target_symbol": target_symbol,
+        "target_candidates": [],
+        "call_graph": artifact,
+        "symbol_index": symbol_artifact,
+        "call_graph_metadata": _call_graph_metadata(data),
+        "availability": availability,
+        "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
+        "total_caller_count": len(groups),
+        "total_call_site_count": total_call_site_count,
+        "hit_count": len(callers),
+        "truncated": len(groups) > k,
+        "callers": callers,
+        "unresolved_reference_count": len(unresolved_references),
+        "unresolved_references_truncated": len(unresolved_references) > k,
+        "unresolved_references": unresolved_visible,
+        "mutation_boundary": _read_only_mutation_boundary(),
+        "does_not_establish": _call_nav_does_not_establish(),
+    }
+
+
+def get_callees(
+    bundle_manifest: str | Path,
+    name: str,
+    path: str | None = None,
+    k: int = 25,
+) -> dict[str, Any]:
+    """Return S1 callees and separate unresolved sites for one caller symbol."""
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    validated = _validated_call_query(
+        kind=CALL_CALLEES_KIND,
+        manifest_path=manifest_path,
+        name=name,
+        k=k,
+        path=path,
+    )
+    if isinstance(validated, dict):
+        return validated
+    data, artifact, query, path_filter = validated
+    selected = _selected_symbol_or_error(
+        kind=CALL_CALLEES_KIND,
+        manifest_path=manifest_path,
+        name=name,
+        k=k,
+        path=path,
+        call_data=data,
+        call_artifact=artifact,
+        query=query,
+        path_filter=path_filter,
+        caller_mode=True,
+    )
+    if isinstance(selected, dict):
+        return selected
+    caller_symbol, symbol_artifact, symbol_data = selected
+    rows_by_id = _symbol_rows_by_id(symbol_data)
+    groups: dict[str, dict[str, Any]] = {}
+    unresolved_call_sites: list[dict[str, Any]] = []
+    caller_sites = [
+        call
+        for call in data.get("calls", [])
+        if _call_belongs_to_symbol(call, caller_symbol)
+    ]
+    for call in caller_sites:
+        if call.get("resolution_status") == "resolved":
+            target_id = call["resolved_target_ids"][0]
+            target_rows = rows_by_id.get(target_id, [])
+            if len(target_rows) != 1:
+                return _invalid_read_result(
+                    kind=CALL_CALLEES_KIND,
+                    bundle_manifest=manifest_path,
+                    status="invalid",
+                    error="resolved callee id does not select exactly one symbol definition",
+                    error_code="python_call_graph_target_symbol_ambiguous",
+                    extra={
+                        "name": name,
+                        "k": k,
+                        "filters": {"path": path},
+                        "caller_symbol": caller_symbol,
+                        "caller_candidates": [],
+                        "call_graph": artifact,
+                        "symbol_index": symbol_artifact,
+                        "callees": [],
+                        "unresolved_call_sites": [],
+                    },
+                )
+            group = groups.setdefault(
+                target_id,
+                {
+                    "callee_symbol": _symbol_record(target_rows[0]),
+                    "relation_types": [],
+                    "call_sites": [],
+                },
+            )
+            group["relation_types"].append(call["relation_type"])
+            group["call_sites"].append(_call_site_record(call))
+        else:
+            unresolved_call_sites.append(_call_site_record(call))
+    ordered = sorted(
+        groups.items(),
+        key=lambda item: (
+            str(item[1]["callee_symbol"]["path"]),
+            int(item[1]["callee_symbol"]["start_line"] or 0),
+            item[0],
+        ),
+    )
+    callees = []
+    for _, group in ordered[:k]:
+        group["relation_types"] = sorted(set(group["relation_types"]))
+        group["call_sites"].sort(key=lambda site: (site["start_line"], site["start_col"]))
+        group["call_site_count"] = len(group["call_sites"])
+        callees.append(group)
+    unresolved_call_sites.sort(
+        key=lambda item: (str(item["path"]), item["start_line"], item["start_col"])
+    )
+    unresolved_visible = unresolved_call_sites[:k]
+    availability = _availability_model_for_manifest(manifest_path)
+    return {
+        "kind": CALL_CALLEES_KIND,
+        "version": "v1",
+        "status": "available",
+        "bundle_manifest": str(manifest_path),
+        "name": name,
+        "k": k,
+        "filters": {"path": path},
+        "caller_symbol": caller_symbol,
+        "caller_candidates": [],
+        "call_graph": artifact,
+        "symbol_index": symbol_artifact,
+        "call_graph_metadata": _call_graph_metadata(data),
+        "availability": availability,
+        "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
+        "total_callee_count": len(groups),
+        "total_call_site_count": len(caller_sites),
+        "hit_count": len(callees),
+        "truncated": len(groups) > k,
+        "callees": callees,
+        "unresolved_call_site_count": len(unresolved_call_sites),
+        "unresolved_call_sites_truncated": len(unresolved_call_sites) > k,
+        "unresolved_call_sites": unresolved_visible,
+        "mutation_boundary": _read_only_mutation_boundary(),
+        "does_not_establish": _call_nav_does_not_establish(),
+    }
+
+
 def snapshot_check(
     bundle_manifest: str | Path,
     task_profile: str = "basic_repo_question",
