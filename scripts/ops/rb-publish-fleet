@@ -39,7 +39,7 @@ FLEET_LOG = LOG_ROOT / "fleet.log"
 LOCK_PATH = STATE_ROOT.parent / "fleet.lock"
 DEFAULT_RETENTION = 3
 MAX_RETENTION = 10
-FINGERPRINT_SCHEMA = "repobrief.fleet-publication-fingerprint.v1"
+FINGERPRINT_SCHEMA = "repobrief.fleet-publication-fingerprint.v2"
 STATE_SCHEMA = "repobrief.fleet-publication-state.v1"
 VERSION_DIR_RE = re.compile(r"^\d{8}T\d{6}Z(?:-[0-9a-f]{12})?$")
 EXCLUDE = {
@@ -221,6 +221,11 @@ def publication_config(entry: RepoEntry) -> PublicationConfig:
     return PublicationConfig(profile=profile)
 
 
+def publication_repository(entry: RepoEntry) -> str:
+    """Return the collision-free registry segment for one GitHub repository."""
+    return safe_segment(entry.owner) + "__" + safe_segment(entry.repo)
+
+
 def git_common_dir(repo: Path) -> Path:
     cp = run(
         ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
@@ -360,12 +365,14 @@ def build_fingerprint(
     *,
     source_sha: str,
     tool_tree_sha: str,
+    publication_repository: str,
     config: PublicationConfig,
 ) -> tuple[str, dict[str, object]]:
     identity: dict[str, object] = {
         "schema": FINGERPRINT_SCHEMA,
         "source_sha": source_sha,
         "tool_tree_sha": tool_tree_sha,
+        "publication_repository": publication_repository,
         "configuration": config.as_dict(),
     }
     return canonical_sha256(identity), identity
@@ -645,7 +652,7 @@ def prune_all_current(
     for repo_group in sorted(root.iterdir()):
         if not repo_group.is_dir() or repo_group.is_symlink():
             continue
-        repository = repo_group.name.rsplit("__", 1)[-1]
+        repository = repo_group.name
         for ref_group in sorted(repo_group.iterdir()):
             if not ref_group.is_dir() or ref_group.is_symlink():
                 continue
@@ -716,6 +723,7 @@ def publish(
     config: PublicationConfig,
 ) -> tuple[dict[str, object], Path]:
     repository = safe_segment(entry.repo)
+    registry_repository = publication_repository(entry)
     ref_segment = safe_segment(branch)
     source_wt = ensure_source_worktree(entry, ref_segment, sha)
     out_base = (
@@ -741,7 +749,7 @@ def publish(
         "--publication-root",
         str(PUB_ROOT),
         "--repository",
-        repository,
+        registry_repository,
         "--ref",
         ref_segment,
         "--profile",
@@ -950,9 +958,11 @@ def main(argv: list[str]) -> int:
                 remote_ref, branch, source_sha = remote_head(entry.path)
                 ref_segment = safe_segment(branch)
                 config = publication_config(entry)
+                registry_repository = publication_repository(entry)
                 fingerprint, identity = build_fingerprint(
                     source_sha=source_sha,
                     tool_tree_sha=tool_tree_sha,
+                    publication_repository=registry_repository,
                     config=config,
                 )
                 publication_state_path = state_path(entry, ref_segment)
@@ -1005,7 +1015,7 @@ def main(argv: list[str]) -> int:
                 try:
                     prune_report = prune_current_group(
                         out_dir.parent,
-                        repository=safe_segment(entry.repo),
+                        repository=registry_repository,
                         ref=ref_segment,
                         keep=args.retention,
                         apply=True,

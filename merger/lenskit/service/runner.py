@@ -28,15 +28,6 @@ from .source_acquisition import (
     RemoteSnapshotResult,
     SourceStatus,
 )
-from ..adapters.security import validate_source_dir, get_security_config, SecurityViolationError
-
-logger = logging.getLogger(__name__)
-
-# Import core logic.
-# Since this file is in merger/repoLens/service/runner.py,
-# and merger/repoLens is usually in sys.path when running repolens.py.
-# We can try absolute import first.
-
 from ..core.merge import (
     get_merges_dir,
     scan_repo,
@@ -47,6 +38,15 @@ from ..core.merge import (
     MERGES_DIR_NAME,
     parse_human_size,
 )
+from ..adapters.security import validate_source_dir, get_security_config, SecurityViolationError
+
+logger = logging.getLogger(__name__)
+
+# Import core logic.
+# Since this file is in merger/repoLens/service/runner.py,
+# and merger/repoLens is usually in sys.path when running repolens.py.
+# We can try absolute import first.
+
 
 def _find_repos(hub: Path) -> List[str]:
     from ..adapters.security import validate_source_dir
@@ -224,6 +224,26 @@ class JobRunner:
         future = self.executor.submit(self._run_job, job_id)
         self.futures[job_id] = future
 
+    def _cleanup_source_snapshots_after_job(
+        self, job_id: str, merges_dir: Path | None
+    ) -> None:
+        try:
+            cleanup_report = self.job_store.cleanup_source_snapshots(
+                merges_dir=merges_dir, apply=True
+            )
+            if cleanup_report.get("status") == "blocked":
+                logger.warning(
+                    "Source snapshot cleanup blocked after job %s: %s",
+                    job_id,
+                    cleanup_report,
+                )
+        except Exception as cleanup_error:
+            logger.warning(
+                "Source snapshot cleanup failed after job %s: %s",
+                job_id,
+                cleanup_error,
+            )
+
     def _run_job(self, job_id: str) -> None:
         job = self.job_store.get_job(job_id)
         if not job:
@@ -254,9 +274,9 @@ class JobRunner:
             # To avoid excessive writes, we DON'T call update_job for every log line anymore.
             pass
 
+        merges_dir: Path | None = None
         try:
             req = job.request
-            merges_dir: Path | None = None
             repo_names = list(job.request.repos or [])
             pre_pull_report_path: Path | None = None
             pre_pull_report_artifact_registered = False
@@ -928,3 +948,6 @@ class JobRunner:
             log(f"Error: {safe_error}")
             logger.error("Job %s failed: %s", job_id, safe_error)
             self.job_store.update_job(job)
+
+        finally:
+            self._cleanup_source_snapshots_after_job(job_id, merges_dir)

@@ -92,33 +92,45 @@ def test_fingerprint_is_stable_and_covers_all_output_inputs() -> None:
     first, identity = module.build_fingerprint(
         source_sha="a" * 40,
         tool_tree_sha="b" * 40,
+        publication_repository="heimgewebe__demo",
         config=config,
     )
     repeated, repeated_identity = module.build_fingerprint(
         source_sha="a" * 40,
         tool_tree_sha="b" * 40,
+        publication_repository="heimgewebe__demo",
         config=config,
     )
     source_changed, _ = module.build_fingerprint(
         source_sha="c" * 40,
         tool_tree_sha="b" * 40,
+        publication_repository="heimgewebe__demo",
         config=config,
     )
     tool_changed, _ = module.build_fingerprint(
         source_sha="a" * 40,
         tool_tree_sha="d" * 40,
+        publication_repository="heimgewebe__demo",
         config=config,
     )
     config_changed, _ = module.build_fingerprint(
         source_sha="a" * 40,
         tool_tree_sha="b" * 40,
+        publication_repository="heimgewebe__demo",
         config=module.PublicationConfig(profile="agent-portable"),
     )
 
     assert first == repeated
     assert identity == repeated_identity
     assert len(first) == 64
-    assert len({first, source_changed, tool_changed, config_changed}) == 4
+    namespace_changed, _ = module.build_fingerprint(
+        source_sha="a" * 40,
+        tool_tree_sha="b" * 40,
+        publication_repository="other__demo",
+        config=config,
+    )
+
+    assert len({first, source_changed, tool_changed, config_changed, namespace_changed}) == 5
 
 
 def test_version_dirs_accepts_old_and_fingerprinted_names_only(tmp_path: Path) -> None:
@@ -202,7 +214,7 @@ def test_current_prune_keeps_localized_hashes_for_history_protection_and_stable_
     stable_target = stable_version / "repo_merge.bundle.manifest.json"
     newest_hashes = {digest for _, digest in versions_and_hashes[-3:]}
     stable_manifest = (
-        publication_root / "external" / "repobrief" / "demo" / "main" / "manifest.json"
+        publication_root / "external" / "repobrief" / "heimgewebe__demo" / "main" / "manifest.json"
     )
     stable_manifest.parent.mkdir(parents=True)
     stable_manifest.write_text(
@@ -215,7 +227,7 @@ def test_current_prune_keeps_localized_hashes_for_history_protection_and_stable_
         ),
         encoding="utf-8",
     )
-    localized = publication_root / "external" / "_bundles" / "demo" / "main"
+    localized = publication_root / "external" / "_bundles" / "heimgewebe__demo" / "main"
     unused_hash = "e" * 64
     for digest in newest_hashes | {protected_hash, stable_hash, unused_hash}:
         candidate = localized / digest
@@ -224,7 +236,7 @@ def test_current_prune_keeps_localized_hashes_for_history_protection_and_stable_
 
     report = module.prune_current_group(
         group,
-        repository="demo",
+        repository="heimgewebe__demo",
         ref="main",
         keep=3,
         apply=True,
@@ -248,7 +260,7 @@ def test_stable_manifest_target_is_fail_closed_for_missing_target(
     publication_root = tmp_path / "publication"
     monkeypatch.setattr(module, "PUB_ROOT", publication_root)
     manifest = (
-        publication_root / "external" / "repobrief" / "demo" / "main" / "manifest.json"
+        publication_root / "external" / "repobrief" / "heimgewebe__demo" / "main" / "manifest.json"
     )
     manifest.parent.mkdir(parents=True)
     manifest.write_text(
