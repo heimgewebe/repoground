@@ -201,11 +201,7 @@ class JobStore:
                     logger.warning("Failed to clean up artifact %s for job %s: %s", art_id, job_id, exc)
                 del self._artifacts_cache[art_id]
 
-        try:
-            with self._snapshot_cleanup_lock:
-                remove_source_snapshot(get_merges_dir(self.hub_path), job_id)
-        except Exception as exc:
-            logger.warning("Failed to delete source snapshot for job %s: %s", job_id, exc)
+        self._remove_source_snapshot_for_job(job_id)
 
         log_p = self.logs_dir / f"{job_id}.log"
         try:
@@ -221,6 +217,13 @@ class JobStore:
             # Cleanup subscribers to prevent memory leaks if streams don't exit.
             self._log_subscribers.pop(job_id, None)
             self._jobs_cache.pop(job_id, None)
+
+    def _remove_source_snapshot_for_job(self, job_id: str) -> None:
+        try:
+            with self._snapshot_cleanup_lock:
+                remove_source_snapshot(get_merges_dir(self.hub_path), job_id)
+        except Exception as exc:
+            logger.warning("Failed to delete source snapshot for job %s: %s", job_id, exc)
 
     def get_job(self, job_id: str) -> Optional[Job]:
         with self._lock:

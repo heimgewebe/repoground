@@ -68,6 +68,121 @@ def _allocated_tree_bytes(path: Path) -> int:
     return total
 
 
+def _snapshot_retention_report(
+    root: Path,
+    *,
+    protected: set[str],
+    keep: int,
+    max_age_hours: int,
+    max_bytes: int,
+    apply: bool,
+) -> dict:
+    return {
+        "status": "ok",
+        "mode": "apply" if apply else "dry-run",
+        "root": str(root),
+        "keep": keep,
+        "max_age_hours": max_age_hours,
+        "max_bytes": max_bytes,
+        "protected_job_ids": sorted(protected),
+        "retained": [],
+        "protected": [],
+        "would_remove": [],
+        "removed": [],
+        "would_remove_bytes": 0,
+        "removed_bytes": 0,
+    }
+
+
+def _collect_snapshot_rows(root: Path) -> tuple[list[dict], list[str]]:
+    rows: list[dict] = []
+    unsafe: list[str] = []
+    for child in root.iterdir():
+        if child.is_symlink() or not child.is_dir():
+            unsafe.append(str(child))
+            continue
+        try:
+            stat_result = child.stat()
+        except FileNotFoundError:
+            continue
+        rows.append(
+            {
+                "path": child,
+                "job_id": child.name,
+                "mtime": stat_result.st_mtime,
+                "bytes": _allocated_tree_bytes(child),
+            }
+        )
+    return rows, unsafe
+
+
+def _partition_snapshot_rows(
+    rows: list[dict],
+    *,
+    protected: set[str],
+    keep: int,
+    current_time: float,
+    max_age_hours: int,
+) -> tuple[list[dict], list[dict], list[str]]:
+    rows.sort(key=lambda row: (row["mtime"], row["job_id"]), reverse=True)
+    unprotected = [row for row in rows if row["job_id"] not in protected]
+    retained_ids = {row["job_id"] for row in unprotected[:keep]}
+    retained: list[dict] = []
+    removable: list[dict] = []
+    protected_paths: list[str] = []
+    max_age_seconds = max_age_hours * 3600
+
+    for row in rows:
+        if row["job_id"] in protected:
+            protected_paths.append(str(row["path"]))
+            retained.append(row)
+        elif (
+            row["job_id"] not in retained_ids
+            or current_time - row["mtime"] > max_age_seconds
+        ):
+            removable.append(row)
+        else:
+            retained.append(row)
+    return retained, removable, protected_paths
+
+
+def _enforce_snapshot_size_limit(
+    retained: list[dict],
+    removable: list[dict],
+    *,
+    protected: set[str],
+    max_bytes: int,
+) -> None:
+    retained_unprotected = [row for row in retained if row["job_id"] not in protected]
+    retained_unprotected.sort(
+        key=lambda row: (row["mtime"], row["job_id"]), reverse=True
+    )
+    retained_bytes = sum(row["bytes"] for row in retained_unprotected)
+    while retained_bytes > max_bytes and retained_unprotected:
+        oldest = retained_unprotected.pop()
+        retained_bytes -= oldest["bytes"]
+        retained.remove(oldest)
+        removable.append(oldest)
+
+
+def _remove_snapshot_rows(root: Path, removable: list[dict]) -> list[str]:
+    root_resolved = root.resolve()
+    removed: list[str] = []
+    for row in removable:
+        candidate = row["path"]
+        if (
+            candidate.is_symlink()
+            or not candidate.is_dir()
+            or candidate.resolve().parent != root_resolved
+        ):
+            raise RuntimeError(
+                f"snapshot cleanup target changed or escaped root: {candidate}"
+            )
+        shutil.rmtree(candidate)
+        removed.append(str(candidate))
+    return removed
+
+
 def prune_source_snapshots(
     cache_root: Path,
     *,
@@ -85,47 +200,24 @@ def prune_source_snapshots(
     """
     if keep < 0 or max_age_hours < 0 or max_bytes < 0:
         raise ValueError("snapshot retention bounds must be non-negative")
+
     protected = set(protected_job_ids or set())
     root = Path(cache_root) / SNAPSHOT_DIR_NAME
-    report = {
-        "status": "ok",
-        "mode": "apply" if apply else "dry-run",
-        "root": str(root),
-        "keep": keep,
-        "max_age_hours": max_age_hours,
-        "max_bytes": max_bytes,
-        "protected_job_ids": sorted(protected),
-        "retained": [],
-        "protected": [],
-        "would_remove": [],
-        "removed": [],
-        "would_remove_bytes": 0,
-        "removed_bytes": 0,
-    }
+    report = _snapshot_retention_report(
+        root,
+        protected=protected,
+        keep=keep,
+        max_age_hours=max_age_hours,
+        max_bytes=max_bytes,
+        apply=apply,
+    )
     if not root.exists():
         return report
     if root.is_symlink() or not root.is_dir():
         report.update(status="blocked", error="snapshot root is not a real directory")
         return report
 
-    rows = []
-    unsafe = []
-    for child in root.iterdir():
-        if child.is_symlink() or not child.is_dir():
-            unsafe.append(str(child))
-            continue
-        try:
-            stat_result = child.stat()
-        except FileNotFoundError:
-            continue
-        rows.append(
-            {
-                "path": child,
-                "job_id": child.name,
-                "mtime": stat_result.st_mtime,
-                "bytes": _allocated_tree_bytes(child),
-            }
-        )
+    rows, unsafe = _collect_snapshot_rows(root)
     if unsafe:
         report.update(
             status="blocked",
@@ -134,53 +226,23 @@ def prune_source_snapshots(
         )
         return report
 
-    current_time = time.time() if now is None else now
-    rows.sort(key=lambda row: (row["mtime"], row["job_id"]), reverse=True)
-    unprotected = [row for row in rows if row["job_id"] not in protected]
-    retained_ids = {row["job_id"] for row in unprotected[:keep]}
-    removable = []
-    retained = []
-    max_age_seconds = max_age_hours * 3600
-    for row in rows:
-        if row["job_id"] in protected:
-            report["protected"].append(str(row["path"]))
-            retained.append(row)
-            continue
-        too_old = current_time - row["mtime"] > max_age_seconds
-        if row["job_id"] not in retained_ids or too_old:
-            removable.append(row)
-        else:
-            retained.append(row)
-
-    retained_unprotected = [row for row in retained if row["job_id"] not in protected]
-    retained_unprotected.sort(
-        key=lambda row: (row["mtime"], row["job_id"]), reverse=True
+    retained, removable, protected_paths = _partition_snapshot_rows(
+        rows,
+        protected=protected,
+        keep=keep,
+        current_time=time.time() if now is None else now,
+        max_age_hours=max_age_hours,
     )
-    while (
-        sum(row["bytes"] for row in retained_unprotected) > max_bytes
-        and retained_unprotected
-    ):
-        oldest = retained_unprotected.pop()
-        retained.remove(oldest)
-        removable.append(oldest)
-
+    _enforce_snapshot_size_limit(
+        retained, removable, protected=protected, max_bytes=max_bytes
+    )
     removable.sort(key=lambda row: (row["mtime"], row["job_id"]))
+    report["protected"] = protected_paths
     report["retained"] = sorted(str(row["path"]) for row in retained)
     bytes_to_remove = sum(row["bytes"] for row in removable)
+
     if apply:
-        root_resolved = root.resolve()
-        for row in removable:
-            candidate = row["path"]
-            if (
-                candidate.is_symlink()
-                or not candidate.is_dir()
-                or candidate.resolve().parent != root_resolved
-            ):
-                raise RuntimeError(
-                    f"snapshot cleanup target changed or escaped root: {candidate}"
-                )
-            shutil.rmtree(candidate)
-            report["removed"].append(str(candidate))
+        report["removed"] = _remove_snapshot_rows(root, removable)
         report["removed_bytes"] = bytes_to_remove
     else:
         report["would_remove"] = [str(row["path"]) for row in removable]
@@ -200,6 +262,7 @@ def remove_source_snapshot(cache_root: Path, job_id: str) -> bool:
         raise RuntimeError(f"source snapshot escaped root: {target}")
     shutil.rmtree(target)
     return True
+
 
 class SourceStatus:
     """String-constant status vocabulary (no enums)."""

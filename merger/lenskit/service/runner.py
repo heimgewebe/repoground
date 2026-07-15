@@ -224,6 +224,26 @@ class JobRunner:
         future = self.executor.submit(self._run_job, job_id)
         self.futures[job_id] = future
 
+    def _cleanup_source_snapshots_after_job(
+        self, job_id: str, merges_dir: Path | None
+    ) -> None:
+        try:
+            cleanup_report = self.job_store.cleanup_source_snapshots(
+                merges_dir=merges_dir, apply=True
+            )
+            if cleanup_report.get("status") == "blocked":
+                logger.warning(
+                    "Source snapshot cleanup blocked after job %s: %s",
+                    job_id,
+                    cleanup_report,
+                )
+        except Exception as cleanup_error:
+            logger.warning(
+                "Source snapshot cleanup failed after job %s: %s",
+                job_id,
+                cleanup_error,
+            )
+
     def _run_job(self, job_id: str) -> None:
         job = self.job_store.get_job(job_id)
         if not job:
@@ -930,19 +950,4 @@ class JobRunner:
             self.job_store.update_job(job)
 
         finally:
-            try:
-                cleanup_report = self.job_store.cleanup_source_snapshots(
-                    merges_dir=merges_dir, apply=True
-                )
-                if cleanup_report.get("status") == "blocked":
-                    logger.warning(
-                        "Source snapshot cleanup blocked after job %s: %s",
-                        job_id,
-                        cleanup_report,
-                    )
-            except Exception as cleanup_error:
-                logger.warning(
-                    "Source snapshot cleanup failed after job %s: %s",
-                    job_id,
-                    cleanup_error,
-                )
+            self._cleanup_source_snapshots_after_job(job_id, merges_dir)
