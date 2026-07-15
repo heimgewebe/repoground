@@ -60,6 +60,11 @@ Read-only by default:
 - `grounding_verify`: runs the existing declaration and evidence verifier;
 - `live_freshness`: compares the snapshot commit and cleanliness with the configured checkout;
 - `find_symbol`: locates Python symbol definitions by name in the snapshot's symbol index (exact matches first), answering "where is X defined?" with a path and line range; each call also attaches the live freshness of the snapshot.
+- `find_references`: searches bounded static Python call sites by callee name and returns source ranges, relation type, S0/S1 evidence and each call site's explicit `resolved`, `candidate`, `ambiguous`, or `unresolved` verdict;
+- `get_callers`: selects one exact target symbol from a run/hash-coherent Symbol Index and returns only S1 call edges to that symbol. Equal names in other files and unresolved textual matches remain separate; use the optional `path` field to disambiguate exact names;
+- `get_callees`: selects one exact caller symbol and groups its uniquely resolved S1 targets while retaining candidate, ambiguous and unresolved S0 call sites separately.
+
+The call-navigation tools read only bundle-registered `python_call_graph_json` and `python_symbol_index_json` artifacts. They validate artifact integrity and provenance coherence before returning symbol relations. `S1` means one unique local target under the producer's bounded static rules; it does not mean the target executes at runtime. `S0` preserves uncertainty instead of guessing.
 
 Optional explicit write tool:
 

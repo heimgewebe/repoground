@@ -70,6 +70,58 @@ def _write_text_atomic(path: Path, text: str) -> None:
                 pass
 
 
+def _append_unique_path(paths: List[Path], path: Optional[Path]) -> None:
+    if path is not None and path not in paths:
+        paths.append(path)
+
+
+def _write_python_call_graph_json(
+    *,
+    base_manifest_path: Path,
+    repo_summaries: List[Dict[str, Any]],
+    final_dump_index: Optional[Path],
+    run_id: str,
+) -> Optional[Path]:
+    """Emit Python Call Graph v1 for one repository as navigation only."""
+    if len(repo_summaries) != 1 or final_dump_index is None or not final_dump_index.exists():
+        return None
+    repo_root = repo_summaries[0].get("root")
+    if repo_root is None:
+        return None
+    canonical_sha = _compute_file_sha256(final_dump_index)
+    if not canonical_sha:
+        return None
+    from merger.lenskit.architecture.call_graph import generate_call_graph_document
+
+    document = generate_call_graph_document(Path(repo_root), run_id, canonical_sha)
+    out_path = base_manifest_path.with_name(
+        base_manifest_path.name.replace(
+            ".bundle.manifest.json", ".python_call_graph.json"
+        )
+    )
+    _write_text_atomic(
+        out_path,
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    )
+    return out_path
+
+
+def _register_optional_artifact(
+    path: Optional[Path],
+    *,
+    role: ArtifactRole,
+    content_type: str,
+    out_paths: List[Path],
+    other_paths: List[Path],
+    add_artifact: Any,
+) -> None:
+    if path is None:
+        return
+    out_paths.append(path)
+    _append_unique_path(other_paths, path)
+    add_artifact(path, role, content_type)
+
+
 def _slug_token(s: str) -> str:
     """Deterministic ASCII token suitable for heading ids across renderers."""
 
@@ -237,6 +289,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.RELATION_CARDS_JSONL: {"id": "relation-card", "version": "v1"},
     ArtifactRole.PR_DELTA_CARDS_JSONL: {"id": "pr-delta-card", "version": "v1"},
     ArtifactRole.PYTHON_SYMBOL_INDEX_JSON: {"id": "python-symbol-index", "version": "v1"},
+    ArtifactRole.PYTHON_CALL_GRAPH_JSON: {"id": "python-call-graph", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -393,6 +446,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "staleness_sensitive": True,
     },
     ArtifactRole.PYTHON_SYMBOL_INDEX_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.PYTHON_CALL_GRAPH_JSON: {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
@@ -668,6 +728,7 @@ class MergeArtifacts:
     delta_json: Optional[Path] = None
     pr_delta_cards: Optional[Path] = None
     python_symbol_index: Optional[Path] = None
+    python_call_graph: Optional[Path] = None
     other: List[Path] = None
 
     def __post_init__(self):
@@ -715,8 +776,8 @@ class MergeArtifacts:
             paths.append(self.delta_json)
         if self.pr_delta_cards and self.pr_delta_cards not in paths:
             paths.append(self.pr_delta_cards)
-        if self.python_symbol_index and self.python_symbol_index not in paths:
-            paths.append(self.python_symbol_index)
+        _append_unique_path(paths, self.python_symbol_index)
+        _append_unique_path(paths, self.python_call_graph)
         if self.bundle_manifest:
             paths.append(self.bundle_manifest)
 
@@ -6373,6 +6434,21 @@ def write_reports_v2(
             "application/json",
         )
 
+    python_call_graph_path = _write_python_call_graph_json(
+        base_manifest_path=bundle_manifest_path,
+        repo_summaries=repo_summaries,
+        final_dump_index=final_dump_index,
+        run_id=run_id,
+    )
+    _register_optional_artifact(
+        python_call_graph_path,
+        role=ArtifactRole.PYTHON_CALL_GRAPH_JSON,
+        content_type="application/json",
+        out_paths=out_paths,
+        other_paths=other_paths,
+        add_artifact=_add_artifact,
+    )
+
 
     def _write_lens_cards_jsonl(base_manifest_path: Path) -> Optional[Path]:
         """Emit Lens Cards v1 as deterministic JSONL navigation."""
@@ -6900,6 +6976,7 @@ def write_reports_v2(
             delta_json=delta_json_path,
             pr_delta_cards=pr_delta_cards_path,
             python_symbol_index=python_symbol_index_path,
+            python_call_graph=python_call_graph_path,
             other=other_paths
         )
     else:
@@ -6924,5 +7001,6 @@ def write_reports_v2(
             delta_json=delta_json_path,
             pr_delta_cards=pr_delta_cards_path,
             python_symbol_index=python_symbol_index_path,
+            python_call_graph=python_call_graph_path,
             other=other_paths
         )

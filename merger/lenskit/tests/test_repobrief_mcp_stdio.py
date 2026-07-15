@@ -87,6 +87,9 @@ def test_mcp_stdio_lists_read_tools_and_hides_snapshot_create_by_default(tmp_pat
         "grounding_verify",
         "live_freshness",
         "find_symbol",
+        "find_references",
+        "get_callers",
+        "get_callees",
     }
 
 
@@ -326,3 +329,54 @@ def test_serve_stdio_returns_parse_error_without_traceback(tmp_path):
 
     response = json.loads(target.getvalue())
     assert response["error"] == {"code": -32700, "message": "parse error"}
+
+
+def test_mcp_stdio_dispatches_get_callees_and_adds_freshness(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path)
+    server = RepoBriefMcpStdioServer(bundle_root=tmp_path)
+    _initialize(server)
+    seen = {}
+
+    def fake_get_callees(**arguments):
+        seen.update(arguments)
+        return {
+            "kind": "repobrief.mcp.read_only_frontdoor",
+            "tool": "get_callees",
+            "status": "available",
+            "result": {"callees": [], "unresolved_call_sites": []},
+        }
+
+    monkeypatch.setattr(repobrief_mcp_tools, "get_callees", fake_get_callees)
+    monkeypatch.setattr(
+        server,
+        "_safe_live_freshness",
+        lambda *_args, **_kwargs: {"status": "fresh", "implicit_refresh": False},
+    )
+
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "get_callees",
+                "arguments": {
+                    "bundle_manifest": str(manifest),
+                    "name": "caller_one",
+                    "path": "pkg/a.py",
+                    "k": 7,
+                },
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    payload = response["result"]["structuredContent"]
+    assert payload["tool"] == "get_callees"
+    assert payload["live_freshness"]["status"] == "fresh"
+    assert seen == {
+        "bundle_manifest": str(manifest.resolve()),
+        "name": "caller_one",
+        "path": "pkg/a.py",
+        "k": 7,
+    }

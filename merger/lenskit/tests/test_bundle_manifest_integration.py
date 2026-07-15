@@ -2039,3 +2039,91 @@ def test_bundle_manifest_registers_python_symbol_index_json(tmp_path):
     jsonschema.validate(instance=symbol_doc, schema=symbol_schema)
     assert symbol_doc["symbols"][0]["qualified_name"] == "build_context"
     assert artifacts.python_symbol_index == symbol_path
+
+
+def test_bundle_manifest_registers_coherent_python_call_graph_json(tmp_path):
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "tool.py").write_text(
+        "def helper():\n"
+        "    return 1\n\n"
+        "def build_context():\n"
+        "    return helper()\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    hub_dir = tmp_path / "hub"
+    hub_dir.mkdir()
+
+    artifacts = write_reports_v2(
+        merges_dir=out_dir,
+        hub=hub_dir,
+        repo_summaries=[scan_repo(src_dir)],
+        detail="test",
+        mode="gesamt",
+        max_bytes=1000,
+        plan_only=False,
+        code_only=False,
+        extras=MockExtras(),
+        output_mode="dual",
+        generator_info=make_generator_info(),
+    )
+    manifest = json.loads(artifacts.bundle_manifest.read_text(encoding="utf-8"))
+    schema = json.loads(_BUNDLE_MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=manifest, schema=schema)
+
+    symbol_entry = _artifact_by_role(
+        manifest, ArtifactRole.PYTHON_SYMBOL_INDEX_JSON.value
+    )
+    call_entry = _artifact_by_role(
+        manifest, ArtifactRole.PYTHON_CALL_GRAPH_JSON.value
+    )
+    dump_entry = _artifact_by_role(manifest, ArtifactRole.DUMP_INDEX_JSON.value)
+    assert symbol_entry is not None
+    assert call_entry is not None
+    assert dump_entry is not None
+    assert call_entry["contract"] == {"id": "python-call-graph", "version": "v1"}
+    assert call_entry["interpretation"]["mode"] == "contract"
+    assert call_entry["authority"] == "navigation_index"
+    assert call_entry["canonicality"] == "derived"
+    assert call_entry["risk_class"] == "navigation"
+    assert call_entry["regenerable"] is True
+    assert call_entry["staleness_sensitive"] is True
+
+    symbol_path = artifacts.bundle_manifest.parent / symbol_entry["path"]
+    call_path = artifacts.bundle_manifest.parent / call_entry["path"]
+    symbol_doc = json.loads(symbol_path.read_text(encoding="utf-8"))
+    call_doc = json.loads(call_path.read_text(encoding="utf-8"))
+    symbol_schema = json.loads(
+        (_CONTRACTS_DIR / "python-symbol-index.v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    call_schema = json.loads(
+        (_CONTRACTS_DIR / "python-call-graph.v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    jsonschema.validate(instance=symbol_doc, schema=symbol_schema)
+    jsonschema.validate(instance=call_doc, schema=call_schema)
+
+    assert call_doc["run_id"] == symbol_doc["run_id"] == manifest["run_id"]
+    assert (
+        call_doc["canonical_dump_index_sha256"]
+        == symbol_doc["canonical_dump_index_sha256"]
+        == dump_entry["sha256"]
+    )
+    symbol_ids = {symbol["id"] for symbol in symbol_doc["symbols"]}
+    helper_call = next(
+        call
+        for call in call_doc["calls"]
+        if call["caller_qualified_name"] == "build_context"
+        and call["simple_name"] == "helper"
+    )
+    assert helper_call["evidence_level"] == "S1"
+    assert helper_call["relation_type"] == "calls"
+    assert helper_call["resolution_status"] == "resolved"
+    assert len(helper_call["resolved_target_ids"]) == 1
+    assert helper_call["resolved_target_ids"][0] in symbol_ids
+    assert artifacts.python_call_graph == call_path

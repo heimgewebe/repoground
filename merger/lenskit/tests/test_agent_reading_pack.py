@@ -1221,3 +1221,36 @@ def test_pack_renders_symbol_index_guidance(tmp_path):
     assert "python_symbol_index_json" in body
     assert "repobrief symbol search" in body
     assert "does_not_establish: call graph completeness" in body
+
+
+def test_call_graph_section_exposes_identity_bound_tools_and_nonclaims(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    call_bytes = b"{}\n"
+    call_path = tmp_path / "demo.python_call_graph.json"
+    call_path.write_bytes(call_bytes)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["artifacts"].append(
+        {
+            "role": "python_call_graph_json",
+            "path": call_path.name,
+            "content_type": "application/json",
+            "bytes": len(call_bytes),
+            "sha256": _sha256(call_bytes),
+            "authority": "navigation_index",
+            "canonicality": "derived",
+        }
+    )
+    manifest.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    report = produce_agent_reading_pack(str(manifest))
+    body = Path(report["output_path"]).read_text(encoding="utf-8")
+    section = _section(body, "CALL_GRAPH_INDEX")
+
+    assert "python_call_graph_json" in section
+    assert "`find_references`" in section
+    assert "`get_callers`" in section
+    assert "`get_callees`" in section
+    assert "one exact target symbol" in section
+    assert "S1 means one unique local target" in section
+    assert "complete call graph" in section
+    assert "runtime reachability" in section
