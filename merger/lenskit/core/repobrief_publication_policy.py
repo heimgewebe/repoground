@@ -812,15 +812,18 @@ class PublicationPolicyStore:
             )
         return sorted(candidates, key=lambda row: str(row["generation_id"]))
 
-    def _selection(
+    def _retention_state(
         self,
         repository: str,
         lane: str,
         *,
         policy: RetentionPolicy,
         now: dt.datetime,
-        missing_allowed: set[str] | None = None,
-    ) -> dict[str, object]:
+    ) -> tuple[
+        list[tuple[Path, dict[str, Any]]],
+        set[str],
+        dict[str, set[str]],
+    ]:
         records = self.list_records(repository, lane)
         pinned = self.pinned_generation_ids(repository, lane)
         self._assert_pins_reference_records(records, pinned)
@@ -844,11 +847,15 @@ class PublicationPolicyStore:
             retained=retained,
             reasons=reasons,
         )
-        candidates = self._retention_candidates(
-            records,
-            retained=retained,
-            allowed_missing=missing_allowed or set(),
-        )
+        return records, retained, reasons
+
+    @staticmethod
+    def _render_selection(
+        records: list[tuple[Path, dict[str, Any]]],
+        retained: set[str],
+        reasons: dict[str, set[str]],
+        candidates: list[dict[str, object]],
+    ) -> dict[str, object]:
         return {
             "retained": sorted(retained),
             "retention_reasons": {
@@ -857,6 +864,25 @@ class PublicationPolicyStore:
             "candidates": candidates,
             "record_count": len(records),
         }
+
+    def _selection(
+        self,
+        repository: str,
+        lane: str,
+        *,
+        policy: RetentionPolicy,
+        now: dt.datetime,
+        missing_allowed: set[str] | None = None,
+    ) -> dict[str, object]:
+        records, retained, reasons = self._retention_state(
+            repository, lane, policy=policy, now=now
+        )
+        candidates = self._retention_candidates(
+            records,
+            retained=retained,
+            allowed_missing=missing_allowed or set(),
+        )
+        return self._render_selection(records, retained, reasons, candidates)
 
     def plan_retention(
         self,
@@ -1428,6 +1454,45 @@ class PublicationPolicyStore:
             f"planned transaction lost both payload copies: {transaction_path}"
         )
 
+    def _reconciliation_retained(
+        self,
+        repository: str,
+        lane: str,
+        transaction_paths: list[Path],
+        *,
+        policy: RetentionPolicy,
+        observed_at: dt.datetime,
+    ) -> set[str]:
+        generation_ids = self._transaction_generation_ids(transaction_paths)
+        selection = self._selection(
+            repository,
+            lane,
+            policy=policy,
+            now=observed_at,
+            missing_allowed=generation_ids,
+        )
+        return set(selection["retained"])
+
+    def _reconcile_transaction_paths(
+        self,
+        transaction_paths: list[Path],
+        *,
+        repository: str,
+        lane: str,
+        retained: set[str],
+        observed_at: dt.datetime,
+    ) -> list[dict[str, object]]:
+        return [
+            self._reconcile_one_transaction(
+                transaction_path,
+                repository=repository,
+                lane=lane,
+                retained=retained,
+                observed_at=observed_at,
+            )
+            for transaction_path in transaction_paths
+        ]
+
     def reconcile_transactions(
         self,
         repository: str,
@@ -1440,23 +1505,18 @@ class PublicationPolicyStore:
         observed_at = now or utc_now()
         with self.stream_lock(repository, lane):
             transaction_paths = self._open_transactions(repository, lane)
-            generation_ids = self._transaction_generation_ids(transaction_paths)
-            selection = self._selection(
+            retained = self._reconciliation_retained(
                 repository,
                 lane,
+                transaction_paths,
                 policy=selected_policy,
-                now=observed_at,
-                missing_allowed=generation_ids,
+                observed_at=observed_at,
             )
-            retained = set(selection["retained"])
-            results = [
-                self._reconcile_one_transaction(
-                    transaction_path,
-                    repository=repository,
-                    lane=lane,
-                    retained=retained,
-                    observed_at=observed_at,
-                )
-                for transaction_path in transaction_paths
-            ]
+            results = self._reconcile_transaction_paths(
+                transaction_paths,
+                repository=repository,
+                lane=lane,
+                retained=retained,
+                observed_at=observed_at,
+            )
         return {"status": "reconciled", "results": results}
