@@ -2,16 +2,29 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
-import shutil
-import stat
-import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterable
+
+from .rooted_filesystem import (
+    RootedFilesystemError,
+    atomic_write_bytes,
+    bind_directory,
+    exclusive_file_lock,
+    exclusive_write_bytes,
+    fsync_directory,
+    make_directories,
+    make_temporary_directory,
+    path_exists,
+    read_regular_bytes,
+    read_tree,
+    remove_tree,
+    rename_path,
+    secure_absolute,
+)
 
 from .external_manifest_reference import (
     BUNDLE_KIND,
@@ -20,7 +33,6 @@ from .external_manifest_reference import (
     ExternalManifestReferenceError,
     _digest_regular_file,
     _normalized_artifact_families,
-    _open_regular_file,
     _registry_segment,
     _relative_path,
     _require_path_inside_root,
@@ -40,12 +52,12 @@ def _json_bytes(data: dict[str, Any]) -> bytes:
 
 
 def _read_regular_bytes(path: Path, label: str) -> bytes:
-    fd, _ = _open_regular_file(path, label)
-    chunks: list[bytes] = []
-    with os.fdopen(fd, "rb", closefd=True) as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            chunks.append(chunk)
-    return b"".join(chunks)
+    try:
+        return read_regular_bytes(path)
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"{label} must be an existing regular file with stable identity: {path}"
+        ) from exc
 
 
 def _read_json_regular_file(
@@ -65,82 +77,41 @@ def _read_json_regular_file(
 
 
 def _fsync_directory(path: Path) -> None:
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
-    fd = os.open(path, flags)
     try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+        fsync_directory(path)
+    except RootedFilesystemError as exc:
+        raise OSError(str(exc)) from exc
 
 
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> dict[str, Any]:
     payload = _json_bytes(data)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path: Path | None = None
-    replaced = False
     try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            delete=False,
-            dir=str(path.parent),
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-        ) as tmp_file:
-            tmp_file.write(payload)
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
-        os.replace(tmp_path, path)
-        replaced = True
-        try:
-            _fsync_directory(path.parent)
-        except OSError as exc:
+        result = atomic_write_bytes(path, payload)
+        if result["durability"] == "durable":
             try:
-                visible = _read_regular_bytes(path, "replaced JSON file") == payload
-            except ExternalManifestReferenceError:
-                visible = False
-            if visible:
-                return {
-                    "bytes": len(payload),
-                    "sha256": hashlib.sha256(payload).hexdigest(),
-                    "durability": "uncertain_after_directory_fsync",
-                    "error": str(exc),
-                }
-            raise
-    except OSError as exc:
-        phase = "after replace" if replaced else "before replace"
+                _fsync_directory(path.parent)
+            except OSError as exc:
+                if _read_regular_bytes(path, "replaced JSON file") == payload:
+                    return {
+                        "bytes": len(payload),
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                        "durability": "uncertain_after_directory_fsync",
+                        "error": str(exc),
+                    }
+                raise
+        return result
+    except RootedFilesystemError as exc:
         raise ExternalManifestReferenceError(
-            f"atomic JSON write failed {phase}: {path}: {exc}"
+            f"atomic JSON write failed through trusted descriptors: {path}: {exc}"
         ) from exc
-    finally:
-        if tmp_path is not None and tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-    return {
-        "bytes": len(payload),
-        "sha256": hashlib.sha256(payload).hexdigest(),
-        "durability": "durable",
-    }
 
 
 def _write_generation_manifest_file(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = _json_bytes(data)
     try:
-        with path.open("xb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except OSError as exc:
+        exclusive_write_bytes(path, _json_bytes(data))
+    except RootedFilesystemError as exc:
         raise ExternalManifestReferenceError(
-            f"generation manifest write failed: {path}: {exc}"
+            f"generation manifest write failed through trusted descriptors: {path}: {exc}"
         ) from exc
 
 
@@ -166,7 +137,7 @@ def publication_generation_pointer_path(
     repository = _registry_segment(repository, "repository")
     ref = _registry_segment(ref, "ref")
     return (
-        Path(publication_root).expanduser().resolve()
+        secure_absolute(publication_root)
         / "external"
         / "_current"
         / repository
@@ -351,35 +322,12 @@ def _prepare_generation_package(
 
 def _regular_generation_files(root: Path) -> dict[str, bytes]:
     try:
-        root_stat = root.lstat()
-    except OSError as exc:
+        observed, _ = read_tree(root)
+        return observed
+    except RootedFilesystemError as exc:
         raise ExternalManifestReferenceError(
-            f"generation directory is unavailable: {root}"
+            f"generation tree must contain only trusted regular files and directories: {root}: {exc}"
         ) from exc
-    if not stat.S_ISDIR(root_stat.st_mode):
-        raise ExternalManifestReferenceError(
-            f"generation path must be a real directory: {root}"
-        )
-    observed: dict[str, bytes] = {}
-    for current, directories, filenames in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        for name in directories:
-            candidate = current_path / name
-            if not stat.S_ISDIR(candidate.lstat().st_mode):
-                raise ExternalManifestReferenceError(
-                    f"generation tree must not contain linked directories: {candidate}"
-                )
-        for name in filenames:
-            candidate = current_path / name
-            if not stat.S_ISREG(candidate.lstat().st_mode):
-                raise ExternalManifestReferenceError(
-                    f"generation tree must contain only regular files: {candidate}"
-                )
-            observed[candidate.relative_to(root).as_posix()] = _read_regular_bytes(
-                candidate,
-                "generation file",
-            )
-    return observed
 
 
 def _expected_generation_files(package: dict[str, Any]) -> dict[str, bytes]:
@@ -392,40 +340,42 @@ def _expected_generation_files(package: dict[str, Any]) -> dict[str, bytes]:
 def _install_generation(package: dict[str, Any]) -> bool:
     generation_dir = Path(package["generationDirectory"])
     expected = _expected_generation_files(package)
-    generation_dir.parent.mkdir(parents=True, exist_ok=True)
-    if generation_dir.exists() or generation_dir.is_symlink():
-        observed = _regular_generation_files(generation_dir)
-        if observed != expected:
-            raise ExternalManifestReferenceError(
-                "existing generation directory does not match the expected immutable generation"
-            )
-        return True
-
-    stage = Path(
-        tempfile.mkdtemp(
-            prefix=f".{package['generationId']}.",
-            suffix=".tmp",
-            dir=str(generation_dir.parent),
-        )
-    )
     try:
-        for row in package["families"]:
-            relative_path = Path(str(row["relativePath"]))
-            _write_generation_manifest_file(stage / relative_path, row["manifest"])
-        _write_generation_descriptor(stage / "generation.json", package["descriptor"])
-        for family in package["families"]:
-            _fsync_directory(stage / "families" / str(family["artifactFamily"]))
-        _fsync_directory(stage / "families")
-        _fsync_directory(stage)
-        os.replace(stage, generation_dir)
-        _fsync_directory(generation_dir.parent)
-    except OSError as exc:
+        make_directories(generation_dir.parent)
+        if path_exists(generation_dir):
+            observed = _regular_generation_files(generation_dir)
+            if observed != expected:
+                raise ExternalManifestReferenceError(
+                    "existing generation directory does not match the expected immutable generation"
+                )
+            return True
+
+        stage = make_temporary_directory(
+            generation_dir.parent,
+            prefix=str(package["generationId"]),
+        )
+        try:
+            for row in package["families"]:
+                relative_path = Path(str(row["relativePath"]))
+                _write_generation_manifest_file(stage / relative_path, row["manifest"])
+            _write_generation_descriptor(
+                stage / "generation.json", package["descriptor"]
+            )
+            for family in package["families"]:
+                _fsync_directory(stage / "families" / str(family["artifactFamily"]))
+            _fsync_directory(stage / "families")
+            _fsync_directory(stage)
+            rename_path(stage, generation_dir)
+            _fsync_directory(generation_dir.parent)
+        finally:
+            try:
+                remove_tree(stage)
+            except RootedFilesystemError:
+                pass
+    except RootedFilesystemError as exc:
         raise ExternalManifestReferenceError(
             f"generation installation failed before pointer commit: {exc}"
         ) from exc
-    finally:
-        if stage.exists():
-            shutil.rmtree(stage)
     return False
 
 
@@ -438,7 +388,7 @@ def _resolve_declared_path(
 ) -> Path:
     if not isinstance(raw_path, str) or not raw_path or Path(raw_path).is_absolute():
         raise ExternalManifestReferenceError(f"{label} path must be relative")
-    candidate = (base / raw_path).resolve()
+    candidate = secure_absolute(base / raw_path)
     _require_path_inside_root(candidate, publication_root, label)
     return candidate
 
@@ -677,7 +627,7 @@ def _read_generation_family(
     }
 
 
-def read_external_manifest_publication(
+def _read_external_manifest_publication_bound(
     publication_root: str | Path,
     *,
     repository: str,
@@ -686,7 +636,7 @@ def read_external_manifest_publication(
     """Read one authoritative, complete generation through its atomic pointer."""
     repository = _registry_segment(repository, "repository")
     ref = _registry_segment(ref, "ref")
-    root = Path(publication_root).expanduser().resolve()
+    root = secure_absolute(publication_root)
     pointer_path = publication_generation_pointer_path(
         root,
         repository=repository,
@@ -774,6 +724,29 @@ def read_external_manifest_publication(
     }
 
 
+def read_external_manifest_publication(
+    publication_root: str | Path,
+    *,
+    repository: str,
+    ref: str,
+) -> dict[str, Any]:
+    """Read one complete generation through a bound publication-root identity."""
+    root = secure_absolute(publication_root)
+    try:
+        with bind_directory(root, create=False) as binding:
+            result = _read_external_manifest_publication_bound(
+                root,
+                repository=repository,
+                ref=ref,
+            )
+            binding.assert_current_path_identity()
+            return result
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"publication read lost its trusted root identity: {root}: {exc}"
+        ) from exc
+
+
 @contextmanager
 def _publication_lock(
     publication_root: Path,
@@ -784,37 +757,12 @@ def _publication_lock(
         publication_root / "external" / "_locks" / repository / ref / "publish.lock"
     )
     try:
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
+        with exclusive_file_lock(lock_path):
+            yield lock_path
+    except RootedFilesystemError as exc:
         raise ExternalManifestReferenceError(
-            f"publication lock directory cannot be prepared: {lock_path.parent}"
+            f"publication lock lost its trusted directory identity: {lock_path}: {exc}"
         ) from exc
-    flags = (
-        os.O_RDWR
-        | os.O_CREAT
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
-    try:
-        fd = os.open(lock_path, flags, 0o600)
-    except OSError as exc:
-        raise ExternalManifestReferenceError(
-            f"publication lock cannot be opened: {lock_path}"
-        ) from exc
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise ExternalManifestReferenceError(
-                f"publication lock must be a regular file: {lock_path}"
-            )
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        except OSError as exc:
-            raise ExternalManifestReferenceError(
-                f"publication lock cannot be acquired: {lock_path}: {exc}"
-            ) from exc
-        yield lock_path
-    finally:
-        os.close(fd)
 
 
 def _compatibility_projection(
@@ -913,22 +861,29 @@ def recover_external_manifest_publication(
     repository: str,
     ref: str,
 ) -> dict[str, Any]:
-    """Rebuild legacy stable family projections from the committed generation."""
+    """Rebuild compatibility projections below one bound publication root."""
     repository = _registry_segment(repository, "repository")
     ref = _registry_segment(ref, "ref")
-    root = Path(publication_root).expanduser().resolve()
-    with _publication_lock(root, repository, ref):
-        selection = read_external_manifest_publication(
-            root,
-            repository=repository,
-            ref=ref,
-        )
-        compatibility = _compatibility_projection(
-            selection=selection,
-            publication_root=root,
-            repository=repository,
-            ref=ref,
-        )
+    root = secure_absolute(publication_root)
+    try:
+        with bind_directory(root, create=False) as binding:
+            with _publication_lock(root, repository, ref):
+                selection = read_external_manifest_publication(
+                    root,
+                    repository=repository,
+                    ref=ref,
+                )
+                compatibility = _compatibility_projection(
+                    selection=selection,
+                    publication_root=root,
+                    repository=repository,
+                    ref=ref,
+                )
+            binding.assert_current_path_identity()
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"publication recovery lost its trusted root identity: {root}: {exc}"
+        ) from exc
     return {
         "kind": "repobrief.external_manifest_publication_recovery",
         "version": GENERATION_VERSION,
@@ -948,47 +903,55 @@ def publish_external_manifest_references(
     ref: str,
     artifact_families: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    """Publish one complete generation and then refresh legacy stable projections."""
+    """Publish one complete generation below one trusted publication-root identity."""
     families = sorted(_normalized_artifact_families(artifact_families))
     repository = _registry_segment(repository, "repository")
     ref = _registry_segment(ref, "ref")
-    root = Path(publication_root).expanduser().resolve()
-    with _publication_lock(root, repository, ref) as lock_path:
-        materialization = materialize_external_bundle(
-            bundle_manifest_path,
-            root,
-            repository=repository,
-            ref=ref,
-        )
-        localized_manifest = Path(str(materialization["bundleManifest"]))
-        package = _prepare_generation_package(
-            localized_manifest=localized_manifest,
-            materialization=materialization,
-            publication_root=root,
-            repository=repository,
-            ref=ref,
-            families=families,
-        )
-        generation_reused = _install_generation(package)
-        pointer_write = _write_generation_pointer(
-            Path(package["pointerPath"]),
-            package["pointer"],
-        )
-        selection = read_external_manifest_publication(
-            root,
-            repository=repository,
-            ref=ref,
-        )
-        if selection["generationId"] != package["generationId"]:
-            raise ExternalManifestReferenceError(
-                "generation pointer readback selected an unexpected generation"
-            )
-        compatibility = _compatibility_projection(
-            selection=selection,
-            publication_root=root,
-            repository=repository,
-            ref=ref,
-        )
+    root = secure_absolute(publication_root)
+    try:
+        with bind_directory(root, create=True) as binding:
+            with _publication_lock(root, repository, ref) as lock_path:
+                materialization = materialize_external_bundle(
+                    bundle_manifest_path,
+                    root,
+                    repository=repository,
+                    ref=ref,
+                )
+                localized_manifest = Path(str(materialization["bundleManifest"]))
+                package = _prepare_generation_package(
+                    localized_manifest=localized_manifest,
+                    materialization=materialization,
+                    publication_root=root,
+                    repository=repository,
+                    ref=ref,
+                    families=families,
+                )
+                generation_reused = _install_generation(package)
+                pointer_write = _write_generation_pointer(
+                    Path(package["pointerPath"]),
+                    package["pointer"],
+                )
+                selection = read_external_manifest_publication(
+                    root,
+                    repository=repository,
+                    ref=ref,
+                )
+                if selection["generationId"] != package["generationId"]:
+                    raise ExternalManifestReferenceError(
+                        "generation pointer readback selected an unexpected generation"
+                    )
+                compatibility = _compatibility_projection(
+                    selection=selection,
+                    publication_root=root,
+                    repository=repository,
+                    ref=ref,
+                )
+            binding.assert_current_path_identity()
+    except RootedFilesystemError as exc:
+        raise ExternalManifestReferenceError(
+            f"publication lost a trusted directory identity: {root}: {exc}"
+        ) from exc
+
     if compatibility["status"] != "ok":
         status = "committed_compatibility_degraded"
     elif pointer_write["durability"] != "durable":
@@ -1003,7 +966,7 @@ def publish_external_manifest_references(
         "repository": repository,
         "ref": ref,
         "publicationRoot": str(root),
-        "sourceBundleManifest": str(Path(bundle_manifest_path).expanduser().resolve()),
+        "sourceBundleManifest": str(secure_absolute(bundle_manifest_path)),
         "bundleManifest": str(localized_manifest),
         "materialization": materialization,
         "generation": {
@@ -1016,6 +979,7 @@ def publish_external_manifest_references(
             "selectionRule": "read_pointer_once_then_verify_complete_generation",
             "serialization": "exclusive_lane_flock",
             "lockPath": str(lock_path),
+            "filesystemBinding": "trusted_dirfd_openat",
         },
         "authoritativePublished": selection["published"],
         "published": compatibility["published"],
