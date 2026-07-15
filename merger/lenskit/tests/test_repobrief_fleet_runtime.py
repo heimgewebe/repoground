@@ -86,6 +86,24 @@ def write_version(
     return version, digest
 
 
+def isolate_retention_roots(
+    module: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> dict[str, Path]:
+    roots = {
+        "publication": tmp_path / "publication",
+        "legacy": tmp_path / "legacy",
+        "special": tmp_path / "special",
+        "state": tmp_path / "state",
+        "log": tmp_path / "log",
+    }
+    monkeypatch.setattr(module, "PUB_ROOT", roots["publication"])
+    monkeypatch.setattr(module, "LEGACY_OUT_ROOT", roots["legacy"])
+    monkeypatch.setattr(module, "SPECIAL_OUT_ROOT", roots["special"])
+    monkeypatch.setattr(module, "STATE_ROOT", roots["state"])
+    monkeypatch.setattr(module, "LOG_ROOT", roots["log"])
+    return roots
+
+
 def test_fingerprint_is_stable_and_covers_all_output_inputs() -> None:
     module = load_publisher()
     config = module.PublicationConfig(profile="full-max")
@@ -130,11 +148,15 @@ def test_fingerprint_is_stable_and_covers_all_output_inputs() -> None:
         config=config,
     )
 
-    assert len({first, source_changed, tool_changed, config_changed, namespace_changed}) == 5
+    assert (
+        len({first, source_changed, tool_changed, config_changed, namespace_changed})
+        == 5
+    )
 
 
-
-def test_generator_inputs_sha_ignores_service_and_test_only_changes(tmp_path: Path) -> None:
+def test_generator_inputs_sha_ignores_service_and_test_only_changes(
+    tmp_path: Path,
+) -> None:
     module = load_publisher()
     repo, _ = initialize_repository(tmp_path, "lenskit")
     tracked = {
@@ -156,36 +178,47 @@ def test_generator_inputs_sha_ignores_service_and_test_only_changes(tmp_path: Pa
     git(repo, "commit", "-m", "generator baseline")
     baseline = module.generator_inputs_sha(repo)
 
-    (repo / "merger/lenskit/service/app.py").write_text("service v2\n", encoding="utf-8")
-    (repo / "merger/lenskit/tests/test_only.py").write_text("test v2\n", encoding="utf-8")
+    (repo / "merger/lenskit/service/app.py").write_text(
+        "service v2\n", encoding="utf-8"
+    )
+    (repo / "merger/lenskit/tests/test_only.py").write_text(
+        "test v2\n", encoding="utf-8"
+    )
     git(repo, "add", ".")
     git(repo, "commit", "-m", "non-generator changes")
     assert module.generator_inputs_sha(repo) == baseline
 
-    (repo / "merger/lenskit/core/merge.py").write_text("generator v2\n", encoding="utf-8")
+    (repo / "merger/lenskit/core/merge.py").write_text(
+        "generator v2\n", encoding="utf-8"
+    )
     git(repo, "add", ".")
     git(repo, "commit", "-m", "generator change")
     assert module.generator_inputs_sha(repo) != baseline
 
-def test_version_dirs_accepts_old_and_fingerprinted_names_only(tmp_path: Path) -> None:
+
+def test_version_dirs_accepts_only_declared_version_names(tmp_path: Path) -> None:
     module = load_publisher()
     group = tmp_path / "group"
     old = group / "20260714T100000Z"
     new = group / "20260714T110000Z-abcdef123456"
-    ignored = group / "scratch"
     old.mkdir(parents=True)
     new.mkdir()
-    ignored.mkdir()
-    (group / "20260714T120000Z-deadbeef0000").symlink_to(new, target_is_directory=True)
     os.utime(old, (100, 100))
     os.utime(new, (200, 200))
 
     assert module.version_dirs(group) == [new, old]
 
+    (group / "scratch").mkdir()
+    with pytest.raises(RuntimeError, match="unexpected retention entries"):
+        module.version_dirs(group)
 
-def test_prune_group_is_dry_run_by_default_and_reports_bytes(tmp_path: Path) -> None:
+
+def test_prune_group_is_dry_run_by_default_and_reports_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     module = load_publisher()
-    group = tmp_path / "group"
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
     versions = [
         write_version(group, f"20260714T10000{index}Z", bytes([index + 1]), index)[0]
         for index in range(5)
@@ -197,13 +230,15 @@ def test_prune_group_is_dry_run_by_default_and_reports_bytes(tmp_path: Path) -> 
     assert report["would_remove_bytes"] > 0
     assert report["removed"] == []
     assert all(path.exists() for path in versions)
+    assert not module.prune_transaction_root().exists()
 
 
 def test_prune_group_keeps_newest_three_and_protected_older_version(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = load_publisher()
-    group = tmp_path / "group"
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
     versions = [
         write_version(group, f"20260714T10000{index}Z", bytes([index + 1]), index)[0]
         for index in range(6)
@@ -225,14 +260,19 @@ def test_prune_group_keeps_newest_three_and_protected_older_version(
     }
     assert str(versions[1]) in report["protected_old"]
     assert report["removed_bytes"] > 0
+    transactions = sorted(module.prune_transaction_root().glob("*.json"))
+    assert len(transactions) == 2
+    assert all(
+        json.loads(path.read_text())["state"] == "deleted" for path in transactions
+    )
 
 
 def test_current_prune_keeps_localized_hashes_for_history_protection_and_stable_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = load_publisher()
-    publication_root = tmp_path / "publication"
-    monkeypatch.setattr(module, "PUB_ROOT", publication_root)
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    publication_root = roots["publication"]
     group = publication_root / "bundles" / "heimgewebe__demo" / "main"
     versions_and_hashes = [
         write_version(
@@ -248,7 +288,12 @@ def test_current_prune_keeps_localized_hashes_for_history_protection_and_stable_
     stable_target = stable_version / "repo_merge.bundle.manifest.json"
     newest_hashes = {digest for _, digest in versions_and_hashes[-3:]}
     stable_manifest = (
-        publication_root / "external" / "repobrief" / "heimgewebe__demo" / "main" / "manifest.json"
+        publication_root
+        / "external"
+        / "repobrief"
+        / "heimgewebe__demo"
+        / "main"
+        / "manifest.json"
     )
     stable_manifest.parent.mkdir(parents=True)
     stable_manifest.write_text(
@@ -294,7 +339,12 @@ def test_stable_manifest_target_is_fail_closed_for_missing_target(
     publication_root = tmp_path / "publication"
     monkeypatch.setattr(module, "PUB_ROOT", publication_root)
     manifest = (
-        publication_root / "external" / "repobrief" / "heimgewebe__demo" / "main" / "manifest.json"
+        publication_root
+        / "external"
+        / "repobrief"
+        / "heimgewebe__demo"
+        / "main"
+        / "manifest.json"
     )
     manifest.parent.mkdir(parents=True)
     manifest.write_text(
@@ -304,6 +354,56 @@ def test_stable_manifest_target_is_fail_closed_for_missing_target(
 
     with pytest.raises(RuntimeError, match="target is unavailable"):
         module.stable_manifest_target(manifest)
+
+
+def test_global_reachability_uses_only_canonical_owner_qualified_manifests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    publication_root = tmp_path / "publication"
+    monkeypatch.setattr(module, "PUB_ROOT", publication_root)
+
+    canonical_target = (
+        publication_root
+        / "bundles"
+        / "heimgewebe__demo"
+        / "main"
+        / "version"
+        / "manifest.json"
+    )
+    canonical_target.parent.mkdir(parents=True)
+    canonical_target.write_text("{}", encoding="utf-8")
+    canonical_manifest = (
+        publication_root
+        / "external"
+        / "repobrief"
+        / "heimgewebe__demo"
+        / "main"
+        / "manifest.json"
+    )
+    canonical_manifest.parent.mkdir(parents=True)
+    canonical_manifest.write_text(
+        json.dumps(
+            {
+                "bundleManifest": {
+                    "path": os.path.relpath(canonical_target, canonical_manifest.parent)
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    frozen_manifest = (
+        publication_root / "external" / "repobrief" / "demo" / "main" / "manifest.json"
+    )
+    frozen_manifest.parent.mkdir(parents=True)
+    frozen_manifest.write_text(
+        json.dumps({"bundleManifest": {"path": "../../../../missing.json"}}),
+        encoding="utf-8",
+    )
+
+    assert module.canonical_stable_manifest_paths() == [canonical_manifest]
+    assert module.all_stable_manifest_targets() == {canonical_target.resolve()}
 
 
 def test_managed_worktree_accepts_only_clean_detached_expected_repository(
@@ -482,8 +582,8 @@ def test_special_history_pruning_keeps_referenced_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = load_publisher()
-    special_root = tmp_path / "repobrief-auto"
-    monkeypatch.setattr(module, "SPECIAL_OUT_ROOT", special_root)
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    special_root = roots["special"]
     group = special_root / "systemkatalog-main"
     versions = [
         write_version(group, f"20260714T10000{index}Z", bytes([index + 1]), index)[0]
@@ -523,3 +623,283 @@ def test_state_identity_does_not_trust_legacy_source_only_marker(
 
     assert path == tmp_path / "heimgewebe__demo__main.state.json"
     assert not path.name.endswith(".last-sha")
+
+
+def test_state_and_active_publication_targets_protect_old_versions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "heimgewebe__demo" / "main"
+    versions = [
+        write_version(group, f"20260714T10000{index}Z", bytes([index + 1]), index)[0]
+        for index in range(7)
+    ]
+    module.atomic_write_json(
+        roots["state"] / "heimgewebe__demo__main.state.json",
+        {
+            "schema": module.STATE_SCHEMA,
+            "publication_dir": str(versions[0]),
+        },
+    )
+    active = module.create_active_publication_lease(
+        repository="heimgewebe__demo",
+        ref="main",
+        fingerprint="a" * 64,
+        publication_dir=versions[1],
+    )
+
+    report = module.prune_group(group, keep=3, apply=True, protected=set())
+
+    assert versions[0].is_dir()
+    assert versions[1].is_dir()
+    assert not versions[2].exists()
+    assert {str(versions[0]), str(versions[1])}.issubset(set(report["protected_old"]))
+    module.clear_active_publication_lease(active)
+
+
+def test_transaction_rechecks_protection_after_quarantine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    snapshot = module.tree_snapshot(candidate)
+    calls = 0
+
+    def changing_protection(explicit: set[Path]) -> set[Path]:
+        nonlocal calls
+        calls += 1
+        return {candidate.resolve()} if calls >= 3 else set(explicit)
+
+    monkeypatch.setattr(module, "dynamic_protected_paths", changing_protection)
+    result = module.transactional_prune(
+        candidate,
+        root=group,
+        expected_snapshot=snapshot,
+        removed_bytes=module.tree_bytes(candidate),
+        protected=set(),
+    )
+
+    assert result["state"] == "retained_newly_protected"
+    assert candidate.is_dir()
+    transaction = next(module.prune_transaction_root().glob("*.json"))
+    assert json.loads(transaction.read_text())["state"] == "restored_newly_protected"
+
+
+def test_transaction_refuses_candidate_changed_after_planning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    snapshot = module.tree_snapshot(candidate)
+    (candidate / "repo_merge.md").write_text("changed", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="changed after planning"):
+        module.transactional_prune(
+            candidate,
+            root=group,
+            expected_snapshot=snapshot,
+            removed_bytes=1,
+            protected=set(),
+        )
+
+    assert candidate.is_dir()
+    assert not module.prune_transaction_root().exists()
+
+
+def test_transactional_delete_is_journaled_and_confined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    snapshot = module.tree_snapshot(candidate)
+
+    result = module.transactional_prune(
+        candidate,
+        root=group,
+        expected_snapshot=snapshot,
+        removed_bytes=module.tree_bytes(candidate),
+        protected=set(),
+    )
+
+    assert result["state"] == "deleted"
+    assert not candidate.exists()
+    transaction = next(module.prune_transaction_root().glob("*.json"))
+    payload = json.loads(transaction.read_text())
+    assert payload["state"] == "deleted"
+    assert payload["source"] == str(candidate.resolve(strict=False))
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    with pytest.raises(RuntimeError, match="escapes managed roots"):
+        module.transactional_prune(
+            outside,
+            root=outside.parent,
+            expected_snapshot=module.tree_snapshot(outside),
+            removed_bytes=0,
+            protected=set(),
+        )
+
+
+def test_reconciliation_restores_planned_move_that_became_protected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    source, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    snapshot = module.tree_snapshot(source)
+    transaction_id = "b" * 32
+    quarantine = group / module.QUARANTINE_DIR_NAME / transaction_id / source.name
+    quarantine.parent.mkdir(parents=True)
+    os.replace(source, quarantine)
+    module.atomic_write_json(
+        module.prune_transaction_root() / f"{transaction_id}.json",
+        {
+            "schema": module.PRUNE_TRANSACTION_SCHEMA,
+            "transaction_id": transaction_id,
+            "state": "planned",
+            "source": str(source.resolve(strict=False)),
+            "quarantine": str(quarantine.resolve(strict=False)),
+            "root": str(group.resolve()),
+            "snapshot": snapshot,
+            "removed_bytes": 1,
+        },
+    )
+
+    reports = module.reconcile_prune_transactions(protected={source}, apply=True)
+
+    assert reports[0]["applied"] == "restore"
+    assert source.is_dir()
+    assert not quarantine.exists()
+    transaction = module.prune_transaction_root() / f"{transaction_id}.json"
+    assert json.loads(transaction.read_text())["state"] == "restored"
+
+
+def test_reconciliation_records_completed_delete_after_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    group.mkdir(parents=True)
+    source = group / "20260714T100000Z"
+    quarantine = group / module.QUARANTINE_DIR_NAME / ("c" * 32) / source.name
+    module.atomic_write_json(
+        module.prune_transaction_root() / f"{'c' * 32}.json",
+        {
+            "schema": module.PRUNE_TRANSACTION_SCHEMA,
+            "transaction_id": "c" * 32,
+            "state": "quarantined",
+            "source": str(source.resolve(strict=False)),
+            "quarantine": str(quarantine.resolve(strict=False)),
+            "root": str(group.resolve()),
+            "snapshot": {"device": 1, "inode": 2, "tree_sha256": "d" * 64},
+            "removed_bytes": 1,
+        },
+    )
+
+    reports = module.reconcile_prune_transactions(protected=set(), apply=True)
+
+    assert reports[0]["applied"] == "record_deleted"
+    transaction = module.prune_transaction_root() / f"{'c' * 32}.json"
+    assert json.loads(transaction.read_text())["state"] == "deleted"
+
+
+def test_tree_snapshot_and_localized_groups_reject_ambiguous_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    target = tmp_path / "target"
+    target.mkdir()
+    (candidate / "link").symlink_to(target, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="contains a symlink"):
+        module.tree_snapshot(candidate)
+
+    localized = roots["publication"] / "external" / "_bundles" / "demo" / "main"
+    (localized / ("a" * 64)).mkdir(parents=True)
+    (localized / "not-a-hash").mkdir()
+    with pytest.raises(RuntimeError, match="unexpected localized bundle entries"):
+        module.localized_hash_dirs(localized)
+
+
+def test_legacy_layout_discovery_supports_both_known_shapes_and_rejects_mixing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    modern = roots["legacy"] / "heimgewebe__demo" / "main"
+    direct = roots["legacy"] / "cabinet-main"
+    write_version(modern, "20260714T100000Z", b"modern", 1)
+    write_version(direct, "20260714T100000Z", b"direct", 1)
+
+    assert module.legacy_version_groups() == [direct, modern]
+
+    (direct / "main").mkdir()
+    with pytest.raises(RuntimeError, match="mixed legacy layouts"):
+        module.legacy_version_groups()
+
+
+def test_reconciliation_rejects_forged_quarantine_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    forged, _ = write_version(group, "20260714T100000Z", b"forged", 1)
+    transaction_id = "d" * 32
+    source = group / "20260714T100001Z"
+    module.atomic_write_json(
+        module.prune_transaction_root() / f"{transaction_id}.json",
+        {
+            "schema": module.PRUNE_TRANSACTION_SCHEMA,
+            "transaction_id": transaction_id,
+            "state": "quarantined",
+            "source": str(source.resolve(strict=False)),
+            "quarantine": str(forged.resolve()),
+            "root": str(group.resolve()),
+            "snapshot": module.tree_snapshot(forged),
+            "removed_bytes": module.tree_bytes(forged),
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="quarantine path mismatch"):
+        module.reconcile_prune_transactions(protected=set(), apply=True)
+
+    assert forged.is_dir()
+
+
+def test_unjournaled_quarantine_entry_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    write_version(group, "20260714T100000Z", b"payload", 1)
+    orphan = group / module.QUARANTINE_DIR_NAME / ("e" * 32) / "20260714T090000Z"
+    orphan.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="unexpected retention quarantine entries"):
+        module.version_dirs(group)
+
+
+def test_transaction_journal_rejects_unexpected_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    isolate_retention_roots(module, tmp_path, monkeypatch)
+    transaction_root = module.prune_transaction_root()
+    transaction_root.mkdir(parents=True)
+    (transaction_root / "notes.txt").write_text("not a journal", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="unexpected retention transaction entries"):
+        module.reconcile_prune_transactions(protected=set(), apply=False)

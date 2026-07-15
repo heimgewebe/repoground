@@ -16,10 +16,12 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -41,6 +43,9 @@ DEFAULT_RETENTION = 3
 MAX_RETENTION = 10
 FINGERPRINT_SCHEMA = "repobrief.fleet-publication-fingerprint.v3"
 STATE_SCHEMA = "repobrief.fleet-publication-state.v1"
+ACTIVE_LEASE_SCHEMA = "repobrief.active-publication-lease.v1"
+PRUNE_TRANSACTION_SCHEMA = "repobrief.retention-transaction.v1"
+QUARANTINE_DIR_NAME = ".rb-prune-quarantine"
 GENERATOR_INPUT_PATHS = (
     "merger/lenskit/__init__.py",
     "merger/lenskit/cli/__init__.py",
@@ -51,6 +56,8 @@ GENERATOR_INPUT_PATHS = (
     "merger/lenskit/retrieval",
 )
 VERSION_DIR_RE = re.compile(r"^\d{8}T\d{6}Z(?:-[0-9a-f]{12})?$")
+SHA256_DIR_RE = re.compile(r"^[0-9a-f]{64}$")
+TRANSACTION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 EXCLUDE = {
     ".repobrief-tools",
     ".repobrief-sources",
@@ -86,6 +93,13 @@ class PublicationConfig:
             "max_bytes": self.max_bytes,
             "split_size": self.split_size,
         }
+
+
+@dataclass(frozen=True)
+class PrunePlan:
+    path: Path
+    snapshot: dict[str, object]
+    bytes: int
 
 
 def run(
@@ -341,7 +355,9 @@ def generator_inputs_sha(worktree: Path) -> str:
                 "path": path,
             }
         )
-    entries.sort(key=lambda entry: entry["path"].encode("utf-8", errors="surrogateescape"))
+    entries.sort(
+        key=lambda entry: entry["path"].encode("utf-8", errors="surrogateescape")
+    )
     required_files = {
         "merger/lenskit/cli/repobrief.py",
         "merger/lenskit/cli/cmd_repobrief.py",
@@ -487,23 +503,268 @@ def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path
     return source_wt
 
 
+def active_lease_root() -> Path:
+    return STATE_ROOT / "active-publications"
+
+
+def prune_transaction_root() -> Path:
+    return STATE_ROOT / "retention-transactions"
+
+
+def retention_roots() -> tuple[Path, ...]:
+    return (PUB_ROOT, LEGACY_OUT_ROOT, SPECIAL_OUT_ROOT)
+
+
+def _path_under(path: Path, root: Path) -> bool:
+    resolved_path = path.resolve(strict=False)
+    resolved_root = root.resolve(strict=False)
+    return resolved_path == resolved_root or resolved_root in resolved_path.parents
+
+
+def _assert_retention_target(path: Path) -> Path:
+    resolved = path.expanduser().resolve(strict=False)
+    if not any(_path_under(resolved, root) for root in retention_roots()):
+        raise RuntimeError(f"retention reference escapes managed roots: {path}")
+    return resolved
+
+
+def _strict_json_object(path: Path) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise RuntimeError(f"retention metadata is not a regular file: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot read retention metadata {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"retention metadata is not an object: {path}")
+    return value
+
+
+def prune_transaction_files() -> list[Path]:
+    root = prune_transaction_root()
+    if not root.exists():
+        return []
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError(f"retention transaction root is not a directory: {root}")
+    files: list[Path] = []
+    unexpected: list[Path] = []
+    for path in root.iterdir():
+        if (
+            path.is_file()
+            and not path.is_symlink()
+            and path.suffix == ".json"
+            and TRANSACTION_ID_RE.fullmatch(path.stem)
+        ):
+            files.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected retention transaction entries: {rendered}")
+    return sorted(files)
+
+
+def validate_quarantine_directory(group: Path) -> None:
+    quarantine_root = group / QUARANTINE_DIR_NAME
+    if not quarantine_root.exists():
+        return
+    if quarantine_root.is_symlink() or not quarantine_root.is_dir():
+        raise RuntimeError(
+            f"retention quarantine is not a directory: {quarantine_root}"
+        )
+    unexpected: list[Path] = []
+    for transaction_dir in quarantine_root.iterdir():
+        transaction_file = prune_transaction_root() / f"{transaction_dir.name}.json"
+        valid_transaction_dir = (
+            transaction_dir.is_dir()
+            and not transaction_dir.is_symlink()
+            and TRANSACTION_ID_RE.fullmatch(transaction_dir.name)
+            and transaction_file.is_file()
+            and not transaction_file.is_symlink()
+        )
+        if not valid_transaction_dir:
+            unexpected.append(transaction_dir)
+            continue
+        children = list(transaction_dir.iterdir())
+        if len(children) > 1 or any(
+            child.is_symlink() or not child.is_dir() for child in children
+        ):
+            unexpected.extend(children or [transaction_dir])
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected retention quarantine entries: {rendered}")
+
+
+def _validated_transaction_paths(
+    payload: dict[str, object], transaction_file: Path
+) -> tuple[str, Path, Path, Path, dict[str, object]]:
+    transaction_id = payload.get("transaction_id")
+    source_raw = payload.get("source")
+    quarantine_raw = payload.get("quarantine")
+    root_raw = payload.get("root")
+    snapshot = payload.get("snapshot")
+    removed_bytes = payload.get("removed_bytes")
+    if (
+        not isinstance(transaction_id, str)
+        or not TRANSACTION_ID_RE.fullmatch(transaction_id)
+        or transaction_file.stem != transaction_id
+        or not isinstance(source_raw, str)
+        or not isinstance(quarantine_raw, str)
+        or not isinstance(root_raw, str)
+        or not isinstance(snapshot, dict)
+        or not isinstance(removed_bytes, int)
+        or isinstance(removed_bytes, bool)
+        or removed_bytes < 0
+    ):
+        raise RuntimeError(f"malformed prune transaction: {transaction_file}")
+    device = snapshot.get("device")
+    inode = snapshot.get("inode")
+    tree_digest = snapshot.get("tree_sha256")
+    if (
+        not isinstance(device, int)
+        or isinstance(device, bool)
+        or not isinstance(inode, int)
+        or isinstance(inode, bool)
+        or not isinstance(tree_digest, str)
+        or not SHA256_DIR_RE.fullmatch(tree_digest)
+    ):
+        raise RuntimeError(f"malformed prune transaction snapshot: {transaction_file}")
+    source = _assert_retention_target(Path(source_raw))
+    quarantine = _assert_retention_target(Path(quarantine_raw))
+    managed_root = _assert_retention_target(Path(root_raw))
+    if source.parent != managed_root:
+        raise RuntimeError(
+            f"prune transaction source is not a direct group child: {transaction_file}"
+        )
+    expected_quarantine = (
+        managed_root / QUARANTINE_DIR_NAME / transaction_id / source.name
+    ).resolve(strict=False)
+    if quarantine != expected_quarantine:
+        raise RuntimeError(
+            f"prune transaction quarantine path mismatch: {transaction_file}"
+        )
+    return transaction_id, source, quarantine, managed_root, snapshot
+
+
+def state_publication_targets() -> set[Path]:
+    targets: set[Path] = set()
+    if not STATE_ROOT.exists():
+        return targets
+    for state_file in sorted(STATE_ROOT.glob("*.state.json")):
+        data = _strict_json_object(state_file)
+        if data.get("schema") != STATE_SCHEMA:
+            raise RuntimeError(f"unsupported publication state schema: {state_file}")
+        raw_target = data.get("publication_dir")
+        if not isinstance(raw_target, str) or not raw_target:
+            raise RuntimeError(f"publication state lacks publication_dir: {state_file}")
+        target = _assert_retention_target(Path(raw_target))
+        if target.is_symlink() or not target.is_dir():
+            raise RuntimeError(f"publication state target is unavailable: {target}")
+        targets.add(target)
+    return targets
+
+
+def active_publication_targets() -> set[Path]:
+    targets: set[Path] = set()
+    root = active_lease_root()
+    if not root.exists():
+        return targets
+    for lease_file in sorted(root.glob("*.json")):
+        data = _strict_json_object(lease_file)
+        if data.get("schema") != ACTIVE_LEASE_SCHEMA:
+            raise RuntimeError(f"unsupported active publication lease: {lease_file}")
+        raw_target = data.get("publication_dir")
+        if not isinstance(raw_target, str) or not raw_target:
+            raise RuntimeError(
+                f"active publication lease lacks publication_dir: {lease_file}"
+            )
+        targets.add(_assert_retention_target(Path(raw_target)))
+    return targets
+
+
+def create_active_publication_lease(
+    *, repository: str, ref: str, fingerprint: str, publication_dir: Path
+) -> Path:
+    target = _assert_retention_target(publication_dir)
+    lease_id = hashlib.sha256(
+        f"{repository}\0{ref}\0{fingerprint}\0{os.getpid()}\0{time.time_ns()}".encode()
+    ).hexdigest()
+    lease_path = active_lease_root() / f"{lease_id}.json"
+    atomic_write_json(
+        lease_path,
+        {
+            "schema": ACTIVE_LEASE_SCHEMA,
+            "lease_id": lease_id,
+            "repository": repository,
+            "ref": ref,
+            "fingerprint": fingerprint,
+            "publication_dir": str(target),
+            "pid": os.getpid(),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    )
+    return lease_path
+
+
+def clear_active_publication_lease(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
 def version_dirs(group: Path) -> list[Path]:
     if not group.exists():
         return []
-    rows = [
-        path
-        for path in group.iterdir()
-        if path.is_dir()
-        and not path.is_symlink()
-        and VERSION_DIR_RE.fullmatch(path.name)
-    ]
+    validate_quarantine_directory(group)
+    rows: list[Path] = []
+    unexpected: list[Path] = []
+    for path in group.iterdir():
+        if path.name == QUARANTINE_DIR_NAME and path.is_dir() and not path.is_symlink():
+            continue
+        if (
+            path.is_dir()
+            and not path.is_symlink()
+            and VERSION_DIR_RE.fullmatch(path.name)
+        ):
+            rows.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected retention entries in {group}: {rendered}")
     return sorted(
         rows, key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True
     )
 
 
+def localized_hash_dirs(group: Path) -> list[Path]:
+    if not group.exists():
+        return []
+    validate_quarantine_directory(group)
+    rows: list[Path] = []
+    unexpected: list[Path] = []
+    for path in group.iterdir():
+        if path.name == QUARANTINE_DIR_NAME and path.is_dir() and not path.is_symlink():
+            continue
+        if (
+            path.is_dir()
+            and not path.is_symlink()
+            and SHA256_DIR_RE.fullmatch(path.name)
+        ):
+            rows.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(
+            f"unexpected localized bundle entries in {group}: {rendered}"
+        )
+    return sorted(rows, key=lambda path: path.name)
+
+
 def path_is_protected(path: Path, protected: set[Path]) -> bool:
-    resolved = path.resolve()
+    resolved = path.resolve(strict=False)
     return any(
         resolved == item or item in resolved.parents or resolved in item.parents
         for item in protected
@@ -514,18 +775,81 @@ def tree_bytes(path: Path) -> int:
     total = 0
     for root, directories, files in os.walk(path, followlinks=False):
         root_path = Path(root)
-        directories[:] = [
-            name for name in directories if not (root_path / name).is_symlink()
-        ]
-        for name in files:
+        directories[:] = sorted(directories)
+        for name in directories:
+            if (root_path / name).is_symlink():
+                raise RuntimeError(
+                    f"retention candidate contains a symlink: {root_path / name}"
+                )
+        for name in sorted(files):
             candidate = root_path / name
             if candidate.is_symlink():
-                continue
-            try:
-                total += candidate.stat().st_size
-            except FileNotFoundError:
-                continue
+                raise RuntimeError(
+                    f"retention candidate contains a symlink: {candidate}"
+                )
+            total += candidate.stat().st_size
     return total
+
+
+def tree_snapshot(path: Path) -> dict[str, object]:
+    if path.is_symlink() or not path.is_dir():
+        raise RuntimeError(f"retention candidate is not a directory: {path}")
+    root_stat = path.lstat()
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise RuntimeError(f"retention candidate is not a directory: {path}")
+    rows: list[list[object]] = []
+    for root, directories, files in os.walk(path, followlinks=False):
+        root_path = Path(root)
+        directories[:] = sorted(directories)
+        relative_root = root_path.relative_to(path).as_posix()
+        root_metadata = root_path.lstat()
+        rows.append(
+            [
+                "d",
+                relative_root,
+                stat.S_IMODE(root_metadata.st_mode),
+                root_metadata.st_mtime_ns,
+            ]
+        )
+        for name in directories:
+            candidate = root_path / name
+            if candidate.is_symlink():
+                raise RuntimeError(
+                    f"retention candidate contains a symlink: {candidate}"
+                )
+        for name in sorted(files):
+            candidate = root_path / name
+            metadata = candidate.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeError(
+                    f"retention candidate contains a non-regular file: {candidate}"
+                )
+            rows.append(
+                [
+                    "f",
+                    candidate.relative_to(path).as_posix(),
+                    stat.S_IMODE(metadata.st_mode),
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
+                    sha256_file(candidate),
+                ]
+            )
+    digest = hashlib.sha256(
+        json.dumps(rows, sort_keys=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "device": root_stat.st_dev,
+        "inode": root_stat.st_ino,
+        "tree_sha256": digest,
+    }
+
+
+def dynamic_protected_paths(explicit: set[Path]) -> set[Path]:
+    protected = {path.expanduser().resolve(strict=False) for path in explicit}
+    protected.update(all_stable_manifest_targets())
+    protected.update(state_publication_targets())
+    protected.update(active_publication_targets())
+    return protected
 
 
 def remove_tree(path: Path, *, apply: bool, root: Path) -> None:
@@ -545,6 +869,227 @@ def discard_generated_output(path: Path, *, root: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
     remove_tree(path, apply=True, root=root)
+
+
+def _write_prune_transaction(payload: dict[str, object]) -> Path:
+    transaction_id = payload.get("transaction_id")
+    if not isinstance(transaction_id, str) or not TRANSACTION_ID_RE.fullmatch(
+        transaction_id
+    ):
+        raise RuntimeError("prune transaction lacks a valid id")
+    path = prune_transaction_root() / f"{transaction_id}.json"
+    atomic_write_json(path, payload)
+    return path
+
+
+def _set_transaction_state(payload: dict[str, object], state_value: str) -> None:
+    payload["state"] = state_value
+    payload["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _write_prune_transaction(payload)
+
+
+def _cleanup_quarantine_parents(quarantine: Path, managed_root: Path) -> None:
+    try:
+        quarantine.parent.rmdir()
+    except OSError:
+        pass
+    try:
+        managed_root.joinpath(QUARANTINE_DIR_NAME).rmdir()
+    except OSError:
+        pass
+
+
+def transactional_prune(
+    path: Path,
+    *,
+    root: Path,
+    expected_snapshot: dict[str, object],
+    removed_bytes: int,
+    protected: set[Path],
+) -> dict[str, object]:
+    managed_root = _assert_retention_target(root)
+    source = _assert_retention_target(path)
+    if source == managed_root or managed_root not in source.parents:
+        raise RuntimeError(
+            f"retention candidate is outside its managed group {managed_root}: {source}"
+        )
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        return {"state": "retained_newly_protected", "path": str(source)}
+    if tree_snapshot(source) != expected_snapshot:
+        raise RuntimeError(f"retention candidate changed after planning: {source}")
+
+    transaction_id = uuid.uuid4().hex
+    quarantine_parent = managed_root / QUARANTINE_DIR_NAME
+    quarantine = quarantine_parent / transaction_id / path.name
+    payload: dict[str, object] = {
+        "schema": PRUNE_TRANSACTION_SCHEMA,
+        "transaction_id": transaction_id,
+        "state": "planned",
+        "source": str(source),
+        "quarantine": str(quarantine.resolve(strict=False)),
+        "root": str(managed_root),
+        "snapshot": expected_snapshot,
+        "removed_bytes": removed_bytes,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    _write_prune_transaction(payload)
+    quarantine.parent.mkdir(parents=True, exist_ok=False)
+
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        _set_transaction_state(payload, "aborted_protected")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        return {"state": "retained_newly_protected", "path": str(source)}
+    if tree_snapshot(source) != expected_snapshot:
+        _set_transaction_state(payload, "aborted_changed")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        raise RuntimeError(f"retention candidate changed before quarantine: {source}")
+
+    os.replace(source, quarantine)
+    if tree_snapshot(quarantine) != expected_snapshot:
+        if not source.exists():
+            os.replace(quarantine, source)
+        _set_transaction_state(payload, "restored_identity_mismatch")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        raise RuntimeError(f"quarantined candidate identity changed: {source}")
+
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        os.replace(quarantine, source)
+        _set_transaction_state(payload, "restored_newly_protected")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        return {"state": "retained_newly_protected", "path": str(source)}
+
+    _set_transaction_state(payload, "quarantined")
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        os.replace(quarantine, source)
+        _set_transaction_state(payload, "restored_newly_protected")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        return {"state": "retained_newly_protected", "path": str(source)}
+
+    shutil.rmtree(quarantine)
+    _cleanup_quarantine_parents(quarantine, managed_root)
+    _set_transaction_state(payload, "deleted")
+    return {
+        "state": "deleted",
+        "path": str(source),
+        "transaction_id": transaction_id,
+        "removed_bytes": removed_bytes,
+    }
+
+
+def reconcile_prune_transactions(
+    *, protected: set[Path], apply: bool
+) -> list[dict[str, object]]:
+    transaction_root = prune_transaction_root()
+    if not transaction_root.exists():
+        return []
+    reports: list[dict[str, object]] = []
+    terminal_states = {
+        "deleted",
+        "restored",
+        "restored_newly_protected",
+        "aborted_protected",
+        "aborted_changed",
+        "aborted_safe_source",
+        "restored_identity_mismatch",
+    }
+    for transaction_file in prune_transaction_files():
+        payload = _strict_json_object(transaction_file)
+        if payload.get("schema") != PRUNE_TRANSACTION_SCHEMA:
+            raise RuntimeError(f"unsupported prune transaction: {transaction_file}")
+        state_value = payload.get("state")
+        if not isinstance(state_value, str):
+            raise RuntimeError(f"malformed prune transaction: {transaction_file}")
+        _, source, quarantine, managed_root, snapshot = _validated_transaction_paths(
+            payload, transaction_file
+        )
+        if state_value in terminal_states:
+            reports.append({"transaction": str(transaction_file), "state": state_value})
+            continue
+        if state_value not in {"planned", "quarantined"}:
+            raise RuntimeError(f"unknown prune transaction state: {state_value}")
+
+        source_exists = source.exists() or source.is_symlink()
+        quarantine_exists = quarantine.exists() or quarantine.is_symlink()
+        if source_exists and quarantine_exists:
+            raise RuntimeError(
+                f"ambiguous prune transaction has two copies: {transaction_file}"
+            )
+
+        if source_exists:
+            if tree_snapshot(source) != snapshot:
+                raise RuntimeError(f"source identity mismatch: {transaction_file}")
+            if state_value == "planned":
+                if apply:
+                    _set_transaction_state(payload, "aborted_safe_source")
+                    _cleanup_quarantine_parents(quarantine, managed_root)
+                reports.append(
+                    {
+                        "transaction": str(transaction_file),
+                        "state": state_value,
+                        "would": "leave_source",
+                        "applied": "leave_source" if apply else None,
+                    }
+                )
+                continue
+            if apply:
+                _set_transaction_state(payload, "restored")
+                _cleanup_quarantine_parents(quarantine, managed_root)
+            reports.append(
+                {
+                    "transaction": str(transaction_file),
+                    "state": state_value,
+                    "would": "record_restored",
+                    "applied": "record_restored" if apply else None,
+                }
+            )
+            continue
+
+        if not quarantine_exists:
+            if state_value == "quarantined":
+                if apply:
+                    _set_transaction_state(payload, "deleted")
+                    _cleanup_quarantine_parents(quarantine, managed_root)
+                reports.append(
+                    {
+                        "transaction": str(transaction_file),
+                        "state": state_value,
+                        "would": "record_deleted",
+                        "applied": "record_deleted" if apply else None,
+                    }
+                )
+                continue
+            raise RuntimeError(
+                f"planned transaction lost both copies: {transaction_file}"
+            )
+
+        if tree_snapshot(quarantine) != snapshot:
+            raise RuntimeError(f"quarantine identity mismatch: {transaction_file}")
+        refreshed = dynamic_protected_paths(protected)
+        action = "restore" if path_is_protected(source, refreshed) else "delete"
+        if apply:
+            if state_value == "planned":
+                _set_transaction_state(payload, "quarantined")
+            if action == "restore":
+                source.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(quarantine, source)
+                _set_transaction_state(payload, "restored")
+            else:
+                shutil.rmtree(quarantine)
+                _set_transaction_state(payload, "deleted")
+            _cleanup_quarantine_parents(quarantine, managed_root)
+        reports.append(
+            {
+                "transaction": str(transaction_file),
+                "state": state_value,
+                "would": action if not apply else None,
+                "applied": action if apply else None,
+            }
+        )
+    return reports
 
 
 def retained_manifest_hashes(versions: Iterable[Path]) -> set[str]:
@@ -589,16 +1134,30 @@ def stable_manifest_targets(repository: str, ref: str) -> set[Path]:
     return retained
 
 
-def all_stable_manifest_targets() -> set[Path]:
-    retained: set[Path] = set()
+def is_canonical_publication_identity(value: str) -> bool:
+    owner, separator, repository = value.partition("__")
+    return bool(separator and owner and repository)
+
+
+def canonical_stable_manifest_paths() -> list[Path]:
+    manifests: list[Path] = []
     external_root = PUB_ROOT / "external"
     for family in ("repobrief", "lenskit"):
         family_root = external_root / family
         if not family_root.exists():
             continue
         for manifest in sorted(family_root.glob("*/*/manifest.json")):
-            retained.add(stable_manifest_target(manifest))
-    return retained
+            repository = manifest.parent.parent.name
+            if is_canonical_publication_identity(repository):
+                manifests.append(manifest)
+    return manifests
+
+
+def all_stable_manifest_targets() -> set[Path]:
+    return {
+        stable_manifest_target(manifest)
+        for manifest in canonical_stable_manifest_paths()
+    }
 
 
 def stable_manifest_hashes(repository: str, ref: str) -> set[str]:
@@ -612,25 +1171,48 @@ def prune_group(
     apply: bool,
     protected: set[Path],
 ) -> dict[str, object]:
+    effective_protected = dynamic_protected_paths(protected)
     versions = version_dirs(group)
     retained = versions[:keep]
     removable = [
-        path for path in versions[keep:] if not path_is_protected(path, protected)
+        path
+        for path in versions[keep:]
+        if not path_is_protected(path, effective_protected)
     ]
     protected_old = [
-        path for path in versions[keep:] if path_is_protected(path, protected)
+        path for path in versions[keep:] if path_is_protected(path, effective_protected)
     ]
-    removable_bytes = sum(tree_bytes(path) for path in removable)
-    for path in removable:
-        remove_tree(path, apply=apply, root=group)
+    plans = [
+        PrunePlan(path=path, snapshot=tree_snapshot(path), bytes=tree_bytes(path))
+        for path in removable
+    ]
+    removed: list[str] = []
+    newly_protected: list[str] = []
+    removed_bytes = 0
+    if apply:
+        for plan in plans:
+            result = transactional_prune(
+                plan.path,
+                root=group,
+                expected_snapshot=plan.snapshot,
+                removed_bytes=plan.bytes,
+                protected=protected,
+            )
+            if result["state"] == "deleted":
+                removed.append(str(plan.path))
+                removed_bytes += int(plan.bytes)
+            else:
+                newly_protected.append(str(plan.path))
+    removable_bytes = sum(int(plan.bytes) for plan in plans)
     return {
         "group": str(group),
         "found": len(versions),
         "retained": [str(path) for path in retained],
         "protected_old": [str(path) for path in protected_old],
-        "removed": [str(path) for path in removable] if apply else [],
+        "newly_protected": newly_protected,
+        "removed": removed,
         "would_remove": [] if apply else [str(path) for path in removable],
-        "removed_bytes": removable_bytes if apply else 0,
+        "removed_bytes": removed_bytes,
         "would_remove_bytes": 0 if apply else removable_bytes,
     }
 
@@ -645,7 +1227,7 @@ def prune_current_group(
     protected: set[Path],
 ) -> dict[str, object]:
     stable_targets = stable_manifest_targets(repository, ref)
-    effective_protected = set(protected) | stable_targets
+    effective_protected = dynamic_protected_paths(set(protected) | stable_targets)
     versions = version_dirs(group)
     retained_versions = versions[:keep] + [
         path for path in versions[keep:] if path_is_protected(path, effective_protected)
@@ -654,41 +1236,71 @@ def prune_current_group(
         group,
         keep=keep,
         apply=apply,
-        protected=effective_protected,
+        protected=set(protected) | stable_targets,
     )
-    keep_hashes = retained_manifest_hashes(retained_versions)
+    retained_after = version_dirs(group) if apply else retained_versions
+    keep_hashes = retained_manifest_hashes(retained_after)
     keep_hashes.update(sha256_file(target) for target in stable_targets)
     report["stable_manifest_targets"] = sorted(str(path) for path in stable_targets)
     localized = PUB_ROOT / "external" / "_bundles" / repository / ref
-    localized_dirs = (
-        [
-            path
-            for path in localized.iterdir()
-            if path.is_dir() and not path.is_symlink()
-        ]
-        if localized.exists()
-        else []
-    )
+    localized_dirs = localized_hash_dirs(localized)
+    effective_protected = dynamic_protected_paths(set(protected) | stable_targets)
     localized_removable = [
         path
         for path in localized_dirs
         if path.name not in keep_hashes
         and not path_is_protected(path, effective_protected)
     ]
-    localized_removable_bytes = sum(tree_bytes(path) for path in localized_removable)
-    for path in localized_removable:
-        remove_tree(path, apply=apply, root=localized)
+    localized_plans = [
+        PrunePlan(path=path, snapshot=tree_snapshot(path), bytes=tree_bytes(path))
+        for path in localized_removable
+    ]
+    localized_removed: list[str] = []
+    localized_newly_protected: list[str] = []
+    localized_removed_bytes = 0
+    if apply:
+        for plan in localized_plans:
+            result = transactional_prune(
+                plan.path,
+                root=localized,
+                expected_snapshot=plan.snapshot,
+                removed_bytes=plan.bytes,
+                protected=set(protected) | stable_targets,
+            )
+            if result["state"] == "deleted":
+                localized_removed.append(str(plan.path))
+                localized_removed_bytes += int(plan.bytes)
+            else:
+                localized_newly_protected.append(str(plan.path))
+    localized_removable_bytes = sum(int(plan.bytes) for plan in localized_plans)
     report["localized_group"] = str(localized)
     report["retained_manifest_hashes"] = sorted(keep_hashes)
-    report["localized_removed"] = (
-        [str(path) for path in localized_removable] if apply else []
-    )
+    report["localized_newly_protected"] = localized_newly_protected
+    report["localized_removed"] = localized_removed
     report["localized_would_remove"] = (
         [] if apply else [str(path) for path in localized_removable]
     )
-    report["localized_removed_bytes"] = localized_removable_bytes if apply else 0
+    report["localized_removed_bytes"] = localized_removed_bytes
     report["localized_would_remove_bytes"] = 0 if apply else localized_removable_bytes
     return report
+
+
+def managed_directories(root: Path, *, label: str) -> list[Path]:
+    if not root.exists():
+        return []
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError(f"{label} root is not a regular directory: {root}")
+    directories: list[Path] = []
+    unexpected: list[Path] = []
+    for path in root.iterdir():
+        if path.is_dir() and not path.is_symlink():
+            directories.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected entries below {label} root {root}: {rendered}")
+    return sorted(directories)
 
 
 def prune_all_current(
@@ -696,15 +1308,11 @@ def prune_all_current(
 ) -> list[dict[str, object]]:
     root = PUB_ROOT / "bundles"
     reports: list[dict[str, object]] = []
-    if not root.exists():
-        return reports
-    for repo_group in sorted(root.iterdir()):
-        if not repo_group.is_dir() or repo_group.is_symlink():
-            continue
+    for repo_group in managed_directories(root, label="current publication"):
         repository = repo_group.name
-        for ref_group in sorted(repo_group.iterdir()):
-            if not ref_group.is_dir() or ref_group.is_symlink():
-                continue
+        for ref_group in managed_directories(
+            repo_group, label=f"current repository {repository}"
+        ):
             reports.append(
                 prune_current_group(
                     ref_group,
@@ -718,47 +1326,50 @@ def prune_all_current(
     return reports
 
 
+def legacy_version_groups() -> list[Path]:
+    groups: list[Path] = []
+    for repository_group in managed_directories(
+        LEGACY_OUT_ROOT, label="legacy publication"
+    ):
+        children = managed_directories(
+            repository_group, label=f"legacy repository {repository_group.name}"
+        )
+        if not children:
+            continue
+        direct_versions = [
+            child for child in children if VERSION_DIR_RE.fullmatch(child.name)
+        ]
+        if direct_versions:
+            if len(direct_versions) != len(children):
+                raise RuntimeError(
+                    f"mixed legacy layouts below {repository_group}: "
+                    "version and ref directories coexist"
+                )
+            version_dirs(repository_group)
+            groups.append(repository_group)
+            continue
+        for ref_group in children:
+            version_dirs(ref_group)
+            groups.append(ref_group)
+    return groups
+
+
 def prune_all_legacy(
     *, keep: int, apply: bool, protected: set[Path]
 ) -> list[dict[str, object]]:
-    reports: list[dict[str, object]] = []
-    if not LEGACY_OUT_ROOT.exists():
-        return reports
-    for repo_group in sorted(LEGACY_OUT_ROOT.iterdir()):
-        if not repo_group.is_dir() or repo_group.is_symlink():
-            continue
-        for ref_group in sorted(repo_group.iterdir()):
-            if not ref_group.is_dir() or ref_group.is_symlink():
-                continue
-            reports.append(
-                prune_group(
-                    ref_group,
-                    keep=keep,
-                    apply=apply,
-                    protected=protected,
-                )
-            )
-    return reports
+    return [
+        prune_group(group, keep=keep, apply=apply, protected=protected)
+        for group in legacy_version_groups()
+    ]
 
 
 def prune_all_special(
     *, keep: int, apply: bool, protected: set[Path]
 ) -> list[dict[str, object]]:
-    reports: list[dict[str, object]] = []
-    if not SPECIAL_OUT_ROOT.exists():
-        return reports
-    for group in sorted(SPECIAL_OUT_ROOT.iterdir()):
-        if not group.is_dir() or group.is_symlink():
-            continue
-        reports.append(
-            prune_group(
-                group,
-                keep=keep,
-                apply=apply,
-                protected=protected,
-            )
-        )
-    return reports
+    return [
+        prune_group(group, keep=keep, apply=apply, protected=protected)
+        for group in managed_directories(SPECIAL_OUT_ROOT, label="special publication")
+    ]
 
 
 def publish(
@@ -770,7 +1381,7 @@ def publish(
     tool_sha: str,
     fingerprint: str,
     config: PublicationConfig,
-) -> tuple[dict[str, object], Path]:
+) -> tuple[dict[str, object], Path, Path]:
     repository = safe_segment(entry.repo)
     registry_repository = publication_repository(entry)
     ref_segment = safe_segment(branch)
@@ -784,6 +1395,12 @@ def publish(
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     out_dir = out_base / f"{stamp}-{fingerprint[:12]}"
     out_base.mkdir(parents=True, exist_ok=True)
+    active_lease = create_active_publication_lease(
+        repository=registry_repository,
+        ref=ref_segment,
+        fingerprint=fingerprint,
+        publication_dir=out_dir,
+    )
     command = [
         "python3",
         "-B",
@@ -812,43 +1429,48 @@ def publish(
     ]
     if config.redact_secrets:
         command.append("--redact-secrets")
-    cp = run(command, cwd=TOOL_WT, check=False)
-    LOG_ROOT.mkdir(parents=True, exist_ok=True)
-    raw_log = LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.stdout.txt"
-    raw_log.write_text(cp.stdout, encoding="utf-8")
-    if cp.returncode != 0:
-        discard_generated_output(out_dir, root=out_base)
-        tail = cp.stdout[-2000:] if cp.stdout else "<empty stdout>"
-        raise RuntimeError(f"repobrief refresh failed rc={cp.returncode}: {tail}")
-    data = parse_cli_json(cp.stdout)
-    manifests = list(out_dir.glob("*_merge.bundle.manifest.json"))
-    if not out_dir.is_dir() or not manifests:
-        discard_generated_output(out_dir, root=out_base)
-        raise RuntimeError(
-            "RepoBrief refresh returned success without a bundle manifest"
+    try:
+        cp = run(command, cwd=TOOL_WT, check=False)
+        LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        raw_log = (
+            LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.stdout.txt"
         )
-    repo_log = LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.json"
-    repo_log.write_text(
-        json.dumps(
-            {
-                "entry": {
-                    "key": entry.key,
-                    "path": str(entry.path),
-                    "remote": entry.remote,
+        raw_log.write_text(cp.stdout, encoding="utf-8")
+        if cp.returncode != 0:
+            tail = cp.stdout[-2000:] if cp.stdout else "<empty stdout>"
+            raise RuntimeError(f"repobrief refresh failed rc={cp.returncode}: {tail}")
+        data = parse_cli_json(cp.stdout)
+        manifests = list(out_dir.glob("*_merge.bundle.manifest.json"))
+        if not out_dir.is_dir() or not manifests:
+            raise RuntimeError(
+                "RepoBrief refresh returned success without a bundle manifest"
+            )
+        repo_log = LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.json"
+        repo_log.write_text(
+            json.dumps(
+                {
+                    "entry": {
+                        "key": entry.key,
+                        "path": str(entry.path),
+                        "remote": entry.remote,
+                    },
+                    "remote_ref": remote_ref,
+                    "sha": sha,
+                    "tool_sha": tool_sha,
+                    "fingerprint": fingerprint,
+                    "result": data,
                 },
-                "remote_ref": remote_ref,
-                "sha": sha,
-                "tool_sha": tool_sha,
-                "fingerprint": fingerprint,
-                "result": data,
-            },
-            indent=2,
-            sort_keys=True,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    return data, out_dir
+        return data, out_dir, active_lease
+    except Exception:
+        discard_generated_output(out_dir, root=out_base)
+        clear_active_publication_lease(active_lease)
+        raise
 
 
 def validate_retention(value: int) -> int:
@@ -869,29 +1491,46 @@ def acquire_lock() -> Any:
 
 
 def cleanup_mode(args: argparse.Namespace) -> int:
-    protected = {Path(raw).expanduser().resolve() for raw in args.protect_path}
-    stable_targets = all_stable_manifest_targets()
-    protected.update(stable_targets)
+    explicit = {
+        Path(raw).expanduser().resolve(strict=False) for raw in args.protect_path
+    }
     apply = bool(args.apply_prune)
     reports: dict[str, object] = {
         "status": "ok",
         "mode": "apply" if apply else "dry-run",
         "retention": args.retention,
-        "protected_paths": sorted(str(path) for path in protected),
-        "stable_manifest_targets": sorted(str(path) for path in stable_targets),
+        "explicit_protected_paths": sorted(str(path) for path in explicit),
     }
-    if args.prune_current:
-        reports["current"] = prune_all_current(
-            keep=args.retention, apply=apply, protected=protected
+    try:
+        reports["reconciliation"] = reconcile_prune_transactions(
+            protected=explicit, apply=apply
         )
-    if args.prune_legacy:
-        reports["legacy"] = prune_all_legacy(
-            keep=args.retention, apply=apply, protected=protected
+        protected = dynamic_protected_paths(explicit)
+        reports["protected_paths"] = sorted(str(path) for path in protected)
+        reports["stable_manifest_targets"] = sorted(
+            str(path) for path in all_stable_manifest_targets()
         )
-    if args.prune_special:
-        reports["special"] = prune_all_special(
-            keep=args.retention, apply=apply, protected=protected
+        reports["state_publication_targets"] = sorted(
+            str(path) for path in state_publication_targets()
         )
+        reports["active_publication_targets"] = sorted(
+            str(path) for path in active_publication_targets()
+        )
+        if args.prune_current:
+            reports["current"] = prune_all_current(
+                keep=args.retention, apply=apply, protected=explicit
+            )
+        if args.prune_legacy:
+            reports["legacy"] = prune_all_legacy(
+                keep=args.retention, apply=apply, protected=explicit
+            )
+        if args.prune_special:
+            reports["special"] = prune_all_special(
+                keep=args.retention, apply=apply, protected=explicit
+            )
+    except Exception as exc:
+        reports["status"] = "error"
+        reports["error"] = str(exc)[:4000]
     LOG_ROOT.mkdir(parents=True, exist_ok=True)
     receipt = LOG_ROOT / (
         "fleet-prune-apply-last.json" if apply else "fleet-prune-dry-run-last.json"
@@ -899,7 +1538,7 @@ def cleanup_mode(args: argparse.Namespace) -> int:
     reports["receipt"] = str(receipt)
     atomic_write_json(receipt, reports)
     print(json.dumps(reports, indent=2, sort_keys=True))
-    return 0
+    return 0 if reports["status"] == "ok" else 1
 
 
 def main(argv: list[str]) -> int:
@@ -920,6 +1559,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--prune-current", action="store_true")
     parser.add_argument("--prune-legacy", action="store_true")
     parser.add_argument("--prune-special", action="store_true")
+    parser.add_argument("--reconcile-prune", action="store_true")
     parser.add_argument("--apply-prune", action="store_true")
     parser.add_argument("--protect-path", action="append", default=[])
     args = parser.parse_args(argv)
@@ -935,11 +1575,14 @@ def main(argv: list[str]) -> int:
         parser.error(
             "--force-republish requires at least one --repo and a non-empty --reason"
         )
-    cleanup_requested = args.prune_current or args.prune_legacy or args.prune_special
+    cleanup_requested = (
+        args.prune_current
+        or args.prune_legacy
+        or args.prune_special
+        or args.reconcile_prune
+    )
     if args.apply_prune and not cleanup_requested:
-        parser.error(
-            "--apply-prune requires --prune-current, --prune-legacy, or --prune-special"
-        )
+        parser.error("--apply-prune requires a prune or reconciliation mode")
     if cleanup_requested:
         cleanup_lock = acquire_lock()
         if cleanup_lock is None:
@@ -1002,6 +1645,7 @@ def main(argv: list[str]) -> int:
         changed = published = skipped = failed = queued = prune_failed = 0
         details: list[dict[str, object]] = []
         protected: set[Path] = set()
+        reconciliation = reconcile_prune_transactions(protected=protected, apply=True)
         for entry in entries:
             try:
                 remote_ref, branch, source_sha = remote_head(entry.path)
@@ -1043,7 +1687,7 @@ def main(argv: list[str]) -> int:
                         }
                     )
                     continue
-                data, out_dir = publish(
+                data, out_dir, active_lease = publish(
                     entry,
                     remote_ref=remote_ref,
                     branch=branch,
@@ -1060,6 +1704,7 @@ def main(argv: list[str]) -> int:
                     ref=ref_segment,
                     publication_dir=out_dir,
                 )
+                clear_active_publication_lease(active_lease)
                 published += 1
                 try:
                     prune_report = prune_current_group(
@@ -1114,6 +1759,7 @@ def main(argv: list[str]) -> int:
             "tool_sha": tool_sha,
             "generator_inputs_sha": generator_sha,
             "force_reason": args.reason if args.force_republish else None,
+            "retention_reconciliation": reconciliation,
             "details": details,
         }
         atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
