@@ -62,3 +62,32 @@ Linux uses `renameat2(..., RENAME_NOREPLACE)`; macOS and iOS use
 `renameatx_np(..., RENAME_EXCL)`. Both variants operate on already validated
 parent directory descriptors. An unknown platform or missing primitive fails
 closed rather than falling back to a pathname `exists()` check.
+
+## Operational boundaries and deliberate trade-offs
+
+Generation discovery and verification hash artifact streams in bounded chunks;
+large artifact payloads are never retained as one in-memory bundle image. The
+manifest itself is still parsed as JSON and therefore remains memory-resident.
+
+Hardlinks are deliberately not used. A source artifact remains mutable until
+publication completes, and a hardlink would let a later source write mutate an
+already published generation through the shared inode. Native reflinks could be
+a future optimization only with copy verification and a portable fallback.
+
+Duplicate declarations of one relative path are idempotent only when byte count
+and SHA-256 are identical. Conflicting content for the same path fails closed.
+
+A lane that has successfully used a `current` symlink remains in symlink mode.
+If the storage environment later loses symlink support, publication stops rather
+than silently changing pointer semantics. Recovery is an explicit administrative
+operation: repair symlink support or remove the lane pointer while no publisher
+is running, then allow a fresh pointer to be established.
+
+Cache metadata identity is considered strong only when device, inode, mtime_ns
+and ctime_ns are all non-zero. Weak or unavailable identity forces full content
+verification; `strict` mode forces it regardless of metadata quality.
+
+The publication protocol detects removal or replacement before and during the
+pointer switch. It cannot make a `current` pointer permanently immune to a
+privileged, uncooperative process deleting immutable generation directories
+after publication; protecting that storage remains an operational boundary.

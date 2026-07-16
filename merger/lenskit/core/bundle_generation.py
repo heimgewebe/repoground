@@ -17,6 +17,8 @@ from .rooted_filesystem import (
     atomic_write_bytes,
     bind_directory,
     copy_verified_file,
+    digest_regular_file,
+    digest_tree,
     fsync_directory,
     lstat_path,
     make_directories,
@@ -24,7 +26,6 @@ from .rooted_filesystem import (
     path_exists,
     path_is_real_directory,
     read_regular_bytes,
-    read_tree,
     remove_tree,
     rename_path_no_replace,
     secure_absolute,
@@ -94,12 +95,12 @@ class BundleGenerationResult:
 class _BundleFile:
     relative_path: str
     source_path: Path
-    payload: bytes
+    byte_count: int
     sha256: str
 
     @property
     def bytes(self) -> int:
-        return len(self.payload)
+        return self.byte_count
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,35 +174,64 @@ def _read_regular_payload(path: Path, *, label: str) -> bytes:
         raise BundleGenerationError(f"{label} must be a regular file inside the bundle root: {path}") from exc
 
 
+def _digest_regular_payload(path: Path, *, label: str) -> tuple[int, str]:
+    try:
+        return digest_regular_file(path)
+    except RootedFilesystemError as exc:
+        raise BundleGenerationError(
+            f"{label} must be a stable regular file inside the bundle root: {path}"
+        ) from exc
+
+
+def _validate_post_emit_health_binding(payload: bytes, manifest_sha256: str) -> None:
+    try:
+        report = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BundleGenerationError("post_emit_health sidecar must be valid UTF-8 JSON") from exc
+    if not isinstance(report, dict):
+        raise BundleGenerationError("post_emit_health sidecar must be a JSON object")
+    declared = report.get("bundle_manifest_sha256")
+    if declared is None:
+        return
+    if not _is_sha256(declared):
+        raise BundleGenerationError("post_emit_health bundle_manifest_sha256 is invalid")
+    if declared != manifest_sha256:
+        raise BundleGenerationError(
+            "post_emit_health bundle_manifest_sha256 does not match the final manifest"
+        )
+
+
 def _add_file(
     files: dict[str, _BundleFile],
     *,
     relative_path: str,
     source_path: Path,
-    payload: bytes,
+    observed_bytes: int,
+    observed_sha256: str,
     expected_bytes: Any = None,
     expected_sha256: Any = None,
     label: str,
 ) -> None:
-    sha256 = hashlib.sha256(payload).hexdigest()
     if (
         isinstance(expected_bytes, int)
         and not isinstance(expected_bytes, bool)
-        and expected_bytes != len(payload)
+        and expected_bytes != observed_bytes
     ):
         raise BundleGenerationError(f"{label} byte count does not match the manifest")
-    if _is_sha256(expected_sha256) and expected_sha256 != sha256:
+    if _is_sha256(expected_sha256) and expected_sha256 != observed_sha256:
         raise BundleGenerationError(f"{label} sha256 does not match the manifest")
     existing = files.get(relative_path)
     if existing is not None:
-        if existing.sha256 != sha256 or existing.bytes != len(payload):
-            raise BundleGenerationError(f"bundle file path is declared with conflicting content: {relative_path}")
+        if existing.sha256 != observed_sha256 or existing.bytes != observed_bytes:
+            raise BundleGenerationError(
+                f"bundle file path is declared with conflicting content: {relative_path}"
+            )
         return
     files[relative_path] = _BundleFile(
         relative_path=relative_path,
         source_path=source_path,
-        payload=payload,
-        sha256=sha256,
+        byte_count=observed_bytes,
+        sha256=observed_sha256,
     )
 
 
@@ -229,12 +259,13 @@ def _collect_manifest_artifacts(
             continue
         label = f"artifact[{index}]"
         relative, source = _resolve_under_root(output_root, row.get("path"), label=label)
-        payload = _read_regular_payload(source, label=label)
+        observed_bytes, observed_sha256 = _digest_regular_payload(source, label=label)
         _add_file(
             files,
             relative_path=relative,
             source_path=source,
-            payload=payload,
+            observed_bytes=observed_bytes,
+            observed_sha256=observed_sha256,
             expected_bytes=row.get("bytes"),
             expected_sha256=row.get("sha256"),
             label=label,
@@ -246,6 +277,7 @@ def _collect_manifest_links(
     *,
     output_root: Path,
     files: dict[str, _BundleFile],
+    manifest_sha256: str,
 ) -> None:
     links = manifest.get("links")
     if not isinstance(links, dict):
@@ -255,12 +287,21 @@ def _collect_manifest_links(
             continue
         label = f"links.{key}"
         relative, source = _resolve_under_root(output_root, links[key], label=label)
-        payload = _read_regular_payload(source, label=label)
+        if key == "post_emit_health_path":
+            payload = _read_regular_payload(source, label=label)
+            _validate_post_emit_health_binding(payload, manifest_sha256)
+            observed_bytes = len(payload)
+            observed_sha256 = hashlib.sha256(payload).hexdigest()
+        else:
+            observed_bytes, observed_sha256 = _digest_regular_payload(
+                source, label=label
+            )
         _add_file(
             files,
             relative_path=relative,
             source_path=source,
-            payload=payload,
+            observed_bytes=observed_bytes,
+            observed_sha256=observed_sha256,
             label=label,
         )
 
@@ -278,12 +319,15 @@ def _collect_extra_paths(
         except ValueError as exc:
             raise BundleGenerationError(f"extra bundle file escapes output root: {source}") from exc
         _safe_relative_path(relative, label="extra file")
-        payload = _read_regular_payload(source, label="extra file")
+        observed_bytes, observed_sha256 = _digest_regular_payload(
+            source, label="extra file"
+        )
         _add_file(
             files,
             relative_path=relative,
             source_path=source,
-            payload=payload,
+            observed_bytes=observed_bytes,
+            observed_sha256=observed_sha256,
             label="extra file",
         )
 
@@ -299,14 +343,20 @@ def _collect_bundle_files(
     manifest = _parse_manifest_payload(manifest_payload)
     files: dict[str, _BundleFile] = {}
     _collect_manifest_artifacts(manifest, output_root=output_root, files=files)
-    _collect_manifest_links(manifest, output_root=output_root, files=files)
+    _collect_manifest_links(
+        manifest,
+        output_root=output_root,
+        files=files,
+        manifest_sha256=manifest_sha256,
+    )
     _collect_extra_paths(extra_paths, output_root=output_root, files=files)
     manifest_relative = manifest_path.relative_to(output_root).as_posix()
     _add_file(
         files,
         relative_path=manifest_relative,
         source_path=manifest_path,
-        payload=manifest_payload,
+        observed_bytes=len(manifest_payload),
+        observed_sha256=manifest_sha256,
         label="bundle manifest",
     )
     ordered = sorted(
@@ -334,8 +384,11 @@ def _generation_id(files: list[_BundleFile], *, manifest_sha256: str) -> str:
     return hashlib.sha256(compact).hexdigest()
 
 
-def _expected_files(files: list[_BundleFile]) -> dict[str, bytes]:
-    return {item.relative_path: item.payload for item in files}
+def _expected_files(files: list[_BundleFile]) -> dict[str, tuple[int, str]]:
+    return {
+        item.relative_path: (item.bytes, item.sha256)
+        for item in files
+    }
 
 
 def _expected_directories(files: list[_BundleFile]) -> set[str]:
@@ -350,7 +403,7 @@ def _expected_directories(files: list[_BundleFile]) -> set[str]:
 
 def _verify_existing_generation(generation_dir: Path, files: list[_BundleFile]) -> None:
     try:
-        observed_files, observed_directories = read_tree(generation_dir)
+        observed_files, observed_directories = digest_tree(generation_dir)
     except RootedFilesystemError as exc:
         raise BundleGenerationError(f"existing generation is not a trusted regular-file tree: {generation_dir}") from exc
     if observed_files != _expected_files(files) or observed_directories != _expected_directories(files):
@@ -581,14 +634,23 @@ def publish_bundle_generation(
         )
         generation_id = _generation_id(files, manifest_sha256=manifest_sha256)
         generation_dir, reused = _install_generation(generations_root, generation_id, files)
-        binding.assert_current_path_identity()
-        pointer_path, pointer_kind = _publish_current_pointer(
-            generations_root,
-            generation_id=generation_id,
-            manifest_relative_path=manifest_relative,
-            manifest_sha256=manifest_sha256,
-        )
-        binding.assert_current_path_identity()
+        try:
+            with bind_directory(generation_dir) as generation_binding:
+                _verify_existing_generation(generation_dir, files)
+                generation_binding.assert_current_path_identity()
+                binding.assert_current_path_identity()
+                pointer_path, pointer_kind = _publish_current_pointer(
+                    generations_root,
+                    generation_id=generation_id,
+                    manifest_relative_path=manifest_relative,
+                    manifest_sha256=manifest_sha256,
+                )
+                generation_binding.assert_current_path_identity()
+                binding.assert_current_path_identity()
+        except RootedFilesystemError as exc:
+            raise BundleGenerationError(
+                f"generation changed while the current pointer was being published: {generation_dir}"
+            ) from exc
     if pointer_kind == "relative_symlink":
         selected_manifest_path = current_manifest_path(root, bundle_stem, manifest_relative)
     else:
@@ -637,8 +699,8 @@ def resolve_bundle_manifest_path(path: str | Path) -> Path:
             pointer.get("manifest_path"),
             label="current JSON pointer manifest_path",
         )
-        expected_prefix = f"{pointer['generation_id']}/"
-        if not relative.startswith(expected_prefix):
+        relative_parts = PurePosixPath(relative).parts
+        if len(relative_parts) < 2 or relative_parts[0] != pointer["generation_id"]:
             raise BundleGenerationError(
                 "current JSON pointer manifest path does not match generation_id"
             )
