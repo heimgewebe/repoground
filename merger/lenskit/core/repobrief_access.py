@@ -1402,6 +1402,7 @@ _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
     dict.fromkeys([*_DOES_NOT_ESTABLISH, *_CALL_GRAPH_DOES_NOT_ESTABLISH])
 )
 _CALL_NAVIGATION_CACHE_MAX_ENTRIES = 2
+_CALL_NAVIGATION_CACHE_VALIDATION_ENV = "LENSKIT_REPOBRIEF_CACHE_VALIDATION"
 _CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV = "LENSKIT_REPOBRIEF_STRICT_CACHE_HASH"
 
 
@@ -1473,13 +1474,49 @@ def _file_identity(stat_result: os.stat_result) -> tuple[int, int, int, int, int
     )
 
 
-def _strict_source_hash_enabled() -> bool:
-    return os.environ.get(_CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV, "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
+def _cache_validation_mode() -> str:
+    """Return the explicit cache-validation mode, failing closed on typos."""
+    configured = os.environ.get(
+        _CALL_NAVIGATION_CACHE_VALIDATION_ENV, ""
+    ).strip().lower()
+    if configured in {"auto", "strict"}:
+        return configured
+    if configured:
+        return "strict"
+
+    legacy = os.environ.get(
+        _CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV, ""
+    ).strip().lower()
+    if legacy in {"", "0", "false", "no", "off"}:
+        return "auto"
+    return "strict"
+
+
+def _source_identity_is_strong(
+    fingerprint: _ArtifactSourceFingerprint,
+) -> bool:
+    """Whether metadata can support the fast warm-cache validation path."""
+    return all(
+        value != 0
+        for value in (
+            fingerprint.device,
+            fingerprint.inode,
+            fingerprint.mtime_ns,
+            fingerprint.ctime_ns,
+        )
+    )
+
+
+def _source_content_verification_required(
+    fingerprint: _ArtifactSourceFingerprint,
+    *,
+    verify_content: bool,
+) -> bool:
+    return (
+        verify_content
+        or _cache_validation_mode() == "strict"
+        or not _source_identity_is_strong(fingerprint)
+    )
 
 
 def _read_stable_artifact_bytes(
@@ -1585,20 +1622,15 @@ def _artifact_source_is_current(
 ) -> bool:
     """Validate one cached generation without reparsing its JSON payload.
 
-    Cold loads and post-build checks always hash the exact artifact bytes. Warm
-    lookups use the manifest hash plus file identity metadata to preserve the
-    index speedup; deployments on filesystems with weak metadata semantics can
-    set ``LENSKIT_REPOBRIEF_STRICT_CACHE_HASH=1`` to hash on every lookup.
+    Cold loads and post-build checks always hash bytes read from one pinned file
+    descriptor. Warm lookups use the manifest hash plus strong file identity
+    metadata. ``LENSKIT_REPOBRIEF_CACHE_VALIDATION=strict`` forces a full hash
+    on every lookup; the legacy strict-hash switch remains supported. Weak
+    identities such as zero device or inode values automatically use strict
+    validation.
     """
     manifest_path = Path(fingerprint.manifest_path)
     artifact_path = Path(fingerprint.absolute_path)
-    try:
-        manifest_before = manifest_path.read_bytes()
-        if hashlib.sha256(manifest_before).hexdigest() != fingerprint.manifest_sha256:
-            return False
-        stat_before = artifact_path.stat()
-    except OSError:
-        return False
     expected_identity = (
         fingerprint.device,
         fingerprint.inode,
@@ -1606,22 +1638,37 @@ def _artifact_source_is_current(
         fingerprint.mtime_ns,
         fingerprint.ctime_ns,
     )
-    if _file_identity(stat_before) != expected_identity:
-        return False
-    if not verify_content and not _strict_source_hash_enabled():
-        return True
     try:
-        artifact_bytes = artifact_path.read_bytes()
-        stat_after = artifact_path.stat()
+        manifest_before = manifest_path.read_bytes()
+    except OSError:
+        return False
+    if hashlib.sha256(manifest_before).hexdigest() != fingerprint.manifest_sha256:
+        return False
+
+    requires_content = _source_content_verification_required(
+        fingerprint,
+        verify_content=verify_content,
+    )
+    if not requires_content:
+        try:
+            return _file_identity(artifact_path.stat()) == expected_identity
+        except OSError:
+            return False
+
+    artifact_bytes, artifact_stat, failure, _detail = (
+        _read_stable_artifact_bytes(artifact_path)
+    )
+    if failure is not None or artifact_bytes is None or artifact_stat is None:
+        return False
+    if _file_identity(artifact_stat) != expected_identity:
+        return False
+    if hashlib.sha256(artifact_bytes).hexdigest() != fingerprint.artifact_sha256:
+        return False
+    try:
         manifest_after = manifest_path.read_bytes()
     except OSError:
         return False
-    return (
-        _file_identity(stat_after) == expected_identity
-        and hashlib.sha256(artifact_bytes).hexdigest() == fingerprint.artifact_sha256
-        and hashlib.sha256(manifest_after).hexdigest() == fingerprint.manifest_sha256
-    )
-
+    return hashlib.sha256(manifest_after).hexdigest() == fingerprint.manifest_sha256
 
 def _cache_state(
     cache: OrderedDict[Any, Any], key: Any, state: Any

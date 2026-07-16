@@ -985,6 +985,7 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
             raise AssertionError("default warm cache hit must not reread call-graph bytes")
         return original_read_bytes(path)
 
+    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
     monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
     monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
 
@@ -992,22 +993,154 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
     assert result["status"] == "available"
 
 
-def test_strict_navigation_cache_hash_rereads_call_graph_bytes(tmp_path, monkeypatch):
+def test_strict_navigation_cache_hash_uses_descriptor_pinned_read(
+    tmp_path, monkeypatch
+):
     manifest, call_graph, _ = _write_bundle(tmp_path)
     assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
 
-    original_read_bytes = Path.read_bytes
+    original_reader = repobrief_access._read_stable_artifact_bytes
     call_graph_path = call_graph.resolve()
     call_graph_reads = 0
 
-    def counting_read_bytes(path):
+    def counting_reader(path):
         nonlocal call_graph_reads
         if path.resolve() == call_graph_path:
             call_graph_reads += 1
-        return original_read_bytes(path)
+        return original_reader(path)
 
+    monkeypatch.setenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", "strict")
+    monkeypatch.setattr(
+        repobrief_access, "_read_stable_artifact_bytes", counting_reader
+    )
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+    assert call_graph_reads >= 1
+
+
+def test_invalid_cache_validation_mode_fails_closed_to_strict(
+    tmp_path, monkeypatch
+):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+
+    original_reader = repobrief_access._read_stable_artifact_bytes
+    call_graph_path = call_graph.resolve()
+    call_graph_reads = 0
+
+    def counting_reader(path):
+        nonlocal call_graph_reads
+        if path.resolve() == call_graph_path:
+            call_graph_reads += 1
+        return original_reader(path)
+
+    monkeypatch.setenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", "typo")
+    monkeypatch.setattr(
+        repobrief_access, "_read_stable_artifact_bytes", counting_reader
+    )
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+    assert call_graph_reads >= 1
+
+
+def test_weak_file_identity_automatically_uses_content_hash(
+    tmp_path, monkeypatch
+):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    original_reader = repobrief_access._read_stable_artifact_bytes
+    call_graph_path = call_graph.resolve()
+    call_graph_reads = 0
+
+    class WeakStat:
+        def __init__(self, source):
+            self.st_dev = 0
+            self.st_ino = 0
+            self.st_size = source.st_size
+            self.st_mtime_ns = source.st_mtime_ns
+            self.st_ctime_ns = source.st_ctime_ns
+
+    def weak_identity_reader(path):
+        nonlocal call_graph_reads
+        raw, stat_result, failure, detail = original_reader(path)
+        if path.resolve() == call_graph_path and stat_result is not None:
+            call_graph_reads += 1
+            stat_result = WeakStat(stat_result)
+        return raw, stat_result, failure, detail
+
+    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
+    monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
+    monkeypatch.setattr(
+        repobrief_access,
+        "_read_stable_artifact_bytes",
+        weak_identity_reader,
+    )
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+    reads_after_cold_load = call_graph_reads
+    assert reads_after_cold_load >= 2
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+    assert call_graph_reads > reads_after_cold_load
+
+
+def test_strict_warm_validation_rejects_tampered_bytes_with_same_identity(
+    tmp_path, monkeypatch
+):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+
+    fingerprint = next(
+        key
+        for key in repobrief_access._CALL_NAVIGATION_CACHE
+        if key.absolute_path == str(call_graph.resolve())
+    )
+    original_reader = repobrief_access._read_stable_artifact_bytes
+
+    def tampered_reader(path):
+        raw, stat_result, failure, detail = original_reader(path)
+        if path.resolve() != call_graph.resolve() or raw is None:
+            return raw, stat_result, failure, detail
+        tampered = bytearray(raw)
+        tampered[-2] = ord(" ") if tampered[-2] != ord(" ") else ord("\t")
+        return bytes(tampered), stat_result, failure, detail
+
+    monkeypatch.setattr(
+        repobrief_access,
+        "_read_stable_artifact_bytes",
+        tampered_reader,
+    )
+
+    assert not repobrief_access._artifact_source_is_current(
+        fingerprint,
+        verify_content=True,
+    )
+
+
+def test_legacy_strict_hash_switch_remains_supported(tmp_path, monkeypatch):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+
+    original_reader = repobrief_access._read_stable_artifact_bytes
+    call_graph_path = call_graph.resolve()
+    call_graph_reads = 0
+
+    def counting_reader(path):
+        nonlocal call_graph_reads
+        if path.resolve() == call_graph_path:
+            call_graph_reads += 1
+        return original_reader(path)
+
+    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
     monkeypatch.setenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", "1")
-    monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+    monkeypatch.setattr(
+        repobrief_access,
+        "_read_stable_artifact_bytes",
+        counting_reader,
+    )
 
     result = get_callers(manifest, "target", path="pkg/target.py")
     assert result["status"] == "available"
