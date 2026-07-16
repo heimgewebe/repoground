@@ -324,6 +324,28 @@ def test_navigation_cache_reuses_validated_call_state(tmp_path, monkeypatch):
     assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 1
 
 
+def test_public_navigation_results_cannot_mutate_cached_state(tmp_path):
+    manifest, _, symbol_index = _write_bundle(tmp_path)
+    symbol_payload = json.loads(symbol_index.read_text(encoding="utf-8"))
+    target = next(item for item in symbol_payload["symbols"] if item["id"] == TARGET_ID)
+    target["decorators"] = ["registered"]
+    symbol_index.write_text(json.dumps(symbol_payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_symbol_index_json", symbol_index)
+
+    first = get_callers(manifest, "target", path="pkg/target.py", k=10)
+    expected = json.loads(json.dumps(first))
+
+    first["target_symbol"]["decorators"].append("mutated")
+    first["call_graph"]["sha256"] = "mutated"
+    first["symbol_index"]["sha256"] = "mutated"
+    first["call_graph_metadata"]["resolution_counts"]["resolved"] = 0
+    first["callers"][0]["call_sites"][0]["resolved_target_ids"].clear()
+    first["unresolved_references"][0]["candidate_target_ids"].append("mutated")
+
+    second = get_callers(manifest, "target", path="pkg/target.py", k=10)
+
+    assert second == expected
+
 def test_call_graph_content_must_match_manifest_hash(tmp_path):
     manifest, call_graph, _ = _write_bundle(tmp_path)
     assert find_references(manifest, "target")["status"] == "available"
@@ -487,7 +509,10 @@ def test_find_references_returns_bounded_s0_and_s1_evidence(tmp_path):
 
 
 def test_get_callers_fails_closed_when_target_name_is_ambiguous(tmp_path):
-    result = get_callers(_bundle(tmp_path), "target", k=10)
+    manifest = _bundle(tmp_path)
+    result = get_callers(manifest, "target", k=10)
+    expected = json.loads(json.dumps(result))
+
     assert result["status"] == "invalid"
     assert result["error_code"] == "symbol_ambiguous"
     assert [item["path"] for item in result["target_candidates"]] == [
@@ -495,6 +520,11 @@ def test_get_callers_fails_closed_when_target_name_is_ambiguous(tmp_path):
         "pkg/target.py",
     ]
     assert result["callers"] == []
+
+    result["symbol_index"]["sha256"] = "mutated"
+    result["target_candidates"][0]["decorators"].append("mutated")
+
+    assert get_callers(manifest, "target", k=10) == expected
 
 
 def test_get_callers_uses_target_identity_and_separates_textual_matches(tmp_path):

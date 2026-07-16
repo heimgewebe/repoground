@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -1185,6 +1186,7 @@ def _symbol_source_range(symbol: dict[str, Any]) -> dict[str, Any]:
 
 
 def _symbol_record(symbol: dict[str, Any]) -> dict[str, Any]:
+    decorators = symbol.get("decorators")
     return {
         "id": symbol.get("id"),
         "kind": symbol.get("kind"),
@@ -1196,7 +1198,7 @@ def _symbol_record(symbol: dict[str, Any]) -> dict[str, Any]:
         "end_line": symbol.get("end_line"),
         "range_ref": symbol.get("range_ref"),
         "source_range": _symbol_source_range(symbol),
-        "decorators": symbol.get("decorators") if isinstance(symbol.get("decorators"), list) else [],
+        "decorators": list(decorators) if isinstance(decorators, list) else [],
     }
 
 
@@ -1699,7 +1701,7 @@ def _call_graph_parse_diagnostics(data: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "skipped_files_count": skipped_files_count,
-        "skipped_errors": skipped_errors,
+        "skipped_errors": list(skipped_errors) if isinstance(skipped_errors, list) else skipped_errors,
         "skipped_errors_total_count": skipped_errors_total_count,
         "skipped_errors_truncated": skipped_errors_truncated,
     }
@@ -1965,6 +1967,8 @@ def _call_source_range(call: dict[str, Any]) -> dict[str, Any]:
 
 
 def _call_site_record(call: dict[str, Any]) -> dict[str, Any]:
+    resolved_target_ids = call.get("resolved_target_ids")
+    candidate_target_ids = call.get("candidate_target_ids")
     return {
         "path": call.get("path"),
         "start_line": call.get("start_line"),
@@ -1984,10 +1988,18 @@ def _call_site_record(call: dict[str, Any]) -> dict[str, Any]:
         "evidence_level": call.get("evidence_level"),
         "resolution_status": call.get("resolution_status"),
         "resolution_reason": call.get("resolution_reason"),
-        "resolved_target_ids": call.get("resolved_target_ids"),
-        "candidate_target_ids": call.get("candidate_target_ids"),
+        "resolved_target_ids": (
+            list(resolved_target_ids) if isinstance(resolved_target_ids, list) else []
+        ),
+        "candidate_target_ids": (
+            list(candidate_target_ids) if isinstance(candidate_target_ids, list) else []
+        ),
         "source_range": _call_source_range(call),
     }
+
+
+def _detached_record(value: Any) -> dict[str, Any] | None:
+    return deepcopy(value) if isinstance(value, dict) else None
 
 
 def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
@@ -1995,9 +2007,9 @@ def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
         "run_id": data.get("run_id"),
         "canonical_dump_index_sha256": data.get("canonical_dump_index_sha256"),
         "call_count": data.get("call_count"),
-        "resolution_counts": data.get("resolution_counts"),
-        "evidence_counts": data.get("evidence_counts"),
-        "relation_counts": data.get("relation_counts"),
+        "resolution_counts": _detached_record(data.get("resolution_counts")),
+        "evidence_counts": _detached_record(data.get("evidence_counts")),
+        "relation_counts": _detached_record(data.get("relation_counts")),
         **_call_graph_parse_diagnostics(data),
     }
 
@@ -2023,7 +2035,7 @@ def _validated_call_query(
             "name": name,
             "k": k,
             "filters": {"path": path},
-            "call_graph": artifact,
+            "call_graph": _detached_record(artifact),
             **_call_empty(kind),
         }
 
@@ -2280,8 +2292,8 @@ def _selected_symbol_or_error(
                 "name": name,
                 "k": k,
                 "filters": {"path": path},
-                "call_graph": call_state.artifact,
-                "symbol_index": symbol_artifact,
+                "call_graph": _detached_record(call_state.artifact),
+                "symbol_index": _detached_record(symbol_artifact),
                 **empty,
             },
         )
@@ -2307,8 +2319,8 @@ def _selected_symbol_or_error(
                 "name": name,
                 "k": k,
                 "filters": {"path": path},
-                "call_graph": call_state.artifact,
-                "symbol_index": symbol_state.artifact,
+                "call_graph": _detached_record(call_state.artifact),
+                "symbol_index": _detached_record(symbol_state.artifact),
                 **empty,
             },
         )
@@ -2359,7 +2371,7 @@ def find_references(
         "name": name,
         "k": k,
         "filters": {"path": path},
-        "call_graph": artifact,
+        "call_graph": _detached_record(artifact),
         "call_graph_metadata": _call_graph_metadata(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
@@ -2482,8 +2494,8 @@ def get_callers(
         "filters": {"path": path},
         "target_symbol": target_symbol,
         "target_candidates": [],
-        "call_graph": artifact,
-        "symbol_index": symbol_artifact,
+        "call_graph": _detached_record(artifact),
+        "symbol_index": _detached_record(symbol_artifact),
         "call_graph_metadata": _call_graph_metadata(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
@@ -2558,8 +2570,8 @@ def get_callees(
                         "filters": {"path": path},
                         "caller_symbol": caller_symbol,
                         "caller_candidates": [],
-                        "call_graph": artifact,
-                        "symbol_index": symbol_artifact,
+                        "call_graph": _detached_record(artifact),
+                        "symbol_index": _detached_record(symbol_artifact),
                         "callees": [],
                         "unresolved_call_sites": [],
                     },
@@ -2605,8 +2617,8 @@ def get_callees(
         "filters": {"path": path},
         "caller_symbol": caller_symbol,
         "caller_candidates": [],
-        "call_graph": artifact,
-        "symbol_index": symbol_artifact,
+        "call_graph": _detached_record(artifact),
+        "symbol_index": _detached_record(symbol_artifact),
         "call_graph_metadata": _call_graph_metadata(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
