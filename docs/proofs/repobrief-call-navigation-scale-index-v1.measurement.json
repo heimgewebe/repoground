@@ -1,0 +1,222 @@
+{
+  "configuration": {
+    "cold_repetitions": 3,
+    "fixed_acceptance_tier": true,
+    "mcp_repetitions": 10,
+    "query_repetitions": 7,
+    "representative_repo": "/home/alex/repos/.lenskit-worktrees/repobrief-call-navigation-scale-index-v1",
+    "synthetic_call_count": 50000
+  },
+  "decision": {
+    "cache_bound": "manifest hash plus artifact identity, declared hash and byte count",
+    "cache_max_entries": 2,
+    "rejected": {
+      "linear_scan": "repeated O(call_count) scans and repeated artifact validation",
+      "persisted_sidecar": "adds a second bundle artifact and measurable byte overhead without better warm queries"
+    },
+    "selected": "process_local_in_memory_index"
+  },
+  "does_not_establish": [
+    "performance_on_all_machines",
+    "performance_on_all_repositories",
+    "runtime_call_graph_completeness",
+    "dynamic_dispatch_resolution",
+    "default_promotion_without_equivalence_gates"
+  ],
+  "kind": "repobrief.call_navigation_scale_benchmark",
+  "machine_context": {
+    "implementation": "CPython",
+    "logical_cpu_count": 32,
+    "machine": "x86_64",
+    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "python": "3.10.12"
+  },
+  "mcp": {
+    "call_count": 50000,
+    "cold_batch": {
+      "max_ms": 754.568603,
+      "median_ms": 672.184264,
+      "min_ms": 658.49867,
+      "p95_ms": 672.184264,
+      "repetitions": 3
+    },
+    "cold_first_ms": 1581.729994,
+    "cold_first_peak_bytes": 143183761,
+    "cold_first_retained_bytes": 92730424,
+    "cold_warm_byte_equivalent": true,
+    "result_sha256": "6aa5b6819149ea6e88df224b6bae599be10fe6cd05634bf9a2cd7f7f828b5dd7",
+    "warm_repeated_batch": {
+      "max_ms": 6.241689,
+      "median_ms": 5.295808,
+      "min_ms": 5.081861,
+      "p95_ms": 5.472694,
+      "repetitions": 10
+    }
+  },
+  "representative_repo_parse": {
+    "skipped_errors": [
+      "Failed to parse merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py: SyntaxError - '(' was never closed (invalid.py, line 1)",
+      "Failed to parse merger/lenskit/tests/fixtures/graph_quality_goldset/invalid_case/broken.py: SyntaxError - invalid syntax (broken.py, line 1)"
+    ],
+    "skipped_files_count": 2
+  },
+  "status": "pass",
+  "tiers": [
+    {
+      "call_count": 50000,
+      "call_json_bytes": 30107862,
+      "equivalence": {
+        "byte_equivalent": true,
+        "result_sha256": "e63d575bccd2baeeba7c70caf2a65d59eecfc27c9d93751f1baa4522f7d71755",
+        "status": "pass"
+      },
+      "label": "synthetic_50000",
+      "linear_scan": {
+        "bundle_bytes": 30107862,
+        "cold_load": {
+          "max_ms": 236.820674,
+          "median_ms": 233.965465,
+          "min_ms": 187.016196,
+          "p95_ms": 233.965465,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 836.821821,
+          "median_ms": 804.27174,
+          "min_ms": 783.052609,
+          "p95_ms": 819.742882,
+          "repetitions": 7
+        }
+      },
+      "persisted_sidecar": {
+        "bundle_bytes": 34097560,
+        "bundle_overhead_ratio": 0.13251349431587006,
+        "cold_load_and_restore": {
+          "max_ms": 340.227563,
+          "median_ms": 333.258619,
+          "min_ms": 286.002427,
+          "p95_ms": 333.258619,
+          "repetitions": 3
+        },
+        "sidecar_bytes": 3989698,
+        "source_hash_bound": true,
+        "warm_query_batch": {
+          "max_ms": 83.453836,
+          "median_ms": 52.112552,
+          "min_ms": 49.117984,
+          "p95_ms": 54.341386,
+          "repetitions": 7
+        }
+      },
+      "process_local_index": {
+        "build_ms": 311.51748,
+        "build_peak_bytes": 13283439,
+        "build_retained_bytes": 7352413,
+        "bundle_bytes": 30107862,
+        "cold_load_and_build": {
+          "max_ms": 398.659734,
+          "median_ms": 381.828149,
+          "min_ms": 344.964982,
+          "p95_ms": 381.828149,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 84.762404,
+          "median_ms": 53.123108,
+          "min_ms": 50.533243,
+          "p95_ms": 53.801962,
+          "repetitions": 7
+        }
+      },
+      "query_counts": {
+        "callers": 20,
+        "references": 20,
+        "targets": 20
+      },
+      "source_calls_sha256": "29ea11a7e4353ee31d66f865fbdf6249bc2732d26ee1e01fa1951a5d78087165",
+      "speedup": {
+        "persisted_vs_linear_warm_median": 15.433359318115912,
+        "process_local_vs_linear_warm_median": 15.139771942560289
+      }
+    },
+    {
+      "call_count": 54710,
+      "call_json_bytes": 39008299,
+      "equivalence": {
+        "byte_equivalent": true,
+        "result_sha256": "150c00d5dbea15aaf4b9d4d222276a736a87a824233fbfcde228844eb020065d",
+        "status": "pass"
+      },
+      "label": "representative_real_repo",
+      "linear_scan": {
+        "bundle_bytes": 39008299,
+        "cold_load": {
+          "max_ms": 375.197879,
+          "median_ms": 370.373178,
+          "min_ms": 282.058533,
+          "p95_ms": 370.373178,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 999.182294,
+          "median_ms": 966.896946,
+          "min_ms": 947.531275,
+          "p95_ms": 976.118692,
+          "repetitions": 7
+        }
+      },
+      "persisted_sidecar": {
+        "bundle_bytes": 45598720,
+        "bundle_overhead_ratio": 0.1689492023223058,
+        "cold_load_and_restore": {
+          "max_ms": 540.941543,
+          "median_ms": 524.449571,
+          "min_ms": 439.001173,
+          "p95_ms": 524.449571,
+          "repetitions": 3
+        },
+        "sidecar_bytes": 6590421,
+        "source_hash_bound": true,
+        "warm_query_batch": {
+          "max_ms": 38.982341,
+          "median_ms": 38.003985,
+          "min_ms": 37.599982,
+          "p95_ms": 38.151146,
+          "repetitions": 7
+        }
+      },
+      "process_local_index": {
+        "build_ms": 428.532048,
+        "build_peak_bytes": 19569429,
+        "build_retained_bytes": 10595655,
+        "bundle_bytes": 39008299,
+        "cold_load_and_build": {
+          "max_ms": 602.136411,
+          "median_ms": 500.0105,
+          "min_ms": 495.754174,
+          "p95_ms": 500.0105,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 111.71657,
+          "median_ms": 38.278157,
+          "min_ms": 36.793138,
+          "p95_ms": 42.238411,
+          "repetitions": 7
+        }
+      },
+      "query_counts": {
+        "callers": 20,
+        "references": 20,
+        "targets": 20
+      },
+      "source_calls_sha256": "1a6453c92872688b53f60fd4fa170cb4d2860867d920c00d3dcefcf30f7bb60b",
+      "speedup": {
+        "persisted_vs_linear_warm_median": 25.441988412530947,
+        "process_local_vs_linear_warm_median": 25.259757046296663
+      }
+    }
+  ],
+  "version": "1.0"
+}
