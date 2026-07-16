@@ -231,6 +231,96 @@ def test_compile_context_plan_selects_ordered_evidence_with_citations(tmp_path):
     assert "exact_token_count" in plan["does_not_establish"]
 
 
+def test_compile_context_plan_streams_relation_cards_without_read_text(tmp_path, monkeypatch):
+    manifest = _write_complete_bundle(tmp_path)
+    relation_cards = tmp_path / "demo.relation_cards.jsonl"
+    original_read_text = Path.read_text
+
+    def guarded_read_text(path, *args, **kwargs):
+        if path == relation_cards:
+            raise AssertionError("relation cards must be streamed instead of loaded wholesale")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read_text)
+
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        task_profile="basic_repo_question",
+        query="context compiler",
+        context_budget_tokens=120,
+        bytes_per_token=4.0,
+    )
+
+    assert plan["signals"]["relation_cards_jsonl"]["status"] == "available"
+    assert any(item["source"] == "relation_cards_jsonl" for item in plan["selected_context"])
+
+
+def test_compile_context_plan_bounds_invalid_relation_row_details(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+    relation_cards = tmp_path / "demo.relation_cards.jsonl"
+    valid_row = relation_cards.read_text(encoding="utf-8")
+    relation_cards.write_text("not-json\n" * 12 + valid_row, encoding="utf-8")
+
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    relation_artifact = next(
+        artifact
+        for artifact in manifest_payload["artifacts"]
+        if artifact["role"] == "relation_cards_jsonl"
+    )
+    relation_artifact["bytes"] = relation_cards.stat().st_size
+    relation_artifact["sha256"] = _sha256(relation_cards)
+    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        task_profile="basic_repo_question",
+        query="context compiler",
+        context_budget_tokens=120,
+        bytes_per_token=4.0,
+    )
+
+    signal = plan["signals"]["relation_cards_jsonl"]
+    relation_gap = next(gap for gap in plan["gaps"] if gap["source"] == "relation_cards_jsonl")
+    assert signal["status"] == "warn"
+    assert signal["invalid_row_count"] == 12
+    assert len(relation_gap["row_errors"]) == 10
+
+
+def test_compile_context_plan_rejects_invalid_utf8_after_relation_hit(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+    relation_cards = tmp_path / "demo.relation_cards.jsonl"
+    relation_cards.write_bytes(relation_cards.read_bytes() + b"\xff")
+
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    relation_artifact = next(
+        artifact
+        for artifact in manifest_payload["artifacts"]
+        if artifact["role"] == "relation_cards_jsonl"
+    )
+    relation_artifact["bytes"] = relation_cards.stat().st_size
+    relation_artifact["sha256"] = _sha256(relation_cards)
+    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        task_profile="basic_repo_question",
+        query="context compiler",
+        context_budget_tokens=120,
+        signal_k=1,
+        bytes_per_token=4.0,
+    )
+
+    signal = plan["signals"]["relation_cards_jsonl"]
+    relation_gap = next(gap for gap in plan["gaps"] if gap["source"] == "relation_cards_jsonl")
+    assert signal["status"] == "invalid"
+    assert signal["error_code"] == "relation_cards_jsonl_unreadable"
+    assert relation_gap["error_code"] == "relation_cards_jsonl_unreadable"
+    assert not any(item["source"] == "relation_cards_jsonl" for item in plan["selected_context"])
+
+
 def test_compile_context_plan_falls_back_to_required_reading_when_signals_missing(tmp_path):
     manifest = _write_fallback_bundle(tmp_path)
 
