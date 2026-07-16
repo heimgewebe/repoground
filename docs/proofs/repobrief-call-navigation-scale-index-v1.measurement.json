@@ -1,0 +1,222 @@
+{
+  "configuration": {
+    "cold_repetitions": 3,
+    "fixed_acceptance_tier": true,
+    "mcp_repetitions": 10,
+    "query_repetitions": 7,
+    "representative_repo": "current_repository",
+    "synthetic_call_count": 50000
+  },
+  "decision": {
+    "cache_bound": "manifest hash plus artifact identity, declared hash and byte count",
+    "cache_max_entries": 2,
+    "rejected": {
+      "linear_scan": "repeated O(call_count) scans and repeated artifact validation",
+      "persisted_sidecar": "adds a second bundle artifact and measurable byte overhead without better warm queries"
+    },
+    "selected": "process_local_in_memory_index"
+  },
+  "does_not_establish": [
+    "performance_on_all_machines",
+    "performance_on_all_repositories",
+    "runtime_call_graph_completeness",
+    "dynamic_dispatch_resolution",
+    "default_promotion_without_equivalence_gates"
+  ],
+  "kind": "repobrief.call_navigation_scale_benchmark",
+  "machine_context": {
+    "implementation": "CPython",
+    "logical_cpu_count": 32,
+    "machine": "x86_64",
+    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "python": "3.10.12"
+  },
+  "mcp": {
+    "call_count": 50000,
+    "cold_batch": {
+      "max_ms": 816.304255,
+      "median_ms": 770.910111,
+      "min_ms": 677.752407,
+      "p95_ms": 770.910111,
+      "repetitions": 3
+    },
+    "cold_first_ms": 1642.021105,
+    "cold_first_peak_bytes": 143183769,
+    "cold_first_retained_bytes": 92761368,
+    "cold_warm_byte_equivalent": true,
+    "result_sha256": "4ff3d69e702d1e9d834b19cea6f2a72afab4bb86c62f5def47ff45879e1f8eac",
+    "warm_repeated_batch": {
+      "max_ms": 6.184592,
+      "median_ms": 5.650798,
+      "min_ms": 5.473927,
+      "p95_ms": 6.01503,
+      "repetitions": 10
+    }
+  },
+  "representative_repo_parse": {
+    "skipped_errors": [
+      "Failed to parse merger/lenskit/tests/fixtures/entrypoints_test_project/invalid.py: SyntaxError - '(' was never closed (invalid.py, line 1)",
+      "Failed to parse merger/lenskit/tests/fixtures/graph_quality_goldset/invalid_case/broken.py: SyntaxError - invalid syntax (broken.py, line 1)"
+    ],
+    "skipped_files_count": 2
+  },
+  "status": "pass",
+  "tiers": [
+    {
+      "call_count": 50000,
+      "call_json_bytes": 30107862,
+      "equivalence": {
+        "byte_equivalent": true,
+        "result_sha256": "e63d575bccd2baeeba7c70caf2a65d59eecfc27c9d93751f1baa4522f7d71755",
+        "status": "pass"
+      },
+      "label": "synthetic_50000",
+      "linear_scan": {
+        "bundle_bytes": 30107862,
+        "cold_load": {
+          "max_ms": 250.889013,
+          "median_ms": 247.948554,
+          "min_ms": 196.076265,
+          "p95_ms": 247.948554,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 812.577431,
+          "median_ms": 764.467798,
+          "min_ms": 745.937654,
+          "p95_ms": 810.516677,
+          "repetitions": 7
+        }
+      },
+      "persisted_sidecar": {
+        "bundle_bytes": 34097560,
+        "bundle_overhead_ratio": 0.13251349431587006,
+        "cold_load_and_restore": {
+          "max_ms": 358.401704,
+          "median_ms": 355.790887,
+          "min_ms": 303.595717,
+          "p95_ms": 355.790887,
+          "repetitions": 3
+        },
+        "sidecar_bytes": 3989698,
+        "source_hash_bound": true,
+        "warm_query_batch": {
+          "max_ms": 87.533237,
+          "median_ms": 56.030235,
+          "min_ms": 51.056253,
+          "p95_ms": 57.373135,
+          "repetitions": 7
+        }
+      },
+      "process_local_index": {
+        "build_ms": 314.055917,
+        "build_peak_bytes": 13283439,
+        "build_retained_bytes": 7352413,
+        "bundle_bytes": 30107862,
+        "cold_load_and_build": {
+          "max_ms": 412.888869,
+          "median_ms": 397.374996,
+          "min_ms": 374.907145,
+          "p95_ms": 397.374996,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 87.305836,
+          "median_ms": 54.977449,
+          "min_ms": 51.580727,
+          "p95_ms": 55.711883,
+          "repetitions": 7
+        }
+      },
+      "query_counts": {
+        "callers": 20,
+        "references": 20,
+        "targets": 20
+      },
+      "source_calls_sha256": "29ea11a7e4353ee31d66f865fbdf6249bc2732d26ee1e01fa1951a5d78087165",
+      "speedup": {
+        "persisted_vs_linear_warm_median": 13.643844220892523,
+        "process_local_vs_linear_warm_median": 13.905115859413558
+      }
+    },
+    {
+      "call_count": 54771,
+      "call_json_bytes": 39055543,
+      "equivalence": {
+        "byte_equivalent": true,
+        "result_sha256": "cd7299bdaa4642e7f1ae88cb30c3a7416ee85ec99346cb59c7d231ab82219c44",
+        "status": "pass"
+      },
+      "label": "representative_real_repo",
+      "linear_scan": {
+        "bundle_bytes": 39055543,
+        "cold_load": {
+          "max_ms": 395.323931,
+          "median_ms": 381.185547,
+          "min_ms": 290.162577,
+          "p95_ms": 381.185547,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 1014.773777,
+          "median_ms": 978.852047,
+          "min_ms": 965.872919,
+          "p95_ms": 994.025408,
+          "repetitions": 7
+        }
+      },
+      "persisted_sidecar": {
+        "bundle_bytes": 45654490,
+        "bundle_overhead_ratio": 0.1689631353992441,
+        "cold_load_and_restore": {
+          "max_ms": 558.776868,
+          "median_ms": 540.697256,
+          "min_ms": 456.503792,
+          "p95_ms": 540.697256,
+          "repetitions": 3
+        },
+        "sidecar_bytes": 6598947,
+        "source_hash_bound": true,
+        "warm_query_batch": {
+          "max_ms": 42.733977,
+          "median_ms": 41.72925,
+          "min_ms": 40.993295,
+          "p95_ms": 41.944181,
+          "repetitions": 7
+        }
+      },
+      "process_local_index": {
+        "build_ms": 440.881597,
+        "build_peak_bytes": 19589982,
+        "build_retained_bytes": 10606696,
+        "bundle_bytes": 39055543,
+        "cold_load_and_build": {
+          "max_ms": 648.433379,
+          "median_ms": 524.878861,
+          "min_ms": 522.809907,
+          "p95_ms": 524.878861,
+          "repetitions": 3
+        },
+        "warm_query_batch": {
+          "max_ms": 122.551512,
+          "median_ms": 43.350291,
+          "min_ms": 41.230177,
+          "p95_ms": 44.313617,
+          "repetitions": 7
+        }
+      },
+      "query_counts": {
+        "callers": 20,
+        "references": 20,
+        "targets": 20
+      },
+      "source_calls_sha256": "94d02a0a5ca5aa27d477b655ddf3b6eca51f3520b867f8f7807ea71307b28fef",
+      "speedup": {
+        "persisted_vs_linear_warm_median": 23.457216388983746,
+        "process_local_vs_linear_warm_median": 22.580057121185185
+      }
+    }
+  ],
+  "version": "1.0"
+}

@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from copy import deepcopy
+from collections import OrderedDict
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from threading import RLock
+from typing import Any, Mapping, Sequence
 
 from merger.lenskit.architecture.call_graph_contract import (
     MAX_SKIPPED_ERRORS as MAX_CALL_GRAPH_SKIPPED_ERRORS,
     PRODUCER_NONCLAIMS as CALL_GRAPH_PRODUCER_NONCLAIMS,
     REQUIRED_NONCLAIMS as CALL_GRAPH_REQUIRED_NONCLAIMS,
+)
+from merger.lenskit.core.call_navigation_index import (
+    CallNavigationIndex,
+    SymbolNavigationIndex,
 )
 
 _DOES_NOT_ESTABLISH = (
@@ -1177,6 +1186,7 @@ def _symbol_source_range(symbol: dict[str, Any]) -> dict[str, Any]:
 
 
 def _symbol_record(symbol: dict[str, Any]) -> dict[str, Any]:
+    decorators = symbol.get("decorators")
     return {
         "id": symbol.get("id"),
         "kind": symbol.get("kind"),
@@ -1188,7 +1198,7 @@ def _symbol_record(symbol: dict[str, Any]) -> dict[str, Any]:
         "end_line": symbol.get("end_line"),
         "range_ref": symbol.get("range_ref"),
         "source_range": _symbol_source_range(symbol),
-        "decorators": symbol.get("decorators") if isinstance(symbol.get("decorators"), list) else [],
+        "decorators": list(decorators) if isinstance(decorators, list) else [],
     }
 
 
@@ -1209,8 +1219,34 @@ def _load_symbol_index(manifest_path: Path) -> tuple[dict[str, Any] | None, dict
             "error": "python_symbol_index_json artifact file does not exist",
         }
     try:
-        data = json.loads(index_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raw = index_path.read_bytes()
+    except OSError as exc:
+        return None, artifact, {
+            "status": "invalid",
+            "error_code": "python_symbol_index_json_unreadable",
+            "error": str(exc),
+        }
+    declared_bytes = artifact.get("bytes")
+    if (
+        isinstance(declared_bytes, int)
+        and not isinstance(declared_bytes, bool)
+        and declared_bytes != len(raw)
+    ):
+        return None, artifact, {
+            "status": "invalid",
+            "error_code": "python_symbol_index_json_bytes_mismatch",
+            "error": "python_symbol_index_json byte count does not match the bundle manifest",
+        }
+    declared_sha256 = artifact.get("sha256")
+    if _is_sha256(declared_sha256) and hashlib.sha256(raw).hexdigest() != declared_sha256:
+        return None, artifact, {
+            "status": "invalid",
+            "error_code": "python_symbol_index_json_sha256_mismatch",
+            "error": "python_symbol_index_json content hash does not match the bundle manifest",
+        }
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return None, artifact, {
             "status": "invalid",
             "error_code": "python_symbol_index_json_unreadable",
@@ -1353,6 +1389,113 @@ _CALL_GRAPH_DOES_NOT_ESTABLISH = CALL_GRAPH_PRODUCER_NONCLAIMS
 _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
     dict.fromkeys([*_DOES_NOT_ESTABLISH, *_CALL_GRAPH_DOES_NOT_ESTABLISH])
 )
+_CALL_NAVIGATION_CACHE_MAX_ENTRIES = 2
+
+
+@dataclass(frozen=True, slots=True)
+class _ArtifactSourceFingerprint:
+    manifest_sha256: str
+    role: str
+    absolute_path: str
+    declared_sha256: str | None
+    declared_bytes: int | None
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class _CallNavigationState:
+    data: dict[str, Any]
+    artifact: dict[str, Any] | None
+    index: CallNavigationIndex
+    fingerprint: _ArtifactSourceFingerprint
+
+
+@dataclass(frozen=True, slots=True)
+class _SymbolNavigationState:
+    data: dict[str, Any]
+    artifact: dict[str, Any] | None
+    index: SymbolNavigationIndex
+    call_fingerprint: _ArtifactSourceFingerprint
+    symbol_fingerprint: _ArtifactSourceFingerprint
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidatedCallQuery:
+    state: _CallNavigationState
+    query: str
+    path_filter: str | None
+
+
+_CALL_NAVIGATION_CACHE: OrderedDict[str, _CallNavigationState] = OrderedDict()
+_SYMBOL_NAVIGATION_CACHE: OrderedDict[str, _SymbolNavigationState] = OrderedDict()
+_CALL_NAVIGATION_CACHE_LOCK = RLock()
+
+
+def _clear_call_navigation_caches() -> None:
+    """Clear process-local derived state; intended for bounded tests and diagnostics."""
+    with _CALL_NAVIGATION_CACHE_LOCK:
+        _CALL_NAVIGATION_CACHE.clear()
+        _SYMBOL_NAVIGATION_CACHE.clear()
+
+
+def _artifact_source_fingerprint(
+    manifest_path: Path, role: str
+) -> _ArtifactSourceFingerprint | None:
+    try:
+        manifest_bytes = manifest_path.read_bytes()
+        manifest = json.loads(manifest_bytes)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    artifact = next(
+        (
+            item
+            for item in _artifact_list(manifest)
+            if item.get("role") == role
+        ),
+        None,
+    )
+    if not isinstance(artifact, dict):
+        return None
+    artifact_path = _safe_artifact_path(manifest_path.parent, artifact.get("path"))
+    if artifact_path is None:
+        return None
+    try:
+        stat = artifact_path.stat()
+    except OSError:
+        return None
+    declared_sha256 = artifact.get("sha256")
+    declared_bytes = artifact.get("bytes")
+    return _ArtifactSourceFingerprint(
+        manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+        role=role,
+        absolute_path=str(artifact_path),
+        declared_sha256=declared_sha256 if isinstance(declared_sha256, str) else None,
+        declared_bytes=(
+            declared_bytes
+            if isinstance(declared_bytes, int) and not isinstance(declared_bytes, bool)
+            else None
+        ),
+        device=stat.st_dev,
+        inode=stat.st_ino,
+        size=stat.st_size,
+        mtime_ns=stat.st_mtime_ns,
+        ctime_ns=stat.st_ctime_ns,
+    )
+
+
+def _cache_state(
+    cache: OrderedDict[str, Any], key: str, state: Any
+) -> None:
+    cache[key] = state
+    cache.move_to_end(key)
+    while len(cache) > _CALL_NAVIGATION_CACHE_MAX_ENTRIES:
+        cache.popitem(last=False)
 
 
 def _call_nav_does_not_establish() -> list[str]:
@@ -1487,8 +1630,30 @@ def _read_call_graph_artifact(
             status="missing",
         )
     try:
-        data = json.loads(graph_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raw = graph_path.read_bytes()
+    except OSError as exc:
+        return None, artifact, _call_graph_error(
+            "python_call_graph_json_unreadable", str(exc)
+        )
+    declared_bytes = artifact.get("bytes")
+    if (
+        isinstance(declared_bytes, int)
+        and not isinstance(declared_bytes, bool)
+        and declared_bytes != len(raw)
+    ):
+        return None, artifact, _call_graph_error(
+            "python_call_graph_json_bytes_mismatch",
+            "python_call_graph_json byte count does not match the bundle manifest",
+        )
+    declared_sha256 = artifact.get("sha256")
+    if _is_sha256(declared_sha256) and hashlib.sha256(raw).hexdigest() != declared_sha256:
+        return None, artifact, _call_graph_error(
+            "python_call_graph_json_sha256_mismatch",
+            "python_call_graph_json content hash does not match the bundle manifest",
+        )
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return None, artifact, _call_graph_error(
             "python_call_graph_json_unreadable", str(exc)
         )
@@ -1536,7 +1701,7 @@ def _call_graph_parse_diagnostics(data: dict[str, Any]) -> dict[str, Any]:
     )
     return {
         "skipped_files_count": skipped_files_count,
-        "skipped_errors": skipped_errors,
+        "skipped_errors": list(skipped_errors) if isinstance(skipped_errors, list) else skipped_errors,
         "skipped_errors_total_count": skipped_errors_total_count,
         "skipped_errors_truncated": skipped_errors_truncated,
     }
@@ -1692,6 +1857,105 @@ def _load_call_graph(
     return data, artifact, None
 
 
+def _load_call_navigation_state(
+    manifest_path: Path,
+) -> tuple[_CallNavigationState | None, dict[str, Any] | None, dict[str, Any] | None]:
+    """Load and index one call graph, reusing it only while its source is unchanged."""
+    cache_key = str(manifest_path)
+    before = _artifact_source_fingerprint(manifest_path, CALL_GRAPH_ROLE)
+    if before is not None:
+        with _CALL_NAVIGATION_CACHE_LOCK:
+            cached = _CALL_NAVIGATION_CACHE.get(cache_key)
+            if cached is not None and cached.fingerprint == before:
+                _CALL_NAVIGATION_CACHE.move_to_end(cache_key)
+                return cached, cached.artifact, None
+
+    data, artifact, error = _load_call_graph(manifest_path)
+    if error is not None:
+        with _CALL_NAVIGATION_CACHE_LOCK:
+            _CALL_NAVIGATION_CACHE.pop(cache_key, None)
+            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+        return None, artifact, error
+    assert data is not None
+    index = CallNavigationIndex.build(data["calls"])
+    after = _artifact_source_fingerprint(manifest_path, CALL_GRAPH_ROLE)
+    if before is None or after is None or before != after:
+        return None, artifact, _call_graph_error(
+            "python_call_graph_source_changed_during_load",
+            "python_call_graph_json source changed while navigation state was loading",
+        )
+    state = _CallNavigationState(
+        data=data,
+        artifact=artifact,
+        index=index,
+        fingerprint=after,
+    )
+    with _CALL_NAVIGATION_CACHE_LOCK:
+        _cache_state(_CALL_NAVIGATION_CACHE, cache_key, state)
+        symbol_state = _SYMBOL_NAVIGATION_CACHE.get(cache_key)
+        if symbol_state is not None and symbol_state.call_fingerprint != after:
+            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+    return state, artifact, None
+
+
+def _load_symbol_navigation_state(
+    manifest_path: Path, call_state: _CallNavigationState
+) -> tuple[_SymbolNavigationState | None, dict[str, Any] | None, dict[str, Any] | None]:
+    """Load a coherent symbol index bound to the cached call-graph source."""
+    cache_key = str(manifest_path)
+    before = _artifact_source_fingerprint(manifest_path, SYMBOL_INDEX_ROLE)
+    if before is not None:
+        with _CALL_NAVIGATION_CACHE_LOCK:
+            cached = _SYMBOL_NAVIGATION_CACHE.get(cache_key)
+            if (
+                cached is not None
+                and cached.call_fingerprint == call_state.fingerprint
+                and cached.symbol_fingerprint == before
+            ):
+                _SYMBOL_NAVIGATION_CACHE.move_to_end(cache_key)
+                return cached, cached.artifact, None
+
+    symbol_data, symbol_artifact, error = _load_symbol_index(manifest_path)
+    if error is not None:
+        with _CALL_NAVIGATION_CACHE_LOCK:
+            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+        return None, symbol_artifact, error
+    assert symbol_data is not None
+    error = _symbol_index_identity_error(symbol_data, call_state.data)
+    if error is not None:
+        return None, symbol_artifact, error
+    symbols, rows_by_id, error = _validated_symbol_rows(symbol_data)
+    if error is not None:
+        return None, symbol_artifact, error
+    assert symbols is not None and rows_by_id is not None
+    error = _call_symbol_reference_error(call_state.data, rows_by_id)
+    if error is not None:
+        return None, symbol_artifact, error
+    index = SymbolNavigationIndex.build(symbols)
+    after = _artifact_source_fingerprint(manifest_path, SYMBOL_INDEX_ROLE)
+    if before is None or after is None or before != after:
+        return None, symbol_artifact, _call_graph_error(
+            "python_symbol_index_source_changed_during_load",
+            "python_symbol_index_json source changed while navigation state was loading",
+        )
+    after_call = _artifact_source_fingerprint(manifest_path, CALL_GRAPH_ROLE)
+    if after_call is None or after_call != call_state.fingerprint:
+        return None, symbol_artifact, _call_graph_error(
+            "python_call_graph_source_changed_during_load",
+            "python_call_graph_json source changed while navigation state was loading",
+        )
+    state = _SymbolNavigationState(
+        data=symbol_data,
+        artifact=symbol_artifact,
+        index=index,
+        call_fingerprint=call_state.fingerprint,
+        symbol_fingerprint=after,
+    )
+    with _CALL_NAVIGATION_CACHE_LOCK:
+        _cache_state(_SYMBOL_NAVIGATION_CACHE, cache_key, state)
+    return state, symbol_artifact, None
+
+
 def _call_source_range(call: dict[str, Any]) -> dict[str, Any]:
     return {
         "path": call.get("path"),
@@ -1703,6 +1967,8 @@ def _call_source_range(call: dict[str, Any]) -> dict[str, Any]:
 
 
 def _call_site_record(call: dict[str, Any]) -> dict[str, Any]:
+    resolved_target_ids = call.get("resolved_target_ids")
+    candidate_target_ids = call.get("candidate_target_ids")
     return {
         "path": call.get("path"),
         "start_line": call.get("start_line"),
@@ -1722,10 +1988,18 @@ def _call_site_record(call: dict[str, Any]) -> dict[str, Any]:
         "evidence_level": call.get("evidence_level"),
         "resolution_status": call.get("resolution_status"),
         "resolution_reason": call.get("resolution_reason"),
-        "resolved_target_ids": call.get("resolved_target_ids"),
-        "candidate_target_ids": call.get("candidate_target_ids"),
+        "resolved_target_ids": (
+            list(resolved_target_ids) if isinstance(resolved_target_ids, list) else []
+        ),
+        "candidate_target_ids": (
+            list(candidate_target_ids) if isinstance(candidate_target_ids, list) else []
+        ),
         "source_range": _call_source_range(call),
     }
+
+
+def _detached_record(value: Any) -> dict[str, Any] | None:
+    return deepcopy(value) if isinstance(value, dict) else None
 
 
 def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
@@ -1733,9 +2007,9 @@ def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
         "run_id": data.get("run_id"),
         "canonical_dump_index_sha256": data.get("canonical_dump_index_sha256"),
         "call_count": data.get("call_count"),
-        "resolution_counts": data.get("resolution_counts"),
-        "evidence_counts": data.get("evidence_counts"),
-        "relation_counts": data.get("relation_counts"),
+        "resolution_counts": _detached_record(data.get("resolution_counts")),
+        "evidence_counts": _detached_record(data.get("evidence_counts")),
+        "relation_counts": _detached_record(data.get("relation_counts")),
         **_call_graph_parse_diagnostics(data),
     }
 
@@ -1755,13 +2029,13 @@ def _validated_call_query(
     name: Any,
     k: Any,
     path: Any,
-) -> tuple[dict[str, Any], dict[str, Any] | None, str, str | None] | dict[str, Any]:
+) -> _ValidatedCallQuery | dict[str, Any]:
     def _extra(artifact: dict[str, Any] | None) -> dict[str, Any]:
         return {
             "name": name,
             "k": k,
             "filters": {"path": path},
-            "call_graph": artifact,
+            "call_graph": _detached_record(artifact),
             **_call_empty(kind),
         }
 
@@ -1792,7 +2066,7 @@ def _validated_call_query(
             error_code="path_invalid",
             extra=_extra(None),
         )
-    data, artifact, error = _load_call_graph(manifest_path)
+    state, artifact, error = _load_call_navigation_state(manifest_path)
     if error is not None:
         return _invalid_read_result(
             kind=kind,
@@ -1802,9 +2076,13 @@ def _validated_call_query(
             error_code=error["error_code"],
             extra=_extra(artifact),
         )
-    assert data is not None
+    assert state is not None
     path_filter = path.strip().casefold() if isinstance(path, str) and path.strip() else None
-    return data, artifact, name.strip().casefold(), path_filter
+    return _ValidatedCallQuery(
+        state=state,
+        query=name.strip().casefold(),
+        path_filter=path_filter,
+    )
 
 
 def _symbol_index_identity_error(
@@ -1878,7 +2156,8 @@ def _validated_symbol_rows(
 
 
 def _matching_caller_symbol_rows(
-    call: dict[str, Any], rows_by_id: dict[str, list[dict[str, Any]]]
+    call: dict[str, Any],
+    rows_by_id: Mapping[str, Sequence[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
     caller_id = call.get("caller_symbol_id")
     if not isinstance(caller_id, str):
@@ -1895,7 +2174,8 @@ def _matching_caller_symbol_rows(
 
 
 def _call_symbol_reference_error(
-    call_data: dict[str, Any], rows_by_id: dict[str, list[dict[str, Any]]]
+    call_data: dict[str, Any],
+    rows_by_id: Mapping[str, Sequence[dict[str, Any]]],
 ) -> dict[str, Any] | None:
     for position, call in enumerate(call_data.get("calls", [])):
         if call.get("caller_scope") == "symbol":
@@ -1990,15 +2270,14 @@ def _selected_symbol_or_error(
     name: str,
     k: int,
     path: str | None,
-    call_data: dict[str, Any],
-    call_artifact: dict[str, Any] | None,
+    call_state: _CallNavigationState,
     query: str,
     path_filter: str | None,
     caller_mode: bool,
-) -> tuple[
-    dict[str, Any], dict[str, Any] | None, dict[str, Any]
-] | dict[str, Any]:
-    symbol_data, symbol_artifact, error = _coherent_symbol_index(manifest_path, call_data)
+) -> tuple[dict[str, Any], _SymbolNavigationState] | dict[str, Any]:
+    symbol_state, symbol_artifact, error = _load_symbol_navigation_state(
+        manifest_path, call_state
+    )
     candidate_key = "caller_candidates" if caller_mode else "target_candidates"
     symbol_key = "caller_symbol" if caller_mode else "target_symbol"
     empty = _call_empty(kind)
@@ -2013,13 +2292,13 @@ def _selected_symbol_or_error(
                 "name": name,
                 "k": k,
                 "filters": {"path": path},
-                "call_graph": call_artifact,
-                "symbol_index": symbol_artifact,
+                "call_graph": _detached_record(call_state.artifact),
+                "symbol_index": _detached_record(symbol_artifact),
                 **empty,
             },
         )
-    assert symbol_data is not None
-    matches = _select_symbols(symbol_data, query, path_filter)
+    assert symbol_state is not None
+    matches = symbol_state.index.select(query, path_filter)
     if len(matches) != 1:
         status = "missing" if not matches else "invalid"
         error_code = "symbol_not_found" if not matches else "symbol_ambiguous"
@@ -2040,12 +2319,12 @@ def _selected_symbol_or_error(
                 "name": name,
                 "k": k,
                 "filters": {"path": path},
-                "call_graph": call_artifact,
-                "symbol_index": symbol_artifact,
+                "call_graph": _detached_record(call_state.artifact),
+                "symbol_index": _detached_record(symbol_state.artifact),
                 **empty,
             },
         )
-    return _symbol_record(matches[0]), symbol_artifact, symbol_data
+    return _symbol_record(matches[0]), symbol_state
 
 
 def find_references(
@@ -2065,23 +2344,24 @@ def find_references(
     )
     if isinstance(validated, dict):
         return validated
-    data, artifact, query, path_filter = validated
-    matched: list[tuple[int, str, int, int, dict[str, Any]]] = []
-    exact_match_count = 0
-    for call in data.get("calls", []):
-        if path_filter and path_filter not in str(call.get("path", "")).casefold():
-            continue
-        simple_name = call.get("simple_name")
-        exact = isinstance(simple_name, str) and simple_name.casefold() == query
-        if not exact and query not in str(call.get("callee_expression", "")).casefold():
-            continue
-        if exact:
-            exact_match_count += 1
-        matched.append(
-            (0 if exact else 1, str(call["path"]), call["start_line"], call["start_col"], call)
-        )
-    matched.sort(key=lambda item: item[:4])
-    hits = [_call_site_record(call) for *_, call in matched[:k]]
+    state = validated.state
+    data = state.data
+    artifact = state.artifact
+    query = validated.query
+    path_filter = validated.path_filter
+    matched = [
+        call
+        for call in state.index.reference_calls(query)
+        if not path_filter
+        or path_filter in str(call.get("path", "")).casefold()
+    ]
+    exact_match_count = sum(
+        1
+        for call in matched
+        if isinstance(call.get("simple_name"), str)
+        and call["simple_name"].casefold() == query
+    )
+    hits = [_call_site_record(call) for call in matched[:k]]
     availability = _availability_model_for_manifest(manifest_path)
     return {
         "kind": CALL_REFERENCES_KIND,
@@ -2091,7 +2371,7 @@ def find_references(
         "name": name,
         "k": k,
         "filters": {"path": path},
-        "call_graph": artifact,
+        "call_graph": _detached_record(artifact),
         "call_graph_metadata": _call_graph_metadata(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
@@ -2122,28 +2402,32 @@ def get_callers(
     )
     if isinstance(validated, dict):
         return validated
-    data, artifact, query, path_filter = validated
+    state = validated.state
+    data = state.data
+    artifact = state.artifact
+    query = validated.query
+    path_filter = validated.path_filter
     selected = _selected_symbol_or_error(
         kind=CALL_CALLERS_KIND,
         manifest_path=manifest_path,
         name=name,
         k=k,
         path=path,
-        call_data=data,
-        call_artifact=artifact,
+        call_state=state,
         query=query,
         path_filter=path_filter,
         caller_mode=False,
     )
     if isinstance(selected, dict):
         return selected
-    target_symbol, symbol_artifact, symbol_data = selected
+    target_symbol, symbol_state = selected
+    symbol_artifact = symbol_state.artifact
     target_id = target_symbol["id"]
-    rows_by_id = _symbol_rows_by_id(symbol_data)
+    rows_by_id = symbol_state.index.rows_by_id
     groups: dict[str, dict[str, Any]] = {}
     unresolved_references: list[dict[str, Any]] = []
     total_call_site_count = 0
-    for call in data.get("calls", []):
+    for call in state.index.target_related_calls(target_id, query):
         if target_id in call.get("resolved_target_ids", []):
             total_call_site_count += 1
             caller_symbol_id = call.get("caller_symbol_id")
@@ -2210,8 +2494,8 @@ def get_callers(
         "filters": {"path": path},
         "target_symbol": target_symbol,
         "target_candidates": [],
-        "call_graph": artifact,
-        "symbol_index": symbol_artifact,
+        "call_graph": _detached_record(artifact),
+        "symbol_index": _detached_record(symbol_artifact),
         "call_graph_metadata": _call_graph_metadata(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
@@ -2245,30 +2529,30 @@ def get_callees(
     )
     if isinstance(validated, dict):
         return validated
-    data, artifact, query, path_filter = validated
+    state = validated.state
+    data = state.data
+    artifact = state.artifact
+    query = validated.query
+    path_filter = validated.path_filter
     selected = _selected_symbol_or_error(
         kind=CALL_CALLEES_KIND,
         manifest_path=manifest_path,
         name=name,
         k=k,
         path=path,
-        call_data=data,
-        call_artifact=artifact,
+        call_state=state,
         query=query,
         path_filter=path_filter,
         caller_mode=True,
     )
     if isinstance(selected, dict):
         return selected
-    caller_symbol, symbol_artifact, symbol_data = selected
-    rows_by_id = _symbol_rows_by_id(symbol_data)
+    caller_symbol, symbol_state = selected
+    symbol_artifact = symbol_state.artifact
+    rows_by_id = symbol_state.index.rows_by_id
     groups: dict[str, dict[str, Any]] = {}
     unresolved_call_sites: list[dict[str, Any]] = []
-    caller_sites = [
-        call
-        for call in data.get("calls", [])
-        if _call_belongs_to_symbol(call, caller_symbol)
-    ]
+    caller_sites = state.index.calls_for_symbol(caller_symbol)
     for call in caller_sites:
         if call.get("resolution_status") == "resolved":
             target_id = call["resolved_target_ids"][0]
@@ -2286,8 +2570,8 @@ def get_callees(
                         "filters": {"path": path},
                         "caller_symbol": caller_symbol,
                         "caller_candidates": [],
-                        "call_graph": artifact,
-                        "symbol_index": symbol_artifact,
+                        "call_graph": _detached_record(artifact),
+                        "symbol_index": _detached_record(symbol_artifact),
                         "callees": [],
                         "unresolved_call_sites": [],
                     },
@@ -2333,8 +2617,8 @@ def get_callees(
         "filters": {"path": path},
         "caller_symbol": caller_symbol,
         "caller_candidates": [],
-        "call_graph": artifact,
-        "symbol_index": symbol_artifact,
+        "call_graph": _detached_record(artifact),
+        "symbol_index": _detached_record(symbol_artifact),
         "call_graph_metadata": _call_graph_metadata(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,

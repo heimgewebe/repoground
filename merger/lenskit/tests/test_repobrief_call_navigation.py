@@ -1,6 +1,7 @@
 """Bounded read-only RepoBrief call navigation over coherent v1 artifacts."""
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,13 @@ HELPER_ID = "py:pkg:helper.py:function:helper"
 CALLER_ONE_ID = "py:pkg:a.py:function:caller_one"
 CALLER_TWO_ID = "py:pkg:b.py:function:caller_two"
 OTHER_CALLER_ID = "py:pkg:c.py:function:other_caller"
+
+
+@pytest.fixture(autouse=True)
+def _reset_call_navigation_caches():
+    repobrief_access._clear_call_navigation_caches()
+    yield
+    repobrief_access._clear_call_navigation_caches()
 
 
 def _sha(path: Path) -> str:
@@ -296,6 +304,197 @@ def _refresh_manifest_artifact(manifest: Path, role: str, artifact: Path) -> Non
     manifest.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def test_navigation_cache_reuses_validated_call_state(tmp_path, monkeypatch):
+    manifest = _bundle(tmp_path)
+    original = repobrief_access._load_call_graph
+    calls = 0
+
+    def counted(manifest_path):
+        nonlocal calls
+        calls += 1
+        return original(manifest_path)
+
+    monkeypatch.setattr(repobrief_access, "_load_call_graph", counted)
+
+    cold = find_references(manifest, "target", k=10)
+    warm = find_references(manifest, "target", k=10)
+
+    assert cold == warm
+    assert calls == 1
+    assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 1
+
+
+def test_public_navigation_results_cannot_mutate_cached_state(tmp_path):
+    manifest, _, symbol_index = _write_bundle(tmp_path)
+    symbol_payload = json.loads(symbol_index.read_text(encoding="utf-8"))
+    target = next(item for item in symbol_payload["symbols"] if item["id"] == TARGET_ID)
+    target["decorators"] = ["registered"]
+    symbol_index.write_text(json.dumps(symbol_payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_symbol_index_json", symbol_index)
+
+    first = get_callers(manifest, "target", path="pkg/target.py", k=10)
+    expected = json.loads(json.dumps(first))
+
+    first["target_symbol"]["decorators"].append("mutated")
+    first["call_graph"]["sha256"] = "mutated"
+    first["symbol_index"]["sha256"] = "mutated"
+    first["call_graph_metadata"]["resolution_counts"]["resolved"] = 0
+    first["callers"][0]["call_sites"][0]["resolved_target_ids"].clear()
+    first["unresolved_references"][0]["candidate_target_ids"].append("mutated")
+
+    second = get_callers(manifest, "target", path="pkg/target.py", k=10)
+
+    assert second == expected
+
+def test_call_graph_content_must_match_manifest_hash(tmp_path):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert find_references(manifest, "target")["status"] == "available"
+    repobrief_access._clear_call_navigation_caches()
+
+    payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    payload["calls"][0]["simple_name"] = "tampered"
+    call_graph.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = find_references(manifest, "target")
+
+    assert result["status"] == "invalid"
+    assert result["error_code"] in {
+        "python_call_graph_json_bytes_mismatch",
+        "python_call_graph_json_sha256_mismatch",
+    }
+
+
+def test_symbol_index_content_must_match_manifest_hash(tmp_path):
+    manifest, _, symbol_index = _write_bundle(tmp_path)
+    assert get_callers(
+        manifest, "target", path="pkg/target.py"
+    )["status"] == "available"
+    repobrief_access._clear_call_navigation_caches()
+
+    payload = json.loads(symbol_index.read_text(encoding="utf-8"))
+    payload["symbols"][0]["name"] = "tampered"
+    symbol_index.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+
+    assert result["status"] == "invalid"
+    assert result["error_code"] in {
+        "python_symbol_index_json_bytes_mismatch",
+        "python_symbol_index_json_sha256_mismatch",
+    }
+
+
+def test_cache_detects_same_size_change_with_restored_mtime(tmp_path):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert find_references(manifest, "target")["status"] == "available"
+    before = call_graph.stat()
+    raw = call_graph.read_bytes()
+    tampered = raw.replace(b"target", b"tamper", 1)
+    assert len(tampered) == len(raw)
+
+    call_graph.write_bytes(tampered)
+    os.utime(call_graph, ns=(before.st_atime_ns, before.st_mtime_ns))
+    after = call_graph.stat()
+    assert after.st_size == before.st_size
+    assert after.st_mtime_ns == before.st_mtime_ns
+    assert after.st_ctime_ns != before.st_ctime_ns
+
+    result = find_references(manifest, "target")
+
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_call_graph_json_sha256_mismatch"
+
+
+def test_call_graph_change_invalidates_cached_navigation_state(tmp_path, monkeypatch):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    original = repobrief_access._load_call_graph
+    loads = 0
+
+    def counted(manifest_path):
+        nonlocal loads
+        loads += 1
+        return original(manifest_path)
+
+    monkeypatch.setattr(repobrief_access, "_load_call_graph", counted)
+    before = find_references(manifest, "target", k=10)
+
+    payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    payload["calls"][0]["simple_name"] = "renamed"
+    payload["calls"][0]["callee_expression"] = "renamed"
+    call_graph.write_text(json.dumps(payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_call_graph_json", call_graph)
+
+    after = find_references(manifest, "target", k=10)
+
+    assert before["total_match_count"] == 4
+    assert after["total_match_count"] == 3
+    assert loads == 2
+
+
+def test_symbol_change_invalidates_cached_symbol_state(tmp_path, monkeypatch):
+    manifest, _, symbol_index = _write_bundle(tmp_path)
+    original = repobrief_access._load_symbol_index
+    loads = 0
+
+    def counted(manifest_path):
+        nonlocal loads
+        loads += 1
+        return original(manifest_path)
+
+    monkeypatch.setattr(repobrief_access, "_load_symbol_index", counted)
+    before = get_callers(manifest, "target", path="pkg/target.py", k=10)
+
+    payload = json.loads(symbol_index.read_text(encoding="utf-8"))
+    payload["symbols"][0]["name"] = "renamed"
+    payload["symbols"][0]["qualified_name"] = "renamed"
+    symbol_index.write_text(json.dumps(payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_symbol_index_json", symbol_index)
+
+    after = get_callers(manifest, "target", path="pkg/target.py", k=10)
+
+    assert before["status"] == "available"
+    assert after["status"] == "missing"
+    assert after["error_code"] == "symbol_not_found"
+    assert loads == 2
+
+
+def test_cold_and_warm_navigation_results_are_byte_equivalent(tmp_path):
+    manifest = _bundle(tmp_path)
+    queries = (
+        (find_references, (manifest, "target"), {"k": 3}),
+        (
+            get_callers,
+            (manifest, "target"),
+            {"path": "pkg/target.py", "k": 3},
+        ),
+        (
+            get_callees,
+            (manifest, "caller_one"),
+            {"path": "pkg/a.py", "k": 3},
+        ),
+    )
+
+    for reader, args, kwargs in queries:
+        repobrief_access._clear_call_navigation_caches()
+        cold = json.dumps(reader(*args, **kwargs), sort_keys=True, separators=(",", ":"))
+        warm = json.dumps(reader(*args, **kwargs), sort_keys=True, separators=(",", ":"))
+        assert cold == warm
+
+
+def test_navigation_cache_is_lru_bounded(tmp_path):
+    manifests = []
+    for index in range(repobrief_access._CALL_NAVIGATION_CACHE_MAX_ENTRIES + 1):
+        bundle_dir = tmp_path / f"bundle-{index}"
+        bundle_dir.mkdir()
+        manifest = _bundle(bundle_dir)
+        manifests.append(str(manifest.resolve()))
+        assert find_references(manifest, "target")["status"] == "available"
+
+    assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 2
+    assert manifests[0] not in repobrief_access._CALL_NAVIGATION_CACHE
+    assert manifests[-1] in repobrief_access._CALL_NAVIGATION_CACHE
+
+
 def test_find_references_returns_bounded_s0_and_s1_evidence(tmp_path):
     result = find_references(_bundle(tmp_path), "target", k=2)
     assert result["status"] == "available"
@@ -310,7 +509,10 @@ def test_find_references_returns_bounded_s0_and_s1_evidence(tmp_path):
 
 
 def test_get_callers_fails_closed_when_target_name_is_ambiguous(tmp_path):
-    result = get_callers(_bundle(tmp_path), "target", k=10)
+    manifest = _bundle(tmp_path)
+    result = get_callers(manifest, "target", k=10)
+    expected = json.loads(json.dumps(result))
+
     assert result["status"] == "invalid"
     assert result["error_code"] == "symbol_ambiguous"
     assert [item["path"] for item in result["target_candidates"]] == [
@@ -318,6 +520,11 @@ def test_get_callers_fails_closed_when_target_name_is_ambiguous(tmp_path):
         "pkg/target.py",
     ]
     assert result["callers"] == []
+
+    result["symbol_index"]["sha256"] = "mutated"
+    result["target_candidates"][0]["decorators"].append("mutated")
+
+    assert get_callers(manifest, "target", k=10) == expected
 
 
 def test_get_callers_uses_target_identity_and_separates_textual_matches(tmp_path):
@@ -598,3 +805,61 @@ def test_navigation_rejects_call_range_that_disagrees_with_source_fields(tmp_pat
 
     assert result["status"] == "invalid"
     assert result["error_code"] == "python_call_graph_call_record_invalid"
+
+def test_call_graph_change_during_index_build_fails_closed(tmp_path, monkeypatch):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    from merger.lenskit.core.call_navigation_index import CallNavigationIndex
+
+    original_build = CallNavigationIndex.build
+
+    def tampered_build(calls):
+        payload = json.loads(call_graph.read_text(encoding="utf-8"))
+        payload["calls"][0]["simple_name"] = "tampered"
+        call_graph.write_text(json.dumps(payload), encoding="utf-8")
+        return original_build(calls)
+
+    monkeypatch.setattr(CallNavigationIndex, "build", tampered_build)
+
+    result = find_references(manifest, "target")
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_call_graph_source_changed_during_load"
+
+
+def test_symbol_index_change_during_index_build_fails_closed(tmp_path, monkeypatch):
+    manifest, _, symbol_index = _write_bundle(tmp_path)
+    from merger.lenskit.core.call_navigation_index import SymbolNavigationIndex
+
+    original_build = SymbolNavigationIndex.build
+
+    def tampered_build(symbols):
+        payload = json.loads(symbol_index.read_text(encoding="utf-8"))
+        payload["symbols"][0]["name"] = "tampered"
+        symbol_index.write_text(json.dumps(payload), encoding="utf-8")
+        return original_build(symbols)
+
+    monkeypatch.setattr(SymbolNavigationIndex, "build", tampered_build)
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_symbol_index_source_changed_during_load"
+
+
+def test_call_graph_change_during_symbol_index_build_fails_closed(
+    tmp_path, monkeypatch
+):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    from merger.lenskit.core.call_navigation_index import SymbolNavigationIndex
+
+    original_build = SymbolNavigationIndex.build
+
+    def tampered_build(symbols):
+        payload = json.loads(call_graph.read_text(encoding="utf-8"))
+        payload["calls"][0]["simple_name"] = "tampered"
+        call_graph.write_text(json.dumps(payload), encoding="utf-8")
+        return original_build(symbols)
+
+    monkeypatch.setattr(SymbolNavigationIndex, "build", tampered_build)
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_call_graph_source_changed_during_load"
