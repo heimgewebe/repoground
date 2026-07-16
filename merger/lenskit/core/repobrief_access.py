@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -1236,6 +1237,12 @@ def _load_symbol_index_source(
             "error_code": "python_symbol_index_json_sha256_mismatch",
             "error": "python_symbol_index_json content hash does not match the bundle manifest",
         }
+    if failure == "source_changed":
+        return None, artifact, None, {
+            "status": "invalid",
+            "error_code": "python_symbol_index_source_changed_during_load",
+            "error": "python_symbol_index_json source changed while navigation state was loading",
+        }
     if source is None:
         return None, artifact, None, {
             "status": "invalid",
@@ -1395,6 +1402,7 @@ _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
     dict.fromkeys([*_DOES_NOT_ESTABLISH, *_CALL_GRAPH_DOES_NOT_ESTABLISH])
 )
 _CALL_NAVIGATION_CACHE_MAX_ENTRIES = 2
+_CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV = "LENSKIT_REPOBRIEF_STRICT_CACHE_HASH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1404,6 +1412,11 @@ class _ArtifactSourceFingerprint:
     role: str
     absolute_path: str
     artifact_sha256: str
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -1450,6 +1463,25 @@ def _clear_call_navigation_caches() -> None:
         _SYMBOL_NAVIGATION_CACHE.clear()
 
 
+def _file_identity(stat_result: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        stat_result.st_dev,
+        stat_result.st_ino,
+        stat_result.st_size,
+        stat_result.st_mtime_ns,
+        stat_result.st_ctime_ns,
+    )
+
+
+def _strict_source_hash_enabled() -> bool:
+    return os.environ.get(_CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV, "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _read_registered_artifact_source(
     manifest_path: Path, role: str
 ) -> tuple[
@@ -1480,12 +1512,17 @@ def _read_registered_artifact_source(
     )
     if artifact_path is None:
         return None, artifact, "missing", None
-    if not artifact_path.exists():
-        return None, artifact, "file_missing", None
     try:
-        raw = artifact_path.read_bytes()
+        with artifact_path.open("rb") as stream:
+            stat_before = os.fstat(stream.fileno())
+            raw = stream.read()
+            stat_after = os.fstat(stream.fileno())
+    except FileNotFoundError:
+        return None, artifact, "file_missing", None
     except OSError as exc:
         return None, artifact, "unreadable", str(exc)
+    if _file_identity(stat_before) != _file_identity(stat_after):
+        return None, artifact, "source_changed", None
     declared_bytes = artifact_payload.get("bytes")
     if (
         isinstance(declared_bytes, int)
@@ -1503,6 +1540,11 @@ def _read_registered_artifact_source(
         role=role,
         absolute_path=str(artifact_path),
         artifact_sha256=actual_sha256,
+        device=stat_after.st_dev,
+        inode=stat_after.st_ino,
+        size=stat_after.st_size,
+        mtime_ns=stat_after.st_mtime_ns,
+        ctime_ns=stat_after.st_ctime_ns,
     )
     return (
         _LoadedArtifactSource(
@@ -1526,17 +1568,47 @@ def _artifact_source_fingerprint(
     return source.fingerprint if source is not None else None
 
 
-def _artifact_source_is_current(fingerprint: _ArtifactSourceFingerprint) -> bool:
+def _artifact_source_is_current(
+    fingerprint: _ArtifactSourceFingerprint,
+    *,
+    verify_content: bool = False,
+) -> bool:
+    """Validate one cached generation without reparsing its JSON payload.
+
+    Cold loads and post-build checks always hash the exact artifact bytes. Warm
+    lookups use the manifest hash plus file identity metadata to preserve the
+    index speedup; deployments on filesystems with weak metadata semantics can
+    set ``LENSKIT_REPOBRIEF_STRICT_CACHE_HASH=1`` to hash on every lookup.
+    """
+    manifest_path = Path(fingerprint.manifest_path)
+    artifact_path = Path(fingerprint.absolute_path)
     try:
-        manifest_before = Path(fingerprint.manifest_path).read_bytes()
+        manifest_before = manifest_path.read_bytes()
         if hashlib.sha256(manifest_before).hexdigest() != fingerprint.manifest_sha256:
             return False
-        artifact_bytes = Path(fingerprint.absolute_path).read_bytes()
-        manifest_after = Path(fingerprint.manifest_path).read_bytes()
+        stat_before = artifact_path.stat()
+    except OSError:
+        return False
+    expected_identity = (
+        fingerprint.device,
+        fingerprint.inode,
+        fingerprint.size,
+        fingerprint.mtime_ns,
+        fingerprint.ctime_ns,
+    )
+    if _file_identity(stat_before) != expected_identity:
+        return False
+    if not verify_content and not _strict_source_hash_enabled():
+        return True
+    try:
+        artifact_bytes = artifact_path.read_bytes()
+        stat_after = artifact_path.stat()
+        manifest_after = manifest_path.read_bytes()
     except OSError:
         return False
     return (
-        hashlib.sha256(artifact_bytes).hexdigest() == fingerprint.artifact_sha256
+        _file_identity(stat_after) == expected_identity
+        and hashlib.sha256(artifact_bytes).hexdigest() == fingerprint.artifact_sha256
         and hashlib.sha256(manifest_after).hexdigest() == fingerprint.manifest_sha256
     )
 
@@ -1738,6 +1810,11 @@ def _read_call_graph_source(
         return None, artifact, None, _call_graph_error(
             "python_call_graph_json_sha256_mismatch",
             "python_call_graph_json content hash does not match the bundle manifest",
+        )
+    if failure == "source_changed":
+        return None, artifact, None, _call_graph_error(
+            "python_call_graph_source_changed_during_load",
+            "python_call_graph_json source changed while navigation state was loading",
         )
     if source is None:
         return None, artifact, None, _call_graph_error(
@@ -1992,7 +2069,7 @@ def _load_call_navigation_state(
         return None, artifact, error
     assert data is not None and source is not None
     index = CallNavigationIndex.build(data["calls"])
-    if not _artifact_source_is_current(source.fingerprint):
+    if not _artifact_source_is_current(source.fingerprint, verify_content=True):
         return None, artifact, _call_graph_error(
             "python_call_graph_source_changed_during_load",
             "python_call_graph_json source changed while navigation state was loading",
@@ -2033,12 +2110,14 @@ def _load_symbol_navigation_state(
     if error is not None:
         return None, symbol_artifact, error
     index = SymbolNavigationIndex.build(symbols)
-    if not _artifact_source_is_current(source.fingerprint):
+    if not _artifact_source_is_current(source.fingerprint, verify_content=True):
         return None, symbol_artifact, _call_graph_error(
             "python_symbol_index_source_changed_during_load",
             "python_symbol_index_json source changed while navigation state was loading",
         )
-    if not _artifact_source_is_current(call_state.fingerprint):
+    if not _artifact_source_is_current(
+        call_state.fingerprint, verify_content=True
+    ):
         return None, symbol_artifact, _call_graph_error(
             "python_call_graph_source_changed_during_load",
             "python_call_graph_json source changed while navigation state was loading",

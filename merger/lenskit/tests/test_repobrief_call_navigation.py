@@ -969,3 +969,46 @@ def test_parallel_navigation_is_isolated_for_same_and_different_bundles(tmp_path
     assert {
         key.manifest_path for key in repobrief_access._CALL_NAVIGATION_CACHE
     } == {str(first.resolve()), str(second.resolve())}
+
+
+def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
+    tmp_path, monkeypatch
+):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+
+    original_read_bytes = Path.read_bytes
+    call_graph_path = call_graph.resolve()
+
+    def guarded_read_bytes(path):
+        if path.resolve() == call_graph_path:
+            raise AssertionError("default warm cache hit must not reread call-graph bytes")
+        return original_read_bytes(path)
+
+    monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+
+
+def test_strict_navigation_cache_hash_rereads_call_graph_bytes(tmp_path, monkeypatch):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+
+    original_read_bytes = Path.read_bytes
+    call_graph_path = call_graph.resolve()
+    call_graph_reads = 0
+
+    def counting_read_bytes(path):
+        nonlocal call_graph_reads
+        if path.resolve() == call_graph_path:
+            call_graph_reads += 1
+        return original_read_bytes(path)
+
+    monkeypatch.setenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", "1")
+    monkeypatch.setattr(Path, "read_bytes", counting_read_bytes)
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+    assert call_graph_reads >= 1
