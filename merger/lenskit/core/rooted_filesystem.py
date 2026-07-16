@@ -282,6 +282,16 @@ def _identity(metadata: os.stat_result) -> tuple[int, int]:
     return metadata.st_dev, metadata.st_ino
 
 
+def _content_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
 def _assert_directory_fd_matches_path(fd: int, path: str | Path) -> None:
     expected = _identity(os.fstat(fd))
     current_fd = _open_absolute_directory(secure_absolute(path), create=False)
@@ -364,17 +374,34 @@ def read_regular_bytes(path: str | Path) -> bytes:
         os.close(fd)
 
 
-def digest_regular_file(path: str | Path) -> tuple[int, str]:
-    fd, _ = open_regular_file(path)
+def _digest_fd(fd: int) -> tuple[int, str]:
     digest = hashlib.sha256()
     observed = 0
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            return observed, digest.hexdigest()
+        observed += len(chunk)
+        digest.update(chunk)
+
+
+def digest_regular_file(path: str | Path) -> tuple[int, str]:
+    """Hash one descriptor-bound regular file without buffering its payload."""
+    fd, _ = open_regular_file(path)
     try:
-        with os.fdopen(os.dup(fd), "rb", closefd=True) as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                observed += len(chunk)
-                digest.update(chunk)
+        before = os.fstat(fd)
+        observed, digest = _digest_fd(fd)
+        after = os.fstat(fd)
+        if _content_identity(before) != _content_identity(after):
+            raise RootedFilesystemError(
+                f"regular file changed while hashing: {secure_absolute(path)}"
+            )
+        if observed != after.st_size:
+            raise RootedFilesystemError(
+                f"regular file size changed while hashing: {secure_absolute(path)}"
+            )
         _assert_regular_fd_matches_path(fd, path)
-        return observed, digest.hexdigest()
+        return observed, digest
     finally:
         os.close(fd)
 
@@ -815,9 +842,13 @@ def _call_rename_no_replace(
         os.fsencode(destination_name),
         flags,
     )
-    if result != 0:
-        err = ctypes.get_errno() or errno.EIO
-        raise OSError(err, os.strerror(err))
+    captured_errno = ctypes.get_errno()
+    if result == 0:
+        return
+    err = captured_errno or errno.EIO
+    if err == errno.EEXIST:
+        raise FileExistsError(err, os.strerror(err), destination_name)
+    raise OSError(err, os.strerror(err), destination_name)
 
 
 def _rename_no_replace(
@@ -878,6 +909,83 @@ def rename_path_no_replace(source: str | Path, destination: str | Path) -> None:
     finally:
         os.close(source_parent)
         os.close(destination_parent)
+
+
+def _digest_tree_fd(
+    fd: int, prefix: Path
+) -> tuple[dict[str, tuple[int, str]], set[str]]:
+    directory_before = os.fstat(fd)
+    files: dict[str, tuple[int, str]] = {}
+    directories: set[str] = set()
+    try:
+        entries = sorted(os.scandir(fd), key=lambda entry: entry.name)
+    except OSError as exc:
+        raise RootedFilesystemError("rooted directory cannot be enumerated") from exc
+    for entry in entries:
+        metadata = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
+        relative = prefix / entry.name
+        relative_text = relative.as_posix()
+        if stat.S_ISDIR(metadata.st_mode):
+            child_fd = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=fd)
+            try:
+                opened = os.fstat(child_fd)
+                directories.add(relative_text)
+                child_files, child_directories = _digest_tree_fd(child_fd, relative)
+                current = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
+                if _identity(current) != _identity(opened):
+                    raise RootedFilesystemError(
+                        f"rooted tree directory changed while hashing: {relative_text}"
+                    )
+                files.update(child_files)
+                directories.update(child_directories)
+            finally:
+                os.close(child_fd)
+        elif stat.S_ISREG(metadata.st_mode):
+            child_fd = os.open(
+                entry.name,
+                os.O_RDONLY | _FILE_NOFOLLOW,
+                dir_fd=fd,
+            )
+            try:
+                before = os.fstat(child_fd)
+                observed, digest = _digest_fd(child_fd)
+                after = os.fstat(child_fd)
+                current = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
+                if _content_identity(before) != _content_identity(after):
+                    raise RootedFilesystemError(
+                        f"rooted tree file changed while hashing: {relative_text}"
+                    )
+                if observed != after.st_size or _identity(current) != _identity(after):
+                    raise RootedFilesystemError(
+                        f"rooted tree file changed while hashing: {relative_text}"
+                    )
+                files[relative_text] = (observed, digest)
+            finally:
+                os.close(child_fd)
+        else:
+            raise RootedFilesystemError(
+                f"rooted tree contains a symlink or special entry: {relative_text}"
+            )
+    directory_after = os.fstat(fd)
+    if _content_identity(directory_before) != _content_identity(directory_after):
+        raise RootedFilesystemError(
+            f"rooted tree directory changed while hashing: {prefix.as_posix()}"
+        )
+    return files, directories
+
+
+def digest_tree(path: str | Path) -> tuple[dict[str, tuple[int, str]], set[str]]:
+    """Hash a trusted regular-file tree without retaining file payloads."""
+    fd = _open_directory(path, create=False)
+    try:
+        try:
+            result = _digest_tree_fd(fd, Path("."))
+        except OSError as exc:
+            raise RootedFilesystemError("rooted tree changed while hashing") from exc
+        _assert_directory_fd_matches_path(fd, path)
+        return result
+    finally:
+        os.close(fd)
 
 
 def _read_tree_fd(fd: int, prefix: Path) -> tuple[dict[str, bytes], set[str]]:

@@ -1825,6 +1825,8 @@ def _cached_call_navigation_state(
 ) -> _CallNavigationState | None:
     resolved_manifest = str(manifest_path.resolve())
     with _CALL_NAVIGATION_CACHE_LOCK:
+        # Snapshot at most two LRU entries so validation can release the lock;
+        # a live reversed iterator would become invalid under concurrent mutation.
         candidates = [
             (fingerprint, state)
             for fingerprint, state in reversed(list(_CALL_NAVIGATION_CACHE.items()))
@@ -1847,6 +1849,7 @@ def _cached_symbol_navigation_state(
 ) -> _SymbolNavigationState | None:
     resolved_manifest = str(manifest_path.resolve())
     with _CALL_NAVIGATION_CACHE_LOCK:
+        # Keep the same bounded snapshot rule as the call-navigation cache.
         candidates = [
             (cache_key, state)
             for cache_key, state in reversed(list(_SYMBOL_NAVIGATION_CACHE.items()))

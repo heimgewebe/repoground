@@ -479,3 +479,79 @@ def test_bundle_publication_uses_portable_darwin_create_only_rename(
     assert loaded == ["renameatx_np"]
     assert result.generation_dir.is_dir()
     assert resolve_bundle_manifest_path(result.current_manifest_path).is_file()
+
+def test_nested_artifact_directories_are_created_in_generation(tmp_path: Path) -> None:
+    manifest, canonical = _write_nested_bundle(tmp_path)
+
+    result = publish_bundle_generation(manifest, output_root=tmp_path)
+
+    assert (result.generation_dir / "artifacts/demo.md").read_bytes() == canonical.read_bytes()
+
+
+def test_post_emit_health_manifest_hash_binding_is_verified(tmp_path: Path) -> None:
+    manifest = _write_basic_bundle(tmp_path)
+    manifest_sha256 = _sha(manifest.read_bytes())
+    health_path = tmp_path / "demo.post_emit_health.json"
+    health_path.write_text(
+        json.dumps(
+            {
+                "status": "pass",
+                "bundle_manifest_sha256": manifest_sha256,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = publish_bundle_generation(manifest)
+
+    assert result.manifest_sha256 == manifest_sha256
+
+
+def test_post_emit_health_manifest_hash_mismatch_blocks_pointer_switch(
+    tmp_path: Path,
+) -> None:
+    manifest = _write_basic_bundle(tmp_path)
+    health_path = tmp_path / "demo.post_emit_health.json"
+    health_path.write_text(
+        json.dumps(
+            {
+                "status": "pass",
+                "bundle_manifest_sha256": "0" * 64,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(BundleGenerationError, match="does not match the final manifest"):
+        publish_bundle_generation(manifest)
+
+    assert not generation_mod.generation_lane_root(tmp_path, "demo").exists()
+
+
+def test_removed_generation_before_pointer_switch_keeps_old_current(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"first\n", run_id="run-1"
+    )
+    first = publish_bundle_generation(first_manifest)
+    second_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"second\n", run_id="run-2"
+    )
+    original_install = generation_mod._install_generation
+
+    def install_then_remove(generations_root, generation_id, files):
+        generation_dir, reused = original_install(generations_root, generation_id, files)
+        rooted_filesystem.remove_tree(generation_dir)
+        return generation_dir, reused
+
+    monkeypatch.setattr(generation_mod, "_install_generation", install_then_remove)
+
+    with pytest.raises(
+        BundleGenerationError, match="generation changed while the current pointer"
+    ):
+        publish_bundle_generation(second_manifest)
+
+    assert first.current_manifest_path.resolve() == first.resolved_manifest_path
+    assert (first.current_manifest_path.parent / "demo.md").read_bytes() == b"first\n"

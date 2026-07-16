@@ -1476,6 +1476,8 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         redact_secrets=redact_secrets,
         include_hidden=args.include_hidden,
         generator_info=generator_info,
+        # Snapshot finalization still mutates the manifest and adds control files;
+        # publish exactly once below after that complete file set is known.
         publish_generation=False,
     )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ctypes
 import errno
+import hashlib
 
 import os
 import stat
@@ -14,6 +15,8 @@ from merger.lenskit.core.rooted_filesystem import (
     atomic_write_bytes,
     bind_directory,
     copy_verified_file,
+    digest_regular_file,
+    digest_tree,
     make_directory_exclusive,
     exclusive_file_lock,
     read_regular_bytes,
@@ -348,3 +351,100 @@ def test_create_only_rename_unknown_platform_fails_closed(
     monkeypatch.setattr(rooted_filesystem, "_rename_platform", lambda: "unknown-os")
     with pytest.raises(RootedFilesystemError, match="unknown-os"):
         rooted_filesystem._rename_no_replace(10, "source", 11, "destination")
+
+def test_digest_tree_streams_nested_file_metadata(tmp_path: Path) -> None:
+    root = tmp_path / "publication"
+    nested = root / "a" / "b" / "payload.bin"
+    nested.parent.mkdir(parents=True)
+    payload = b"streamed-content\n"
+    nested.write_bytes(payload)
+
+    with bind_directory(root):
+        files, directories = digest_tree(root)
+
+    assert files == {
+        "a/b/payload.bin": (len(payload), hashlib.sha256(payload).hexdigest())
+    }
+    assert directories == {"a", "a/b"}
+
+
+def test_digest_regular_file_rejects_in_place_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"before\n")
+    original = rooted_filesystem._digest_fd
+
+    def digest_then_mutate(fd: int) -> tuple[int, str]:
+        result = original(fd)
+        source.write_bytes(b"after!\n")
+        return result
+
+    monkeypatch.setattr(rooted_filesystem, "_digest_fd", digest_then_mutate)
+
+    with pytest.raises(RootedFilesystemError, match="changed while hashing"):
+        digest_regular_file(source)
+
+
+def test_digest_tree_rejects_in_place_file_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "publication"
+    source = root / "payload.bin"
+    root.mkdir()
+    source.write_bytes(b"before\n")
+    original = rooted_filesystem._digest_fd
+
+    def digest_then_mutate(fd: int) -> tuple[int, str]:
+        result = original(fd)
+        source.write_bytes(b"after!\n")
+        return result
+
+    monkeypatch.setattr(rooted_filesystem, "_digest_fd", digest_then_mutate)
+
+    with bind_directory(root):
+        with pytest.raises(RootedFilesystemError, match="changed while hashing"):
+            digest_tree(root)
+
+
+def test_native_create_only_rename_captures_eexist_immediately() -> None:
+    def fail_existing(*_args):
+        ctypes.set_errno(errno.EEXIST)
+        return -1
+
+    with pytest.raises(FileExistsError) as captured:
+        rooted_filesystem._call_rename_no_replace(
+            _FakeRenameFunction(fail_existing), 10, "source", 11, "destination", 1
+        )
+
+    assert captured.value.errno == errno.EEXIST
+    assert captured.value.filename == "destination"
+
+
+def test_native_create_only_rename_without_errno_fails_as_eio() -> None:
+    def fail_without_errno(*_args):
+        return -1
+
+    with pytest.raises(OSError) as captured:
+        rooted_filesystem._call_rename_no_replace(
+            _FakeRenameFunction(fail_without_errno), 10, "source", 11, "destination", 1
+        )
+
+    assert captured.value.errno == errno.EIO
+
+
+def test_native_create_only_rename_success_ignores_stale_errno() -> None:
+    def succeed_with_stale_errno(*_args):
+        ctypes.set_errno(errno.EEXIST)
+        return 0
+
+    rooted_filesystem._call_rename_no_replace(
+        _FakeRenameFunction(succeed_with_stale_errno),
+        10,
+        "source",
+        11,
+        "destination",
+        1,
+    )
