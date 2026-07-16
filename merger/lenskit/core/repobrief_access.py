@@ -5,6 +5,12 @@ import re
 from pathlib import Path
 from typing import Any
 
+from merger.lenskit.architecture.call_graph_contract import (
+    MAX_SKIPPED_ERRORS as MAX_CALL_GRAPH_SKIPPED_ERRORS,
+    PRODUCER_NONCLAIMS as CALL_GRAPH_PRODUCER_NONCLAIMS,
+    REQUIRED_NONCLAIMS as CALL_GRAPH_REQUIRED_NONCLAIMS,
+)
+
 _DOES_NOT_ESTABLISH = (
     "truth",
     "correctness",
@@ -1340,20 +1346,8 @@ CALL_RESOLUTION_STATUSES = ("resolved", "candidate", "ambiguous", "unresolved")
 CALL_EVIDENCE_LEVELS = ("S0", "S1")
 CALL_RELATION_TYPES = ("calls", "constructs")
 _CALL_CALLER_KINDS = ("module", "class", "function", "async_function")
-_CALL_GRAPH_REQUIRED_NONCLAIMS = (
-    "complete_call_graph",
-    "runtime_reachability",
-    "dynamic_dispatch_resolution",
-    "dependency_completeness",
-    "import_success",
-    "test_sufficiency",
-    "review_completeness",
-    "merge_readiness",
-)
-_CALL_GRAPH_DOES_NOT_ESTABLISH = (
-    *_CALL_GRAPH_REQUIRED_NONCLAIMS,
-    "transitive_import_resolution",
-)
+_CALL_GRAPH_REQUIRED_NONCLAIMS = CALL_GRAPH_REQUIRED_NONCLAIMS
+_CALL_GRAPH_DOES_NOT_ESTABLISH = CALL_GRAPH_PRODUCER_NONCLAIMS
 
 
 _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
@@ -1527,6 +1521,27 @@ def _call_graph_identity_error(data: Any) -> dict[str, Any] | None:
     return None
 
 
+def _call_graph_parse_diagnostics(data: dict[str, Any]) -> dict[str, Any]:
+    """Project current and legacy parse diagnostics through one code path."""
+    skipped_files_count = data.get("skipped_files_count")
+    skipped_errors = data.get("skipped_errors")
+    skipped_errors_total_count = data.get(
+        "skipped_errors_total_count", skipped_files_count
+    )
+    skipped_errors_truncated = data.get(
+        "skipped_errors_truncated",
+        isinstance(skipped_errors, list)
+        and _is_int_not_bool(skipped_errors_total_count)
+        and skipped_errors_total_count > len(skipped_errors),
+    )
+    return {
+        "skipped_files_count": skipped_files_count,
+        "skipped_errors": skipped_errors,
+        "skipped_errors_total_count": skipped_errors_total_count,
+        "skipped_errors_truncated": skipped_errors_truncated,
+    }
+
+
 def _call_graph_model_error(data: dict[str, Any]) -> dict[str, Any] | None:
     if data.get("resolution_statuses") != list(CALL_RESOLUTION_STATUSES):
         return _call_graph_error(
@@ -1548,22 +1563,16 @@ def _call_graph_model_error(data: dict[str, Any]) -> dict[str, Any] | None:
             "python_call_graph_evidence_model_invalid",
             "python_call_graph_json evidence_model must define non-empty S0 and S1 semantics",
         )
-    skipped_files_count = data.get("skipped_files_count")
-    skipped_errors = data.get("skipped_errors")
-    skipped_errors_total_count = data.get(
-        "skipped_errors_total_count", skipped_files_count
-    )
-    skipped_errors_truncated = data.get(
-        "skipped_errors_truncated",
-        isinstance(skipped_errors, list)
-        and _is_int_not_bool(skipped_errors_total_count)
-        and skipped_errors_total_count > len(skipped_errors),
-    )
+    diagnostics = _call_graph_parse_diagnostics(data)
+    skipped_files_count = diagnostics["skipped_files_count"]
+    skipped_errors = diagnostics["skipped_errors"]
+    skipped_errors_total_count = diagnostics["skipped_errors_total_count"]
+    skipped_errors_truncated = diagnostics["skipped_errors_truncated"]
     diagnostics_valid = (
         _is_int_not_bool(skipped_files_count)
         and skipped_files_count >= 0
         and isinstance(skipped_errors, list)
-        and len(skipped_errors) <= 20
+        and len(skipped_errors) <= MAX_CALL_GRAPH_SKIPPED_ERRORS
         and all(isinstance(item, str) for item in skipped_errors)
         and _is_int_not_bool(skipped_errors_total_count)
         and skipped_errors_total_count == skipped_files_count
@@ -1727,17 +1736,7 @@ def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
         "resolution_counts": data.get("resolution_counts"),
         "evidence_counts": data.get("evidence_counts"),
         "relation_counts": data.get("relation_counts"),
-        "skipped_files_count": data.get("skipped_files_count"),
-        "skipped_errors": data.get("skipped_errors"),
-        "skipped_errors_total_count": data.get(
-            "skipped_errors_total_count", data.get("skipped_files_count")
-        ),
-        "skipped_errors_truncated": data.get(
-            "skipped_errors_truncated",
-            isinstance(data.get("skipped_errors"), list)
-            and _is_int_not_bool(data.get("skipped_files_count"))
-            and data["skipped_files_count"] > len(data["skipped_errors"]),
-        ),
+        **_call_graph_parse_diagnostics(data),
     }
 
 

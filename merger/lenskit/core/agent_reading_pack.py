@@ -451,8 +451,8 @@ def _append_call_graph_section(lines: List[str], model: PackModel) -> None:
     )
     lines.append(
         "- does_not_establish: complete call graph, runtime reachability, dynamic "
-        "dispatch resolution, dependency completeness, test sufficiency, review "
-        "completeness or merge readiness."
+        "dispatch resolution, dependency completeness, transitive import resolution, "
+        "import success, test sufficiency, review completeness or merge readiness."
     )
     lines.append("")
 

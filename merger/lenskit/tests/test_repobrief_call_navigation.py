@@ -3,7 +3,9 @@ import hashlib
 import json
 from pathlib import Path
 
-from merger.lenskit.core import repobrief_mcp_tools
+import pytest
+
+from merger.lenskit.core import repobrief_access, repobrief_mcp_tools
 from merger.lenskit.core.repobrief_access import (
     find_references,
     get_callees,
@@ -379,6 +381,20 @@ def test_invalid_navigation_payloads_preserve_filters_and_full_shape(tmp_path):
     assert wrapped["result"] == access_result
 
 
+@pytest.mark.parametrize("reader", [find_references, get_callers, get_callees])
+def test_invalid_navigation_name_fails_before_artifact_io(tmp_path, monkeypatch, reader):
+    def fail_if_loaded(_manifest_path):
+        raise AssertionError("invalid primitive input must not load the call graph")
+
+    monkeypatch.setattr(repobrief_access, "_load_call_graph", fail_if_loaded)
+
+    result = reader(tmp_path / "missing.bundle.manifest.json", "")
+
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "name_invalid"
+    assert result["call_graph"] is None
+
+
 def test_navigation_path_filter_and_invalid_k_fail_closed(tmp_path):
     manifest = _bundle(tmp_path)
     filtered = find_references(manifest, "target", path="pkg/b.py")
@@ -402,6 +418,41 @@ def test_navigation_rejects_mismatched_symbol_binding(tmp_path):
     assert result["status"] == "invalid"
     assert result["error_code"] == "call_symbol_run_id_mismatch"
     assert result["callers"] == []
+
+
+def test_navigation_rejects_inconsistent_parse_diagnostic_counts(tmp_path):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    payload["skipped_files_count"] = 1
+    payload["skipped_errors"] = ["broken.py: SyntaxError"]
+    payload["skipped_errors_total_count"] = 2
+    payload["skipped_errors_truncated"] = True
+    call_graph.write_text(json.dumps(payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_call_graph_json", call_graph)
+
+    result = find_references(manifest, "target")
+
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_call_graph_parse_diagnostics_invalid"
+    assert result["hits"] == []
+
+
+def test_legacy_parse_diagnostics_use_one_normalized_metadata_projection(tmp_path):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    payload["skipped_files_count"] = 2
+    payload["skipped_errors"] = ["broken.py: SyntaxError"]
+    payload.pop("skipped_errors_total_count", None)
+    payload.pop("skipped_errors_truncated", None)
+    call_graph.write_text(json.dumps(payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_call_graph_json", call_graph)
+
+    result = find_references(manifest, "target")
+
+    assert result["status"] == "available"
+    assert result["call_graph_metadata"]["skipped_files_count"] == 2
+    assert result["call_graph_metadata"]["skipped_errors_total_count"] == 2
+    assert result["call_graph_metadata"]["skipped_errors_truncated"] is True
 
 
 def test_navigation_rejects_invalid_aggregate_counts(tmp_path):

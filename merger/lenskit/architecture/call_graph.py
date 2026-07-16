@@ -13,6 +13,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from merger.lenskit.architecture.call_graph_contract import (
+    MAX_SKIPPED_ERRORS,
+    PRODUCER_NONCLAIMS,
+)
 from merger.lenskit.architecture.symbol_index import (
     EXCLUDED_DIRS,
     _module_name,
@@ -24,24 +28,12 @@ RESOLUTION_STATUSES = ("resolved", "candidate", "ambiguous", "unresolved")
 EVIDENCE_LEVELS = ("S0", "S1")
 RELATION_TYPES = ("calls", "constructs")
 CALLER_KINDS = ("module", "class", "function", "async_function")
-MAX_SKIPPED_ERRORS = 20
-
-DOES_NOT_ESTABLISH = (
-    "complete_call_graph",
-    "runtime_reachability",
-    "dynamic_dispatch_resolution",
-    "dependency_completeness",
-    "transitive_import_resolution",
-    "import_success",
-    "test_sufficiency",
-    "review_completeness",
-    "merge_readiness",
-)
+DOES_NOT_ESTABLISH = PRODUCER_NONCLAIMS
 
 _FUNCTION_KINDS = ("function", "async_function")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ScopeFrame:
     """Immutable lexical-scope snapshot shared safely by recorded calls."""
 
@@ -313,16 +305,41 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self.stack.pop()
         return None
 
-    def _visit_comprehension(self, node: ast.AST) -> None:
+    def _visit_comprehension(
+        self,
+        node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+    ) -> None:
+        generators = node.generators
+        if not generators:
+            return
+
+        # Python evaluates the outermost iterable before entering the implicit
+        # comprehension scope. Later iterables see only targets bound by earlier
+        # generators; nested comprehensions create their own frames when visited.
+        self.visit(generators[0].iter)
         local: set[str] = set()
-        for child in ast.walk(node):
-            if isinstance(child, ast.comprehension):
-                local.update(_target_names(child.target))
-        self.stack.append(
-            _ScopeFrame(name=None, kind="comprehension", local_bindings=frozenset(local))
-        )
-        self.generic_visit(node)
-        self.stack.pop()
+        self.stack.append(_ScopeFrame(name=None, kind="comprehension"))
+        try:
+            for index, generator in enumerate(generators):
+                if index:
+                    self.visit(generator.iter)
+                local.update(_target_names(generator.target))
+                self.stack[-1] = _ScopeFrame(
+                    name=None,
+                    kind="comprehension",
+                    local_bindings=frozenset(local),
+                )
+                self.visit(generator.target)
+                for condition in generator.ifs:
+                    self.visit(condition)
+
+            if isinstance(node, ast.DictComp):
+                self.visit(node.key)
+                self.visit(node.value)
+            else:
+                self.visit(node.elt)
+        finally:
+            self.stack.pop()
 
     def visit_ListComp(self, node: ast.ListComp) -> Any:
         self._visit_comprehension(node)

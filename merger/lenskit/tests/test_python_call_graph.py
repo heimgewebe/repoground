@@ -13,6 +13,7 @@ import jsonschema
 
 from merger.lenskit.architecture.call_graph import (
     DOES_NOT_ESTABLISH,
+    MAX_SKIPPED_ERRORS,
     _CallGraphVisitor,
     _Resolver,
     extract_python_calls,
@@ -313,8 +314,20 @@ def test_parse_error_truncation_is_explicit(tmp_path):
 
     assert doc["skipped_files_count"] == 25
     assert doc["skipped_errors_total_count"] == 25
-    assert len(doc["skipped_errors"]) == 20
+    assert len(doc["skipped_errors"]) == MAX_SKIPPED_ERRORS
     assert doc["skipped_errors_truncated"] is True
+
+
+def test_call_graph_schema_matches_shared_diagnostic_limit():
+    schema_path = (
+        Path(__file__).parents[1] / "contracts" / "python-call-graph.v1.schema.json"
+    )
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+    assert schema["properties"]["skipped_errors"]["maxItems"] == MAX_SKIPPED_ERRORS
+    assert set(DOES_NOT_ESTABLISH) <= set(
+        schema["properties"]["does_not_establish"]["items"]["enum"]
+    )
 
 
 def test_missing_ast_end_position_is_normalized_to_valid_range():
@@ -469,6 +482,55 @@ def test_lexical_shadowing_never_upgrades_to_s1(tmp_path):
         and call["caller_qualified_name"] == "lambda_shadow"
     ]
     assert len(lambda_call) == 1
+
+
+def test_nested_comprehension_targets_do_not_leak_into_outer_scope(tmp_path):
+    (tmp_path / "sample.py").write_text(
+        "def target():\n"
+        "    return 1\n\n"
+        "def caller(items):\n"
+        "    return [target() for item in [item for target in items]]\n",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    call = next(
+        row
+        for row in calls
+        if row["caller_qualified_name"] == "caller"
+        and row["callee_expression"] == "target"
+    )
+
+    assert call["resolution_status"] == "resolved"
+    assert call["resolution_reason"] == "local_module_function"
+
+
+def test_comprehension_generator_bindings_follow_python_evaluation_order(tmp_path):
+    (tmp_path / "sample.py").write_text(
+        "def target():\n"
+        "    return [1]\n\n"
+        "def before_binding(items):\n"
+        "    return [item for target in target()]\n\n"
+        "def later_binding(items):\n"
+        "    return [item for item in target() for target in items]\n\n"
+        "def prior_binding(items):\n"
+        "    return [item for target in items for item in target()]\n",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    by_caller = {
+        row["caller_qualified_name"]: row
+        for row in calls
+        if row["callee_expression"] == "target"
+    }
+
+    assert by_caller["before_binding"]["resolution_status"] == "resolved"
+    assert by_caller["before_binding"]["resolution_reason"] == "local_module_function"
+    assert by_caller["later_binding"]["resolution_status"] == "resolved"
+    assert by_caller["later_binding"]["resolution_reason"] == "local_module_function"
+    assert by_caller["prior_binding"]["resolution_status"] == "unresolved"
+    assert by_caller["prior_binding"]["resolution_reason"] == "comprehension_binding"
 
 
 def test_global_binding_can_resolve_module_symbol(tmp_path):
