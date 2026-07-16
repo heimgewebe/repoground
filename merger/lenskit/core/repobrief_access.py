@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 from collections import OrderedDict
@@ -42,6 +43,7 @@ TEXT_EXCERPT_MAX_CHARS = 1200
 _CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _CITATION_RANGE_KEY_FIELDS = ("file_path", "start_byte", "end_byte")
+logger = logging.getLogger(__name__)
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -1410,6 +1412,11 @@ _CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV = "LENSKIT_REPOBRIEF_STRICT_CACHE_HASH"
 class _ArtifactSourceFingerprint:
     manifest_path: str
     manifest_sha256: str
+    manifest_device: int
+    manifest_inode: int
+    manifest_size: int
+    manifest_mtime_ns: int
+    manifest_ctime_ns: int
     role: str
     absolute_path: str
     artifact_sha256: str
@@ -1455,6 +1462,7 @@ class _ValidatedCallQuery:
 _CALL_NAVIGATION_CACHE: OrderedDict[_ArtifactSourceFingerprint, _CallNavigationState] = OrderedDict()
 _SYMBOL_NAVIGATION_CACHE: OrderedDict[tuple[_ArtifactSourceFingerprint, _ArtifactSourceFingerprint], _SymbolNavigationState] = OrderedDict()
 _CALL_NAVIGATION_CACHE_LOCK = RLock()
+_WARNED_INVALID_CACHE_VALIDATION_VALUES: set[str] = set()
 
 
 def _clear_call_navigation_caches() -> None:
@@ -1474,14 +1482,90 @@ def _file_identity(stat_result: os.stat_result) -> tuple[int, int, int, int, int
     )
 
 
+def _stat_identity_is_strong(stat_result: os.stat_result) -> bool:
+    return all(
+        value != 0
+        for value in (
+            stat_result.st_dev,
+            stat_result.st_ino,
+            stat_result.st_mtime_ns,
+            stat_result.st_ctime_ns,
+        )
+    )
+
+
+def _stat_matches_identity(
+    stat_result: os.stat_result,
+    *,
+    device: int,
+    inode: int,
+    size: int,
+    mtime_ns: int,
+    ctime_ns: int,
+) -> bool:
+    def available(expected: int, observed: int) -> bool:
+        return expected == 0 or observed == expected
+
+    return (
+        available(device, stat_result.st_dev)
+        and available(inode, stat_result.st_ino)
+        and stat_result.st_size == size
+        and available(mtime_ns, stat_result.st_mtime_ns)
+        and available(ctime_ns, stat_result.st_ctime_ns)
+    )
+
+
+def _manifest_stat_matches_fingerprint(
+    fingerprint: _ArtifactSourceFingerprint,
+    stat_result: os.stat_result,
+) -> bool:
+    return _stat_matches_identity(
+        stat_result,
+        device=fingerprint.manifest_device,
+        inode=fingerprint.manifest_inode,
+        size=fingerprint.manifest_size,
+        mtime_ns=fingerprint.manifest_mtime_ns,
+        ctime_ns=fingerprint.manifest_ctime_ns,
+    )
+
+
+def _artifact_stat_matches_fingerprint(
+    fingerprint: _ArtifactSourceFingerprint,
+    stat_result: os.stat_result,
+) -> bool:
+    return _stat_matches_identity(
+        stat_result,
+        device=fingerprint.device,
+        inode=fingerprint.inode,
+        size=fingerprint.size,
+        mtime_ns=fingerprint.mtime_ns,
+        ctime_ns=fingerprint.ctime_ns,
+    )
+
+
 def _cache_validation_mode() -> str:
-    """Return the explicit cache-validation mode, failing closed on typos."""
-    configured = os.environ.get(
-        _CALL_NAVIGATION_CACHE_VALIDATION_ENV, ""
-    ).strip().lower()
+    """Return the cache-validation mode while preserving legacy semantics.
+
+    ``LENSKIT_REPOBRIEF_CACHE_VALIDATION`` accepts only ``auto`` and ``strict``.
+    Any other non-empty value falls back to ``strict`` and is logged once per
+    distinct invalid value. The legacy
+    ``LENSKIT_REPOBRIEF_STRICT_CACHE_HASH`` switch remains supported when the
+    new variable is unset or empty: unset/empty/0/false/no/off means ``auto``;
+    every other non-empty legacy value means ``strict``.
+    """
+    configured_raw = os.environ.get(_CALL_NAVIGATION_CACHE_VALIDATION_ENV, "")
+    configured = configured_raw.strip().lower()
     if configured in {"auto", "strict"}:
         return configured
     if configured:
+        with _CALL_NAVIGATION_CACHE_LOCK:
+            if configured_raw not in _WARNED_INVALID_CACHE_VALIDATION_VALUES:
+                _WARNED_INVALID_CACHE_VALIDATION_VALUES.add(configured_raw)
+                logger.warning(
+                    "Invalid %s value %r; falling back to strict cache validation",
+                    _CALL_NAVIGATION_CACHE_VALIDATION_ENV,
+                    configured_raw,
+                )
         return "strict"
 
     legacy = os.environ.get(
@@ -1499,6 +1583,10 @@ def _source_identity_is_strong(
     return all(
         value != 0
         for value in (
+            fingerprint.manifest_device,
+            fingerprint.manifest_inode,
+            fingerprint.manifest_mtime_ns,
+            fingerprint.manifest_ctime_ns,
             fingerprint.device,
             fingerprint.inode,
             fingerprint.mtime_ns,
@@ -1522,8 +1610,14 @@ def _source_content_verification_required(
 def _read_stable_artifact_bytes(
     artifact_path: Path,
 ) -> tuple[bytes | None, os.stat_result | None, str | None, str | None]:
+    return _read_stable_regular_file_bytes(artifact_path)
+
+
+def _read_stable_regular_file_bytes(
+    path: Path,
+) -> tuple[bytes | None, os.stat_result | None, str | None, str | None]:
     try:
-        with artifact_path.open("rb") as stream:
+        with path.open("rb") as stream:
             stat_before = os.fstat(stream.fileno())
             raw = stream.read()
             stat_after = os.fstat(stream.fileno())
@@ -1534,10 +1628,10 @@ def _read_stable_artifact_bytes(
     if _file_identity(stat_before) != _file_identity(stat_after):
         return None, None, "source_changed", None
     try:
-        path_stat_after = artifact_path.stat()
+        current_stat = path.stat()
     except OSError as exc:
         return None, None, "source_changed", str(exc)
-    if _file_identity(path_stat_after) != _file_identity(stat_after):
+    if _file_identity(stat_after) != _file_identity(current_stat):
         return None, None, "source_changed", None
     return raw, stat_after, None, None
 
@@ -1550,10 +1644,15 @@ def _read_registered_artifact_source(
     str | None,
     str | None,
 ]:
+    manifest_bytes, manifest_stat, failure, detail = _read_stable_regular_file_bytes(
+        manifest_path
+    )
+    if failure is not None:
+        return None, None, failure, detail
+    assert manifest_bytes is not None and manifest_stat is not None
     try:
-        manifest_bytes = manifest_path.read_bytes()
         manifest = json.loads(manifest_bytes)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return None, None, "unreadable", str(exc)
     if not isinstance(manifest, dict):
         return None, None, "unreadable", "bundle manifest must be a JSON object"
@@ -1591,6 +1690,11 @@ def _read_registered_artifact_source(
     fingerprint = _ArtifactSourceFingerprint(
         manifest_path=str(manifest_path.resolve()),
         manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+        manifest_device=manifest_stat.st_dev,
+        manifest_inode=manifest_stat.st_ino,
+        manifest_size=manifest_stat.st_size,
+        manifest_mtime_ns=manifest_stat.st_mtime_ns,
+        manifest_ctime_ns=manifest_stat.st_ctime_ns,
         role=role,
         absolute_path=str(artifact_path),
         artifact_sha256=actual_sha256,
@@ -1613,33 +1717,6 @@ def _read_registered_artifact_source(
     )
 
 
-def _artifact_content_is_current(
-    fingerprint: _ArtifactSourceFingerprint,
-    manifest_path: Path,
-    artifact_path: Path,
-    expected_identity: tuple[int, int, int, int, int],
-) -> bool:
-    """Verify one generation through pinned bytes and final pathname identity."""
-    artifact_bytes, artifact_stat, failure, _detail = (
-        _read_stable_artifact_bytes(artifact_path)
-    )
-    if failure is not None or artifact_bytes is None or artifact_stat is None:
-        return False
-    if _file_identity(artifact_stat) != expected_identity:
-        return False
-    if hashlib.sha256(artifact_bytes).hexdigest() != fingerprint.artifact_sha256:
-        return False
-    try:
-        manifest_after = manifest_path.read_bytes()
-        path_stat_after = artifact_path.stat()
-    except OSError:
-        return False
-    return (
-        hashlib.sha256(manifest_after).hexdigest() == fingerprint.manifest_sha256
-        and _file_identity(path_stat_after) == expected_identity
-    )
-
-
 def _artifact_source_is_current(
     fingerprint: _ArtifactSourceFingerprint,
     *,
@@ -1656,30 +1733,55 @@ def _artifact_source_is_current(
     """
     manifest_path = Path(fingerprint.manifest_path)
     artifact_path = Path(fingerprint.absolute_path)
-    expected_identity = (
-        fingerprint.device,
-        fingerprint.inode,
-        fingerprint.size,
-        fingerprint.mtime_ns,
-        fingerprint.ctime_ns,
-    )
-    try:
-        manifest_before = manifest_path.read_bytes()
-    except OSError:
-        return False
-    if hashlib.sha256(manifest_before).hexdigest() != fingerprint.manifest_sha256:
-        return False
-    if _source_content_verification_required(
-        fingerprint, verify_content=verify_content
-    ):
-        return _artifact_content_is_current(
-            fingerprint, manifest_path, artifact_path, expected_identity
-        )
-    try:
-        return _file_identity(artifact_path.stat()) == expected_identity
-    except OSError:
-        return False
 
+    requires_content = _source_content_verification_required(
+        fingerprint,
+        verify_content=verify_content,
+    )
+    if not requires_content:
+        try:
+            manifest_stat = manifest_path.stat()
+            artifact_stat = artifact_path.stat()
+        except OSError:
+            return False
+        if _stat_identity_is_strong(manifest_stat) and _stat_identity_is_strong(
+            artifact_stat
+        ):
+            return _manifest_stat_matches_fingerprint(
+                fingerprint,
+                manifest_stat,
+            ) and _artifact_stat_matches_fingerprint(fingerprint, artifact_stat)
+        requires_content = True
+
+    manifest_bytes, manifest_stat, manifest_failure, _manifest_detail = (
+        _read_stable_regular_file_bytes(manifest_path)
+    )
+    if (
+        manifest_failure is not None
+        or manifest_bytes is None
+        or manifest_stat is None
+        or not _manifest_stat_matches_fingerprint(fingerprint, manifest_stat)
+        or hashlib.sha256(manifest_bytes).hexdigest() != fingerprint.manifest_sha256
+    ):
+        return False
+    artifact_bytes, artifact_stat, failure, _detail = (
+        _read_stable_artifact_bytes(artifact_path)
+    )
+    if failure is not None or artifact_bytes is None or artifact_stat is None:
+        return False
+    if not _artifact_stat_matches_fingerprint(fingerprint, artifact_stat):
+        return False
+    if hashlib.sha256(artifact_bytes).hexdigest() != fingerprint.artifact_sha256:
+        return False
+    try:
+        manifest_after_stat = manifest_path.stat()
+        artifact_after_stat = artifact_path.stat()
+    except OSError:
+        return False
+    return _manifest_stat_matches_fingerprint(
+        fingerprint,
+        manifest_after_stat,
+    ) and _artifact_stat_matches_fingerprint(fingerprint, artifact_after_stat)
 
 def _cache_state(
     cache: OrderedDict[Any, Any], key: Any, state: Any
@@ -1687,35 +1789,35 @@ def _cache_state(
     cache[key] = state
     cache.move_to_end(key)
     while len(cache) > _CALL_NAVIGATION_CACHE_MAX_ENTRIES:
-        cache.popitem(last=False)
+        evicted_key, _evicted_state = cache.popitem(last=False)
+        if cache is _CALL_NAVIGATION_CACHE:
+            _drop_symbol_navigation_states_for_call_fingerprint(evicted_key)
 
 
-def _evict_call_navigation_state(
+def _drop_symbol_navigation_states_for_call_fingerprint(
+    fingerprint: _ArtifactSourceFingerprint,
+) -> None:
+    for cache_key in list(_SYMBOL_NAVIGATION_CACHE):
+        if cache_key[0] == fingerprint:
+            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+
+
+def _drop_call_navigation_state_if_current(
     fingerprint: _ArtifactSourceFingerprint,
     state: _CallNavigationState,
 ) -> None:
-    """Remove one stale call generation and symbol states derived from it."""
-    with _CALL_NAVIGATION_CACHE_LOCK:
-        if _CALL_NAVIGATION_CACHE.get(fingerprint) is not state:
-            return
+    if _CALL_NAVIGATION_CACHE.get(fingerprint) is state:
         _CALL_NAVIGATION_CACHE.pop(fingerprint, None)
-        stale_symbol_keys = [
-            cache_key
-            for cache_key in _SYMBOL_NAVIGATION_CACHE
-            if cache_key[0] == fingerprint
-        ]
-        for cache_key in stale_symbol_keys:
-            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+        _drop_symbol_navigation_states_for_call_fingerprint(fingerprint)
 
 
-def _evict_symbol_navigation_state(
+def _drop_symbol_navigation_state_if_current(
     cache_key: tuple[_ArtifactSourceFingerprint, _ArtifactSourceFingerprint],
     state: _SymbolNavigationState,
 ) -> None:
-    """Remove one stale symbol generation without touching a replacement."""
-    with _CALL_NAVIGATION_CACHE_LOCK:
-        if _SYMBOL_NAVIGATION_CACHE.get(cache_key) is state:
-            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+    if _SYMBOL_NAVIGATION_CACHE.get(cache_key) is state:
+        _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+
 
 
 def _cached_call_navigation_state(
@@ -1727,10 +1829,11 @@ def _cached_call_navigation_state(
             (fingerprint, state)
             for fingerprint, state in reversed(list(_CALL_NAVIGATION_CACHE.items()))
             if fingerprint.manifest_path == resolved_manifest
-        ]
+    ]
     for fingerprint, state in candidates:
         if not _artifact_source_is_current(fingerprint):
-            _evict_call_navigation_state(fingerprint, state)
+            with _CALL_NAVIGATION_CACHE_LOCK:
+                _drop_call_navigation_state_if_current(fingerprint, state)
             continue
         with _CALL_NAVIGATION_CACHE_LOCK:
             if _CALL_NAVIGATION_CACHE.get(fingerprint) is state:
@@ -1749,13 +1852,18 @@ def _cached_symbol_navigation_state(
             for cache_key, state in reversed(list(_SYMBOL_NAVIGATION_CACHE.items()))
             if cache_key[0] == call_state.fingerprint
             and cache_key[1].manifest_path == resolved_manifest
-        ]
+    ]
     for cache_key, state in candidates:
         if not _artifact_source_is_current(cache_key[1]):
-            _evict_symbol_navigation_state(cache_key, state)
+            with _CALL_NAVIGATION_CACHE_LOCK:
+                _drop_symbol_navigation_state_if_current(cache_key, state)
             continue
         if not _artifact_source_is_current(call_state.fingerprint):
-            _evict_call_navigation_state(call_state.fingerprint, call_state)
+            with _CALL_NAVIGATION_CACHE_LOCK:
+                _drop_call_navigation_state_if_current(
+                    call_state.fingerprint,
+                    call_state,
+                )
             return None
         with _CALL_NAVIGATION_CACHE_LOCK:
             if _SYMBOL_NAVIGATION_CACHE.get(cache_key) is state:

@@ -974,7 +974,7 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
                 ref=args.ref,
                 artifact_family=family,
             )
-    except ExternalManifestReferenceError as exc:
+    except (ExternalManifestReferenceError, OSError, ValueError) as exc:
         print("repobrief external-manifest refresh: " + str(exc), file=sys.stderr)
         return 2
 
@@ -997,11 +997,22 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
         print("repobrief external-manifest refresh: missing bundle_manifest", file=sys.stderr)
         return 1
     try:
+        from merger.lenskit.core.bundle_generation import (
+            BundleGenerationError,
+            resolve_bundle_manifest_path,
+        )
+
+        publish_source_manifest = resolve_bundle_manifest_path(bundle_manifest)
         publication = publish_external_manifest_references(
-            bundle_manifest, publication_root,
+            publish_source_manifest, publication_root,
             repository=args.repository, ref=args.ref, artifact_families=args.artifact_families,
         )
-    except ExternalManifestReferenceError as exc:
+    except (
+        BundleGenerationError,
+        ExternalManifestReferenceError,
+        OSError,
+        ValueError,
+    ) as exc:
         print("repobrief external-manifest refresh: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps({
@@ -1465,6 +1476,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         redact_secrets=redact_secrets,
         include_hidden=args.include_hidden,
         generator_info=generator_info,
+        publish_generation=False,
     )
     dropped_profile_paths = enforce_profile_exclusions(artifacts.bundle_manifest, profile)
     snapshot_plan_path = emit_snapshot_plan_report(
@@ -1472,21 +1484,6 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     )
     finalization = finalize_snapshot_bundle(artifacts.bundle_manifest, profile)
     profile_evaluation = finalization.get("profile_evaluation")
-    latest_registry_result = None
-    latest_registry_arg = getattr(args, "latest_complete_registry", None)
-    if (
-        latest_registry_arg
-        and artifacts.bundle_manifest is not None
-        and finalization.get("status") == "pass"
-    ):
-        from merger.lenskit.core.repobrief_latest_complete import (
-            write_latest_complete_registry,
-        )
-
-        latest_registry_result = write_latest_complete_registry(
-            artifacts.bundle_manifest,
-            latest_registry_arg,
-        )
     artifact_paths = [
         path
         for path in artifacts.get_all_paths()
@@ -1498,6 +1495,36 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         path = Path(raw_path)
         if path not in artifact_paths:
             artifact_paths.append(path)
+
+    published_bundle_manifest = artifacts.bundle_manifest
+    bundle_generation_result = None
+    if artifacts.bundle_manifest is not None and finalization.get("status") == "pass":
+        from merger.lenskit.core.bundle_generation import publish_bundle_generation
+
+        bundle_generation_result = publish_bundle_generation(
+            artifacts.bundle_manifest,
+            output_root=out,
+            extra_paths=artifact_paths,
+        )
+        published_bundle_manifest = bundle_generation_result.current_manifest_path
+        if published_bundle_manifest not in artifact_paths:
+            artifact_paths.append(published_bundle_manifest)
+
+    latest_registry_result = None
+    latest_registry_arg = getattr(args, "latest_complete_registry", None)
+    if (
+        latest_registry_arg
+        and published_bundle_manifest is not None
+        and finalization.get("status") == "pass"
+    ):
+        from merger.lenskit.core.repobrief_latest_complete import (
+            write_latest_complete_registry,
+        )
+
+        latest_registry_result = write_latest_complete_registry(
+            published_bundle_manifest,
+            latest_registry_arg,
+        )
 
     return {
         "status": "ok" if finalization.get("status") == "pass" else "fail",
@@ -1512,7 +1539,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
         },
         "repo": str(repo),
         "out": str(out),
-        "bundle_manifest": str(artifacts.bundle_manifest) if artifacts.bundle_manifest else None,
+        "bundle_manifest": str(published_bundle_manifest) if published_bundle_manifest else None,
         "profile_evaluation": profile_evaluation,
         "snapshot_plan_report": str(snapshot_plan_path) if snapshot_plan_path else None,
         "export_safety_report": next(
@@ -1524,6 +1551,11 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
             None,
         ),
         "finalization": finalization,
+        "bundle_generation": (
+            bundle_generation_result.as_dict()
+            if bundle_generation_result is not None
+            else None
+        ),
         "latest_complete_registry": latest_registry_result,
         "refreshed_agent_entrypoints": finalization.get("refreshed_paths", []),
         "removed_profile_excluded_artifacts": [str(path) for path in dropped_profile_paths],

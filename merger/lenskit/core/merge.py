@@ -730,6 +730,8 @@ class MergeArtifacts:
     python_symbol_index: Optional[Path] = None
     python_call_graph: Optional[Path] = None
     other: List[Path] = None
+    legacy_bundle_manifest: Optional[Path] = None
+    bundle_generation: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.md_parts is None:
@@ -810,6 +812,51 @@ class MergeArtifacts:
     def get_primary_path(self) -> Optional[Path]:
         """Return the primary artifact path (JSON if exists, otherwise Markdown)."""
         return self.index_json or self.canonical_md
+
+
+def _publish_merge_artifact_generation(
+    artifacts: MergeArtifacts,
+    *,
+    output_root: Path,
+    flat_bundle_manifest: Path,
+    extra_paths: List[Path],
+) -> MergeArtifacts:
+    from .bundle_generation import publish_bundle_generation
+
+    generation = publish_bundle_generation(
+        flat_bundle_manifest,
+        output_root=output_root,
+        extra_paths=extra_paths,
+    )
+
+    def current(path: Optional[Path]) -> Optional[Path]:
+        return generation.current_path_for(path) if path is not None else None
+
+    return MergeArtifacts(
+        index_json=current(artifacts.index_json),
+        canonical_md=current(artifacts.canonical_md),
+        chunk_index=current(artifacts.chunk_index),
+        md_parts=[generation.current_path_for(path) for path in artifacts.md_parts],
+        dump_index=current(artifacts.dump_index),
+        sqlite_index=current(artifacts.sqlite_index),
+        retrieval_eval=current(artifacts.retrieval_eval),
+        derived_manifest=current(artifacts.derived_manifest),
+        bundle_manifest=generation.current_manifest_path,
+        output_health=current(artifacts.output_health),
+        claim_evidence_map=current(artifacts.claim_evidence_map),
+        agent_reading_pack=current(artifacts.agent_reading_pack),
+        agent_entry_manifest=current(artifacts.agent_entry_manifest),
+        lens_cards=current(artifacts.lens_cards),
+        concept_cards=current(artifacts.concept_cards),
+        relation_cards=current(artifacts.relation_cards),
+        delta_json=current(artifacts.delta_json),
+        pr_delta_cards=current(artifacts.pr_delta_cards),
+        python_symbol_index=current(artifacts.python_symbol_index),
+        python_call_graph=current(artifacts.python_call_graph),
+        other=[generation.current_path_for(path) for path in artifacts.other],
+        legacy_bundle_manifest=flat_bundle_manifest,
+        bundle_generation=generation.as_dict(),
+    )
 
 
 @dataclass
@@ -5391,6 +5438,7 @@ def write_reports_v2(
     redact_secrets: bool = False,
     include_hidden: bool = True,
     generator_info: Optional[Dict[str, Any]] = None,
+    publish_generation: bool = True,
 ) -> MergeArtifacts:
     out_paths = []
 
@@ -6870,7 +6918,10 @@ def write_reports_v2(
     # skipped), stamp the links into the manifest, then run a second validation
     # pass against the link-bearing manifest so the final persisted sidecar
     # actually validates the truly finished artifact.
-    from .post_emit_health import write_post_emit_health
+    from .post_emit_health import (
+        bind_post_emit_health_to_final_manifest,
+        write_post_emit_health,
+    )
     from .bundle_surface_validate import write_bundle_surface_validation
 
     post_health_path, _ = write_post_emit_health(str(bundle_manifest_path))
@@ -6945,6 +6996,13 @@ def write_reports_v2(
         bundle_manifest["links"] = links
         _write_text_atomic(bundle_manifest_path, json.dumps(bundle_manifest, indent=2))
 
+    # Bind only after the last possible manifest rewrite. The sidecar is not a
+    # manifest artifact, so this content hash is non-circular and survives a
+    # byte-identical copy into an immutable generation.
+    bind_post_emit_health_to_final_manifest(
+        str(bundle_manifest_path),
+        str(post_health_path),
+    )
     # Hard, visible gate: when the claim-map surface is required, an active
     # DEFECT of the claim-map invariant — a silently absent claim map (no reason),
     # a present/announced-absent contradiction, or a stale pack placeholder —
@@ -6967,53 +7025,35 @@ def write_reports_v2(
             + failed
         )
 
-    if extras and extras.json_sidecar:
-        # JSON is primary when json_sidecar is enabled
-        return MergeArtifacts(
-            index_json=final_index_json,
-            canonical_md=final_canonical_md,
-            chunk_index=final_chunk_index,
-            md_parts=verified_md,
-            dump_index=final_dump_index,
-            sqlite_index=sqlite_indices[-1] if sqlite_indices else None,
-            retrieval_eval=retrieval_evals[-1] if retrieval_evals else None,
-            derived_manifest=derived_manifests[-1] if derived_manifests else None,
-            bundle_manifest=bundle_manifest_path,
-            output_health=output_health_path,
-            claim_evidence_map=claim_evidence_map_path,
-            agent_reading_pack=agent_reading_pack_path,
-            agent_entry_manifest=agent_entry_manifest_path,
-            lens_cards=lens_cards_path,
-            concept_cards=concept_cards_path,
-            relation_cards=relation_cards_path,
-            delta_json=delta_json_path,
-            pr_delta_cards=pr_delta_cards_path,
-            python_symbol_index=python_symbol_index_path,
-            python_call_graph=python_call_graph_path,
-            other=other_paths
-        )
-    else:
-        # Markdown is primary when json_sidecar is disabled
-        return MergeArtifacts(
-            index_json=None,
-            canonical_md=final_canonical_md,
-            chunk_index=final_chunk_index,
-            md_parts=verified_md,
-            dump_index=final_dump_index,
-            sqlite_index=sqlite_indices[-1] if sqlite_indices else None,
-            retrieval_eval=retrieval_evals[-1] if retrieval_evals else None,
-            derived_manifest=derived_manifests[-1] if derived_manifests else None,
-            bundle_manifest=bundle_manifest_path,
-            output_health=output_health_path,
-            claim_evidence_map=claim_evidence_map_path,
-            agent_reading_pack=agent_reading_pack_path,
-            agent_entry_manifest=agent_entry_manifest_path,
-            lens_cards=lens_cards_path,
-            concept_cards=concept_cards_path,
-            relation_cards=relation_cards_path,
-            delta_json=delta_json_path,
-            pr_delta_cards=pr_delta_cards_path,
-            python_symbol_index=python_symbol_index_path,
-            python_call_graph=python_call_graph_path,
-            other=other_paths
-        )
+    result = MergeArtifacts(
+        index_json=final_index_json if extras and extras.json_sidecar else None,
+        canonical_md=final_canonical_md,
+        chunk_index=final_chunk_index,
+        md_parts=verified_md,
+        dump_index=final_dump_index,
+        sqlite_index=sqlite_indices[-1] if sqlite_indices else None,
+        retrieval_eval=retrieval_evals[-1] if retrieval_evals else None,
+        derived_manifest=derived_manifests[-1] if derived_manifests else None,
+        bundle_manifest=bundle_manifest_path,
+        output_health=output_health_path,
+        claim_evidence_map=claim_evidence_map_path,
+        agent_reading_pack=agent_reading_pack_path,
+        agent_entry_manifest=agent_entry_manifest_path,
+        lens_cards=lens_cards_path,
+        concept_cards=concept_cards_path,
+        relation_cards=relation_cards_path,
+        delta_json=delta_json_path,
+        pr_delta_cards=pr_delta_cards_path,
+        python_symbol_index=python_symbol_index_path,
+        python_call_graph=python_call_graph_path,
+        other=other_paths,
+        legacy_bundle_manifest=bundle_manifest_path,
+    )
+    if not publish_generation:
+        return result
+    return _publish_merge_artifact_generation(
+        result,
+        output_root=merges_dir,
+        flat_bundle_manifest=bundle_manifest_path,
+        extra_paths=out_paths,
+    )

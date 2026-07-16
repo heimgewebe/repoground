@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import ctypes
 import errno
 import fcntl
 import hashlib
 import os
 import secrets
 import stat
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
@@ -755,6 +757,123 @@ def rename_path(source: str | Path, destination: str | Path) -> None:
     except OSError as exc:
         raise RootedFilesystemError(
             f"rooted rename failed: {source_absolute} -> {destination_absolute}: {exc}"
+        ) from exc
+    finally:
+        os.close(source_parent)
+        os.close(destination_parent)
+
+
+_RENAME_NOREPLACE = 0x00000001
+_RENAME_EXCL = 0x00000004
+_RENAME_FUNCTION_ARGTYPES = (
+    ctypes.c_int,
+    ctypes.c_char_p,
+    ctypes.c_int,
+    ctypes.c_char_p,
+    ctypes.c_uint,
+)
+
+
+def _rename_platform() -> str:
+    if sys.platform.startswith("linux"):
+        return "linux"
+    if sys.platform in {"darwin", "ios"}:
+        return "darwin"
+    try:
+        if os.uname().sysname == "Darwin":
+            return "darwin"
+    except (AttributeError, OSError):
+        pass
+    return sys.platform
+
+
+def _load_libc_rename_function(name: str):
+    try:
+        function = getattr(ctypes.CDLL(None, use_errno=True), name)
+    except AttributeError as exc:
+        raise RootedFilesystemError(
+            f"create-only rooted rename primitive {name} is unavailable"
+        ) from exc
+    function.argtypes = _RENAME_FUNCTION_ARGTYPES
+    function.restype = ctypes.c_int
+    return function
+
+
+def _call_rename_no_replace(
+    function,
+    source_parent: int,
+    source_name: str,
+    destination_parent: int,
+    destination_name: str,
+    flags: int,
+) -> None:
+    ctypes.set_errno(0)
+    result = function(
+        source_parent,
+        os.fsencode(source_name),
+        destination_parent,
+        os.fsencode(destination_name),
+        flags,
+    )
+    if result != 0:
+        err = ctypes.get_errno() or errno.EIO
+        raise OSError(err, os.strerror(err))
+
+
+def _rename_no_replace(
+    source_parent: int,
+    source_name: str,
+    destination_parent: int,
+    destination_name: str,
+) -> None:
+    platform = _rename_platform()
+    if platform == "linux":
+        function = _load_libc_rename_function("renameat2")
+        flags = _RENAME_NOREPLACE
+    elif platform == "darwin":
+        function = _load_libc_rename_function("renameatx_np")
+        flags = _RENAME_EXCL
+    else:
+        raise RootedFilesystemError(
+            f"create-only rooted rename is unsupported on platform {platform!r}"
+        )
+    _call_rename_no_replace(
+        function,
+        source_parent,
+        source_name,
+        destination_parent,
+        destination_name,
+        flags,
+    )
+
+
+def rename_path_no_replace(source: str | Path, destination: str | Path) -> None:
+    source_parent, source_name, source_absolute = _open_parent(source, create=False)
+    try:
+        destination_parent, destination_name, destination_absolute = _open_parent(
+            destination,
+            create=True,
+        )
+    except OSError:
+        os.close(source_parent)
+        raise
+    try:
+        _rename_no_replace(
+            source_parent,
+            source_name,
+            destination_parent,
+            destination_name,
+        )
+        os.fsync(destination_parent)
+        _assert_directory_fd_matches_path(source_parent, source_absolute.parent)
+        _assert_directory_fd_matches_path(
+            destination_parent, destination_absolute.parent
+        )
+    except RootedFilesystemError:
+        raise
+    except OSError as exc:
+        raise RootedFilesystemError(
+            f"rooted create-only rename failed: {source_absolute} -> {destination_absolute}: {exc}"
         ) from exc
     finally:
         os.close(source_parent)

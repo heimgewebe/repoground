@@ -1,4 +1,6 @@
 from __future__ import annotations
+import ctypes
+import errno
 
 import os
 import stat
@@ -15,6 +17,7 @@ from merger.lenskit.core.rooted_filesystem import (
     make_directory_exclusive,
     exclusive_file_lock,
     read_regular_bytes,
+    rename_path_no_replace,
     remove_regular_file,
     remove_tree,
     read_tree,
@@ -250,3 +253,98 @@ def test_verified_copy_rejects_source_file_identity_swap(
         )
 
     assert not destination.exists()
+
+class _FakeRenameFunction:
+    def __init__(self, callback):
+        self.callback = callback
+        self.calls = []
+        self.argtypes = None
+        self.restype = None
+
+    def __call__(self, *args):
+        self.calls.append(args)
+        return self.callback(*args)
+
+
+def test_darwin_create_only_rename_uses_renameatx_np_exclusive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "publication"
+    root.mkdir()
+    source = root / "staged"
+    destination = root / "generation"
+    source.mkdir()
+    (source / "payload").write_bytes(b"ok\n")
+    loaded = []
+
+    def emulate_rename(source_fd, source_name, destination_fd, destination_name, flags):
+        assert flags == rooted_filesystem._RENAME_EXCL
+        destination_text = os.fsdecode(destination_name)
+        try:
+            os.stat(destination_text, dir_fd=destination_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            os.rename(
+                os.fsdecode(source_name),
+                destination_text,
+                src_dir_fd=source_fd,
+                dst_dir_fd=destination_fd,
+            )
+            return 0
+        ctypes.set_errno(errno.EEXIST)
+        return -1
+
+    fake = _FakeRenameFunction(emulate_rename)
+    monkeypatch.setattr(rooted_filesystem, "_rename_platform", lambda: "darwin")
+    monkeypatch.setattr(
+        rooted_filesystem,
+        "_load_libc_rename_function",
+        lambda name: loaded.append(name) or fake,
+    )
+
+    with bind_directory(root):
+        rename_path_no_replace(source, destination)
+
+    assert loaded == ["renameatx_np"]
+    assert (destination / "payload").read_bytes() == b"ok\n"
+    assert not source.exists()
+
+
+def test_darwin_create_only_rename_preserves_existing_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "publication"
+    root.mkdir()
+    source = root / "staged"
+    destination = root / "generation"
+    source.mkdir()
+    destination.mkdir()
+    (source / "payload").write_bytes(b"new\n")
+    (destination / "payload").write_bytes(b"old\n")
+
+    def reject_existing(*_args):
+        ctypes.set_errno(errno.EEXIST)
+        return -1
+
+    monkeypatch.setattr(rooted_filesystem, "_rename_platform", lambda: "darwin")
+    monkeypatch.setattr(
+        rooted_filesystem,
+        "_load_libc_rename_function",
+        lambda _name: _FakeRenameFunction(reject_existing),
+    )
+
+    with bind_directory(root):
+        with pytest.raises(RootedFilesystemError, match="File exists"):
+            rename_path_no_replace(source, destination)
+
+    assert (source / "payload").read_bytes() == b"new\n"
+    assert (destination / "payload").read_bytes() == b"old\n"
+
+
+def test_create_only_rename_unknown_platform_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(rooted_filesystem, "_rename_platform", lambda: "unknown-os")
+    with pytest.raises(RootedFilesystemError, match="unknown-os"):
+        rooted_filesystem._rename_no_replace(10, "source", 11, "destination")

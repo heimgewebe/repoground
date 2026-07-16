@@ -847,3 +847,79 @@ def test_post_emit_health_degradation_summary_lists_skipped_validation_classes(t
         "environment_degraded",
     }
     assert report["health_status_model"] == report["degradation"]["status_model"]
+
+
+def test_final_manifest_binding_preserves_report_and_uses_atomic_write(
+    tmp_path, monkeypatch
+):
+    manifest = _make_bundle(tmp_path)
+    post_path, original = write_post_emit_health(str(manifest))
+    original_bytes = post_path.read_bytes()
+    calls = []
+    real_atomic_write = post_emit_health.atomic_write_bytes
+
+    def recording_atomic_write(path, payload, **kwargs):
+        calls.append((Path(path), payload))
+        return real_atomic_write(path, payload, **kwargs)
+
+    monkeypatch.setattr(post_emit_health, "atomic_write_bytes", recording_atomic_write)
+    manifest_sha256 = post_emit_health.bind_post_emit_health_to_final_manifest(
+        str(manifest), str(post_path)
+    )
+
+    bound = json.loads(post_path.read_text(encoding="utf-8"))
+    assert calls and calls[0][0] == post_path
+    assert post_path.read_bytes() != original_bytes
+    assert bound["bundle_manifest_sha256"] == _sha256(manifest.read_bytes())
+    assert manifest_sha256 == bound["bundle_manifest_sha256"]
+    for key in ("run_id", "checked_at", "status", "bundle_manifest_path"):
+        assert bound[key] == original[key]
+    schema = json.loads(_POST_HEALTH_SCHEMA_PATH.read_text(encoding="utf-8"))
+    jsonschema.validate(instance=bound, schema=schema)
+
+
+def test_final_manifest_binding_fails_before_write_for_invalid_health(tmp_path):
+    manifest = _make_bundle(tmp_path)
+    post_path = tmp_path / "invalid.bundle_health.post.json"
+    original = b"{not-json\n"
+    post_path.write_bytes(original)
+
+    with pytest.raises(
+        post_emit_health.PostEmitHealthBindingError,
+        match="valid UTF-8 JSON",
+    ):
+        post_emit_health.bind_post_emit_health_to_final_manifest(
+            str(manifest), str(post_path)
+        )
+
+    assert post_path.read_bytes() == original
+
+def test_final_manifest_binding_rejects_prewrite_manifest_change_without_mutation(
+    tmp_path, monkeypatch
+):
+    manifest = _make_bundle(tmp_path)
+    post_path, _ = write_post_emit_health(str(manifest))
+    original_post = post_path.read_bytes()
+    original_reader = post_emit_health.read_regular_bytes
+    manifest_reads = 0
+
+    def changing_reader(path):
+        nonlocal manifest_reads
+        result = original_reader(path)
+        if Path(path) == manifest:
+            manifest_reads += 1
+            if manifest_reads == 1:
+                manifest.write_bytes(result + b" ")
+        return result
+
+    monkeypatch.setattr(post_emit_health, "read_regular_bytes", changing_reader)
+
+    with pytest.raises(
+        post_emit_health.PostEmitHealthBindingError,
+        match="final bundle manifest changed",
+    ):
+        post_emit_health.bind_post_emit_health_to_final_manifest(
+            str(manifest), str(post_path)
+        )
+
+    assert post_path.read_bytes() == original_post

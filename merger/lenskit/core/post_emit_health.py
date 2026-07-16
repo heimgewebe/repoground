@@ -51,6 +51,11 @@ from .claim_evidence_diagnostics import (
 from .constants import ArtifactRole
 from .output_health import _is_jsonschema_unavailable_error
 from .path_security import resolve_secure_path
+from .rooted_filesystem import (
+    RootedFilesystemError,
+    atomic_write_bytes,
+    read_regular_bytes,
+)
 
 from .dependency_diagnostics import jsonschema_dependency
 from .health_degradation import HEALTH_STATUS_MODEL, degradation_item, degradation_summary
@@ -64,6 +69,10 @@ logger = logging.getLogger(__name__)
 
 KIND = "lenskit.post_emit_health"
 VERSION = "1.0"
+
+
+class PostEmitHealthBindingError(RuntimeError):
+    """Raised when final manifest binding cannot be persisted safely."""
 
 _MANIFEST_SUFFIX = ".bundle.manifest.json"
 _POST_HEALTH_SUFFIX = ".bundle_health.post.json"
@@ -964,6 +973,76 @@ def compute_post_emit_health(
         jsonschema_available=jsonschema is not None,
         agent_pack=agent_pack,
     )
+
+
+def _read_binding_input(path: Path, *, label: str) -> bytes:
+    try:
+        return read_regular_bytes(path)
+    except (RootedFilesystemError, OSError) as exc:
+        raise PostEmitHealthBindingError(f"cannot read {label}: {exc}") from exc
+
+
+def _parse_post_emit_health_binding_input(payload: bytes) -> Dict[str, Any]:
+    try:
+        post_health = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise PostEmitHealthBindingError(
+            "post_emit_health must be valid UTF-8 JSON before final binding"
+        ) from exc
+    if not isinstance(post_health, dict):
+        raise PostEmitHealthBindingError(
+            "post_emit_health JSON root must be an object before final binding"
+        )
+    if post_health.get("kind") != KIND or post_health.get("version") != VERSION:
+        raise PostEmitHealthBindingError(
+            "post_emit_health kind/version mismatch before final binding"
+        )
+    return post_health
+
+
+def _assert_final_manifest_hash(path: Path, expected_sha256: str) -> None:
+    current = _read_binding_input(path, label="final bundle manifest")
+    if hashlib.sha256(current).hexdigest() != expected_sha256:
+        raise PostEmitHealthBindingError(
+            "final bundle manifest changed while post_emit_health was being bound"
+        )
+
+
+def bind_post_emit_health_to_final_manifest(
+    manifest_path_str: str,
+    post_health_path_str: str,
+) -> str:
+    """Atomically bind an existing health report to final manifest bytes.
+
+    The report is intentionally not a manifest artifact, so this additive hash
+    does not create a self-hash cycle. Existing validation metadata is preserved.
+    """
+    manifest_path = _resolve_manifest_path(manifest_path_str)
+    post_health_path = Path(post_health_path_str)
+    if not post_health_path.is_absolute():
+        post_health_path = Path.cwd() / post_health_path
+
+    manifest_bytes = _read_binding_input(
+        manifest_path, label="final bundle manifest"
+    )
+    post_health = _parse_post_emit_health_binding_input(
+        _read_binding_input(post_health_path, label="post_emit_health")
+    )
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    post_health["bundle_manifest_sha256"] = manifest_sha256
+    rendered = (json.dumps(post_health, indent=2) + "\n").encode("utf-8")
+
+    # Reject changes that occurred while parsing before making the sidecar visible.
+    _assert_final_manifest_hash(manifest_path, manifest_sha256)
+    try:
+        atomic_write_bytes(post_health_path, rendered)
+    except (RootedFilesystemError, OSError) as exc:
+        raise PostEmitHealthBindingError(
+            f"cannot persist final manifest binding safely: {exc}"
+        ) from exc
+    # Close the remaining write-to-observation race before publication continues.
+    _assert_final_manifest_hash(manifest_path, manifest_sha256)
+    return manifest_sha256
 
 
 def write_post_emit_health(

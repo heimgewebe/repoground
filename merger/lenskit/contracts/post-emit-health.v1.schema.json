@@ -71,6 +71,11 @@
       "type": "string",
       "description": "Absolute path to the validated bundle manifest."
     },
+    "bundle_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 of the final validated bundle manifest bytes."
+    },
     "status": {
       "type": "string",
       "enum": ["pass", "warn", "fail", "blocked"],

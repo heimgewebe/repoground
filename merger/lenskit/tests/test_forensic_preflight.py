@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 from merger.lenskit.cli.main import main
@@ -271,6 +272,50 @@ def test_forensic_preflight_rejects_adjacent_stale_post_emit_health(tmp_path):
     assert by_name["post_emit_health_bound_to_manifest"]["status"] == "fail"
     assert by_name["post_emit_health_pass"]["status"] == "blocked"
     assert report["status"] in {"blocked", "fail"}
+
+
+def test_forensic_preflight_rejects_invalid_or_wrong_manifest_hash(tmp_path):
+    manifest = _make_bundle(tmp_path, include_claim_map=True)
+    post_path = _write_post_health(manifest)
+
+    for declared_hash, expected_detail in (
+        ("A" * 64, "is invalid"),
+        ("0" * 64, "does not match"),
+    ):
+        post_doc = compute_post_emit_health(str(manifest))
+        post_doc["bundle_manifest_sha256"] = declared_hash
+        post_path.write_text(json.dumps(post_doc, indent=2), encoding="utf-8")
+
+        report = compute_forensic_preflight(str(manifest))
+        binding = {item["name"]: item for item in report["checks"]}[
+            "post_emit_health_bound_to_manifest"
+        ]
+        assert binding["status"] == "fail"
+        assert expected_detail in binding["detail"]
+
+
+def test_forensic_preflight_accepts_byte_identical_immutable_manifest_by_hash(
+    tmp_path,
+):
+    flat = tmp_path / "flat"
+    flat.mkdir()
+    flat_manifest = _make_bundle(flat, include_claim_map=True)
+    flat_post = _write_post_health(flat_manifest)
+    post_doc = json.loads(flat_post.read_text(encoding="utf-8"))
+    post_doc["bundle_manifest_sha256"] = _sha256(flat_manifest.read_bytes())
+    flat_post.write_text(json.dumps(post_doc, indent=2), encoding="utf-8")
+
+    immutable = tmp_path / "immutable"
+    shutil.copytree(flat, immutable)
+    immutable_manifest = immutable / flat_manifest.name
+
+    report = compute_forensic_preflight(str(immutable_manifest))
+    binding = {item["name"]: item for item in report["checks"]}[
+        "post_emit_health_bound_to_manifest"
+    ]
+    assert binding["status"] == "pass"
+    assert "hash-bound" in binding["detail"]
+    assert report["status"] == "pass"
 
 
 def test_forensic_strict_preflight_passes_with_all_prerequisites(tmp_path):

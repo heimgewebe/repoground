@@ -1910,7 +1910,12 @@ def test_real_dump_surface_hook_emits_runtime_and_surface_links(tmp_path):
     assert status in {"pass", "warn", "blocked", "fail"}
 
     # sidecars persisted by the standard dump (criteria A + B)
-    assert (manifest_dir / post_path).is_file(), "post_emit_health sidecar must exist"
+    post_file = manifest_dir / post_path
+    assert post_file.is_file(), "post_emit_health sidecar must exist"
+    post_report = json.loads(post_file.read_text(encoding="utf-8"))
+    assert post_report["bundle_manifest_sha256"] == _sha256_file(
+        artifacts.bundle_manifest
+    )
     surface_file = manifest_dir / surface_path
     assert surface_file.is_file(), "bundle_surface_validation sidecar must exist"
 

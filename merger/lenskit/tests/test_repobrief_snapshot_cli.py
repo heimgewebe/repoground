@@ -1,4 +1,6 @@
+import hashlib
 import json
+from argparse import Namespace
 
 import pytest
 from pathlib import Path
@@ -330,6 +332,143 @@ def test_public_share_rejects_explicit_dual_output_mode(tmp_path):
 
     assert rc == 2
     assert not out.exists()
+
+
+def test_external_manifest_refresh_returns_exit_2_for_bundle_generation_resolver_error(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    out = tmp_path / "publication" / "snapshot"
+    publication_root = tmp_path / "publication"
+    repo.mkdir()
+    publication_root.mkdir()
+    current_json = out / ".repobrief-generations" / "repo_merge" / "current.json"
+
+    def fake_snapshot_create(_args):
+        current_json.parent.mkdir(parents=True)
+        current_json.write_text("{}", encoding="utf-8")
+        print(json.dumps({"bundle_manifest": str(current_json)}))
+        return 0
+
+    def fail_resolver(_path):
+        from merger.lenskit.core.bundle_generation import BundleGenerationError
+
+        raise BundleGenerationError("current JSON pointer contract mismatch")
+
+    monkeypatch.setattr(cmd_repobrief, "run_snapshot_create", fake_snapshot_create)
+    monkeypatch.setattr(
+        "merger.lenskit.core.bundle_generation.resolve_bundle_manifest_path",
+        fail_resolver,
+    )
+
+    rc = cmd_repobrief.run_external_manifest_refresh(
+        Namespace(
+            repo=str(repo),
+            out=str(out),
+            publication_root=str(publication_root),
+            repository="repo",
+            ref="main",
+            artifact_families=["lenskit"],
+            profile="agent-portable",
+            mode="gesamt",
+            max_bytes="0",
+            split_size="25MB",
+            path_filter=None,
+            ext=None,
+            output_mode="dual",
+            redact_secrets=False,
+            include_hidden=False,
+        )
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "current JSON pointer contract mismatch" in captured.err
+
+
+def test_snapshot_create_json_pointer_outputs_resolved_immutable_manifest(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+
+    def fake_scan_repo(*args, **kwargs):
+        return {"name": "repo", "root": repo, "files": [], "total_files": 0, "total_bytes": 0, "ext_hist": {}}
+
+    def fake_write_reports_v2(*args, **kwargs):
+        manifest = out / "repo_merge.bundle.manifest.json"
+        brief = out / "brief.md"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        brief.write_text("# brief\n", encoding="utf-8")
+        brief_bytes = brief.read_bytes()
+        manifest.write_text(
+            json.dumps(
+                {
+                    "kind": "repolens.bundle.manifest",
+                    "version": "1.0",
+                    "run_id": "run-json",
+                    "created_at": "2026-07-16T00:00:00Z",
+                    "generator": {"name": "test", "version": "dev", "config_sha256": "a" * 64},
+                    "artifacts": [
+                        {
+                            "role": "canonical_md",
+                            "path": brief.name,
+                            "content_type": "text/markdown",
+                            "bytes": len(brief_bytes),
+                            "sha256": hashlib.sha256(brief_bytes).hexdigest(),
+                        }
+                    ],
+                    "links": {},
+                    "capabilities": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+        return FakeArtifacts(manifest)
+
+    def unsupported_symlink(*_args, **_kwargs):
+        raise NotImplementedError("symlink unsupported")
+
+    monkeypatch.setattr(cmd_repobrief, "scan_repo", fake_scan_repo)
+    monkeypatch.setattr(cmd_repobrief, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_repobrief,
+        "finalize_snapshot_bundle",
+        _stub_successful_finalization,
+    )
+    monkeypatch.setattr(
+        "merger.lenskit.core.bundle_generation._write_current_symlink",
+        unsupported_symlink,
+    )
+
+    rc = main([
+        "repobrief",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "local-private",
+    ])
+
+    emitted = json.loads(capsys.readouterr().out)
+    bundle_manifest = emitted["bundle_manifest"]
+    generation = emitted["bundle_generation"]
+    assert rc == 0
+    assert generation["pointer_kind"] == "json_pointer"
+    assert generation["current_pointer_path"].endswith("/current.json")
+    assert not bundle_manifest.endswith("/current.json")
+    assert bundle_manifest == generation["current_manifest_path"]
+    assert bundle_manifest == generation["resolved_manifest_path"]
+    assert ".repobrief-generations" in bundle_manifest
 
 
 def test_snapshot_create_emits_snapshot_plan_report(tmp_path, capsys):

@@ -108,6 +108,39 @@ ARTIFACT_PATH_FIELDS = {
     "bundle_manifest": "bundle_manifest",
 }
 
+
+def _secure_absolute_lexical(path: str | Path) -> Path:
+    raw = os.path.expanduser(os.fspath(path))
+    if "\\" in raw:
+        raise ValueError(f"artifact path must be POSIX-compatible: {path}")
+    if not os.path.isabs(raw):
+        raw = os.path.join(os.getcwd(), raw)
+    normalized = os.path.normpath(raw)
+    if not os.path.isabs(normalized):
+        raise ValueError(f"artifact path did not normalize to an absolute path: {path}")
+    return Path(normalized)
+
+
+def _artifact_relative_path(path: str | Path, *, merges_dir: Path) -> str:
+    root = _secure_absolute_lexical(merges_dir)
+    raw_path = Path(path)
+    candidate = raw_path if raw_path.is_absolute() else root / raw_path
+    lexical_candidate = _secure_absolute_lexical(candidate)
+    try:
+        relative = lexical_candidate.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"artifact path escapes merges_dir lexically: {path}") from exc
+    if not relative.parts:
+        raise ValueError(f"artifact path must name a file below merges_dir: {path}")
+    resolved_root = root.resolve(strict=False)
+    resolved_candidate = lexical_candidate.resolve(strict=False)
+    try:
+        resolved_candidate.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"artifact path escapes merges_dir after resolution: {path}") from exc
+    return relative.as_posix()
+
+
 def _register_pre_pull_report_artifact_once(
     *,
     job_store: JobStore,
@@ -129,7 +162,12 @@ def _register_pre_pull_report_artifact_once(
             hub=job.hub_resolved or "",
             repos=repos if repos is not None else (job.request.repos or []),
             created_at=datetime.now(timezone.utc).isoformat(),
-            paths={"pre_pull_report": report_path.name},
+            paths={
+                "pre_pull_report": _artifact_relative_path(
+                    report_path,
+                    merges_dir=report_path.parent,
+                )
+            },
             params=job.request,
             merges_dir=str(report_path.parent.resolve())
         )
@@ -179,7 +217,12 @@ def _register_source_acquisition_report_artifact_once(
             hub=job.hub_resolved or "",
             repos=repos if repos is not None else (job.request.repos or []),
             created_at=datetime.now(timezone.utc).isoformat(),
-            paths={"source_acquisition_report": report_path.name},
+            paths={
+                "source_acquisition_report": _artifact_relative_path(
+                    report_path,
+                    merges_dir=report_path.parent,
+                )
+            },
             params=job.request,
             merges_dir=str(report_path.parent.resolve()),
         )
@@ -874,29 +917,42 @@ class JobRunner:
 
             # Map outputs to Artifact record
             path_map = {}
+
             if artifacts_obj.index_json:
-                path_map["json"] = artifacts_obj.index_json.name
+                path_map["json"] = _artifact_relative_path(
+                    artifacts_obj.index_json,
+                    merges_dir=merges_dir,
+                )
 
             if artifacts_obj.canonical_md:
-                path_map["md"] = artifacts_obj.canonical_md.name
+                path_map["md"] = _artifact_relative_path(
+                    artifacts_obj.canonical_md,
+                    merges_dir=merges_dir,
+                )
 
             for attr, key in ARTIFACT_PATH_FIELDS.items():
                 value = getattr(artifacts_obj, attr, None)
                 if value:
-                    path_map[key] = value.name
+                    path_map[key] = _artifact_relative_path(value, merges_dir=merges_dir)
 
             for i, p in enumerate(artifacts_obj.md_parts):
-                path_map[f"md_part_{i+1}"] = p.name
+                path_map[f"md_part_{i+1}"] = _artifact_relative_path(p, merges_dir=merges_dir)
 
             if artifacts_obj.other:
                 for i, p in enumerate(artifacts_obj.other):
-                    path_map[f"other_{i+1}"] = p.name
+                    path_map[f"other_{i+1}"] = _artifact_relative_path(p, merges_dir=merges_dir)
 
             if pre_pull_report_path and pre_pull_report_path.exists() and not pre_pull_report_artifact_registered:
-                path_map["pre_pull_report"] = pre_pull_report_path.name
+                path_map["pre_pull_report"] = _artifact_relative_path(
+                    pre_pull_report_path,
+                    merges_dir=merges_dir,
+                )
 
             if source_acq_report_path and source_acq_report_path.exists() and not source_acq_report_artifact_registered:
-                path_map["source_acquisition_report"] = source_acq_report_path.name
+                path_map["source_acquisition_report"] = _artifact_relative_path(
+                    source_acq_report_path,
+                    merges_dir=merges_dir,
+                )
 
             artifact_id = str(uuid.uuid4())
 

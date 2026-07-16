@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from merger.lenskit.service.runner import JobRunner
+from merger.lenskit.service.runner import JobRunner, _artifact_relative_path
 from merger.lenskit.service.jobstore import JobStore
 from merger.lenskit.service.models import JobRequest, Job, Artifact
 from merger.lenskit.service.app import download_artifact
@@ -180,6 +180,97 @@ def test_runner_artifact_path_mapping(temp_hub):
 
     assert art.paths["other_1"] == "other_A.txt"
     assert art.paths["other_2"] == "other_B.txt"
+
+
+def test_artifact_relative_path_allows_nested_relative_paths(tmp_path):
+    merges_dir = tmp_path / "merges"
+    nested = merges_dir / "nested" / "reports" / "bundle.json"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("{}", encoding="utf-8")
+
+    assert (
+        _artifact_relative_path(Path("nested/reports/bundle.json"), merges_dir=merges_dir)
+        == "nested/reports/bundle.json"
+    )
+
+
+def test_artifact_relative_path_allows_current_symlink_inside_generations(tmp_path):
+    merges_dir = tmp_path / "merges"
+    generation_id = "a" * 64
+    generation = merges_dir / ".repobrief-generations" / "demo" / generation_id
+    target = generation / "nested" / "bundle.json"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    current = generation.parent / "current"
+    current.symlink_to(generation_id)
+
+    relative = _artifact_relative_path(
+        current / "nested" / "bundle.json",
+        merges_dir=merges_dir,
+    )
+
+    assert relative == ".repobrief-generations/demo/current/nested/bundle.json"
+
+
+def test_artifact_relative_path_rejects_outside_root(tmp_path):
+    merges_dir = tmp_path / "merges"
+    outside = tmp_path / "outside.txt"
+    merges_dir.mkdir()
+    outside.write_text("outside", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="lexically"):
+        _artifact_relative_path(Path("../outside.txt"), merges_dir=merges_dir)
+    with pytest.raises(ValueError, match="lexically"):
+        _artifact_relative_path(outside, merges_dir=merges_dir)
+
+
+def test_artifact_relative_path_rejects_symlink_escape(tmp_path):
+    merges_dir = tmp_path / "merges"
+    outside_dir = tmp_path / "outside"
+    outside_file = outside_dir / "bundle.json"
+    outside_file.parent.mkdir()
+    merges_dir.mkdir()
+    outside_file.write_text("{}", encoding="utf-8")
+    (merges_dir / "linked").symlink_to(outside_dir)
+
+    with pytest.raises(ValueError, match="after resolution"):
+        _artifact_relative_path(Path("linked/bundle.json"), merges_dir=merges_dir)
+
+
+def test_runner_rejects_registered_artifact_outside_merges_dir(temp_hub):
+    store = JobStore(temp_hub)
+    runner = JobRunner(store)
+    req = JobRequest(hub=str(temp_hub), repos=["repoA"], merges_dir="output")
+    job = Job.create(req)
+    job.hub_resolved = str(temp_hub)
+    store.add_job(job)
+    outside = temp_hub / "outside.json"
+    outside.write_text("{}", encoding="utf-8")
+
+    with patch("merger.lenskit.service.runner.write_reports_v2") as mock_write, \
+         patch("merger.lenskit.service.runner.scan_repo") as mock_scan:
+        mock_scan.return_value = {}
+        mock_artifacts = MagicMock()
+        mock_artifacts.get_all_paths.return_value = [outside]
+        mock_artifacts.get_primary_path.return_value = None
+        mock_artifacts.index_json = outside
+        mock_artifacts.canonical_md = None
+        mock_artifacts.md_parts = []
+        mock_artifacts.chunk_index = None
+        mock_artifacts.dump_index = None
+        mock_artifacts.sqlite_index = None
+        mock_artifacts.retrieval_eval = None
+        mock_artifacts.derived_manifest = None
+        mock_artifacts.bundle_manifest = None
+        mock_artifacts.other = []
+        mock_write.return_value = mock_artifacts
+
+        runner._run_job(job.id)
+
+    updated_job = store.get_job(job.id)
+    assert updated_job.status == "failed"
+    assert "escapes merges_dir" in (updated_job.error or "")
+    assert _merge_artifacts(store, updated_job) == []
 
 
 def test_download_artifact_uses_persisted_merges_dir(temp_hub):

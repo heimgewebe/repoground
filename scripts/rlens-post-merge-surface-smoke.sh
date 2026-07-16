@@ -34,8 +34,51 @@ if [[ ! -d "$MERGES_DIR" ]]; then
   exit 2
 fi
 
-# shellcheck disable=SC2012
-MANIFEST="$(ls -1t "$MERGES_DIR"/*_merge.bundle.manifest.json 2>/dev/null | head -1 || true)"
+MANIFEST="$(python3 - "$MERGES_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+from merger.lenskit.core.bundle_generation import (
+    BundleGenerationError,
+    resolve_bundle_manifest_path,
+)
+
+root = Path(sys.argv[1])
+current_root = root / ".repobrief-generations"
+current = []
+pointer_seen = False
+if current_root.is_dir():
+    for lane in sorted(current_root.iterdir()):
+        if not lane.is_dir() or not lane.name.endswith("_merge"):
+            continue
+        current_link = lane / "current"
+        current_json = lane / "current.json"
+        if current_link.is_symlink():
+            pointer_seen = True
+            current.extend(
+                path
+                for path in current_link.glob("*_merge.bundle.manifest.json")
+                if path.is_file()
+            )
+            continue
+        if current_link.exists():
+            raise SystemExit(f"FAILED: unexpected current pointer type: {current_link}")
+        if current_json.exists() or current_json.is_symlink():
+            pointer_seen = True
+            try:
+                resolved = resolve_bundle_manifest_path(current_json)
+            except (BundleGenerationError, OSError, ValueError) as exc:
+                raise SystemExit(f"FAILED: invalid current.json pointer: {current_json}: {exc}") from exc
+            if resolved.name.endswith("_merge.bundle.manifest.json") and resolved.is_file():
+                current.append(resolved)
+if pointer_seen and not current:
+    raise SystemExit("FAILED: generation pointer exists but no valid current merge manifest resolved")
+legacy = [path for path in root.glob("*_merge.bundle.manifest.json") if path.is_file()]
+candidates = current or legacy
+if candidates:
+    print(max(candidates, key=lambda item: item.stat().st_mtime_ns))
+PY
+)"
 if [[ -z "$MANIFEST" || ! -f "$MANIFEST" ]]; then
   echo "FAILED: no *_merge.bundle.manifest.json found under $MERGES_DIR" >&2
   echo "       (erst nach 'systemctl --user restart rlens' und einem neuen Dump suchen)" >&2

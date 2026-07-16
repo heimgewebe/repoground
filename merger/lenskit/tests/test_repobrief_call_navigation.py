@@ -27,8 +27,10 @@ OTHER_CALLER_ID = "py:pkg:c.py:function:other_caller"
 @pytest.fixture(autouse=True)
 def _reset_call_navigation_caches():
     repobrief_access._clear_call_navigation_caches()
+    repobrief_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
     yield
     repobrief_access._clear_call_navigation_caches()
+    repobrief_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
 
 
 def _sha(path: Path) -> str:
@@ -538,10 +540,14 @@ def test_navigation_cache_is_lru_bounded(tmp_path):
         bundle_dir.mkdir()
         manifest = _bundle(bundle_dir)
         manifests.append(str(manifest.resolve()))
-        assert find_references(manifest, "target")["status"] == "available"
+        assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
 
     assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 2
     assert not any(k.manifest_path == manifests[0] for k in repobrief_access._CALL_NAVIGATION_CACHE)
+    assert not any(
+        key[0].manifest_path == manifests[0]
+        for key in repobrief_access._SYMBOL_NAVIGATION_CACHE
+    )
     assert any(k.manifest_path == manifests[-1] for k in repobrief_access._CALL_NAVIGATION_CACHE)
 
 
@@ -993,7 +999,7 @@ def test_navigation_uses_actual_hash_when_manifest_omits_bytes_and_sha256(tmp_pa
     assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 1
     assert {
         key.artifact_sha256 for key in repobrief_access._CALL_NAVIGATION_CACHE
-    } == {hashlib.sha256(call_graph.read_bytes()).hexdigest()}
+    } == {_sha(call_graph)}
 
 
 def test_parallel_navigation_is_isolated_for_same_and_different_bundles(tmp_path):
@@ -1028,17 +1034,21 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
     manifest, call_graph, _ = _write_bundle(tmp_path)
     assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
 
-    original_read_bytes = Path.read_bytes
-    call_graph_path = call_graph.resolve()
-
-    def guarded_read_bytes(path):
-        if path.resolve() == call_graph_path:
-            raise AssertionError("default warm cache hit must not reread call-graph bytes")
-        return original_read_bytes(path)
+    def forbidden_stable_read(path):
+        raise AssertionError(f"default warm cache hit must not read bytes: {path}")
 
     monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
     monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
-    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+    monkeypatch.setattr(
+        repobrief_access,
+        "_read_stable_regular_file_bytes",
+        forbidden_stable_read,
+    )
+    monkeypatch.setattr(
+        repobrief_access,
+        "_read_stable_artifact_bytes",
+        forbidden_stable_read,
+    )
 
     result = get_callers(manifest, "target", path="pkg/target.py")
     assert result["status"] == "available"
@@ -1099,8 +1109,8 @@ def test_strict_navigation_cache_hash_uses_descriptor_pinned_read(
     assert call_graph_reads >= 1
 
 
-def test_invalid_cache_validation_mode_fails_closed_to_strict(
-    tmp_path, monkeypatch
+def test_invalid_cache_validation_mode_falls_back_to_strict(
+    tmp_path, monkeypatch, caplog
 ):
     manifest, call_graph, _ = _write_bundle(tmp_path)
     assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
@@ -1120,9 +1130,19 @@ def test_invalid_cache_validation_mode_fails_closed_to_strict(
         repobrief_access, "_read_stable_artifact_bytes", counting_reader
     )
 
+    caplog.set_level("WARNING")
     result = get_callers(manifest, "target", path="pkg/target.py")
+    result_again = get_callers(manifest, "target", path="pkg/target.py")
     assert result["status"] == "available"
+    assert result_again["status"] == "available"
     assert call_graph_reads >= 1
+    warnings = [
+        record
+        for record in caplog.records
+        if "LENSKIT_REPOBRIEF_CACHE_VALIDATION" in record.getMessage()
+        and "typo" in record.getMessage()
+    ]
+    assert len(warnings) == 1
 
 
 def test_weak_file_identity_automatically_uses_content_hash(
@@ -1181,6 +1201,48 @@ def test_weak_file_identity_automatically_uses_content_hash(
     assert call_graph_reads > reads_after_cold_load
 
 
+def test_weak_manifest_identity_automatically_uses_content_hash(
+    tmp_path, monkeypatch
+):
+    manifest, _, _ = _write_bundle(tmp_path)
+    original_reader = repobrief_access._read_stable_regular_file_bytes
+    manifest_path = manifest.resolve()
+    manifest_reads = 0
+
+    class WeakStat:
+        def __init__(self, source):
+            self.st_dev = 0
+            self.st_ino = 0
+            self.st_size = source.st_size
+            self.st_mtime_ns = source.st_mtime_ns
+            self.st_ctime_ns = source.st_ctime_ns
+
+    def weak_manifest_reader(path):
+        nonlocal manifest_reads
+        raw, stat_result, failure, detail = original_reader(path)
+        if path.resolve() == manifest_path and stat_result is not None:
+            manifest_reads += 1
+            stat_result = WeakStat(stat_result)
+        return raw, stat_result, failure, detail
+
+    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
+    monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
+    monkeypatch.setattr(
+        repobrief_access,
+        "_read_stable_regular_file_bytes",
+        weak_manifest_reader,
+    )
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+    reads_after_cold_load = manifest_reads
+    assert reads_after_cold_load >= 2
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "available"
+    assert manifest_reads > reads_after_cold_load
+
+
 def test_strict_warm_validation_rejects_tampered_bytes_with_same_identity(
     tmp_path, monkeypatch
 ):
@@ -1212,6 +1274,61 @@ def test_strict_warm_validation_rejects_tampered_bytes_with_same_identity(
         fingerprint,
         verify_content=True,
     )
+
+
+def test_atomic_pathname_exchange_during_stable_read_is_rejected(tmp_path, monkeypatch):
+    artifact = tmp_path / "artifact.json"
+    replacement = tmp_path / "replacement.json"
+    artifact.write_text('{"version": 1}\n', encoding="utf-8")
+    replacement.write_text('{"version": 2}\n', encoding="utf-8")
+    original_open = Path.open
+    replaced = False
+
+    def replacing_open(path, *args, **kwargs):
+        nonlocal replaced
+        handle = original_open(path, *args, **kwargs)
+        if Path(path).resolve() == artifact.resolve() and not replaced:
+            os.replace(replacement, artifact)
+            replaced = True
+        return handle
+
+    monkeypatch.setattr(Path, "open", replacing_open)
+
+    raw, stat_result, failure, detail = repobrief_access._read_stable_artifact_bytes(
+        artifact
+    )
+
+    assert raw is None
+    assert stat_result is None
+    assert failure == "source_changed"
+    assert detail is None
+
+
+def test_manifest_change_during_full_verification_is_rejected(tmp_path, monkeypatch):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert find_references(manifest, "target")["status"] == "available"
+    fingerprint = next(iter(repobrief_access._CALL_NAVIGATION_CACHE))
+    original_reader = repobrief_access._read_stable_artifact_bytes
+    changed = False
+
+    def mutating_artifact_reader(path):
+        nonlocal changed
+        result = original_reader(path)
+        if path.resolve() == call_graph.resolve() and not changed:
+            payload = json.loads(manifest.read_text(encoding="utf-8"))
+            payload["run_id"] = "changed-during-verification"
+            manifest.write_text(json.dumps(payload), encoding="utf-8")
+            changed = True
+        return result
+
+    monkeypatch.setenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", "strict")
+    monkeypatch.setattr(
+        repobrief_access,
+        "_read_stable_artifact_bytes",
+        mutating_artifact_reader,
+    )
+
+    assert not repobrief_access._artifact_source_is_current(fingerprint)
 
 
 def test_legacy_strict_hash_switch_remains_supported(tmp_path, monkeypatch):
