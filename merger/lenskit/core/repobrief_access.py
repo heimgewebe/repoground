@@ -1533,6 +1533,12 @@ def _read_stable_artifact_bytes(
         return None, None, "unreadable", str(exc)
     if _file_identity(stat_before) != _file_identity(stat_after):
         return None, None, "source_changed", None
+    try:
+        path_stat_after = artifact_path.stat()
+    except OSError as exc:
+        return None, None, "source_changed", str(exc)
+    if _file_identity(path_stat_after) != _file_identity(stat_after):
+        return None, None, "source_changed", None
     return raw, stat_after, None, None
 
 
@@ -1552,12 +1558,13 @@ def _read_registered_artifact_source(
     if not isinstance(manifest, dict):
         return None, None, "unreadable", "bundle manifest must be a JSON object"
     try:
-        artifact_payload = next(
-            (item for item in _artifact_list(manifest) if item.get("role") == role),
-            None,
-        )
+        artifacts = _artifact_list(manifest)
     except ValueError as exc:
         return None, None, "unreadable", str(exc)
+    artifact_payload = next(
+        (item for item in artifacts if item.get("role") == role),
+        None,
+    )
     if not isinstance(artifact_payload, dict):
         return None, None, "missing", None
     artifact = _artifact_record(manifest_path, artifact_payload)
@@ -1606,13 +1613,31 @@ def _read_registered_artifact_source(
     )
 
 
-def _artifact_source_fingerprint(
-    manifest_path: Path, role: str
-) -> _ArtifactSourceFingerprint | None:
-    source, _artifact, _failure, _detail = _read_registered_artifact_source(
-        manifest_path, role
+def _artifact_content_is_current(
+    fingerprint: _ArtifactSourceFingerprint,
+    manifest_path: Path,
+    artifact_path: Path,
+    expected_identity: tuple[int, int, int, int, int],
+) -> bool:
+    """Verify one generation through pinned bytes and final pathname identity."""
+    artifact_bytes, artifact_stat, failure, _detail = (
+        _read_stable_artifact_bytes(artifact_path)
     )
-    return source.fingerprint if source is not None else None
+    if failure is not None or artifact_bytes is None or artifact_stat is None:
+        return False
+    if _file_identity(artifact_stat) != expected_identity:
+        return False
+    if hashlib.sha256(artifact_bytes).hexdigest() != fingerprint.artifact_sha256:
+        return False
+    try:
+        manifest_after = manifest_path.read_bytes()
+        path_stat_after = artifact_path.stat()
+    except OSError:
+        return False
+    return (
+        hashlib.sha256(manifest_after).hexdigest() == fingerprint.manifest_sha256
+        and _file_identity(path_stat_after) == expected_identity
+    )
 
 
 def _artifact_source_is_current(
@@ -1644,31 +1669,17 @@ def _artifact_source_is_current(
         return False
     if hashlib.sha256(manifest_before).hexdigest() != fingerprint.manifest_sha256:
         return False
-
-    requires_content = _source_content_verification_required(
-        fingerprint,
-        verify_content=verify_content,
-    )
-    if not requires_content:
-        try:
-            return _file_identity(artifact_path.stat()) == expected_identity
-        except OSError:
-            return False
-
-    artifact_bytes, artifact_stat, failure, _detail = (
-        _read_stable_artifact_bytes(artifact_path)
-    )
-    if failure is not None or artifact_bytes is None or artifact_stat is None:
-        return False
-    if _file_identity(artifact_stat) != expected_identity:
-        return False
-    if hashlib.sha256(artifact_bytes).hexdigest() != fingerprint.artifact_sha256:
-        return False
+    if _source_content_verification_required(
+        fingerprint, verify_content=verify_content
+    ):
+        return _artifact_content_is_current(
+            fingerprint, manifest_path, artifact_path, expected_identity
+        )
     try:
-        manifest_after = manifest_path.read_bytes()
+        return _file_identity(artifact_path.stat()) == expected_identity
     except OSError:
         return False
-    return hashlib.sha256(manifest_after).hexdigest() == fingerprint.manifest_sha256
+
 
 def _cache_state(
     cache: OrderedDict[Any, Any], key: Any, state: Any
@@ -1677,6 +1688,34 @@ def _cache_state(
     cache.move_to_end(key)
     while len(cache) > _CALL_NAVIGATION_CACHE_MAX_ENTRIES:
         cache.popitem(last=False)
+
+
+def _evict_call_navigation_state(
+    fingerprint: _ArtifactSourceFingerprint,
+    state: _CallNavigationState,
+) -> None:
+    """Remove one stale call generation and symbol states derived from it."""
+    with _CALL_NAVIGATION_CACHE_LOCK:
+        if _CALL_NAVIGATION_CACHE.get(fingerprint) is not state:
+            return
+        _CALL_NAVIGATION_CACHE.pop(fingerprint, None)
+        stale_symbol_keys = [
+            cache_key
+            for cache_key in _SYMBOL_NAVIGATION_CACHE
+            if cache_key[0] == fingerprint
+        ]
+        for cache_key in stale_symbol_keys:
+            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
+
+
+def _evict_symbol_navigation_state(
+    cache_key: tuple[_ArtifactSourceFingerprint, _ArtifactSourceFingerprint],
+    state: _SymbolNavigationState,
+) -> None:
+    """Remove one stale symbol generation without touching a replacement."""
+    with _CALL_NAVIGATION_CACHE_LOCK:
+        if _SYMBOL_NAVIGATION_CACHE.get(cache_key) is state:
+            _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
 
 
 def _cached_call_navigation_state(
@@ -1691,6 +1730,7 @@ def _cached_call_navigation_state(
         ]
     for fingerprint, state in candidates:
         if not _artifact_source_is_current(fingerprint):
+            _evict_call_navigation_state(fingerprint, state)
             continue
         with _CALL_NAVIGATION_CACHE_LOCK:
             if _CALL_NAVIGATION_CACHE.get(fingerprint) is state:
@@ -1712,8 +1752,10 @@ def _cached_symbol_navigation_state(
         ]
     for cache_key, state in candidates:
         if not _artifact_source_is_current(cache_key[1]):
+            _evict_symbol_navigation_state(cache_key, state)
             continue
         if not _artifact_source_is_current(call_state.fingerprint):
+            _evict_call_navigation_state(call_state.fingerprint, call_state)
             return None
         with _CALL_NAVIGATION_CACHE_LOCK:
             if _SYMBOL_NAVIGATION_CACHE.get(cache_key) is state:

@@ -459,6 +459,55 @@ def test_symbol_change_invalidates_cached_symbol_state(tmp_path, monkeypatch):
     assert loads == 2
 
 
+def test_stale_call_generation_is_evicted_with_dependent_symbol_state(tmp_path):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    assert get_callers(
+        manifest, "target", path="pkg/target.py", k=10
+    )["status"] == "available"
+    stale_call_fingerprint = next(iter(repobrief_access._CALL_NAVIGATION_CACHE))
+    assert any(
+        cache_key[0] == stale_call_fingerprint
+        for cache_key in repobrief_access._SYMBOL_NAVIGATION_CACHE
+    )
+
+    payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    payload["calls"][0]["simple_name"] = "renamed"
+    payload["calls"][0]["callee_expression"] = "renamed"
+    call_graph.write_text(json.dumps(payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_call_graph_json", call_graph)
+
+    result = get_callers(manifest, "target", path="pkg/target.py", k=10)
+
+    assert result["status"] == "available"
+    assert stale_call_fingerprint not in repobrief_access._CALL_NAVIGATION_CACHE
+    assert not any(
+        cache_key[0] == stale_call_fingerprint
+        for cache_key in repobrief_access._SYMBOL_NAVIGATION_CACHE
+    )
+    assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 1
+    assert len(repobrief_access._SYMBOL_NAVIGATION_CACHE) == 1
+
+
+def test_stale_symbol_generation_is_evicted_before_replacement(tmp_path):
+    manifest, _, symbol_index = _write_bundle(tmp_path)
+    assert get_callers(
+        manifest, "target", path="pkg/target.py", k=10
+    )["status"] == "available"
+    stale_symbol_key = next(iter(repobrief_access._SYMBOL_NAVIGATION_CACHE))
+
+    payload = json.loads(symbol_index.read_text(encoding="utf-8"))
+    target = next(item for item in payload["symbols"] if item["id"] == TARGET_ID)
+    target["decorators"] = ["updated"]
+    symbol_index.write_text(json.dumps(payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_symbol_index_json", symbol_index)
+
+    result = get_callers(manifest, "target", path="pkg/target.py", k=10)
+
+    assert result["status"] == "available"
+    assert stale_symbol_key not in repobrief_access._SYMBOL_NAVIGATION_CACHE
+    assert len(repobrief_access._SYMBOL_NAVIGATION_CACHE) == 1
+
+
 def test_cold_and_warm_navigation_results_are_byte_equivalent(tmp_path):
     manifest = _bundle(tmp_path)
     queries = (
@@ -941,8 +990,10 @@ def test_navigation_uses_actual_hash_when_manifest_omits_bytes_and_sha256(tmp_pa
     assert after["status"] == "available"
     assert after["total_match_count"] == 3
     assert after_callers["status"] == "available"
-    assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 2
-    assert len({key.artifact_sha256 for key in repobrief_access._CALL_NAVIGATION_CACHE}) == 2
+    assert len(repobrief_access._CALL_NAVIGATION_CACHE) == 1
+    assert {
+        key.artifact_sha256 for key in repobrief_access._CALL_NAVIGATION_CACHE
+    } == {hashlib.sha256(call_graph.read_bytes()).hexdigest()}
 
 
 def test_parallel_navigation_is_isolated_for_same_and_different_bundles(tmp_path):
@@ -991,6 +1042,35 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
 
     result = get_callers(manifest, "target", path="pkg/target.py")
     assert result["status"] == "available"
+
+
+def test_descriptor_pinned_read_rejects_atomic_path_replacement(
+    tmp_path, monkeypatch
+):
+    artifact = tmp_path / "artifact.json"
+    replacement = tmp_path / "replacement.json"
+    artifact.write_bytes(b"original")
+    replacement.write_bytes(b"replaced")
+    original_stat = Path.stat
+    replaced = False
+
+    def replacing_stat(path, *args, **kwargs):
+        nonlocal replaced
+        if path == artifact and not replaced:
+            replaced = True
+            os.replace(replacement, artifact)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", replacing_stat)
+
+    raw, stat_result, failure, _detail = (
+        repobrief_access._read_stable_artifact_bytes(artifact)
+    )
+
+    assert replaced is True
+    assert raw is None
+    assert stat_result is None
+    assert failure == "source_changed"
 
 
 def test_strict_navigation_cache_hash_uses_descriptor_pinned_read(
@@ -1055,22 +1135,36 @@ def test_weak_file_identity_automatically_uses_content_hash(
 
     class WeakStat:
         def __init__(self, source):
+            self._source = source
             self.st_dev = 0
             self.st_ino = 0
             self.st_size = source.st_size
             self.st_mtime_ns = source.st_mtime_ns
             self.st_ctime_ns = source.st_ctime_ns
 
+        def __getattr__(self, name):
+            return getattr(self._source, name)
+
+    original_fstat = os.fstat
+    original_path_stat = Path.stat
+
+    def weak_fstat(descriptor):
+        return WeakStat(original_fstat(descriptor))
+
+    def weak_path_stat(path, *args, **kwargs):
+        return WeakStat(original_path_stat(path, *args, **kwargs))
+
     def weak_identity_reader(path):
         nonlocal call_graph_reads
         raw, stat_result, failure, detail = original_reader(path)
         if path.resolve() == call_graph_path and stat_result is not None:
             call_graph_reads += 1
-            stat_result = WeakStat(stat_result)
         return raw, stat_result, failure, detail
 
     monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
     monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
+    monkeypatch.setattr(os, "fstat", weak_fstat)
+    monkeypatch.setattr(Path, "stat", weak_path_stat)
     monkeypatch.setattr(
         repobrief_access,
         "_read_stable_artifact_bytes",
