@@ -1875,6 +1875,7 @@ def _load_call_navigation_state(
             _SYMBOL_NAVIGATION_CACHE.pop(cache_key, None)
         return None, artifact, error
     assert data is not None
+    index = CallNavigationIndex.build(data["calls"])
     after = _artifact_source_fingerprint(manifest_path, CALL_GRAPH_ROLE)
     if before is None or after is None or before != after:
         return None, artifact, _call_graph_error(
@@ -1884,7 +1885,7 @@ def _load_call_navigation_state(
     state = _CallNavigationState(
         data=data,
         artifact=artifact,
-        index=CallNavigationIndex.build(data["calls"]),
+        index=index,
         fingerprint=after,
     )
     with _CALL_NAVIGATION_CACHE_LOCK:
@@ -1928,16 +1929,23 @@ def _load_symbol_navigation_state(
     error = _call_symbol_reference_error(call_state.data, rows_by_id)
     if error is not None:
         return None, symbol_artifact, error
+    index = SymbolNavigationIndex.build(symbols)
     after = _artifact_source_fingerprint(manifest_path, SYMBOL_INDEX_ROLE)
     if before is None or after is None or before != after:
         return None, symbol_artifact, _call_graph_error(
             "python_symbol_index_source_changed_during_load",
             "python_symbol_index_json source changed while navigation state was loading",
         )
+    after_call = _artifact_source_fingerprint(manifest_path, CALL_GRAPH_ROLE)
+    if after_call is None or after_call != call_state.fingerprint:
+        return None, symbol_artifact, _call_graph_error(
+            "python_call_graph_source_changed_during_load",
+            "python_call_graph_json source changed while navigation state was loading",
+        )
     state = _SymbolNavigationState(
         data=symbol_data,
         artifact=symbol_artifact,
-        index=SymbolNavigationIndex.build(symbols),
+        index=index,
         call_fingerprint=call_state.fingerprint,
         symbol_fingerprint=after,
     )

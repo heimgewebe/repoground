@@ -6,7 +6,7 @@ Base commit: `fafa115c1bb291742f5a7e10ba5ab21e33baa902`
 Default implementation: bounded process-local in-memory index
 Persisted sidecar promotion: `false`
 Measurement artifact: `repobrief-call-navigation-scale-index-v1.measurement.json`
-Measurement SHA-256: `2a43ecf1ed82bf94900d623a3a75d8f5d75185b74379b841039c0d21addda336`
+Measurement SHA-256: `1c97af3a164b47039834efb7dca58f26fdbfb89ab16331de9b2135d2de0576f6`
 
 ## Problem
 

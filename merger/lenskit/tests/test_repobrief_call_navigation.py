@@ -775,3 +775,61 @@ def test_navigation_rejects_call_range_that_disagrees_with_source_fields(tmp_pat
 
     assert result["status"] == "invalid"
     assert result["error_code"] == "python_call_graph_call_record_invalid"
+
+def test_call_graph_change_during_index_build_fails_closed(tmp_path, monkeypatch):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    from merger.lenskit.core.call_navigation_index import CallNavigationIndex
+
+    original_build = CallNavigationIndex.build
+
+    def tampered_build(calls):
+        payload = json.loads(call_graph.read_text(encoding="utf-8"))
+        payload["calls"][0]["simple_name"] = "tampered"
+        call_graph.write_text(json.dumps(payload), encoding="utf-8")
+        return original_build(calls)
+
+    monkeypatch.setattr(CallNavigationIndex, "build", tampered_build)
+
+    result = find_references(manifest, "target")
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_call_graph_source_changed_during_load"
+
+
+def test_symbol_index_change_during_index_build_fails_closed(tmp_path, monkeypatch):
+    manifest, _, symbol_index = _write_bundle(tmp_path)
+    from merger.lenskit.core.call_navigation_index import SymbolNavigationIndex
+
+    original_build = SymbolNavigationIndex.build
+
+    def tampered_build(symbols):
+        payload = json.loads(symbol_index.read_text(encoding="utf-8"))
+        payload["symbols"][0]["name"] = "tampered"
+        symbol_index.write_text(json.dumps(payload), encoding="utf-8")
+        return original_build(symbols)
+
+    monkeypatch.setattr(SymbolNavigationIndex, "build", tampered_build)
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_symbol_index_source_changed_during_load"
+
+
+def test_call_graph_change_during_symbol_index_build_fails_closed(
+    tmp_path, monkeypatch
+):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    from merger.lenskit.core.call_navigation_index import SymbolNavigationIndex
+
+    original_build = SymbolNavigationIndex.build
+
+    def tampered_build(symbols):
+        payload = json.loads(call_graph.read_text(encoding="utf-8"))
+        payload["calls"][0]["simple_name"] = "tampered"
+        call_graph.write_text(json.dumps(payload), encoding="utf-8")
+        return original_build(symbols)
+
+    monkeypatch.setattr(SymbolNavigationIndex, "build", tampered_build)
+
+    result = get_callers(manifest, "target", path="pkg/target.py")
+    assert result["status"] == "invalid"
+    assert result["error_code"] == "python_call_graph_source_changed_during_load"

@@ -533,7 +533,7 @@ def run_benchmark(
             "query_repetitions": query_repetitions,
             "cold_repetitions": cold_repetitions,
             "mcp_repetitions": mcp_repetitions,
-            "representative_repo": str(repo_path) if include_real_repo else None,
+            "representative_repo": "current_repository" if include_real_repo else None,
         },
         "representative_repo_parse": {
             "skipped_files_count": skipped_files_count,

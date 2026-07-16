@@ -4,7 +4,7 @@
     "fixed_acceptance_tier": true,
     "mcp_repetitions": 10,
     "query_repetitions": 7,
-    "representative_repo": "/home/alex/repos/.lenskit-worktrees/repobrief-call-navigation-scale-index-v1",
+    "representative_repo": "current_repository",
     "synthetic_call_count": 50000
   },
   "decision": {
@@ -35,22 +35,22 @@
   "mcp": {
     "call_count": 50000,
     "cold_batch": {
-      "max_ms": 754.568603,
-      "median_ms": 672.184264,
-      "min_ms": 658.49867,
-      "p95_ms": 672.184264,
+      "max_ms": 762.66987,
+      "median_ms": 703.091354,
+      "min_ms": 672.933684,
+      "p95_ms": 703.091354,
       "repetitions": 3
     },
-    "cold_first_ms": 1581.729994,
-    "cold_first_peak_bytes": 143183761,
-    "cold_first_retained_bytes": 92730424,
+    "cold_first_ms": 1605.92483,
+    "cold_first_peak_bytes": 143183337,
+    "cold_first_retained_bytes": 92730267,
     "cold_warm_byte_equivalent": true,
-    "result_sha256": "6aa5b6819149ea6e88df224b6bae599be10fe6cd05634bf9a2cd7f7f828b5dd7",
+    "result_sha256": "7e1b27768651187b206c2aa2c848818403512a3782e8a7fcea7b2ea57cca1dd3",
     "warm_repeated_batch": {
-      "max_ms": 6.241689,
-      "median_ms": 5.295808,
-      "min_ms": 5.081861,
-      "p95_ms": 5.472694,
+      "max_ms": 6.131759,
+      "median_ms": 5.2507085,
+      "min_ms": 5.120102,
+      "p95_ms": 5.433974,
       "repetitions": 10
     }
   },
@@ -75,17 +75,17 @@
       "linear_scan": {
         "bundle_bytes": 30107862,
         "cold_load": {
-          "max_ms": 236.820674,
-          "median_ms": 233.965465,
-          "min_ms": 187.016196,
-          "p95_ms": 233.965465,
+          "max_ms": 235.242517,
+          "median_ms": 206.606276,
+          "min_ms": 188.186549,
+          "p95_ms": 206.606276,
           "repetitions": 3
         },
         "warm_query_batch": {
-          "max_ms": 836.821821,
-          "median_ms": 804.27174,
-          "min_ms": 783.052609,
-          "p95_ms": 819.742882,
+          "max_ms": 851.007749,
+          "median_ms": 815.716666,
+          "min_ms": 796.055622,
+          "p95_ms": 837.318882,
           "repetitions": 7
         }
       },
@@ -93,39 +93,39 @@
         "bundle_bytes": 34097560,
         "bundle_overhead_ratio": 0.13251349431587006,
         "cold_load_and_restore": {
-          "max_ms": 340.227563,
-          "median_ms": 333.258619,
-          "min_ms": 286.002427,
-          "p95_ms": 333.258619,
+          "max_ms": 350.327555,
+          "median_ms": 331.775496,
+          "min_ms": 298.495867,
+          "p95_ms": 331.775496,
           "repetitions": 3
         },
         "sidecar_bytes": 3989698,
         "source_hash_bound": true,
         "warm_query_batch": {
-          "max_ms": 83.453836,
-          "median_ms": 52.112552,
-          "min_ms": 49.117984,
-          "p95_ms": 54.341386,
+          "max_ms": 90.17834,
+          "median_ms": 53.149096,
+          "min_ms": 51.990379,
+          "p95_ms": 87.01701,
           "repetitions": 7
         }
       },
       "process_local_index": {
-        "build_ms": 311.51748,
+        "build_ms": 318.597443,
         "build_peak_bytes": 13283439,
         "build_retained_bytes": 7352413,
         "bundle_bytes": 30107862,
         "cold_load_and_build": {
-          "max_ms": 398.659734,
-          "median_ms": 381.828149,
-          "min_ms": 344.964982,
-          "p95_ms": 381.828149,
+          "max_ms": 404.186695,
+          "median_ms": 381.32956,
+          "min_ms": 343.34903,
+          "p95_ms": 381.32956,
           "repetitions": 3
         },
         "warm_query_batch": {
-          "max_ms": 84.762404,
-          "median_ms": 53.123108,
-          "min_ms": 50.533243,
-          "p95_ms": 53.801962,
+          "max_ms": 85.888123,
+          "median_ms": 52.090609,
+          "min_ms": 51.508806,
+          "p95_ms": 53.167726,
           "repetitions": 7
         }
       },
@@ -136,73 +136,73 @@
       },
       "source_calls_sha256": "29ea11a7e4353ee31d66f865fbdf6249bc2732d26ee1e01fa1951a5d78087165",
       "speedup": {
-        "persisted_vs_linear_warm_median": 15.433359318115912,
-        "process_local_vs_linear_warm_median": 15.139771942560289
+        "persisted_vs_linear_warm_median": 15.347705368309558,
+        "process_local_vs_linear_warm_median": 15.659572457676585
       }
     },
     {
-      "call_count": 54710,
-      "call_json_bytes": 39008299,
+      "call_count": 54735,
+      "call_json_bytes": 39028877,
       "equivalence": {
         "byte_equivalent": true,
-        "result_sha256": "150c00d5dbea15aaf4b9d4d222276a736a87a824233fbfcde228844eb020065d",
+        "result_sha256": "0f18d641c470a76a96928ac6872308bb16843d53c29e7d24b2786c391c647336",
         "status": "pass"
       },
       "label": "representative_real_repo",
       "linear_scan": {
-        "bundle_bytes": 39008299,
+        "bundle_bytes": 39028877,
         "cold_load": {
-          "max_ms": 375.197879,
-          "median_ms": 370.373178,
-          "min_ms": 282.058533,
-          "p95_ms": 370.373178,
+          "max_ms": 409.543988,
+          "median_ms": 301.163664,
+          "min_ms": 295.014334,
+          "p95_ms": 301.163664,
           "repetitions": 3
         },
         "warm_query_batch": {
-          "max_ms": 999.182294,
-          "median_ms": 966.896946,
-          "min_ms": 947.531275,
-          "p95_ms": 976.118692,
+          "max_ms": 1103.544916,
+          "median_ms": 1014.18234,
+          "min_ms": 1005.026603,
+          "p95_ms": 1045.8325,
           "repetitions": 7
         }
       },
       "persisted_sidecar": {
-        "bundle_bytes": 45598720,
-        "bundle_overhead_ratio": 0.1689492023223058,
+        "bundle_bytes": 45623612,
+        "bundle_overhead_ratio": 0.168970657290498,
         "cold_load_and_restore": {
-          "max_ms": 540.941543,
-          "median_ms": 524.449571,
-          "min_ms": 439.001173,
-          "p95_ms": 524.449571,
+          "max_ms": 579.14813,
+          "median_ms": 548.797329,
+          "min_ms": 540.386695,
+          "p95_ms": 548.797329,
           "repetitions": 3
         },
-        "sidecar_bytes": 6590421,
+        "sidecar_bytes": 6594735,
         "source_hash_bound": true,
         "warm_query_batch": {
-          "max_ms": 38.982341,
-          "median_ms": 38.003985,
-          "min_ms": 37.599982,
-          "p95_ms": 38.151146,
+          "max_ms": 40.298255,
+          "median_ms": 39.790792,
+          "min_ms": 39.144038,
+          "p95_ms": 40.174304,
           "repetitions": 7
         }
       },
       "process_local_index": {
-        "build_ms": 428.532048,
-        "build_peak_bytes": 19569429,
-        "build_retained_bytes": 10595655,
-        "bundle_bytes": 39008299,
+        "build_ms": 420.85432,
+        "build_peak_bytes": 19576345,
+        "build_retained_bytes": 10600219,
+        "bundle_bytes": 39028877,
         "cold_load_and_build": {
-          "max_ms": 602.136411,
-          "median_ms": 500.0105,
-          "min_ms": 495.754174,
-          "p95_ms": 500.0105,
+          "max_ms": 619.542046,
+          "median_ms": 509.595671,
+          "min_ms": 498.714232,
+          "p95_ms": 509.595671,
           "repetitions": 3
         },
         "warm_query_batch": {
-          "max_ms": 111.71657,
-          "median_ms": 38.278157,
-          "min_ms": 36.793138,
-          "p95_ms": 42.238411,
+          "max_ms": 116.811208,
+          "median_ms": 41.052899,
+          "min_ms": 39.688321,
+          "p95_ms": 42.012375,
           "repetitions": 7
         }
       },
@@ -211,10 +211,10 @@
         "references": 20,
         "targets": 20
       },
-      "source_calls_sha256": "1a6453c92872688b53f60fd4fa170cb4d2860867d920c00d3dcefcf30f7bb60b",
+      "source_calls_sha256": "dcfcf33570b9477fb95f735044009f6b6e5023ea2221c6f4b6954de28abce4c5",
       "speedup": {
-        "persisted_vs_linear_warm_median": 25.441988412530947,
-        "process_local_vs_linear_warm_median": 25.259757046296663
+        "persisted_vs_linear_warm_median": 25.487865132214505,
+        "process_local_vs_linear_warm_median": 24.704280689166435
       }
     }
   ],
