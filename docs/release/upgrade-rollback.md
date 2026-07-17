@@ -1,4 +1,4 @@
-# RepoBrief upgrade and rollback
+# RepoGround upgrade and rollback
 
 ## Upgrade preconditions
 

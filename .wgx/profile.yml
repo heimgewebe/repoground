@@ -1,5 +1,5 @@
 ---
-# WGX Profil für heimgewebe/lenskit
+# WGX Profil für heimgewebe/repoground
 profile: lenskit
 description: "RepoLens Merger & Scanner (epistemischer Kern) plus Metrics-/Host-Hilfsskripte"
 
@@ -20,7 +20,7 @@ lang:
 
 meta:
   org: heimgewebe
-  repo: heimgewebe/lenskit
+  repo: heimgewebe/repoground
   maintainer: alexdermohr@gmail.com
   tags:
     - lenskit

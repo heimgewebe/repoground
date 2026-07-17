@@ -7,6 +7,7 @@ import json
 import re
 import sys
 import tarfile
+from dataclasses import dataclass
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -32,6 +33,64 @@ from scripts.release.build_release_candidate import (
 )
 
 
+@dataclass(frozen=True)
+class ReleaseContract:
+    kind: str
+    version: str
+    schema_uri: str
+    license_expression: str
+    lock_paths: tuple[str, ...]
+    semantic_target_id: str
+    semantic_platform_contract_path: str
+    semantic_input_path: str
+    semantic_constraints_path: str
+    semantic_lock_path: str
+    project_name: str
+    repository: str
+    archive_slug: str
+    compatibility_mode: str
+
+
+CANONICAL_CONTRACT = ReleaseContract(
+    kind=KIND,
+    version=CONTRACT_VERSION,
+    schema_uri=SCHEMA_URI,
+    license_expression=LICENSE_EXPRESSION,
+    lock_paths=LOCK_PATHS,
+    semantic_target_id=SEMANTIC_TARGET_ID,
+    semantic_platform_contract_path=SEMANTIC_PLATFORM_CONTRACT_PATH,
+    semantic_input_path=SEMANTIC_INPUT_PATH,
+    semantic_constraints_path=SEMANTIC_CONSTRAINTS_PATH,
+    semantic_lock_path=SEMANTIC_LOCK_PATH,
+    project_name="RepoGround",
+    repository="heimgewebe/repoground",
+    archive_slug="repoground",
+    compatibility_mode="canonical_repoground_v1",
+)
+
+LEGACY_CONTRACT = ReleaseContract(
+    kind="repobrief.release_candidate",
+    version="v1",
+    schema_uri="https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json",
+    license_expression="LicenseRef-RepoBrief-All-Rights-Reserved",
+    lock_paths=(
+        "requirements/repobrief-runtime.lock.txt",
+        "requirements/repobrief-dev.lock.txt",
+        "requirements/repobrief-browser.lock.txt",
+        "requirements/repobrief-lock-tools.lock.txt",
+    ),
+    semantic_target_id="cpython-312-linux-x86_64",
+    semantic_platform_contract_path="docs/release/semantic-extension-platforms.v1.json",
+    semantic_input_path="requirements/repobrief-semantic-linux-x86_64-py312.in",
+    semantic_constraints_path="requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt",
+    semantic_lock_path="requirements/repobrief-semantic-linux-x86_64-py312.lock.txt",
+    project_name="RepoBrief",
+    repository="heimgewebe/lenskit",
+    archive_slug="repobrief",
+    compatibility_mode="legacy_repobrief_v1",
+)
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -45,13 +104,15 @@ def _safe_name(name: str) -> bool:
     return bool(name) and not path.is_absolute() and ".." not in path.parts
 
 
-def _load_candidate(candidate_dir: Path) -> tuple[dict[str, object], Path, Path, Path]:
+def _load_candidate(
+    candidate_dir: Path, contract: ReleaseContract
+) -> tuple[dict[str, object], Path, Path, Path]:
     manifests = sorted(candidate_dir.glob("*.release.json"))
     if len(manifests) != 1:
         raise ValueError(f"expected exactly one release manifest, found {len(manifests)}")
     manifest_path = manifests[0]
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("kind") != KIND or manifest.get("version") != CONTRACT_VERSION:
+    if manifest.get("kind") != contract.kind or manifest.get("version") != contract.version:
         raise ValueError("release manifest kind/version mismatch")
     archive = manifest.get("archive")
     if not isinstance(archive, dict) or not isinstance(archive.get("path"), str):
@@ -182,9 +243,10 @@ def _verify_dependency_locks(
     manifest: dict[str, object],
     archive_path: Path,
     expected_prefix: str,
+    contract: ReleaseContract,
 ) -> None:
     lock_records = manifest.get("dependency_locks")
-    if not isinstance(lock_records, list) or len(lock_records) != len(LOCK_PATHS):
+    if not isinstance(lock_records, list) or len(lock_records) != len(contract.lock_paths):
         raise ValueError("manifest dependency lock count mismatch")
     observed_paths: list[str] = []
     for record in lock_records:
@@ -199,7 +261,7 @@ def _verify_dependency_locks(
             raise ValueError(f"dependency lock byte size mismatch: {path}")
         if record.get("sha256") != hashlib.sha256(content).hexdigest():
             raise ValueError(f"dependency lock SHA-256 mismatch: {path}")
-    if tuple(observed_paths) != LOCK_PATHS:
+    if tuple(observed_paths) != contract.lock_paths:
         raise ValueError("manifest dependency lock path/order mismatch")
 
 
@@ -224,24 +286,25 @@ def _verify_semantic_target(
     archive_path: Path,
     expected_prefix: str,
     target: object,
+    contract: ReleaseContract,
 ) -> None:
     if not isinstance(target, dict) or set(target) != {
         "id", "input", "constraints", "lock"
     }:
         raise ValueError("semantic extension target record is invalid")
-    if target.get("id") != SEMANTIC_TARGET_ID:
+    if target.get("id") != contract.semantic_target_id:
         raise ValueError("semantic extension target identity mismatch")
     _verify_semantic_record(
-        archive_path, expected_prefix, target.get("input"), SEMANTIC_INPUT_PATH
+        archive_path, expected_prefix, target.get("input"), contract.semantic_input_path
     )
     _verify_semantic_record(
         archive_path,
         expected_prefix,
         target.get("constraints"),
-        SEMANTIC_CONSTRAINTS_PATH,
+        contract.semantic_constraints_path,
     )
     _verify_semantic_record(
-        archive_path, expected_prefix, target.get("lock"), SEMANTIC_LOCK_PATH
+        archive_path, expected_prefix, target.get("lock"), contract.semantic_lock_path
     )
 
 
@@ -249,6 +312,7 @@ def _verify_semantic_extension(
     manifest: dict[str, object],
     archive_path: Path,
     expected_prefix: str,
+    contract: ReleaseContract,
 ) -> None:
     semantic = manifest.get("semantic_extension")
     if not isinstance(semantic, dict):
@@ -263,19 +327,20 @@ def _verify_semantic_extension(
         archive_path,
         expected_prefix,
         semantic.get("platform_contract"),
-        SEMANTIC_PLATFORM_CONTRACT_PATH,
+        contract.semantic_platform_contract_path,
     )
     targets = semantic.get("targets")
     if not isinstance(targets, list) or len(targets) != 1:
         raise ValueError("semantic extension target count mismatch")
-    _verify_semantic_target(archive_path, expected_prefix, targets[0])
+    _verify_semantic_target(archive_path, expected_prefix, targets[0], contract)
 
 
 def _verify_manifest_contract(
     manifest: dict[str, object],
     archive_path: Path,
+    contract: ReleaseContract,
 ) -> None:
-    if manifest.get("$schema") != SCHEMA_URI:
+    if manifest.get("$schema") != contract.schema_uri:
         raise ValueError("release manifest schema URI mismatch")
 
     project = manifest.get("project")
@@ -290,9 +355,9 @@ def _verify_manifest_contract(
     release_version = project.get("release_version")
     commit = source.get("git_commit")
     tree = source.get("git_tree")
-    if project.get("name") != "RepoBrief":
+    if project.get("name") != contract.project_name:
         raise ValueError("manifest project name mismatch")
-    if project.get("repository") != "heimgewebe/lenskit":
+    if project.get("repository") != contract.repository:
         raise ValueError("manifest repository mismatch")
     if not isinstance(release_version, str) or not VERSION_RE.fullmatch(release_version):
         raise ValueError("manifest release version is invalid")
@@ -306,8 +371,8 @@ def _verify_manifest_contract(
     candidate_id = f"{release_version}-g{commit[:12]}"
     if project.get("candidate_id") != candidate_id:
         raise ValueError("manifest candidate id does not match version and commit")
-    expected_prefix = f"repobrief-{candidate_id}/"
-    expected_archive_name = f"repobrief-{candidate_id}.tar.gz"
+    expected_prefix = f"{contract.archive_slug}-{candidate_id}/"
+    expected_archive_name = f"{contract.archive_slug}-{candidate_id}.tar.gz"
     if archive.get("prefix") != expected_prefix:
         raise ValueError("manifest archive prefix mismatch")
     if archive.get("path") != expected_archive_name:
@@ -323,15 +388,15 @@ def _verify_manifest_contract(
     }:
         raise ValueError("manifest archive normalization mismatch")
 
-    _verify_dependency_locks(manifest, archive_path, expected_prefix)
+    _verify_dependency_locks(manifest, archive_path, expected_prefix, contract)
 
     license_content = _read_archive_member(
         archive_path, f"{expected_prefix}LICENSE"
     ).decode("utf-8")
-    if LICENSE_EXPRESSION not in license_content:
+    if contract.license_expression not in license_content:
         raise ValueError("archived LICENSE does not contain the manifest LicenseRef")
 
-    _verify_semantic_extension(manifest, archive_path, expected_prefix)
+    _verify_semantic_extension(manifest, archive_path, expected_prefix, contract)
 
     nonclaims = manifest.get("does_not_establish")
     if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(nonclaims):
@@ -381,6 +446,57 @@ def _compare_with_repo(
                     raise ValueError(f"content mismatch: {entry.path}")
 
 
+def _contract_for_manifest(manifest: dict[str, object]) -> ReleaseContract:
+    identity = (manifest.get("kind"), manifest.get("version"), manifest.get("$schema"))
+    for contract in (CANONICAL_CONTRACT, LEGACY_CONTRACT):
+        if identity == (contract.kind, contract.version, contract.schema_uri):
+            return contract
+    raise ValueError("unsupported or contradictory release manifest identity")
+
+
+def _verify_release_candidate(
+    candidate_path: Path,
+    *,
+    contract: ReleaseContract,
+    repo: str | Path | None,
+) -> dict[str, object]:
+    manifest, manifest_path, archive_path, sums_path = _load_candidate(
+        candidate_path, contract
+    )
+    if not archive_path.is_file():
+        raise ValueError("candidate archive is missing")
+    _verify_sums(manifest_path, archive_path, sums_path)
+
+    license_data = manifest.get("license")
+    if not isinstance(license_data, dict):
+        raise ValueError("license object is missing")
+    if license_data.get("expression") != contract.license_expression:
+        raise ValueError("license expression mismatch")
+    if license_data.get("distribution_status") != (
+        "blocked_without_separate_written_permission"
+    ):
+        raise ValueError("distribution boundary mismatch")
+
+    members = _archive_members(manifest, archive_path)
+    _verify_manifest_contract(manifest, archive_path, contract)
+    if repo is not None:
+        _compare_with_repo(
+            Path(repo).expanduser().resolve(), manifest, archive_path, members
+        )
+    project = manifest.get("project")
+    assert isinstance(project, dict)
+    return {
+        "status": "pass",
+        "candidate_id": project["candidate_id"],
+        "archive_sha256": _sha256(archive_path),
+        "manifest_sha256": _sha256(manifest_path),
+        "member_count": len(members),
+        "source_bound": repo is not None,
+        "distribution_status": "blocked_without_separate_written_permission",
+        "compatibility_mode": contract.compatibility_mode,
+    }
+
+
 def verify_release_candidate(
     candidate_dir: str | Path,
     *,
@@ -389,38 +505,31 @@ def verify_release_candidate(
     candidate_path = Path(candidate_dir).expanduser().resolve()
     if not candidate_path.is_dir():
         raise ValueError(f"candidate directory is missing: {candidate_path}")
-    manifest, manifest_path, archive_path, sums_path = _load_candidate(candidate_path)
-    if not archive_path.is_file():
-        raise ValueError("candidate archive is missing")
-    _verify_sums(manifest_path, archive_path, sums_path)
+    manifests = sorted(candidate_path.glob("*.release.json"))
+    if len(manifests) != 1:
+        raise ValueError(f"expected exactly one release manifest, found {len(manifests)}")
+    preview = json.loads(manifests[0].read_text(encoding="utf-8"))
+    if not isinstance(preview, dict):
+        raise ValueError("release manifest must be a JSON object")
+    contract = _contract_for_manifest(preview)
+    return _verify_release_candidate(candidate_path, contract=contract, repo=repo)
 
-    license_data = manifest.get("license")
-    if not isinstance(license_data, dict):
-        raise ValueError("license object is missing")
-    if license_data.get("expression") != LICENSE_EXPRESSION:
-        raise ValueError("license expression mismatch")
-    if license_data.get("distribution_status") != (
-        "blocked_without_separate_written_permission"
-    ):
-        raise ValueError("distribution boundary mismatch")
 
-    members = _archive_members(manifest, archive_path)
-    _verify_manifest_contract(manifest, archive_path)
-    if repo is not None:
-        _compare_with_repo(Path(repo).expanduser().resolve(), manifest, archive_path, members)
-    return {
-        "status": "pass",
-        "candidate_id": manifest["project"]["candidate_id"],
-        "archive_sha256": _sha256(archive_path),
-        "manifest_sha256": _sha256(manifest_path),
-        "member_count": len(members),
-        "source_bound": repo is not None,
-        "distribution_status": "blocked_without_separate_written_permission",
-    }
+def verify_legacy_release_candidate(
+    candidate_dir: str | Path,
+    *,
+    repo: str | Path | None = None,
+) -> dict[str, object]:
+    candidate_path = Path(candidate_dir).expanduser().resolve()
+    if not candidate_path.is_dir():
+        raise ValueError(f"candidate directory is missing: {candidate_path}")
+    return _verify_release_candidate(
+        candidate_path, contract=LEGACY_CONTRACT, repo=repo
+    )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify a RepoBrief release candidate")
+    parser = argparse.ArgumentParser(description="Verify a RepoGround release candidate")
     parser.add_argument("--candidate-dir", required=True)
     parser.add_argument("--repo")
     args = parser.parse_args()

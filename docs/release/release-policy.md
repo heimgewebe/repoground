@@ -1,4 +1,4 @@
-# RepoBrief release-candidate policy
+# RepoGround release-candidate policy
 
 ## Purpose
 

@@ -25,9 +25,9 @@ An agent or test can use it to check — before answering — whether the artifa
 
 | File | Role |
 |------|------|
-| `merger/lenskit/contracts/required-reading-protocol.v1.schema.json` | JSON Schema (Draft-07) for the protocol contract |
-| `merger/lenskit/core/required_reading.py` | Resolver: `default_required_reading_protocol()`, `resolve_required_reading()` |
-| `merger/lenskit/tests/test_required_reading_protocol.py` | Schema validation and resolver tests |
+| `merger/repoground/contracts/required-reading-protocol.v1.schema.json` | JSON Schema (Draft-07) for the protocol contract |
+| `merger/repoground/core/required_reading.py` | Resolver: `default_required_reading_protocol()`, `resolve_required_reading()` |
+| `merger/repoground/tests/test_required_reading_protocol.py` | Schema validation and resolver tests |
 
 ---
 
@@ -79,7 +79,7 @@ Resolver results preserve `citation_required`, `answer_checklist_required`, and 
 ### Example: pr_review
 
 ```python
-from merger.lenskit.core.required_reading import (
+from merger.repoground.core.required_reading import (
     default_required_reading_protocol,
     resolve_required_reading,
 )
@@ -164,9 +164,9 @@ The trace is a declaration-comparison artifact only. It does not prove actual re
 
 | File | Role |
 |------|------|
-| `merger/lenskit/contracts/agent-consumption-trace.v1.schema.json` | JSON Schema (Draft-07) for the trace contract |
-| `merger/lenskit/core/agent_consumption_validate.py` | Pure validator: `validate_agent_consumption(required_reading_result, answer_compliance, *, available_roles=None)` |
-| `merger/lenskit/tests/test_agent_consumption_trace.py` | Schema validation and validator behaviour tests |
+| `merger/repoground/contracts/agent-consumption-trace.v1.schema.json` | JSON Schema (Draft-07) for the trace contract |
+| `merger/repoground/core/agent_consumption_validate.py` | Pure validator: `validate_agent_consumption(required_reading_result, answer_compliance, *, available_roles=None)` |
+| `merger/repoground/tests/test_agent_consumption_trace.py` | Schema validation and validator behaviour tests |
 
 ### Scope
 

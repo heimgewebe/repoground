@@ -8,8 +8,8 @@ from pathlib import Path
 # Legacy path setup removed - handled by pytest.ini pythonpath=.
 # sys.path.append(os.path.abspath("merger/repoLens"))
 
-from merger.lenskit.adapters.metarepo import sync_from_metarepo
-from merger.lenskit.core.merge import HealthCollector
+from merger.repoground.adapters.metarepo import sync_from_metarepo
+from merger.repoground.core.merge import HealthCollector
 
 class TestMetarepoSync(unittest.TestCase):
     def setUp(self):

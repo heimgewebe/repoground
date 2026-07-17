@@ -1,6 +1,6 @@
 # Artifact Drift Matrix
 
-Diese Matrix dokumentiert paarweise Drift-Risiken zwischen Lenskit-Artefakten
+Diese Matrix dokumentiert paarweise Drift-Risiken zwischen RepoGround-Artefakten
 und ordnet jeder Paarung Autorität, Guard-/Coverage-Status und
 Regenerationspfad zu. Sie ist
 zunächst **diagnostisch**: sie macht bestehende Ankerpunkte sichtbar, ohne

@@ -5,8 +5,8 @@ Not intended as a deterministic performance test for CI.
 import asyncio
 import time
 import httpx
-from merger.lenskit.service.app import app, state, init_service
-from merger.lenskit.service.models import JobRequest, Job
+from merger.repoground.service.app import app, state, init_service
+from merger.repoground.service.models import JobRequest, Job
 import pathlib
 from httpx import ASGITransport
 

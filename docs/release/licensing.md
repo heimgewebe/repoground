@@ -1,4 +1,4 @@
-# RepoBrief licensing boundary
+# RepoGround licensing boundary
 
 ## Current decision
 

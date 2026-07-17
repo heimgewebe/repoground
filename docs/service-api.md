@@ -94,7 +94,7 @@ Typed read-only facade over stored `context_bundle` artifacts. Returns the conte
 - Context bundle artifacts are stored automatically when `/api/query` produces a `context_bundle`, for example via `build_context_bundle=true` or an output profile / context mode that includes a context bundle. In those cases, the ID is returned in `artifact_ids.context_bundle` of the query response.
 - `trace=true` alone stores a `query_trace`; it does not by itself guarantee `artifact_ids.context_bundle`.
 - Extra request fields are rejected with HTTP 422 (`additionalProperties: false` per contract).
-- Contract: `merger/lenskit/contracts/context-lookup.v1.schema.json`
+- Contract: `merger/repoground/contracts/context-lookup.v1.schema.json`
 
 ## Diagnostics
 
@@ -134,7 +134,7 @@ Read-only lookup facade over the persisted diagnostics snapshot.
 - `not_found`: snapshot file does not exist.
 - `error`: snapshot file exists but cannot be parsed as JSON.
 - `freshness` is `null` if `generated_at` is absent/invalid or if lookup fails.
-- Contract: `merger/lenskit/contracts/diagnostics-lookup.v1.schema.json`.
+- Contract: `merger/repoground/contracts/diagnostics-lookup.v1.schema.json`.
 
 ## Trace Lookup
 
@@ -190,7 +190,7 @@ Typed read-only facade over stored `query_trace` artifacts. Returns the trace pa
 - Only returns artifacts of type `query_trace`. If the ID exists but refers to a different artifact type, `status: "not_found"` is returned with a warning naming the actual type — no foreign artifact data is leaked.
 - Artifacts are stored automatically when `/api/query` is called with `trace=true`. The ID is returned in `artifact_ids.query_trace` of the query response.
 - Extra request fields are rejected with HTTP 422 (`additionalProperties: false` per contract).
-- Contract: `merger/lenskit/contracts/trace-lookup.v1.schema.json`
+- Contract: `merger/repoground/contracts/trace-lookup.v1.schema.json`
 
 ## Agent Query Session
 
@@ -222,11 +222,11 @@ Storage entries below assume `query_artifact_store` is configured. If the store 
 | `both` | `mixed` |
 | `none` | `unknown` |
 
-**Schema:** `merger/lenskit/contracts/agent-query-session.v2.schema.json`
+**Schema:** `merger/repoground/contracts/agent-query-session.v2.schema.json`
 
 **Runtime Artifact Lifecycle / Retention Policy (v1):**
 
-All runtime artifacts stored in the `QueryArtifactStore` (`query_trace`, `context_bundle`, `agent_query_session`) carry explicit lifecycle metadata derived from the machine-readable policy in `merger/lenskit/service/runtime_artifact_retention.py`:
+All runtime artifacts stored in the `QueryArtifactStore` (`query_trace`, `context_bundle`, `agent_query_session`) carry explicit lifecycle metadata derived from the machine-readable policy in `merger/repoground/service/runtime_artifact_retention.py`:
 
 | Field | Value |
 |---|---|
@@ -267,29 +267,29 @@ Authenticated capability probe for small admin controls.
 
 `service_restart_enabled` is `true` only when all of the following are true:
 
-- `RLENS_ENABLE_SERVICE_RESTART=1`
-- `RLENS_SERVICE_UNIT` is absent or matches `^[A-Za-z0-9_.@-]+$`
+- `REPOGROUND_ENABLE_SERVICE_RESTART=1` (legacy fallback: `RLENS_ENABLE_SERVICE_RESTART=1`)
+- `REPOGROUND_SERVICE_UNIT` or its legacy fallback `RLENS_SERVICE_UNIT` is absent or matches `^[A-Za-z0-9_.@-]+$`
 - the service is running in the existing local-trust mode (loopback-bound with auth configured)
 
 ### `POST /api/admin/restart`
 
 Feature-flagged local admin control that schedules a restart of the configured
-rLens systemd user unit. It does **not** pull git changes, rebuild diagnostics,
+RepoGround systemd user unit. It does **not** pull git changes, rebuild diagnostics,
 or restart unrelated services.
 
 **Auth:** `Authorization: Bearer <token>` required.
 
 **Environment:**
 
-- `RLENS_ENABLE_SERVICE_RESTART=1` enables the endpoint and WebUI button.
-- `RLENS_SERVICE_UNIT=rlens` selects the systemd user unit (default `rlens`).
+- `REPOGROUND_ENABLE_SERVICE_RESTART=1` enables the endpoint and WebUI button; `RLENS_ENABLE_SERVICE_RESTART=1` remains a 3.x fallback.
+- `REPOGROUND_SERVICE_UNIT=repoground` selects the canonical systemd user unit. `RLENS_SERVICE_UNIT=rlens` remains a 3.x fallback for the not-yet-cut-over legacy service.
 
 **Success (`202 Accepted`):**
 ```json
 {
   "status": "scheduled",
-  "unit": "rlens",
-  "message": "rLens restart scheduled"
+  "unit": "repoground",
+  "message": "RepoGround restart scheduled"
 }
 ```
 
@@ -324,7 +324,7 @@ or restart unrelated services.
 
 ## Mutation Boundary Classification
 
-Lenskit API documentation distinguishes four classes for mutation-near buttons or paths. This is a contract boundary, not an implementation of new endpoints:
+RepoGround API documentation distinguishes four classes for mutation-near buttons or paths. This is a contract boundary, not an implementation of new endpoints:
 
 | Class | Meaning | Agent exposure |
 |---|---|---|
@@ -333,7 +333,7 @@ Lenskit API documentation distinguishes four classes for mutation-near buttons o
 | `bounded repo-sync mutation` | Narrow Omnipull-style repo preparation: plan/report, clone missing repos, fetch/prune existing repos, and clean fast-forward only. | Must remain locally authorized, report-producing, and unavailable as a general external Agent tool. |
 | `local-only forensic operation` | Broad local filesystem or forensic inspection, especially profiles marked non-exportable. | Must remain local-only unless a reviewed, redacted export artifact is produced. |
 
-Omnipull-shaped paths, if added later, must be documented and tested as `bounded repo-sync mutation`. They are not generic command execution and must not provide arbitrary shell command, branch switching, reset, stash, rebase, untracked-file deletion, or local-change discard semantics. Snapshot and Merger controls must similarly state whether they are read-only observation, local artifact generation, or local-only forensic work before they are exposed beyond the local rLens peer.
+Omnipull-shaped paths, if added later, must be documented and tested as `bounded repo-sync mutation`. They are not generic command execution and must not provide arbitrary shell command, branch switching, reset, stash, rebase, untracked-file deletion, or local-change discard semantics. Snapshot and Merger controls must similarly state whether they are read-only observation, local artifact generation, or local-only forensic work before they are exposed beyond the local RepoGround service peer.
 
 ## Job Submission & Dispatch
 
@@ -351,11 +351,11 @@ update of every selected local repo **before** it is scanned, so a fresh dump
 reflects current upstream state instead of a stale checkout.
 
 This is classified as a **`bounded repo-sync mutation`** (see *Mutation Boundary
-Classification* above), implemented in `merger/lenskit/service/repo_sync.py` and
+Classification* above), implemented in `merger/repoground/service/repo_sync.py` and
 invoked by the runner *before* `scan_repo()` — never in `core/merge.py`.
 
 **One contract, every surface.** The effective pre-pull is the same everywhere
-(rLens service runner, WebUI, rLens-client, repoLens UI + headless):
+(RepoGround service runner, WebUI, `service-client`, and RepoGround build UI/headless):
 
 ```
 effective_pre_pull = requested_pre_pull and not plan_only
@@ -412,13 +412,12 @@ Notes:
   (`pre_pull=true and not plan_only`) — the user explicitly wants a fresh
   repo-sync check. A `pre_pull=false` (or `plan_only`) request may reuse a
   succeeded job, and an identical **active** job is always reusable.
-- **Self-repo caveat:** if the selected repo is the running rLens code itself
-  (typically `repos/lenskit`), an actual fast-forward updates files on disk but
+- **Self-repo caveat:** if the selected repo is the running RepoGround code itself
+  (currently the legacy checkout `repos/lenskit`; target `repos/repoground`), an actual fast-forward updates files on disk but
   the live Python process keeps its already-loaded modules. The job emits a
   visible restart warning (logs + `job.warnings`) **only on an actual
-  `fast_forwarded`** and **never** auto-restarts the service. Restart
-  `rlens.service` manually after updating lenskit.
-- CLI: `lenskit rlens-client run` (and repoLens headless) send `pre_pull`
+  `fast_forwarded`** and **never** auto-restarts the service. Restart the configured RepoGround unit manually after updating the checkout; during the 3.x transition this may still be the legacy `rlens.service`.
+- CLI: `repoground service-client run` (legacy alias: `rlens-client`) and RepoGround build headless send `pre_pull`
   explicitly; disable with `--no-pre-pull`. `--plan-only` implies
   `pre_pull=false`.
 
@@ -439,7 +438,7 @@ digest summary of this report.
 
 ### Source Acquisition (`repo_source_mode`)
 
-rLens Source Acquisition v1 makes *how the content to scan is acquired* explicit.
+RepoGround Source Acquisition v1 makes *how the content to scan is acquired* explicit.
 See `docs/blueprints/rlens-source-acquisition-blueprint.md` for the full design.
 
 New `JobRequest` fields:
@@ -454,7 +453,7 @@ New `JobRequest` fields:
 **Source-mode control plane (HTTP 422).** `/api/jobs` is the hard boundary: it
 validates the source-mode combination *before* job hashing, reuse and any git or
 network access, and rejects contradictions with **422** (no job created, no
-mutation). The CLI, repoLens headless and the WebUI enforce the identical rules
+mutation). The CLI, RepoGround build headless and the WebUI enforce the identical rules
 (`validate_source_mode_request`) so they cannot out-permit the API. Rejected
 (explicit `pre_pull` only; a bare `repo_source_mode` is accepted):
 
@@ -475,7 +474,7 @@ Modes:
   `remote_snapshot + default_branch` scans `origin/HEAD` (fallback `origin/main`)
   regardless of the local branch's upstream.
 
-Ref selection: explicit `remote_ref` wins. Otherwise exactly `remote_ref_policy` is used. Missing upstream remains `missing_ref`; rLens does not guess `default_branch` unless that policy is selected.
+Ref selection: explicit `remote_ref` wins. Otherwise exactly `remote_ref_policy` is used. Missing upstream remains `missing_ref`; RepoGround does not guess `default_branch` unless that policy is selected.
 For `upstream`, the configured tracking remote is used, not implicitly `origin`.
 An explicit commit SHA works if the commit is reachable via fetched heads/tags or if the remote server allows direct SHA fetches.
 
@@ -503,7 +502,7 @@ repo: `original_path`, `scan_path`, `source_mode`, `resolved_ref`,
 `resolved_commit`, `local_repo_mutated` (always `false`), plus credential-redacted `remote_url_redacted`,
 `message`, `stderr` and `warnings`. On failure it is registered as an
 early-diagnostic artifact. The report shape is pinned by the JSON-Schema contract
-`merger/lenskit/contracts/source-acquisition-report.v1.schema.json`
+`merger/repoground/contracts/source-acquisition-report.v1.schema.json`
 (`additionalProperties: false`); written reports are validated against it in
 tests. The report is a provenance/diagnostic signal (structure), not a proof that
 the snapshot equals a locally generated bundle.
@@ -512,9 +511,9 @@ the snapshot equals a locally generated bundle.
 `submodules_not_expanded` when `.gitmodules` is present); Git-LFS content is not
 smudged (warning `lfs_not_smudged` when LFS filters/pointers are detected).
 
-**Surfaces:** CLI `lenskit rlens-client run --source-mode {local-current,local-ff,remote-snapshot}`
+**Surfaces:** CLI `repoground service-client run --source-mode {local-current,local-ff,remote-snapshot}`
 with `--remote-ref` / `--remote-ref-policy`; WebUI "Quelle" dropdown (+ ref
-policy/ref fields for remote-snapshot); repoLens headless `--source-mode` /
+policy/ref fields for remote-snapshot); RepoGround build headless `--source-mode` /
 `--remote-ref` / `--remote-ref-policy`. Contradictory `--source-mode`/`--pre-pull`
 combinations are rejected before any network access.
 

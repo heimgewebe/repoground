@@ -1,6 +1,6 @@
-# Lenskit Artefakt-Inventar
+# RepoGround Artefakt-Inventar
 
-Dieses Inventar dokumentiert die primären und abgeleiteten Artefakte von Lenskit, wie sie aktuell in `merger/lenskit/` implementiert und durch Verträge (Contracts) abgesichert sind.
+Dieses Inventar dokumentiert die primären und abgeleiteten Artefakte von RepoGround, wie sie aktuell in `merger/repoground/` implementiert und durch Verträge (Contracts) abgesichert sind.
 
 Die Spalten **Authority** und **Canonicality** entsprechen den optionalen Feldern in `bundle-manifest.v1.schema.json` (Phase 1 der Artifact-Integrity-Blaupause). Sie machen maschinenlesbar, *was* ein Artefakt sein darf:
 
@@ -21,7 +21,7 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 | `<stem>.chunk_index.jsonl` | `chunk_index_jsonl` | `retrieval_index` | `derived` | `core.chunker` | `retrieval.index_db` | - | Ja | Index-Aufbau |
 | `<stem>.index.sqlite` | `sqlite_index` | `runtime_cache` | `cache` | `retrieval.index_db` | `retrieval.query_core`, `eval_core` | - | Ja (als `.index.sqlite`) | FTS5 Ranking, Chunk Retrieval |
 | `<stem>.dump_index.json` | `dump_index_json` | `navigation_index` | `index_only` | `core.merge` | `retrieval.index_db` | - | Ja | Initialer Index-Bau |
-| `<stem>.json` (Sidecar) | `index_sidecar_json` | `navigation_index` | `index_only` | `core.merge` | Agents, WebUI, CLI, Lenskit Service | `bundle-manifest.v1.schema.json` | Meta | Verknüpfung der Artefakte |
+| `<stem>.json` (Sidecar) | `index_sidecar_json` | `navigation_index` | `index_only` | `core.merge` | Agents, WebUI, CLI, RepoGround Service | `bundle-manifest.v1.schema.json` | Meta | Verknüpfung der Artefakte |
 | `<base>.derived_index.json` | `derived_manifest_json` | `navigation_index` | `derived` | `core.merge` | Bundle-Konsumenten | - | Ja | Verlinkt abgeleitete Artefakte |
 | `<stem>.graph_index.json` | `graph_index_json` | `retrieval_index` | `derived` | `architecture.graph_index` | `retrieval.query_core`, `eval_core` | `architecture.graph_index.v1.schema.json` | Ja | Graph Penalty/Bonus, Semantic Eval |
 | `<stem>.python_symbol_index.json` | `python_symbol_index_json` | `navigation_index` | `derived` | `architecture.symbol_index` über `core.merge` | `repobrief symbol search`, MCP `find_symbol`, Call-Graph-Navigation | `python-symbol-index.v1.schema.json` | Ja, Single-Repo-Bundle; aus `public-share` ausgeschlossen | Exakte Definitionsnavigation mit Pfad und Zeilenbereich; keine Referenz- oder Laufzeitaussage |
@@ -29,7 +29,7 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 | `<stem>_architecture.md` | `architecture_summary` | _(Schema-Zukunftsform: `diagnostic_signal`)_ | _(Schema-Zukunftsform: `diagnostic`)_ | `write_reports_v2` / `generate_architecture_summary` | Mensch, LLMs, Report-Konsumenten | - | Nein (nicht im Bundle Manifest) | Lesbare Architektur-Zusammenfassung |
 | `query_context_bundle.json`| - (Runtime Payload) | _(Phase 4)_ | _(Phase 4)_ | `retrieval.query_core` | CLI, WebUI, Agents | `query-context-bundle.v1.schema.json` | Nein (Runtime Output) | Context Expansion, UI Display |
 | `query_trace.json` | - (Runtime Payload) | _(Phase 4)_ | _(Phase 4)_ | `retrieval.query_core` | Debug CLI, Evaluatoren | extrahiert aus `query-result.v1.schema.json` | Nein (Runtime Output) | Ranking-Analyse (via `--trace`) |
-| `agent_query_session` (API Runtime) | - (Runtime Payload) | `runtime_observation` | `observation` | `service.app` via `retrieval.session.build_agent_query_session_v2` | Agents, Artifact Lookup (`/api/artifact_lookup`) | `merger/lenskit/contracts/agent-query-session.v2.schema.json` | Nein (Runtime Output) | Provenienz-Wrapper für Query-Kontext-Projektion; `artifact_shape`: `wrapper` |
+| `agent_query_session` (API Runtime) | - (Runtime Payload) | `runtime_observation` | `observation` | `service.app` via `retrieval.session.build_agent_query_session_v2` | Agents, Artifact Lookup (`/api/artifact_lookup`) | `merger/repoground/contracts/agent-query-session.v2.schema.json` | Nein (Runtime Output) | Provenienz-Wrapper für Query-Kontext-Projektion; `artifact_shape`: `wrapper` |
 | `<stem>.retrieval_eval.json` | `retrieval_eval_json` | `diagnostic_signal` | `diagnostic` | `retrieval.eval_core` | CI, Entwickler | `retrieval-eval.v1.schema.json` | Ja (wenn vorhanden) | Evaluierungsmetriken |
 | `<stem>.delta.json` / `pr-schau-delta.json` | `delta_json` | `diagnostic_signal` | `diagnostic` | `write_reports_v2` (Bundle-Pfad bei validem Delta) und `core.pr_schau_bundle` | PR-Schau Frontends, Agents | `pr-schau-delta.v1.schema.json` | Ja (optional, bei validem Delta) | Source-Diagnose fuer PR-Delta-Karten; Code-Review-Differentials |
 | `<stem>.entrypoints.json` | - (Hilfs-/Zwischenartefakt) | _(Phase 1: nicht annotiert)_ | _(Phase 1: nicht annotiert)_ | `architecture.entrypoints` | `architecture.graph_index` | `entrypoints.v1.schema.json` | Nein | Berechnung des Graph-Boosts |
@@ -56,14 +56,14 @@ Dateiendung ist Kleidung; Autorität ist Identität.
 4. **Phase-5-Artefakte und Implementierungsstand:**
    Für `cross_repo_links` und `federation_conflicts` existieren eigene Contracts (`cross-repo-links.v1.schema.json`, `federation-conflicts.v1.schema.json`). Die offene Lücke betrifft nicht das Vorhandensein der Contracts, sondern die durchgängige Producer-/Runtime-/Persistenz-Umsetzung. `federation_conflicts` ist heuristisch/minimal im föderierten Query-/Trace-Pfad emittiert (`federation_query.py`) und per CLI-Trace persistierbar (`cmd_federation.py`); offen bleibt eine belastbare Identity- und Konfliktlogik. `cross_repo_links` hat einen minimalen heuristischen Runtime-Producer (`_build_cross_repo_links` in `federation_query.py`): emittiert `co_occurrence`-Links mit `confidence: "inferred"` pro Repo-Paar in den finalen `results`; CLI-Persistenz als `cross_repo_links.json` bei `--trace`; ganzes Artefakt-Array schema-validiert. `cross-repo-links.v1.schema.json` Root-Type ist `array` (korrigiert aus dem ursprünglichen Placeholder, der als Item-Schema `"type": "object"` beschrieben hatte und nie einen Runtime-Producer hatte). `federation_index.json` ist implementiert.
 5. **Begriffs-Dissonanzen (Repo-Kanonik vs. Dateinamen):**
-   Einige Rollenbegriffe weichen historisch gewachsen von den Dateinamen ab. Um Semantic Drift zu vermeiden, dokumentiert dieses Inventar streng die in `merger/lenskit/core/constants.py` und `bundle-manifest.v1.schema.json` hartcodierten `ArtifactRole` Enums.
+   Einige Rollenbegriffe weichen historisch gewachsen von den Dateinamen ab. Um Semantic Drift zu vermeiden, dokumentiert dieses Inventar streng die in `merger/repoground/core/constants.py` und `bundle-manifest.v1.schema.json` hartcodierten `ArtifactRole` Enums.
    - `index.sqlite` wird systemintern als `sqlite_index` geführt (statt `chunk_index_sqlite`).
    - `architecture_graph.json` und `architecture_summary` sind getrennt zu behandeln: `architecture_graph.json` bezeichnet Graph-/Importdaten, `architecture_summary` die lesbare `_architecture.md`-Zusammenfassung.
    - `<stem>.delta.json` / `pr-schau-delta.json` wird als `delta_json` deklariert.
 6. **Authority/Canonicality-Felder (Phase 1 + 3.5):**
    Die Felder `authority`, `canonicality`, `regenerable` und `staleness_sensitive` sind in `bundle-manifest.v1.schema.json` optional. `authority` und `canonicality` sind pro Rolle wertbeschränkt (z.B. darf `sqlite_index` keine `canonical_content`-Autorität tragen, `architecture_summary` keinen `content_source`-Status). `regenerable` und `staleness_sensitive` werden vom Producer emittiert und bleiben typgeprüft. `staleness_sensitive` beschreibt Bundle-interne Drift, nicht Aktualität gegenüber dem Live-Repository.
 
-   **Vom Producer (`merger/lenskit/core/merge.py`, `AUTHORITY_REGISTRY`) aktiv emittiert:**
+   **Vom Producer (`merger/repoground/core/merge.py`, `AUTHORITY_REGISTRY`) aktiv emittiert:**
    `canonical_md`, `index_sidecar_json`, `dump_index_json`, `derived_manifest_json`, `chunk_index_jsonl`, `sqlite_index`, `retrieval_eval_json` (Phase 3.5), `graph_index_json` (Phase 3.5), `output_health`, `citation_map_jsonl` (Producer `core.citation_map`, emittiert bei kohärentem canonical_md/chunk_index-Paar), `python_symbol_index_json` und `python_call_graph_json` für Single-Repo-Bundles sowie `agent_reading_pack` (Producer `core.agent_reading_pack`, immer emittiert, passt sich an vorhandene Artefakte an). Optional bei vorhandenem und validem `pr-schau-delta.v1`-Source: `delta_json` als Source-Diagnose und `pr_delta_cards_jsonl` als daraus abgeleitete Karten-Navigation.
 
    `agent_reading_pack` ist als `role_only` (kein JSON-Schema-Contract) registriert — wie `output_health` ist es ein abgeleitetes Diagnose-/Navigationsartefakt; seine Form ist Markdown. Authority: `navigation_index`, Canonicality: `derived`. Es ist **Navigation, nicht Wahrheit**: kanonische Quelle bleibt `canonical_md`. Der Pack wird zeitlich **zuletzt produziert** (nach `output_health` und `citation_map_jsonl`, aus dem bereits finalisierten Manifest), damit er alle übrigen Artefakte zusammenfassen kann. In der Manifest-`artifacts`-Liste steht er jedoch nicht zwangsläufig zuletzt: die Liste bleibt nach `(role, path)` deterministisch sortiert. Der Pack listet sich selbst nie als Bundle-Inhalt.
@@ -87,4 +87,4 @@ Dateiendung ist Kleidung; Autorität ist Identität.
    - `deletion_mode`: `"not_supported_by_policy"`.
 
    Legacy-Einträge (ohne Lifecycle-/Retention-Felder) werden beim Lookup via `_with_runtime_metadata()` transparent backgefüllt und dabei nicht auf Platte zurückgeschrieben.
-   **Kein GC, kein TTL, kein automatisches Löschen.** Diese Entscheidung ist jetzt explizit und maschinenlesbar in `merger/lenskit/service/runtime_artifact_retention.py` dokumentiert; sie ist keine Cleanup-Engine.
+   **Kein GC, kein TTL, kein automatisches Löschen.** Diese Entscheidung ist jetzt explizit und maschinenlesbar in `merger/repoground/service/runtime_artifact_retention.py` dokumentiert; sie ist keine Cleanup-Engine.

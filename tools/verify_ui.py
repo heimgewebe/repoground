@@ -19,7 +19,7 @@ import argparse
 
 # Determine the project root and UI directory
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UI_DIR = os.path.join(PROJECT_ROOT, "merger/lenskit/frontends/webui")
+UI_DIR = os.path.join(PROJECT_ROOT, "merger/repoground/frontends/webui")
 
 try:
     from playwright.sync_api import sync_playwright

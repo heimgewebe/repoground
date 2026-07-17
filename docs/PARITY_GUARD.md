@@ -1,7 +1,7 @@
 # Frontend Feature Parity Guard
 
 ## Overview
-To prevent feature divergence between the WebUI (`rLens`) and Pythonista UI (`repoLens`), we have implemented a mechanized guard. This script ensures that control fields defined in the backend `JobRequest` model are exposed in both frontends.
+To prevent feature divergence between the WebUI (`RepoGround service`) and Pythonista UI (`RepoGround build`), we have implemented a mechanized guard. This script ensures that control fields defined in the backend `JobRequest` model are exposed in both frontends.
 
 ## The Guard Script
 The script is located at `tools/parity_guard.py`.
@@ -49,7 +49,7 @@ python3 tools/parity_guard.py --verify-guard
 
 ## Adding New Features
 When adding a new feature (control) to `JobRequest`:
-1.  Add the field to `JobRequest` in `merger/lenskit/service/models.py`.
+1.  Add the field to `JobRequest` in `merger/repoground/service/models.py`.
 2.  Add the feature to the `FEATURES` dictionary in `tools/parity_guard.py` with all required mappings.
 3.  Run the script. It will fail.
 4.  Implement the feature in `repolens.py` (CLI argument + Usage logic).
@@ -66,8 +66,8 @@ This is dedicated path-scoped CI enforcement; it is not a statement that every r
 
 Real dump parity evidence is a separate workflow based on bundle manifests and diagnostic artifacts:
 
-- CLI: `lenskit parity compare LEFT_MANIFEST RIGHT_MANIFEST --json`
-- Core state builder: `merger/lenskit/core/parity_state.py`
-- Gate evaluator: `merger/lenskit/core/parity_gates.py`
+- CLI: `repoground parity compare LEFT_MANIFEST RIGHT_MANIFEST --json`
+- Core state builder: `merger/repoground/core/parity_state.py`
+- Gate evaluator: `merger/repoground/core/parity_gates.py`
 
 This dump-compare path is parser/CLI foundation for evidence-based parity checks. It is not automatically a global CI blocker unless explicitly wired as such in CI policy/workflows.

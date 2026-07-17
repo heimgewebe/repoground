@@ -1,4 +1,4 @@
-# RepoBrief fleet generation and retention
+# RepoGround fleet generation and retention
 
 ## Decision
 
@@ -73,7 +73,7 @@ For every candidate the publisher:
 7. restores the source if it became protected;
 8. otherwise deletes only the quarantined copy and records the terminal result.
 
-The source and its exact group must resolve below one of the three managed RepoBrief roots. Symlinks and non-regular files inside a candidate are rejected. These checks are repeated immediately before the irreversible step, so a parallel state or manifest change causes retention to preserve or restore the data.
+The source and its exact group must resolve below one of the three managed RepoGround roots. Symlinks and non-regular files inside a candidate are rejected. These checks are repeated immediately before the irreversible step, so a parallel state or manifest change causes retention to preserve or restore the data.
 
 ## Crash recovery
 

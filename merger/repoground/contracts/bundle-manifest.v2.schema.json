@@ -1,0 +1,1352 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/bundle-manifest.v2.schema.json",
+  "title": "RepoGround Bundle Manifest (bundle-manifest v2.0)",
+  "description": "Root of navigation for RepoGround artifacts. Legacy v1 remains a separate readable contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "created_at",
+    "generator",
+    "artifacts",
+    "links",
+    "capabilities"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "repoground.bundle.manifest"
+    },
+    "version": {
+      "type": "string",
+      "const": "2.0"
+    },
+    "run_id": {
+      "type": "string",
+      "description": "Unique identifier for this specific generator run."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp of creation."
+    },
+    "generator": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "config_sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "config_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Runtime provenance of the generating process, used to diagnose runtime/entry-point drift (e.g. a service running a stale build that no longer matches the repository code).",
+          "properties": {
+            "module": {
+              "type": "string",
+              "description": "Dotted import path of the core generator module that produced the bundle."
+            },
+            "module_file": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Absolute filesystem path of the generator module. Null when redacted."
+            },
+            "package_root": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Filesystem root of the installed generator package. Null when redacted."
+            },
+            "python_executable": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Interpreter that ran the generator. Null when redacted."
+            },
+            "python_version": {
+              "type": "string",
+              "description": "Python version string of the generating interpreter."
+            },
+            "git_commit": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Git commit of the generator package working tree, or null if unavailable."
+            },
+            "git_dirty": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Whether the generator package working tree had uncommitted changes, or null if unavailable."
+            }
+          },
+          "required": [
+            "module",
+            "python_version"
+          ]
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "description": "List of artifacts in the bundle.",
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "path",
+          "content_type",
+          "bytes",
+          "sha256"
+        ],
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "canonical_md",
+              "index_sidecar_json",
+              "chunk_index_jsonl",
+              "dump_index_json",
+              "sqlite_index",
+              "retrieval_eval_json",
+              "derived_manifest_json",
+              "delta_json",
+              "architecture_graph_json",
+              "entrypoints_json",
+              "graph_index_json",
+              "architecture_summary",
+              "output_health",
+              "citation_map_jsonl",
+              "claim_evidence_map_json",
+              "agent_reading_pack",
+              "agent_entry_manifest",
+              "export_safety_report",
+              "snapshot_plan_json",
+              "lens_cards_jsonl",
+              "concept_cards_jsonl",
+              "relation_cards_jsonl",
+              "pr_delta_cards_jsonl",
+              "python_symbol_index_json",
+              "python_call_graph_json"
+            ],
+            "description": "Machine-readable enum role for this artifact."
+          },
+          "path": {
+            "type": "string",
+            "description": "Relative path to the artifact."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "MIME or general content type."
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "contract": {
+            "type": "object",
+            "description": "Contract reference metadata.",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "version"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "interpretation": {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "contract",
+                  "role_only"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "authority": {
+            "type": "string",
+            "description": "Optional authority class describing what kind of statement this artifact is allowed to make. Optional in v1.0 for backward compatibility; values are constrained per role when present.",
+            "enum": [
+              "canonical_content",
+              "navigation_index",
+              "retrieval_index",
+              "diagnostic_signal",
+              "runtime_cache",
+              "runtime_observation"
+            ]
+          },
+          "canonicality": {
+            "type": "string",
+            "description": "Optional canonicality class describing the artifact's relation to a content source. Optional in v1.0 for backward compatibility; values are constrained per role when present.",
+            "enum": [
+              "content_source",
+              "index_only",
+              "derived",
+              "diagnostic",
+              "cache",
+              "observation"
+            ]
+          },
+          "risk_class": {
+            "type": "string",
+            "description": "Optional governance risk-class (epistemic misuse risk) per the C1 authority/risk matrix. Optional in v1.0 for backward compatibility; values are constrained per role when present. Roles with authority 'retrieval_index' actively reject any risk_class until C1 documents an unambiguous risk_class for that authority class.",
+            "enum": [
+              "content",
+              "navigation",
+              "diagnostic",
+              "cache",
+              "observation",
+              "derived",
+              "external",
+              "evidence_index"
+            ]
+          },
+          "regenerable": {
+            "type": "boolean",
+            "description": "Optional flag: true if the artifact can be deterministically regenerated from its sources, false if it represents a one-time observation."
+          },
+          "staleness_sensitive": {
+            "type": "boolean",
+            "description": "Optional flag: true if the artifact can drift relative to another artifact inside the same bundle and needs bundle-internal staleness checks; false if it is the bundle-local source for its layer. This does not assert freshness relative to the live repository."
+          }
+        },
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "contract"
+              ]
+            },
+            "then": {
+              "properties": {
+                "interpretation": {
+                  "properties": {
+                    "mode": {
+                      "const": "contract"
+                    }
+                  }
+                }
+              },
+              "required": [
+                "interpretation"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "interpretation": {
+                  "properties": {
+                    "mode": {
+                      "const": "role_only"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                }
+              },
+              "required": [
+                "interpretation"
+              ]
+            },
+            "then": {
+              "not": {
+                "required": [
+                  "contract"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "enum": [
+                    "index_sidecar_json",
+                    "retrieval_eval_json",
+                    "delta_json",
+                    "architecture_graph_json",
+                    "entrypoints_json",
+                    "graph_index_json",
+                    "architecture_summary",
+                    "agent_entry_manifest",
+                    "lens_cards_jsonl",
+                    "concept_cards_jsonl",
+                    "relation_cards_jsonl",
+                    "pr_delta_cards_jsonl",
+                    "snapshot_plan_json",
+                    "python_symbol_index_json",
+                    "python_call_graph_json"
+                  ]
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "contract",
+                "interpretation"
+              ],
+              "properties": {
+                "interpretation": {
+                  "properties": {
+                    "mode": {
+                      "const": "contract"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "interpretation": {
+                  "properties": {
+                    "mode": {
+                      "const": "contract"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ]
+                }
+              },
+              "required": [
+                "interpretation"
+              ]
+            },
+            "then": {
+              "required": [
+                "contract"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "canonical_md"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "canonical_content"
+                },
+                "canonicality": {
+                  "const": "content_source"
+                },
+                "risk_class": {
+                  "const": "content"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "index_sidecar_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "index_only"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "dump_index_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "index_only"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "derived_manifest_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "chunk_index_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "retrieval_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                }
+              },
+              "not": {
+                "required": [
+                  "risk_class"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "sqlite_index"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "runtime_cache"
+                },
+                "canonicality": {
+                  "const": "cache"
+                },
+                "risk_class": {
+                  "const": "cache"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "architecture_summary"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "retrieval_eval_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
+                }
+              }
+            }
+          },
+          {
+            "$comment": "lenskit.graph-source-roles",
+            "if": {
+              "properties": {
+                "role": {
+                  "enum": [
+                    "architecture_graph_json",
+                    "entrypoints_json"
+                  ]
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "graph_index_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "retrieval_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                }
+              },
+              "not": {
+                "required": [
+                  "risk_class"
+                ]
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "delta_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "citation_map_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/x-ndjson"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "citation-map"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "claim_evidence_map_json"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/json"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "claim-evidence-map"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "evidence_index"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "agent_reading_pack"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "authority",
+                "canonicality"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "text/markdown"
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "agent_entry_manifest"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/json"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "agent-entry-manifest"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "output_health"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "properties": {
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "export_safety_report"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/json"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "export-safety-report"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "lens_cards_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/x-ndjson"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "lens-card"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "pr_delta_cards_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/x-ndjson"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "pr-delta-card"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "diagnostic_signal"
+                },
+                "canonicality": {
+                  "const": "diagnostic"
+                },
+                "risk_class": {
+                  "const": "diagnostic"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "concept_cards_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/x-ndjson"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "concept-card"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "role": {
+                  "const": "relation_cards_jsonl"
+                }
+              },
+              "required": [
+                "role"
+              ]
+            },
+            "then": {
+              "required": [
+                "content_type",
+                "contract",
+                "authority",
+                "canonicality",
+                "risk_class",
+                "regenerable",
+                "staleness_sensitive"
+              ],
+              "properties": {
+                "content_type": {
+                  "const": "application/x-ndjson"
+                },
+                "contract": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "version"
+                  ],
+                  "properties": {
+                    "id": {
+                      "const": "relation-card"
+                    },
+                    "version": {
+                      "const": "v1"
+                    }
+                  }
+                },
+                "authority": {
+                  "const": "navigation_index"
+                },
+                "canonicality": {
+                  "const": "derived"
+                },
+                "risk_class": {
+                  "const": "navigation"
+                },
+                "regenerable": {
+                  "const": true
+                },
+                "staleness_sensitive": {
+                  "const": true
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "canonical_dump_index_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "description": "SHA256 of the canonical dump_index.json artifact, linking derived artifacts back to their source index."
+        },
+        "derived_from": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Graph edges back to origin sources."
+        },
+        "claim_evidence_map_absence_reason": {
+          "type": "string",
+          "enum": [
+            "no_registry",
+            "multi_repo_out_of_scope",
+            "unexpected_missing_with_registry"
+          ],
+          "description": "Machine-readable reason why claim_evidence_map_json is absent in this bundle."
+        },
+        "bundle_surface_validation_status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "blocked"
+          ],
+          "description": "Self-check verdict of the bundle surface validator run by the generator after final emission (claim-map surface coherence, post-emit health persistence, generator provenance)."
+        },
+        "bundle_surface_validation_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the persisted bundle_surface_validation sidecar. Unregistered as an artifact (a self-check never verifies its own hash)."
+        },
+        "post_emit_health_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the persisted post_emit_health sidecar. Unregistered as an artifact to avoid self-hash circularity."
+        },
+        "agent_export_gate_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the unregistered agent export gate sidecar."
+        },
+        "agent_export_gate_status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "blocked"
+          ],
+          "description": "Observed status of the agent export gate sidecar."
+        },
+        "export_safety_report_path": {
+          "type": "string",
+          "description": "Bundle-relative path to the export safety report."
+        },
+        "export_safety_report_status": {
+          "type": "string",
+          "enum": [
+            "pass",
+            "warn",
+            "fail",
+            "blocked"
+          ],
+          "description": "Observed status of the export safety report."
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "fts5_bm25": {
+          "type": "boolean"
+        },
+        "redaction": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "snapshot_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "repositories",
+        "does_not_establish"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "const": "v1"
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "repo_root",
+              "repo_remote",
+              "git_commit",
+              "git_dirty",
+              "git_branch",
+              "provenance_status",
+              "freshness_basis"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "repo_root": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "repo_remote": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "git_commit": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[a-f0-9]{40}$"
+              },
+              "git_dirty": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "git_branch": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "provenance_status": {
+                "type": "string",
+                "enum": [
+                  "present",
+                  "not_git_checkout",
+                  "git_unavailable",
+                  "unavailable_environment",
+                  "producer_did_not_collect"
+                ]
+              },
+              "freshness_basis": {
+                "type": "string",
+                "enum": [
+                  "git_commit",
+                  "unknown"
+                ]
+              }
+            }
+          }
+        },
+        "does_not_establish": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

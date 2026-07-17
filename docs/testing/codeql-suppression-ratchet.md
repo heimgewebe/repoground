@@ -1,6 +1,6 @@
 # CodeQL path-injection suppression ratchet
 
-Lenskit uses a small number of inline `lgtm[py/path-injection]` comments where a
+RepoGround uses a small number of inline `lgtm[py/path-injection]` comments where a
 filesystem sink is protected by a project-specific validation boundary that
 CodeQL does not infer. A suppression is not a security boundary and must never
 replace validation.
@@ -34,7 +34,7 @@ comment tokens count, not marker-like text inside strings.
 
    ```bash
    python3 scripts/ci/check_codeql_suppressions.py
-   pytest -q merger/lenskit/tests/test_codeql_suppression_ratchet.py
+   pytest -q merger/repoground/tests/test_codeql_suppression_ratchet.py
    ```
 
 6. Review the complete diff. An inventory update is evidence of an explicit

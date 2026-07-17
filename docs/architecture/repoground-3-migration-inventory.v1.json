@@ -1,0 +1,223 @@
+{
+  "kind": "repoground.migration_inventory",
+  "version": "1.0",
+  "observed_on": "2026-07-17",
+  "baseline_commit": "3c342b23274fe1d87483d82b2ef88334fa35fa06",
+  "canonical": {
+    "product": "RepoGround",
+    "repository_target": "heimgewebe/repoground",
+    "python_namespace": "merger.repoground",
+    "command": "repoground"
+  },
+  "legacy_policy": {
+    "compatibility_window": "3.x",
+    "removal_eligible_major": 4,
+    "retired_product_names": [
+      "Lenskit",
+      "repoLens",
+      "rLens",
+      "RepoBrief"
+    ],
+    "persisted_2_x_identifiers_reinterpreted": false,
+    "allowed_path_prefixes": [
+      "CHANGELOG.md",
+      "docs/archive/",
+      "docs/diagnostics/",
+      "docs/proofs/",
+      "docs/tasks/",
+      "docs/status/",
+      "docs/decisions/repoground-3-",
+      "docs/architecture/repoground-3-",
+      "docs/architecture/naming.md",
+      "docs/systemd/rlens.service",
+      "merger/lenskit/",
+      "merger/repoground/contracts/",
+      "merger/repoground/tests/",
+      "scripts/proofs/"
+    ],
+    "allowed_exact_files": [
+      "docs/architecture/repobrief.md",
+      "docs/architecture/repoground.md",
+      "merger/repoground/cli/cmd_repobrief.py",
+      "merger/repoground/cli/cmd_rlens_client.py",
+      "merger/repoground/cli/repobrief.py",
+      "merger/repoground/cli/repobrief_mcp_stdio.py",
+      "merger/repoground/cli/rlens.py",
+      "merger/repoground/frontends/pythonista/repolens.py",
+      "merger/repoground/repoLens-spec.md",
+      "merger/repoground/repoground-build-spec.md",
+      "scripts/ops/install_rb_publish_fleet_runtime.sh",
+      "scripts/ops/rb-publication-policy",
+      "scripts/ops/rb-publish-fleet",
+      "scripts/ops/repobrief-publish-systemkatalog-main",
+      "scripts/ops/repobrief-publish-systemkatalog-main-if-changed",
+      "scripts/repobrief",
+      "scripts/repolens",
+      "scripts/rlens"
+    ]
+  },
+  "current_public_documents": [
+    "README.md",
+    "docs/FAQ.md",
+    "docs/GETTING_STARTED.md",
+    "docs/architecture/naming.md",
+    "docs/architecture/repoground-3-migration.md",
+    "docs/architecture/repoground.md",
+    "docs/glossary.md",
+    "merger/repoground/repoground-build-spec.md"
+  ],
+  "local_runtime": {
+    "legacy_service": {
+      "unit": "rlens.service",
+      "launcher": "python3 -m merger.lenskit.cli.rlens",
+      "port": 8787,
+      "state_at_inventory": "running",
+      "cutover": "deferred_until_parallel_healthcheck"
+    },
+    "canonical_candidate": {
+      "unit": "repoground.service",
+      "launcher": "python3 -m merger.repoground serve",
+      "parallel_test_port": 8788,
+      "state_at_inventory": "not_installed"
+    }
+  },
+  "external_consumers": [
+    {
+      "repository": "grabowski",
+      "classification": "active_runtime_and_contract_consumer",
+      "blocking": true,
+      "evidence": [
+        "src/grabowski_mcp.py",
+        "src/grabowski_repobrief.py",
+        "contracts/capability-catalog.v1.json"
+      ],
+      "action": "add RepoGround tool vocabulary while preserving versioned rlens tool aliases and legacy bundle kinds"
+    },
+    {
+      "repository": "bureau",
+      "classification": "active_policy_and_registry_consumer",
+      "blocking": true,
+      "evidence": [
+        "registry/resources/lenskit.json",
+        "src/bureau/rlens_policy.py",
+        "schemas/receipt.v1.schema.json"
+      ],
+      "action": "add canonical RepoGround resource and policy vocabulary with explicit schema migration"
+    },
+    {
+      "repository": "systemkatalog",
+      "classification": "active_catalog_consumer",
+      "blocking": true,
+      "evidence": [
+        "registry/ecosystem/nodes.json",
+        "registry/ecosystem/source-bindings.v1.json",
+        "policy/system-catalog.v1.json"
+      ],
+      "action": "replace current product and repository nodes, then regenerate rendered views"
+    },
+    {
+      "repository": "schauwerk",
+      "classification": "active_source_registry_consumer",
+      "blocking": true,
+      "evidence": [
+        "registry/sources.yaml",
+        "registry/projects.yaml",
+        "src/schauwerk/durable/adapters.py"
+      ],
+      "action": "retarget current sources; retain dated pilot evidence"
+    },
+    {
+      "repository": "metarepo",
+      "classification": "active_repository_index_consumer",
+      "blocking": true,
+      "evidence": [
+        "repos.yml",
+        "docs/org-index.md"
+      ],
+      "action": "retarget repository index after GitHub rename; retain archived index"
+    },
+    {
+      "repository": "infra",
+      "classification": "active_operations_documentation",
+      "blocking": true,
+      "evidence": [
+        "runbooks/preflight.md",
+        "docs/infra/lenskit-hybrid.md",
+        "docs/infra/blueprint.md"
+      ],
+      "action": "publish RepoGround runbook and keep dated runtime evidence unchanged"
+    },
+    {
+      "repository": "heim-pc",
+      "classification": "active_operator_manifest_consumer",
+      "blocking": true,
+      "evidence": [
+        "manifest/operator-entry.v1.json"
+      ],
+      "action": "adopt RepoGround public name and canonical tool aliases through its generator"
+    },
+    {
+      "repository": "weltgewebe",
+      "classification": "local_agent_configuration_consumer",
+      "blocking": false,
+      "evidence": [
+        ".claude/settings.local.json"
+      ],
+      "action": "replace executable Pythonista commands after canonical launcher verification"
+    },
+    {
+      "repository": "chronik",
+      "classification": "contract_vocabulary_consumer",
+      "blocking": false,
+      "evidence": [
+        "docs/chronik/runtime-lens-observation-v1.schema.json"
+      ],
+      "action": "version contract text only if constants change; do not rewrite existing fixtures"
+    },
+    {
+      "repository": "vibe-lab",
+      "classification": "experiment_and_validator_consumer",
+      "blocking": false,
+      "evidence": [
+        "Makefile",
+        "scripts/docmeta/validate_rlens_agent_context_conditions.py"
+      ],
+      "action": "keep completed experiment IDs; rename current explanatory surfaces separately"
+    },
+    {
+      "repository": "commonworld",
+      "classification": "no_reference_found",
+      "blocking": false,
+      "evidence": [],
+      "action": "none unless a later live search finds a consumer"
+    },
+    {
+      "repository": "vault-gewebe",
+      "classification": "historical_planning_material",
+      "blocking": false,
+      "evidence": [
+        "lenskit/",
+        "agent-control-surface/multirepo-orchestrator.md"
+      ],
+      "action": "retain as historical material unless separately promoted to an active plan"
+    }
+  ],
+  "evidence_quality": {
+    "proven": [
+      "GitHub repository and main commit",
+      "local process and systemd unit",
+      "exact repository file matches"
+    ],
+    "plausible": [
+      "compatibility of consumers after alias introduction"
+    ],
+    "speculative": [
+      "unscanned remote machines and private device sandboxes"
+    ]
+  },
+  "does_not_establish": [
+    "GitHub rename completed",
+    "consumer cutovers completed",
+    "service cutover completed"
+  ]
+}

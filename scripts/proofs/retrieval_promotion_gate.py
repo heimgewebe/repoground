@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from merger.lenskit.retrieval.retrieval_promotion_gate import (  # noqa: E402
+from merger.repoground.retrieval.retrieval_promotion_gate import (  # noqa: E402
     build_promotion_gate_report,
     load_json,
 )

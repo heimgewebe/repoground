@@ -10,7 +10,7 @@ task: BUREAU-LENSKIT-AUDIT-LANES-002
 
 The adapter turns untrusted audit-lane candidate claims into a deterministic diagnostic
 result set. It does not decide repository truth. It records whether a candidate belongs
-to a selected lane, points at resolvable Lenskit citations and was reviewed against the
+to a selected lane, points at resolvable RepoGround citations and was reviewed against the
 same repository revision that is current at adaptation time.
 
 ## Priority order
@@ -47,7 +47,7 @@ Duplicate semantic candidates are rejected instead of being counted twice.
 
 Citation ids must use the existing `cit_<16 lower-hex>` address form. The adapter consumes
 an explicit registry of citation ids that the caller already resolved from a validated
-Lenskit citation map. It does not invent citations and does not claim that a structurally
+RepoGround citation map. It does not invent citations and does not claim that a structurally
 valid citation proves the candidate.
 
 ## Authority

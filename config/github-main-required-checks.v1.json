@@ -6,7 +6,7 @@
     "absence_of_security_findings",
     "merge_readiness"
   ],
-  "repository": "heimgewebe/lenskit",
+  "repository": "heimgewebe/repoground",
   "ruleset": {
     "bypass_actors": [],
     "conditions": {

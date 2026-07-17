@@ -2,17 +2,17 @@
 
 > Aktualisiert am 2026-05-31.
 > Knappe Definitionen der load-bearing Begriffe. Kanonische Rollennamen folgen
-> `merger/lenskit/contracts/bundle-manifest.v1.schema.json` und der
-> Namensdisziplin der [Master-Roadmap](roadmap/lenskit-master-roadmap.md).
+> `merger/repoground/contracts/bundle-manifest.v1.schema.json` und der
+> Namensdisziplin der [Master-Roadmap](roadmap/repoground-master-roadmap.md).
 
 ## Kern & Organismus
 
-- **Heimgewebe-Organismus** — Verbund mehrerer Repos; Lenskit ist darin
+- **Heimgewebe-Organismus** — Verbund mehrerer Repos; RepoGround ist darin
   **Merger**, **Scanner** und epistemischer Kern.
-- **repoLens** — Pythonista/iPad- und CLI-Frontend zum Erzeugen von Bundles.
-- **rLens** — Web-UI/Service-Schicht (FastAPI) für Heim-PC/Server. Funktionsgleich
-  zu repoLens (Parität verpflichtend). *Hinweis:* `cli/rlens.py` ist der
-  Service-Launcher, `cli/cmd_rlens_client.py` der HTTP-Client.
+- **RepoGround** — Pythonista/iPad- und CLI-Frontend zum Erzeugen von Bundles.
+- **RepoGround** — Web-UI/Service-Schicht (FastAPI) für Heim-PC/Server. Funktionsgleich
+  zu RepoGround (Parität verpflichtend). *Hinweis:* `cli/repoground.py` ist der
+  Service-Launcher, `cli/cmd_repoground_client.py` der HTTP-Client.
 - **Bundle** — Ausgabe eines Merges: Sammlung von Artefakten zu einem Lauf,
   registriert im `bundle_manifest`.
 - **Invariante Sektionsreihenfolge** (Spec v2.4) — *Source & Profile → Profile

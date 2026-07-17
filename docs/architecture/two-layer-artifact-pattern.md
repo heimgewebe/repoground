@@ -2,9 +2,9 @@
 
 ## Zweck
 
-Beschreibe das Lenskit-Muster: Index Layer zeigt, Content Layer beweist.
+Beschreibe das RepoGround-Muster: Index Layer zeigt, Content Layer beweist.
 
-Dieses Dokument zieht eine architektonische Regel fest, die in Lenskit bereits
+Dieses Dokument zieht eine architektonische Regel fest, die in RepoGround bereits
 implizit gelebt wird (PR-Schau JSON ↔ Markdown, Bundle Manifest ↔ canonical_md,
 Runtime-Trace ↔ Context Bundle). Es macht das Muster explizit, damit neue
 Artefakte ohne Drift in genau eine Schicht eingeordnet werden können.
@@ -92,10 +92,10 @@ Beispiele:
 - Cache-Artefakt als Ursprung ausgeben
 - Runtime-Spur als Live-Repo-Beweis behandeln
 
-## Abbildungen in Lenskit
+## Abbildungen in RepoGround
 
 - PR-Schau: JSON index ↔ Markdown content
-- repoLens bundle: bundle manifest / sidecar / dump index ↔ canonical_md
+- RepoGround build bundle: bundle manifest / sidecar / dump index ↔ canonical_md
 - Query Runtime: query_trace ↔ context_bundle ↔ agent_query_session
 
 ## Architekturregel

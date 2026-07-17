@@ -1,0 +1,1836 @@
+#!/usr/bin/env python3
+"""Publish bounded RepoGround bundles for changed repository states only.
+
+The publisher is fail-closed around generation identity:
+- unchanged source + generator + configuration is skipped;
+- successful publications retain only a bounded history;
+- destructive storage cleanup is a separate, dry-run-by-default operation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
+
+
+def _env_value(primary: str, legacy: str, default: str) -> str:
+    return os.environ.get(primary) or os.environ.get(legacy) or default
+
+
+def _prefer_existing(canonical: Path, legacy: Path) -> Path:
+    if canonical.exists() or not legacy.exists():
+        return canonical
+    return legacy
+
+
+REPOS_ROOT = Path(
+    _env_value("REPOGROUND_REPOS_ROOT", "RB_REPOS_ROOT", "/home/alex/repos")
+).expanduser()
+REPOGROUND_REPO = Path(
+    os.environ.get("REPOGROUND_REPOSITORY_PATH")
+    or os.environ.get("RB_REPOSITORY_PATH")
+    or _prefer_existing(REPOS_ROOT / "repoground", REPOS_ROOT / "lenskit")
+)
+TOOL_WT = Path(
+    os.environ.get("REPOGROUND_TOOL_WORKTREE")
+    or os.environ.get("RB_TOOL_WORKTREE")
+    or _prefer_existing(
+        REPOS_ROOT / ".repoground-tools" / "repoground-main",
+        REPOS_ROOT / ".repobrief-tools" / "lenskit-main",
+    )
+)
+SOURCE_ROOT = Path(
+    os.environ.get("REPOGROUND_SOURCE_ROOT")
+    or os.environ.get("RB_SOURCE_ROOT")
+    or _prefer_existing(
+        REPOS_ROOT / ".repoground-sources",
+        REPOS_ROOT / ".repobrief-sources",
+    )
+)
+LEGACY_OUT_ROOT = REPOS_ROOT / "merges" / "repobrief-auto"
+PUB_ROOT = REPOS_ROOT / "manifest-publications"
+SPECIAL_OUT_ROOT = PUB_ROOT / "repobrief-auto"
+STATE_ROOT = Path(
+    _env_value(
+        "REPOGROUND_FLEET_STATE_ROOT",
+        "RB_STATE_ROOT",
+        "/home/alex/.local/state/repobrief-publish/fleet",
+    )
+).expanduser()
+LOG_ROOT = Path(
+    _env_value(
+        "REPOGROUND_FLEET_LOG_ROOT",
+        "RB_LOG_ROOT",
+        "/home/alex/logs/repobrief-publish",
+    )
+).expanduser()
+FLEET_LOG = LOG_ROOT / "fleet.log"
+LOCK_PATH = STATE_ROOT.parent / "fleet.lock"
+DEFAULT_RETENTION = 3
+MAX_RETENTION = 10
+FINGERPRINT_SCHEMA = "repobrief.fleet-publication-fingerprint.v3"
+STATE_SCHEMA = "repobrief.fleet-publication-state.v1"
+ACTIVE_LEASE_SCHEMA = "repobrief.active-publication-lease.v1"
+PRUNE_TRANSACTION_SCHEMA = "repobrief.retention-transaction.v1"
+QUARANTINE_DIR_NAME = ".rb-prune-quarantine"
+GENERATOR_INPUT_PATHS = (
+    "merger/repoground/__init__.py",
+    "merger/repoground/cli/__init__.py",
+    "merger/repoground/cli/ground.py",
+    "merger/repoground/cli/cmd_repobrief.py",
+    "merger/repoground/core",
+    "merger/repoground/contracts",
+    "merger/repoground/retrieval",
+)
+VERSION_DIR_RE = re.compile(r"^\d{8}T\d{6}Z(?:-[0-9a-f]{12})?$")
+SHA256_DIR_RE = re.compile(r"^[0-9a-f]{64}$")
+TRANSACTION_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+EXCLUDE = {
+    ".repoground-tools",
+    ".repoground-sources",
+    ".repobrief-tools",
+    ".repobrief-sources",
+    ".vibe-lab-worktrees",
+    "merges",
+    "manifest-publications",
+}
+EXCLUDED_REPO_KEYS = {"heimgewebe/vault-gewebe", "heimgewebe/heim-assi"}
+
+
+@dataclass(frozen=True)
+class RepoEntry:
+    key: str
+    owner: str
+    repo: str
+    path: Path
+    remote: str
+
+
+@dataclass(frozen=True)
+class PublicationConfig:
+    profile: str
+    output_mode: str = "dual"
+    redact_secrets: bool = True
+    max_bytes: int = 0
+    split_size: str = "25MB"
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "profile": self.profile,
+            "output_mode": self.output_mode,
+            "redact_secrets": self.redact_secrets,
+            "max_bytes": self.max_bytes,
+            "split_size": self.split_size,
+        }
+
+
+@dataclass(frozen=True)
+class PrunePlan:
+    path: Path
+    snapshot: dict[str, object]
+    bytes: int
+
+
+def run(
+    argv: list[str], cwd: Path | None = None, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    cp = subprocess.run(
+        argv,
+        cwd=str(cwd) if cwd else None,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"command failed rc={cp.returncode}: {' '.join(argv)}\n{cp.stdout}"
+        )
+    return cp
+
+
+def log(msg: str) -> None:
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    with FLEET_LOG.open("a", encoding="utf-8") as fh:
+        fh.write(msg + "\n")
+
+
+def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    tmp = Path(raw_tmp)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def canonical_sha256(payload: dict[str, object]) -> str:
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def parse_github_remote(remote: str) -> tuple[str, str] | None:
+    if remote.startswith("/") or remote.startswith("file:"):
+        return None
+    match = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", remote)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def is_top_level_git(path: Path) -> bool:
+    cp = run(
+        ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+        check=False,
+    )
+    if cp.returncode != 0 or cp.stdout.strip() != "true":
+        return False
+    top = run(
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"], check=False
+    ).stdout.strip()
+    return bool(top) and Path(top).resolve() == path.resolve()
+
+
+def score_candidate(owner: str, repo: str, path: Path) -> int:
+    score = 0
+    if path.name == repo:
+        score += 100
+    if path.name.startswith(repo + "-"):
+        score += 10
+    if path.name in {
+        "bureau",
+        "cabinet",
+        "grabowski",
+        "lenskit",
+        "weltgewebe",
+        "vibe-lab",
+        "heimlern",
+        "plexer",
+        "chronik",
+        "schauwerk",
+        "commonworld",
+        "wgx",
+        "systemkatalog",
+    }:
+        score += 50
+    if owner == "heimgewebe":
+        score += 5
+    return score
+
+
+def discover() -> list[RepoEntry]:
+    best: dict[str, tuple[int, RepoEntry]] = {}
+    for path in sorted(REPOS_ROOT.iterdir()):
+        if not path.is_dir() or path.name in EXCLUDE or path.name.startswith("."):
+            continue
+        if not is_top_level_git(path):
+            continue
+        remote = run(
+            ["git", "-C", str(path), "remote", "get-url", "origin"], check=False
+        ).stdout.strip()
+        parsed = parse_github_remote(remote)
+        if not parsed:
+            continue
+        owner, repo = parsed
+        key = f"{owner}/{repo}"
+        if key in EXCLUDED_REPO_KEYS:
+            continue
+        entry = RepoEntry(key=key, owner=owner, repo=repo, path=path, remote=remote)
+        score = score_candidate(owner, repo, path)
+        previous = best.get(key)
+        if (
+            previous is None
+            or score > previous[0]
+            or (score == previous[0] and len(path.name) < len(previous[1].path.name))
+        ):
+            best[key] = (score, entry)
+    return [item[1] for item in sorted(best.values(), key=lambda row: row[1].key)]
+
+
+def safe_segment(raw: str) -> str:
+    value = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip(".-_/")
+    if not value:
+        raise ValueError(f"cannot form safe segment from {raw!r}")
+    return value
+
+
+def publication_config(entry: RepoEntry) -> PublicationConfig:
+    profile = "agent-portable" if entry.repo == "vault-gewebe" else "full-max"
+    return PublicationConfig(profile=profile)
+
+
+def publication_repository(entry: RepoEntry) -> str:
+    """Return the collision-free registry segment for one GitHub repository."""
+    return safe_segment(entry.owner) + "__" + safe_segment(entry.repo)
+
+
+def git_common_dir(repo: Path) -> Path:
+    cp = run(
+        ["git", "-C", str(repo), "rev-parse", "--git-common-dir"],
+        check=False,
+    )
+    if cp.returncode != 0:
+        raise RuntimeError(f"not a Git repository: {repo}")
+    raw = Path(cp.stdout.strip())
+    return (raw if raw.is_absolute() else repo / raw).resolve()
+
+
+def assert_managed_worktree_clean(path: Path, expected_repo: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        raise RuntimeError(f"managed worktree path is not a real directory: {path}")
+    top = run(
+        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+        check=False,
+    )
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != path.resolve():
+        raise RuntimeError(f"managed path is not the expected worktree root: {path}")
+    if git_common_dir(path) != git_common_dir(expected_repo):
+        raise RuntimeError(f"managed worktree belongs to another repository: {path}")
+    attached = run(
+        ["git", "-C", str(path), "symbolic-ref", "--quiet", "HEAD"],
+        check=False,
+    )
+    if attached.returncode == 0:
+        raise RuntimeError(
+            f"managed worktree is attached to a branch; refusing to move it: {path}"
+        )
+    status = run(
+        [
+            "git",
+            "-C",
+            str(path),
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignored=matching",
+        ]
+    ).stdout.strip()
+    if status:
+        sample = "\n".join(status.splitlines()[:20])
+        raise RuntimeError(
+            f"managed worktree is not clean; refusing reset or cleanup: {path}\n{sample}"
+        )
+
+
+def prepare_managed_worktree(
+    path: Path,
+    *,
+    expected_repo: Path,
+    target: str,
+) -> None:
+    if path.exists() or path.is_symlink():
+        assert_managed_worktree_clean(path, expected_repo)
+        run(["git", "-C", str(path), "reset", "--hard", target])
+        assert_managed_worktree_clean(path, expected_repo)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            "git",
+            "-C",
+            str(expected_repo),
+            "worktree",
+            "add",
+            "--detach",
+            str(path),
+            target,
+        ]
+    )
+    assert_managed_worktree_clean(path, expected_repo)
+
+
+def generator_inputs_sha(worktree: Path) -> str:
+    raw = run(
+        [
+            "git",
+            "-C",
+            str(worktree),
+            "ls-tree",
+            "-rz",
+            "--full-tree",
+            "HEAD",
+            "--",
+            *GENERATOR_INPUT_PATHS,
+        ]
+    ).stdout
+    entries: list[dict[str, str]] = []
+    for record in raw.split("\0"):
+        if not record:
+            continue
+        metadata, path = record.split("\t", 1)
+        mode, object_type, object_id = metadata.split(" ")
+        if object_type != "blob":
+            raise RuntimeError(
+                f"unexpected generator input object {object_type!r} at {path!r}"
+            )
+        entries.append(
+            {
+                "mode": mode,
+                "object_id": object_id,
+                "path": path,
+            }
+        )
+    entries.sort(
+        key=lambda entry: entry["path"].encode("utf-8", errors="surrogateescape")
+    )
+    required_files = {
+        "merger/repoground/cli/ground.py",
+        "merger/repoground/cli/cmd_repobrief.py",
+    }
+    present_paths = {entry["path"] for entry in entries}
+    missing = sorted(required_files - present_paths)
+    if missing:
+        raise RuntimeError(f"missing required generator inputs: {missing}")
+    return canonical_sha256(entries)
+
+
+def ensure_tool_worktree() -> tuple[str, str]:
+    run(["git", "-C", str(REPOGROUND_REPO), "fetch", "origin", "--prune"])
+    prepare_managed_worktree(
+        TOOL_WT,
+        expected_repo=REPOGROUND_REPO,
+        target="origin/main",
+    )
+    tool_sha = run(["git", "-C", str(TOOL_WT), "rev-parse", "HEAD"]).stdout.strip()
+    return tool_sha, generator_inputs_sha(TOOL_WT)
+
+
+def remote_head(repo_path: Path) -> tuple[str, str, str]:
+    run(["git", "-C", str(repo_path), "fetch", "origin", "--prune"])
+    head = run(
+        [
+            "git",
+            "-C",
+            str(repo_path),
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "--short",
+        ],
+        check=False,
+    ).stdout.strip()
+    if not head:
+        run(
+            ["git", "-C", str(repo_path), "remote", "set-head", "origin", "-a"],
+            check=False,
+        )
+        head = run(
+            [
+                "git",
+                "-C",
+                str(repo_path),
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "--short",
+            ],
+            check=False,
+        ).stdout.strip()
+    for ref in [head, "origin/main", "origin/master"]:
+        if not ref:
+            continue
+        cp = run(["git", "-C", str(repo_path), "rev-parse", ref], check=False)
+        if cp.returncode == 0:
+            branch = ref.split("/", 1)[1] if ref.startswith("origin/") else ref
+            return ref, branch, cp.stdout.strip()
+    raise RuntimeError(f"no remote default branch for {repo_path}")
+
+
+def state_path(entry: RepoEntry, ref_segment: str) -> Path:
+    stem = (
+        safe_segment(entry.owner) + "__" + safe_segment(entry.repo) + "__" + ref_segment
+    )
+    return STATE_ROOT / f"{stem}.state.json"
+
+
+def build_fingerprint(
+    *,
+    source_sha: str,
+    generator_inputs_sha: str,
+    publication_repository: str,
+    config: PublicationConfig,
+) -> tuple[str, dict[str, object]]:
+    identity: dict[str, object] = {
+        "schema": FINGERPRINT_SCHEMA,
+        "source_sha": source_sha,
+        "generator_inputs_sha": generator_inputs_sha,
+        "publication_repository": publication_repository,
+        "configuration": config.as_dict(),
+    }
+    return canonical_sha256(identity), identity
+
+
+def load_state(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def write_state(
+    path: Path,
+    *,
+    fingerprint: str,
+    identity: dict[str, object],
+    repository: str,
+    ref: str,
+    publication_dir: Path | None,
+) -> None:
+    atomic_write_json(
+        path,
+        {
+            "schema": STATE_SCHEMA,
+            "fingerprint": fingerprint,
+            "identity": identity,
+            "repository": repository,
+            "ref": ref,
+            "publication_dir": str(publication_dir) if publication_dir else None,
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    )
+
+
+def parse_cli_json(text: str) -> dict[str, object]:
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        data = json.loads(text[start : end + 1])
+    if not isinstance(data, dict):
+        raise ValueError("RepoBrief CLI result is not a JSON object")
+    return data
+
+
+def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path:
+    source_wt = SOURCE_ROOT / (
+        safe_segment(entry.owner) + "__" + safe_segment(entry.repo) + "__" + ref_segment
+    )
+    SOURCE_ROOT.mkdir(parents=True, exist_ok=True)
+    prepare_managed_worktree(
+        source_wt,
+        expected_repo=entry.path,
+        target=sha,
+    )
+    return source_wt
+
+
+def active_lease_root() -> Path:
+    return STATE_ROOT / "active-publications"
+
+
+def prune_transaction_root() -> Path:
+    return STATE_ROOT / "retention-transactions"
+
+
+def retention_roots() -> tuple[Path, ...]:
+    return (PUB_ROOT, LEGACY_OUT_ROOT, SPECIAL_OUT_ROOT)
+
+
+def _path_under(path: Path, root: Path) -> bool:
+    resolved_path = path.resolve(strict=False)
+    resolved_root = root.resolve(strict=False)
+    return resolved_path == resolved_root or resolved_root in resolved_path.parents
+
+
+def _assert_retention_target(path: Path) -> Path:
+    resolved = path.expanduser().resolve(strict=False)
+    if not any(_path_under(resolved, root) for root in retention_roots()):
+        raise RuntimeError(f"retention reference escapes managed roots: {path}")
+    return resolved
+
+
+def _strict_json_object(path: Path) -> dict[str, Any]:
+    if not path.is_file() or path.is_symlink():
+        raise RuntimeError(f"retention metadata is not a regular file: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot read retention metadata {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"retention metadata is not an object: {path}")
+    return value
+
+
+def prune_transaction_files() -> list[Path]:
+    root = prune_transaction_root()
+    if not root.exists():
+        return []
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError(f"retention transaction root is not a directory: {root}")
+    files: list[Path] = []
+    unexpected: list[Path] = []
+    for path in root.iterdir():
+        if (
+            path.is_file()
+            and not path.is_symlink()
+            and path.suffix == ".json"
+            and TRANSACTION_ID_RE.fullmatch(path.stem)
+        ):
+            files.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected retention transaction entries: {rendered}")
+    return sorted(files)
+
+
+def validate_quarantine_directory(group: Path) -> None:
+    quarantine_root = group / QUARANTINE_DIR_NAME
+    if not quarantine_root.exists():
+        return
+    if quarantine_root.is_symlink() or not quarantine_root.is_dir():
+        raise RuntimeError(
+            f"retention quarantine is not a directory: {quarantine_root}"
+        )
+    unexpected: list[Path] = []
+    for transaction_dir in quarantine_root.iterdir():
+        transaction_file = prune_transaction_root() / f"{transaction_dir.name}.json"
+        valid_transaction_dir = (
+            transaction_dir.is_dir()
+            and not transaction_dir.is_symlink()
+            and TRANSACTION_ID_RE.fullmatch(transaction_dir.name)
+            and transaction_file.is_file()
+            and not transaction_file.is_symlink()
+        )
+        if not valid_transaction_dir:
+            unexpected.append(transaction_dir)
+            continue
+        children = list(transaction_dir.iterdir())
+        if len(children) > 1 or any(
+            child.is_symlink() or not child.is_dir() for child in children
+        ):
+            unexpected.extend(children or [transaction_dir])
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected retention quarantine entries: {rendered}")
+
+
+def _validated_transaction_paths(
+    payload: dict[str, object], transaction_file: Path
+) -> tuple[str, Path, Path, Path, dict[str, object]]:
+    transaction_id = payload.get("transaction_id")
+    source_raw = payload.get("source")
+    quarantine_raw = payload.get("quarantine")
+    root_raw = payload.get("root")
+    snapshot = payload.get("snapshot")
+    removed_bytes = payload.get("removed_bytes")
+    if (
+        not isinstance(transaction_id, str)
+        or not TRANSACTION_ID_RE.fullmatch(transaction_id)
+        or transaction_file.stem != transaction_id
+        or not isinstance(source_raw, str)
+        or not isinstance(quarantine_raw, str)
+        or not isinstance(root_raw, str)
+        or not isinstance(snapshot, dict)
+        or not isinstance(removed_bytes, int)
+        or isinstance(removed_bytes, bool)
+        or removed_bytes < 0
+    ):
+        raise RuntimeError(f"malformed prune transaction: {transaction_file}")
+    device = snapshot.get("device")
+    inode = snapshot.get("inode")
+    tree_digest = snapshot.get("tree_sha256")
+    if (
+        not isinstance(device, int)
+        or isinstance(device, bool)
+        or not isinstance(inode, int)
+        or isinstance(inode, bool)
+        or not isinstance(tree_digest, str)
+        or not SHA256_DIR_RE.fullmatch(tree_digest)
+    ):
+        raise RuntimeError(f"malformed prune transaction snapshot: {transaction_file}")
+    source = _assert_retention_target(Path(source_raw))
+    quarantine = _assert_retention_target(Path(quarantine_raw))
+    managed_root = _assert_retention_target(Path(root_raw))
+    if source.parent != managed_root:
+        raise RuntimeError(
+            f"prune transaction source is not a direct group child: {transaction_file}"
+        )
+    expected_quarantine = (
+        managed_root / QUARANTINE_DIR_NAME / transaction_id / source.name
+    ).resolve(strict=False)
+    if quarantine != expected_quarantine:
+        raise RuntimeError(
+            f"prune transaction quarantine path mismatch: {transaction_file}"
+        )
+    return transaction_id, source, quarantine, managed_root, snapshot
+
+
+def state_publication_targets() -> set[Path]:
+    targets: set[Path] = set()
+    if not STATE_ROOT.exists():
+        return targets
+    for state_file in sorted(STATE_ROOT.glob("*.state.json")):
+        data = _strict_json_object(state_file)
+        if data.get("schema") != STATE_SCHEMA:
+            raise RuntimeError(f"unsupported publication state schema: {state_file}")
+        raw_target = data.get("publication_dir")
+        if not isinstance(raw_target, str) or not raw_target:
+            raise RuntimeError(f"publication state lacks publication_dir: {state_file}")
+        target = _assert_retention_target(Path(raw_target))
+        if target.is_symlink() or not target.is_dir():
+            raise RuntimeError(f"publication state target is unavailable: {target}")
+        targets.add(target)
+    return targets
+
+
+def active_publication_targets() -> set[Path]:
+    targets: set[Path] = set()
+    root = active_lease_root()
+    if not root.exists():
+        return targets
+    for lease_file in sorted(root.glob("*.json")):
+        data = _strict_json_object(lease_file)
+        if data.get("schema") != ACTIVE_LEASE_SCHEMA:
+            raise RuntimeError(f"unsupported active publication lease: {lease_file}")
+        raw_target = data.get("publication_dir")
+        if not isinstance(raw_target, str) or not raw_target:
+            raise RuntimeError(
+                f"active publication lease lacks publication_dir: {lease_file}"
+            )
+        targets.add(_assert_retention_target(Path(raw_target)))
+    return targets
+
+
+def create_active_publication_lease(
+    *, repository: str, ref: str, fingerprint: str, publication_dir: Path
+) -> Path:
+    target = _assert_retention_target(publication_dir)
+    lease_id = hashlib.sha256(
+        f"{repository}\0{ref}\0{fingerprint}\0{os.getpid()}\0{time.time_ns()}".encode()
+    ).hexdigest()
+    lease_path = active_lease_root() / f"{lease_id}.json"
+    atomic_write_json(
+        lease_path,
+        {
+            "schema": ACTIVE_LEASE_SCHEMA,
+            "lease_id": lease_id,
+            "repository": repository,
+            "ref": ref,
+            "fingerprint": fingerprint,
+            "publication_dir": str(target),
+            "pid": os.getpid(),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+    )
+    return lease_path
+
+
+def clear_active_publication_lease(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+
+
+def version_dirs(group: Path) -> list[Path]:
+    if not group.exists():
+        return []
+    validate_quarantine_directory(group)
+    rows: list[Path] = []
+    unexpected: list[Path] = []
+    for path in group.iterdir():
+        if path.name == QUARANTINE_DIR_NAME and path.is_dir() and not path.is_symlink():
+            continue
+        if (
+            path.is_dir()
+            and not path.is_symlink()
+            and VERSION_DIR_RE.fullmatch(path.name)
+        ):
+            rows.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected retention entries in {group}: {rendered}")
+    return sorted(
+        rows, key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True
+    )
+
+
+def localized_hash_dirs(group: Path) -> list[Path]:
+    if not group.exists():
+        return []
+    validate_quarantine_directory(group)
+    rows: list[Path] = []
+    unexpected: list[Path] = []
+    for path in group.iterdir():
+        if path.name == QUARANTINE_DIR_NAME and path.is_dir() and not path.is_symlink():
+            continue
+        if (
+            path.is_dir()
+            and not path.is_symlink()
+            and SHA256_DIR_RE.fullmatch(path.name)
+        ):
+            rows.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(
+            f"unexpected localized bundle entries in {group}: {rendered}"
+        )
+    return sorted(rows, key=lambda path: path.name)
+
+
+def path_is_protected(path: Path, protected: set[Path]) -> bool:
+    resolved = path.resolve(strict=False)
+    return any(
+        resolved == item or item in resolved.parents or resolved in item.parents
+        for item in protected
+    )
+
+
+def tree_bytes(path: Path) -> int:
+    total = 0
+    for root, directories, files in os.walk(path, followlinks=False):
+        root_path = Path(root)
+        directories[:] = sorted(directories)
+        for name in directories:
+            if (root_path / name).is_symlink():
+                raise RuntimeError(
+                    f"retention candidate contains a symlink: {root_path / name}"
+                )
+        for name in sorted(files):
+            candidate = root_path / name
+            if candidate.is_symlink():
+                raise RuntimeError(
+                    f"retention candidate contains a symlink: {candidate}"
+                )
+            total += candidate.stat().st_size
+    return total
+
+
+def tree_snapshot(path: Path) -> dict[str, object]:
+    if path.is_symlink() or not path.is_dir():
+        raise RuntimeError(f"retention candidate is not a directory: {path}")
+    root_stat = path.lstat()
+    if not stat.S_ISDIR(root_stat.st_mode):
+        raise RuntimeError(f"retention candidate is not a directory: {path}")
+    rows: list[list[object]] = []
+    for root, directories, files in os.walk(path, followlinks=False):
+        root_path = Path(root)
+        directories[:] = sorted(directories)
+        relative_root = root_path.relative_to(path).as_posix()
+        root_metadata = root_path.lstat()
+        rows.append(
+            [
+                "d",
+                relative_root,
+                stat.S_IMODE(root_metadata.st_mode),
+                root_metadata.st_mtime_ns,
+            ]
+        )
+        for name in directories:
+            candidate = root_path / name
+            if candidate.is_symlink():
+                raise RuntimeError(
+                    f"retention candidate contains a symlink: {candidate}"
+                )
+        for name in sorted(files):
+            candidate = root_path / name
+            metadata = candidate.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeError(
+                    f"retention candidate contains a non-regular file: {candidate}"
+                )
+            rows.append(
+                [
+                    "f",
+                    candidate.relative_to(path).as_posix(),
+                    stat.S_IMODE(metadata.st_mode),
+                    metadata.st_size,
+                    metadata.st_mtime_ns,
+                    sha256_file(candidate),
+                ]
+            )
+    digest = hashlib.sha256(
+        json.dumps(rows, sort_keys=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "device": root_stat.st_dev,
+        "inode": root_stat.st_ino,
+        "tree_sha256": digest,
+    }
+
+
+def dynamic_protected_paths(explicit: set[Path]) -> set[Path]:
+    protected = {path.expanduser().resolve(strict=False) for path in explicit}
+    protected.update(all_stable_manifest_targets())
+    protected.update(state_publication_targets())
+    protected.update(active_publication_targets())
+    return protected
+
+
+def remove_tree(path: Path, *, apply: bool, root: Path) -> None:
+    if path.is_symlink() or not path.is_dir():
+        raise RuntimeError(f"refusing to prune non-directory or symlink: {path}")
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    if resolved_path == resolved_root or resolved_root not in resolved_path.parents:
+        raise RuntimeError(
+            f"refusing to prune path outside managed root {root}: {path}"
+        )
+    if apply:
+        shutil.rmtree(path)
+
+
+def discard_generated_output(path: Path, *, root: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    remove_tree(path, apply=True, root=root)
+
+
+def _write_prune_transaction(payload: dict[str, object]) -> Path:
+    transaction_id = payload.get("transaction_id")
+    if not isinstance(transaction_id, str) or not TRANSACTION_ID_RE.fullmatch(
+        transaction_id
+    ):
+        raise RuntimeError("prune transaction lacks a valid id")
+    path = prune_transaction_root() / f"{transaction_id}.json"
+    atomic_write_json(path, payload)
+    return path
+
+
+def _set_transaction_state(payload: dict[str, object], state_value: str) -> None:
+    payload["state"] = state_value
+    payload["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _write_prune_transaction(payload)
+
+
+def _cleanup_quarantine_parents(quarantine: Path, managed_root: Path) -> None:
+    try:
+        quarantine.parent.rmdir()
+    except OSError:
+        pass
+    try:
+        managed_root.joinpath(QUARANTINE_DIR_NAME).rmdir()
+    except OSError:
+        pass
+
+
+def transactional_prune(
+    path: Path,
+    *,
+    root: Path,
+    expected_snapshot: dict[str, object],
+    removed_bytes: int,
+    protected: set[Path],
+) -> dict[str, object]:
+    managed_root = _assert_retention_target(root)
+    source = _assert_retention_target(path)
+    if source == managed_root or managed_root not in source.parents:
+        raise RuntimeError(
+            f"retention candidate is outside its managed group {managed_root}: {source}"
+        )
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        return {"state": "retained_newly_protected", "path": str(source)}
+    if tree_snapshot(source) != expected_snapshot:
+        raise RuntimeError(f"retention candidate changed after planning: {source}")
+
+    transaction_id = uuid.uuid4().hex
+    quarantine_parent = managed_root / QUARANTINE_DIR_NAME
+    quarantine = quarantine_parent / transaction_id / path.name
+    payload: dict[str, object] = {
+        "schema": PRUNE_TRANSACTION_SCHEMA,
+        "transaction_id": transaction_id,
+        "state": "planned",
+        "source": str(source),
+        "quarantine": str(quarantine.resolve(strict=False)),
+        "root": str(managed_root),
+        "snapshot": expected_snapshot,
+        "removed_bytes": removed_bytes,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    _write_prune_transaction(payload)
+    quarantine.parent.mkdir(parents=True, exist_ok=False)
+
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        _set_transaction_state(payload, "aborted_protected")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        return {"state": "retained_newly_protected", "path": str(source)}
+    if tree_snapshot(source) != expected_snapshot:
+        _set_transaction_state(payload, "aborted_changed")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        raise RuntimeError(f"retention candidate changed before quarantine: {source}")
+
+    os.replace(source, quarantine)
+    if tree_snapshot(quarantine) != expected_snapshot:
+        if not source.exists():
+            os.replace(quarantine, source)
+        _set_transaction_state(payload, "restored_identity_mismatch")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        raise RuntimeError(f"quarantined candidate identity changed: {source}")
+
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        os.replace(quarantine, source)
+        _set_transaction_state(payload, "restored_newly_protected")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        return {"state": "retained_newly_protected", "path": str(source)}
+
+    _set_transaction_state(payload, "quarantined")
+    refreshed = dynamic_protected_paths(protected)
+    if path_is_protected(source, refreshed):
+        os.replace(quarantine, source)
+        _set_transaction_state(payload, "restored_newly_protected")
+        _cleanup_quarantine_parents(quarantine, managed_root)
+        return {"state": "retained_newly_protected", "path": str(source)}
+
+    shutil.rmtree(quarantine)
+    _cleanup_quarantine_parents(quarantine, managed_root)
+    _set_transaction_state(payload, "deleted")
+    return {
+        "state": "deleted",
+        "path": str(source),
+        "transaction_id": transaction_id,
+        "removed_bytes": removed_bytes,
+    }
+
+
+def reconcile_prune_transactions(
+    *, protected: set[Path], apply: bool
+) -> list[dict[str, object]]:
+    transaction_root = prune_transaction_root()
+    if not transaction_root.exists():
+        return []
+    reports: list[dict[str, object]] = []
+    terminal_states = {
+        "deleted",
+        "restored",
+        "restored_newly_protected",
+        "aborted_protected",
+        "aborted_changed",
+        "aborted_safe_source",
+        "restored_identity_mismatch",
+    }
+    for transaction_file in prune_transaction_files():
+        payload = _strict_json_object(transaction_file)
+        if payload.get("schema") != PRUNE_TRANSACTION_SCHEMA:
+            raise RuntimeError(f"unsupported prune transaction: {transaction_file}")
+        state_value = payload.get("state")
+        if not isinstance(state_value, str):
+            raise RuntimeError(f"malformed prune transaction: {transaction_file}")
+        _, source, quarantine, managed_root, snapshot = _validated_transaction_paths(
+            payload, transaction_file
+        )
+        if state_value in terminal_states:
+            reports.append({"transaction": str(transaction_file), "state": state_value})
+            continue
+        if state_value not in {"planned", "quarantined"}:
+            raise RuntimeError(f"unknown prune transaction state: {state_value}")
+
+        source_exists = source.exists() or source.is_symlink()
+        quarantine_exists = quarantine.exists() or quarantine.is_symlink()
+        if source_exists and quarantine_exists:
+            raise RuntimeError(
+                f"ambiguous prune transaction has two copies: {transaction_file}"
+            )
+
+        if source_exists:
+            if tree_snapshot(source) != snapshot:
+                raise RuntimeError(f"source identity mismatch: {transaction_file}")
+            if state_value == "planned":
+                if apply:
+                    _set_transaction_state(payload, "aborted_safe_source")
+                    _cleanup_quarantine_parents(quarantine, managed_root)
+                reports.append(
+                    {
+                        "transaction": str(transaction_file),
+                        "state": state_value,
+                        "would": "leave_source",
+                        "applied": "leave_source" if apply else None,
+                    }
+                )
+                continue
+            if apply:
+                _set_transaction_state(payload, "restored")
+                _cleanup_quarantine_parents(quarantine, managed_root)
+            reports.append(
+                {
+                    "transaction": str(transaction_file),
+                    "state": state_value,
+                    "would": "record_restored",
+                    "applied": "record_restored" if apply else None,
+                }
+            )
+            continue
+
+        if not quarantine_exists:
+            if state_value == "quarantined":
+                if apply:
+                    _set_transaction_state(payload, "deleted")
+                    _cleanup_quarantine_parents(quarantine, managed_root)
+                reports.append(
+                    {
+                        "transaction": str(transaction_file),
+                        "state": state_value,
+                        "would": "record_deleted",
+                        "applied": "record_deleted" if apply else None,
+                    }
+                )
+                continue
+            raise RuntimeError(
+                f"planned transaction lost both copies: {transaction_file}"
+            )
+
+        if tree_snapshot(quarantine) != snapshot:
+            raise RuntimeError(f"quarantine identity mismatch: {transaction_file}")
+        refreshed = dynamic_protected_paths(protected)
+        action = "restore" if path_is_protected(source, refreshed) else "delete"
+        if apply:
+            if state_value == "planned":
+                _set_transaction_state(payload, "quarantined")
+            if action == "restore":
+                source.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(quarantine, source)
+                _set_transaction_state(payload, "restored")
+            else:
+                shutil.rmtree(quarantine)
+                _set_transaction_state(payload, "deleted")
+            _cleanup_quarantine_parents(quarantine, managed_root)
+        reports.append(
+            {
+                "transaction": str(transaction_file),
+                "state": state_value,
+                "would": action if not apply else None,
+                "applied": action if apply else None,
+            }
+        )
+    return reports
+
+
+def retained_manifest_hashes(versions: Iterable[Path]) -> set[str]:
+    retained: set[str] = set()
+    for version in versions:
+        for manifest in version.glob("*_merge.bundle.manifest.json"):
+            if manifest.is_file() and not manifest.is_symlink():
+                retained.add(sha256_file(manifest))
+    return retained
+
+
+def stable_manifest_target(manifest: Path) -> Path:
+    if not manifest.is_file() or manifest.is_symlink():
+        raise RuntimeError(f"stable manifest is not a regular file: {manifest}")
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot read stable manifest {manifest}: {exc}") from exc
+    bundle_manifest = data.get("bundleManifest")
+    if not isinstance(bundle_manifest, dict):
+        raise RuntimeError(f"stable manifest lacks bundleManifest object: {manifest}")
+    relative_path = bundle_manifest.get("path")
+    if not isinstance(relative_path, str) or not relative_path:
+        raise RuntimeError(f"stable manifest lacks bundleManifest.path: {manifest}")
+    target = (manifest.parent / relative_path).resolve()
+    publication_root = PUB_ROOT.resolve()
+    if target != publication_root and publication_root not in target.parents:
+        raise RuntimeError(
+            f"stable manifest target escapes publication root: {manifest}"
+        )
+    if not target.is_file() or target.is_symlink():
+        raise RuntimeError(f"stable manifest target is unavailable: {target}")
+    return target
+
+
+def stable_manifest_targets(repository: str, ref: str) -> set[Path]:
+    retained: set[Path] = set()
+    for family in ("repobrief", "lenskit"):
+        manifest = PUB_ROOT / "external" / family / repository / ref / "manifest.json"
+        if manifest.exists() or manifest.is_symlink():
+            retained.add(stable_manifest_target(manifest))
+    return retained
+
+
+def is_canonical_publication_identity(value: str) -> bool:
+    owner, separator, repository = value.partition("__")
+    return bool(separator and owner and repository)
+
+
+def canonical_stable_manifest_paths() -> list[Path]:
+    manifests: list[Path] = []
+    external_root = PUB_ROOT / "external"
+    for family in ("repobrief", "lenskit"):
+        family_root = external_root / family
+        if not family_root.exists():
+            continue
+        for manifest in sorted(family_root.glob("*/*/manifest.json")):
+            repository = manifest.parent.parent.name
+            if is_canonical_publication_identity(repository):
+                manifests.append(manifest)
+    return manifests
+
+
+def all_stable_manifest_targets() -> set[Path]:
+    return {
+        stable_manifest_target(manifest)
+        for manifest in canonical_stable_manifest_paths()
+    }
+
+
+def stable_manifest_hashes(repository: str, ref: str) -> set[str]:
+    return {sha256_file(target) for target in stable_manifest_targets(repository, ref)}
+
+
+def prune_group(
+    group: Path,
+    *,
+    keep: int,
+    apply: bool,
+    protected: set[Path],
+) -> dict[str, object]:
+    effective_protected = dynamic_protected_paths(protected)
+    versions = version_dirs(group)
+    retained = versions[:keep]
+    removable = [
+        path
+        for path in versions[keep:]
+        if not path_is_protected(path, effective_protected)
+    ]
+    protected_old = [
+        path for path in versions[keep:] if path_is_protected(path, effective_protected)
+    ]
+    plans = [
+        PrunePlan(path=path, snapshot=tree_snapshot(path), bytes=tree_bytes(path))
+        for path in removable
+    ]
+    removed: list[str] = []
+    newly_protected: list[str] = []
+    removed_bytes = 0
+    if apply:
+        for plan in plans:
+            result = transactional_prune(
+                plan.path,
+                root=group,
+                expected_snapshot=plan.snapshot,
+                removed_bytes=plan.bytes,
+                protected=protected,
+            )
+            if result["state"] == "deleted":
+                removed.append(str(plan.path))
+                removed_bytes += int(plan.bytes)
+            else:
+                newly_protected.append(str(plan.path))
+    removable_bytes = sum(int(plan.bytes) for plan in plans)
+    return {
+        "group": str(group),
+        "found": len(versions),
+        "retained": [str(path) for path in retained],
+        "protected_old": [str(path) for path in protected_old],
+        "newly_protected": newly_protected,
+        "removed": removed,
+        "would_remove": [] if apply else [str(path) for path in removable],
+        "removed_bytes": removed_bytes,
+        "would_remove_bytes": 0 if apply else removable_bytes,
+    }
+
+
+def prune_current_group(
+    group: Path,
+    *,
+    repository: str,
+    ref: str,
+    keep: int,
+    apply: bool,
+    protected: set[Path],
+) -> dict[str, object]:
+    stable_targets = stable_manifest_targets(repository, ref)
+    effective_protected = dynamic_protected_paths(set(protected) | stable_targets)
+    versions = version_dirs(group)
+    retained_versions = versions[:keep] + [
+        path for path in versions[keep:] if path_is_protected(path, effective_protected)
+    ]
+    report = prune_group(
+        group,
+        keep=keep,
+        apply=apply,
+        protected=set(protected) | stable_targets,
+    )
+    retained_after = version_dirs(group) if apply else retained_versions
+    keep_hashes = retained_manifest_hashes(retained_after)
+    keep_hashes.update(sha256_file(target) for target in stable_targets)
+    report["stable_manifest_targets"] = sorted(str(path) for path in stable_targets)
+    localized = PUB_ROOT / "external" / "_bundles" / repository / ref
+    localized_dirs = localized_hash_dirs(localized)
+    effective_protected = dynamic_protected_paths(set(protected) | stable_targets)
+    localized_removable = [
+        path
+        for path in localized_dirs
+        if path.name not in keep_hashes
+        and not path_is_protected(path, effective_protected)
+    ]
+    localized_plans = [
+        PrunePlan(path=path, snapshot=tree_snapshot(path), bytes=tree_bytes(path))
+        for path in localized_removable
+    ]
+    localized_removed: list[str] = []
+    localized_newly_protected: list[str] = []
+    localized_removed_bytes = 0
+    if apply:
+        for plan in localized_plans:
+            result = transactional_prune(
+                plan.path,
+                root=localized,
+                expected_snapshot=plan.snapshot,
+                removed_bytes=plan.bytes,
+                protected=set(protected) | stable_targets,
+            )
+            if result["state"] == "deleted":
+                localized_removed.append(str(plan.path))
+                localized_removed_bytes += int(plan.bytes)
+            else:
+                localized_newly_protected.append(str(plan.path))
+    localized_removable_bytes = sum(int(plan.bytes) for plan in localized_plans)
+    report["localized_group"] = str(localized)
+    report["retained_manifest_hashes"] = sorted(keep_hashes)
+    report["localized_newly_protected"] = localized_newly_protected
+    report["localized_removed"] = localized_removed
+    report["localized_would_remove"] = (
+        [] if apply else [str(path) for path in localized_removable]
+    )
+    report["localized_removed_bytes"] = localized_removed_bytes
+    report["localized_would_remove_bytes"] = 0 if apply else localized_removable_bytes
+    return report
+
+
+def managed_directories(root: Path, *, label: str) -> list[Path]:
+    if not root.exists():
+        return []
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError(f"{label} root is not a regular directory: {root}")
+    directories: list[Path] = []
+    unexpected: list[Path] = []
+    for path in root.iterdir():
+        if path.is_dir() and not path.is_symlink():
+            directories.append(path)
+        else:
+            unexpected.append(path)
+    if unexpected:
+        rendered = ", ".join(str(path) for path in sorted(unexpected))
+        raise RuntimeError(f"unexpected entries below {label} root {root}: {rendered}")
+    return sorted(directories)
+
+
+def prune_all_current(
+    *, keep: int, apply: bool, protected: set[Path]
+) -> list[dict[str, object]]:
+    root = PUB_ROOT / "bundles"
+    reports: list[dict[str, object]] = []
+    for repo_group in managed_directories(root, label="current publication"):
+        repository = repo_group.name
+        for ref_group in managed_directories(
+            repo_group, label=f"current repository {repository}"
+        ):
+            reports.append(
+                prune_current_group(
+                    ref_group,
+                    repository=repository,
+                    ref=ref_group.name,
+                    keep=keep,
+                    apply=apply,
+                    protected=protected,
+                )
+            )
+    return reports
+
+
+def legacy_version_groups() -> list[Path]:
+    groups: list[Path] = []
+    for repository_group in managed_directories(
+        LEGACY_OUT_ROOT, label="legacy publication"
+    ):
+        children = managed_directories(
+            repository_group, label=f"legacy repository {repository_group.name}"
+        )
+        if not children:
+            continue
+        direct_versions = [
+            child for child in children if VERSION_DIR_RE.fullmatch(child.name)
+        ]
+        if direct_versions:
+            if len(direct_versions) != len(children):
+                raise RuntimeError(
+                    f"mixed legacy layouts below {repository_group}: "
+                    "version and ref directories coexist"
+                )
+            version_dirs(repository_group)
+            groups.append(repository_group)
+            continue
+        for ref_group in children:
+            version_dirs(ref_group)
+            groups.append(ref_group)
+    return groups
+
+
+def prune_all_legacy(
+    *, keep: int, apply: bool, protected: set[Path]
+) -> list[dict[str, object]]:
+    return [
+        prune_group(group, keep=keep, apply=apply, protected=protected)
+        for group in legacy_version_groups()
+    ]
+
+
+def prune_all_special(
+    *, keep: int, apply: bool, protected: set[Path]
+) -> list[dict[str, object]]:
+    return [
+        prune_group(group, keep=keep, apply=apply, protected=protected)
+        for group in managed_directories(SPECIAL_OUT_ROOT, label="special publication")
+    ]
+
+
+def publish(
+    entry: RepoEntry,
+    *,
+    remote_ref: str,
+    branch: str,
+    sha: str,
+    tool_sha: str,
+    fingerprint: str,
+    config: PublicationConfig,
+) -> tuple[dict[str, object], Path, Path]:
+    repository = safe_segment(entry.repo)
+    registry_repository = publication_repository(entry)
+    ref_segment = safe_segment(branch)
+    source_wt = ensure_source_worktree(entry, ref_segment, sha)
+    out_base = (
+        PUB_ROOT
+        / "bundles"
+        / (safe_segment(entry.owner) + "__" + repository)
+        / ref_segment
+    )
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    out_dir = out_base / f"{stamp}-{fingerprint[:12]}"
+    out_base.mkdir(parents=True, exist_ok=True)
+    active_lease = create_active_publication_lease(
+        repository=registry_repository,
+        ref=ref_segment,
+        fingerprint=fingerprint,
+        publication_dir=out_dir,
+    )
+    command = [
+        "python3",
+        "-B",
+        "-m",
+        "merger.repoground.cli.ground",
+        "external-manifest",
+        "refresh",
+        "--repo",
+        str(source_wt),
+        "--out",
+        str(out_dir),
+        "--publication-root",
+        str(PUB_ROOT),
+        "--repository",
+        registry_repository,
+        "--ref",
+        ref_segment,
+        "--profile",
+        config.profile,
+        "--output-mode",
+        config.output_mode,
+        "--max-bytes",
+        str(config.max_bytes),
+        "--split-size",
+        config.split_size,
+    ]
+    if config.redact_secrets:
+        command.append("--redact-secrets")
+    try:
+        cp = run(command, cwd=TOOL_WT, check=False)
+        LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        raw_log = (
+            LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.stdout.txt"
+        )
+        raw_log.write_text(cp.stdout, encoding="utf-8")
+        if cp.returncode != 0:
+            tail = cp.stdout[-2000:] if cp.stdout else "<empty stdout>"
+            raise RuntimeError(f"RepoGround refresh failed rc={cp.returncode}: {tail}")
+        data = parse_cli_json(cp.stdout)
+        manifests = list(out_dir.glob("*_merge.bundle.manifest.json"))
+        if not out_dir.is_dir() or not manifests:
+            raise RuntimeError(
+                "RepoBrief refresh returned success without a bundle manifest"
+            )
+        repo_log = LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.json"
+        repo_log.write_text(
+            json.dumps(
+                {
+                    "entry": {
+                        "key": entry.key,
+                        "path": str(entry.path),
+                        "remote": entry.remote,
+                    },
+                    "remote_ref": remote_ref,
+                    "sha": sha,
+                    "tool_sha": tool_sha,
+                    "fingerprint": fingerprint,
+                    "result": data,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return data, out_dir, active_lease
+    except Exception:
+        discard_generated_output(out_dir, root=out_base)
+        clear_active_publication_lease(active_lease)
+        raise
+
+
+def validate_retention(value: int) -> int:
+    if value < 1 or value > MAX_RETENTION:
+        raise ValueError(f"retention must be between 1 and {MAX_RETENTION}")
+    return value
+
+
+def acquire_lock() -> Any:
+    LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    handle = LOCK_PATH.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return None
+    return handle
+
+
+def cleanup_mode(args: argparse.Namespace) -> int:
+    explicit = {
+        Path(raw).expanduser().resolve(strict=False) for raw in args.protect_path
+    }
+    apply = bool(args.apply_prune)
+    reports: dict[str, object] = {
+        "status": "ok",
+        "mode": "apply" if apply else "dry-run",
+        "retention": args.retention,
+        "explicit_protected_paths": sorted(str(path) for path in explicit),
+    }
+    try:
+        reports["reconciliation"] = reconcile_prune_transactions(
+            protected=explicit, apply=apply
+        )
+        protected = dynamic_protected_paths(explicit)
+        reports["protected_paths"] = sorted(str(path) for path in protected)
+        reports["stable_manifest_targets"] = sorted(
+            str(path) for path in all_stable_manifest_targets()
+        )
+        reports["state_publication_targets"] = sorted(
+            str(path) for path in state_publication_targets()
+        )
+        reports["active_publication_targets"] = sorted(
+            str(path) for path in active_publication_targets()
+        )
+        if args.prune_current:
+            reports["current"] = prune_all_current(
+                keep=args.retention, apply=apply, protected=explicit
+            )
+        if args.prune_legacy:
+            reports["legacy"] = prune_all_legacy(
+                keep=args.retention, apply=apply, protected=explicit
+            )
+        if args.prune_special:
+            reports["special"] = prune_all_special(
+                keep=args.retention, apply=apply, protected=explicit
+            )
+    except Exception as exc:
+        reports["status"] = "error"
+        reports["error"] = str(exc)[:4000]
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    receipt = LOG_ROOT / (
+        "fleet-prune-apply-last.json" if apply else "fleet-prune-dry-run-last.json"
+    )
+    reports["receipt"] = str(receipt)
+    atomic_write_json(receipt, reports)
+    print(json.dumps(reports, indent=2, sort_keys=True))
+    return 0 if reports["status"] == "ok" else 1
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--inventory", action="store_true")
+    parser.add_argument("--if-changed", action="store_true")
+    parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--force-republish", action="store_true")
+    parser.add_argument("--reason")
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--retention", type=int, default=DEFAULT_RETENTION)
+    parser.add_argument(
+        "--repo",
+        action="append",
+        dest="repo_keys",
+        help="Only process this owner/repository key; repeatable",
+    )
+    parser.add_argument("--prune-current", action="store_true")
+    parser.add_argument("--prune-legacy", action="store_true")
+    parser.add_argument("--prune-special", action="store_true")
+    parser.add_argument("--reconcile-prune", action="store_true")
+    parser.add_argument("--apply-prune", action="store_true")
+    parser.add_argument("--protect-path", action="append", default=[])
+    args = parser.parse_args(argv)
+    try:
+        args.retention = validate_retention(args.retention)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.force:
+        parser.error(
+            "--force is disabled; use targeted --force-republish with --repo and --reason"
+        )
+    if args.force_republish and (not args.repo_keys or not args.reason):
+        parser.error(
+            "--force-republish requires at least one --repo and a non-empty --reason"
+        )
+    cleanup_requested = (
+        args.prune_current
+        or args.prune_legacy
+        or args.prune_special
+        or args.reconcile_prune
+    )
+    if args.apply_prune and not cleanup_requested:
+        parser.error("--apply-prune requires a prune or reconciliation mode")
+    if cleanup_requested:
+        cleanup_lock = acquire_lock()
+        if cleanup_lock is None:
+            print(
+                json.dumps(
+                    {"status": "busy", "reason": "fleet publisher already running"}
+                )
+            )
+            return 0
+        try:
+            return cleanup_mode(args)
+        finally:
+            cleanup_lock.close()
+
+    entries = discover()
+    if args.repo_keys:
+        wanted = set(args.repo_keys)
+        entries = [entry for entry in entries if entry.key in wanted]
+        missing = sorted(wanted - {entry.key for entry in entries})
+        if missing:
+            print(
+                json.dumps(
+                    {"status": "invalid", "missing_repositories": missing},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 2
+    if args.inventory:
+        print(
+            json.dumps(
+                {
+                    "count": len(entries),
+                    "repos": [
+                        {"key": row.key, "path": str(row.path), "remote": row.remote}
+                        for row in entries
+                    ],
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+
+    lock = acquire_lock()
+    if lock is None:
+        print(
+            json.dumps({"status": "busy", "reason": "fleet publisher already running"})
+        )
+        return 0
+    try:
+        STATE_ROOT.mkdir(parents=True, exist_ok=True)
+        LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        mode = "targeted-force" if args.force_republish else "if-changed"
+        log(
+            f"== fleet {mode} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
+            f"entries={len(entries)} limit={args.limit} retention={args.retention} =="
+        )
+        tool_sha, generator_sha = ensure_tool_worktree()
+        changed = published = skipped = failed = queued = prune_failed = 0
+        details: list[dict[str, object]] = []
+        protected: set[Path] = set()
+        reconciliation = reconcile_prune_transactions(protected=protected, apply=True)
+        for entry in entries:
+            try:
+                remote_ref, branch, source_sha = remote_head(entry.path)
+                ref_segment = safe_segment(branch)
+                config = publication_config(entry)
+                registry_repository = publication_repository(entry)
+                fingerprint, identity = build_fingerprint(
+                    source_sha=source_sha,
+                    generator_inputs_sha=generator_sha,
+                    publication_repository=registry_repository,
+                    config=config,
+                )
+                publication_state_path = state_path(entry, ref_segment)
+                state = load_state(publication_state_path)
+                previous_fingerprint = state.get("fingerprint") if state else None
+                should_publish = (
+                    args.force_republish or previous_fingerprint != fingerprint
+                )
+                if not should_publish:
+                    skipped += 1
+                    details.append(
+                        {
+                            "repo": entry.key,
+                            "status": "unchanged",
+                            "source_sha": source_sha,
+                            "fingerprint": fingerprint,
+                        }
+                    )
+                    continue
+                changed += 1
+                if args.limit and published >= args.limit:
+                    queued += 1
+                    details.append(
+                        {
+                            "repo": entry.key,
+                            "status": "queued",
+                            "source_sha": source_sha,
+                            "fingerprint": fingerprint,
+                        }
+                    )
+                    continue
+                data, out_dir, active_lease = publish(
+                    entry,
+                    remote_ref=remote_ref,
+                    branch=branch,
+                    sha=source_sha,
+                    tool_sha=tool_sha,
+                    fingerprint=fingerprint,
+                    config=config,
+                )
+                write_state(
+                    publication_state_path,
+                    fingerprint=fingerprint,
+                    identity=identity,
+                    repository=entry.key,
+                    ref=ref_segment,
+                    publication_dir=out_dir,
+                )
+                clear_active_publication_lease(active_lease)
+                published += 1
+                try:
+                    prune_report = prune_current_group(
+                        out_dir.parent,
+                        repository=registry_repository,
+                        ref=ref_segment,
+                        keep=args.retention,
+                        apply=True,
+                        protected=protected,
+                    )
+                except Exception as exc:
+                    prune_failed += 1
+                    prune_report = {
+                        "status": "warn",
+                        "error": str(exc)[:2000],
+                    }
+                    log(f"PRUNE-FAILED {entry.key}: {exc}")
+                generated = None
+                publication = data.get("publication")
+                if isinstance(publication, dict):
+                    rows = publication.get("published")
+                    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                        generated = rows[0].get("generatedAt")
+                details.append(
+                    {
+                        "repo": entry.key,
+                        "status": "published",
+                        "source_sha": source_sha,
+                        "fingerprint": fingerprint,
+                        "generatedAt": generated,
+                        "publication_dir": str(out_dir),
+                        "prune": prune_report,
+                    }
+                )
+            except Exception as exc:
+                failed += 1
+                details.append(
+                    {"repo": entry.key, "status": "failed", "error": str(exc)[:2000]}
+                )
+                log(f"FAILED {entry.key}: {exc}")
+        summary: dict[str, object] = {
+            "status": "ok" if failed == 0 else "warn",
+            "mode": mode,
+            "count": len(entries),
+            "changed": changed,
+            "published": published,
+            "skipped": skipped,
+            "queued": queued,
+            "failed": failed,
+            "prune_failed": prune_failed,
+            "retention": args.retention,
+            "tool_sha": tool_sha,
+            "generator_inputs_sha": generator_sha,
+            "force_reason": args.reason if args.force_republish else None,
+            "retention_reconciliation": reconciliation,
+            "details": details,
+        }
+        atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
+        log(
+            json.dumps(
+                {
+                    key: summary[key]
+                    for key in (
+                        "status",
+                        "mode",
+                        "count",
+                        "changed",
+                        "published",
+                        "skipped",
+                        "queued",
+                        "failed",
+                        "prune_failed",
+                        "retention",
+                    )
+                },
+                sort_keys=True,
+            )
+        )
+        print(json.dumps(summary, indent=2, sort_keys=True))
+        return 0 if failed == 0 else 1
+    finally:
+        lock.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -5,64 +5,64 @@ name: Graph Model
   push:
     branches: ["main", "master"]
     paths:
-      - "merger/lenskit/architecture/graph_index.py"
-      - "merger/lenskit/architecture/graph_source_validation.py"
-      - "merger/lenskit/cli/cmd_architecture.py"
-      - "merger/lenskit/core/merge.py"
-      - "merger/lenskit/retrieval/query_core.py"
-      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
-      - "merger/lenskit/contracts/architecture.graph_index.v1.schema.json"
-      - "merger/lenskit/contracts/entrypoints.v1.schema.json"
-      - "merger/lenskit/tests/test_graph_index.py"
-      - "merger/lenskit/tests/test_graph_bundle_integration.py"
-      - "merger/lenskit/tests/test_graph_bundle_manifest_provenance.py"
-      - "merger/lenskit/tests/test_cli_architecture_graph_index.py"
-      - "merger/lenskit/tests/test_graph_current_state_audit.py"
-      - "merger/lenskit/tests/test_graph_e2e.py"
-      - "merger/lenskit/tests/test_graph_rerank.py"
-      - "merger/lenskit/tests/test_graph_eval.py"
-      - "merger/lenskit/tests/test_retrieval_query.py"
+      - "merger/repoground/architecture/graph_index.py"
+      - "merger/repoground/architecture/graph_source_validation.py"
+      - "merger/repoground/cli/cmd_architecture.py"
+      - "merger/repoground/core/merge.py"
+      - "merger/repoground/retrieval/query_core.py"
+      - "merger/repoground/contracts/architecture.graph.v1.schema.json"
+      - "merger/repoground/contracts/architecture.graph_index.v1.schema.json"
+      - "merger/repoground/contracts/entrypoints.v1.schema.json"
+      - "merger/repoground/tests/test_graph_index.py"
+      - "merger/repoground/tests/test_graph_bundle_integration.py"
+      - "merger/repoground/tests/test_graph_bundle_manifest_provenance.py"
+      - "merger/repoground/tests/test_cli_architecture_graph_index.py"
+      - "merger/repoground/tests/test_graph_current_state_audit.py"
+      - "merger/repoground/tests/test_graph_e2e.py"
+      - "merger/repoground/tests/test_graph_rerank.py"
+      - "merger/repoground/tests/test_graph_eval.py"
+      - "merger/repoground/tests/test_retrieval_query.py"
       - "docs/architecture/graph-runtime-contract.md"
       - "docs/diagnostics/graph-current-state-audit.md"
       - "docs/proofs/graph-provenance-coherent-compilation-proof.md"
       - "docs/tasks/board.md"
       - "docs/tasks/index.json"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - "pytest.ini"
       - ".github/workflows/graph-model.yml"
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
   pull_request:
     branches: ["main", "master"]
     paths:
-      - "merger/lenskit/architecture/graph_index.py"
-      - "merger/lenskit/architecture/graph_source_validation.py"
-      - "merger/lenskit/cli/cmd_architecture.py"
-      - "merger/lenskit/core/merge.py"
-      - "merger/lenskit/retrieval/query_core.py"
-      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
-      - "merger/lenskit/contracts/architecture.graph_index.v1.schema.json"
-      - "merger/lenskit/contracts/entrypoints.v1.schema.json"
-      - "merger/lenskit/tests/test_graph_index.py"
-      - "merger/lenskit/tests/test_graph_bundle_integration.py"
-      - "merger/lenskit/tests/test_graph_bundle_manifest_provenance.py"
-      - "merger/lenskit/tests/test_cli_architecture_graph_index.py"
-      - "merger/lenskit/tests/test_graph_current_state_audit.py"
-      - "merger/lenskit/tests/test_graph_e2e.py"
-      - "merger/lenskit/tests/test_graph_rerank.py"
-      - "merger/lenskit/tests/test_graph_eval.py"
-      - "merger/lenskit/tests/test_retrieval_query.py"
+      - "merger/repoground/architecture/graph_index.py"
+      - "merger/repoground/architecture/graph_source_validation.py"
+      - "merger/repoground/cli/cmd_architecture.py"
+      - "merger/repoground/core/merge.py"
+      - "merger/repoground/retrieval/query_core.py"
+      - "merger/repoground/contracts/architecture.graph.v1.schema.json"
+      - "merger/repoground/contracts/architecture.graph_index.v1.schema.json"
+      - "merger/repoground/contracts/entrypoints.v1.schema.json"
+      - "merger/repoground/tests/test_graph_index.py"
+      - "merger/repoground/tests/test_graph_bundle_integration.py"
+      - "merger/repoground/tests/test_graph_bundle_manifest_provenance.py"
+      - "merger/repoground/tests/test_cli_architecture_graph_index.py"
+      - "merger/repoground/tests/test_graph_current_state_audit.py"
+      - "merger/repoground/tests/test_graph_e2e.py"
+      - "merger/repoground/tests/test_graph_rerank.py"
+      - "merger/repoground/tests/test_graph_eval.py"
+      - "merger/repoground/tests/test_retrieval_query.py"
       - "docs/architecture/graph-runtime-contract.md"
       - "docs/diagnostics/graph-current-state-audit.md"
       - "docs/proofs/graph-provenance-coherent-compilation-proof.md"
       - "docs/tasks/board.md"
       - "docs/tasks/index.json"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - "pytest.ini"
       - ".github/workflows/graph-model.yml"
 
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
 permissions:
   contents: read
 
@@ -80,7 +80,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
       - name: Require jsonschema
         run: |
@@ -99,9 +99,9 @@ jobs:
           from jsonschema import Draft7Validator
 
           paths = (
-              Path("merger/lenskit/contracts/architecture.graph.v1.schema.json"),
-              Path("merger/lenskit/contracts/architecture.graph_index.v1.schema.json"),
-              Path("merger/lenskit/contracts/entrypoints.v1.schema.json"),
+              Path("merger/repoground/contracts/architecture.graph.v1.schema.json"),
+              Path("merger/repoground/contracts/architecture.graph_index.v1.schema.json"),
+              Path("merger/repoground/contracts/entrypoints.v1.schema.json"),
           )
           for path in paths:
               with path.open(encoding="utf-8") as handle:
@@ -114,15 +114,15 @@ jobs:
         run: |
           set -o pipefail
           python -m pytest -q \
-            merger/lenskit/tests/test_graph_index.py \
-            merger/lenskit/tests/test_graph_bundle_integration.py \
-            merger/lenskit/tests/test_graph_bundle_manifest_provenance.py \
-            merger/lenskit/tests/test_cli_architecture_graph_index.py \
-            merger/lenskit/tests/test_graph_current_state_audit.py \
-            merger/lenskit/tests/test_graph_e2e.py \
-            merger/lenskit/tests/test_graph_rerank.py \
-            merger/lenskit/tests/test_graph_eval.py \
-            merger/lenskit/tests/test_retrieval_query.py \
+            merger/repoground/tests/test_graph_index.py \
+            merger/repoground/tests/test_graph_bundle_integration.py \
+            merger/repoground/tests/test_graph_bundle_manifest_provenance.py \
+            merger/repoground/tests/test_cli_architecture_graph_index.py \
+            merger/repoground/tests/test_graph_current_state_audit.py \
+            merger/repoground/tests/test_graph_e2e.py \
+            merger/repoground/tests/test_graph_rerank.py \
+            merger/repoground/tests/test_graph_eval.py \
+            merger/repoground/tests/test_retrieval_query.py \
             2>&1 | tee graph-model-tests.log
 
       - name: Upload failing test diagnostics
@@ -137,15 +137,15 @@ jobs:
       - name: Ruff
         run: |
           ruff check \
-            merger/lenskit/architecture/graph_index.py \
-            merger/lenskit/architecture/graph_source_validation.py \
-            merger/lenskit/cli/cmd_architecture.py \
-            merger/lenskit/retrieval/query_core.py \
-            merger/lenskit/tests/test_graph_index.py \
-            merger/lenskit/tests/test_graph_bundle_integration.py \
-            merger/lenskit/tests/test_graph_bundle_manifest_provenance.py \
-            merger/lenskit/tests/test_cli_architecture_graph_index.py \
-            merger/lenskit/tests/test_graph_current_state_audit.py \
-            merger/lenskit/tests/test_graph_e2e.py \
-            merger/lenskit/tests/test_graph_rerank.py \
-            merger/lenskit/tests/test_retrieval_query.py
+            merger/repoground/architecture/graph_index.py \
+            merger/repoground/architecture/graph_source_validation.py \
+            merger/repoground/cli/cmd_architecture.py \
+            merger/repoground/retrieval/query_core.py \
+            merger/repoground/tests/test_graph_index.py \
+            merger/repoground/tests/test_graph_bundle_integration.py \
+            merger/repoground/tests/test_graph_bundle_manifest_provenance.py \
+            merger/repoground/tests/test_cli_architecture_graph_index.py \
+            merger/repoground/tests/test_graph_current_state_audit.py \
+            merger/repoground/tests/test_graph_e2e.py \
+            merger/repoground/tests/test_graph_rerank.py \
+            merger/repoground/tests/test_retrieval_query.py

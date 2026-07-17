@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RepoGround</title>
+    <!-- Asset base for static mount (templated by server) -->
+    <base href="__REPOGROUND_ASSET_BASE__">
+    <script>window.__REPOGROUND_UI_VERSION__ = "__REPOGROUND_BUILD__";</script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css?v=__REPOGROUND_BUILD__">
+    <script src="materialize.js?v=__REPOGROUND_BUILD__"></script>
+    <script src="atlas_payload.js?v=__REPOGROUND_BUILD__"></script>
+    <script src="app.js?v=__REPOGROUND_BUILD__" defer></script>
+</head>
+<body class="bg-gray-900 text-gray-200 font-sans">
+    <header class="flex flex-col md:flex-row justify-between items-center gap-4">
+        <h1 class="text-2xl font-bold text-blue-400">RepoGround</h1>
+        <div class="flex items-center gap-4">
+            <nav class="flex space-x-2">
+                 <button onclick="switchTab('job')" id="tab-job" class="px-3 py-1 rounded bg-blue-600 text-white font-bold text-sm">Merge</button>
+                 <button onclick="switchTab('atlas')" id="tab-atlas" class="px-3 py-1 rounded bg-gray-700 text-gray-300 hover:text-white text-sm">Atlas</button>
+                 <button onclick="switchTab('query')" id="tab-query" class="px-3 py-1 rounded bg-gray-700 text-gray-300 hover:text-white text-sm">Query</button>
+            </nav>
+            <div class="flex items-center bg-gray-800 rounded p-1 border border-gray-700">
+                <span class="text-xs text-gray-500 px-2 uppercase font-bold">Token</span>
+                <input type="password" id="authToken" placeholder="Enter Token" class="bg-gray-900 text-sm border-none outline-none text-white px-2 py-1 w-32 rounded focus:ring-1 focus:ring-blue-500">
+            </div>
+            <div id="status" class="text-sm text-gray-400 whitespace-nowrap">Loading...</div>
+            <div id="versionDisplay" class="hidden md:flex flex-col items-end leading-none opacity-50 hover:opacity-100 transition-opacity">
+                 <span id="verLabel" class="text-[9px] text-gray-500 font-mono">v...</span>
+                 <span id="originLabel" class="text-[9px] text-gray-600 font-mono">...</span>
+            </div>
+            <button onclick="restartService()" id="restartServiceBtn" title="Restart local RepoGround backend service. Use after git pull/merge." class="hidden text-xs bg-amber-950 hover:bg-amber-800 text-amber-300 hover:text-white px-2 py-1 rounded border border-amber-800 transition-colors font-mono">Restart RepoGround</button>
+            <button onclick="hardRefresh()" title="Browser hard refresh only — does not restart RepoGround service" class="text-xs bg-gray-800 hover:bg-red-900 text-gray-500 hover:text-white px-2 py-1 rounded border border-gray-700 transition-colors font-mono">⚡</button>
+        </div>
+    </header>
+
+    <!-- Main Layout (Merge View) -->
+    <div id="layout-job" class="layout-view flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4">
+        <!-- Left: Repo Selection -->
+        <aside id="repo-panel" class="w-full md:w-1/4 flex flex-col bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl min-w-[250px]">
+            <h2 class="text-xl mb-4 font-semibold border-b border-gray-700 pb-2">Repositories</h2>
+
+            <!-- Sets UI -->
+            <div class="mb-4 pb-2 border-b border-gray-700">
+                <div class="flex gap-2 mb-2">
+                    <input type="text" id="setName" placeholder="Set Name" class="bg-gray-800 border border-gray-600 rounded p-1 text-xs flex-1 text-white">
+                    <button type="button" onclick="saveSet()" class="text-xs bg-blue-600 px-2 py-1 rounded hover:bg-blue-500 text-white font-bold">Save</button>
+                </div>
+                <div id="setsList" class="flex flex-wrap gap-2 min-h-[20px]">
+                    <!-- Sets populated by JS -->
+                </div>
+            </div>
+
+            <div class="mb-2 text-right">
+                <span class="text-xs text-gray-500 cursor-pointer hover:text-blue-300" onclick="selectAllRepos()">Select All / None</span>
+            </div>
+            <div id="repoList" class="flex-1 overflow-y-auto space-y-1 text-sm">
+                 <div class="text-gray-500 italic">Loading repos...</div>
+            </div>
+        </aside>
+
+        <!-- Center: Job Config -->
+        <main id="job-panel" class="w-full md:w-2/4 flex flex-col bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl">
+             <div class="flex justify-between items-center border-b border-gray-700 mb-4 pb-2">
+                 <h2 class="text-xl font-semibold">Configuration</h2>
+                 <button type="button" onclick="saveConfig()" class="text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 px-2 py-1 rounded border border-gray-600">Save Defaults</button>
+             </div>
+             <form id="jobForm" class="space-y-4 flex-1 flex flex-col">
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Hub (Input)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="hubPath" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" placeholder="/path/to/repos">
+                        <button type="button" onclick="openPicker('hubPath')" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded">📁</button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Merges (Output)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="mergesPath" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" placeholder="(default: hub/merges)">
+                        <button type="button" onclick="openPicker('mergesPath')" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded">📁</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Profile</label>
+                        <select id="profile" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                            <option value="overview">Overview</option>
+                            <option value="summary">Summary</option>
+                            <option value="dev">Dev</option>
+                            <option value="max" selected>Max</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Mode</label>
+                        <select id="mode" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                            <option value="gesamt" selected>Combined</option>
+                            <option value="pro-repo">Per Repo</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                     <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Split Size</label>
+                        <input type="text" id="splitSize" value="25MB" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Max File Bytes</label>
+                        <input type="text" id="maxBytes" value="0" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Meta Density</label>
+                    <select id="metaDensity" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                        <option value="auto" selected>Auto (Default)</option>
+                        <option value="min">Min (Throttled)</option>
+                        <option value="standard">Standard</option>
+                        <option value="full">Full (Audit)</option>
+                    </select>
+                </div>
+
+                <div>
+                     <div class="flex justify-between items-center mb-1">
+                        <label class="block text-xs font-bold uppercase text-gray-500">Filter</label>
+                        <button type="button" onclick="togglePoolPanel()" class="text-[10px] bg-gray-700 hover:bg-gray-600 px-2 py-0.5 rounded text-gray-300 border border-gray-600" title="Toggle Selection Pool">Pool</button>
+                     </div>
+                     <div class="grid grid-cols-2 gap-4">
+                         <input type="text" id="pathFilter" placeholder="Path (e.g. src/)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                         <input type="text" id="extFilter" placeholder="Ext (e.g. .py,.md)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                     </div>
+                     <!-- Selection Pool Panel -->
+                     <div id="selectionPool" class="mt-2 hidden border border-gray-700 rounded p-2 bg-gray-800 shadow-inner">
+                        <!-- Populated by JS -->
+                     </div>
+                </div>
+
+                <div class="flex space-x-4">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="planOnly" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                        <span class="text-sm">Plan Only</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="codeOnly" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                        <span class="text-sm">Code Only</span>
+                    </label>
+                </div>
+
+                <div class="border-t border-gray-700 pt-3">
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Quelle</label>
+                    <select id="sourceMode" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                        <option value="local_current">Lokaler Stand</option>
+                        <option value="local_ff" selected>Lokaler Fast-Forward</option>
+                        <option value="remote_snapshot">Remote-Snapshot</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">Lokaler Fast-Forward = Pre-Pull (fast-forward-only). Remote-Snapshot scannt einen isolierten Remote-Stand ohne lokale Git-Änderung.</p>
+
+                    <div id="remoteSnapshotFields" class="mt-2 hidden grid grid-cols-2 gap-2">
+                        <select id="remoteRefPolicy" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                            <option value="upstream">Upstream</option>
+                            <option value="same_branch">Gleicher Branch</option>
+                            <option value="default_branch" selected>Default Branch</option>
+                        </select>
+                        <input type="text" id="remoteRef" placeholder="remote_ref (optional, z.B. origin/main)" class="bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                    </div>
+
+                    <!-- Legacy pre-pull checkbox: hidden, kept for backward compat / migration.
+                         The Quelle dropdown is the leading semantics; this checkbox is only a
+                         derived mirror for the local fast-forward mode. -->
+                    <label class="hidden">
+                        <input type="checkbox" id="prePull" checked>
+                    </label>
+                    <p id="prePullPlanOnlyNote" class="text-xs text-yellow-500 mt-1 hidden">Plan-only überspringt Pre-Pull.</p>
+                </div>
+
+                <div class="flex-1">
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Extras</label>
+                    <div id="extras-container" class="bg-gray-900 border border-gray-700 rounded p-2">
+                        <!-- Populated via JS -->
+                    </div>
+                </div>
+
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded transition-colors mt-auto mb-2">Start Job</button>
+                <button type="button" onclick="startPrescan()" class="w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded transition-colors text-xs border border-gray-500">
+                    🔍 Prescan (Select Files)
+                </button>
+             </form>
+        </main>
+
+        <!-- Right: Status -->
+        <aside id="status-panel" class="w-full md:w-1/4 flex flex-col gap-4">
+            <section class="flex flex-col h-1/2 bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl">
+                 <h2 class="text-xl mb-2 font-semibold border-b border-gray-700 pb-2">Live Logs</h2>
+                 <pre id="logs" class="flex-1 overflow-y-auto font-mono text-xs bg-black p-2 rounded text-green-400 whitespace-pre-wrap">No active job.</pre>
+            </section>
+
+            <section class="flex flex-col h-1/2 bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl">
+                <h2 class="text-xl mb-4 font-semibold border-b border-gray-700 pb-2 flex justify-between">
+                    <span>Artifacts</span>
+                    <button onclick="loadArtifacts()" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+                </h2>
+                <div id="artifactList" class="space-y-2 text-sm overflow-y-auto flex-1">
+                    <div class="text-gray-500 italic">No artifacts yet.</div>
+                </div>
+            </section>
+        </aside>
+    </div>
+
+    <!-- Atlas Layout -->
+    <!-- Query Tab -->
+    <div id="layout-query" class="layout-view hidden flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4">
+        <!-- Left: Query Config -->
+        <aside class="w-full md:w-1/3 flex flex-col bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl">
+            <h2 class="text-xl mb-4 font-semibold border-b border-gray-700 pb-2">Retrieval / Query</h2>
+
+            <form id="queryForm" class="space-y-4 flex-1 flex flex-col">
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Index ID (Job ID)</label>
+                    <input type="text" id="queryIndexId" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" placeholder="job-1234...">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Query</label>
+                    <textarea id="queryText" rows="3" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-gray-200 focus:outline-none focus:border-blue-500" placeholder="E.g. find login logic..."></textarea>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Top-K</label>
+                        <input type="number" id="queryK" value="10" min="1" max="100" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-gray-200">
+                    </div>
+                    <div>
+                         <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Context Mode</label>
+                         <select id="queryContextMode" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-gray-200">
+                             <option value="exact">Exact</option>
+                             <option value="window">Window</option>
+                             <option value="block">Block</option>
+                             <option value="file">File</option>
+                         </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Window Lines</label>
+                    <input type="number" id="queryWindowLines" value="0" min="0" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-gray-200">
+                </div>
+
+                <div class="flex space-x-4">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="queryExplain" checked class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                        <span class="text-sm">Include Explain</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="queryTrace" class="form-checkbox text-blue-500 bg-gray-900 border-gray-700">
+                        <span class="text-sm">Trace Diagnostics</span>
+                    </label>
+                </div>
+
+                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-4 rounded transition-colors mt-auto">Execute Query</button>
+            </form>
+        </aside>
+
+        <!-- Right: Query Results -->
+        <main class="w-full md:w-2/3 flex flex-col bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl overflow-hidden">
+             <div class="flex justify-between items-center border-b border-gray-700 pb-2 mb-4">
+                 <h2 class="text-xl font-semibold">Results</h2>
+             </div>
+             <div id="queryResults" class="flex-1 overflow-y-auto space-y-4 pr-2">
+                 <div class="text-sm text-gray-500 italic">Enter a query to see results.</div>
+             </div>
+        </main>
+    </div>
+
+    <!-- Atlas Tab -->
+    <div id="layout-atlas" class="layout-view hidden flex-1 min-h-0 flex flex-col md:flex-row gap-4 p-4">
+        <!-- Left: Atlas Config -->
+        <aside class="w-full md:w-1/3 flex flex-col bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl">
+            <h2 class="text-xl mb-4 font-semibold border-b border-gray-700 pb-2">Cartography / Atlas</h2>
+
+            <form id="atlasForm" class="space-y-4 flex-1 flex flex-col">
+                <div class="p-3 bg-gray-900 rounded border border-gray-700 text-sm text-gray-400">
+                    <p class="mb-2"><strong>Goal:</strong> Map the system structure (metadata only) to create a navigable index for AI Agents.</p>
+                    <ul class="list-disc list-inside text-xs">
+                        <li>Scans directory tree</li>
+                        <li>Counts files/extensions</li>
+                        <li>Identifies hotspots</li>
+                        <li>Exportable to <code>webmaschine</code></li>
+                    </ul>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Root ID (hub|merges|system) or use picker</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="atlasRoot" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm" placeholder="hub|merges|system (raw paths only via picker)">
+                        <button type="button" onclick="openPicker('atlasRoot')" class="bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded">📁</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Max Depth</label>
+                        <input type="number" id="atlasDepth" value="6" min="1" max="20" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Limit Entries</label>
+                        <input type="number" id="atlasLimit" value="200000" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                    </div>
+                </div>
+
+                <div>
+                     <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Exclude Globs (comma sep)</label>
+                     <textarea id="atlasExcludes" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm h-20">**/.git/**,**/.ssh/**,**/.gnupg/**,**/.password-store/**,**/.aws/**,**/.kube/**,**/.mozilla/**,**/.config/google-chrome/**,**/.config/chromium/**,**/.local/share/keyrings/**,**/.cache/**,**/.local/share/**,**/node_modules/**,**/.venv/**,**/__pycache__/**,**/Downloads/**</textarea>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Scan Mode</label>
+                    <select id="atlasMode" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm">
+                        <option value="inventory" selected>Inventory (Default)</option>
+                        <option value="topology">Topology</option>
+                        <option value="content">Content</option>
+                        <option value="workspace">Workspace</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="w-full bg-green-700 hover:bg-green-600 text-white font-bold py-3 px-4 rounded transition-colors mt-auto">Create Atlas</button>
+            </form>
+
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                <h3 class="text-sm font-bold text-gray-400 mb-2 uppercase">Export</h3>
+                <button onclick="startExport()" class="w-full bg-purple-900 hover:bg-purple-800 border border-purple-700 text-white py-2 px-4 rounded transition-colors text-sm">
+                    Prepare Webmaschine Export
+                </button>
+                <p class="text-xs text-gray-500 mt-2">Exports latest atlas and repo index to <code>exports/webmaschine</code>.</p>
+            </div>
+        </aside>
+
+        <!-- Right: Atlas Results -->
+        <main class="w-full md:w-2/3 flex flex-col bg-gray-800 rounded-lg p-4 border border-gray-700 shadow-xl">
+            <h2 class="text-xl mb-4 font-semibold border-b border-gray-700 pb-2 flex justify-between">
+                <span>Atlas Artifacts</span>
+                <button onclick="loadAtlasArtifacts()" class="text-xs text-blue-400 hover:text-blue-300">Refresh</button>
+            </h2>
+
+            <div id="atlasList" class="space-y-2 text-sm overflow-y-auto flex-1">
+                <div class="text-gray-500 italic">No atlas artifacts found.</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Folder Picker Modal -->
+    <div id="pickerModal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded shadow-lg w-full max-w-2xl h-3/4 flex flex-col p-4">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                <h3 class="text-lg font-bold">Select Folder</h3>
+                <button onclick="closePicker()" class="text-gray-400 hover:text-white">✕</button>
+            </div>
+
+            <div class="flex gap-2 mb-2">
+                 <input type="text" id="pickerCurrentPath" class="flex-1 bg-gray-900 border border-gray-700 rounded px-2 py-1 text-xs" readonly>
+            </div>
+
+            <div id="pickerList" class="flex-1 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-sm space-y-1 font-mono">
+                <!-- Entries -->
+            </div>
+
+            <div class="flex justify-end gap-2 mt-4 pt-2 border-t border-gray-700">
+                <button onclick="closePicker()" class="px-4 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded">Cancel</button>
+                <button onclick="pickerSelect()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white font-bold rounded">Select This Folder</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Prescan Modal -->
+    <div id="prescanModal" onclick="if(event.target === this) closePrescan()" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+        <div class="bg-gray-800 rounded shadow-lg w-full max-w-4xl h-[90vh] flex flex-col p-4">
+            <div class="flex justify-between items-center mb-4 border-b border-gray-700 pb-2">
+                <div class="flex flex-col">
+                     <h3 class="text-lg font-bold">Prescan Selection</h3>
+                     <span class="text-xs text-gray-400" id="prescanStats">Loading...</span>
+                </div>
+                <button onclick="closePrescan()" class="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+
+            <div class="flex gap-2 mb-2 bg-gray-900 p-2 rounded">
+                 <button onclick="prescanToggleAll(true)" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">All</button>
+                 <button onclick="prescanToggleAll(false)" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">None</button>
+                 <div class="w-px bg-gray-700 mx-2"></div>
+                 <button onclick="prescanRecommended()" class="text-xs bg-blue-900 hover:bg-blue-800 text-blue-100 px-2 py-1 rounded">Recommended</button>
+                 <button onclick="prescanDocs()" class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded">Docs Only</button>
+            </div>
+
+            <div id="prescanTree" class="flex-1 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2 text-sm font-mono whitespace-nowrap">
+                <!-- Tree Content -->
+            </div>
+
+            <div class="flex justify-between mt-4 pt-2 border-t border-gray-700">
+                <button onclick="removePrescanSelection()" class="px-4 py-2 text-sm bg-red-700 hover:bg-red-600 text-white rounded">Remove from Pool</button>
+                <div class="flex gap-2">
+                    <button onclick="closePrescan()" class="px-4 py-2 text-sm bg-gray-700 hover:bg-gray-600 rounded">Cancel</button>
+                    <button onclick="applyPrescanSelectionReplace()" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-500 text-white font-bold rounded">Replace</button>
+                    <button onclick="applyPrescanSelectionAppend()" class="px-4 py-2 text-sm bg-green-600 hover:bg-green-500 text-white font-bold rounded">Append</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

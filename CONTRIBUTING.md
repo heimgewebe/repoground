@@ -1,13 +1,13 @@
-# Contributing to Lenskit
+# Contributing to RepoGround
 
 > Aktualisiert am 2026-05-31.
 > Diese Datei fasst die **gelebten** Konventionen des Repos zusammen. Maßgeblich
 > bleiben [`AGENTS.md`](AGENTS.md) und
-> [`docs/roadmap/lenskit-master-roadmap.md`](docs/roadmap/lenskit-master-roadmap.md).
+> [`docs/roadmap/repoground-master-roadmap.md`](docs/roadmap/repoground-master-roadmap.md).
 
 ## Arbeitsphilosophie: Diagnose-first
 
-Lenskit ist ein **epistemischer Kern** — Korrektheit und Belegbarkeit gehen vor
+RepoGround ist ein **epistemischer Kern** — Korrektheit und Belegbarkeit gehen vor
 Feature-Tempo. Die zentrale Arbeitsregel der Master-Roadmap lautet:
 
 > **Erst diagnostizieren, dann ändern. Keine Heuristik-Patches ohne Target-Proof.**
@@ -30,22 +30,22 @@ Praktisch heißt das:
 ## Frontend-Parität (verpflichtend)
 
 Jedes neue Feld im Backend-`JobRequest`-Modell
-(`merger/lenskit/service/models.py`) MUSS in **beiden** Frontends umgesetzt
-werden (repoLens-CLI **und** rLens-WebUI). Nach jeder Änderung an `JobRequest`
+(`merger/repoground/service/models.py`) MUSS in **beiden** Frontends umgesetzt
+werden (RepoGround-CLI **und** RepoGround-WebUI). Nach jeder Änderung an `JobRequest`
 oder UI-Komponenten:
 
 ```bash
 python3 tools/parity_guard.py
 ```
 
-prüft Backend-Modell, CLI-Argumente (`repolens.py`), HTML-IDs (`index.html`)
+prüft Backend-Modell, CLI-Argumente (`repoground.py`), HTML-IDs (`index.html`)
 und JS-Payload-Keys (`app.js`). Details: [`docs/PARITY_GUARD.md`](docs/PARITY_GUARD.md).
 
 ## Lokale Checks vor dem Commit
 
 ```bash
 # Tests (pytest.ini konfiguriert die Pfade)
-python3 -m pip install --require-hashes -r requirements/repobrief-dev.lock.txt
+python3 -m pip install --require-hashes -r requirements/repoground-dev.lock.txt
 python3 -m pytest
 
 # Repo-weiter CI-Lint (exakt wie die CI; Scope steht in ruff-ci.toml)
@@ -86,7 +86,7 @@ PRs gegen `main` müssen u. a. grün sein bei:
 
 ## Reihenfolge beim Lesen (vor Parität/Evidence/Runtime-Änderungen)
 
-1. [`docs/roadmap/lenskit-master-roadmap.md`](docs/roadmap/lenskit-master-roadmap.md)
+1. [`docs/roadmap/repoground-master-roadmap.md`](docs/roadmap/repoground-master-roadmap.md)
 2. [`docs/testing/test-matrix.md`](docs/testing/test-matrix.md)
 3. die relevanten [`docs/proofs/*`](docs/proofs/)
 
@@ -94,10 +94,10 @@ PRs gegen `main` müssen u. a. grün sein bei:
 
 - Generierte Docs (`docs/_generated/*`) nicht editieren. Änderungen sind nur
   über den jeweiligen Generator erlaubt. Für Doc-Freshness lautet der Generator:
-  `python -m merger.lenskit.cli.main doc-freshness update --write`
+  `python -m merger.repoground.cli.main doc-freshness update --write`
 - Lokale Runtime-Artefakte nicht committen.
-- Den rLens-**Launcher** (`cli/rlens.py`) nicht still als HTTP-Client
-  umdeuten — der CLI-Client ist `cli/cmd_rlens_client.py`.
+- Den RepoGround-**Launcher** (`cli/repoground.py`) nicht still als HTTP-Client
+  umdeuten — der CLI-Client ist `cli/cmd_repoground_client.py`.
 - Keine semantische Reranking-Priorisierung vor Belegadressierung; keine
   Federation-Härtung vor stabiler lokaler Evidence-Address (s. Roadmap
   „Nicht jetzt").

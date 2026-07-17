@@ -37,7 +37,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
       - name: Run full pytest suite
         run: pytest -q -m "not browser and not doc_freshness_live"
@@ -63,12 +63,12 @@ jobs:
 
       - name: Build and compare deterministic source candidates
         run: |
-          rm -rf /tmp/repobrief-release-a /tmp/repobrief-release-b
-          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repobrief-release-a
-          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repobrief-release-b
-          diff --recursive --brief /tmp/repobrief-release-a /tmp/repobrief-release-b
-          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repobrief-release-a --repo .
-          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repobrief-release-b --repo .
+          rm -rf /tmp/repoground-release-a /tmp/repoground-release-b
+          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repoground-release-a
+          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repoground-release-b
+          diff --recursive --brief /tmp/repoground-release-a /tmp/repoground-release-b
+          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repoground-release-a --repo .
+          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repoground-release-b --repo .
 
   browser-tests:
     runs-on: ubuntu-latest
@@ -82,14 +82,14 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
 
       - name: Install pinned browser-test dependencies
-        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-browser.lock.txt
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-browser.lock.txt
 
       - name: Verify pinned Chromium runtime
         run: python scripts/ci/check_browser_gate_environment.py
 
       - name: Run Playwright browser tests
         run: |
-          python -m pytest -q -m browser merger/lenskit/tests/test_webui_payload.py \
+          python -m pytest -q -m browser merger/repoground/tests/test_webui_payload.py \
             --browser chromium \
             --output=test-results \
             --tracing retain-on-failure \
@@ -119,7 +119,7 @@ jobs:
       - name: Run WebUI JS tests
         run: |
           set -euo pipefail
-          for f in merger/lenskit/frontends/webui/tests/test_*.js; do
+          for f in merger/repoground/frontends/webui/tests/test_*.js; do
             echo "=== node $f"
             node "$f"
           done

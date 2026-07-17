@@ -1,5 +1,5 @@
 [Unit]
-Description=Hourly changed-only RepoBrief fleet publication
+Description=Hourly changed-only RepoGround fleet publication
 
 [Timer]
 OnCalendar=hourly

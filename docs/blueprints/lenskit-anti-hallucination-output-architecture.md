@@ -1,4 +1,4 @@
-# Lenskit Anti-Hallucination Output Architecture (Reconciled)
+# RepoGround Anti-Hallucination Output Architecture (Reconciled)
 
 Status: Blueprint (docs-first, diagnose-first).
 Beziehung zu bestehenden Docs: **Diese Datei ersetzt nichts.** Sie reconciled einen
@@ -6,8 +6,8 @@ extern vorgeschlagenen Anti-Hallucination-Plan mit dem realen Repo-Stand und ord
 ihn in die bestehende Reihenfolge ein:
 - Befund/Falsifikation: `docs/proofs/anti-hallucination-capability-audit.md`
 - Bestehende Arbeitspakete A–H: `docs/blueprints/lenskit-output-optimierung-v1.md`
-- Globale Reihenfolge/Gates: `docs/roadmap/lenskit-master-roadmap.md`
-- Profile/Evidence/Health: `docs/blueprints/lenskit-artifact-output-control-plane.md`
+- Globale Reihenfolge/Gates: `docs/roadmap/repoground-master-roadmap.md`
+- Profile/Evidence/Health: `docs/blueprints/repoground-artifact-output-control-plane.md`
 
 Wenn ein Punkt hier einem bestehenden Arbeitspaket entspricht, wird **das bestehende
 Paket gehärtet**, kein Parallelartefakt gebaut. Neue Begriffe stehen nie neben alten
@@ -17,7 +17,7 @@ ohne Migrationsnotiz.
 
 ## 0. Kernthese
 
-Lenskit soll **nicht** zum Erklär-LLM werden. Lenskit erzeugt **belegbare Bedingungen**,
+RepoGround soll **nicht** zum Erklär-LLM werden. RepoGround erzeugt **belegbare Bedingungen**,
 unter denen ein LLM Bedeutung sicherer erschließt. Der perfekte Plan sortiert nicht nach
 konzeptioneller Eleganz, sondern nach **dump-/repo-belegtem Risiko**: erst reale
 Output-Schäden schließen, dann Authority/Risk normieren, dann repo-eigene Lesart, dann
@@ -25,7 +25,7 @@ strukturierte Navigation, dann kuratierte Semantik, zuletzt gated Integrationen.
 
 ## 1. Invarianten (Leitplanken)
 
-1. Keine freie Lenskit-Interpretation; keine automatische Architektur-Erzählung.
+1. Keine freie RepoGround-Interpretation; keine automatische Architektur-Erzählung.
 2. **Keine automatische Claim-Bewertung** (`supported/unsupported/true/false/proven`).
 3. Keine unqualifizierten Purpose-/Meaning-/Important-Claims in generierten Feldern.
 4. Jede Navigation hat Resolve-Pflicht (`must_resolve_to: role_specific_authority`).
@@ -41,7 +41,7 @@ strukturierte Navigation, dann kuratierte Semantik, zuletzt gated Integrationen.
 
 ```
 Repo            -> deklariert Lesart und Grenzen (.lenskit/, optional)
-Lenskit         -> sammelt, validiert, adressiert, klassifiziert, warnt
+RepoGround         -> sammelt, validiert, adressiert, klassifiziert, warnt
 LLM             -> interpretiert, erklärt, synthetisiert
 canonical_md    -> Inhaltswahrheit
 bundle_manifest -> Artefakt-/Metadatenwahrheit
@@ -83,9 +83,9 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 
 #### PR A2 — Output Noise Hygiene härten  (härtet #681–#683)
 - **Ziel:** Hard-Exclusion absichern + sichtbar machen; Listendrift beseitigen.
-- **Repo-Befund:** `merger/lenskit/core/merge.py:297-314` (`SKIP_DIRS` deckt Caches), `:2277` (Walk-Filter);
-  `merger/lenskit/core/merge.py:1772-1780` (`is_noise_file.noisy_dirs` ohne `.ruff_cache/.pytest_cache/
-  .mypy_cache`); `merger/lenskit/core/lenses.py:87` (Fallback `core`).
+- **Repo-Befund:** `merger/repoground/core/merge.py:297-314` (`SKIP_DIRS` deckt Caches), `:2277` (Walk-Filter);
+  `merger/repoground/core/merge.py:1772-1780` (`is_noise_file.noisy_dirs` ohne `.ruff_cache/.pytest_cache/
+  .mypy_cache`); `merger/repoground/core/lenses.py:87` (Fallback `core`).
 - **Änderung:**
   - `is_noise_file` aus `SKIP_DIRS` ableiten statt Parallelliste pflegen.
   - Regressions-Guard: Cache-Dirs nie in canonical/chunk/sqlite/agent-navigation.
@@ -103,8 +103,8 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 #### PR A3 — Range-Ref v2  (= AP B; reuse Blueprint)
 - **Ziel:** Source- und Artifact-Achsen schema-seitig trennen.
 - **Repo-Befund:** `docs/blueprints/range-ref-v2-semantic-boundary-split-preimage.md`; `docs/architecture/range-semantics.md`; nur
-  `merger/lenskit/contracts/range-ref.v1.schema.json`; AP B `[ ]`.
-- **Änderung:** `merger/lenskit/contracts/range-ref.v2.schema.json` mit `artifact_role`,
+  `merger/repoground/contracts/range-ref.v1.schema.json`; AP B `[ ]`.
+- **Änderung:** `merger/repoground/contracts/range-ref.v2.schema.json` mit `artifact_role`,
   `artifact_path`, `artifact_line_start/end`, `source_file_path`,
   `source_line_start/end`, `content_sha256`, `range_content_sha256`,
   `range_ref_version:"2"`. v1 bleibt lesbar; Resolver akzeptiert v1+v2; neue
@@ -119,7 +119,7 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 #### PR A4 — Post-hoc Bundle Validator  (= AP H; reuse `post_emit_health`)
 - **Ziel:** Vollständiges Bundle nach Emission prüfen (Health kennt den Pack in-pipeline
   noch nicht).
-- **Repo-Befund:** `merger/lenskit/core/output_health.py:424-466`; `docs/blueprints/lenskit-artifact-output-control-plane.md` §2.4
+- **Repo-Befund:** `merger/repoground/core/output_health.py:424-466`; `docs/blueprints/repoground-artifact-output-control-plane.md` §2.4
   (`post_emit_health`); `docs/architecture/artifact-evidence-levels.md` (`post_emit_validation_available`).
 - **Änderung:** `post_emit_health` (Datei `<stem>.bundle_health.post.json`) bzw. CLI
   `lenskit bundle-health post <manifest> --json`: prüft Manifest-/Artefakt-Hashes,
@@ -139,8 +139,8 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 #### PR A5 — Safe Output Profiles / agent-safe Gate  (= AP E; reuse control-plane-Namen)
 - **Ziel:** Export-Sicherheit profilbasiert erzwingen; Redaction an agent-safe koppeln.
 - **Repo-Befund:** **Namens-Drift** AP E (`max-private/agent-safe/…`) vs
-  `docs/blueprints/lenskit-artifact-output-control-plane.md` §7
-  (`agent-portable/local-search/…`); `merger/lenskit/core/redactor.py`; `capabilities.redaction`.
+  `docs/blueprints/repoground-artifact-output-control-plane.md` §7
+  (`agent-portable/local-search/…`); `merger/repoground/core/redactor.py`; `capabilities.redaction`.
 - **Änderung:** control-plane-Namen sind kanonisch. Mapping der Plan-Intents:
   `agent-safe → agent-portable + redact_secrets=true + require post_emit_health`;
   `max-private → debug-full/local intern, agent_export=false`. Profil-Gate validiert vor
@@ -162,8 +162,8 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
   den dort definierten erreichten Evidence-Level (aus `post_emit_health`) zusammen mit weiteren
   vorhandenen Signalen. (Frühere Annahme „kein `context_quality.json`" ist überholt.)
 - **Ergebnis (PR B1 umgesetzt: Schema/Core/CLI/Tests/Proof additiv):**
-  - `merger/lenskit/contracts/context-quality.v1.schema.json` (neuer lokaler Contract).
-  - `merger/lenskit/core/context_quality.py` — `compute_context_quality` (rein) +
+  - `merger/repoground/contracts/context-quality.v1.schema.json` (neuer lokaler Contract).
+  - `merger/repoground/core/context_quality.py` — `compute_context_quality` (rein) +
     `write_context_quality` (optional persistierend, **keine** Manifest-Mutation/-Registrierung).
   - `<stem>.context_quality.json` als **Projektion** vorhandener Signale (Manifest-Rollen +
     `output_health`-Checks + `post_emit_health`-Status/Evidence-Level + `retrieval_eval`-Metriken
@@ -173,8 +173,8 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
     Gesamt-Score. Kopf-Feld ist `projection_status` (`complete|degraded|blocked`), **kein**
     globaler Verdict.
   - CLI `lenskit context-quality inspect <manifest> [--json] [--emit-artifact] [--output PATH]`.
-  - Tests: `merger/lenskit/tests/test_context_quality.py`,
-    `merger/lenskit/tests/test_cli_context_quality.py` (inkl. der benannten Invarianten
+  - Tests: `merger/repoground/tests/test_context_quality.py`,
+    `merger/repoground/tests/test_cli_context_quality.py` (inkl. der benannten Invarianten
     „has_no_global_understanding_verdict" und „is_projection_of_existing_signals" in
     `test_named_blueprint_invariants`, plus Forbidden-Vocabulary-Walk).
   - Beleg: `docs/proofs/context-quality-signals-proof.md`.
@@ -186,7 +186,7 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 
 #### PR B2 — Retrieval Miss Taxonomy  (neu, über AP-Eval)
 - **Ziel:** Retrieval-Schwächen mechanisch klassifizieren (vor Task-Packs/MCP).
-- **Repo-Befund:** `merger/lenskit/retrieval/eval_core.py`, `merger/lenskit/contracts/retrieval-eval.v1.schema.json`.
+- **Repo-Befund:** `merger/repoground/retrieval/eval_core.py`, `merger/repoground/contracts/retrieval-eval.v1.schema.json`.
 - **Änderung:** `<stem>.retrieval_miss_taxonomy.json` über vorhandenem Eval; erlaubte
   `miss_class`: `zero_results`, `expected_path_not_in_top10`,
   `expected_symbol_not_in_top10`, `filter_excluded_expected`,
@@ -201,9 +201,9 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 
 #### PR B3 — Context Bundle Resolve Discipline  (härtet `query-context-bundle.v1`)
 - **Ziel:** Context Bundles sind Auswahlspuren, keine Wahrheitsbündel.
-- **Repo-Befund:** `merger/lenskit/contracts/agent-query-session.v2.schema.json` hat
+- **Repo-Befund:** `merger/repoground/contracts/agent-query-session.v2.schema.json` hat
   `session_authority`+`claim_boundaries`;
-  `merger/lenskit/contracts/query-context-bundle.v1.schema.json` hat nur `resolver_status`.
+  `merger/repoground/contracts/query-context-bundle.v1.schema.json` hat nur `resolver_status`.
 - **Änderung:** additiver `context_risk`-Block (`retrieval_based_subset`,
   `missing_relevant_context_possible`, `may_answer_from_this_directly:false`,
   `*_claims_resolve_to: {content:canonical_md, metadata:bundle_manifest,
@@ -220,7 +220,7 @@ Arbeitspaket (AP), das er härtet, oder markiert sich als **neu**.
 #### PR C1 — Authority Matrix + Risk Classes normieren  (härtet vorhandene Authority)
 - **Ziel:** Vorhandene Authority/Canonicality normieren, `risk_class` **additiv** ableiten.
 - **Repo-Befund:** `docs/architecture/artifact-inventory.md` Authority/Canonicality; `AUTHORITY_REGISTRY`
-  in `merger/lenskit/core/merge.py`.
+  in `merger/repoground/core/merge.py`.
 - **Änderung:** `risk_class` aus Authority ableiten (`canonical_content→canonical`,
   `navigation_index→navigation+must_resolve`, `diagnostic_signal→diagnostic`,
   `runtime_*→runtime_observation`, heuristisch→`heuristic`), in der Matrix dokumentiert.
@@ -327,8 +327,8 @@ grenzt ab und verweist auf bereits vorhandene Schutzflächen.
 
 #### These / Antithese / Synthese
 - **These:** Vibe-Lab liefert nützliche Fehlerklassen für Agentenarbeit.
-- **Antithese:** Vibe-Lab-Strukturen dürfen nicht als Module nach Lenskit wandern.
-- **Synthese:** Lenskit übernimmt nur epistemische Disziplin und Fehlerklassen, keine
+- **Antithese:** Vibe-Lab-Strukturen dürfen nicht als Module nach RepoGround wandern.
+- **Synthese:** RepoGround übernimmt nur epistemische Disziplin und Fehlerklassen, keine
   Vibe-Lab-Governance. Vibe-Lab bleibt Kontrastfolie, nicht Modulquelle.
 
 #### Verbindliche Abgrenzung
@@ -341,15 +341,15 @@ Nicht übernommen (kein neues Agent-Operability-Subsystem):
 6. keine Promotion-Readiness-Control-Plane,
 7. keine automatische Claim-Bewertung (`supported/unsupported`).
 
-#### Bestehende Lenskit-Schutzflächen (referenziert, nicht dupliziert)
+#### Bestehende RepoGround-Schutzflächen (referenziert, nicht dupliziert)
 - Agent Reading Pack — Navigation, nicht Wahrheit (u. a. Begriffshärtung um
   `TOP_CHUNK_SPANS`; Claim-Grenzen bleiben contract-bound).
 - Bundle Manifest — Rollen, Authority, Hashes.
 - Citation Map — Belegadressen.
 - Query Result — Claim-/Evidence-Kontext, soweit durch bestehende Contracts abgebildet
-  (`merger/lenskit/contracts/query-result.v1.schema.json` `claim_boundaries`).
+  (`merger/repoground/contracts/query-result.v1.schema.json` `claim_boundaries`).
 - Agent Query Session — `session_authority = agent_context_projection`
-  (`merger/lenskit/contracts/agent-query-session.v2.schema.json`).
+  (`merger/repoground/contracts/agent-query-session.v2.schema.json`).
 - Runtime Lookup Artefakte — Beobachtung/Projektion, nicht kanonischer Content.
 - Output Health — Integritätsdiagnostik, **kein** automatisches `agent-safe`.
 

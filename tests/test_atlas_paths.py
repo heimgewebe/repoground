@@ -3,9 +3,9 @@ import tempfile
 import json
 import pytest
 from pathlib import Path
-from merger.lenskit.atlas.paths import resolve_atlas_base_dir, resolve_snapshot_dir, resolve_artifact_ref
-from merger.lenskit.atlas.registry import AtlasRegistry
-from merger.lenskit.atlas.diff import compute_snapshot_delta
+from merger.repoground.atlas.paths import resolve_atlas_base_dir, resolve_snapshot_dir, resolve_artifact_ref
+from merger.repoground.atlas.registry import AtlasRegistry
+from merger.repoground.atlas.diff import compute_snapshot_delta
 
 def test_canonical_paths():
     """Test that resolving the base dir is independent of CWD if registry is given."""

@@ -1,6 +1,6 @@
-# Lenskit API Query Contracts
+# RepoGround API Query Contracts
 
-This document strictly specifies the response structures returned by the `/api/query` endpoint in Lenskit, specifically outlining the integration of `output_profile`, `context_bundle`, and `query_trace`.
+This document strictly specifies the response structures returned by the `/api/query` endpoint in RepoGround, specifically outlining the integration of `output_profile`, `context_bundle`, and `query_trace`.
 
 ## 1. Raw Result (No Output Profile)
 **Condition:** `output_profile` is not specified or is empty.

@@ -1,10 +1,10 @@
-# RepoBrief Agent Optimization Triage v1
+# RepoGround Agent Optimization Triage v1
 
 ## Status
 
 This document closes Bureau task `RBAW-V1-T005` as a deduplicating triage layer.
 
-It maps broad Agent Workbench / RepoBrief optimization axes to existing RepoBrief roadmap tasks, explicit non-goals, or future bounded tasks. It does not start a broad refactor and does not change RepoBrief authority boundaries.
+It maps broad Agent Workbench / RepoGround optimization axes to existing RepoGround roadmap tasks, explicit non-goals, or future bounded tasks. It does not start a broad refactor and does not change RepoGround authority boundaries.
 
 ## Scope
 
@@ -22,12 +22,12 @@ The triage covers these axes:
 
 ## Decision summary
 
-RepoBrief should optimize agent usefulness in this order:
+RepoGround should optimize agent usefulness in this order:
 
 1. **Evidence hygiene first**: finish provenance, availability, freshness, and health/status vocabulary before adding more analysis surfaces.
 2. **Consumption hygiene second**: make CLI/read-access outputs predictable enough for agents without adding hidden refresh, shell, Git, PR, or patch authority.
 3. **Workbench intelligence third**: add relation, graph, symbol, and retrieval improvements only as deterministic, read-only surfaces with explicit availability and non-claims.
-4. **Mutable evaluation last and external**: prototype patch/test execution only in the external Patch Evaluation Sidecar, never inside RepoBrief core.
+4. **Mutable evaluation last and external**: prototype patch/test execution only in the external Patch Evaluation Sidecar, never inside RepoGround core.
 
 The alternative axis is important: the goal is not “more tools for agents” in general. The goal is “fewer unjustified agent assumptions per edit.” A smaller tool that reports missing evidence is better than a larger tool that sounds certain.
 
@@ -77,7 +77,7 @@ The broad improvement axes above are now registered as concrete task-control ite
 - `TASK-REPOBRIEF-PACKAGE-RENAME-DECISION-001`
 - `TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001`
 
-This registration does not implement the tasks and does not change RepoBrief authority boundaries. It only moves the improvement backlog from chat/triage prose into the repository task registry.
+This registration does not implement the tasks and does not change RepoGround authority boundaries. It only moves the improvement backlog from chat/triage prose into the repository task registry.
 
 ## Risks and benefits
 
@@ -108,7 +108,7 @@ This triage does not:
 - add AST, graph, relation, or retrieval code,
 - rename the Python package or repository,
 - promote semantic reranking into the deterministic core,
-- add shell, Git, PR, patch, sandbox, or secret capabilities to RepoBrief,
+- add shell, Git, PR, patch, sandbox, or secret capabilities to RepoGround,
 - assert that tests are sufficient,
 - assert merge readiness.
 

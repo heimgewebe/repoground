@@ -1,10 +1,10 @@
-# Pythonista Hub Setup (repoLens + wc-hub)
+# Pythonista Hub Setup (RepoGround build + wc-hub)
 
 ## Kernproblem
 
 In Pythonista existieren getrennte Speicherwelten:
 
-- iCloud → enthält repoLens
+- iCloud → enthält RepoGround build
 - Lokales Pythonista Documents → enthält wc-hub
 
 Konkrete Pfade (Beispiel):
@@ -15,14 +15,14 @@ Konkrete Pfade (Beispiel):
 - Lokal:
   /private/var/mobile/Containers/Data/Application/.../Documents/...
 
-→ repoLens kann den Hub teils automatisch erkennen (z. B. über Argument, Environment oder gespeicherten Pfad),
+→ RepoGround build kann den Hub teils automatisch erkennen (z. B. über Argument, Environment oder gespeicherten Pfad),
   aber über die getrennten iCloud-/lokalen Documents-Welten hinweg ist diese Erkennung nicht verlässlich.
 
 ---
 
 ## iOS-Fähigkeiten und Grenzen (keine Subprozesse)
 
-Pythonista/iOS unterstützt **keine Subprozesse**. repoLens kann dort daher keine
+Pythonista/iOS unterstützt **keine Subprozesse**. RepoGround build kann dort daher keine
 Git-Subprozesse starten.
 
 - **Lokale Scans funktionieren** (kein Git nötig) – Merge/Reports laufen normal.
@@ -35,7 +35,7 @@ Git-Subprozesse starten.
   | **Headless – explizite Flags** | `--pre-pull`, `--source-mode local-ff`, `--source-mode remote-snapshot` werden **früh abgelehnt** (Exit 2, klare Fehlermeldung, kein Stacktrace). |
   | **Headless – impliziter Default** | Ein einfaches `repolens.py --headless` (keine Source-Flags) würde intern zu `local_ff` auflösen; stattdessen wird **implizit auf `local_current` degradiert** (Hinweis im stdout, kein Crash). |
 
-- Für alle git-basierten Funktionen **Desktop bzw. den rLens-Service verwenden**.
+- Für alle git-basierten Funktionen **Desktop bzw. den RepoGround service verwenden**.
 
 > Praxis: Auf dem iPad „Run Merge” ohne Pre-pull ausführen. Ein versehentlich
 > aktivierter Pre-pull-Schalter stoppt den Merge nicht – er wird effektiv
@@ -58,7 +58,7 @@ Der Ausführungsort bestimmt die Sicht auf das Dateisystem.
 
 Kopiere:
 
-merger/lenskit/frontends/pythonista/pathfinder.py
+merger/repoground/frontends/pythonista/pathfinder.py
 
 nach:
 
@@ -85,28 +85,28 @@ Der Pathfinder:
 
 und zusätzlich nach:
 
-`<repoLens iCloud-Verzeichnis>/.repolens-hub-path.txt`
+`<RepoGround build iCloud-Verzeichnis>/.repolens-hub-path.txt`
 
 → Damit entsteht ein persistenter Pfad-Contract.
 
 ---
 
-### 4. repoLens neu starten
+### 4. RepoGround build neu starten
 
 Nach erfolgreichem Lauf:
 
-👉 repoLens neu starten
+👉 RepoGround build neu starten
 
 ---
 
 ## ✅ Erfolgskriterium
 
-repoLens startet **ohne Fehler**.
+RepoGround build startet **ohne Fehler**.
 
 Zusätzlich prüfen:
 
 1. Öffne:
-   `<repoLens iCloud-Verzeichnis>/.repolens-hub-path.txt`
+   `<RepoGround build iCloud-Verzeichnis>/.repolens-hub-path.txt`
 
 2. Inhalt muss exakt sein:
    /private/var/mobile/.../Documents/wc-hub
@@ -118,13 +118,13 @@ Wenn diese Datei fehlt oder leer ist → Pathfinder erneut ausführen.
 ## 🧯 Wenn es nicht funktioniert
 
 1. Prüfen:
-   Existiert `<repoLens iCloud-Verzeichnis>/.repolens-hub-path.txt`?
+   Existiert `<RepoGround build iCloud-Verzeichnis>/.repolens-hub-path.txt`?
 
 2. Wenn nein:
    → Pathfinder erneut im wc-hub ausführen
 
 3. Wenn ja:
-   → repoLens komplett neu starten
+   → RepoGround build komplett neu starten
 
 4. Wenn weiterhin Fehler:
    → falscher Script-Kontext (Pathfinder im falschen Ort ausgeführt)
@@ -143,14 +143,14 @@ Ein Lauf aus iCloud heraus liefert falsche oder unvollständige Ergebnisse.
 
 - nach Verschieben des wc-hub
 - nach iOS-/App-Neuinstallation
-- wenn repoLens meldet:
+- wenn RepoGround build meldet:
   `Hub-Verzeichnis nicht gefunden`
 
 ---
 
 ## 🧠 Designentscheidung
 
-repoLens bevorzugt bewusst einen expliziten gespeicherten Pfad-Contract
+RepoGround build bevorzugt bewusst einen expliziten gespeicherten Pfad-Contract
 statt sich primär auf Auto-Erkennung zu verlassen.
 Begrenzte Fallbacks existieren, können aber in getrennten Speicherwelten fehlschlagen.
 
@@ -160,8 +160,8 @@ Begrenzte Fallbacks existieren, können aber in getrennten Speicherwelten fehlsc
 
 ## 🧾 Kurzfassung
 
-Wenn repoLens den Hub nicht findet:
+Wenn RepoGround build den Hub nicht findet:
 
 1. Pathfinder in wc-hub kopieren
 2. dort ausführen
-3. repoLens neu starten
+3. RepoGround build neu starten

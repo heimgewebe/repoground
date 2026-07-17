@@ -2,8 +2,8 @@
 ai_context_version: 1.1
 
 project:
-  name: lenskit
-  summary: RepoLens Merger & Scanner (epistemischer Kern) – erzeugt strukturierte, zitierbare Repository-Bundles für LLM-Agents.
+  name: repoground
+  summary: RepoGround Knowledge Compiler & Evidence Runtime – erzeugt strukturierte, zitierbare Repository-Bundles für LLM-Agents.
   role: merger_scanner_epistemic_core
   primary_language: python
   visibility: internal
@@ -17,7 +17,7 @@ heimgewebe:
     guard_smoke_expected: false
 
 interfaces:
-  consumes: ["local repository working copies", "rLens HTTP API requests"]
+  consumes: ["local repository working copies", "RepoGround HTTP API requests"]
   produces: ["canonical_md bundles", "chunk/dump/sqlite indexes", "bundle manifests & health reports"]
 
 boundaries:
@@ -36,13 +36,13 @@ dependencies:
 
 architecture:
   entrypoints:
-    - merger/lenskit/frontends/pythonista/repolens.py
-    - merger/lenskit/cli/main.py
-    - merger/lenskit/service/app.py
+    - merger/repoground/frontends/pythonista/build.py
+    - merger/repoground/cli/main.py
+    - merger/repoground/service/app.py
   key_paths:
-    - path: merger/lenskit/core/merge.py
+    - path: merger/repoground/core/merge.py
       purpose: Merge-Pipeline (scan → chunk → emit)
-    - path: merger/lenskit/contracts/
+    - path: merger/repoground/contracts/
       purpose: JSON-Schema-Contracts der Artefakte
     - path: docs/tasks/board.md
       purpose: Task-Board (Status + Evidence)
@@ -53,7 +53,7 @@ architecture:
 
 conventions:
   branching: "main, feature/*"
-  commit_prefix: "lenskit"
+  commit_prefix: "repoground"
   ci_platform: github_actions
 
 documentation:

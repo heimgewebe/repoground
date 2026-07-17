@@ -57,6 +57,6 @@ Dieses Profil ist nur für lokale forensische Analyse unter direkter lokaler Kon
 
 - Atlas-Snapshot = Observation / Evidence, kein Befehl.
 - Merger = lokale Artefakterzeugung aus beobachteten oder bereitgestellten Quellen.
-- rLens = lokaler Service / UI / API, keine öffentliche Control-Plane.
+- RepoGround service = lokaler Service / UI / API, keine öffentliche Control-Plane.
 - Root-Browsing bleibt loopback- und Auth-gated; non-loopback Root-Browsing bleibt verweigert.
 - Secret-Inhalte werden nicht durch Profilnamen freigegeben.

@@ -1,6 +1,6 @@
-# Lenskit Runtime-Matrix
+# RepoGround Runtime-Matrix
 
-Diese Matrix dokumentiert den tatsächlichen, aktuellen Implementierungsstand im Repository (`merger/lenskit/`). Sie erfasst, welche Module welche Artefakte aufnehmen, verarbeiten, ausgeben, und welche Fallback-Pfade oder Fehlerbehandlungsmechanismen existieren.
+Diese Matrix dokumentiert den tatsächlichen, aktuellen Implementierungsstand im Repository (`merger/repoground/`). Sie erfasst, welche Module welche Artefakte aufnehmen, verarbeiten, ausgeben, und welche Fallback-Pfade oder Fehlerbehandlungsmechanismen existieren.
 
 | Modul (Prozess) | Liest (Artefakt / Daten) | Schreibt (Artefakt / Output) | Manifest-Nutzung | Contract-Nutzung | Fallback / Fehlertyp | Stiller oder expliziter Fehler |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -56,7 +56,7 @@ Runtime-Artefakte (`query_trace`, `context_bundle`, `agent_query_session`) trage
 | `gc_mode` | `"not_implemented"` |
 | `deletion_mode` | `"not_supported_by_policy"` |
 
-Die maschinenlesbare Policy liegt in `merger/lenskit/service/runtime_artifact_retention.py` (`policy_id: "runtime-artifact-retention.v1"`, `status: "explicitly_deferred"`).
+Die maschinenlesbare Policy liegt in `merger/repoground/service/runtime_artifact_retention.py` (`policy_id: "runtime-artifact-retention.v1"`, `status: "explicitly_deferred"`).
 
 **Kein GC. Keine TTL. Keine automatische Löschung.**
 Die Policy macht die Deferral-Entscheidung explizit; sie ist keine Cleanup-Engine.

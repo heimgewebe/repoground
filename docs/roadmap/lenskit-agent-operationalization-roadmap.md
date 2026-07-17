@@ -1,4 +1,4 @@
-# Lenskit Agent Operationalization Roadmap
+# RepoGround Agent Operationalization Roadmap
 
 Stand: 2026-06-29
 
@@ -14,7 +14,7 @@ Stand: 2026-06-29
 
 Diese Roadmap pflegt den aktuellen Agent-, Lens-, Graph- und Retrieval-Plan als Planartefakt ins Repo ein. Sie ersetzt keine bestehenden Contracts, Producer, Validatoren oder Proofs. Sie ordnet die offenen Arbeiten danach, was bereits gebaut ist und was noch angeschlossen werden muss.
 
-Leitentscheidung: Lenskit bleibt ein deterministischer Linsenapparat fuer LLMs und Coding Agents. Der Kern erzeugt keine Review-Urteile, keine Patches, keine Commits, keine Embeddings und kein LLM-Reranking. `canonical_md` bleibt einzige Inhaltswahrheit; Sidecars bleiben Navigation, Diagnose, Evidence-Index oder Cache.
+Leitentscheidung: RepoGround bleibt ein deterministischer Linsenapparat fuer LLMs und Coding Agents. Der Kern erzeugt keine Review-Urteile, keine Patches, keine Commits, keine Embeddings und kein LLM-Reranking. `canonical_md` bleibt einzige Inhaltswahrheit; Sidecars bleiben Navigation, Diagnose, Evidence-Index oder Cache.
 
 ## These / Antithese / Synthese
 

@@ -45,7 +45,7 @@ This creates a visible type boundary between "untrusted user input" and "safe fi
 *   **Maintenance**: Filesystem navigation tokens require `RLENS_FS_TOKEN_SECRET` (or `RLENS_TOKEN` fallback) to be managed securely. This signing secret is not bearer authorization.
 
 ## References
-*   `merger/lenskit/adapters/filesystem.py`
-*   `merger/lenskit/adapters/security.py`
-*   `merger/lenskit/service/app.py`
-*   `merger/lenskit/service/auth.py`
+*   `merger/repoground/adapters/filesystem.py`
+*   `merger/repoground/adapters/security.py`
+*   `merger/repoground/service/app.py`
+*   `merger/repoground/service/auth.py`

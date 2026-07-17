@@ -16,7 +16,7 @@ docker run --rm \
   bash --noprofile --norc -euo pipefail -c '
     mkdir -p /tmp/home
     python -m pip install --disable-pip-version-check --require-hashes \
-      -r requirements/repobrief-lock-tools.lock.txt
+      -r requirements/repoground-lock-tools.lock.txt
     for name in runtime dev browser lock-tools; do
       extra=()
       if [[ "$name" == "lock-tools" ]]; then
@@ -28,7 +28,7 @@ docker run --rm \
         --strip-extras \
         --no-emit-index-url \
         "${extra[@]}" \
-        --output-file "requirements/repobrief-${name}.lock.txt" \
-        "requirements/repobrief-${name}.in"
+        --output-file "requirements/repoground-${name}.lock.txt" \
+        "requirements/repoground-${name}.in"
     done
   '

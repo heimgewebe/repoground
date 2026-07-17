@@ -1,4 +1,4 @@
-# Augment Sidecar for lenskit repository
+# Augment sidecar for the RepoGround repository
 # Version: 1.0
 # Purpose: Provide additional context and recommendations for AI agents
 
@@ -7,15 +7,15 @@ augment:
 
   # Hotspots: Areas requiring special attention
   hotspots:
-    - path: merger/lenskit/core/merge.py
+    - path: merger/repoground/core/merge.py
       reason: "Large merge pipeline (>6000 LOC) with branching profile logic"
       severity: "medium"
 
-    - path: merger/lenskit/service/app.py
+    - path: merger/repoground/service/app.py
       reason: "Service entrypoint; auth, SSE streaming and security policies"
       severity: "medium"
 
-    - path: merger/lenskit/cli/cmd_atlas.py
+    - path: merger/repoground/cli/cmd_atlas.py
       reason: "Atlas CLI dispatch with many subcommands and policies"
       severity: "low"
 
@@ -35,7 +35,7 @@ augment:
   dependencies:
     - name: "fastapi"
       required: true
-      purpose: "rLens HTTP service"
+      purpose: "RepoGround HTTP service"
     - name: "pydantic"
       required: true
       purpose: "JobRequest model & validation"
@@ -49,7 +49,7 @@ augment:
       task: "Maintain frontend parity (parity_guard.py)"
       status: "ongoing"
     - priority: 2
-      task: "rLens CLI client maturation (see docs/blueprints/rlens-cli-client-blueprint.md)"
+      task: "RepoGround service client maturation (legacy plan: docs/blueprints/rlens-cli-client-blueprint.md)"
       status: "in-progress"
     - priority: 3
       task: "Improve test coverage for core/merge.py split-mode contracts"
@@ -59,5 +59,5 @@ augment:
   context:
     coding_style: "Python 3.11+, type hints, dataclasses"
     architecture: "Pipeline: scan → chunk → emit (markdown + JSON sidecars); service wraps as jobs"
-    testing: "pytest under merger/lenskit/tests/ and tests/"
+    testing: "pytest under merger/repoground/tests/ and tests/"
     deployment: "CLI + FastAPI service; Pythonista iOS frontend (flat layout)"

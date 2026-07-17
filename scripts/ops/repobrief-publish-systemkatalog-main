@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-exec /home/alex/.local/bin/rb-publish-fleet \
-  --if-changed \
-  --retention 3 \
-  --repo heimgewebe/systemkatalog
+printf '%s\n' 'repobrief-publish-systemkatalog-main is deprecated; use repoground-publish-systemkatalog-main' >&2
+exec "$(dirname "$0")/repoground-publish-systemkatalog-main" "$@"

@@ -1,20 +1,20 @@
-# rLens CLI Client Blueprint
+# RepoGround service CLI Client Blueprint
 
 ## Status
 
 Blueprint / Zielarchitektur / Vor-Implementierungsdokument.
 
-Diese Datei beschreibt den geplanten rLens CLI Client. Sie implementiert nichts und behauptet nicht, dass Remote-Zugriff bereits funktioniert.
+Diese Datei beschreibt den geplanten RepoGround service CLI Client. Sie implementiert nichts und behauptet nicht, dass Remote-Zugriff bereits funktioniert.
 
 ## These
 
-Ein rLens CLI Client soll rLens auf Heim-PC und Heimserver bedienbar machen, ohne WebUI-Zwang und ohne unsichere Netzöffnung.
+Ein RepoGround service CLI Client soll RepoGround service auf Heim-PC und Heimserver bedienbar machen, ohne WebUI-Zwang und ohne unsichere Netzöffnung.
 
 ## Antithese
 
 Ein CLI, das nur `http://127.0.0.1:8787` kennt, funktioniert nur auf dem Host, auf dem rLens selbst läuft. Auf dem Heimserver meint `127.0.0.1` den Heimserver, nicht den Heim-PC.
 
-Außerdem: `merger/lenskit/cli/rlens.py` ist bereits vorhanden und trägt die Bezeichnung „rLens Service Entry Point (Canonical)". Dieses Modul startet den Service — es ist kein HTTP-Client. Agenten dürfen den Launcher nicht still zu einem HTTP-Client umdeuten.
+Außerdem: `merger/repoground/cli/serve.py` ist bereits vorhanden und trägt die Bezeichnung „rLens Service Entry Point (Canonical)". Dieses Modul startet den Service — es ist kein HTTP-Client. Agenten dürfen den Launcher nicht still zu einem HTTP-Client umdeuten.
 
 ## Synthese
 
@@ -24,14 +24,14 @@ Das CLI wird als HTTP-Client mit expliziter Base-URL, Token-Modell und Host-Prof
 
 | Modul | Rolle | Gegenstand dieses Blueprints |
 | --- | --- | --- |
-| `merger/lenskit/cli/rlens.py` | rLens Service Entry Point / Launcher — startet den Service-Prozess | Nein |
-| geplanter CLI Client | HTTP-Client gegen laufende rLens HTTP-API | Ja — Zielarchitektur, keine Implementierung |
+| `merger/repoground/cli/serve.py` | rLens Service Entry Point / Launcher — startet den Service-Prozess | Nein |
+| geplanter CLI Client | HTTP-Client gegen laufende RepoGround service HTTP-API | Ja — Zielarchitektur, keine Implementierung |
 
 Der geplante CLI Client darf den Launcher nicht ersetzen, umbenennen oder neu interpretieren.
 
 ## Ziel
 
-- Read-only CLI Client für die bestehende rLens HTTP-API.
+- Read-only CLI Client für die bestehende RepoGround service HTTP-API.
 - Nutzbar auf Heim-PC und Heimserver.
 - Geeignet für Diagnose, Artefaktprüfung, Jobsicht und spätere Automation.
 - Kein Ersatz für den bestehenden Service-Launcher.
@@ -44,14 +44,14 @@ Der geplante CLI Client darf den Launcher nicht ersetzen, umbenennen oder neu in
 - Kein Port-Forwarding.
 - Kein Internet-Ingress.
 - Keine Secrets im Repo.
-- Keine Vermischung mit `merger/lenskit/cli/rlens.py`, solange dieses Modul Service Entry Point bleibt.
+- Keine Vermischung mit `merger/repoground/cli/serve.py`, solange dieses Modul Service Entry Point bleibt.
 
 ## Maschinenmodell
 
-| Maschine | Rolle | Möglicher rLens-Modus | CLI-Folge |
+| Maschine | Rolle | Möglicher RepoGround service-Modus | CLI-Folge |
 | --- | --- | --- | --- |
 | Heim-PC | Interaction Layer | rLens lokal | Default `http://127.0.0.1:8787` sinnvoll |
-| Heimserver | Service Layer | rLens lokal oder Client zu anderem Host | Base-URL muss explizit gesetzt werden |
+| Heimserver | Service Layer | RepoGround service lokal oder Client zu anderem Host | Base-URL muss explizit gesetzt werden |
 | iPad / Access Layer | Bedienoberfläche | kein primärer Service-Host | später optional nur via SSH/Blink/Browser |
 
 ## Verbindungsmodell
@@ -59,18 +59,18 @@ Der geplante CLI Client darf den Launcher nicht ersetzen, umbenennen oder neu in
 ### Profil `local`
 
 - `RLENS_BASE_URL=http://127.0.0.1:8787`
-- gilt nur für den Host, auf dem rLens läuft
+- gilt nur für den Host, auf dem RepoGround service läuft
 
 ### Profil `heim-pc`
 
 - `RLENS_BASE_URL=http://heim-pc:8787` oder Tailnet-Name
-- funktioniert nur, wenn rLens nicht ausschließlich an Loopback gebunden ist oder ein Tunnel existiert
+- funktioniert nur, wenn RepoGround service nicht ausschließlich an Loopback gebunden ist oder ein Tunnel existiert
 - Blueprint darf Remote-Erreichbarkeit nicht behaupten
 
 ### Profil `heimserver`
 
 - lokal: `http://127.0.0.1:8787`, falls rLens auf Heimserver läuft
-- remote: explizite Base-URL zu Heim-PC oder anderem rLens-Host
+- remote: explizite Base-URL zu Heim-PC oder anderem RepoGround service-Host
 
 ## Sicherheitsmodell
 
@@ -154,13 +154,13 @@ Heim-PC lokal:
 RLENS_BASE_URL=http://127.0.0.1:8787 lenskit rlens-client health --json
 ```
 
-Heimserver mit eigenem lokalem rLens:
+Heimserver mit eigenem lokalem RepoGround service:
 
 ```bash
 RLENS_BASE_URL=http://127.0.0.1:8787 lenskit rlens-client health --json
 ```
 
-Heimserver als Client zu Heim-PC (nur wenn rLens auf Heim-PC erreichbar gemacht wurde oder ein Tunnel existiert):
+Heimserver als Client zu Heim-PC (nur wenn RepoGround service auf Heim-PC erreichbar gemacht wurde oder ein Tunnel existiert):
 
 ```bash
 RLENS_BASE_URL=http://heim-pc:8787 lenskit rlens-client health --json
@@ -168,7 +168,7 @@ RLENS_BASE_URL=http://heim-pc:8787 lenskit rlens-client health --json
 
 ## Offene Entscheidungsfragen
 
-1. Soll rLens auf Heimserver selbst laufen?
+1. Soll RepoGround service auf Heimserver selbst laufen?
 2. Soll Heimserver nur Client zu Heim-PC sein?
 3. Soll Remote-Zugriff über Tailscale, LAN-DNS oder SSH-Tunnel laufen?
 4. Bleibt `RLENS_BASE_URL=http://127.0.0.1:8787` der Client-Default? (`RLENS_HOST` bleibt Launcher-/Service-Konfiguration und ist nicht die Client-Base-URL.)
@@ -190,12 +190,12 @@ RLENS_BASE_URL=http://heim-pc:8787 lenskit rlens-client health --json
 
 Umgesetzt:
 
-- `merger/lenskit/cli/cmd_rlens_client.py` — HTTP-Client ohne neue Dependency
+- `merger/repoground/cli/cmd_rlens_client.py` — HTTP-Client ohne neue Dependency
 - Commands: `health`, `artifacts`, `latest --repo REPO`
 - Base-URL-Priorität: `--base-url` > `RLENS_BASE_URL` > `http://127.0.0.1:8787`
 - Bearer-Token-Auth: `--token` > `RLENS_TOKEN`; Token nie als Query-Parameter
 - Token-Redaction in allen Fehlerausgaben
-- Tests: `merger/lenskit/tests/test_cli_rlens_client.py` (44 Tests, kein echter Server)
+- Tests: `merger/repoground/tests/test_cli_rlens_client.py` (44 Tests, kein echter Server)
 
 Offen (folgende PRs):
 
@@ -251,7 +251,7 @@ Umgesetzt:
   - Explizit angefordertes Profil wird nie still ignoriert, auch nicht bei `--base-url`/`RLENS_BASE_URL`-Override -> `config_error`
   - Kein Profil/keine Config -> stiller Fallback auf Default
   - Profile-Listing gibt nur `base_url` und `token_env`-Name zurück, niemals Werte
-- Tests: `merger/lenskit/tests/test_cli_rlens_client.py` (74 Tests, davon 29 für PR D)
+- Tests: `merger/repoground/tests/test_cli_rlens_client.py` (74 Tests, davon 29 für PR D)
 
 Heim-PC/Heimserver-Betriebsentscheidung bleibt offen — der Profile-Mechanismus erleichtert nur die Konfiguration, behauptet keine Erreichbarkeit.
 
@@ -270,7 +270,7 @@ Status: umgesetzt.
   - `job_id` wird als Pfadsegment URL-encodiert.
   - Base-URL-/Profilvalidierung bleibt vor Netzwerkzugriff aktiv.
   - Remote-/HTTP-/Parse-Fehler liefern Exit-Code 1; lokale Config-/Input-Fehler liefern Exit-Code 2.
-- Tests: `merger/lenskit/tests/test_cli_rlens_client.py` deckt POST-Methode, Payload, Text-/JSON-Ausgabe, URL-Encoding, Token-Header und Fehler-Redaction ab.
+- Tests: `merger/repoground/tests/test_cli_rlens_client.py` deckt POST-Methode, Payload, Text-/JSON-Ausgabe, URL-Encoding, Token-Header und Fehler-Redaction ab.
 
 ## Akzeptanzkriterien für PR B
 
@@ -281,4 +281,4 @@ Status: umgesetzt.
 - Token erscheint nicht in Fehlerausgaben.
 - Netzwerkfehler liefern Exit-Code 1.
 - Config/Input-Fehler liefern Exit-Code 2.
-- Tests nutzen keine echte lokale rLens-Instanz.
+- Tests nutzen keine echte lokale RepoGround service-Instanz.

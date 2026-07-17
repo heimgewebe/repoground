@@ -71,7 +71,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from merger.lenskit.core.merge import ExtrasConfig, scan_repo, write_reports_v2
+from merger.repoground.core.merge import ExtrasConfig, scan_repo, write_reports_v2
 
 workdir = Path(sys.argv[1]).resolve()
 manifest_ref = Path(sys.argv[2])
@@ -85,7 +85,7 @@ REQUIRED_ROLES = {
 
 # Minimal, schema-valid doc-freshness registry (doc-freshness-registry v1.0).
 # produce_claim_evidence_map() validates this against
-# merger/lenskit/contracts/doc-freshness-registry.v1.schema.json. Embedding it
+# merger/repoground/contracts/doc-freshness-registry.v1.schema.json. Embedding it
 # keeps the canary deterministic and independent of the repo's own registry.
 REGISTRY_YAML = """\
 kind: lenskit.doc_freshness_registry
@@ -226,7 +226,7 @@ echo "MANIFEST=${MANIFEST}"
 #    exits non-zero (blocked/fail still emit a machine-readable report) so the
 #    artifact is always available for upload and the diagnosis stays precise.
 set +e
-python3 -m merger.lenskit.cli.main governance forensic-preflight \
+python3 -m merger.repoground.cli.main governance forensic-preflight \
   --manifest "${MANIFEST}" \
   --json > "${ARTIFACT_JSON}"
 cli_exit=$?

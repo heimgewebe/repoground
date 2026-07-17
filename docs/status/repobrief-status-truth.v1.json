@@ -1,5 +1,5 @@
 {
-  "$schema": "../../merger/lenskit/contracts/repobrief-status-truth.v1.schema.json",
+  "$schema": "../../merger/repoground/contracts/repobrief-status-truth.v1.schema.json",
   "audit_package_coverage": "selected_remediation_packages",
   "audit_packages": [
     {
@@ -164,7 +164,7 @@
     {
       "canonical_task_status": false,
       "checkbox_semantics": "item_local",
-      "path": "docs/lenskit-upgrade-blaupause.md",
+      "path": "docs/repoground-upgrade-blaupause.md",
       "phase_gate_independent": true,
       "required_markers": [
         "Kanonische Taskstatus: `docs/tasks/index.json`",
@@ -176,7 +176,7 @@
     {
       "canonical_task_status": false,
       "checkbox_semantics": "item_local",
-      "path": "docs/roadmap/lenskit-master-roadmap.md",
+      "path": "docs/roadmap/repoground-master-roadmap.md",
       "phase_gate_independent": true,
       "required_markers": [
         "Kanonische Taskstatus: `docs/tasks/index.json`",

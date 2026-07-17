@@ -13,36 +13,36 @@ on:
   push:
     branches: [ "main", "master" ]
     paths:
-      - "merger/lenskit/core/doc_freshness.py"
-      - "merger/lenskit/cli/cmd_doc_freshness.py"
-      - "merger/lenskit/cli/main.py"
-      - "merger/lenskit/contracts/doc-freshness-registry.v1.schema.json"
+      - "merger/repoground/core/doc_freshness.py"
+      - "merger/repoground/cli/cmd_doc_freshness.py"
+      - "merger/repoground/cli/main.py"
+      - "merger/repoground/contracts/doc-freshness-registry.v1.schema.json"
       - "docs/doc-freshness-registry.yml"
       - "docs/_generated/doc-freshness.md"
-      - "merger/lenskit/tests/test_doc_freshness.py"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/tests/test_doc_freshness.py"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/doc-freshness.yml"
-      - "merger/lenskit/repoLens-spec.md"
+      - "merger/repoground/repoLens-spec.md"
       - "docs/**.md"
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
   pull_request:
     branches: [ "main", "master" ]
     paths:
-      - "merger/lenskit/core/doc_freshness.py"
-      - "merger/lenskit/cli/cmd_doc_freshness.py"
-      - "merger/lenskit/cli/main.py"
-      - "merger/lenskit/contracts/doc-freshness-registry.v1.schema.json"
+      - "merger/repoground/core/doc_freshness.py"
+      - "merger/repoground/cli/cmd_doc_freshness.py"
+      - "merger/repoground/cli/main.py"
+      - "merger/repoground/contracts/doc-freshness-registry.v1.schema.json"
       - "docs/doc-freshness-registry.yml"
       - "docs/_generated/doc-freshness.md"
-      - "merger/lenskit/tests/test_doc_freshness.py"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/tests/test_doc_freshness.py"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/doc-freshness.yml"
-      - "merger/lenskit/repoLens-spec.md"
+      - "merger/repoground/repoLens-spec.md"
       - "docs/**.md"
 
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
 permissions:
   contents: read
 
@@ -59,16 +59,16 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
       - name: Doc-freshness inspect (diagnostic, non-blocking)
         # Surfaces drift in the run log without failing the build (v0). Exit 1
         # on findings is expected and tolerated here.
         continue-on-error: true
-        run: python -m merger.lenskit.cli.main doc-freshness inspect
+        run: python -m merger.repoground.cli.main doc-freshness inspect
 
       - name: Doc-freshness unit/schema tests (blocking)
-        run: pytest -q merger/lenskit/tests/test_doc_freshness.py -m "not doc_freshness_live"
+        run: pytest -q merger/repoground/tests/test_doc_freshness.py -m "not doc_freshness_live"
 
       - name: Live registry verification (diagnostic, non-blocking)
         # Runs the real-registry tests against the live tree. Non-blocking for
@@ -77,7 +77,7 @@ jobs:
         # than hard build failures. Promotion to blocking is the documented
         # next slice (docs/proofs/doc-freshness-registry-v0-proof.md §7).
         continue-on-error: true
-        run: pytest -q merger/lenskit/tests/test_doc_freshness.py -m doc_freshness_live
+        run: pytest -q merger/repoground/tests/test_doc_freshness.py -m doc_freshness_live
 
       - name: Generated view in sync (diagnostic, non-blocking)
         # docs/_generated/doc-freshness.md must match a fresh regeneration from
@@ -85,5 +85,5 @@ jobs:
         # Use --no-stamp to avoid date-based registry mutations during CI sync checks.
         continue-on-error: true
         run: |
-          python -m merger.lenskit.cli.main doc-freshness update --write --no-stamp
+          python -m merger.repoground.cli.main doc-freshness update --write --no-stamp
           git diff --exit-code docs/_generated/doc-freshness.md docs/doc-freshness-registry.yml

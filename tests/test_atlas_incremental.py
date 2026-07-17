@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from merger.lenskit.adapters.atlas import AtlasScanner
+from merger.repoground.adapters.atlas import AtlasScanner
 
 def test_incremental_scan_reuses_unchanged_files(tmp_path: Path):
     # Setup test directory
@@ -338,7 +338,7 @@ def test_incremental_scan_directory_aggregates_rollup(tmp_path: Path):
     assert "child_dir_hashes" not in gc
 
 def test_recursive_hash_determinism_and_bubbling(tmp_path: Path):
-    from merger.lenskit.adapters.atlas import AtlasScanner
+    from merger.repoground.adapters.atlas import AtlasScanner
     import json
 
     root_dir = tmp_path / "test_root_recursive_hash"

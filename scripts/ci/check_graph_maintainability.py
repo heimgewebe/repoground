@@ -17,7 +17,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from merger.lenskit.architecture.graph_maintainability import (  # noqa: E402
+from merger.repoground.architecture.graph_maintainability import (  # noqa: E402
     evaluate_graph_policy,
     measure_graph_maintainability,
 )

@@ -1,10 +1,10 @@
-# RepoBrief Agent Impact Context v1
+# RepoGround Agent Impact Context v1
 
 ## Entscheidung
 
 RepoBrief übernimmt ausgewählte Ideen aus `codegraph-ai/CodeGraph`, aber nicht
-das Produkt als zweiten Dienst. Lenskit bleibt die einzige Bundle-, Provenienz-
-und Agenten-Frontdoor. Die Fläche projiziert vorhandene Lenskit-Artefakte
+das Produkt als zweiten Dienst. RepoGround bleibt die einzige Bundle-, Provenienz-
+und Agenten-Frontdoor. Die Fläche projiziert vorhandene RepoGround-Artefakte
 read-only zu einem kompakten Arbeitskontext.
 
 Übernommen werden:
@@ -25,16 +25,16 @@ Nicht übernommen werden:
 
 ## Komponenten
 
-- `merger/lenskit/core/agent_impact_context.py`
+- `merger/repoground/core/agent_impact_context.py`
   erzeugt die reine deterministische Graph-/Symbolprojektion.
-- `merger/lenskit/core/agent_impact_refinement.py`
+- `merger/repoground/core/agent_impact_refinement.py`
   ergänzt bereits aufgelöste Query-Treffer als eigenständige
   Navigationsevidenz, ohne sie zu Graphkanten oder Coverage hochzustufen.
-- `merger/lenskit/core/repobrief_agent_impact_adapter.py`
+- `merger/repoground/core/repobrief_agent_impact_adapter.py`
   liest nur ausdrücklich registrierte und integritätsgeprüfte Bundle-Artefakte.
-- `merger/lenskit/cli/agent_impact.py`
+- `merger/repoground/cli/agent_impact.py`
   stellt die opt-in Kommandozeilenfläche bereit.
-- `merger/lenskit/core/agent_impact_eval.py`
+- `merger/repoground/core/agent_impact_eval.py`
   misst festen Goldset-Recall und Kontextkompression, ohne eine
   Standardbeförderung auszulösen.
 
@@ -99,7 +99,7 @@ Damit bedeutet:
 ## Nutzung
 
 ```bash
-python -m merger.lenskit.cli.agent_impact \
+python -m merger.repoground.cli.agent_impact \
   --config /path/to/repobrief-readonly-adapter.json \
   --snapshot-id lenskit-main \
   --target-symbol build_agent_impact_context \

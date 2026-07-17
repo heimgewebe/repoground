@@ -4,12 +4,12 @@ status: active
 task: TASK-AGENT-FRONTDOOR-001
 ---
 
-# Lenskit Agent Front-Door Hardening Blueprint
+# RepoGround Agent Front-Door Hardening Blueprint
 
 ## 0. Dokumentrolle und Einordnung
 
 Dieser Blueprint ordnet die vollständige Roadmap für Front-Door-Härtung,
-Nutzungsdisziplin und spätere deterministische Linsen in die bestehende Lenskit-
+Nutzungsdisziplin und spätere deterministische Linsen in die bestehende RepoGround-
 Architektur ein. Er ist ein **Planungsartefakt**, keine Implementierungs- oder
 Runtime-Evidence.
 
@@ -29,7 +29,7 @@ Er ersetzt keine bestehenden Fachblueprints:
 
 Der Blueprint ergänzt diese Dokumente um eine noch fehlende Frage: **Wie wird die
 vorhandene agent-facing Oberfläche so benutzt, dass Agents nicht bei linearem Lesen von
-`canonical_md` stehen bleiben, ohne dass Lenskit selbst zum Agenten, Reviewer oder
+`canonical_md` stehen bleiben, ohne dass RepoGround selbst zum Agenten, Reviewer oder
 Wahrheitsbewerter wird?**
 
 Dieser Blueprint-PR ändert keine Producer, Contracts, Pipelines, Health-Gates, Services,
@@ -40,7 +40,7 @@ begrenzten Folge-PR.
 
 ### These
 
-Lenskit braucht zuerst keine neue Sidecar-Familie. Der größte kurzfristige Hebel ist die
+RepoGround braucht zuerst keine neue Sidecar-Familie. Der größte kurzfristige Hebel ist die
 vorhandene Front Door: Das Agent Reading Pack muss task-spezifisch erklären, welche
 bereits vorhandenen Artefakte zu lesen sind und welche Aussagen daraus nicht folgen.
 
@@ -63,11 +63,11 @@ Reading-, Answer-Compliance- oder Consumption-Contracts sinnvoll werden.
 
 ## 2. Zielbild
 
-Lenskit soll normale LLMs und Coding Agents bei Repo-Fragen, belegorientierten
+RepoGround soll normale LLMs und Coding Agents bei Repo-Fragen, belegorientierten
 PR-Reviews und späteren Patch-Vorbereitungen unterstützen, ohne selbst Agent, Reviewer
 oder Patch-Automat zu werden.
 
-### 2.1 Lenskit bleibt
+### 2.1 RepoGround bleibt
 
 - deterministisch
 - read-first
@@ -80,7 +80,7 @@ oder Patch-Automat zu werden.
 - ohne Embedding-Pflicht
 - ohne automatische Review-Urteile
 
-### 2.2 Lenskit erzeugt oder adressiert
+### 2.2 RepoGround erzeugt oder adressiert
 
 - eine kanonische Repo-Sicht
 - Navigation und Artifact-Role-Grenzen
@@ -90,7 +90,7 @@ oder Patch-Automat zu werden.
 - task-spezifische Leseregeln
 - später, nach eigenen Gates: Facets, Lens Cards und Relation Cards
 
-### 2.3 Lenskit erzeugt nicht
+### 2.3 RepoGround erzeugt nicht
 
 - Inhaltswahrheit außerhalb `canonical_md`
 - automatische PR-Findings oder Review-Verdicts
@@ -142,9 +142,9 @@ Das versionierte Review-Goldset, der Metrikadapter, die reproduzierbaren
 Metriken und die Miss-Diagnostik sind implementiert.
 Belege:
 - `docs/retrieval/review_queries.v1.json`
-- `merger/lenskit/retrieval/review_eval.py`
-- `merger/lenskit/tests/test_review_retrieval_goldset.py`
-- `merger/lenskit/tests/test_review_retrieval_metrics.py`
+- `merger/repoground/retrieval/review_eval.py`
+- `merger/repoground/tests/test_review_retrieval_goldset.py`
+- `merger/repoground/tests/test_review_retrieval_metrics.py`
 - `docs/diagnostics/review-retrieval-baseline.md`
 Konkrete Metrikwerte werden gegen einen gewählten Index reproduziert und
 nicht als zeitlose Leistungszahlen dieses Blueprints festgeschrieben.
@@ -154,14 +154,14 @@ semantische Abdeckung.
 
 ## 4. Problem
 
-Lenskit besitzt bereits nützliche Navigations-, Evidence- und Diagnoseflächen. Lesende
+RepoGround besitzt bereits nützliche Navigations-, Evidence- und Diagnoseflächen. Lesende
 LLMs oder Coding Agents können diese Flächen trotzdem ignorieren und ausschließlich
 `canonical_md` linear lesen. Dann bleiben vorhandene Belegadressen, Surface-Diagnosen,
 Claim-Grenzen und Retrieval-Metriken praktisch ungenutzt.
 
-Das primäre Problem lautet deshalb nicht „Lenskit hat zu wenig Artefakte“, sondern:
+Das primäre Problem lautet deshalb nicht „RepoGround hat zu wenig Artefakte“, sondern:
 
-> Lenskit hat eine umfangreiche agent-facing Oberfläche, aber noch keine ausreichend
+> RepoGround hat eine umfangreiche agent-facing Oberfläche, aber noch keine ausreichend
 > sichtbare, task-spezifische Front Door für deren disziplinierte Nutzung.
 
 ## 5. Architekturprinzipien
@@ -234,7 +234,7 @@ Primary Lens IDs.
 2. Das Agent Reading Pack bleibt `navigation_index` / `derived`.
 3. Sidecars bleiben rollenabhängig Navigation, Diagnose, Index oder Cache.
 4. Kein Health- oder Surface-Pass wird als Antwortsicherheit interpretiert.
-5. Kein Slice führt freie Modellinterpretation in einen Lenskit-Producer ein.
+5. Kein Slice führt freie Modellinterpretation in einen RepoGround-Producer ein.
 6. Keine neue maschinenlesbare Fläche wird nur aus Zukunftsvermutung eingeführt.
 7. Jeder Slice wird separat registriert und darf höchstens ein neues Subsystem bauen.
 
@@ -310,16 +310,16 @@ Pflichtlektüre und epistemische Grenzen.
 **Voraussichtlich betroffene Dateien:**
 
 ```text
-merger/lenskit/core/agent_reading_pack.py
-merger/lenskit/tests/test_agent_reading_pack.py
-merger/lenskit/tests/test_cli_agent_pack.py
+merger/repoground/core/agent_reading_pack.py
+merger/repoground/tests/test_agent_reading_pack.py
+merger/repoground/tests/test_cli_agent_pack.py
 docs/proofs/agent-reading-pack-producer-proof.md
 ```
 
 Optional darf ein fokussierter Test hinzukommen:
 
 ```text
-merger/lenskit/tests/test_agent_reading_pack_usage_rules.py
+merger/repoground/tests/test_agent_reading_pack_usage_rules.py
 ```
 
 **Neue Pack-Abschnitte:**
@@ -366,7 +366,7 @@ wenn seine Abwesenheits- und Capability-Semantik für das Profil geklärt ist.
 **Minimale `ANSWER_COMPLIANCE_CHECKLIST`:**
 
 ```text
-Lenskit consumption:
+RepoGround consumption:
 - task_profile:
 - required_artifacts_checked:
 - sidecars_used:
@@ -421,7 +421,7 @@ nicht, dass ein Agent sie befolgt hat.
 **Geplanter Hauptpfad:**
 
 ```text
-merger/lenskit/tests/test_agent_reading_pack_usage_rules.py
+merger/repoground/tests/test_agent_reading_pack_usage_rules.py
 ```
 
 **Checks:**
@@ -439,7 +439,7 @@ merger/lenskit/tests/test_agent_reading_pack_usage_rules.py
 **Optionaler späterer CLI-Check:**
 
 ```text
-python -m merger.lenskit.cli.main agent-pack inspect --pack <path> --json
+python -m merger.repoground.cli.main agent-pack inspect --pack <path> --json
 ```
 
 Ein CLI-Subcommand ist nur zulässig, wenn er eine echte Consumer-Lücke schließt. Er ist
@@ -458,9 +458,9 @@ Tests erkannt.
 sind implementiert.
 **Belege:**
 - `docs/retrieval/review_queries.v1.json`
-- `merger/lenskit/retrieval/review_eval.py`
-- `merger/lenskit/tests/test_review_retrieval_goldset.py`
-- `merger/lenskit/tests/test_review_retrieval_metrics.py`
+- `merger/repoground/retrieval/review_eval.py`
+- `merger/repoground/tests/test_review_retrieval_goldset.py`
+- `merger/repoground/tests/test_review_retrieval_metrics.py`
 - `docs/diagnostics/review-retrieval-baseline.md`
 **Bewusst nicht Teil des abgeschlossenen Slices:**
 - kein neuer Goldset-Contract
@@ -537,7 +537,7 @@ Capability-/Abwesenheitssemantik, Sidecar Authority, Compliance Checklist und Be
 **Tests, falls das Repo-Muster einen Doc-Guard rechtfertigt:**
 
 ```text
-merger/lenskit/tests/test_required_reading_protocol_doc.py
+merger/repoground/tests/test_required_reading_protocol_doc.py
 ```
 
 **Akzeptanz:** Alle stabilisierten Profile und ihre Negativsemantik sind dokumentiert;
@@ -555,10 +555,10 @@ ohne daraus Antwort- oder Truth-Gates zu machen.
 **Voraussichtlich betroffene Dateien:**
 
 ```text
-merger/lenskit/core/post_emit_health.py
-merger/lenskit/core/bundle_surface_validate.py
-merger/lenskit/tests/test_post_emit_health.py
-merger/lenskit/tests/test_bundle_surface_validate.py
+merger/repoground/core/post_emit_health.py
+merger/repoground/core/bundle_surface_validate.py
+merger/repoground/tests/test_post_emit_health.py
+merger/repoground/tests/test_bundle_surface_validate.py
 ```
 
 **Bestehende harte Grenzen bleiben:** fehlendes erforderliches Pack, falsche
@@ -583,11 +583,11 @@ der Slice gestoppt und neu geplant.
 **Status:** Required Reading Protocol, Resolver, fokussierte Tests und der
 CLI-Lesepfad sind implementiert.
 **Belege:**
-- `merger/lenskit/contracts/required-reading-protocol.v1.schema.json`
-- `merger/lenskit/core/required_reading.py`
-- `merger/lenskit/tests/test_required_reading_protocol.py`
-- `merger/lenskit/cli/cmd_agent_consumption.py`
-- `merger/lenskit/cli/main.py`
+- `merger/repoground/contracts/required-reading-protocol.v1.schema.json`
+- `merger/repoground/core/required_reading.py`
+- `merger/repoground/tests/test_required_reading_protocol.py`
+- `merger/repoground/cli/cmd_agent_consumption.py`
+- `merger/repoground/cli/main.py`
 **Weiterhin offen:**
 - harte Durchsetzung in Consumer- oder Export-Gates
 - automatische Bundle-Integration
@@ -610,9 +610,9 @@ Profile werden konservativ behandelt.
 **Status:** Answer Compliance Contract, Architekturgrenzen und fokussierte
 Tests sind implementiert.
 **Belege:**
-- `merger/lenskit/contracts/answer-compliance.v1.schema.json`
+- `merger/repoground/contracts/answer-compliance.v1.schema.json`
 - `docs/architecture/answer-compliance.md`
-- `merger/lenskit/tests/test_answer_compliance_schema.py`
+- `merger/repoground/tests/test_answer_compliance_schema.py`
 **Geltungsgrenze:**
 Answer Compliance ist eine deklarative Selbstauskunft über verwendete
 Artefakte, Citations, Ranges und epistemische Lücken.
@@ -630,12 +630,12 @@ Antwortkorrektheit oder Repo-Verständnis.
 **Status:** Agent Consumption Trace Contract, Validator, Strict-Mode,
 Exit-Code-Policy, fokussierte Tests und CLI sind implementiert.
 **Belege:**
-- `merger/lenskit/contracts/agent-consumption-trace.v1.schema.json`
-- `merger/lenskit/core/agent_consumption_validate.py`
-- `merger/lenskit/tests/test_agent_consumption_trace.py`
-- `merger/lenskit/cli/cmd_agent_consumption.py`
-- `merger/lenskit/cli/main.py`
-- `merger/lenskit/tests/test_cli_agent_consumption.py`
+- `merger/repoground/contracts/agent-consumption-trace.v1.schema.json`
+- `merger/repoground/core/agent_consumption_validate.py`
+- `merger/repoground/tests/test_agent_consumption_trace.py`
+- `merger/repoground/cli/cmd_agent_consumption.py`
+- `merger/repoground/cli/main.py`
+- `merger/repoground/tests/test_cli_agent_consumption.py`
 **Weiterhin offen:**
 - automatische Bundle-Emission
 - Einbindung in Output Health oder Post-Emit Health
@@ -653,9 +653,9 @@ Repo-Verständnis.
 **Status:** Agent Entry Manifest Contract, Core-Producer und fokussierte
 Tests sind implementiert.
 **Belege:**
-- `merger/lenskit/contracts/agent-entry-manifest.v1.schema.json`
-- `merger/lenskit/core/agent_entry_manifest.py`
-- `merger/lenskit/tests/test_agent_entry_manifest.py`
+- `merger/repoground/contracts/agent-entry-manifest.v1.schema.json`
+- `merger/repoground/core/agent_entry_manifest.py`
+- `merger/repoground/tests/test_agent_entry_manifest.py`
 **Weiterhin offen:**
 - eigener CLI-Befehl
 - automatische Bundle-Emission
@@ -675,9 +675,9 @@ prüfbar machen, ohne IDs oder Prioritäten zu ändern.
 **Status:** Contract, Core Producer und fokussierte Tests sind implementiert.
 
 **Belege (Evidence):**
-- `merger/lenskit/contracts/primary-lens-audit.v1.schema.json`
-- `merger/lenskit/core/lens_audit.py`
-- `merger/lenskit/tests/test_primary_lens_audit.py`
+- `merger/repoground/contracts/primary-lens-audit.v1.schema.json`
+- `merger/repoground/core/lens_audit.py`
+- `merger/repoground/tests/test_primary_lens_audit.py`
 
 **Bewusst nicht Teil des abgeschlossenen Slices:**
 
@@ -706,9 +706,9 @@ zu verändern.
 ### Slice 11 — Facet Model v1
 
 **Status:** Contract/Core/Tests umgesetzt
-(`merger/lenskit/contracts/lens-facet.v1.schema.json`,
-`merger/lenskit/core/lens_facets.py`,
-`merger/lenskit/tests/test_lens_facets.py`; Proof
+(`merger/repoground/contracts/lens-facet.v1.schema.json`,
+`merger/repoground/core/lens_facets.py`,
+`merger/repoground/tests/test_lens_facets.py`; Proof
 `docs/proofs/facet-model-v1-proof.md`, Task `TASK-LENS-FACET-001`).
 Umgesetzte v1-Taxonomie: `contract`, `test`, `retrieval` — bewusst klein;
 `test` ist die engere additive Form von `test_guard`, die übrigen Kandidaten
@@ -729,9 +729,9 @@ einhalten.
 **Planungskandidaten:**
 
 ```text
-merger/lenskit/contracts/lens-facet.v1.schema.json
-merger/lenskit/core/lens_facets.py
-merger/lenskit/tests/test_lens_facets.py
+merger/repoground/contracts/lens-facet.v1.schema.json
+merger/repoground/core/lens_facets.py
+merger/repoground/tests/test_lens_facets.py
 ```
 
 **Regeln:** mehrere Facets pro Datei; genau eine Primary Lens; Facets sind Navigation;
@@ -749,11 +749,11 @@ nicht als semantische Wahrheit oder Review-Priorität behandelt.
 ### Slice 12 — Lens Cards v1
 
 **Status:** Contract/Core/Validation/Tests umgesetzt
-(`merger/lenskit/contracts/lens-card.v1.schema.json`,
-`merger/lenskit/core/lens_cards.py`,
-`merger/lenskit/core/lens_card_validate.py`,
-`merger/lenskit/tests/test_lens_cards.py`,
-`merger/lenskit/tests/test_lens_card_validate.py`; Proof
+(`merger/repoground/contracts/lens-card.v1.schema.json`,
+`merger/repoground/core/lens_cards.py`,
+`merger/repoground/core/lens_card_validate.py`,
+`merger/repoground/tests/test_lens_cards.py`,
+`merger/repoground/tests/test_lens_card_validate.py`; Proof
 `docs/proofs/lens-card-v1-proof.md`, Task `TASK-LENS-CARD-001`).
 
 **Ziel:** Kleine agentenlesbare Navigationseinheiten aus Primary Lens und Facets erzeugen.
@@ -770,10 +770,10 @@ Die Card ist `authority=navigation_index` und
 **Planungskandidaten:**
 
 ```text
-merger/lenskit/contracts/lens-card.v1.schema.json
-merger/lenskit/core/lens_cards.py
-merger/lenskit/core/lens_card_validate.py
-merger/lenskit/tests/test_lens_cards.py
+merger/repoground/contracts/lens-card.v1.schema.json
+merger/repoground/core/lens_cards.py
+merger/repoground/core/lens_card_validate.py
+merger/repoground/tests/test_lens_cards.py
 ```
 
 **Umgesetzter Mindestinhalt:** Pfad, Primary Lens, `matched_rule`, Facets als
@@ -808,11 +808,11 @@ noch Review-Priorität.
 ### Slice 13 — PR Delta Cards v1
 
 **Status:** umgesetzt, gemergt und post-merge verifiziert
-(`merger/lenskit/contracts/pr-delta-card.v1.schema.json`,
-`merger/lenskit/core/pr_delta_cards.py`,
-`merger/lenskit/core/pr_delta_card_validate.py`,
-`merger/lenskit/tests/test_pr_delta_cards.py`,
-`merger/lenskit/tests/test_pr_delta_card_validate.py`; Proof
+(`merger/repoground/contracts/pr-delta-card.v1.schema.json`,
+`merger/repoground/core/pr_delta_cards.py`,
+`merger/repoground/core/pr_delta_card_validate.py`,
+`merger/repoground/tests/test_pr_delta_cards.py`,
+`merger/repoground/tests/test_pr_delta_card_validate.py`; Proof
 `docs/proofs/pr-delta-cards-gap-report.md`, `docs/proofs/pr-delta-cards-v1-post-merge-proof.md`, Task `TASK-PR-DELTA-CARD-001`).
 
 **Ziel:** Bereits vorhandene PR-Schau-/Delta-Daten kontrolliert auf die Lens-Card-Produktion projizieren.
@@ -856,11 +856,11 @@ Relation Cards) und bleiben dort.
 **Umgesetzte Dateien:**
 
 ```text
-merger/lenskit/contracts/relation-card.v1.schema.json
-merger/lenskit/core/relation_cards.py
-merger/lenskit/core/relation_card_validate.py
-merger/lenskit/tests/test_relation_cards.py
-merger/lenskit/tests/test_relation_card_validate.py
+merger/repoground/contracts/relation-card.v1.schema.json
+merger/repoground/core/relation_cards.py
+merger/repoground/core/relation_card_validate.py
+merger/repoground/tests/test_relation_cards.py
+merger/repoground/tests/test_relation_card_validate.py
 ```
 
 **Pflichtgrenzen:** Relations etablieren keine Kausalität, Runtime-Abhängigkeit,
@@ -888,7 +888,7 @@ stdlib-import-geprüftes `infer_facets`), verfolgt Bindungen scope- und
 quellreihenfolgeabhängig und trennt statisch belegte (`derived_ast`) von
 loader- oder parameterindirekten (`manual_source_review`) Callsites, leitet alle Aggregate ab
 und prüft das Flow-Manifest fail-closed; Falsifikationstests
-(`merger/lenskit/tests/test_guard_relation_validates_schema_audit.py`) und ein
+(`merger/repoground/tests/test_guard_relation_validates_schema_audit.py`) und ein
 eigener CI-Job (`validates-schema-target-proof`, `fetch-depth: 0`) belegen, dass
 manipulierte Manifeste abgelehnt werden. Ein persistierter Contract wird mangels
 verbindlichem Consumer und belegtem Persistenzvorteil zurückgestellt. Die übrigen
@@ -951,7 +951,7 @@ Jede neue agent-facing Fläche enthält eine repo-konforme Form von
 
 ### Gate E — Determinism
 
-Gleicher Bundle-Zustand und gleiche Inputs erzeugen gleiche Lenskit-Ausgaben. Freie
+Gleicher Bundle-Zustand und gleiche Inputs erzeugen gleiche RepoGround-Ausgaben. Freie
 Modellinterpretation ist kein Producer-Schritt.
 
 ### Gate F — No LLM / No Embedding
@@ -1077,37 +1077,37 @@ Exact shape: see `docs/retrieval/review_queries.v1.json`.
 ### 15.2 Required Reading Protocol
 
 Exact shape: see the canonical contract at
-`merger/lenskit/contracts/required-reading-protocol.v1.schema.json`.
+`merger/repoground/contracts/required-reading-protocol.v1.schema.json`.
 
 ### 15.3 Required Reading Resolver
 
 Für das Resolver-Ergebnis existiert derzeit kein eigener JSON-Contract.
 Die deterministische Output-Shape wird durch
-`merger/lenskit/core/required_reading.py::resolve_required_reading`
+`merger/repoground/core/required_reading.py::resolve_required_reading`
 erzeugt und durch
-`merger/lenskit/tests/test_required_reading_protocol.py`
+`merger/repoground/tests/test_required_reading_protocol.py`
 abgesichert.
 
 ### 15.4 Answer Compliance
 
 Exact shape: see the canonical contract at
-`merger/lenskit/contracts/answer-compliance.v1.schema.json`.
+`merger/repoground/contracts/answer-compliance.v1.schema.json`.
 
 ### 15.5 Agent Consumption Trace
 
 Exact shape: see the canonical contract at
-`merger/lenskit/contracts/agent-consumption-trace.v1.schema.json`.
+`merger/repoground/contracts/agent-consumption-trace.v1.schema.json`.
 
 ### 15.6 Agent Entry Manifest
 
 Exact shape: see the canonical contract at
-`merger/lenskit/contracts/agent-entry-manifest.v1.schema.json`.
+`merger/repoground/contracts/agent-entry-manifest.v1.schema.json`.
 
 ### 15.7 Primary Lens Audit
 
 ```json
 {
-  "path": "merger/lenskit/core/agent_reading_pack.py",
+  "path": "merger/repoground/core/agent_reading_pack.py",
   "primary_lens": "core",
   "matched_rule": "core path",
   "does_not_establish": [
@@ -1121,7 +1121,7 @@ Exact shape: see the canonical contract at
 ### 15.8 Lens Card
 
 Exact shape: see the canonical single-card contract at
-`merger/lenskit/contracts/lens-card.v1.schema.json`.
+`merger/repoground/contracts/lens-card.v1.schema.json`.
 
 ### 15.9 Relation Card Negativsemantik
 

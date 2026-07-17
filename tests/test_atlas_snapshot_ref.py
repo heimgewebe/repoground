@@ -1,5 +1,5 @@
 import pytest
-from merger.lenskit.cli.cmd_atlas import parse_snapshot_ref, SnapshotRefKind
+from merger.repoground.cli.cmd_atlas import parse_snapshot_ref, SnapshotRefKind
 
 def test_parse_snapshot_ref_id():
     parsed = parse_snapshot_ref("my-snapshot-123")

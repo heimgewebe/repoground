@@ -19,43 +19,43 @@ on:
       - ".github/workflows/forensic-preflight-canary.yml"
       - "scripts/proofs/forensic_preflight_ci_canary.sh"
       - "scripts/proofs/forensic_preflight_calibration.sh"
-      - "merger/lenskit/core/forensic_preflight.py"
-      - "merger/lenskit/core/post_emit_health.py"
-      - "merger/lenskit/core/bundle_surface_validate.py"
-      - "merger/lenskit/core/claim_evidence_map.py"
-      - "merger/lenskit/core/doc_freshness.py"
-      - "merger/lenskit/core/agent_reading_pack.py"
-      - "merger/lenskit/core/merge.py"
-      - "merger/lenskit/cli/cmd_governance.py"
-      - "merger/lenskit/cli/main.py"
-      - "merger/lenskit/contracts/**"
-      - "merger/lenskit/tests/test_forensic_preflight.py"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/core/forensic_preflight.py"
+      - "merger/repoground/core/post_emit_health.py"
+      - "merger/repoground/core/bundle_surface_validate.py"
+      - "merger/repoground/core/claim_evidence_map.py"
+      - "merger/repoground/core/doc_freshness.py"
+      - "merger/repoground/core/agent_reading_pack.py"
+      - "merger/repoground/core/merge.py"
+      - "merger/repoground/cli/cmd_governance.py"
+      - "merger/repoground/cli/main.py"
+      - "merger/repoground/contracts/**"
+      - "merger/repoground/tests/test_forensic_preflight.py"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - "docs/proofs/forensic-preflight-ci-canary-proof.md"
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
   pull_request:
     branches: [ "main", "master" ]
     paths:
       - ".github/workflows/forensic-preflight-canary.yml"
       - "scripts/proofs/forensic_preflight_ci_canary.sh"
       - "scripts/proofs/forensic_preflight_calibration.sh"
-      - "merger/lenskit/core/forensic_preflight.py"
-      - "merger/lenskit/core/post_emit_health.py"
-      - "merger/lenskit/core/bundle_surface_validate.py"
-      - "merger/lenskit/core/claim_evidence_map.py"
-      - "merger/lenskit/core/doc_freshness.py"
-      - "merger/lenskit/core/agent_reading_pack.py"
-      - "merger/lenskit/core/merge.py"
-      - "merger/lenskit/cli/cmd_governance.py"
-      - "merger/lenskit/cli/main.py"
-      - "merger/lenskit/contracts/**"
-      - "merger/lenskit/tests/test_forensic_preflight.py"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/core/forensic_preflight.py"
+      - "merger/repoground/core/post_emit_health.py"
+      - "merger/repoground/core/bundle_surface_validate.py"
+      - "merger/repoground/core/claim_evidence_map.py"
+      - "merger/repoground/core/doc_freshness.py"
+      - "merger/repoground/core/agent_reading_pack.py"
+      - "merger/repoground/core/merge.py"
+      - "merger/repoground/cli/cmd_governance.py"
+      - "merger/repoground/cli/main.py"
+      - "merger/repoground/contracts/**"
+      - "merger/repoground/tests/test_forensic_preflight.py"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - "docs/proofs/forensic-preflight-ci-canary-proof.md"
 
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
 permissions:
   contents: read
 
@@ -70,7 +70,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
-          # The RepoBrief dependency locks are generated and supported on
+          # The RepoGround dependency locks are generated and supported on
           # Python 3.12; every lock consumer must use the same interpreter line.
           python-version: '3.12'
 
@@ -78,11 +78,11 @@ jobs:
         run: python --version
 
       - name: Install Dependencies
-        # the RepoBrief development lock provides jsonschema, which the preflight
+        # the RepoGround development lock provides jsonschema, which the preflight
         # needs to validate the claim-evidence-map schema. Without it the positive
         # case would block on claim_evidence_map_schema_valid rather than pass.
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
       - name: Shell syntax checks
         run: |
@@ -90,7 +90,7 @@ jobs:
           bash -n scripts/proofs/forensic_preflight_calibration.sh
 
       - name: Unit coverage for forensic preflight (blocking)
-        run: pytest -q merger/lenskit/tests/test_forensic_preflight.py
+        run: pytest -q merger/repoground/tests/test_forensic_preflight.py
 
       - name: Run forensic preflight canary (blocking)
         # Builds a hermetic fixture bundle, runs `governance forensic-preflight

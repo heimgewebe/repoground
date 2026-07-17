@@ -4,11 +4,11 @@ status: active
 initiative: REPOBRIEF-FRONTDOOR-GROUNDING-V1
 ---
 
-# RepoBrief Agent Frontdoor and Grounding Verifier v1
+# RepoGround Agent Frontdoor and Grounding Verifier v1
 
 ## 0. Dokumentrolle
 
-Dieser Blueprint ist ein Planungsartefakt. Er beschreibt, wie RepoBrief von einer
+Dieser Blueprint ist ein Planungsartefakt. Er beschreibt, wie RepoGround von einer
 umfangreichen Bundle-/Artefaktfläche zu einer agententauglichen Frontdoor wird:
 
 > Ein Agent stellt eine konkrete Repo-Frage, erhält ein kleines task-passendes Context
@@ -58,14 +58,14 @@ wenn die lokale CLI- und Verifier-Semantik stabil ist.
 
 ## 3. Belegt, plausibel, spekulativ
 
-### Belegt im RepoBrief-Planungsstand
+### Belegt im RepoGround-Planungsstand
 
-- RepoBrief/Lenskit führt bereits das Authority-Modell mit `canonical_md` als einziger
+- RepoBrief/RepoGround führt bereits das Authority-Modell mit `canonical_md` als einziger
   Inhaltswahrheit und Sidecars als Navigation/Diagnose.
 - Es existieren Profile, Health/Freshness/Availability, Required Reading, Query-/Context-
   Flächen, Citation Map, Range-Refs, Retrieval-Evaluation, Relation-/Graph-/Symbol-Slices
   und read-only Access/MCP-Roadmap-Slices.
-- RepoBrief Core soll keine Git-, PR-, Patch-, Shell-, Test- oder Merge-Autorität erhalten.
+- RepoGround Core soll keine Git-, PR-, Patch-, Shell-, Test- oder Merge-Autorität erhalten.
 
 ### Plausibel
 
@@ -91,7 +91,7 @@ Dieser Plan baut nicht:
 
 - keinen Wahrheitsdetektor;
 - keine automatische `supported/unsupported`-Claim-Bewertung im ersten Schritt;
-- keine Patchanwendung in RepoBrief Core;
+- keine Patchanwendung in RepoGround Core;
 - keine Shell-, Test-, CI- oder Merge-Autorität;
 - keine automatische Snapshot-Erzeugung durch Lesezugriffe;
 - kein LLM-Reranking als Kernpflicht;
@@ -121,7 +121,7 @@ User / Agent Query
        - query_existing_index / range_get / artifact_get
        - context_pack
        - answer obligations
-  -> LLM answer outside RepoBrief
+  -> LLM answer outside RepoGround
   -> answer declaration
        - used citations
        - used ranges
@@ -136,7 +136,7 @@ User / Agent Query
        - freshness/availability caveats carried forward?
 ```
 
-RepoBrief erzeugt und prüft Belegbedingungen. Die Antwort selbst bleibt Agenten-/LLM-
+RepoGround erzeugt und prüft Belegbedingungen. Die Antwort selbst bleibt Agenten-/LLM-
 Synthese außerhalb des deterministischen Kerns.
 
 ## 6. Artefakte und Begriffe
@@ -336,7 +336,7 @@ Dieser Plan setzt voraus oder nutzt bevorzugt:
 - Health/Freshness/Availability;
 - Read-only Access Layer;
 - Required Reading und Agent Consumption Preflight;
-- RepoBrief CLI-Alias;
+- RepoGround CLI-Alias;
 - Relation Guard Goldset, Graph Availability, Symbol Index und Retrieval-v2-Evaluation als
   Qualitätsflächen;
 - MCP Boundary, bevor MCP-Tools produktiv werden.
@@ -353,7 +353,7 @@ Dieser Plan setzt voraus oder nutzt bevorzugt:
 
 ## 10. Entscheidungsregel
 
-Der Plan gilt, wenn RepoBrief primär Agenten helfen soll, belegte Antworten schneller und
+Der Plan gilt, wenn RepoGround primär Agenten helfen soll, belegte Antworten schneller und
 prüfbarer zu erzeugen.
 
 Er gilt nicht, wenn kurzfristig nur menschliche Dokumentation, UI-Politur oder Patch-

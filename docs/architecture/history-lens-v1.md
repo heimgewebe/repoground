@@ -1,4 +1,4 @@
-# RepoBrief History Lens v1
+# RepoGround History Lens v1
 
 Status: optional derived navigation
 Initiative: `REPOBRIEF-FRONTDOOR-GROUNDING-V1`
@@ -6,7 +6,7 @@ Task: `RBGV-V1-T009`
 
 History Lens is a derived navigation and diagnostic surface for explicit history records such as commit, file, and pull-request provenance hints.
 
-It is not canonical content truth. Canonical repository content remains the selected RepoBrief snapshot's canonical source. Current work still requires live GitHub, CI, PR and working-tree checks.
+It is not canonical content truth. Canonical repository content remains the selected RepoGround snapshot's canonical source. Current work still requires live GitHub, CI, PR and working-tree checks.
 
 ## Profiles and export policy
 
