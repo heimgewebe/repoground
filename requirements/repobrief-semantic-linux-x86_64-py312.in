@@ -1,6 +1,0 @@
-# RepoBrief optional semantic extension roots.
-# Supported target: CPython 3.12 on Linux x86_64 only.
-# This input is resolved into the target-specific, SHA-256-locked file beside it.
--r ../merger/lenskit/requirements.txt
-sentence-transformers==5.6.0
-torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=4ca4a9394b0c771238a4f73590fdbbc4debad85ed0fa63d026ae1b085da7d6e2

@@ -3,7 +3,7 @@
 > Aktualisiert am 2026-05-31.
 > Einstieg in fünf Minuten: Repository aufbereiten, Ergebnis lesen, durchsuchen.
 > Für die normative Spezifikation siehe
-> [`merger/repoground/RepoGround-spec.md`](../merger/repoground/RepoGround-spec.md),
+> [`merger/repoground/repoground-build-spec.md`](../merger/repoground/repoground-build-spec.md),
 > für die Architektur die
 > [Systemkarte](architecture/system-map.repoground.md), für Begriffe das
 > [Glossar](glossary.md).

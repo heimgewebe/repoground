@@ -15,15 +15,15 @@ from scripts.release.compile_semantic_lock import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
-CONTRACT_PATH = ROOT / "docs/release/semantic-extension-platforms.v1.json"
+CONTRACT_PATH = ROOT / "docs/release/repoground-semantic-platforms.v1.json"
 SCHEMA_PATH = (
-    ROOT / "merger/repoground/contracts/repobrief-semantic-platforms.v1.schema.json"
+    ROOT / "merger/repoground/contracts/repoground-semantic-platforms.v1.schema.json"
 )
-LOCK_PATH = ROOT / "requirements/repobrief-semantic-linux-x86_64-py312.lock.txt"
+LOCK_PATH = ROOT / "requirements/repoground-semantic-linux-x86_64-py312.lock.txt"
 CONSTRAINTS_PATH = (
-    ROOT / "requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt"
+    ROOT / "requirements/repoground-semantic-linux-x86_64-py312.constraints.txt"
 )
-RUNTIME_LOCK = ROOT / "requirements/repobrief-runtime.lock.txt"
+RUNTIME_LOCK = ROOT / "requirements/repoground-runtime.lock.txt"
 
 
 def _sha256(path: Path) -> str:

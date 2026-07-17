@@ -575,13 +575,18 @@ def test_installer_defaults_to_paused_and_removes_duplicate_generators() -> None
 
 
 def test_systemkatalog_entrypoints_delegate_to_bounded_fleet_runtime() -> None:
-    for path in (SYSTEMKATALOG_PUBLISH, SYSTEMKATALOG_WATCH):
-        text = path.read_text(encoding="utf-8")
-        assert "/home/alex/.local/bin/repoground-publish-fleet" in text
-        assert "--if-changed" in text
-        assert "--retention 3" in text
-        assert "--repo heimgewebe/systemkatalog" in text
-        assert "--force" not in text
+    publish = SYSTEMKATALOG_PUBLISH.read_text(encoding="utf-8")
+    assert "/home/alex/.local/bin/repoground-publish-fleet" in publish
+    assert "--if-changed" in publish
+    assert "--retention 3" in publish
+    assert "--repo heimgewebe/systemkatalog" in publish
+    assert "--force" not in publish
+
+    watch = SYSTEMKATALOG_WATCH.read_text(encoding="utf-8")
+    assert "is a compatibility alias" in watch
+    assert 'exec "$(dirname "$0")/repoground-publish-systemkatalog-main"' in watch
+    assert "repoground-publish-fleet" not in watch
+    assert "--repo" not in watch
 
     for path in (LEGACY_SYSTEMKATALOG_PUBLISH, LEGACY_SYSTEMKATALOG_WATCH):
         text = path.read_text(encoding="utf-8")

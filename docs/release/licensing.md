@@ -3,7 +3,7 @@
 ## Current decision
 
 The repository uses the custom identifier
-`LicenseRef-RepoBrief-All-Rights-Reserved`. The full controlling text is the
+`LicenseRef-RepoGround-All-Rights-Reserved`. The full controlling text is the
 root `LICENSE` file.
 
 The practical rule is fail-closed:

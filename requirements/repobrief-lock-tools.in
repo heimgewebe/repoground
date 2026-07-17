@@ -1,2 +1,0 @@
-# Toolchain used only to regenerate the reviewed hash locks.
-pip-tools==7.5.3

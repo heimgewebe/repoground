@@ -39,7 +39,7 @@ Direkte Datei-Ausführung ist ebenfalls möglich, falls der Modulaufruf in einer
 python3 merger/repoground/frontends/pythonista/build.py . --level max --split-size 20MB --meta-density full --output-mode dual
 ```
 
-Siehe [merger/repoground/RepoGround-spec.md](merger/repoground/RepoGround-spec.md) für Details.
+Siehe [merger/repoground/repoground-build-spec.md](merger/repoground/repoground-build-spec.md) für Details.
 
 ### Agent Reading Pack (Einstieg für LLM-Agents)
 

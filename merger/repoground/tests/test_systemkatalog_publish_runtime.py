@@ -22,11 +22,10 @@ def test_publish_uses_canonical_systemkatalog_identity_through_fleet_runtime() -
 
 def test_watcher_is_only_a_compatibility_entrypoint() -> None:
     text = WATCH.read_text(encoding="utf-8")
-    assert "/home/alex/.local/bin/repoground-publish-fleet" in text
-    assert "--repo heimgewebe/systemkatalog" in text
-    assert "--if-changed" in text
-    assert "--retention 3" in text
-    assert "heimgewebe-katalog" not in text
+    assert "is a compatibility alias" in text
+    assert "repoground-publish-systemkatalog-main" in text
+    assert "repoground-publish-fleet" not in text
+    assert "--repo" not in text
 
 
 def test_legacy_systemkatalog_entrypoints_are_thin_delegates() -> None:

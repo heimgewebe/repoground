@@ -74,7 +74,7 @@
           "allowed_paths": [
             "scripts/repoground-mcp-stdio.py",
             "merger/repoground/cli/mcp_stdio.py",
-            "docs/usage/repobrief-mcp-stdio.md",
+            "docs/usage/repoground-mcp-stdio.md",
             "docs/architecture/repobrief-mcp-boundary.md"
           ],
           "forbidden_paths": [],
@@ -92,7 +92,7 @@
           "allowed_paths": [
             "scripts/repoground-mcp-stdio.py",
             "merger/repoground/cli/mcp_stdio.py",
-            "docs/usage/repobrief-mcp-stdio.md",
+            "docs/usage/repoground-mcp-stdio.md",
             "docs/architecture/repobrief-mcp-boundary.md"
           ],
           "forbidden_paths": [],
@@ -126,7 +126,7 @@
             "merger/repoground/core/repobrief_live_freshness.py",
             "merger/repoground/tests/test_repobrief_live_freshness.py",
             "merger/repoground/tests/test_repobrief_mcp_stdio_e2e.py",
-            "docs/usage/repobrief-mcp-stdio.md"
+            "docs/usage/repoground-mcp-stdio.md"
           ],
           "forbidden_paths": [],
           "required_symbols": [],
@@ -144,7 +144,7 @@
             "merger/repoground/core/repobrief_live_freshness.py",
             "merger/repoground/tests/test_repobrief_live_freshness.py",
             "merger/repoground/tests/test_repobrief_mcp_stdio_e2e.py",
-            "docs/usage/repobrief-mcp-stdio.md"
+            "docs/usage/repoground-mcp-stdio.md"
           ],
           "forbidden_paths": [],
           "required_symbols": [],
@@ -490,7 +490,7 @@
             "merger/repoground/cli/mcp_stdio.py",
             "merger/repoground/core/repobrief_live_freshness.py",
             "docs/architecture/repobrief-mcp-boundary.md",
-            "docs/usage/repobrief-mcp-stdio.md",
+            "docs/usage/repoground-mcp-stdio.md",
             "merger/repoground/tests/test_repobrief_mcp_stdio.py"
           ],
           "forbidden_paths": [],
@@ -514,7 +514,7 @@
             "merger/repoground/cli/mcp_stdio.py",
             "merger/repoground/core/repobrief_live_freshness.py",
             "docs/architecture/repobrief-mcp-boundary.md",
-            "docs/usage/repobrief-mcp-stdio.md",
+            "docs/usage/repoground-mcp-stdio.md",
             "merger/repoground/tests/test_repobrief_mcp_stdio.py"
           ],
           "forbidden_paths": [],
@@ -611,7 +611,7 @@
             "merger/repoground/cli/mcp_stdio.py",
             "merger/repoground/core/repobrief_mcp_tools.py",
             "docs/architecture/repobrief-mcp-boundary.md",
-            "docs/usage/repobrief-mcp-stdio.md"
+            "docs/usage/repoground-mcp-stdio.md"
           ],
           "forbidden_paths": [],
           "required_symbols": [],
@@ -633,7 +633,7 @@
             "merger/repoground/cli/mcp_stdio.py",
             "merger/repoground/core/repobrief_mcp_tools.py",
             "docs/architecture/repobrief-mcp-boundary.md",
-            "docs/usage/repobrief-mcp-stdio.md"
+            "docs/usage/repoground-mcp-stdio.md"
           ],
           "forbidden_paths": [],
           "required_symbols": [],

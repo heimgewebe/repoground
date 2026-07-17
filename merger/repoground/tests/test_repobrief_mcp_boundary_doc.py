@@ -4,7 +4,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MCP_BOUNDARY_DOC = REPO_ROOT / "docs/architecture/repobrief-mcp-boundary.md"
 REPOGROUND_DOC = REPO_ROOT / "docs/architecture/repoground.md"
-MCP_USAGE_DOC = REPO_ROOT / "docs/usage/repobrief-mcp-stdio.md"
+MCP_USAGE_DOC = REPO_ROOT / "docs/usage/repoground-mcp-stdio.md"
 MCP_LAUNCHER = REPO_ROOT / "scripts/repoground-mcp-stdio.py"
 
 MCP_RESOURCES = (
@@ -163,7 +163,7 @@ def test_repoground_doc_links_to_implemented_mcp_surface() -> None:
     assert "binds the existing read-only resource and tool handlers" in compact
     assert "it is not a network service" in compact
     assert "explicit `snapshot_create` handler remains hidden" in compact
-    assert "[RepoGround MCP stdio](../usage/repobrief-mcp-stdio.md)" in compact
+    assert "[RepoGround MCP stdio](../usage/repoground-mcp-stdio.md)" in compact
 
 
 def test_mcp_boundary_doc_names_concrete_readonly_resource_adapter() -> None:
@@ -177,10 +177,11 @@ def test_mcp_boundary_doc_names_concrete_readonly_resource_adapter() -> None:
 def test_mcp_usage_doc_has_stable_start_and_client_configuration() -> None:
     text = _read(MCP_USAGE_DOC)
 
-    assert "python3 /absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py" in text
+    assert "python3 /absolute/path/to/repoground/scripts/repoground-mcp-stdio.py" in text
     assert "python3 -m merger.repoground.cli.mcp_stdio" in text
     assert '"mcpServers"' in text
-    assert '"/absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py"' in text
+    assert '"repoground": {' in text
+    assert '"/absolute/path/to/repoground/scripts/repoground-mcp-stdio.py"' in text
     assert "--bundle-root" in text
     assert "--repo-root" in text
     assert "--enable-snapshot-create" in text

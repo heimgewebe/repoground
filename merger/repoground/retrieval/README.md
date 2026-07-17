@@ -15,7 +15,7 @@ Run from the repository root:
 python3 -m pip install \
   --only-binary=:all: \
   --require-hashes \
-  -r requirements/repobrief-semantic-linux-x86_64-py312.lock.txt
+  -r requirements/repoground-semantic-linux-x86_64-py312.lock.txt
 ```
 
 Other Python versions, operating systems, architectures and GPU builds are not

@@ -20,7 +20,7 @@ def pytest_collection_modifyitems(config, items):
     skip_browser = pytest.mark.skip(
         reason=(
             "pytest-playwright not installed "
-            "(see requirements/repobrief-browser.lock.txt)"
+            "(see requirements/repoground-browser.lock.txt)"
         )
     )
     for item in items:

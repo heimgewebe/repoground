@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-exec /home/alex/.local/bin/repoground-publish-fleet \
-  --if-changed \
-  --retention 3 \
-  --repo heimgewebe/systemkatalog
+printf '%s\n' 'repoground-publish-systemkatalog-main-if-changed is a compatibility alias; use repoground-publish-systemkatalog-main' >&2
+exec "$(dirname "$0")/repoground-publish-systemkatalog-main" "$@"

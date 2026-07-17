@@ -71,7 +71,7 @@ PRs gegen `main` müssen u. a. grün sein bei:
 - **lint** (`ruff` F401/F811)
 - **Parity Gate** / **parity_check**
 - **anti-hallucination-lint** (contract-statischer L3/L5-Governance-Lint)
-- **contracts-validate**, **validate-merges**
+- **contracts-validate**, **test-suite**
 - **ai-context-guard**, **wgx-guard**, **codeql**
 
 ## Commit- & Branch-Konventionen

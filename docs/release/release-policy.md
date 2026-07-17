@@ -19,7 +19,7 @@ sharing one candidate identity.
 python scripts/release/build_release_candidate.py \
   --repo . \
   --ref HEAD \
-  --out /tmp/repobrief-candidate
+  --out /tmp/repoground-candidate
 ```
 
 The builder:
@@ -35,7 +35,7 @@ The builder:
 
 ```bash
 python scripts/release/verify_release_candidate.py \
-  --candidate-dir /tmp/repobrief-candidate \
+  --candidate-dir /tmp/repoground-candidate \
   --repo .
 ```
 
@@ -47,10 +47,10 @@ commit.
 
 The release-supported Python 3.12 core uses four generated lock surfaces:
 
-- `requirements/repobrief-runtime.lock.txt`;
-- `requirements/repobrief-dev.lock.txt`;
-- `requirements/repobrief-browser.lock.txt`;
-- `requirements/repobrief-lock-tools.lock.txt` for the lock compiler itself.
+- `requirements/repoground-runtime.lock.txt`;
+- `requirements/repoground-dev.lock.txt`;
+- `requirements/repoground-browser.lock.txt`;
+- `requirements/repoground-lock-tools.lock.txt` for the lock compiler itself.
 
 Every resolved package is exactly versioned and carries SHA-256 hashes. The
 input files remain human-maintained; the lock files are regenerated with
@@ -67,13 +67,13 @@ explicitly supported reproducible target:
 - selected binary wheels only.
 
 Its 58-package closure is stored in
-`requirements/repobrief-semantic-linux-x86_64-py312.lock.txt`. Every selected
+`requirements/repoground-semantic-linux-x86_64-py312.lock.txt`. Every selected
 wheel has exactly one SHA-256, and Torch is bound to a direct target-specific
 CPU wheel URL plus hash. Other platforms fail closed and are not implied by the
 lock.
 
 The machine-readable platform boundary is
-`docs/release/semantic-extension-platforms.v1.json`. Regeneration and
+`docs/release/repoground-semantic-platforms.v1.json`. Regeneration and
 byte-for-byte checking use the digest-pinned container wrapper:
 
 ```bash
@@ -84,7 +84,7 @@ An isolated installation check uses:
 
 ```bash
 scripts/release/compile_semantic_lock.sh \
-  --verify-install /tmp/repobrief-semantic-install
+  --verify-install /tmp/repoground-semantic-install
 ```
 
 The release-candidate manifest records this semantic surface as

@@ -68,28 +68,6 @@ CANONICAL_CONTRACT = ReleaseContract(
     compatibility_mode="canonical_repoground_v1",
 )
 
-LEGACY_CONTRACT = ReleaseContract(
-    kind="repobrief.release_candidate",
-    version="v1",
-    schema_uri="https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json",
-    license_expression="LicenseRef-RepoBrief-All-Rights-Reserved",
-    lock_paths=(
-        "requirements/repobrief-runtime.lock.txt",
-        "requirements/repobrief-dev.lock.txt",
-        "requirements/repobrief-browser.lock.txt",
-        "requirements/repobrief-lock-tools.lock.txt",
-    ),
-    semantic_target_id="cpython-312-linux-x86_64",
-    semantic_platform_contract_path="docs/release/semantic-extension-platforms.v1.json",
-    semantic_input_path="requirements/repobrief-semantic-linux-x86_64-py312.in",
-    semantic_constraints_path="requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt",
-    semantic_lock_path="requirements/repobrief-semantic-linux-x86_64-py312.lock.txt",
-    project_name="RepoBrief",
-    repository="heimgewebe/lenskit",
-    archive_slug="repobrief",
-    compatibility_mode="legacy_repobrief_v1",
-)
-
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -448,7 +426,7 @@ def _compare_with_repo(
 
 def _contract_for_manifest(manifest: dict[str, object]) -> ReleaseContract:
     identity = (manifest.get("kind"), manifest.get("version"), manifest.get("$schema"))
-    for contract in (CANONICAL_CONTRACT, LEGACY_CONTRACT):
+    for contract in (CANONICAL_CONTRACT,):
         if identity == (contract.kind, contract.version, contract.schema_uri):
             return contract
     raise ValueError("unsupported or contradictory release manifest identity")
@@ -513,19 +491,6 @@ def verify_release_candidate(
         raise ValueError("release manifest must be a JSON object")
     contract = _contract_for_manifest(preview)
     return _verify_release_candidate(candidate_path, contract=contract, repo=repo)
-
-
-def verify_legacy_release_candidate(
-    candidate_dir: str | Path,
-    *,
-    repo: str | Path | None = None,
-) -> dict[str, object]:
-    candidate_path = Path(candidate_dir).expanduser().resolve()
-    if not candidate_path.is_dir():
-        raise ValueError(f"candidate directory is missing: {candidate_path}")
-    return _verify_release_candidate(
-        candidate_path, contract=LEGACY_CONTRACT, repo=repo
-    )
 
 
 def main() -> int:

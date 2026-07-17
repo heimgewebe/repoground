@@ -10,7 +10,7 @@ Use the launcher by absolute path. It adds its own RepoGround checkout to the Py
 so the MCP client does not need to start inside the repository:
 
 ```bash
-python3 /absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py \
+python3 /absolute/path/to/repoground/scripts/repoground-mcp-stdio.py \
   --bundle-root /absolute/path/to/briefs \
   --repo-root /absolute/path/to/repository
 ```
@@ -35,10 +35,10 @@ Clients that accept an MCP stdio command can use this shape:
 ```json
 {
   "mcpServers": {
-    "repobrief": {
+    "repoground": {
       "command": "python3",
       "args": [
-        "/absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py",
+        "/absolute/path/to/repoground/scripts/repoground-mcp-stdio.py",
         "--bundle-root",
         "/absolute/path/to/briefs",
         "--repo-root",

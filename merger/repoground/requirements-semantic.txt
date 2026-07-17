@@ -1,6 +1,6 @@
 # Compatibility root input for the optional semantic extension.
 # Do not use this file for reproducible installation. The only supported locked
-# target is requirements/repobrief-semantic-linux-x86_64-py312.lock.txt.
+# target is requirements/repoground-semantic-linux-x86_64-py312.lock.txt.
 -r requirements.txt
 sentence-transformers==5.6.0
 torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl#sha256=4ca4a9394b0c771238a4f73590fdbbc4debad85ed0fa63d026ae1b085da7d6e2

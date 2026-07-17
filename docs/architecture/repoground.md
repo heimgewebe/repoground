@@ -77,7 +77,7 @@ fix or merge authority.
 
 The explicit `snapshot_create` handler remains hidden unless the operator
 enables it at server startup. Stable startup and generic client configuration
-are documented in [RepoGround MCP stdio](../usage/repobrief-mcp-stdio.md).
+are documented in [RepoGround MCP stdio](../usage/repoground-mcp-stdio.md).
 Older files and protocol identifiers containing `repobrief` remain compatibility
 contracts until a separately versioned replacement is introduced.
 

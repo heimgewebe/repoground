@@ -35,7 +35,7 @@ scripts/repoground-mcp-stdio.py
 Start the default read-only server with an absolute launcher path:
 
 ```bash
-python3 /absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py \
+python3 /absolute/path/to/repoground/scripts/repoground-mcp-stdio.py \
   --bundle-root /absolute/path/to/briefs \
   --repo-root /absolute/path/to/repository
 ```
@@ -43,7 +43,7 @@ python3 /absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py \
 It implements the MCP initialization lifecycle and the `tools/list`, `tools/call`,
 `resources/list`, `resources/templates/list`, and `resources/read` methods over newline-delimited
 stdio JSON-RPC messages. Standard output is reserved for protocol messages. Client setup and the
-stable command contract are documented in [RepoGround MCP stdio](../usage/repobrief-mcp-stdio.md).
+stable command contract are documented in [RepoGround MCP stdio](../usage/repoground-mcp-stdio.md).
 
 `--repo-root` is the sole checkout permission for the protocol server. Without it, live freshness
 is `not_comparable` and no Git probe runs. A tool argument or bundle manifest cannot redirect the

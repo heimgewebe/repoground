@@ -483,146 +483,20 @@ def test_release_contract_rejects_lock_python_mismatch(tmp_path: Path) -> None:
     assert "WORKFLOW_LOCK_PYTHON_MISMATCH" in codes
 
 
-def _legacy_candidate(repo: Path, out: Path) -> dict[str, object]:
-    """Build one exact historical RepoBrief v1 candidate for compatibility tests."""
-    import importlib
 
-    release = importlib.import_module("scripts.release.build_release_candidate")
-    commit = release.resolve_commit(repo, "HEAD")
-    tree = release.resolve_tree(repo, commit)
-    release_version = release.read_release_version(repo, commit)
-    entries = release.list_tree(repo, commit)
-    candidate_id = f"{release_version}-g{commit[:12]}"
-    prefix = f"repobrief-{candidate_id}/"
-    archive_name = f"repobrief-{candidate_id}.tar.gz"
-    manifest_name = f"repobrief-{candidate_id}.release.json"
-    archive_bytes = release.build_archive_bytes(repo, commit, prefix, entries)
-    out.mkdir()
-    archive_path = out / archive_name
-    archive_path.write_bytes(archive_bytes)
-
-    lock_paths = (
-        "requirements/repobrief-runtime.lock.txt",
-        "requirements/repobrief-dev.lock.txt",
-        "requirements/repobrief-browser.lock.txt",
-        "requirements/repobrief-lock-tools.lock.txt",
+def test_legacy_repobrief_release_identity_is_rejected(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate"
+    build_release_candidate(repo, candidate)
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["kind"] = "repobrief.release_candidate"
+    manifest["$schema"] = (
+        "https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json"
     )
-    semantic_paths = {
-        "platform_contract": "docs/release/semantic-extension-platforms.v1.json",
-        "input": "requirements/repobrief-semantic-linux-x86_64-py312.in",
-        "constraints": "requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt",
-        "lock": "requirements/repobrief-semantic-linux-x86_64-py312.lock.txt",
-    }
-
-    def hashed(relative: str) -> dict[str, object]:
-        payload = release.read_blob(repo, commit, relative)
-        return {
-            "path": relative,
-            "bytes": len(payload),
-            "sha256": hashlib.sha256(payload).hexdigest(),
-        }
-
-    manifest = {
-        "$schema": "https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json",
-        "kind": "repobrief.release_candidate",
-        "version": "v1",
-        "project": {
-            "name": "RepoBrief",
-            "repository": "heimgewebe/lenskit",
-            "release_version": release_version,
-            "candidate_id": candidate_id,
-        },
-        "source": {
-            "git_commit": commit,
-            "git_tree": tree,
-            "git_dirty": False,
-            "archive_timestamp": 0,
-        },
-        "license": {
-            "expression": "LicenseRef-RepoBrief-All-Rights-Reserved",
-            "file": "LICENSE",
-            "distribution_status": "blocked_without_separate_written_permission",
-        },
-        "archive": {
-            "path": archive_name,
-            "prefix": prefix,
-            "format": "tar.gz",
-            "bytes": len(archive_bytes),
-            "sha256": hashlib.sha256(archive_bytes).hexdigest(),
-            "tracked_entry_count": len(entries),
-            "normalization": {
-                "uid": 0,
-                "gid": 0,
-                "mtime": 0,
-                "gzip_mtime": 0,
-                "path_order": "git_path_bytes_ascending",
-            },
-        },
-        "dependency_locks": [hashed(relative) for relative in lock_paths],
-        "semantic_extension": {
-            "status": "optional_locked",
-            "default_enabled": False,
-            "unsupported_target_policy": "fail_closed",
-            "platform_contract": hashed(semantic_paths["platform_contract"]),
-            "targets": [
-                {
-                    "id": "cpython-312-linux-x86_64",
-                    "input": hashed(semantic_paths["input"]),
-                    "constraints": hashed(semantic_paths["constraints"]),
-                    "lock": hashed(semantic_paths["lock"]),
-                }
-            ],
-        },
-        "verification": {
-            "self_contained_command": "python scripts/release/verify_release_candidate.py --candidate-dir <candidate-dir>",
-            "source_bound_command": "python scripts/release/verify_release_candidate.py --candidate-dir <candidate-dir> --repo .",
-        },
-        "does_not_establish": list(release.DOES_NOT_ESTABLISH),
-    }
-    manifest_path = out / manifest_name
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    sums = {
-        archive_name: hashlib.sha256(archive_path.read_bytes()).hexdigest(),
-        manifest_name: hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
-    }
-    (out / "SHA256SUMS").write_text(
-        "\n".join(f"{digest}  {name}" for name, digest in sorted(sums.items())) + "\n",
-        encoding="utf-8",
-    )
-    return manifest
-
-
-def test_legacy_repobrief_v1_candidate_remains_verifiable(tmp_path: Path) -> None:
-    repo = _repo(tmp_path)
-    requirements = repo / "requirements"
-    for source in tuple(requirements.glob("repoground-*")):
-        source.rename(source.with_name(source.name.replace("repoground-", "repobrief-", 1)))
-    canonical_semantic = repo / "docs/release/repoground-semantic-platforms.v1.json"
-    legacy_semantic = repo / "docs/release/semantic-extension-platforms.v1.json"
-    canonical_semantic.rename(legacy_semantic)
-    (repo / "LICENSE").write_text(
-        "LicenseRef-RepoBrief-All-Rights-Reserved\nNo permission is granted.\n",
-        encoding="utf-8",
-    )
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "legacy RepoBrief v1 fixture")
-
-    candidate = tmp_path / "legacy-candidate"
-    manifest = _legacy_candidate(repo, candidate)
-    legacy_schema = json.loads(
-        (ROOT / "merger/repoground/contracts/repobrief-release-candidate.v1.schema.json")
-        .read_text(encoding="utf-8")
-    )
-    jsonschema.Draft7Validator(legacy_schema).validate(manifest)
-
-    standalone = verify_release_candidate(candidate)
-    source_bound = verify_release_candidate(candidate, repo=repo)
-    assert standalone["status"] == "pass"
-    assert standalone["compatibility_mode"] == "legacy_repobrief_v1"
-    assert standalone["source_bound"] is False
-    assert source_bound["status"] == "pass"
-    assert source_bound["compatibility_mode"] == "legacy_repobrief_v1"
-    assert source_bound["source_bound"] is True
+    with pytest.raises(ValueError, match="unsupported or contradictory"):
+        verify_release_candidate(candidate)

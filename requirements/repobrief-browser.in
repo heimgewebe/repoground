@@ -1,2 +1,0 @@
-# Browser-gate inputs. The Playwright version must match the digest-pinned image.
--r ../requirements-browser.txt

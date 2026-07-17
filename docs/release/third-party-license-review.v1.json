@@ -1,5 +1,5 @@
 {
-  "kind": "repobrief.third_party_license_review",
+  "kind": "repoground.third_party_license_review",
   "version": "1.0",
   "observed_on": "2026-07-12",
   "environment": {
@@ -7,9 +7,9 @@
     "platform": "Linux x86_64 container",
     "container": "mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69",
     "locks": [
-      "requirements/repobrief-runtime.lock.txt",
-      "requirements/repobrief-dev.lock.txt",
-      "requirements/repobrief-browser.lock.txt"
+      "requirements/repoground-runtime.lock.txt",
+      "requirements/repoground-dev.lock.txt",
+      "requirements/repoground-browser.lock.txt"
     ],
     "install_mode": "pip --require-hashes --target isolated container directory"
   },
