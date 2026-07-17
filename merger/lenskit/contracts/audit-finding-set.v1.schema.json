@@ -1,0 +1,184 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lenskit.merger/schemas/audit-finding-set.v1.json",
+  "title": "Lenskit Audit Finding Set",
+  "description": "Diagnostic result set binding audit-lane candidates to an exact revision and resolvable Lenskit citations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "authority",
+    "risk_class",
+    "plan_version",
+    "reviewed_revision",
+    "current_revision",
+    "revision_fresh",
+    "findings",
+    "state_counts",
+    "allowed_inferences",
+    "does_not_prove"
+  ],
+  "properties": {
+    "version": {"const": "audit_finding_set.v1"},
+    "authority": {"const": "diagnostic_signal"},
+    "risk_class": {"const": "diagnostic"},
+    "plan_version": {"const": "audit_lane_plan.v1"},
+    "reviewed_revision": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "current_revision": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+    "revision_fresh": {"type": "boolean"},
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "finding_id",
+          "lane_id",
+          "claim",
+          "citation_ids",
+          "state",
+          "state_reason",
+          "unresolved_citation_ids",
+          "verification_record",
+          "verification_applied"
+        ],
+        "properties": {
+          "finding_id": {"type": "string", "pattern": "^af_[a-f0-9]{16}$"},
+          "lane_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "claim": {"type": "string", "minLength": 1, "maxLength": 8192},
+          "citation_ids": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^cit_[a-f0-9]{16}$"}
+          },
+          "state": {
+            "type": "string",
+            "enum": ["candidate", "verified", "stale", "wrong", "unresolved"]
+          },
+          "state_reason": {
+            "type": "string",
+            "enum": [
+              "verification_missing",
+              "verifier_verdict",
+              "revision_mismatch",
+              "citation_unresolved"
+            ]
+          },
+          "unresolved_citation_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {"type": "string", "pattern": "^cit_[a-f0-9]{16}$"}
+          },
+          "verification_record": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["finding_id", "state", "verifier_id", "note"],
+                "properties": {
+                  "finding_id": {"type": "string", "pattern": "^af_[a-f0-9]{16}$"},
+                  "state": {"type": "string", "enum": ["verified", "wrong", "unresolved"]},
+                  "verifier_id": {"type": "string", "minLength": 1, "maxLength": 8192},
+                  "note": {"type": "string", "minLength": 1, "maxLength": 8192}
+                }
+              }
+            ]
+          },
+          "verification_applied": {"type": "boolean"}
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"verification_applied": {"const": true}}
+            },
+            "then": {
+              "properties": {
+                "verification_record": {"type": "object"},
+                "state_reason": {"const": "verifier_verdict"}
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {"state_reason": {"const": "verifier_verdict"}}
+            },
+            "then": {
+              "properties": {
+                "verification_record": {"type": "object"},
+                "verification_applied": {"const": true}
+              }
+            }
+          }
+        ]
+      }
+    },
+    "state_counts": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "candidate"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "verified"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "stale"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "wrong"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "unresolved"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        }
+      ],
+      "additionalItems": false
+    },
+    "allowed_inferences": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "does_not_prove": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}
