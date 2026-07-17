@@ -4,6 +4,7 @@ import errno
 import hashlib
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -555,3 +556,314 @@ def test_removed_generation_before_pointer_switch_keeps_old_current(
 
     assert first.current_manifest_path.resolve() == first.resolved_manifest_path
     assert (first.current_manifest_path.parent / "demo.md").read_bytes() == b"first\n"
+
+
+def _corrupt_after_pointer_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    original = generation_mod._publish_current_pointer
+
+    def publish_then_corrupt(generations_root: Path, **kwargs):
+        result = original(generations_root, **kwargs)
+        (generations_root / kwargs["generation_id"] / "demo.md").write_bytes(
+            b"corrupt-after-switch\n"
+        )
+        return result
+
+    monkeypatch.setattr(generation_mod, "_publish_current_pointer", publish_then_corrupt)
+
+
+def test_post_switch_mutation_rolls_back_relative_symlink_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"first\n", run_id="run-1"
+    )
+    first = publish_bundle_generation(first_manifest)
+    assert first.pointer_kind == "relative_symlink"
+    second_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"second\n", run_id="run-2"
+    )
+    _corrupt_after_pointer_switch(monkeypatch)
+
+    with pytest.raises(BundleGenerationError, match="previous pointer state was restored"):
+        publish_bundle_generation(second_manifest)
+
+    assert os.readlink(first.current_pointer_path) == first.generation_id
+    assert (first.generation_dir / "demo.md").read_bytes() == b"first\n"
+    assert resolve_bundle_manifest_path(first.current_manifest_path) == first.resolved_manifest_path
+
+
+def test_post_switch_mutation_rolls_back_json_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unsupported_symlink(*_args: object, **_kwargs: object):
+        raise NotImplementedError("symlink unsupported")
+
+    monkeypatch.setattr(generation_mod, "_write_current_symlink", unsupported_symlink)
+    first_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"first\n", run_id="run-1"
+    )
+    first = publish_bundle_generation(first_manifest)
+    assert first.pointer_kind == "json_pointer"
+    first_pointer = json.loads(first.current_pointer_path.read_text(encoding="utf-8"))
+    second_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"second\n", run_id="run-2"
+    )
+    _corrupt_after_pointer_switch(monkeypatch)
+
+    with pytest.raises(BundleGenerationError, match="previous pointer state was restored"):
+        publish_bundle_generation(second_manifest)
+
+    restored = json.loads(first.current_pointer_path.read_text(encoding="utf-8"))
+    assert restored == first_pointer
+    assert restored["generation_id"] == first.generation_id
+    assert (first.generation_dir / "demo.md").read_bytes() == b"first\n"
+    assert resolve_bundle_manifest_path(first.current_pointer_path) == first.resolved_manifest_path
+
+
+def test_pointer_failure_after_atomic_switch_restores_previous_generation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"first\n", run_id="run-1"
+    )
+    first = publish_bundle_generation(first_manifest)
+    second_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"second\n", run_id="run-2"
+    )
+    original = generation_mod._publish_current_pointer
+
+    def switch_then_fail(generations_root: Path, **kwargs):
+        original(generations_root, **kwargs)
+        raise BundleGenerationError("simulated failure after atomic switch")
+
+    monkeypatch.setattr(generation_mod, "_publish_current_pointer", switch_then_fail)
+
+    with pytest.raises(BundleGenerationError, match="simulated failure"):
+        publish_bundle_generation(second_manifest)
+
+    assert os.readlink(first.current_pointer_path) == first.generation_id
+    assert (first.generation_dir / "demo.md").read_bytes() == b"first\n"
+
+
+def test_parallel_publishers_share_one_serialized_generation_lane(tmp_path: Path) -> None:
+    manifest = _write_basic_bundle(tmp_path, run_id="parallel-run")
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(lambda _index: publish_bundle_generation(manifest), range(4)))
+
+    generation_ids = {result.generation_id for result in results}
+    assert len(generation_ids) == 1
+    assert sum(not result.reused for result in results) == 1
+    assert sum(result.reused for result in results) == 3
+    lane = generation_mod.generation_lane_root(tmp_path, "demo")
+    assert os.readlink(lane / "current") == results[0].generation_id
+    assert (results[0].generation_dir / "demo.md").read_bytes() == b"# bundle\n"
+
+
+def test_oversized_post_emit_health_is_rejected_before_json_decode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _write_basic_bundle(tmp_path)
+    health = tmp_path / "demo.post_emit_health.json"
+    health.write_bytes(b"x" * 65)
+    monkeypatch.setattr(generation_mod, "_MAX_POST_EMIT_HEALTH_BYTES", 64)
+
+    with pytest.raises(BundleGenerationError, match="exceeds maximum size 64"):
+        publish_bundle_generation(manifest)
+
+    assert not generation_mod.generation_lane_root(tmp_path, "demo").exists()
+
+
+@pytest.mark.parametrize("pointer_mode", ["relative_symlink", "json_pointer"])
+def test_first_post_switch_failure_removes_new_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    pointer_mode: str,
+) -> None:
+    if pointer_mode == "json_pointer":
+        def unsupported_symlink(*_args: object, **_kwargs: object):
+            raise NotImplementedError("symlink unsupported")
+
+        monkeypatch.setattr(
+            generation_mod,
+            "_write_current_symlink",
+            unsupported_symlink,
+        )
+    manifest = _write_basic_bundle(tmp_path, run_id=f"first-{pointer_mode}")
+    _corrupt_after_pointer_switch(monkeypatch)
+
+    with pytest.raises(BundleGenerationError, match="previous pointer state was restored"):
+        publish_bundle_generation(manifest)
+
+    lane = generation_mod.generation_lane_root(tmp_path, "demo")
+    assert not os.path.lexists(lane / "current")
+    assert not (lane / "current.json").exists()
+
+
+def test_lock_failure_is_exposed_as_bundle_generation_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _write_basic_bundle(tmp_path)
+
+    def fail_lock(*_args: object, **_kwargs: object):
+        raise rooted_filesystem.RootedFilesystemError("simulated lock failure")
+
+    monkeypatch.setattr(generation_mod, "exclusive_file_lock", fail_lock)
+
+    with pytest.raises(BundleGenerationError, match="filesystem guard.*lock failure"):
+        publish_bundle_generation(manifest)
+
+
+def test_new_lane_uses_json_fallback_only_when_symlinks_are_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _write_basic_bundle(tmp_path, run_id="unsupported-symlink")
+
+    def unsupported_symlink(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EOPNOTSUPP, "symlink unsupported")
+
+    monkeypatch.setattr(rooted_filesystem.os, "symlink", unsupported_symlink)
+
+    result = publish_bundle_generation(manifest)
+
+    assert result.pointer_kind == "json_pointer"
+    assert result.current_pointer_path.name == generation_mod.CURRENT_POINTER_JSON_NAME
+    assert resolve_bundle_manifest_path(result.current_pointer_path) == result.resolved_manifest_path
+
+
+def test_new_lane_permission_failure_does_not_downgrade_to_json_pointer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = _write_basic_bundle(tmp_path, run_id="permission-denied")
+
+    def denied_symlink(*_args: object, **_kwargs: object) -> None:
+        raise OSError(errno.EACCES, "symlink denied")
+
+    monkeypatch.setattr(rooted_filesystem.os, "symlink", denied_symlink)
+
+    with pytest.raises(BundleGenerationError, match="descriptor-bound current symlink"):
+        publish_bundle_generation(manifest)
+
+    lane = generation_mod.generation_lane_root(tmp_path, "demo")
+    assert not os.path.lexists(lane / generation_mod.CURRENT_LINK_NAME)
+    assert not (lane / generation_mod.CURRENT_POINTER_JSON_NAME).exists()
+
+
+def test_lane_directory_swap_after_pointer_switch_is_reported_as_failed_rollback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"first\n", run_id="lane-first"
+    )
+    first = publish_bundle_generation(first_manifest)
+    second_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"second\n", run_id="lane-second"
+    )
+    lane = generation_mod.generation_lane_root(tmp_path, "demo")
+    displaced = tmp_path / "displaced-generation-lane"
+    original = generation_mod._publish_current_pointer
+
+    def switch_then_swap_lane(generations_root: Path, **kwargs):
+        result = original(generations_root, **kwargs)
+        generations_root.rename(displaced)
+        generations_root.mkdir()
+        return result
+
+    monkeypatch.setattr(
+        generation_mod, "_publish_current_pointer", switch_then_swap_lane
+    )
+
+    with pytest.raises(BundleGenerationError, match="rollback also failed"):
+        publish_bundle_generation(second_manifest)
+
+    assert not os.path.lexists(lane / generation_mod.CURRENT_LINK_NAME)
+    displaced_target = os.readlink(displaced / generation_mod.CURRENT_LINK_NAME)
+    assert displaced_target != first.generation_id
+    assert (displaced / displaced_target).is_dir()
+
+
+def test_pre_switch_symlink_change_refuses_blind_overwrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = publish_bundle_generation(
+        _write_basic_bundle(
+            tmp_path, canonical_bytes=b"first\n", run_id="snapshot-first"
+        )
+    )
+    third = publish_bundle_generation(
+        _write_basic_bundle(
+            tmp_path, canonical_bytes=b"third\n", run_id="snapshot-third"
+        )
+    )
+    lane = generation_mod.generation_lane_root(tmp_path, "demo")
+    generation_mod._write_current_symlink(lane, first.generation_id)
+    second_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"second\n", run_id="snapshot-second"
+    )
+    original_install = generation_mod._install_generation
+
+    def install_then_change_pointer(*args, **kwargs):
+        result = original_install(*args, **kwargs)
+        generation_mod._write_current_symlink(lane, third.generation_id)
+        return result
+
+    monkeypatch.setattr(
+        generation_mod, "_install_generation", install_then_change_pointer
+    )
+
+    with pytest.raises(BundleGenerationError, match="refusing blind overwrite"):
+        publish_bundle_generation(second_manifest)
+
+    assert os.readlink(lane / generation_mod.CURRENT_LINK_NAME) == third.generation_id
+
+
+def test_pre_switch_json_change_refuses_blind_overwrite(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unsupported_symlink(*_args: object, **_kwargs: object):
+        raise NotImplementedError("symlink unsupported")
+
+    monkeypatch.setattr(
+        generation_mod, "_write_current_symlink", unsupported_symlink
+    )
+    first = publish_bundle_generation(
+        _write_basic_bundle(
+            tmp_path, canonical_bytes=b"first\n", run_id="json-snapshot-first"
+        )
+    )
+    first_payload = first.current_pointer_path.read_bytes()
+    third = publish_bundle_generation(
+        _write_basic_bundle(
+            tmp_path, canonical_bytes=b"third\n", run_id="json-snapshot-third"
+        )
+    )
+    third_payload = third.current_pointer_path.read_bytes()
+    generation_mod.atomic_write_bytes(first.current_pointer_path, first_payload)
+    second_manifest = _write_basic_bundle(
+        tmp_path, canonical_bytes=b"second\n", run_id="json-snapshot-second"
+    )
+    original_install = generation_mod._install_generation
+
+    def install_then_change_pointer(*args, **kwargs):
+        result = original_install(*args, **kwargs)
+        generation_mod.atomic_write_bytes(first.current_pointer_path, third_payload)
+        return result
+
+    monkeypatch.setattr(
+        generation_mod, "_install_generation", install_then_change_pointer
+    )
+
+    with pytest.raises(BundleGenerationError, match="refusing blind overwrite"):
+        publish_bundle_generation(second_manifest)
+
+    assert first.current_pointer_path.read_bytes() == third_payload

@@ -5,6 +5,7 @@ import hashlib
 
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ import pytest
 from merger.lenskit.core import rooted_filesystem
 from merger.lenskit.core.rooted_filesystem import (
     RootedFilesystemError,
+    atomic_replace_symlink,
     atomic_write_bytes,
     bind_directory,
     copy_verified_file,
@@ -20,8 +22,10 @@ from merger.lenskit.core.rooted_filesystem import (
     make_directory_exclusive,
     exclusive_file_lock,
     read_regular_bytes,
+    read_symlink_target,
     rename_path_no_replace,
     remove_regular_file,
+    remove_symlink,
     remove_tree,
     read_tree,
 )
@@ -448,3 +452,248 @@ def test_native_create_only_rename_success_ignores_stale_errno() -> None:
         "destination",
         1,
     )
+
+
+def test_digest_tree_is_not_limited_by_python_recursion_depth(tmp_path: Path) -> None:
+    root = tmp_path / "publication"
+    current = root
+    current.mkdir()
+    depth = 120
+    for index in range(depth):
+        current = current / f"d{index}"
+        current.mkdir()
+    payload = b"deep-leaf\n"
+    (current / "leaf.bin").write_bytes(payload)
+
+    previous_limit = sys.getrecursionlimit()
+    sys.setrecursionlimit(100)
+    try:
+        files, directories = digest_tree(root)
+    finally:
+        sys.setrecursionlimit(previous_limit)
+
+    relative = "/".join([*(f"d{index}" for index in range(depth)), "leaf.bin"])
+    assert files[relative] == (len(payload), hashlib.sha256(payload).hexdigest())
+    assert len(directories) == depth
+
+
+def test_read_regular_bytes_enforces_size_ceiling(tmp_path: Path) -> None:
+    payload = tmp_path / "payload.bin"
+    payload.write_bytes(b"0123456789")
+
+    with pytest.raises(RootedFilesystemError, match="exceeds maximum size 9"):
+        read_regular_bytes(payload, max_bytes=9)
+
+    assert read_regular_bytes(payload, max_bytes=10) == b"0123456789"
+
+
+def test_remove_symlink_rejects_regular_file_and_removes_only_link(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.write_text("preserved\n", encoding="utf-8")
+    link = tmp_path / "link"
+    link.symlink_to(target.name)
+
+    assert remove_symlink(link) is True
+    assert target.read_text(encoding="utf-8") == "preserved\n"
+    with pytest.raises(RootedFilesystemError, match="not a symlink"):
+        remove_symlink(target)
+
+
+def test_atomic_replace_symlink_round_trips_through_bound_parent(tmp_path: Path) -> None:
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    current = lane / "current"
+
+    atomic_replace_symlink(current, "generation-a")
+    assert read_symlink_target(current) == "generation-a"
+
+    atomic_replace_symlink(current, "generation-b")
+    assert read_symlink_target(current) == "generation-b"
+
+
+def test_atomic_replace_symlink_rejects_parent_swap_during_temp_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane = tmp_path / "lane"
+    displaced = tmp_path / "lane-displaced"
+    lane.mkdir()
+    current = lane / "current"
+    original_symlink = os.symlink
+
+    def create_then_swap(
+        target: str,
+        name: str,
+        *,
+        dir_fd: int | None = None,
+    ) -> None:
+        original_symlink(target, name, dir_fd=dir_fd)
+        lane.rename(displaced)
+        lane.mkdir()
+
+    monkeypatch.setattr(rooted_filesystem.os, "symlink", create_then_swap)
+
+    with pytest.raises(RootedFilesystemError, match="identity changed"):
+        atomic_replace_symlink(current, "generation-a")
+
+    assert not os.path.lexists(current)
+    assert not any(path.name.startswith(".current.") for path in displaced.iterdir())
+
+
+@pytest.mark.parametrize("swap_phase", ["before", "after"])
+def test_atomic_replace_symlink_rejects_parent_swap_around_atomic_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    swap_phase: str,
+) -> None:
+    lane = tmp_path / "lane"
+    displaced = tmp_path / "lane-displaced"
+    lane.mkdir()
+    current = lane / "current"
+    original_rename = os.rename
+
+    def rename_with_swap(
+        source: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        pointer_exchange = (
+            isinstance(source, str)
+            and source.startswith(".current.")
+            and destination == "current"
+            and src_dir_fd is not None
+            and dst_dir_fd is not None
+        )
+        if pointer_exchange and swap_phase == "before":
+            original_rename(lane, displaced)
+            lane.mkdir()
+        original_rename(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+        if pointer_exchange and swap_phase == "after":
+            original_rename(lane, displaced)
+            lane.mkdir()
+
+    monkeypatch.setattr(rooted_filesystem.os, "rename", rename_with_swap)
+
+    with pytest.raises(RootedFilesystemError, match="identity changed"):
+        atomic_replace_symlink(current, "generation-a")
+
+    assert not os.path.lexists(current)
+    assert read_symlink_target(displaced / "current") == "generation-a"
+
+
+def test_read_symlink_target_uses_bound_parent_and_rejects_path_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane = tmp_path / "lane"
+    displaced = tmp_path / "lane-displaced"
+    lane.mkdir()
+    current = lane / "current"
+    current.symlink_to("generation-a")
+    original_readlink = os.readlink
+    swapped = False
+
+    def readlink_with_swap(
+        name: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        dir_fd: int | None = None,
+    ) -> str:
+        nonlocal swapped
+        if not swapped and name == "current" and dir_fd is not None:
+            swapped = True
+            lane.rename(displaced)
+            lane.mkdir()
+            (lane / "current").symlink_to("generation-b")
+        return original_readlink(name, dir_fd=dir_fd)
+
+    monkeypatch.setattr(rooted_filesystem.os, "readlink", readlink_with_swap)
+
+    with pytest.raises(RootedFilesystemError, match="identity changed"):
+        read_symlink_target(current)
+
+    assert original_readlink(displaced / "current") == "generation-a"
+    assert original_readlink(current) == "generation-b"
+
+
+def test_atomic_replace_symlink_cleanup_preserves_replaced_temp_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    current = lane / "current"
+    original_rename = os.rename
+
+    def replace_temp_then_fail(
+        source: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        destination: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+        *,
+        src_dir_fd: int | None = None,
+        dst_dir_fd: int | None = None,
+    ) -> None:
+        if (
+            isinstance(source, str)
+            and source.startswith(".current.")
+            and destination == "current"
+            and src_dir_fd is not None
+        ):
+            os.unlink(source, dir_fd=src_dir_fd)
+            replacement_fd = os.open(
+                source,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=src_dir_fd,
+            )
+            try:
+                os.write(replacement_fd, b"foreign-temp\n")
+            finally:
+                os.close(replacement_fd)
+            raise OSError(errno.EIO, "simulated rename failure")
+        original_rename(
+            source,
+            destination,
+            src_dir_fd=src_dir_fd,
+            dst_dir_fd=dst_dir_fd,
+        )
+
+    monkeypatch.setattr(rooted_filesystem.os, "rename", replace_temp_then_fail)
+
+    with pytest.raises(RootedFilesystemError, match="before replace"):
+        atomic_replace_symlink(current, "generation-a")
+
+    leftovers = list(lane.glob(".current.*.tmp"))
+    assert len(leftovers) == 1
+    assert leftovers[0].read_bytes() == b"foreign-temp\n"
+    assert not os.path.lexists(current)
+
+
+def test_atomic_replace_symlink_reports_failure_after_successful_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane = tmp_path / "lane"
+    lane.mkdir()
+    current = lane / "current"
+    original_fsync = os.fsync
+    failed = False
+
+    def fail_first_fsync(fd: int) -> None:
+        nonlocal failed
+        if not failed:
+            failed = True
+            raise OSError(errno.EIO, "simulated parent fsync failure")
+        original_fsync(fd)
+
+    monkeypatch.setattr(rooted_filesystem.os, "fsync", fail_first_fsync)
+
+    with pytest.raises(RootedFilesystemError, match="after replace"):
+        atomic_replace_symlink(current, "generation-a")
+
+    assert os.readlink(current) == "generation-a"

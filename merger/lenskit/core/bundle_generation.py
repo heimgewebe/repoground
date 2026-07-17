@@ -6,19 +6,21 @@ import errno
 import hashlib
 import json
 import os
-import secrets
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 from .rooted_filesystem import (
+    DirectoryBinding,
     RootedFilesystemError,
+    atomic_replace_symlink,
     atomic_write_bytes,
     bind_directory,
     copy_verified_file,
     digest_regular_file,
     digest_tree,
+    exclusive_file_lock,
     fsync_directory,
     lstat_path,
     make_directories,
@@ -26,6 +28,9 @@ from .rooted_filesystem import (
     path_exists,
     path_is_real_directory,
     read_regular_bytes,
+    read_symlink_target,
+    remove_regular_file,
+    remove_symlink,
     remove_tree,
     rename_path_no_replace,
     secure_absolute,
@@ -39,8 +44,11 @@ class BundleGenerationError(RuntimeError):
 GENERATION_ROOT_NAME = ".repobrief-generations"
 CURRENT_LINK_NAME = "current"
 CURRENT_POINTER_JSON_NAME = "current.json"
+PUBLISH_LOCK_NAME = ".publish.lock"
 POINTER_KIND = "repobrief.bundle_generation_pointer"
 POINTER_VERSION = "1"
+_MAX_POST_EMIT_HEALTH_BYTES = 16 * 1024 * 1024
+_MAX_CURRENT_POINTER_BYTES = 1024 * 1024
 
 _SIDECAR_LINK_KEYS = (
     "post_emit_health_path",
@@ -109,6 +117,13 @@ class _PointerState:
     path: Path | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _PointerSnapshot:
+    mode: str
+    symlink_target: str | None = None
+    json_payload: bytes | None = None
+
+
 def bundle_stem_from_manifest(manifest_path: str | Path) -> str:
     name = Path(manifest_path).name
     suffix = ".bundle.manifest.json"
@@ -167,11 +182,15 @@ def _resolve_under_root(output_root: Path, raw_path: Any, *, label: str) -> tupl
     return relative, candidate
 
 
-def _read_regular_payload(path: Path, *, label: str) -> bytes:
+def _read_regular_payload(
+    path: Path, *, label: str, max_bytes: int | None = None
+) -> bytes:
     try:
-        return read_regular_bytes(path)
+        return read_regular_bytes(path, max_bytes=max_bytes)
     except RootedFilesystemError as exc:
-        raise BundleGenerationError(f"{label} must be a regular file inside the bundle root: {path}") from exc
+        raise BundleGenerationError(
+            f"{label} must be a stable regular file inside the bundle root: {path}: {exc}"
+        ) from exc
 
 
 def _digest_regular_payload(path: Path, *, label: str) -> tuple[int, str]:
@@ -288,7 +307,11 @@ def _collect_manifest_links(
         label = f"links.{key}"
         relative, source = _resolve_under_root(output_root, links[key], label=label)
         if key == "post_emit_health_path":
-            payload = _read_regular_payload(source, label=label)
+            payload = _read_regular_payload(
+                source,
+                label=label,
+                max_bytes=_MAX_POST_EMIT_HEALTH_BYTES,
+            )
             _validate_post_emit_health_binding(payload, manifest_sha256)
             observed_bytes = len(payload)
             observed_sha256 = hashlib.sha256(payload).hexdigest()
@@ -486,25 +509,83 @@ def _optional_lstat(path: Path) -> os.stat_result | None:
         raise
 
 
-def _validate_current_symlink(generations_root: Path, current: Path) -> None:
+def _validate_current_symlink(generations_root: Path, current: Path) -> str:
     try:
-        target = os.readlink(current)
-    except OSError as exc:
+        target = read_symlink_target(current)
+    except RootedFilesystemError as exc:
         raise BundleGenerationError(f"current symlink cannot be read safely: {exc}") from exc
     if not _is_sha256(target) or "/" in target or "\\" in target:
         raise BundleGenerationError("current symlink target is not a valid generation id")
     if not path_is_real_directory(generations_root / target):
         raise BundleGenerationError("current symlink target does not name a valid generation")
+    return target
+
+
+def _parse_current_json_pointer_payload(payload: bytes) -> dict[str, Any]:
+    try:
+        pointer = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BundleGenerationError("current JSON pointer must be valid UTF-8 JSON") from exc
+    if (
+        not isinstance(pointer, dict)
+        or pointer.get("kind") != POINTER_KIND
+        or pointer.get("version") != POINTER_VERSION
+        or not _is_sha256(pointer.get("generation_id"))
+        or not _is_sha256(pointer.get("sha256"))
+        or pointer.get("selection_rule")
+        != "read_pointer_once_then_verify_generation_manifest"
+    ):
+        raise BundleGenerationError("current JSON pointer contract mismatch")
+    return pointer
+
+
+def _resolve_current_json_pointer_payload(
+    candidate: Path,
+    payload: bytes,
+    *,
+    binding: DirectoryBinding,
+) -> Path:
+    pointer = _parse_current_json_pointer_payload(payload)
+    relative, manifest_path = _resolve_under_root(
+        candidate.parent,
+        pointer.get("manifest_path"),
+        label="current JSON pointer manifest_path",
+    )
+    relative_parts = PurePosixPath(relative).parts
+    if len(relative_parts) < 2 or relative_parts[0] != pointer["generation_id"]:
+        raise BundleGenerationError(
+            "current JSON pointer manifest path does not match generation_id"
+        )
+    manifest_payload = _read_regular_payload(
+        manifest_path,
+        label="current generation manifest",
+    )
+    if hashlib.sha256(manifest_payload).hexdigest() != pointer["sha256"]:
+        raise BundleGenerationError("current JSON pointer manifest sha256 mismatch")
+    binding.assert_current_path_identity()
+    return manifest_path
 
 
 def _validate_current_json_pointer(pointer_path: Path) -> None:
     try:
-        resolve_bundle_manifest_path(pointer_path)
+        with bind_directory(pointer_path.parent) as binding:
+            payload = _read_regular_payload(
+                pointer_path,
+                label="current JSON pointer",
+                max_bytes=_MAX_CURRENT_POINTER_BYTES,
+            )
+            _resolve_current_json_pointer_payload(
+                pointer_path,
+                payload,
+                binding=binding,
+            )
     except (BundleGenerationError, OSError, ValueError) as exc:
         raise BundleGenerationError(f"current JSON pointer is invalid: {exc}") from exc
 
 
-def _inspect_pointer_state(generations_root: Path) -> _PointerState:
+def _capture_pointer_state(
+    generations_root: Path,
+) -> tuple[_PointerState, _PointerSnapshot]:
     current = generations_root / CURRENT_LINK_NAME
     current_json = generations_root / CURRENT_POINTER_JSON_NAME
     current_stat = _optional_lstat(current)
@@ -516,42 +597,236 @@ def _inspect_pointer_state(generations_root: Path) -> _PointerState:
     if current_stat is not None:
         if not stat.S_ISLNK(current_stat.st_mode):
             raise BundleGenerationError("current pointer has an unexpected filesystem type")
-        _validate_current_symlink(generations_root, current)
-        return _PointerState("relative_symlink", current)
+        target = _validate_current_symlink(generations_root, current)
+        return (
+            _PointerState("relative_symlink", current),
+            _PointerSnapshot("relative_symlink", symlink_target=target),
+        )
 
     if json_stat is not None:
         if not stat.S_ISREG(json_stat.st_mode):
             raise BundleGenerationError("current.json pointer has an unexpected filesystem type")
-        _validate_current_json_pointer(current_json)
-        return _PointerState("json_pointer", current_json)
+        with bind_directory(generations_root) as binding:
+            payload = _read_regular_payload(
+                current_json,
+                label="current JSON pointer snapshot",
+                max_bytes=_MAX_CURRENT_POINTER_BYTES,
+            )
+            _resolve_current_json_pointer_payload(
+                current_json,
+                payload,
+                binding=binding,
+            )
+        return (
+            _PointerState("json_pointer", current_json),
+            _PointerSnapshot("json_pointer", json_payload=payload),
+        )
 
-    return _PointerState("new")
+    return _PointerState("new"), _PointerSnapshot("new")
+
+
+def _inspect_pointer_state(generations_root: Path) -> _PointerState:
+    state, _snapshot = _capture_pointer_state(generations_root)
+    return state
+
+
+def _snapshot_pointer_state(generations_root: Path) -> _PointerSnapshot:
+    _state, snapshot = _capture_pointer_state(generations_root)
+    return snapshot
+
+
+def _pointer_generation_id_from_json_payload(payload: bytes) -> str:
+    return _parse_current_json_pointer_payload(payload)["generation_id"]
+
+
+def _assert_pointer_snapshot_unchanged(
+    generations_root: Path,
+    expected: _PointerSnapshot,
+) -> None:
+    _state, observed = _capture_pointer_state(generations_root)
+    if observed != expected:
+        raise BundleGenerationError(
+            "current pointer changed after publication snapshot; refusing blind overwrite"
+        )
+
+
+def _read_symlink_for_rollback(path: Path, *, error: str) -> str:
+    try:
+        return read_symlink_target(path)
+    except RootedFilesystemError as exc:
+        raise BundleGenerationError(error) from exc
+
+
+def _restore_relative_symlink_snapshot(
+    generations_root: Path,
+    current: Path,
+    current_stat: os.stat_result | None,
+    snapshot: _PointerSnapshot,
+    *,
+    attempted_generation_id: str,
+) -> None:
+    assert snapshot.symlink_target is not None
+    if current_stat is None or not stat.S_ISLNK(current_stat.st_mode):
+        raise BundleGenerationError("cannot roll back missing current symlink")
+    target = _read_symlink_for_rollback(
+        current, error="cannot read current symlink during rollback"
+    )
+    if target == snapshot.symlink_target:
+        return
+    if target != attempted_generation_id:
+        raise BundleGenerationError(
+            "current symlink was changed by another writer during rollback"
+        )
+    _write_current_symlink(generations_root, snapshot.symlink_target)
+
+
+def _restore_json_pointer_snapshot(
+    current_json: Path,
+    json_stat: os.stat_result | None,
+    snapshot: _PointerSnapshot,
+    *,
+    attempted_generation_id: str,
+) -> None:
+    assert snapshot.json_payload is not None
+    if json_stat is None or not stat.S_ISREG(json_stat.st_mode):
+        raise BundleGenerationError("cannot roll back missing current JSON pointer")
+    current_payload = _read_regular_payload(
+        current_json,
+        label="current JSON pointer rollback",
+        max_bytes=_MAX_CURRENT_POINTER_BYTES,
+    )
+    old_generation_id = _pointer_generation_id_from_json_payload(snapshot.json_payload)
+    current_generation_id = _pointer_generation_id_from_json_payload(current_payload)
+    if current_generation_id == old_generation_id:
+        return
+    if current_generation_id != attempted_generation_id:
+        raise BundleGenerationError(
+            "current JSON pointer was changed by another writer during rollback"
+        )
+    try:
+        atomic_write_bytes(current_json, snapshot.json_payload)
+    except RootedFilesystemError as exc:
+        raise BundleGenerationError("failed to restore current JSON pointer") from exc
+    _validate_current_json_pointer(current_json)
+
+
+def _remove_new_symlink_pointer(
+    current: Path,
+    current_stat: os.stat_result,
+    *,
+    attempted_generation_id: str,
+) -> None:
+    if not stat.S_ISLNK(current_stat.st_mode):
+        raise BundleGenerationError("new current pointer has an unexpected type")
+    current_target = _read_symlink_for_rollback(
+        current, error="cannot read new current symlink during rollback"
+    )
+    if current_target != attempted_generation_id:
+        raise BundleGenerationError(
+            "current symlink was changed by another writer during rollback"
+        )
+    try:
+        remove_symlink(current)
+    except RootedFilesystemError as exc:
+        raise BundleGenerationError("failed to remove new current symlink") from exc
+
+
+def _remove_new_json_pointer(
+    current_json: Path,
+    json_stat: os.stat_result,
+    *,
+    attempted_generation_id: str,
+) -> None:
+    if not stat.S_ISREG(json_stat.st_mode):
+        raise BundleGenerationError("new current JSON pointer has an unexpected type")
+    payload = _read_regular_payload(
+        current_json,
+        label="new current JSON pointer rollback",
+        max_bytes=_MAX_CURRENT_POINTER_BYTES,
+    )
+    if _pointer_generation_id_from_json_payload(payload) != attempted_generation_id:
+        raise BundleGenerationError(
+            "current JSON pointer was changed by another writer during rollback"
+        )
+    try:
+        remove_regular_file(current_json)
+    except RootedFilesystemError as exc:
+        raise BundleGenerationError("failed to remove new current JSON pointer") from exc
+
+
+def _remove_new_pointer(
+    current: Path,
+    current_json: Path,
+    current_stat: os.stat_result | None,
+    json_stat: os.stat_result | None,
+    *,
+    attempted_generation_id: str,
+) -> None:
+    if current_stat is not None:
+        _remove_new_symlink_pointer(
+            current, current_stat, attempted_generation_id=attempted_generation_id
+        )
+        return
+    if json_stat is not None:
+        _remove_new_json_pointer(
+            current_json, json_stat, attempted_generation_id=attempted_generation_id
+        )
+
+
+def _restore_pointer_snapshot(
+    generations_root: Path,
+    snapshot: _PointerSnapshot,
+    *,
+    attempted_generation_id: str,
+) -> None:
+    current = generations_root / CURRENT_LINK_NAME
+    current_json = generations_root / CURRENT_POINTER_JSON_NAME
+    current_stat = _optional_lstat(current)
+    json_stat = _optional_lstat(current_json)
+    if current_stat is not None and json_stat is not None:
+        raise BundleGenerationError(
+            "cannot roll back conflicting current and current.json pointers"
+        )
+    if snapshot.mode == "relative_symlink":
+        _restore_relative_symlink_snapshot(
+            generations_root,
+            current,
+            current_stat,
+            snapshot,
+            attempted_generation_id=attempted_generation_id,
+        )
+        return
+    if snapshot.mode == "json_pointer":
+        _restore_json_pointer_snapshot(
+            current_json,
+            json_stat,
+            snapshot,
+            attempted_generation_id=attempted_generation_id,
+        )
+        return
+    _remove_new_pointer(
+        current,
+        current_json,
+        current_stat,
+        json_stat,
+        attempted_generation_id=attempted_generation_id,
+    )
+    if _inspect_pointer_state(generations_root).mode != "new":
+        raise BundleGenerationError(
+            "new current pointer rollback did not restore an empty lane"
+        )
 
 
 def _write_current_symlink(generations_root: Path, generation_id: str) -> tuple[Path, str]:
     current = generations_root / CURRENT_LINK_NAME
-    temporary = generations_root / f".{CURRENT_LINK_NAME}.{secrets.token_hex(12)}.tmp"
     try:
-        os.symlink(generation_id, temporary)
-    except OSError as exc:
-        if exc.errno in {errno.EPERM, errno.EOPNOTSUPP, errno.ENOSYS, errno.EACCES}:
-            raise NotImplementedError(str(exc)) from exc
-        raise BundleGenerationError(f"failed to create temporary current symlink: {exc}") from exc
-    try:
-        os.replace(temporary, current)
-        fsync_directory(generations_root)
-        if os.readlink(current) != generation_id:
-            raise BundleGenerationError("current symlink readback selected the wrong generation")
-    except OSError as exc:
-        raise BundleGenerationError(f"failed to atomically replace current symlink: {exc}") from exc
+        atomic_replace_symlink(current, generation_id)
+    except NotImplementedError:
+        raise
     except RootedFilesystemError as exc:
-        raise BundleGenerationError(f"failed to fsync current symlink parent: {exc}") from exc
-    finally:
-        try:
-            if os.path.lexists(temporary):
-                temporary.unlink()
-        except OSError:
-            pass
+        raise BundleGenerationError(
+            f"failed to publish descriptor-bound current symlink: {exc}"
+        ) from exc
     return current, "relative_symlink"
 
 
@@ -581,25 +856,27 @@ def _write_current_json_pointer(
 def _publish_current_pointer(
     generations_root: Path,
     *,
+    pointer_mode: str,
     generation_id: str,
     manifest_relative_path: str,
     manifest_sha256: str,
 ) -> tuple[Path, str]:
-    state = _inspect_pointer_state(generations_root)
-    if state.mode == "relative_symlink":
+    if pointer_mode == "relative_symlink":
         try:
             return _write_current_symlink(generations_root, generation_id)
         except NotImplementedError as exc:
             raise BundleGenerationError(
                 "current symlink mode is sticky; refusing JSON fallback after symlink failure"
             ) from exc
-    if state.mode == "json_pointer":
+    if pointer_mode == "json_pointer":
         return _write_current_json_pointer(
             generations_root,
             generation_id=generation_id,
             manifest_relative_path=manifest_relative_path,
             manifest_sha256=manifest_sha256,
         )
+    if pointer_mode != "new":
+        raise BundleGenerationError(f"unsupported current pointer mode: {pointer_mode}")
     try:
         return _write_current_symlink(generations_root, generation_id)
     except NotImplementedError:
@@ -611,7 +888,7 @@ def _publish_current_pointer(
         )
 
 
-def publish_bundle_generation(
+def _publish_bundle_generation_impl(
     bundle_manifest: str | Path,
     *,
     output_root: str | Path | None = None,
@@ -633,32 +910,72 @@ def publish_bundle_generation(
             extra_paths=extra_paths,
         )
         generation_id = _generation_id(files, manifest_sha256=manifest_sha256)
-        generation_dir, reused = _install_generation(generations_root, generation_id, files)
-        try:
-            with bind_directory(generation_dir) as generation_binding:
-                _verify_existing_generation(generation_dir, files)
-                generation_binding.assert_current_path_identity()
-                binding.assert_current_path_identity()
-                pointer_path, pointer_kind = _publish_current_pointer(
-                    generations_root,
-                    generation_id=generation_id,
-                    manifest_relative_path=manifest_relative,
-                    manifest_sha256=manifest_sha256,
+        make_directories(generations_root)
+        with bind_directory(generations_root) as lane_binding:
+            with exclusive_file_lock(generations_root / PUBLISH_LOCK_NAME):
+                lane_binding.assert_current_path_identity()
+                pointer_snapshot = _snapshot_pointer_state(generations_root)
+                generation_dir, reused = _install_generation(
+                    generations_root, generation_id, files
                 )
-                generation_binding.assert_current_path_identity()
-                binding.assert_current_path_identity()
-        except RootedFilesystemError as exc:
-            raise BundleGenerationError(
-                f"generation changed while the current pointer was being published: {generation_dir}"
-            ) from exc
+                pointer_publication_started = False
+                pointer_published = False
+                try:
+                    with bind_directory(generation_dir) as generation_binding:
+                        _verify_existing_generation(generation_dir, files)
+                        generation_binding.assert_current_path_identity()
+                        lane_binding.assert_current_path_identity()
+                        binding.assert_current_path_identity()
+                        _assert_pointer_snapshot_unchanged(
+                            generations_root, pointer_snapshot
+                        )
+                        pointer_publication_started = True
+                        pointer_path, pointer_kind = _publish_current_pointer(
+                            generations_root,
+                            pointer_mode=pointer_snapshot.mode,
+                            generation_id=generation_id,
+                            manifest_relative_path=manifest_relative,
+                            manifest_sha256=manifest_sha256,
+                        )
+                        pointer_published = True
+                        _verify_existing_generation(generation_dir, files)
+                        generation_binding.assert_current_path_identity()
+                        lane_binding.assert_current_path_identity()
+                        binding.assert_current_path_identity()
+                except (BundleGenerationError, RootedFilesystemError) as exc:
+                    if pointer_publication_started:
+                        try:
+                            _restore_pointer_snapshot(
+                                generations_root,
+                                pointer_snapshot,
+                                attempted_generation_id=generation_id,
+                            )
+                            lane_binding.assert_current_path_identity()
+                            binding.assert_current_path_identity()
+                        except (BundleGenerationError, RootedFilesystemError) as rollback_exc:
+                            raise BundleGenerationError(
+                                "current pointer publication failed and rollback also failed: "
+                                f"{rollback_exc}"
+                            ) from exc
+                        if pointer_published:
+                            raise BundleGenerationError(
+                                "generation verification failed after current pointer switch; "
+                                "the previous pointer state was restored"
+                            ) from exc
+                        raise
+                    if isinstance(exc, BundleGenerationError):
+                        raise
+                    raise BundleGenerationError(
+                        "generation changed while the current pointer was being published: "
+                        f"{generation_dir}"
+                    ) from exc
     if pointer_kind == "relative_symlink":
         selected_manifest_path = current_manifest_path(root, bundle_stem, manifest_relative)
     else:
         selected_manifest_path = generation_dir / Path(*PurePosixPath(manifest_relative).parts)
     resolved_manifest = generation_dir / Path(*PurePosixPath(manifest_relative).parts)
-    resolved_payload = _read_regular_payload(resolved_manifest, label="published bundle manifest")
-    if hashlib.sha256(resolved_payload).hexdigest() != manifest_sha256:
-        raise BundleGenerationError("published generation manifest readback hash mismatch")
+    # The complete tree, including this manifest hash, was already reverified
+    # inside the lane lock where failure can still trigger pointer rollback.
     return BundleGenerationResult(
         output_root=root,
         bundle_stem=bundle_stem,
@@ -674,38 +991,38 @@ def publish_bundle_generation(
     )
 
 
+def publish_bundle_generation(
+    bundle_manifest: str | Path,
+    *,
+    output_root: str | Path | None = None,
+    extra_paths: Iterable[str | Path] = (),
+) -> BundleGenerationResult:
+    try:
+        return _publish_bundle_generation_impl(
+            bundle_manifest,
+            output_root=output_root,
+            extra_paths=extra_paths,
+        )
+    except BundleGenerationError:
+        raise
+    except RootedFilesystemError as exc:
+        raise BundleGenerationError(
+            f"bundle generation filesystem guard failed: {exc}"
+        ) from exc
+
+
 def resolve_bundle_manifest_path(path: str | Path) -> Path:
     candidate = secure_absolute(path)
     if candidate.name != CURRENT_POINTER_JSON_NAME:
         return candidate.resolve(strict=True)
     with bind_directory(candidate.parent) as binding:
-        payload = _read_regular_payload(candidate, label="current JSON pointer")
-        try:
-            pointer = json.loads(payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise BundleGenerationError("current JSON pointer must be valid UTF-8 JSON") from exc
-        if (
-            not isinstance(pointer, dict)
-            or pointer.get("kind") != POINTER_KIND
-            or pointer.get("version") != POINTER_VERSION
-            or not _is_sha256(pointer.get("generation_id"))
-            or not _is_sha256(pointer.get("sha256"))
-            or pointer.get("selection_rule")
-            != "read_pointer_once_then_verify_generation_manifest"
-        ):
-            raise BundleGenerationError("current JSON pointer contract mismatch")
-        relative, manifest_path = _resolve_under_root(
-            candidate.parent,
-            pointer.get("manifest_path"),
-            label="current JSON pointer manifest_path",
+        payload = _read_regular_payload(
+            candidate,
+            label="current JSON pointer",
+            max_bytes=_MAX_CURRENT_POINTER_BYTES,
         )
-        relative_parts = PurePosixPath(relative).parts
-        if len(relative_parts) < 2 or relative_parts[0] != pointer["generation_id"]:
-            raise BundleGenerationError(
-                "current JSON pointer manifest path does not match generation_id"
-            )
-        manifest_payload = _read_regular_payload(manifest_path, label="current generation manifest")
-        if hashlib.sha256(manifest_payload).hexdigest() != pointer["sha256"]:
-            raise BundleGenerationError("current JSON pointer manifest sha256 mismatch")
-        binding.assert_current_path_identity()
-        return manifest_path
+        return _resolve_current_json_pointer_payload(
+            candidate,
+            payload,
+            binding=binding,
+        )

@@ -20,7 +20,7 @@ import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 
 class RootedFilesystemError(OSError):
@@ -34,20 +34,31 @@ _DIRECTORY_FLAGS = (
     | getattr(os, "O_NOFOLLOW", 0)
 )
 _FILE_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+_SYMLINK_DIR_FD_SUPPORTED = os.symlink in os.supports_dir_fd
+_READLINK_DIR_FD_SUPPORTED = os.readlink in os.supports_dir_fd
+_SYMLINK_UNSUPPORTED_ERRNOS = frozenset(
+    {errno.EOPNOTSUPP, errno.ENOSYS, getattr(errno, "ENOTSUP", errno.EOPNOTSUPP)}
+)
+_IO_CHUNK_BYTES = 1024 * 1024
 _SELECTION = contextvars.ContextVar[tuple["DirectoryBinding", ...]](
     "lenskit_rooted_filesystem_bindings",
     default=(),
 )
 
 
-def _required_primitives_supported() -> bool:
-    required_dir_fd = (os.open, os.mkdir, os.rename, os.stat, os.unlink, os.rmdir)
-    return (
-        os.name == "posix"
-        and hasattr(os, "O_DIRECTORY")
-        and hasattr(os, "O_NOFOLLOW")
-        and all(function in os.supports_dir_fd for function in required_dir_fd)
+_REQUIRED_PRIMITIVES_SUPPORTED = (
+    os.name == "posix"
+    and hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
+    and all(
+        function in os.supports_dir_fd
+        for function in (os.open, os.mkdir, os.rename, os.stat, os.unlink, os.rmdir)
     )
+)
+
+
+def _required_primitives_supported() -> bool:
+    return _REQUIRED_PRIMITIVES_SUPPORTED
 
 
 def require_rooted_filesystem_support() -> None:
@@ -293,12 +304,18 @@ def _content_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int
 
 
 def _assert_directory_fd_matches_path(fd: int, path: str | Path) -> None:
+    absolute = secure_absolute(path)
     expected = _identity(os.fstat(fd))
-    current_fd = _open_absolute_directory(secure_absolute(path), create=False)
+    try:
+        current_fd = _open_absolute_directory(absolute, create=False)
+    except OSError as exc:
+        raise RootedFilesystemError(
+            f"directory path no longer resolves during rooted operation: {absolute}"
+        ) from exc
     try:
         if _identity(os.fstat(current_fd)) != expected:
             raise RootedFilesystemError(
-                f"directory path identity changed during rooted operation: {secure_absolute(path)}"
+                f"directory path identity changed during rooted operation: {absolute}"
             )
     finally:
         os.close(current_fd)
@@ -361,13 +378,40 @@ def open_regular_file(path: str | Path, *, flags: int = os.O_RDONLY) -> tuple[in
     return fd, metadata.st_size
 
 
-def read_regular_bytes(path: str | Path) -> bytes:
+def read_regular_bytes(
+    path: str | Path, *, max_bytes: int | None = None
+) -> bytes:
+    """Read one stable descriptor-bound regular file with an optional size ceiling."""
+    if max_bytes is not None and max_bytes < 0:
+        raise ValueError("max_bytes must be non-negative")
     fd, _ = open_regular_file(path)
     chunks: list[bytes] = []
+    observed = 0
     try:
-        with os.fdopen(os.dup(fd), "rb", closefd=True) as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                chunks.append(chunk)
+        before = os.fstat(fd)
+        if max_bytes is not None and before.st_size > max_bytes:
+            raise RootedFilesystemError(
+                f"regular file exceeds maximum size {max_bytes}: {secure_absolute(path)}"
+            )
+        while True:
+            chunk = os.read(fd, _IO_CHUNK_BYTES)
+            if not chunk:
+                break
+            observed += len(chunk)
+            if max_bytes is not None and observed > max_bytes:
+                raise RootedFilesystemError(
+                    f"regular file exceeds maximum size {max_bytes}: {secure_absolute(path)}"
+                )
+            chunks.append(chunk)
+        after = os.fstat(fd)
+        if _content_identity(before) != _content_identity(after):
+            raise RootedFilesystemError(
+                f"regular file changed while reading: {secure_absolute(path)}"
+            )
+        if observed != after.st_size:
+            raise RootedFilesystemError(
+                f"regular file size changed while reading: {secure_absolute(path)}"
+            )
         _assert_regular_fd_matches_path(fd, path)
         return b"".join(chunks)
     finally:
@@ -378,7 +422,7 @@ def _digest_fd(fd: int) -> tuple[int, str]:
     digest = hashlib.sha256()
     observed = 0
     while True:
-        chunk = os.read(fd, 1024 * 1024)
+        chunk = os.read(fd, _IO_CHUNK_BYTES)
         if not chunk:
             return observed, digest.hexdigest()
         observed += len(chunk)
@@ -604,6 +648,166 @@ def exclusive_write_bytes(
         os.close(parent_fd)
 
 
+def _read_stable_symlink_entry(
+    parent_fd: int,
+    name: str,
+    absolute: Path,
+) -> tuple[str, tuple[int, int, int, int, int]]:
+    before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if not stat.S_ISLNK(before.st_mode):
+        raise RootedFilesystemError(f"entry is not a symlink: {absolute}")
+    target = os.readlink(name, dir_fd=parent_fd)
+    after = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if _content_identity(before) != _content_identity(after):
+        raise RootedFilesystemError(f"symlink changed while reading: {absolute}")
+    return target, _content_identity(after)
+
+
+def read_symlink_target(path: str | Path) -> str:
+    """Read one stable symlink target through its already-open parent directory."""
+    if not _READLINK_DIR_FD_SUPPORTED:
+        raise RootedFilesystemError(
+            "trusted dirfd symlink reads are unsupported on this platform"
+        )
+    parent_fd, name, absolute = _open_parent(path, create=False)
+    try:
+        target, _entry_identity = _read_stable_symlink_entry(
+            parent_fd, name, absolute
+        )
+        _assert_directory_fd_matches_path(parent_fd, absolute.parent)
+        return target
+    except RootedFilesystemError:
+        raise
+    except OSError as exc:
+        raise RootedFilesystemError(f"symlink cannot be read: {absolute}") from exc
+    finally:
+        os.close(parent_fd)
+
+
+def _create_verified_temp_symlink(
+    parent_fd: int,
+    temp_name: str,
+    target: str,
+    absolute: Path,
+) -> tuple[int, int, int, int, int]:
+    try:
+        os.symlink(target, temp_name, dir_fd=parent_fd)
+    except OSError as exc:
+        if exc.errno in _SYMLINK_UNSUPPORTED_ERRNOS:
+            raise NotImplementedError(str(exc)) from exc
+        raise
+    observed_target, identity = _read_stable_symlink_entry(
+        parent_fd, temp_name, absolute.parent / temp_name
+    )
+    if observed_target != target:
+        raise RootedFilesystemError(
+            f"temporary symlink readback mismatch: {absolute.parent / temp_name}"
+        )
+    return identity
+
+
+def _verify_published_symlink(
+    parent_fd: int,
+    name: str,
+    target: str,
+    absolute: Path,
+) -> None:
+    observed_target, _identity_after = _read_stable_symlink_entry(
+        parent_fd, name, absolute
+    )
+    if observed_target != target:
+        raise RootedFilesystemError(
+            f"published symlink selected the wrong target: {absolute}"
+        )
+    _assert_directory_fd_matches_path(parent_fd, absolute.parent)
+
+
+def _cleanup_owned_temp_symlink(
+    parent_fd: int,
+    temp_name: str,
+    expected_identity: tuple[int, int, int, int, int] | None,
+) -> None:
+    if expected_identity is None:
+        return
+    try:
+        current = os.stat(temp_name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError:
+        return
+    if not stat.S_ISLNK(current.st_mode):
+        return
+    if _content_identity(current) != expected_identity:
+        return
+    try:
+        os.unlink(temp_name, dir_fd=parent_fd)
+        os.fsync(parent_fd)
+    except OSError:
+        pass
+
+
+def atomic_replace_symlink(path: str | Path, target: str) -> None:
+    """Atomically replace one symlink through a stable parent descriptor."""
+    if not _SYMLINK_DIR_FD_SUPPORTED or not _READLINK_DIR_FD_SUPPORTED:
+        raise NotImplementedError(
+            "trusted dirfd symlink publication is unsupported on this platform"
+        )
+    parent_fd, name, absolute = _open_parent(path, create=True)
+    temp_name = _new_temp_name(name)
+    temp_identity: tuple[int, int, int, int, int] | None = None
+    replaced = False
+    try:
+        _assert_directory_fd_matches_path(parent_fd, absolute.parent)
+        temp_identity = _create_verified_temp_symlink(
+            parent_fd, temp_name, target, absolute
+        )
+        _assert_directory_fd_matches_path(parent_fd, absolute.parent)
+        os.rename(
+            temp_name,
+            name,
+            src_dir_fd=parent_fd,
+            dst_dir_fd=parent_fd,
+        )
+        replaced = True
+        temp_identity = None
+        os.fsync(parent_fd)
+        _verify_published_symlink(parent_fd, name, target, absolute)
+    except NotImplementedError:
+        raise
+    except RootedFilesystemError:
+        raise
+    except OSError as exc:
+        phase = "after replace" if replaced else "before replace"
+        raise RootedFilesystemError(
+            f"rooted symlink publication failed {phase}: {absolute}: {exc}"
+        ) from exc
+    finally:
+        _cleanup_owned_temp_symlink(parent_fd, temp_name, temp_identity)
+        os.close(parent_fd)
+
+
+def remove_symlink(path: str | Path, *, missing_ok: bool = False) -> bool:
+    """Remove exactly one symlink without following it or any bound ancestor."""
+    parent_fd, name, absolute = _open_parent(path, create=False)
+    try:
+        try:
+            metadata = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            if missing_ok:
+                return False
+            raise
+        if not stat.S_ISLNK(metadata.st_mode):
+            raise RootedFilesystemError(f"entry is not a symlink: {absolute}")
+        os.unlink(name, dir_fd=parent_fd)
+        os.fsync(parent_fd)
+        _assert_directory_fd_matches_path(parent_fd, absolute.parent)
+        return True
+    except RootedFilesystemError:
+        raise
+    except OSError as exc:
+        raise RootedFilesystemError(f"symlink cannot be removed: {absolute}") from exc
+    finally:
+        os.close(parent_fd)
+
+
 def remove_regular_file(path: str | Path, *, missing_ok: bool = False) -> bool:
     """Remove one regular file through its already-open parent directory."""
     try:
@@ -641,7 +845,7 @@ def _copy_stream(source_fd: int, destination_fd: int) -> tuple[int, str]:
     digest = hashlib.sha256()
     observed = 0
     while True:
-        chunk = os.read(source_fd, 1024 * 1024)
+        chunk = os.read(source_fd, _IO_CHUNK_BYTES)
         if not chunk:
             break
         observed += len(chunk)
@@ -911,66 +1115,182 @@ def rename_path_no_replace(source: str | Path, destination: str | Path) -> None:
         os.close(destination_parent)
 
 
+@dataclass(slots=True)
+class _DigestTreeFrame:
+    fd: int
+    prefix: Path
+    directory_before: os.stat_result
+    scanner: Any
+    owns_fd: bool
+    parent_fd: int | None = None
+    parent_name: str | None = None
+    opened_identity: tuple[int, int] | None = None
+    closed: bool = False
+
+
+def _new_digest_tree_frame(
+    fd: int,
+    prefix: Path,
+    *,
+    owns_fd: bool,
+    parent_fd: int | None = None,
+    parent_name: str | None = None,
+    opened_identity: tuple[int, int] | None = None,
+) -> _DigestTreeFrame:
+    scanner = None
+    try:
+        scanner = os.scandir(fd)
+        directory_before = os.fstat(fd)
+    except OSError as exc:
+        if scanner is not None:
+            scanner.close()
+        if owns_fd:
+            os.close(fd)
+        raise RootedFilesystemError("rooted directory cannot be enumerated") from exc
+    return _DigestTreeFrame(
+        fd=fd,
+        prefix=prefix,
+        directory_before=directory_before,
+        scanner=scanner,
+        owns_fd=owns_fd,
+        parent_fd=parent_fd,
+        parent_name=parent_name,
+        opened_identity=opened_identity,
+    )
+
+
+def _close_digest_tree_frame(frame: _DigestTreeFrame) -> None:
+    if frame.closed:
+        return
+    frame.closed = True
+    try:
+        frame.scanner.close()
+    finally:
+        if frame.owns_fd:
+            os.close(frame.fd)
+
+
+def _finish_digest_tree_frame(frame: _DigestTreeFrame) -> None:
+    directory_after = os.fstat(frame.fd)
+    if _content_identity(frame.directory_before) != _content_identity(directory_after):
+        raise RootedFilesystemError(
+            "rooted tree directory changed while hashing: "
+            f"{frame.prefix.as_posix()}"
+        )
+    if frame.parent_fd is None:
+        return
+    assert frame.parent_name is not None
+    assert frame.opened_identity is not None
+    current = os.stat(
+        frame.parent_name,
+        dir_fd=frame.parent_fd,
+        follow_symlinks=False,
+    )
+    if _identity(current) != frame.opened_identity:
+        raise RootedFilesystemError(
+            "rooted tree directory changed while hashing: "
+            f"{frame.prefix.as_posix()}"
+        )
+
+
+def _open_digest_tree_child(
+    frame: _DigestTreeFrame,
+    entry_name: str,
+    relative: Path,
+) -> _DigestTreeFrame:
+    child_fd = os.open(entry_name, _DIRECTORY_FLAGS, dir_fd=frame.fd)
+    try:
+        opened = os.fstat(child_fd)
+    except OSError:
+        os.close(child_fd)
+        raise
+    return _new_digest_tree_frame(
+        child_fd,
+        relative,
+        owns_fd=True,
+        parent_fd=frame.fd,
+        parent_name=entry_name,
+        opened_identity=_identity(opened),
+    )
+
+
+def _digest_tree_regular_entry(
+    frame: _DigestTreeFrame,
+    entry_name: str,
+    relative_text: str,
+) -> tuple[int, str]:
+    child_fd = os.open(
+        entry_name,
+        os.O_RDONLY | _FILE_NOFOLLOW,
+        dir_fd=frame.fd,
+    )
+    try:
+        before = os.fstat(child_fd)
+        observed, digest = _digest_fd(child_fd)
+        after = os.fstat(child_fd)
+        current = os.stat(entry_name, dir_fd=frame.fd, follow_symlinks=False)
+        if _content_identity(before) != _content_identity(after):
+            raise RootedFilesystemError(
+                f"rooted tree file changed while hashing: {relative_text}"
+            )
+        if observed != after.st_size or _identity(current) != _identity(after):
+            raise RootedFilesystemError(
+                f"rooted tree file changed while hashing: {relative_text}"
+            )
+        return observed, digest
+    finally:
+        os.close(child_fd)
+
+
+def _visit_digest_tree_entry(
+    frame: _DigestTreeFrame,
+    entry_name: str,
+    files: dict[str, tuple[int, str]],
+    directories: set[str],
+    stack: list[_DigestTreeFrame],
+) -> None:
+    metadata = os.stat(entry_name, dir_fd=frame.fd, follow_symlinks=False)
+    relative = frame.prefix / entry_name
+    relative_text = relative.as_posix()
+    if stat.S_ISDIR(metadata.st_mode):
+        directories.add(relative_text)
+        stack.append(_open_digest_tree_child(frame, entry_name, relative))
+        return
+    if stat.S_ISREG(metadata.st_mode):
+        files[relative_text] = _digest_tree_regular_entry(
+            frame, entry_name, relative_text
+        )
+        return
+    raise RootedFilesystemError(
+        f"rooted tree contains a symlink or special entry: {relative_text}"
+    )
+
+
 def _digest_tree_fd(
     fd: int, prefix: Path
 ) -> tuple[dict[str, tuple[int, str]], set[str]]:
-    directory_before = os.fstat(fd)
     files: dict[str, tuple[int, str]] = {}
     directories: set[str] = set()
+    stack = [_new_digest_tree_frame(fd, prefix, owns_fd=False)]
     try:
-        entries = sorted(os.scandir(fd), key=lambda entry: entry.name)
-    except OSError as exc:
-        raise RootedFilesystemError("rooted directory cannot be enumerated") from exc
-    for entry in entries:
-        metadata = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
-        relative = prefix / entry.name
-        relative_text = relative.as_posix()
-        if stat.S_ISDIR(metadata.st_mode):
-            child_fd = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=fd)
+        while stack:
+            frame = stack[-1]
             try:
-                opened = os.fstat(child_fd)
-                directories.add(relative_text)
-                child_files, child_directories = _digest_tree_fd(child_fd, relative)
-                current = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
-                if _identity(current) != _identity(opened):
-                    raise RootedFilesystemError(
-                        f"rooted tree directory changed while hashing: {relative_text}"
-                    )
-                files.update(child_files)
-                directories.update(child_directories)
-            finally:
-                os.close(child_fd)
-        elif stat.S_ISREG(metadata.st_mode):
-            child_fd = os.open(
-                entry.name,
-                os.O_RDONLY | _FILE_NOFOLLOW,
-                dir_fd=fd,
+                entry = next(frame.scanner)
+            except StopIteration:
+                _finish_digest_tree_frame(frame)
+                _close_digest_tree_frame(frame)
+                stack.pop()
+                continue
+            _visit_digest_tree_entry(
+                frame, entry.name, files, directories, stack
             )
+    finally:
+        for frame in reversed(stack):
             try:
-                before = os.fstat(child_fd)
-                observed, digest = _digest_fd(child_fd)
-                after = os.fstat(child_fd)
-                current = os.stat(entry.name, dir_fd=fd, follow_symlinks=False)
-                if _content_identity(before) != _content_identity(after):
-                    raise RootedFilesystemError(
-                        f"rooted tree file changed while hashing: {relative_text}"
-                    )
-                if observed != after.st_size or _identity(current) != _identity(after):
-                    raise RootedFilesystemError(
-                        f"rooted tree file changed while hashing: {relative_text}"
-                    )
-                files[relative_text] = (observed, digest)
-            finally:
-                os.close(child_fd)
-        else:
-            raise RootedFilesystemError(
-                f"rooted tree contains a symlink or special entry: {relative_text}"
-            )
-    directory_after = os.fstat(fd)
-    if _content_identity(directory_before) != _content_identity(directory_after):
-        raise RootedFilesystemError(
-            f"rooted tree directory changed while hashing: {prefix.as_posix()}"
-        )
+                _close_digest_tree_frame(frame)
+            except OSError:
+                pass
     return files, directories
 
 
@@ -992,7 +1312,8 @@ def _read_tree_fd(fd: int, prefix: Path) -> tuple[dict[str, bytes], set[str]]:
     files: dict[str, bytes] = {}
     directories: set[str] = set()
     try:
-        entries = sorted(os.scandir(fd), key=lambda entry: entry.name)
+        with os.scandir(fd) as scanner:
+            entries = sorted(scanner, key=lambda entry: entry.name)
     except OSError as exc:
         raise RootedFilesystemError("rooted directory cannot be enumerated") from exc
     for entry in entries:
@@ -1017,7 +1338,7 @@ def _read_tree_fd(fd: int, prefix: Path) -> tuple[dict[str, bytes], set[str]]:
             try:
                 chunks: list[bytes] = []
                 while True:
-                    chunk = os.read(child_fd, 1024 * 1024)
+                    chunk = os.read(child_fd, _IO_CHUNK_BYTES)
                     if not chunk:
                         break
                     chunks.append(chunk)
@@ -1044,7 +1365,8 @@ def read_tree(path: str | Path) -> tuple[dict[str, bytes], set[str]]:
 def _remove_tree_fd(parent_fd: int, name: str) -> None:
     child_fd = os.open(name, _DIRECTORY_FLAGS, dir_fd=parent_fd)
     try:
-        entries = list(os.scandir(child_fd))
+        with os.scandir(child_fd) as scanner:
+            entries = list(scanner)
         for entry in entries:
             metadata = os.stat(entry.name, dir_fd=child_fd, follow_symlinks=False)
             if stat.S_ISDIR(metadata.st_mode):
