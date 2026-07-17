@@ -15,6 +15,8 @@ from typing import Any
 
 _REVISION_RE = re.compile(r"^[a-f0-9]{40}$")
 _CITATION_RE = re.compile(r"^cit_[a-f0-9]{16}$")
+_LANE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_FINDING_RE = re.compile(r"^af_[a-f0-9]{16}$")
 _VERIFIER_STATES = frozenset({"verified", "wrong", "unresolved"})
 _STATES = ("candidate", "verified", "stale", "wrong", "unresolved")
 _MAX_TEXT_CHARS = 8192
@@ -30,6 +32,12 @@ class AuditFindingError(ValueError):
 def _require_revision(value: str, field: str) -> str:
     if not isinstance(value, str) or _REVISION_RE.fullmatch(value) is None:
         raise AuditFindingError(f"{field} must be a lowercase 40-hex revision")
+    return value
+
+
+def _require_identifier(value: Any, field: str, pattern: re.Pattern[str]) -> str:
+    if not isinstance(value, str) or pattern.fullmatch(value) is None:
+        raise AuditFindingError(f"{field} has an invalid identifier format")
     return value
 
 
@@ -70,7 +78,7 @@ def make_audit_finding_id(lane_id: str, claim: str, citation_ids: Sequence[str])
     """Return a stable semantic id for one normalized candidate."""
 
     payload = {
-        "lane_id": _require_string(lane_id, "lane_id"),
+        "lane_id": _require_identifier(lane_id, "lane_id", _LANE_RE),
         "claim": _require_string(claim, "claim"),
         "citation_ids": list(_normalize_citations(citation_ids)),
     }
@@ -90,7 +98,9 @@ def _plan_lane_ids(plan: Mapping[str, Any]) -> frozenset[str]:
     for lane in lanes:
         if not isinstance(lane, Mapping):
             raise AuditFindingError("plan lanes must be objects")
-        lane_ids.append(_require_string(lane.get("id"), "plan lane id"))
+        lane_ids.append(
+            _require_identifier(lane.get("id"), "plan lane id", _LANE_RE)
+        )
     if len(lane_ids) != len(set(lane_ids)):
         raise AuditFindingError("plan lane ids must be unique")
     return frozenset(lane_ids)
@@ -109,7 +119,7 @@ def _normalize_candidate(candidate: Any, lane_ids: frozenset[str]) -> dict[str, 
         raise AuditFindingError("candidates must contain objects")
     if set(candidate) != _CANDIDATE_KEYS:
         raise AuditFindingError("candidate fields must be exactly lane_id, claim, citation_ids")
-    lane_id = _require_string(candidate.get("lane_id"), "lane_id")
+    lane_id = _require_identifier(candidate.get("lane_id"), "lane_id", _LANE_RE)
     if lane_id not in lane_ids:
         raise AuditFindingError(f"candidate references unselected lane: {lane_id}")
     claim = _require_string(candidate.get("claim"), "claim")
@@ -131,7 +141,9 @@ def _normalize_verdicts(values: Iterable[Mapping[str, Any]]) -> dict[str, dict[s
             raise AuditFindingError(
                 "verdict fields must be exactly finding_id, state, verifier_id, note"
             )
-        finding_id = _require_string(value.get("finding_id"), "verdict finding_id")
+        finding_id = _require_identifier(
+            value.get("finding_id"), "verdict finding_id", _FINDING_RE
+        )
         state = _require_string(value.get("state"), "verdict state")
         if state not in _VERIFIER_STATES:
             raise AuditFindingError(f"unsupported verifier state: {state}")
@@ -171,8 +183,8 @@ def _classify(
         "state": state,
         "state_reason": reason,
         "unresolved_citation_ids": unresolved,
-        "verifier_verdict": verdict,
-        "verifier_verdict_applied": verdict is not None and reason == "verifier_verdict",
+        "verification_record": verdict,
+        "verification_applied": verdict is not None and reason == "verifier_verdict",
     }
 
 
@@ -233,7 +245,7 @@ def adapt_audit_findings(
         ],
         "allowed_inferences": [
             "which candidate claims were bound to selected lanes and known citations",
-            "whether verifier verdicts were applied under the recorded revision",
+            "whether verifier decisions were applied under the recorded revision",
         ],
         "does_not_prove": [
             "repository truth",
