@@ -26,7 +26,11 @@
         "changed_paths": {
           "type": "array",
           "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1}
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+          }
         },
         "review_query": {"type": "string"},
         "max_lanes": {"type": "integer", "minimum": 1, "maximum": 8}
