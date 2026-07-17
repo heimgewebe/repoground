@@ -8,31 +8,51 @@ repository contents, produce findings, or claim review completeness.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any, Iterable, Sequence
 
-_TOKEN_RE = re.compile(r"[a-z0-9]+")
+_TOKEN_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _MAX_LANES = 8
-_PHRASE_ALIASES = {
-    "false positives": "falsepositive",
-    "false positive": "falsepositive",
-    "n+1": "nplusone",
-}
+_MAX_CHANGED_PATHS = 5_000
+_MAX_PATH_CHARS = 4_096
+_MAX_PATH_CHARS_TOTAL = 2 * 1024 * 1024
+_MAX_REVIEW_QUERY_CHARS = 8_192
+_PATH_SIGNAL_WEIGHT = 3
+_QUERY_SIGNAL_WEIGHT = 1
+_PATH_JOINER = "\x1f"
+_PHRASE_ALIAS_PATTERNS = (
+    (re.compile(r"\bfalse[ _\-‐‑‒–—]+positives?\b"), "falsepositive"),
+    (re.compile(r"\bn[ ]*\+[ ]*1\b"), "nplusone"),
+)
 _TOKEN_ALIASES = {
+    "abfragen": "query",
+    "absturz": "failure",
+    "abstürze": "failure",
+    "berechtigung": "permission",
+    "berechtigungen": "permission",
     "caches": "cache",
     "deployments": "deploy",
     "errors": "error",
     "failures": "failure",
+    "fehler": "error",
+    "geheimnis": "secret",
+    "geheimnisse": "secret",
     "indices": "index",
+    "leistung": "performance",
+    "migrationen": "migration",
     "migrations": "migration",
     "permissions": "permission",
     "queries": "query",
     "races": "race",
     "releases": "release",
     "secrets": "secret",
+    "skalierung": "scale",
     "tests": "test",
     "tokens": "token",
+    "zugänglichkeit": "accessibility",
+    "zwischenspeicher": "cache",
 }
 
 
@@ -127,9 +147,9 @@ _DOES_NOT_ESTABLISH = (
 
 
 def _tokens(value: str) -> set[str]:
-    normalized = value.lower()
-    for phrase, replacement in _PHRASE_ALIASES.items():
-        normalized = normalized.replace(phrase, replacement)
+    normalized = unicodedata.normalize("NFKC", value).casefold()
+    for pattern, replacement in _PHRASE_ALIAS_PATTERNS:
+        normalized = pattern.sub(replacement, normalized)
     tokens = set(_TOKEN_RE.findall(normalized))
     tokens.update(_TOKEN_ALIASES[token] for token in tuple(tokens) if token in _TOKEN_ALIASES)
     return tokens
@@ -138,18 +158,33 @@ def _tokens(value: str) -> set[str]:
 def _normalize_paths(changed_paths: Iterable[str]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
-    for raw in changed_paths:
+    total_chars = 0
+    for index, raw in enumerate(changed_paths, start=1):
+        if index > _MAX_CHANGED_PATHS:
+            raise ValueError(f"changed_paths must contain at most {_MAX_CHANGED_PATHS} paths")
         if not isinstance(raw, str):
             raise ValueError("changed_paths must contain strings")
-        if not raw or "\x00" in raw or "\\" in raw:
+        if not raw or any(character in raw for character in ("\x00", "\n", "\r", "\\")):
             raise ValueError("changed_paths must contain non-empty POSIX repository paths")
+        if len(raw) > _MAX_PATH_CHARS:
+            raise ValueError(f"changed path exceeds {_MAX_PATH_CHARS} characters")
+        total_chars += len(raw)
+        if total_chars > _MAX_PATH_CHARS_TOTAL:
+            raise ValueError("changed_paths exceed the aggregate character budget")
+
         path = PurePosixPath(raw)
-        if path.is_absolute() or ".." in path.parts or "." in path.parts:
-            raise ValueError("changed_paths must be normalized relative repository paths")
-        text = str(path)
-        if text not in seen:
-            seen.add(text)
-            normalized.append(text)
+        text = path.as_posix()
+        if (
+            path.is_absolute()
+            or text in {"", "."}
+            or ".." in path.parts
+            or raw != text
+        ):
+            raise ValueError("changed_paths must be canonical relative POSIX repository paths")
+        if text in seen:
+            raise ValueError(f"changed_paths must not contain duplicates: {text}")
+        seen.add(text)
+        normalized.append(text)
     return normalized
 
 
@@ -164,6 +199,8 @@ def _validate_inputs(
         raise ValueError("changed_paths must be an iterable of repository paths") from exc
     if not isinstance(review_query, str):
         raise ValueError("review_query must be a string")
+    if "\x00" in review_query or len(review_query) > _MAX_REVIEW_QUERY_CHARS:
+        raise ValueError(f"review_query must not exceed {_MAX_REVIEW_QUERY_CHARS} characters")
     if isinstance(max_lanes, bool) or not isinstance(max_lanes, int):
         raise ValueError("max_lanes must be an integer")
     if not 1 <= max_lanes <= _MAX_LANES:
@@ -177,20 +214,20 @@ def _matching_signals(tokens: set[str], signals: Sequence[str]) -> list[str]:
 
 def _rank_lanes(
     paths: Sequence[str], review_query: str
-) -> list[tuple[int, int, AuditLaneDefinition, list[str], list[str]]]:
+) -> tuple[list[tuple[int, int, AuditLaneDefinition, list[str], list[str]]], int, int]:
     query_tokens = _tokens(review_query)
-    path_tokens: set[str] = set()
-    for path in paths:
-        path_tokens.update(_tokens(path))
+    path_tokens = _tokens(_PATH_JOINER.join(paths))
 
     ranked: list[tuple[int, int, AuditLaneDefinition, list[str], list[str]]] = []
     for order, lane in enumerate(_LANES):
         path_matches = _matching_signals(path_tokens, lane.path_signals)
         query_matches = _matching_signals(query_tokens, lane.query_signals)
-        score = (2 * len(path_matches)) + len(query_matches)
+        score = (_PATH_SIGNAL_WEIGHT * len(path_matches)) + (
+            _QUERY_SIGNAL_WEIGHT * len(query_matches)
+        )
         if score:
             ranked.append((score, order, lane, path_matches, query_matches))
-    return sorted(ranked, key=lambda item: (-item[0], item[1]))
+    return sorted(ranked, key=lambda item: (-item[0], item[1])), len(path_tokens), len(query_tokens)
 
 
 def _render_lane(
@@ -242,14 +279,15 @@ def plan_audit_lanes(
 ) -> dict[str, Any]:
     """Return a deterministic, bounded audit-lane plan.
 
-    Path matches carry weight two because they are tied to the concrete change
+    Path matches carry weight three because they are tied to the concrete change
     surface. Query matches carry weight one because natural-language requests are
-    useful routing hints but weaker evidence. Ties preserve the fixed lane catalog
-    order. If nothing matches, a single general integrity lane is emitted.
+    untrusted routing hints. Ties preserve the fixed lane catalog order. If nothing
+    matches, a single general integrity lane is emitted.
     """
 
     paths = _validate_inputs(changed_paths, review_query, max_lanes)
-    lane_plans = _render_lanes(_rank_lanes(paths, review_query), max_lanes)
+    ranked, path_token_count, query_token_count = _rank_lanes(paths, review_query)
+    lane_plans = _render_lanes(ranked, max_lanes)
     return {
         "version": "audit_lane_plan.v1",
         "authority": "navigation_index",
@@ -261,10 +299,14 @@ def plan_audit_lanes(
         },
         "routing": {
             "method": "weighted_signal_match",
-            "path_signal_weight": 2,
-            "query_signal_weight": 1,
+            "path_signal_weight": _PATH_SIGNAL_WEIGHT,
+            "query_signal_weight": _QUERY_SIGNAL_WEIGHT,
             "tie_break": "catalog_order",
             "selected_count": len(lane_plans),
+            "candidate_lane_count": len(ranked),
+            "path_token_count": path_token_count,
+            "query_token_count": query_token_count,
+            "fallback_used": not ranked,
         },
         "lanes": lane_plans,
         "does_not_establish": list(_DOES_NOT_ESTABLISH),
