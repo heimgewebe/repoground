@@ -101,6 +101,10 @@ let serviceRestartEnabled = false;
 // Guard: strictly prevent merge when prescan is open
 window.__prescanOpen = false;
 
+// Startup readiness: form submissions must be intercepted before any
+// asynchronous health or repository request can delay initialization.
+window.__repoground_form_listeners_ready = false;
+
 let prescanCurrentTree = null;
 // prescanSelection is Tri-State:
 // null = ALL selected
@@ -1535,6 +1539,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (sourceModeToggleEl) sourceModeToggleEl.addEventListener('change', syncSourceModeFields);
     syncSourceModeFields();
 
+    // Bind all form submissions before the first network await. Otherwise a
+    // fast user action or a browser test can trigger native form navigation
+    // while startup is still waiting for the health endpoint.
+    const jobForm = document.getElementById('jobForm');
+    const atlasForm = document.getElementById('atlasForm');
+    const queryForm = document.getElementById('queryForm');
+    if (jobForm) jobForm.addEventListener('submit', startJob);
+    if (atlasForm) atlasForm.addEventListener('submit', startAtlasJob);
+    if (queryForm) queryForm.addEventListener('submit', executeQuery);
+    window.__repoground_form_listeners_ready = Boolean(
+        jobForm && atlasForm && queryForm
+    );
+
     // Optional: accept token from URL once, then scrub it from the address bar.
     // Enables local wrapper to open UI already authenticated.
     try {
@@ -1589,15 +1606,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load Atlas artifacts too if tab is visible? Or just always.
     // loadAtlasArtifacts();
-
-    document.getElementById('jobForm').addEventListener('submit', startJob);
-    document.getElementById('atlasForm').addEventListener('submit', startAtlasJob);
-
-    // Bind query form submission logic
-    const qf = document.getElementById('queryForm');
-    if (qf) {
-        qf.addEventListener('submit', executeQuery);
-    }
 
     // Clear token if user manually edits the root path
     const atlasRootEl = document.getElementById('atlasRoot');

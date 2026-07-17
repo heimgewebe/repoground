@@ -659,8 +659,11 @@ def test_query_tab_submits_payload(page_with_static: Page):
 
     page_with_static.wait_for_selector("#tab-query")
 
-    # Wait for JS to attach event listeners
-    page_with_static.wait_for_function("typeof window.switchTab === 'function' && typeof window.executeQuery === 'function'")
+    # Wait for the actual form-listener binding, not merely for globally
+    # declared functions that exist before asynchronous startup has finished.
+    page_with_static.wait_for_function(
+        "() => window.__repoground_form_listeners_ready === true"
+    )
 
     # Switch to the query tab explicitly via application state to avoid headless click flakiness on hidden layout elements
     page_with_static.evaluate("window.switchTab('query')")
