@@ -31,6 +31,6 @@ python -m py_compile merger/lenskit/retrieval/audit_lane.py
 pytest -q merger/lenskit/tests/test_audit_lane.py
 ```
 
-Result: `15 passed`.
+Result: `19 passed`.
 
 The GitHub PR remains responsible for repository-wide CI and integration validation.
