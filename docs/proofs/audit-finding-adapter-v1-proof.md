@@ -21,7 +21,7 @@ review is complete.
 3. Every candidate has at least one syntactically valid citation id.
 4. Duplicate semantic candidates and duplicate verifier decisions fail closed.
 5. Revision mismatch takes precedence over verifier output and yields `stale`.
-6. Unresolvable citations take precedence over verifier output and yields `unresolved`.
+6. Unresolvable citations take precedence over verifier output and yield `unresolved`.
 7. Blocked verification records remain visible but are marked unapplied.
 8. Output ordering is stable by `finding_id`.
 9. State-count ordering and applied-verification consistency are contract-bound.
