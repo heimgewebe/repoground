@@ -24,8 +24,12 @@ def page_with_static(page: Page):
     with open(os.path.join(UI_DIR, "index.html"), "r") as f:
         content = f.read()
 
+    content = content.replace("__REPOGROUND_ASSET_BASE__", "./")
     content = content.replace("__RLENS_ASSET_BASE__", "./")
+    content = content.replace("__REPOGROUND_BUILD__", "test-v1")
     content = content.replace("__RLENS_BUILD__", "test-v1")
+    assert "__REPOGROUND_ASSET_BASE__" not in content
+    assert "__REPOGROUND_BUILD__" not in content
 
     page.route("http://localhost:8000/", lambda route: route.fulfill(
         status=200,
@@ -657,6 +661,10 @@ def test_query_tab_submits_payload(page_with_static: Page):
 
     page_with_static.goto("http://localhost:8000/")
 
+    assert page_with_static.evaluate("window.__REPOGROUND_UI_VERSION__") == "test-v1"
+    assert page_with_static.evaluate("document.querySelector('base').href") == (
+        "http://localhost:8000/"
+    )
     page_with_static.wait_for_selector("#tab-query")
 
     # Wait for the actual form-listener binding, not merely for globally

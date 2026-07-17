@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 APP_JS = Path(__file__).resolve().parents[1] / "frontends" / "webui" / "app.js"
+BROWSER_TEST = Path(__file__).resolve().parent / "test_webui_payload.py"
 
 
 def _load_appjs() -> str:
@@ -43,3 +44,13 @@ def test_listener_readiness_requires_all_three_forms() -> None:
         "window.__repoground_form_listeners_ready = Boolean( "
         "jobForm && atlasForm && queryForm )"
     ) in source
+
+def test_browser_fixture_replaces_canonical_repoground_tokens() -> None:
+    source = BROWSER_TEST.read_text(encoding="utf-8")
+
+    for replacement in (
+        'content.replace("__REPOGROUND_ASSET_BASE__", "./")',
+        'content.replace("__REPOGROUND_BUILD__", "test-v1")',
+    ):
+        assert replacement in source
+    assert 'window.__REPOGROUND_UI_VERSION__") == "test-v1"' in source
