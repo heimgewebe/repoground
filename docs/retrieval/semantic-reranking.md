@@ -1,10 +1,10 @@
 # Semantic Re-Ranking Pipeline
 
-This document outlines the architectural concept for implementing semantic re-ranking in Lenskit, satisfying Phase F of the Retrieval Project Roadmap.
+This document outlines the architectural concept for implementing semantic re-ranking in RepoGround, satisfying Phase F of the Retrieval Project Roadmap.
 
 ## Context
 
-Following the "Scope Management Principle" of Lenskit, we define complex algorithmic behavior through documentation and explicit schema contracts *before* modifying core logic. The foundational FTS (Full-Text Search) layer is fast, explainable, and handles filtering effectively. Semantic search is introduced strictly as a **re-ranker** applied to the top candidates retrieved by the lexical engine.
+Following the "Scope Management Principle" of RepoGround, we define complex algorithmic behavior through documentation and explicit schema contracts *before* modifying core logic. The foundational FTS (Full-Text Search) layer is fast, explainable, and handles filtering effectively. Semantic search is introduced strictly as a **re-ranker** applied to the top candidates retrieved by the lexical engine.
 
 ## The Pipeline
 

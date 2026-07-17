@@ -24,7 +24,7 @@ Ein Profil kann angefordert werden; bestehendes `output_health` (während der Mi
 ## Diagnostic-Paritaet als Profilgrenze
 
 `content_parity_pass` und `diagnostic_parity_pass` (siehe
-`merger/lenskit/core/parity_gates.py`) sind capability-abhaengig, nicht
+`merger/repoground/core/parity_gates.py`) sind capability-abhaengig, nicht
 frontend-abhaengig: `repolens` und `rlens` teilen dieselbe Pipeline.
 
 - Volle Diagnostic-Paritaet (inkl. `citation_map_jsonl_valid`, `fts_non_empty`)

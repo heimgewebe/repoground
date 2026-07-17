@@ -21,10 +21,10 @@ from scripts.release.build_release_candidate import (
 )
 
 INPUT_PATHS = (
-    "requirements/repobrief-runtime.in",
-    "requirements/repobrief-dev.in",
-    "requirements/repobrief-browser.in",
-    "requirements/repobrief-lock-tools.in",
+    "requirements/repoground-runtime.in",
+    "requirements/repoground-dev.in",
+    "requirements/repoground-browser.in",
+    "requirements/repoground-lock-tools.in",
 )
 
 REQUIRED_FILES = (
@@ -40,8 +40,8 @@ REQUIRED_FILES = (
     *INPUT_PATHS,
     *LOCK_PATHS,
     SEMANTIC_PLATFORM_CONTRACT_PATH,
-    "merger/lenskit/contracts/repobrief-semantic-platforms.v1.schema.json",
-    "merger/lenskit/requirements-semantic.txt",
+    "merger/repoground/contracts/repoground-semantic-platforms.v1.schema.json",
+    "merger/repoground/requirements-semantic.txt",
     SEMANTIC_INPUT_PATH,
     SEMANTIC_CONSTRAINTS_PATH,
     SEMANTIC_LOCK_PATH,
@@ -130,7 +130,7 @@ def _check_semantic_contract_policy(
 ) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
     expected = {
-        "kind": "repobrief.semantic_platforms",
+        "kind": "repoground.semantic_platforms",
         "version": "v1",
         "status": "optional_locked",
         "default_enabled": False,
@@ -330,7 +330,7 @@ def _check_semantic_lock_boundary(
 
 
 def _check_semantic_core_isolation(repo: Path) -> list[dict[str, str]]:
-    core_lock = (repo / "requirements/repobrief-runtime.lock.txt").read_text(
+    core_lock = (repo / "requirements/repoground-runtime.lock.txt").read_text(
         encoding="utf-8"
     ).lower()
     leaked = "sentence-transformers" in core_lock or re.search(
@@ -341,7 +341,7 @@ def _check_semantic_core_isolation(repo: Path) -> list[dict[str, str]]:
     return [
         _finding(
             "SEMANTIC_DEPENDENCY_LEAKED_TO_CORE",
-            "requirements/repobrief-runtime.lock.txt",
+            "requirements/repoground-runtime.lock.txt",
             "semantic roots must remain outside the core runtime lock",
         )
     ]
@@ -394,7 +394,7 @@ def _check_workflows(root: Path) -> list[dict[str, str]]:
     paths = sorted(
         {*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")}
     )
-    lock_pattern = r"requirements/repobrief-[A-Za-z-]+\.lock\.txt"
+    lock_pattern = r"requirements/repoground-[A-Za-z-]+\.lock\.txt"
     for path in paths:
         relative = path.relative_to(root).as_posix()
         text = path.read_text(encoding="utf-8")
@@ -412,7 +412,7 @@ def _check_workflows(root: Path) -> list[dict[str, str]]:
                     continue
                 if (
                     "--require-hashes" not in stripped
-                    or "repobrief-" not in stripped
+                    or "repoground-" not in stripped
                     or ".lock.txt" not in stripped
                 ):
                     findings.append(
@@ -440,7 +440,7 @@ def _check_workflows(root: Path) -> list[dict[str, str]]:
                     _finding(
                         "WORKFLOW_LOCK_PYTHON_MISMATCH",
                         relative,
-                        "RepoBrief locks require exactly Python 3.12; "
+                        "RepoGround locks require exactly Python 3.12; "
                         f"observed={sorted(python_versions)!r}",
                     )
                 )
@@ -512,7 +512,7 @@ def scan(root: str | Path) -> dict[str, object]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Check RepoBrief release packaging contracts")
+    parser = argparse.ArgumentParser(description="Check RepoGround release packaging contracts")
     parser.add_argument("--root", default=".")
     args = parser.parse_args()
     report = scan(args.root)

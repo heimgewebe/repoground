@@ -1,4 +1,4 @@
-# RepoBrief Agent Benchmark v1 bedienen
+# RepoGround Agent Benchmark v1 bedienen
 
 Der Benchmark-Harness ist ein Prüfstand. Er plant und prüft echte Agentenläufe,
 stellt aber selbst weder ein Sprachmodell noch Zugangsdaten bereit.
@@ -6,7 +6,7 @@ stellt aber selbst weder ein Sprachmodell noch Zugangsdaten bereit.
 ## 1. Gefrorenes Taskset prüfen
 
 ```bash
-python -m merger.lenskit.cli.agent_benchmark validate-taskset \
+python -m merger.repoground.cli.agent_benchmark validate-taskset \
   --taskset docs/retrieval/repobrief_agent_benchmark_taskset.v1.json
 ```
 
@@ -53,7 +53,7 @@ Live-Runner an diesen Identitätsunterschieden scheitern.
 Der externe Runner muss dieselbe Provider-, Modell- und Sampling-Identität in
 jeder Laufquittung zurückgeben.
 
-## 3. RepoBrief-Snapshots binden
+## 3. RepoGround-Snapshots binden
 
 `manifest-bindings.json` ordnet jedem Repository seinen unveränderlichen
 Snapshot und den lokalen MCP-Startbefehl zu:
@@ -65,7 +65,7 @@ Snapshot und den lokalen MCP-Startbefehl zu:
     "manifest_sha256": "64-lowercase-hex-characters",
     "mcp_command": [
       "python",
-      "scripts/repobrief-mcp-stdio.py",
+      "scripts/repoground-mcp-stdio.py",
       "--bundle-root",
       "/absolute/path/to/bundle"
     ]
@@ -89,7 +89,7 @@ funktionierenden lokalen MCP-Befehl ersetzt werden.
 ## 4. Vollständigen Paarplan erzeugen
 
 ```bash
-python -m merger.lenskit.cli.agent_benchmark plan \
+python -m merger.repoground.cli.agent_benchmark plan \
   --taskset docs/retrieval/repobrief_agent_benchmark_taskset.v1.json \
   --runner runner.json \
   --manifest-bindings manifest-bindings.json \
@@ -121,7 +121,7 @@ Behandlung dürfen diese Identitäten nicht teilen.
 Ein einzelner Auftrag wird so ausgeführt:
 
 ```bash
-python -m merger.lenskit.cli.agent_benchmark run \
+python -m merger.repoground.cli.agent_benchmark run \
   --request benchmark-plan/requests/REQUEST.json \
   --runner-command runner-command.json \
   --transcript-root benchmark-transcripts \
@@ -145,7 +145,7 @@ Lauf ungültig.
 ## 6. Einzelne Quittung nachprüfen
 
 ```bash
-python -m merger.lenskit.cli.agent_benchmark validate-receipt \
+python -m merger.repoground.cli.agent_benchmark validate-receipt \
   --request benchmark-plan/requests/REQUEST.json \
   --receipt benchmark-receipts/REQUEST.json \
   --transcript-root benchmark-transcripts
@@ -159,7 +159,7 @@ Transcript-Digest und Statuskonsistenz.
 Für echte gepaarte Agentenläufe:
 
 ```bash
-python -m merger.lenskit.cli.agent_benchmark evaluate \
+python -m merger.repoground.cli.agent_benchmark evaluate \
   --taskset docs/retrieval/repobrief_agent_benchmark_taskset.v1.json \
   --requests benchmark-plan/requests \
   --receipts benchmark-receipts \
@@ -191,7 +191,7 @@ werden nicht still wiederholt oder in erfolgreiche Werte umgedeutet.
 
 ## Was v1 noch nicht leistet
 
-Der Harness belegt allein keinen realen Vorteil von RepoBrief. Dafür muss
+Der Harness belegt allein keinen realen Vorteil von RepoGround. Dafür muss
 `RAB-V1-T002` einen qualifizierten instrumentierten Agent-Runner binden und den
 vollständigen Plan zweimal unter realen Bedingungen ausführen. Bis dahin gilt
 `default_promoted=false`.

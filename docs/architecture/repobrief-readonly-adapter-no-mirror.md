@@ -1,19 +1,19 @@
-# RepoBrief Read-only Adapter without Mirror Authority v1
+# RepoGround Read-only Adapter without Mirror Authority v1
 
 Status: implemented and locally runtime-validated on 2026-07-12
 Task: `TASK-REPOBRIEF-READONLY-ADAPTER-NO-MIRROR-001`
 
 ## Purpose
 
-The adapter is a small read-only interface over **already existing** RepoBrief
+The adapter is a small read-only interface over **already existing** RepoGround
 bundles. A consumer supplies a configuration containing allowed directories and
 exact bundle manifests. The adapter does not search for repositories, mirror
 Git state or repair missing evidence.
 
 Implementation:
 
-- `merger/lenskit/core/repobrief_readonly_adapter.py`
-- config schema: `merger/lenskit/contracts/repobrief-readonly-adapter-config.v1.schema.json`
+- `merger/repoground/core/repobrief_readonly_adapter.py`
+- config schema: `merger/repoground/contracts/repobrief-readonly-adapter-config.v1.schema.json`
 - CLI: `repobrief adapter list` and `repobrief adapter call`
 - compatibility contract: `docs/contracts/repobrief-readonly-adapter-compatibility.v1.json`
 
@@ -62,7 +62,7 @@ patch; create a pull request; read secrets; or issue a review/merge verdict.
 
 The library class is the canonical adapter implementation. The CLI is a thin
 JSON wrapper over the same class. Existing MCP-shaped resources remain separate
-transport adapters over RepoBrief access helpers.
+transport adapters over RepoGround access helpers.
 
 Some MCP resources are analogous to adapter reads, but parity is not implied:
 MCP can enumerate a supplied bundle root, while this adapter lists only explicit

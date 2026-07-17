@@ -1,4 +1,4 @@
-# Komplettumbaublaupause: Lenskit Evidence Address Architecture
+# Komplettumbaublaupause: RepoGround Evidence Address Architecture
 
 ## 0. Belegter Ist-Zustand
 
@@ -172,7 +172,7 @@ Umbauziel v2.1/v3:
   },
   "source_range": {
     "artifact_role": "source_file",
-    "file_path": "merger/lenskit/core/merge.py",
+    "file_path": "merger/repoground/core/merge.py",
     "start_byte": 0,
     "end_byte": 333,
     "start_line": 1,
@@ -403,10 +403,10 @@ Stop-Kriterium: Keine Implementierung vor dokumentierter Zuständigkeit.
 
 Neue Dateien:
 
-- `merger/lenskit/contracts/citation-map.v1.schema.json`
-- `merger/lenskit/contracts/examples/valid_citation_map_entry.json`
-- `merger/lenskit/contracts/examples/invalid_citation_map_missing_hash.json`
-- `merger/lenskit/tests/test_citation_map_schema.py`
+- `merger/repoground/contracts/citation-map.v1.schema.json`
+- `merger/repoground/contracts/examples/valid_citation_map_entry.json`
+- `merger/repoground/contracts/examples/invalid_citation_map_missing_hash.json`
+- `merger/repoground/tests/test_citation_map_schema.py`
 - `docs/architecture/citation-map.md`
 
 Minimaler Eintrag:
@@ -427,7 +427,7 @@ Minimaler Eintrag:
     "content_sha256": "..."
   },
   "source_range": {
-    "file_path": "merger/lenskit/core/merge.py",
+    "file_path": "merger/repoground/core/merge.py",
     "start_byte": 0,
     "end_byte": 333,
     "start_line": 1,
@@ -455,9 +455,9 @@ Minimaler Eintrag:
 
 Ändern:
 
-- `merger/lenskit/contracts/bundle-manifest.v1.schema.json`
-- `merger/lenskit/tests/test_role_completeness.py`
-- `merger/lenskit/tests/test_bundle_manifest_schema.py`
+- `merger/repoground/contracts/bundle-manifest.v1.schema.json`
+- `merger/repoground/tests/test_role_completeness.py`
+- `merger/repoground/tests/test_bundle_manifest_schema.py`
 - `docs/architecture/artifact-inventory.md`
 - `docs/architecture/artifact-drift-matrix.md`
 - `docs/contracts/contracts-matrix.md`
@@ -528,7 +528,7 @@ Neue Tests:
 
 Neue Datei:
 
-`merger/lenskit/core/citation_map.py`
+`merger/repoground/core/citation_map.py`
 
 Funktionen:
 
@@ -577,16 +577,16 @@ lenskit citation inspect <path-or-byte-range>
 
 Neue Dateien:
 
-- `merger/lenskit/cli/cmd_citation.py`
-- `merger/lenskit/tests/test_citation_cli.py`
+- `merger/repoground/cli/cmd_citation.py`
+- `merger/repoground/tests/test_citation_cli.py`
 
 #### PR 4.2 — Output Health Erweiterung
 
 Erweitern:
 
-- `merger/lenskit/core/output_health.py`
-- `merger/lenskit/contracts/output-health.v1.schema.json`
-- `merger/lenskit/tests/test_output_health_citation_map.py`
+- `merger/repoground/core/output_health.py`
+- `merger/repoground/contracts/output-health.v1.schema.json`
+- `merger/repoground/tests/test_output_health_citation_map.py`
 
 Health-Gates:
 
@@ -693,7 +693,7 @@ Query-Hit:
   "chunk_id": "...",
   "citation_id": "cit_...",
   "canonical_ref": "lenskit-max-..._merge.md:1200-1210",
-  "source_ref": "merger/lenskit/core/merge.py:1-12",
+  "source_ref": "merger/repoground/core/merge.py:1-12",
   "citation_status": "valid"
 }
 ```
@@ -882,7 +882,7 @@ Dual-Range-Phase, Legacy-Aliase, Real-Dump-Proof, Health-Gates, Konsumentenmatri
 
 ## 12. Für Dummies
 
-Stell dir Lenskit wie ein Buchsystem vor:
+Stell dir RepoGround wie ein Buchsystem vor:
 
 `merge.md` ist das Buch.
 `chunk_index` ist das Suchregister.

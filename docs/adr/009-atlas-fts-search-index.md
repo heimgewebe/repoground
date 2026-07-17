@@ -8,9 +8,9 @@ Phase 4 of the Atlas Blaupause ("Suchschicht") requires that file inventories
 be searchable system-wide via the registry and an index, rather than by
 linearly re-reading and re-parsing every `inventory.jsonl` from the live
 filesystem on each query (the prior best-effort transitional state in
-`merger/lenskit/atlas/search.py`). ADR-005 already commits Atlas to "registry
+`merger/repoground/atlas/search.py`). ADR-005 already commits Atlas to "registry
 in SQLite, large artifacts as files", and SQLite FTS5 is established in the repo
-for Lenskit chunks (`chunks_fts`). The design note
+for RepoGround chunks (`chunks_fts`). The design note
 `docs/architecture/atlas-fts-integration.md` enumerated four architectural
 decisions that had to be made before implementation. This ADR records those
 decisions.

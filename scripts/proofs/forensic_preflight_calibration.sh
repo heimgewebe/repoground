@@ -45,8 +45,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from merger.lenskit.core.merge import ExtrasConfig, scan_repo, write_reports_v2
-from merger.lenskit.core.post_emit_health import derive_post_health_path, write_post_emit_health
+from merger.repoground.core.merge import ExtrasConfig, scan_repo, write_reports_v2
+from merger.repoground.core.post_emit_health import derive_post_health_path, write_post_emit_health
 
 REQUIRED_ROLES = {
     "canonical_md",
@@ -185,7 +185,7 @@ def _run_preflight(case: str, manifest: Path, *, post_health: Path | None = None
     cmd = [
         sys.executable,
         "-m",
-        "merger.lenskit.cli.main",
+        "merger.repoground.cli.main",
         "governance",
         "forensic-preflight",
         "--manifest",

@@ -1,11 +1,11 @@
-# RepoBrief Agent Benchmark v1
+# RepoGround Agent Benchmark v1
 
 Status: Harness- und Vertragsfläche für `RAB-V1-T001`  
 Standardaktivierung: `false`
 
 ## Zweck
 
-Der Benchmark misst später den zusätzlichen Nutzen eines RepoBrief-MCP-Zugangs
+Der Benchmark misst später den zusätzlichen Nutzen eines RepoGround-MCP-Zugangs
 gegenüber einem gewöhnlichen Coding-Agent-Ablauf mit Dateisuche, Glob, `grep`
 und gezieltem Lesen. V1 baut zunächst den geeichten Prüfstand. Es führt selbst
 kein Sprachmodell aus und liefert deshalb noch kein Urteil über Agentennutzen.
@@ -26,16 +26,16 @@ read-only-Werkzeuge verwenden:
 Die Behandlung behält alle Baseline-Werkzeuge und erhält zusätzlich:
 
 - `ask_context`;
-- RepoBrief-Ressourcen;
+- RepoGround-Ressourcen;
 - `grounding_verify`;
 - `live_freshness`.
 
-Damit wird der realistische additive Nutzen geprüft. RepoBrief ersetzt nicht
+Damit wird der realistische additive Nutzen geprüft. RepoGround ersetzt nicht
 das Lesen des Quellcodes.
 
 ## Gefrorenes Taskset
 
-Das versionierte Taskset enthält genau 24 commitgebundene Fälle auf Lenskit,
+Das versionierte Taskset enthält genau 24 commitgebundene Fälle auf RepoGround,
 Grabowski und Weltgewebe:
 
 - acht Navigationsfälle;
@@ -126,5 +126,5 @@ Sie belegt ausdrücklich nicht:
   Aufgabenklassen oder Verwerfung.
 
 Ein inkrementeller Rebuild oder File-Watcher wird erst priorisiert, wenn reale
-Agentenevidenz zeigt, dass RepoBrief nützlich ist und Freshness-Latenz diesen
+Agentenevidenz zeigt, dass RepoGround nützlich ist und Freshness-Latenz diesen
 Nutzen praktisch begrenzt.

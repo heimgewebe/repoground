@@ -12,24 +12,24 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
-KIND = "repobrief.release_candidate"
+KIND = "repoground.release_candidate"
 CONTRACT_VERSION = "v1"
-SCHEMA_URI = "https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json"
-LICENSE_EXPRESSION = "LicenseRef-RepoBrief-All-Rights-Reserved"
+SCHEMA_URI = "https://heimgewebe.local/schema/repoground-release-candidate.v1.schema.json"
+LICENSE_EXPRESSION = "LicenseRef-RepoGround-All-Rights-Reserved"
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 LOCK_PATHS = (
-    "requirements/repobrief-runtime.lock.txt",
-    "requirements/repobrief-dev.lock.txt",
-    "requirements/repobrief-browser.lock.txt",
-    "requirements/repobrief-lock-tools.lock.txt",
+    "requirements/repoground-runtime.lock.txt",
+    "requirements/repoground-dev.lock.txt",
+    "requirements/repoground-browser.lock.txt",
+    "requirements/repoground-lock-tools.lock.txt",
 )
 SEMANTIC_TARGET_ID = "cpython-312-linux-x86_64"
-SEMANTIC_PLATFORM_CONTRACT_PATH = "docs/release/semantic-extension-platforms.v1.json"
-SEMANTIC_INPUT_PATH = "requirements/repobrief-semantic-linux-x86_64-py312.in"
+SEMANTIC_PLATFORM_CONTRACT_PATH = "docs/release/repoground-semantic-platforms.v1.json"
+SEMANTIC_INPUT_PATH = "requirements/repoground-semantic-linux-x86_64-py312.in"
 SEMANTIC_CONSTRAINTS_PATH = (
-    "requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt"
+    "requirements/repoground-semantic-linux-x86_64-py312.constraints.txt"
 )
-SEMANTIC_LOCK_PATH = "requirements/repobrief-semantic-linux-x86_64-py312.lock.txt"
+SEMANTIC_LOCK_PATH = "requirements/repoground-semantic-linux-x86_64-py312.lock.txt"
 DOES_NOT_ESTABLISH = (
     "public_distribution_permission",
     "open_source_status",
@@ -278,9 +278,9 @@ def build_release_candidate(
 
     entries = list_tree(repo_path, commit)
     candidate_id = f"{release_version}-g{commit[:12]}"
-    prefix = f"repobrief-{candidate_id}/"
-    archive_name = f"repobrief-{candidate_id}.tar.gz"
-    manifest_name = f"repobrief-{candidate_id}.release.json"
+    prefix = f"repoground-{candidate_id}/"
+    archive_name = f"repoground-{candidate_id}.tar.gz"
+    manifest_name = f"repoground-{candidate_id}.release.json"
     sums_name = "SHA256SUMS"
 
     archive_bytes = build_archive_bytes(repo_path, commit, prefix, entries)
@@ -292,8 +292,8 @@ def build_release_candidate(
         "kind": KIND,
         "version": CONTRACT_VERSION,
         "project": {
-            "name": "RepoBrief",
-            "repository": "heimgewebe/lenskit",
+            "name": "RepoGround",
+            "repository": "heimgewebe/repoground",
             "release_version": release_version,
             "candidate_id": candidate_id,
         },
@@ -364,7 +364,7 @@ def build_release_candidate(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build a deterministic RepoBrief source candidate")
+    parser = argparse.ArgumentParser(description="Build a deterministic RepoGround source candidate")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--ref", default="HEAD")

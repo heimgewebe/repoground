@@ -123,10 +123,10 @@ FEATURES = {
 
 # Paths
 ROOT = Path(__file__).parent.parent.resolve()
-MODEL_PATH = ROOT / "merger/lenskit/service/models.py"
-REPOLENS_PATH = ROOT / "merger/lenskit/frontends/pythonista/repolens.py"
-WEBUI_HTML_PATH = ROOT / "merger/lenskit/frontends/webui/index.html"
-WEBUI_JS_PATH = ROOT / "merger/lenskit/frontends/webui/app.js"
+MODEL_PATH = ROOT / "merger/repoground/service/models.py"
+REPOLENS_PATH = ROOT / "merger/repoground/frontends/pythonista/build.py"
+WEBUI_HTML_PATH = ROOT / "merger/repoground/frontends/webui/index.html"
+WEBUI_JS_PATH = ROOT / "merger/repoground/frontends/webui/app.js"
 
 class ParityChecker:
     def __init__(self):

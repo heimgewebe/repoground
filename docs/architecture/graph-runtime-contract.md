@@ -1,13 +1,13 @@
 # Graph Runtime Contract
 
 **Status:** Verbindlich ab Phase 3
-**Geltungsbereich:** Definiert die semantische Bedeutung des Architecture Graphs für die Query- und Eval-Runtime in Lenskit.
+**Geltungsbereich:** Definiert die semantische Bedeutung des Architecture Graphs für die Query- und Eval-Runtime in RepoGround.
 
 ---
 
 ## 1. Zweck
 
-Der Lenskit-Architekturgraph (`graph_index.json`) dient nicht nur der Visualisierung, sondern fließt als formales, berechenbares Signal in die Such- und Evaluierungspipeline ein. Dieses Dokument definiert die Semantik der Graphelemente und deren exakte Wirkung auf das Retrieval-Ranking.
+Der RepoGround-Architekturgraph (`graph_index.json`) dient nicht nur der Visualisierung, sondern fließt als formales, berechenbares Signal in die Such- und Evaluierungspipeline ein. Dieses Dokument definiert die Semantik der Graphelemente und deren exakte Wirkung auf das Retrieval-Ranking.
 
 ---
 

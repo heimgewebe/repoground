@@ -1,32 +1,32 @@
-# lenskit – Index
+# repoground – Index
 
 Kurzüberblick über Ordner:
 - `scripts/` – wiederverwendbare Helfer
-- `merger/lenskit/` – **repoLens** (Primary Tool) – erzeugt strukturierte Merge-Berichte für KIs.
+- `merger/repoground/` – **RepoGround** (Primary Tool) – erzeugt strukturierte Merge-Berichte für KIs.
 - `merger/repomerger/` – Legacy-Merger (Standalone).
 
 ## Einstieg & Dokumentation
 
 - 🚀 [Getting Started](docs/GETTING_STARTED.md) – Dump erzeugen, Bundle lesen, durchsuchen
 - 📖 [Glossar](docs/glossary.md) · [FAQ](docs/FAQ.md)
-- 🗺️ [Systemkarte](docs/architecture/system-map.lenskit.md) – Modul-Zusammenspiel
-- 🧭 [Master-Roadmap](docs/roadmap/lenskit-master-roadmap.md) – Reihenfolge & Tracks
+- 🗺️ [Systemkarte](docs/architecture/system-map.repoground.md) – Modul-Zusammenspiel
+- 🧭 [Master-Roadmap](docs/roadmap/repoground-master-roadmap.md) – Reihenfolge & Tracks
 - 🤝 [CONTRIBUTING](CONTRIBUTING.md) · [CHANGELOG](CHANGELOG.md)
 
 ## Nutzung (Beispiele)
 
-### repoLens (Empfohlen)
+### RepoGround (Empfohlen)
 
 Das Hauptwerkzeug, um Repositories für LLMs aufzubereiten.
-`merger.lenskit.frontends.pythonista.repolens` ist der direkte repoLens Dump-/Bundle-Emitter für lokale Modulaufrufe, insbesondere aus Pythonista/iPad-Kontexten.
-`merger.lenskit.cli.rlens` ist die rLens-Service-/Host-Surface und nicht der direkte `repoLens . --level ...`-Aufruf; rLens bleibt die operative Heim-PC/Service-Schicht.
+`merger.repoground.frontends.pythonista.build` ist der direkte RepoGround Dump-/Bundle-Emitter für lokale Modulaufrufe, insbesondere aus Pythonista/iPad-Kontexten.
+`merger.repoground.cli.serve` ist die RepoGround-Service-/Host-Surface und nicht der direkte `RepoGround . --level ...`-Aufruf; RepoGround bleibt die operative Heim-PC/Service-Schicht.
 
 ```bash
 # Overview
-python3 -m merger.lenskit.frontends.pythonista.repolens . --level overview
+python3 -m merger.repoground.frontends.pythonista.build . --level overview
 
 # Full Merge mit Split (20MB), voller Metadichte und Dual-Output
-python3 -m merger.lenskit.frontends.pythonista.repolens . \
+python3 -m merger.repoground.frontends.pythonista.build . \
   --level max \
   --split-size 20MB \
   --meta-density full \
@@ -36,10 +36,10 @@ python3 -m merger.lenskit.frontends.pythonista.repolens . \
 Direkte Datei-Ausführung ist ebenfalls möglich, falls der Modulaufruf in einer lokalen Umgebung nicht greift:
 
 ```bash
-python3 merger/lenskit/frontends/pythonista/repolens.py . --level max --split-size 20MB --meta-density full --output-mode dual
+python3 merger/repoground/frontends/pythonista/build.py . --level max --split-size 20MB --meta-density full --output-mode dual
 ```
 
-Siehe [merger/lenskit/repoLens-spec.md](merger/lenskit/repoLens-spec.md) für Details.
+Siehe [merger/repoground/RepoGround-spec.md](merger/repoground/RepoGround-spec.md) für Details.
 
 ### Agent Reading Pack (Einstieg für LLM-Agents)
 
@@ -60,29 +60,29 @@ Der Pack fasst zusammen:
 Standalone erzeugen oder regenerieren:
 
 ```bash
-python3 -m merger.lenskit.cli.main agent-pack produce <stem>.bundle.manifest.json --json
+python3 -m merger.repoground.cli.main agent-pack produce <stem>.bundle.manifest.json --json
 ```
 
-### RepoBrief als lokaler MCP-Server
+### RepoGround als lokaler MCP-Server
 
 Vorhandene Brief Bundles können direkt als MCP-Ressourcen und Werkzeuge für Coding-Agenten
 eingehängt werden. Für MCP-Clients ist der checkout-unabhängige Starter vorgesehen:
 
 ```bash
-python3 /absoluter/pfad/zu/lenskit/scripts/repobrief-mcp-stdio.py \
+python3 /absoluter/pfad/zu/repoground/scripts/repoground-mcp-stdio.py \
   --bundle-root /absoluter/pfad/zu/briefs \
   --repo-root /absoluter/pfad/zum/repository
 ```
 
 Der Server stellt standardmäßig `ask_context`, `grounding_verify`, `live_freshness` und die
-`repobrief://snapshot/...`-Ressourcen bereit. Lesezugriffe erzeugen oder aktualisieren keinen
+`repoground://snapshot/...`-Ressourcen bereit. Lesezugriffe erzeugen oder aktualisieren keinen
 Snapshot. Live-Freshness meldet abweichendes `HEAD` oder einen Dirty Working Tree als `stale`.
 Der schreibende `snapshot_create`-Pfad bleibt verborgen, solange der Server nicht ausdrücklich
 mit `--enable-snapshot-create` gestartet wird. In diesem Modus sind Quellrepository und Ausgabeziel
 weiterhin an `--repo-root` und `--bundle-root` des Serverstarts gebunden.
 
 Konfiguration, Zustände und Sicherheitsgrenzen:
-[RepoBrief MCP stdio](docs/usage/repobrief-mcp-stdio.md).
+[RepoGround MCP stdio](docs/usage/repoground-mcp-stdio.md).
 
 ### ATLAS MODE
 
@@ -101,9 +101,9 @@ Example usage:
 ```bash
 # Service API: broad system roots require loopback plus --token / RLENS_TOKEN.
 # The standalone Atlas CLI remains a local, explicit filesystem operation.
-rlens atlas scan /
-rlens atlas scan /home
-rlens atlas scan /etc
+repoground atlas scan /
+repoground atlas scan /home
+repoground atlas scan /etc
 ```
 
 ### JSONL Tools

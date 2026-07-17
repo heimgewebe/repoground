@@ -49,7 +49,10 @@ DEFAULT_MANIFEST = (
     Path(__file__).resolve().parent.parent.parent
     / "docs" / "proofs" / AUDIT_FILENAME
 )
-LENS_FACETS_PATH = "merger/lenskit/core/lens_facets.py"
+LENS_FACETS_PATHS = (
+    "merger/repoground/core/lens_facets.py",
+    "merger/lenskit/core/lens_facets.py",
+)
 JSONSCHEMA_CONSTRUCTORS = {
     "Draft3Validator", "Draft4Validator", "Draft6Validator",
     "Draft7Validator", "Draft201909Validator", "Draft202012Validator",
@@ -156,12 +159,27 @@ def inventory_sha(paths: list[str]) -> str:
 
 
 def load_base_infer_facets(repo: str, base_sha: str):
-    """Load infer_facets from the BASE snapshot, never the working tree."""
-    source = git(repo, "show", f"{base_sha}:{LENS_FACETS_PATH}")
-    validate_base_import_policy(source, f"{LENS_FACETS_PATH}@{base_sha[:12]}")
+    """Load ``infer_facets`` from the exact base snapshot.
+
+    RepoGround 3 snapshots use the canonical path. Pre-3.0 snapshots are read
+    from the documented legacy path; the source is never taken from the
+    working tree and no identifier is rewritten.
+    """
+    source = None
+    source_path = None
+    for candidate in LENS_FACETS_PATHS:
+        try:
+            source = git(repo, "show", f"{base_sha}:{candidate}")
+            source_path = candidate
+            break
+        except subprocess.CalledProcessError:
+            continue
+    require(source is not None and source_path is not None, "base snapshot lens_facets.py missing")
+    label = f"{source_path}@{base_sha[:12]}"
+    validate_base_import_policy(source, label)
     import types
     module = types.ModuleType("lens_facets_base")
-    exec(compile(source, f"{LENS_FACETS_PATH}@{base_sha[:12]}", "exec"), module.__dict__)  # noqa: S102
+    exec(compile(source, label, "exec"), module.__dict__)  # noqa: S102
     facets = getattr(module, "infer_facets", None)
     require(callable(facets), "base snapshot lens_facets.infer_facets missing")
     return facets

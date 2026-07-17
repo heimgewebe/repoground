@@ -1,10 +1,10 @@
-# rLens Source Acquisition v1 — Blueprint
+# RepoGround service Source Acquisition v1 — Blueprint
 
 Status: implemented (`task/rlens-source-acquisition-v1`); control plane hardened
 (TASK-SERVICE-003B): central source-mode validation enforced at `/api/jobs` and
 all surfaces, schema-validated report contract, manual link-rejecting tar writer.
 Schema: `lenskit.source_acquisition_report.v1`
-(`merger/lenskit/contracts/source-acquisition-report.v1.schema.json`).
+(`merger/repoground/contracts/source-acquisition-report.v1.schema.json`).
 
 ## Problem
 
@@ -14,7 +14,7 @@ exists but the branch has no `@{u}`. The existing bounded pre-pull then correctl
 reports `skipped_no_upstream` — `git rev-parse @{u}` fails, so there is nothing to
 fast-forward.
 
-Operators want rLens to scan *the remote default branch* in that situation,
+Operators want RepoGround service to scan *the remote default branch* in that situation,
 **without** mutating the local checkout.
 
 ## Why "git pull always" is wrong
@@ -51,12 +51,12 @@ When `repo_source_mode` is set explicitly it wins.
 ## Source-mode control plane (validation)
 
 The source-mode rules live in one place — `validate_source_mode_request()` in
-`merger/lenskit/service/source_acquisition.py` — and are enforced identically by
+`merger/repoground/service/source_acquisition.py` — and are enforced identically by
 every surface so a client can never out-permit the API:
 
 * **`/api/jobs` is the hard boundary.** `JobRequest` runs the validator and
   FastAPI maps a contradictory body to **HTTP 422** *before* any job hash, reuse
-  check, git or network access. The CLI, repoLens/Pythonista headless and the
+  check, git or network access. The CLI, RepoGround build/Pythonista headless and the
   WebUI run the same rules locally (CLI/headless: exit 2; WebUI: blocked submit
   with a visible error) but they are surfaces, not the control instance.
 
@@ -161,7 +161,7 @@ Remote snapshots are temporary cache material, not permanent history. Cleanup is
 
 Snapshots belonging to jobs in `queued`, `running` or `canceling` state are protected regardless of age or size. Cleanup runs after every job attempt and during lazy job garbage collection; deleting a job also removes exactly that job's snapshot root. If the snapshot root contains a symlink or another unexpected non-directory child, cleanup fails closed and deletes nothing. Every deletion is revalidated as a real direct child of `<merges_dir>/.rlens-source-snapshots` immediately before removal.
 
-These rules bound disk growth while preserving current work. They do not turn snapshots into a version archive; reproducible history belongs in the published RepoBrief bundles and their retention policy.
+These rules bound disk growth while preserving current work. They do not turn snapshots into a version archive; reproducible history belongs in the published RepoGround bundles and their retention policy.
 
 ## Plan-only semantics
 

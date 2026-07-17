@@ -1,16 +1,16 @@
-# RepoBrief MCP stdio
+# RepoGround MCP stdio
 
-RepoBrief can run as a local Model Context Protocol server over standard input and output.
-The server exposes existing RepoBrief bundles and handlers; it does not invent a second
+RepoGround can run as a local Model Context Protocol server over standard input and output.
+The server exposes existing RepoGround bundles and handlers; it does not invent a second
 snapshot or grounding implementation.
 
 ## Start
 
-Use the launcher by absolute path. It adds its own Lenskit checkout to the Python import path,
+Use the launcher by absolute path. It adds its own RepoGround checkout to the Python import path,
 so the MCP client does not need to start inside the repository:
 
 ```bash
-python3 /absolute/path/to/lenskit/scripts/repobrief-mcp-stdio.py \
+python3 /absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py \
   --bundle-root /absolute/path/to/briefs \
   --repo-root /absolute/path/to/repository
 ```
@@ -19,11 +19,11 @@ python3 /absolute/path/to/lenskit/scripts/repobrief-mcp-stdio.py \
 one exact bundle manifest. `--repo-root` is optional for the default read-only server, but
 without it live freshness is reported as `not_comparable` and no Git probe runs.
 
-The module form remains valid when the Lenskit checkout or installed package is already on
+The module form remains valid when the RepoGround checkout or installed package is already on
 Python's import path:
 
 ```bash
-python3 -m merger.lenskit.cli.repobrief_mcp_stdio \
+python3 -m merger.repoground.cli.mcp_stdio \
   --bundle-root /absolute/path/to/briefs \
   --repo-root /absolute/path/to/repository
 ```
@@ -38,7 +38,7 @@ Clients that accept an MCP stdio command can use this shape:
     "repobrief": {
       "command": "python3",
       "args": [
-        "/absolute/path/to/lenskit/scripts/repobrief-mcp-stdio.py",
+        "/absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py",
         "--bundle-root",
         "/absolute/path/to/briefs",
         "--repo-root",
@@ -50,7 +50,7 @@ Clients that accept an MCP stdio command can use this shape:
 ```
 
 The client-specific file location or registration command varies. The absolute launcher,
-bundle root, and optional repository root are the stable RepoBrief side of the contract.
+bundle root, and optional repository root are the stable RepoGround side of the contract.
 
 ## Exposed tools
 

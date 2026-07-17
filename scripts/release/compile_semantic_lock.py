@@ -13,9 +13,9 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 ROOT = Path(__file__).resolve().parents[2]
-INPUT_REL = "requirements/repobrief-semantic-linux-x86_64-py312.in"
-CONSTRAINTS_REL = "requirements/repobrief-semantic-linux-x86_64-py312.constraints.txt"
-LOCK_REL = "requirements/repobrief-semantic-linux-x86_64-py312.lock.txt"
+INPUT_REL = "requirements/repoground-semantic-linux-x86_64-py312.in"
+CONSTRAINTS_REL = "requirements/repoground-semantic-linux-x86_64-py312.constraints.txt"
+LOCK_REL = "requirements/repoground-semantic-linux-x86_64-py312.lock.txt"
 TORCH_URL = (
     "https://download-r2.pytorch.org/whl/cpu/"
     "torch-2.13.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl"
@@ -74,13 +74,13 @@ def _pip_environment() -> dict[str, str]:
     env = os.environ.copy()
     env.update(
         {
-            "HOME": env.get("HOME", "/tmp/repobrief-semantic-home"),
+            "HOME": env.get("HOME", "/tmp/repoground-semantic-home"),
             "PIP_CONFIG_FILE": os.devnull,
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
             "PYTHONHASHSEED": "0",
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
-            "HF_HOME": "/tmp/repobrief-semantic-hf-home",
+            "HF_HOME": "/tmp/repoground-semantic-hf-home",
         }
     )
     return env
@@ -171,7 +171,7 @@ def _report_packages(report_path: Path) -> list[dict[str, str]]:
 
 def _constraints_bytes(packages: list[dict[str, str]]) -> bytes:
     lines = [
-        "# Exact target closure for RepoBrief's optional semantic extension.",
+        "# Exact target closure for RepoGround's optional semantic extension.",
         f"# Target: {SUPPORTED_TARGET_ID}",
         "# Generated from the reviewed lock compiler; do not install this file directly.",
         "",
@@ -183,7 +183,7 @@ def _constraints_bytes(packages: list[dict[str, str]]) -> bytes:
 def _lock_bytes(packages: list[dict[str, str]]) -> bytes:
     lines = [
         "#",
-        "# Target-specific SHA-256 lock for RepoBrief's optional semantic extension.",
+        "# Target-specific SHA-256 lock for RepoGround's optional semantic extension.",
         f"# Target: {SUPPORTED_TARGET_ID}",
         "# Compiler environment: scripts/release/compile_semantic_lock.sh",
         "# One selected wheel hash per package intentionally fails closed on other targets.",
@@ -227,7 +227,7 @@ def compile_lock(*, check: bool) -> dict[str, object]:
     if check and (not constraints_path.is_file() or not lock_path.is_file()):
         raise RuntimeError("committed semantic constraints/lock are required for --check")
 
-    with tempfile.TemporaryDirectory(prefix="repobrief-semantic-lock-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="repoground-semantic-lock-") as tmp:
         report_path = Path(tmp) / "pip-report.json"
         _resolve_report(constraints_path if check else None, report_path)
         packages = _report_packages(report_path)
@@ -354,7 +354,7 @@ def verify_install(target: Path) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Compile or verify the target-specific RepoBrief semantic lock"
+        description="Compile or verify the target-specific RepoGround semantic lock"
     )
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--verify-install", type=Path)

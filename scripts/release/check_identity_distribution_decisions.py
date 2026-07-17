@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed checks for RepoBrief naming and distribution decisions."""
+"""Fail-closed checks for RepoGround identity and distribution decisions."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-NAMESPACE = Path("docs/decisions/repobrief-package-namespace-decision.v1.json")
-LICENSE_DECISION = Path("docs/decisions/repobrief-public-license-decision.v1.json")
+IDENTITY = Path("docs/decisions/repoground-3-naming-and-migration.v1.json")
+LICENSE_DECISION = Path("docs/decisions/repoground-public-license-decision.v1.json")
 THIRD_PARTY = Path("docs/release/third-party-license-review.v1.json")
 ALLOWED_METADATA_STATUSES = {
     "identified",
@@ -22,7 +22,7 @@ def check(root: Path) -> list[str]:
     """Return decision drift findings for a repository root."""
 
     findings: list[str] = []
-    namespace = json.loads((root / NAMESPACE).read_text(encoding="utf-8"))
+    identity = json.loads((root / IDENTITY).read_text(encoding="utf-8"))
     license_decision = json.loads(
         (root / LICENSE_DECISION).read_text(encoding="utf-8")
     )
@@ -33,21 +33,26 @@ def check(root: Path) -> list[str]:
         encoding="utf-8"
     )
 
-    if namespace.get("decision") != "keep_lenskit_namespace_for_2_x":
-        findings.append("namespace decision changed")
+    if identity.get("decision") != "adopt_repoground_for_3_x":
+        findings.append("RepoGround identity decision changed")
     if (
-        namespace.get("python_namespace") != "merger.lenskit"
-        or namespace.get("product_name") != "RepoBrief"
+        identity.get("repository_target_name") != "repoground"
+        or identity.get("python_namespace") != "merger.repoground"
+        or identity.get("product_name") != "RepoGround"
+        or identity.get("primary_cli_name") != "repoground"
     ):
-        findings.append("namespace identity mismatch")
-    inventory = namespace.get("consumer_inventory") or {}
-    if int(inventory.get("local_merger_lenskit_occurrences", 0)) < 1:
-        findings.append("consumer inventory missing")
-    if "RepoBrief" not in naming_text or "merger.lenskit" not in naming_text:
+        findings.append("RepoGround identity mismatch")
+    compatibility = identity.get("compatibility") or {}
+    if (
+        compatibility.get("legacy_python_namespace") != "merger.lenskit"
+        or compatibility.get("persisted_2_x_identifiers_reinterpreted") is not False
+    ):
+        findings.append("compatibility boundary drift")
+    if "RepoGround" not in naming_text or "merger.repoground" not in naming_text:
         findings.append("naming document drift")
 
     expression = license_decision.get("current_license_expression")
-    if expression != "LicenseRef-RepoBrief-All-Rights-Reserved":
+    if expression != "LicenseRef-RepoGround-All-Rights-Reserved":
         findings.append("license expression changed")
     if expression not in license_text:
         findings.append("LICENSE does not match decision")
@@ -90,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     findings = check(args.root.resolve())
     report = {
-        "kind": "repobrief.identity_distribution_decision_check",
+        "kind": "repoground.identity_distribution_decision_check",
         "version": "1.0",
         "status": "pass" if not findings else "fail",
         "findings": findings,

@@ -15,41 +15,41 @@ name: Lens Model
   push:
     branches: ["main", "master"]
     paths:
-      - "merger/lenskit/core/lenses.py"
-      - "merger/lenskit/core/lens_audit.py"
-      - "merger/lenskit/core/lens_facets.py"
-      - "merger/lenskit/core/lens_cards.py"
-      - "merger/lenskit/core/lens_card_validate.py"
-      - "merger/lenskit/core/pr_delta_cards.py"
-      - "merger/lenskit/core/pr_delta_card_validate.py"
-      - "merger/lenskit/core/relation_cards.py"
-      - "merger/lenskit/core/relation_card_validate.py"
-      - "merger/lenskit/core/agent_reading_pack.py"
-      - "merger/lenskit/architecture/import_graph.py"
-      - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
-      - "merger/lenskit/contracts/lens-facet.v1.schema.json"
-      - "merger/lenskit/contracts/lens-card.v1.schema.json"
-      - "merger/lenskit/contracts/pr-delta-card.v1.schema.json"
-      - "merger/lenskit/contracts/pr-schau-delta.v1.schema.json"
-      - "merger/lenskit/contracts/relation-card.v1.schema.json"
-      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
-      - "merger/lenskit/tests/test_lenses.py"
-      - "merger/lenskit/tests/test_primary_lens_audit.py"
-      - "merger/lenskit/tests/test_lens_facets.py"
-      - "merger/lenskit/tests/test_lens_cards.py"
-      - "merger/lenskit/tests/test_lens_card_validate.py"
-      - "merger/lenskit/tests/test_pr_delta_cards.py"
-      - "merger/lenskit/tests/test_pr_delta_card_validate.py"
-      - "merger/lenskit/tests/test_relation_cards.py"
-      - "merger/lenskit/tests/test_relation_card_validate.py"
-      - "merger/lenskit/tests/test_architecture_import_graph.py"
-      - "merger/lenskit/tests/fixtures/architecture_import_graph/expected.graph.json"
-      - "merger/lenskit/tests/test_pr_schau_delta_schema.py"
-      - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
-      - "merger/lenskit/tests/test_agent_reading_pack.py"
-      - "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py"
-      - "merger/lenskit/tests/test_cli_agent_pack.py"
-      - "merger/lenskit/tests/test_bundle_manifest_integration.py"
+      - "merger/repoground/core/lenses.py"
+      - "merger/repoground/core/lens_audit.py"
+      - "merger/repoground/core/lens_facets.py"
+      - "merger/repoground/core/lens_cards.py"
+      - "merger/repoground/core/lens_card_validate.py"
+      - "merger/repoground/core/pr_delta_cards.py"
+      - "merger/repoground/core/pr_delta_card_validate.py"
+      - "merger/repoground/core/relation_cards.py"
+      - "merger/repoground/core/relation_card_validate.py"
+      - "merger/repoground/core/agent_reading_pack.py"
+      - "merger/repoground/architecture/import_graph.py"
+      - "merger/repoground/contracts/primary-lens-audit.v1.schema.json"
+      - "merger/repoground/contracts/lens-facet.v1.schema.json"
+      - "merger/repoground/contracts/lens-card.v1.schema.json"
+      - "merger/repoground/contracts/pr-delta-card.v1.schema.json"
+      - "merger/repoground/contracts/pr-schau-delta.v1.schema.json"
+      - "merger/repoground/contracts/relation-card.v1.schema.json"
+      - "merger/repoground/contracts/architecture.graph.v1.schema.json"
+      - "merger/repoground/tests/test_lenses.py"
+      - "merger/repoground/tests/test_primary_lens_audit.py"
+      - "merger/repoground/tests/test_lens_facets.py"
+      - "merger/repoground/tests/test_lens_cards.py"
+      - "merger/repoground/tests/test_lens_card_validate.py"
+      - "merger/repoground/tests/test_pr_delta_cards.py"
+      - "merger/repoground/tests/test_pr_delta_card_validate.py"
+      - "merger/repoground/tests/test_relation_cards.py"
+      - "merger/repoground/tests/test_relation_card_validate.py"
+      - "merger/repoground/tests/test_architecture_import_graph.py"
+      - "merger/repoground/tests/fixtures/architecture_import_graph/expected.graph.json"
+      - "merger/repoground/tests/test_pr_schau_delta_schema.py"
+      - "merger/repoground/tests/test_lens_facet_pattern_ecma.js"
+      - "merger/repoground/tests/test_agent_reading_pack.py"
+      - "merger/repoground/tests/test_agent_reading_pack_usage_rules.py"
+      - "merger/repoground/tests/test_cli_agent_pack.py"
+      - "merger/repoground/tests/test_bundle_manifest_integration.py"
       - "docs/architecture/lens-model.md"
       - "docs/proofs/facet-model-v1-proof.md"
       - "docs/proofs/lens-card-v1-proof.md"
@@ -58,51 +58,51 @@ name: Lens Model
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md"
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
       - "scripts/proofs/guard_relation_validates_schema_audit.py"
-      - "merger/lenskit/tests/test_guard_relation_validates_schema_audit.py"
+      - "merger/repoground/tests/test_guard_relation_validates_schema_audit.py"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - "pytest.ini"
       - ".github/workflows/lens-model.yml"
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
   pull_request:
     branches: ["main", "master"]
     paths:
-      - "merger/lenskit/core/lenses.py"
-      - "merger/lenskit/core/lens_audit.py"
-      - "merger/lenskit/core/lens_facets.py"
-      - "merger/lenskit/core/lens_cards.py"
-      - "merger/lenskit/core/lens_card_validate.py"
-      - "merger/lenskit/core/pr_delta_cards.py"
-      - "merger/lenskit/core/pr_delta_card_validate.py"
-      - "merger/lenskit/core/relation_cards.py"
-      - "merger/lenskit/core/relation_card_validate.py"
-      - "merger/lenskit/core/agent_reading_pack.py"
-      - "merger/lenskit/architecture/import_graph.py"
-      - "merger/lenskit/contracts/primary-lens-audit.v1.schema.json"
-      - "merger/lenskit/contracts/lens-facet.v1.schema.json"
-      - "merger/lenskit/contracts/lens-card.v1.schema.json"
-      - "merger/lenskit/contracts/pr-delta-card.v1.schema.json"
-      - "merger/lenskit/contracts/pr-schau-delta.v1.schema.json"
-      - "merger/lenskit/contracts/relation-card.v1.schema.json"
-      - "merger/lenskit/contracts/architecture.graph.v1.schema.json"
-      - "merger/lenskit/tests/test_lenses.py"
-      - "merger/lenskit/tests/test_primary_lens_audit.py"
-      - "merger/lenskit/tests/test_lens_facets.py"
-      - "merger/lenskit/tests/test_lens_cards.py"
-      - "merger/lenskit/tests/test_lens_card_validate.py"
-      - "merger/lenskit/tests/test_pr_delta_cards.py"
-      - "merger/lenskit/tests/test_pr_delta_card_validate.py"
-      - "merger/lenskit/tests/test_relation_cards.py"
-      - "merger/lenskit/tests/test_relation_card_validate.py"
-      - "merger/lenskit/tests/test_architecture_import_graph.py"
-      - "merger/lenskit/tests/fixtures/architecture_import_graph/expected.graph.json"
-      - "merger/lenskit/tests/test_pr_schau_delta_schema.py"
-      - "merger/lenskit/tests/test_lens_facet_pattern_ecma.js"
-      - "merger/lenskit/tests/test_agent_reading_pack.py"
-      - "merger/lenskit/tests/test_agent_reading_pack_usage_rules.py"
-      - "merger/lenskit/tests/test_cli_agent_pack.py"
-      - "merger/lenskit/tests/test_bundle_manifest_integration.py"
+      - "merger/repoground/core/lenses.py"
+      - "merger/repoground/core/lens_audit.py"
+      - "merger/repoground/core/lens_facets.py"
+      - "merger/repoground/core/lens_cards.py"
+      - "merger/repoground/core/lens_card_validate.py"
+      - "merger/repoground/core/pr_delta_cards.py"
+      - "merger/repoground/core/pr_delta_card_validate.py"
+      - "merger/repoground/core/relation_cards.py"
+      - "merger/repoground/core/relation_card_validate.py"
+      - "merger/repoground/core/agent_reading_pack.py"
+      - "merger/repoground/architecture/import_graph.py"
+      - "merger/repoground/contracts/primary-lens-audit.v1.schema.json"
+      - "merger/repoground/contracts/lens-facet.v1.schema.json"
+      - "merger/repoground/contracts/lens-card.v1.schema.json"
+      - "merger/repoground/contracts/pr-delta-card.v1.schema.json"
+      - "merger/repoground/contracts/pr-schau-delta.v1.schema.json"
+      - "merger/repoground/contracts/relation-card.v1.schema.json"
+      - "merger/repoground/contracts/architecture.graph.v1.schema.json"
+      - "merger/repoground/tests/test_lenses.py"
+      - "merger/repoground/tests/test_primary_lens_audit.py"
+      - "merger/repoground/tests/test_lens_facets.py"
+      - "merger/repoground/tests/test_lens_cards.py"
+      - "merger/repoground/tests/test_lens_card_validate.py"
+      - "merger/repoground/tests/test_pr_delta_cards.py"
+      - "merger/repoground/tests/test_pr_delta_card_validate.py"
+      - "merger/repoground/tests/test_relation_cards.py"
+      - "merger/repoground/tests/test_relation_card_validate.py"
+      - "merger/repoground/tests/test_architecture_import_graph.py"
+      - "merger/repoground/tests/fixtures/architecture_import_graph/expected.graph.json"
+      - "merger/repoground/tests/test_pr_schau_delta_schema.py"
+      - "merger/repoground/tests/test_lens_facet_pattern_ecma.js"
+      - "merger/repoground/tests/test_agent_reading_pack.py"
+      - "merger/repoground/tests/test_agent_reading_pack_usage_rules.py"
+      - "merger/repoground/tests/test_cli_agent_pack.py"
+      - "merger/repoground/tests/test_bundle_manifest_integration.py"
       - "docs/architecture/lens-model.md"
       - "docs/proofs/facet-model-v1-proof.md"
       - "docs/proofs/lens-card-v1-proof.md"
@@ -111,14 +111,14 @@ name: Lens Model
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-target-proof.md"
       - "docs/proofs/guard-relation-cards-v1b-validates-schema-audit.json"
       - "scripts/proofs/guard_relation_validates_schema_audit.py"
-      - "merger/lenskit/tests/test_guard_relation_validates_schema_audit.py"
+      - "merger/repoground/tests/test_guard_relation_validates_schema_audit.py"
       - "docs/blueprints/lenskit-agent-front-door-hardening.md"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - "pytest.ini"
       - ".github/workflows/lens-model.yml"
 
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
 permissions:
   contents: read
 
@@ -141,18 +141,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
       - name: Lint audit script and falsification tests
         run: |
           ruff check \
             scripts/proofs/guard_relation_validates_schema_audit.py \
-            merger/lenskit/tests/test_guard_relation_validates_schema_audit.py
+            merger/repoground/tests/test_guard_relation_validates_schema_audit.py
 
       - name: Falsification tests (gate must reject tampered inputs)
         run: |
           python3 -m pytest -q \
-            merger/lenskit/tests/test_guard_relation_validates_schema_audit.py
+            merger/repoground/tests/test_guard_relation_validates_schema_audit.py
 
       - name: Regenerate audit from snapshot and compare (derive, not echo)
         env:
@@ -184,15 +184,31 @@ jobs:
           with open(sys.argv[1], encoding="utf-8") as handle:
               data = json.load(handle)
 
-          line_index = data["fields"].index("relation_call_line")
-          row_index = next(
-              index
-              for index, row in enumerate(data["flows"])
-              if row.startswith(
-                  "merger/lenskit/core/relation_card_validate.py|"
-                  "validate_relation_card|226|_schema_check|159"
+          fields = data["fields"]
+          line_index = fields.index("relation_call_line")
+          source_index = fields.index("source_path")
+          relation_owner_index = fields.index("relation_owner_symbol")
+          engine_owner_index = fields.index("engine_owner_symbol")
+          schema_index = fields.index("schema_path")
+          matches = []
+          for index, row in enumerate(data["flows"]):
+              values = row.split("|")
+              if len(values) != len(fields):
+                  raise SystemExit(f"invalid flow width at index {index}")
+              if (
+                  values[source_index].endswith("/core/relation_card_validate.py")
+                  and values[relation_owner_index] == "validate_relation_card"
+                  and values[engine_owner_index] == "_schema_check"
+                  and values[schema_index].endswith(
+                      "/contracts/relation-card.v1.schema.json"
+                  )
+              ):
+                  matches.append(index)
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected exactly one relation-card flow, found {len(matches)}"
               )
-          )
+          row_index = matches[0]
           values = data["flows"][row_index].split("|")
           values[line_index] = str(int(values[line_index]) + 10_000)
           data["flows"][row_index] = "|".join(values)
@@ -231,7 +247,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
       - name: Require jsonschema (contract tests must run, not skip)
         run: |
@@ -287,10 +303,10 @@ jobs:
           from jsonschema import Draft7Validator
 
           for path in [
-              Path("merger/lenskit/contracts/lens-facet.v1.schema.json"),
-              Path("merger/lenskit/contracts/lens-card.v1.schema.json"),
-              Path("merger/lenskit/contracts/pr-delta-card.v1.schema.json"),
-              Path("merger/lenskit/contracts/relation-card.v1.schema.json"),
+              Path("merger/repoground/contracts/lens-facet.v1.schema.json"),
+              Path("merger/repoground/contracts/lens-card.v1.schema.json"),
+              Path("merger/repoground/contracts/pr-delta-card.v1.schema.json"),
+              Path("merger/repoground/contracts/relation-card.v1.schema.json"),
           ]:
               schema = json.loads(
                   path.read_text(encoding="utf-8")
@@ -306,56 +322,56 @@ jobs:
           from pathlib import Path
           from jsonschema import Draft202012Validator
 
-          path = Path("merger/lenskit/contracts/pr-schau-delta.v1.schema.json")
+          path = Path("merger/repoground/contracts/pr-schau-delta.v1.schema.json")
           schema = json.loads(path.read_text(encoding="utf-8"))
           Draft202012Validator.check_schema(schema)
           print(f"{path.name}: meta-valid")
           PY
 
       - name: Validate lens path patterns in ECMAScript Unicode mode (Node)
-        run: node merger/lenskit/tests/test_lens_facet_pattern_ecma.js
+        run: node merger/repoground/tests/test_lens_facet_pattern_ecma.js
 
       - name: Run lens model tests
         run: |
           python -m pytest -q \
-            merger/lenskit/tests/test_lenses.py \
-            merger/lenskit/tests/test_primary_lens_audit.py \
-            merger/lenskit/tests/test_lens_facets.py \
-            merger/lenskit/tests/test_lens_cards.py \
-            merger/lenskit/tests/test_lens_card_validate.py \
-            merger/lenskit/tests/test_pr_delta_cards.py \
-            merger/lenskit/tests/test_pr_delta_card_validate.py \
-            merger/lenskit/tests/test_relation_cards.py \
-            merger/lenskit/tests/test_relation_card_validate.py \
-            merger/lenskit/tests/test_architecture_import_graph.py \
-            merger/lenskit/tests/test_pr_schau_delta_schema.py \
-            merger/lenskit/tests/test_agent_reading_pack.py \
-            merger/lenskit/tests/test_agent_reading_pack_usage_rules.py \
-            merger/lenskit/tests/test_cli_agent_pack.py \
-            merger/lenskit/tests/test_bundle_manifest_integration.py::test_agent_reading_pack_emitted_schema_valid_and_hashed
+            merger/repoground/tests/test_lenses.py \
+            merger/repoground/tests/test_primary_lens_audit.py \
+            merger/repoground/tests/test_lens_facets.py \
+            merger/repoground/tests/test_lens_cards.py \
+            merger/repoground/tests/test_lens_card_validate.py \
+            merger/repoground/tests/test_pr_delta_cards.py \
+            merger/repoground/tests/test_pr_delta_card_validate.py \
+            merger/repoground/tests/test_relation_cards.py \
+            merger/repoground/tests/test_relation_card_validate.py \
+            merger/repoground/tests/test_architecture_import_graph.py \
+            merger/repoground/tests/test_pr_schau_delta_schema.py \
+            merger/repoground/tests/test_agent_reading_pack.py \
+            merger/repoground/tests/test_agent_reading_pack_usage_rules.py \
+            merger/repoground/tests/test_cli_agent_pack.py \
+            merger/repoground/tests/test_bundle_manifest_integration.py::test_agent_reading_pack_emitted_schema_valid_and_hashed
 
       - name: Ruff (lens model core and tests)
         run: |
           ruff check \
-            merger/lenskit/core/lens_facets.py \
-            merger/lenskit/core/lens_cards.py \
-            merger/lenskit/core/lens_card_validate.py \
-            merger/lenskit/core/pr_delta_cards.py \
-            merger/lenskit/core/pr_delta_card_validate.py \
-            merger/lenskit/core/relation_cards.py \
-            merger/lenskit/core/relation_card_validate.py \
-            merger/lenskit/core/agent_reading_pack.py \
-            merger/lenskit/architecture/import_graph.py \
-            merger/lenskit/tests/test_lens_facets.py \
-            merger/lenskit/tests/test_lens_cards.py \
-            merger/lenskit/tests/test_lens_card_validate.py \
-            merger/lenskit/tests/test_pr_delta_cards.py \
-            merger/lenskit/tests/test_pr_delta_card_validate.py \
-            merger/lenskit/tests/test_relation_cards.py \
-            merger/lenskit/tests/test_relation_card_validate.py \
-            merger/lenskit/tests/test_architecture_import_graph.py \
-            merger/lenskit/tests/test_pr_schau_delta_schema.py \
-            merger/lenskit/tests/test_agent_reading_pack.py \
-            merger/lenskit/tests/test_agent_reading_pack_usage_rules.py \
-            merger/lenskit/tests/test_cli_agent_pack.py \
-            merger/lenskit/tests/test_bundle_manifest_integration.py
+            merger/repoground/core/lens_facets.py \
+            merger/repoground/core/lens_cards.py \
+            merger/repoground/core/lens_card_validate.py \
+            merger/repoground/core/pr_delta_cards.py \
+            merger/repoground/core/pr_delta_card_validate.py \
+            merger/repoground/core/relation_cards.py \
+            merger/repoground/core/relation_card_validate.py \
+            merger/repoground/core/agent_reading_pack.py \
+            merger/repoground/architecture/import_graph.py \
+            merger/repoground/tests/test_lens_facets.py \
+            merger/repoground/tests/test_lens_cards.py \
+            merger/repoground/tests/test_lens_card_validate.py \
+            merger/repoground/tests/test_pr_delta_cards.py \
+            merger/repoground/tests/test_pr_delta_card_validate.py \
+            merger/repoground/tests/test_relation_cards.py \
+            merger/repoground/tests/test_relation_card_validate.py \
+            merger/repoground/tests/test_architecture_import_graph.py \
+            merger/repoground/tests/test_pr_schau_delta_schema.py \
+            merger/repoground/tests/test_agent_reading_pack.py \
+            merger/repoground/tests/test_agent_reading_pack_usage_rules.py \
+            merger/repoground/tests/test_cli_agent_pack.py \
+            merger/repoground/tests/test_bundle_manifest_integration.py

@@ -2,7 +2,7 @@
 
 ## Zweck
 
-Definiere die Range-Begriffe für Lenskit, damit Chunking, Range-Resolver, Citation Map,
+Definiere die Range-Begriffe für RepoGround, damit Chunking, Range-Resolver, Citation Map,
 Query Runtime und spätere Evidence-Auswertung nicht dieselben Felder unterschiedlich
 interpretieren.
 

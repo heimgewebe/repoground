@@ -7,7 +7,7 @@
       "query": "RepoBrief protocol neutral read only adapter",
       "symbol_query": "RepoBriefReadonlyAdapter",
       "symbol_kind": "class",
-      "expected_paths": ["merger/lenskit/core/repobrief_readonly_adapter.py"],
+      "expected_paths": ["merger/repoground/core/repobrief_readonly_adapter.py"],
       "expected_symbols": ["RepoBriefReadonlyAdapter"]
     },
     {
@@ -16,7 +16,7 @@
       "symbol_query": "dispatch",
       "symbol_kind": "function",
       "symbol_path_filter": "repobrief_readonly_adapter.py",
-      "expected_paths": ["merger/lenskit/core/repobrief_readonly_adapter.py"],
+      "expected_paths": ["merger/repoground/core/repobrief_readonly_adapter.py"],
       "expected_symbols": ["dispatch"]
     },
     {
@@ -24,7 +24,7 @@
       "query": "read status of existing RepoBrief snapshot",
       "symbol_query": "snapshot_status",
       "symbol_kind": "function",
-      "expected_paths": ["merger/lenskit/core/repobrief_access.py"],
+      "expected_paths": ["merger/repoground/core/repobrief_access.py"],
       "expected_symbols": ["snapshot_status"]
     },
     {
@@ -32,7 +32,7 @@
       "query": "query an existing SQLite index without mutation",
       "symbol_query": "query_existing_index",
       "symbol_kind": "function",
-      "expected_paths": ["merger/lenskit/core/repobrief_access.py"],
+      "expected_paths": ["merger/repoground/core/repobrief_access.py"],
       "expected_symbols": ["query_existing_index"]
     },
     {
@@ -40,7 +40,7 @@
       "query": "search Python symbol index without importing target code",
       "symbol_query": "search_symbol_index",
       "symbol_kind": "function",
-      "expected_paths": ["merger/lenskit/core/repobrief_access.py"],
+      "expected_paths": ["merger/repoground/core/repobrief_access.py"],
       "expected_symbols": ["search_symbol_index"]
     },
     {
@@ -48,7 +48,7 @@
       "query": "list RepoBrief MCP resources from existing bundle",
       "symbol_query": "list_mcp_resources",
       "symbol_kind": "function",
-      "expected_paths": ["merger/lenskit/core/repobrief_mcp_resources.py"],
+      "expected_paths": ["merger/repoground/core/repobrief_mcp_resources.py"],
       "expected_symbols": ["list_mcp_resources"]
     },
     {
@@ -56,7 +56,7 @@
       "query": "compare latest complete snapshot commit with live repository head",
       "symbol_query": "evaluate_registry_freshness",
       "symbol_kind": "function",
-      "expected_paths": ["merger/lenskit/core/repobrief_latest_complete.py"],
+      "expected_paths": ["merger/repoground/core/repobrief_latest_complete.py"],
       "expected_symbols": ["evaluate_registry_freshness"]
     },
     {

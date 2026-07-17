@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 import tempfile
-from merger.lenskit.core.merge import detect_hub_dir
+from merger.repoground.core.merge import detect_hub_dir
 
 def test_detect_hub_dir_saved_path():
     with tempfile.TemporaryDirectory() as script_dir, tempfile.TemporaryDirectory() as hub_dir:
@@ -68,7 +68,7 @@ def test_detect_hub_dir_env_overrides_saved(monkeypatch):
         assert detected == Path(hub_dir_env)
 
 def test_is_pythonista_runtime(monkeypatch):
-    from merger.lenskit.frontends.pythonista.pathfinder import _is_pythonista_runtime
+    from merger.repoground.frontends.pythonista.pathfinder import _is_pythonista_runtime
     import sys
 
     monkeypatch.setattr(sys, "executable", "/usr/bin/python3")

@@ -1,0 +1,2 @@
+# Runtime inputs for the non-semantic RepoGround core.
+-r ../merger/repoground/requirements.txt

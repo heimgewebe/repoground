@@ -150,7 +150,7 @@ jobs:
       GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
       GH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       GH_PUSH_BEFORE: ${{ github.event.before }}
-      PROTECTED_REGEX: '^(merger/lenskit/contracts/|docs/contracts/)'
+      PROTECTED_REGEX: '^(merger/repoground/contracts/|docs/contracts/)'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -228,5 +228,5 @@ jobs:
     uses: heimgewebe/contracts-mirror/.github/workflows/contracts-ajv-reusable.yml@0e5430c72b7948124e2b892da9473bdf8f8a120e
     secrets: inherit
     with:
-      fixtures_glob: ${{ vars.FIXTURES_GLOB || 'merger/lenskit/contracts/examples/**/*.json merger/lenskit/contracts/examples/**/*.jsonl' }}
+      fixtures_glob: ${{ vars.FIXTURES_GLOB || 'merger/repoground/contracts/examples/**/*.json merger/repoground/contracts/examples/**/*.jsonl' }}
       contracts_ref: 0e5430c72b7948124e2b892da9473bdf8f8a120e

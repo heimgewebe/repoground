@@ -1,4 +1,4 @@
-# Lenskit Output- und Repo-Härtung v1 (Abhakbare Blaupause)
+# RepoGround Output- und Repo-Härtung v1 (Abhakbare Blaupause)
 
 > **Reconciliation (2026-05-21):** Die Anti-Hallucination-Erweiterung dieser Roadmap
 > ist reconciled in `docs/blueprints/lenskit-anti-hallucination-output-architecture.md`,
@@ -9,7 +9,7 @@
 ## These / Antithese / Synthese
 
 ### These
-- [x] Lenskit besitzt eine tragfähige Artefaktordnung (canonical Markdown, Chunk-Index, Dump-Index, SQLite-Cache, Manifest, Architektur-Summary).
+- [x] RepoGround besitzt eine tragfähige Artefaktordnung (canonical Markdown, Chunk-Index, Dump-Index, SQLite-Cache, Manifest, Architektur-Summary).
 - [x] Rollen sind im Manifest getrennt:
   - [x] `canonical_md` = Inhaltsquelle.
   - [x] `chunk_index_jsonl` = Retrieval-Index.
@@ -27,7 +27,7 @@
 ### Synthese
 - [ ] Fokus nicht auf „größerem Dump", sondern auf **Evidence-Control-Plane**.
 - [ ] Jeder Output muss sich selbst beweisen können: vollständig, suchbar, auflösbar, zitierbar, hash-konsistent, agententauglich.
-- [ ] Leitfrage: Wie erzeugt Lenskit Outputs, die Agenten nicht mehr falsch lesen können?
+- [ ] Leitfrage: Wie erzeugt RepoGround Outputs, die Agenten nicht mehr falsch lesen können?
 
 ---
 
@@ -90,10 +90,10 @@
 
 ### Umsetzung
 - [x] Dateien sind umgesetzt und mit Tests abgesichert:
-  - [x] `merger/lenskit/retrieval/index_db.py`
-  - [x] `merger/lenskit/core/range_resolver.py`
-  - [x] `merger/lenskit/tests/test_retrieval_index.py`
-  - [x] `merger/lenskit/tests/test_dump_retrieval.py`
+  - [x] `merger/repoground/retrieval/index_db.py`
+  - [x] `merger/repoground/core/range_resolver.py`
+  - [x] `merger/repoground/tests/test_retrieval_index.py`
+  - [x] `merger/repoground/tests/test_dump_retrieval.py`
 - [x] Algorithmus ist vorhanden:
   - [x] `content = chunk.get("content")`
   - [x] Fallback ohne Inline-Content nutzt `content_range_ref` + Resolver.
@@ -143,7 +143,7 @@
 - [ ] Zeilenachsen explizit trennen; Fehlzitate verhindern.
 
 ### Umsetzung
-- [ ] Neue Schema-Datei: `merger/lenskit/contracts/range-ref.v2.schema.json`
+- [ ] Neue Schema-Datei: `merger/repoground/contracts/range-ref.v2.schema.json`
 - [ ] v2-Felder einführen:
   - [ ] `artifact_byte_start`, `artifact_byte_end`
   - [ ] `artifact_line_start`, `artifact_line_end`
@@ -219,7 +219,7 @@
 - [x] Manifest-Rolle: `agent_reading_pack`, Authority: `navigation_index`, Canonicality: `derived` (role_only, `text/markdown`).
 
 ### Umsetzung (v1)
-- [x] Producer: `merger/lenskit/core/agent_reading_pack.py` (pure Funktionen + IO-Adapter, atomic write, SHA-Verifikation der Wahrheitsanker `canonical_md`/`chunk_index`).
+- [x] Producer: `merger/repoground/core/agent_reading_pack.py` (pure Funktionen + IO-Adapter, atomic write, SHA-Verifikation der Wahrheitsanker `canonical_md`/`chunk_index`).
 - [x] Rolle: `ArtifactRole.AGENT_READING_PACK` in `core/constants.py`; Schema-Enum + per-role `if/then` in `bundle-manifest.v1.schema.json`; `AUTHORITY_REGISTRY` in `merge.py`.
 - [x] Pipeline-Emission: am Ende von `write_reports_v2` aus dem finalen Manifest; `MergeArtifacts.agent_reading_pack`.
 - [x] CLI: `lenskit agent-pack produce <bundle_manifest> [--output] [--json]` (`cli/cmd_agent_pack.py`).
@@ -232,7 +232,7 @@
 ## Arbeitspaket E — Output-Profile trennen (Optimierungsgrad 0.70)
 
 > **Namens-Reconciliation (2026-05-21):** Es existieren zwei Profilnamensschemata
-> (hier vs. `docs/blueprints/lenskit-artifact-output-control-plane.md` §7). **Kanonisch
+> (hier vs. `docs/blueprints/repoground-artifact-output-control-plane.md` §7). **Kanonisch
 > sind die control-plane-Namen** (`lean-readable`, `lean-evidence`, `agent-portable`,
 > `local-search`, `debug-full`, `forensic-strict`). Die folgenden Namen bleiben als
 > Verwendungsabsicht/Alias bestehen und mappen wie folgt:
@@ -256,9 +256,9 @@
 ## Arbeitspaket F — Claim-Evidence-Map (Optimierungsgrad 0.76)
 
 > **Epistemische Korrektur (2026-05-21):** Die ursprüngliche Formulierung
-> ("supported / unsupported" pro Claim) ist zurückgezogen. Lenskit darf Belege
+> ("supported / unsupported" pro Claim) ist zurückgezogen. RepoGround darf Belege
 > **adressieren**, nicht **bewerten** — `supported/unsupported/true/false/proven`
-> ist eine LLM-/Review-Aufgabe, kein Lenskit-Output. Auflösung des Widerspruchs siehe
+> ist eine LLM-/Review-Aufgabe, kein RepoGround-Output. Auflösung des Widerspruchs siehe
 > `docs/proofs/anti-hallucination-capability-audit.md` §2.6 und
 > `docs/blueprints/lenskit-anti-hallucination-output-architecture.md` (PR F1–F3).
 
@@ -318,11 +318,11 @@
 - [ ] Neuer CI-Job: `output-health-validate`.
 
 ### Geplante CLI-/CI-Checks nach Implementierung:
-- [ ] `python -m merger.lenskit.cli.main validate-output-health <stem>` *(geplant; neuer Command)*
-- [ ] Aktueller Query-Vertrag: `python -m merger.lenskit.cli.main query --index <sqlite> --q "range_resolver" --emit json`
+- [ ] `python -m merger.repoground.cli.main validate-output-health <stem>` *(geplant; neuer Command)*
+- [ ] Aktueller Query-Vertrag: `python -m merger.repoground.cli.main query --index <sqlite> --q "range_resolver" --emit json`
 - [ ] Trefferprüfung für CI zunächst über Wrapper/Python/JQ aus dem JSON-Output ableiten; ein mögliches `--expect-hit` wäre ein zukünftig einzuführendes Assert-Flag, nicht aktueller CLI-Vertrag.
-- [ ] Aktuelle Range-Auflösung: `python -m merger.lenskit.cli.main range get --manifest <bundle.manifest.json|dump_index.json> --ref <range_ref.json> --format json`
-- [ ] Aktueller Stored-Artifact-Lookup: `python -m merger.lenskit.cli.main artifact --id <artifact-id> --artifact-type <query_trace|context_bundle|agent_query_session>`
+- [ ] Aktuelle Range-Auflösung: `python -m merger.repoground.cli.main range get --manifest <bundle.manifest.json|dump_index.json> --ref <range_ref.json> --format json`
+- [ ] Aktueller Stored-Artifact-Lookup: `python -m merger.repoground.cli.main artifact --id <artifact-id> --artifact-type <query_trace|context_bundle|agent_query_session>`
 
 Hinweis: `query --index/--q`, `range get --manifest/--ref` und `artifact --id/--artifact-type` spiegeln den aktuellen CLI-Vertrag. Neue Convenience-Flags wie `--expect-hit` oder neue Commands wie `validate-output-health` müssen separat implementiert und getestet werden, bevor sie in CI blockierend verwendet werden.
 

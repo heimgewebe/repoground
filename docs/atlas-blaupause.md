@@ -10,7 +10,7 @@ Wenn Atlas zu viel auf einmal tut, droht der klassische Werkzeugtod: ein Scanner
 Die tragfähige Lösung ist:
 **Atlas = physische Wahrnehmungsschicht + Snapshot-Gedächtnis + optionale Inhaltserschließung**
 
-Darauf setzen Retrieval, Analyse, Visualisierung und Agentenlogik auf. Lenskit bleibt die Denkmaschine; Atlas bleibt das Beobachtungsorgan. Das passt auch zum aktuellen Repo-Stand: Atlas ist im README ausdrücklich als vom Repository-Inspektionspfad getrennte Dateisystem-Erkundung beschrieben, inklusive Root-Modell für `preset`, `token` und `abs_path`.
+Darauf setzen Retrieval, Analyse, Visualisierung und Agentenlogik auf. RepoGround bleibt die Denkmaschine; Atlas bleibt das Beobachtungsorgan. Das passt auch zum aktuellen Repo-Stand: Atlas ist im README ausdrücklich als vom Repository-Inspektionspfad getrennte Dateisystem-Erkundung beschrieben, inklusive Root-Modell für `preset`, `token` und `abs_path`.
 
 ---
 
@@ -48,7 +48,7 @@ Der aktuelle Stand im Repo zeigt: Atlas ist bereits als Filesystem Exploration T
 
 Im aktuellen Stand existieren außerdem bereits:
 * ein formales Root-Modell (`preset`, `token`, `abs_path`) statt stiller Fallbacks, inklusive strikter Ablehnung relativer/manipulativer Pfade auf API-Ebene; die WebUI fängt ungültige manuelle Eingaben bereits vor dem Request ab.
-* eine Atlas-Planungsschicht `merger/lenskit/atlas/planner.py`, die Artefakte nach `scan_mode` plant:
+* eine Atlas-Planungsschicht `merger/repoground/atlas/planner.py`, die Artefakte nach `scan_mode` plant:
   * `inventory` → summary + inventory + dirs
   * `topology` → summary + topology
   * `content` → summary + inventory + content
@@ -78,7 +78,7 @@ Sekundär darf Atlas:
 * Hotspots berechnen
 * Topologien ableiten
 * Deltas zwischen Snapshots berechnen
-* Lenskit/Heimgeist/HausKI mit Rohwirklichkeit versorgen
+* RepoGround/Heimgeist/HausKI mit Rohwirklichkeit versorgen
 
 Das sind Aufbauten, nicht das Mandat selbst.
 
@@ -157,7 +157,7 @@ Der aktuelle `scan_mode`-Ansatz geht bereits in diese Richtung, weil unterschied
 * **E. Exportierte Artefakte**: inventory, dirs inventory, summary, topology, content, workspaces, hotspots, später snapshots/deltas/history/search-indizes
 
 ### 5.2 Atlas ist nicht zuständig für
-* **A. Semantische Tiefeninterpretation**: Dafür sind Lenskit, Heimgeist, HausKI besser geeignet.
+* **A. Semantische Tiefeninterpretation**: Dafür sind RepoGround, Heimgeist, HausKI besser geeignet.
 * **B. Politische oder organisatorische Systemlogik**: Nicht Atlas’ Aufgabe.
 * **C. Vollständige Git-Historienanalyse**: Atlas darf Repos erkennen, aber nicht in seinem Kern von Git abhängen.
 * **D. UI-zentrierte Wahrheitsdefinition**: Die WebUI ist Konsument, nicht Kanon.
@@ -199,7 +199,7 @@ Der aktuelle `scan_mode`-Ansatz geht bereits in diese Richtung, weil unterschied
 * **Schicht C – Enrichment Layer**: Zusatzwissen pro Datei/Verzeichnis (`content.json`, `media.json`, `workspace_annotations.json`).
 * **Schicht D – Derivation Layer**: Abgeleitete Sichten (`topology.json`, `hotspots.json`, `duplicates.json`, `history_views.json`).
 * **Schicht E – Index Layer**: Suchen, Filtern, Retrieval (`FTS`, `Chunk-Index`, `Semantik-Index`).
-* **Schicht F – Integration Layer**: Exports für Lenskit, Heimgeist, HausKI, Chronik, UI.
+* **Schicht F – Integration Layer**: Exports für RepoGround, Heimgeist, HausKI, Chronik, UI.
 
 ## 9. Soll-Ist-Abgleich zum aktuellen Repo-Stand
 
@@ -658,7 +658,7 @@ Ich ordne die kommenden Atlas-Funktionen nach fünf Kriterien:
 1. **Hebel**: Wie stark erhöht die Funktion den praktischen Nutzen im Alltag?
 2. **Systemtiefe**: Verbessert sie nur die Oberfläche oder den Kern?
 3. **Replizierbarkeit**: Ist das Verhalten stabil, deterministisch, testbar?
-4. **Anschlussfähigkeit**: Kann Lenskit/Heimgeist/HausKI später darauf aufsetzen?
+4. **Anschlussfähigkeit**: Kann RepoGround/Heimgeist/HausKI später darauf aufsetzen?
 5. **Drift-Risiko**: Verführt die Funktion Atlas dazu, seine Kernrolle zu verlieren?
 
 ## 3. Die große Ausbau-Roadmap (Übersicht)
@@ -912,7 +912,7 @@ Ziel: Große Roots effizient aktualisierbar machen.
 ### Phase 4 — Suchschicht
 Ziel: Dateien und Inhalte systemweit abfragbar machen.
 - [x] SQLite-FTS evaluieren und festziehen
-  - *Architekturnotiz: FTS5 ist technologisch bestätigt (bereits für Chunks im Einsatz) und performant. Die vier offenen Integrationsentscheidungen aus `docs/architecture/atlas-fts-integration.md` wurden in **ADR-009** verbindlich entschieden (global index, derive-write-path, hard-delete-per-snapshot, latest-only-default). Implementiert als globaler Index `atlas/indexes/fts.sqlite` in `merger/lenskit/atlas/index.py` (`AtlasFTSIndex`): Scope/`ext`/Größe/Datum werden aus indizierten SQLite-Spalten bedient statt aus erneutem JSONL-Parsing (Glob-/Name-/Path-Exaktheit und die generische `query`-Substring-Prüfung bleiben Python-Postfilter über den SQL-eingegrenzten Kandidaten — nicht via FTS); die Indizierung läuft als best-effort Derivation-Schritt nach Snapshot-Abschluss. `search.py` nutzt den Index, wenn er alle Kandidaten-Snapshots konsistent abdeckt, und fällt sonst transparent auf den linearen Scan zurück. CLI: `atlas index rebuild` / `atlas index stats`, `atlas search --all-snapshots` / `--no-index`, `atlas scan --no-index`. Content-Suche: Die FTS-`content`-Spalte wird beim Indizieren befüllt (vorbereitete Struktur für künftige Nutzung), wird aber **nicht** als harter Vorfilter eingesetzt — der Indexierungszeitpunkt des Dateiinhalts kann vom Live-Zustand abweichen (Freshness-Gap). Alle metadaten-gefilterten Kandidaten werden stets per Live-Scan (`_content_match`) bestätigt; die Snippet-Semantik (case-insensitiv, erste Trefferzeile, 200 Zeichen) bleibt damit identisch zum linearen Pfad.*
+  - *Architekturnotiz: FTS5 ist technologisch bestätigt (bereits für Chunks im Einsatz) und performant. Die vier offenen Integrationsentscheidungen aus `docs/architecture/atlas-fts-integration.md` wurden in **ADR-009** verbindlich entschieden (global index, derive-write-path, hard-delete-per-snapshot, latest-only-default). Implementiert als globaler Index `atlas/indexes/fts.sqlite` in `merger/repoground/atlas/index.py` (`AtlasFTSIndex`): Scope/`ext`/Größe/Datum werden aus indizierten SQLite-Spalten bedient statt aus erneutem JSONL-Parsing (Glob-/Name-/Path-Exaktheit und die generische `query`-Substring-Prüfung bleiben Python-Postfilter über den SQL-eingegrenzten Kandidaten — nicht via FTS); die Indizierung läuft als best-effort Derivation-Schritt nach Snapshot-Abschluss. `search.py` nutzt den Index, wenn er alle Kandidaten-Snapshots konsistent abdeckt, und fällt sonst transparent auf den linearen Scan zurück. CLI: `atlas index rebuild` / `atlas index stats`, `atlas search --all-snapshots` / `--no-index`, `atlas scan --no-index`. Content-Suche: Die FTS-`content`-Spalte wird beim Indizieren befüllt (vorbereitete Struktur für künftige Nutzung), wird aber **nicht** als harter Vorfilter eingesetzt — der Indexierungszeitpunkt des Dateiinhalts kann vom Live-Zustand abweichen (Freshness-Gap). Alle metadaten-gefilterten Kandidaten werden stets per Live-Scan (`_content_match`) bestätigt; die Snippet-Semantik (case-insensitiv, erste Trefferzeile, 200 Zeichen) bleibt damit identisch zum linearen Pfad.*
 - [x] Metadaten-Suchschema definieren
 - [x] Path-Search implementieren
 - [x] Name-Search implementieren

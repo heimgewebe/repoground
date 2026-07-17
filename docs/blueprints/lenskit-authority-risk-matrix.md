@@ -6,13 +6,13 @@
 
 Beziehung zu bestehenden Docs:
 - Bestehende Authority-/Canonicality-Terme: `docs/architecture/artifact-inventory.md` §6
-- Bestehende Contracts: `merger/lenskit/contracts/`
+- Bestehende Contracts: `merger/repoground/contracts/`
 - Bestehende Evidence-Levels: `docs/architecture/artifact-evidence-levels.md`
 - Retrieval-Miss-Scope: `docs/proofs/retrieval-miss-taxonomy-proof.md`
 - Context-Quality-Scope: `docs/proofs/context-quality-signals-proof.md`
 - Post-Emit-Health-Scope: `docs/proofs/post-emit-health-implementation-proof.md`
 - Anti-Hallucination-Architektur: `docs/blueprints/lenskit-anti-hallucination-output-architecture.md`
-- Globale Reihenfolge: `docs/roadmap/lenskit-master-roadmap.md`
+- Globale Reihenfolge: `docs/roadmap/repoground-master-roadmap.md`
 
 **Diese Datei ersetzt nichts.** Sie normiert Inferenzgrenzen, die in bestehenden
 Artefakten und Contracts partiell bereits angelegt sind, aber noch nicht als explizite
@@ -82,7 +82,7 @@ C1 schließt diese Lücken auf Governance-Ebene — ohne neue Runtime-Artefakte.
 
 ### 1.1 Das additive Wachstumsproblem
 
-Lenskit erzeugt inzwischen Artefakte unterschiedlicher epistemischer Stärke:
+RepoGround erzeugt inzwischen Artefakte unterschiedlicher epistemischer Stärke:
 
 - `canonical_md` — der Repo-Inhalt selbst
 - `chunk_index_jsonl` — mechanische Zerlegung des Inhalts
@@ -147,7 +147,7 @@ nicht ausreichend, weil:
 
 > Beobachtung ≠ Diagnose ≠ Interpretation ≠ Wahrheit
 
-Dieses Prinzip ist in Lenskit bereits partiell implementiert (durch Artefaktrollen,
+Dieses Prinzip ist in RepoGround bereits partiell implementiert (durch Artefaktrollen,
 `does_not_prove`, Authority-Felder). C1 macht es zur expliziten Governance-Norm,
 nicht zur impliziten Konvention.
 
@@ -229,7 +229,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Der Repo-Inhalt selbst. Einzige Inhaltquelle. In Lenskit: `canonical_md`. |
+| **Definition** | Der Repo-Inhalt selbst. Einzige Inhaltquelle. In RepoGround: `canonical_md`. |
 | **allowed_inference** | Inhalt lesen, zitieren (mit Range-Ref), als Baseline für Ableitungen verwenden. |
 | **forbidden_inference** | Vollständigkeit des Repos behaupten; Abwesenheit einer Sektion als "nicht vorhanden" deuten ohne Scope-Prüfung; Bedeutung oder Wichtigkeit von Abschnitten ableiten. |
 | **valid_consumers** | Mensch, LLM (direkt), Bundle-Manifest, Citation-Map-Producer, Range-Resolver. |
@@ -246,7 +246,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Artefakt, das Beobachtungen über den Zustand des Systems oder Bundles aggregiert. Warnt, beweist nicht. In Lenskit: `output_health`, `post_emit_health`, `context_quality`, `miss_taxonomy` (innerhalb `retrieval_eval`). |
+| **Definition** | Artefakt, das Beobachtungen über den Zustand des Systems oder Bundles aggregiert. Warnt, beweist nicht. In RepoGround: `output_health`, `post_emit_health`, `context_quality`, `miss_taxonomy` (innerhalb `retrieval_eval`). |
 | **allowed_inference** | Zustand des Systems zum Zeitpunkt der Prüfung lesen; Warnungen als Hinweise behandeln; CI-Entscheidungen auf Basis von `verdict/status` treffen (fail/pass). |
 | **forbidden_inference** | `verdict=pass` als Beweis für Repo-Korrektheit; `verdict=pass` als Beweis für Antwortsicherheit; diagnostics als Wahrheit über den Inhalt; `projection_status=complete` als Vollständigkeitsbeweis. |
 | **valid_consumers** | CI-Pipelines, Entwickler, Debug-Tools. Nicht: LLM-Agents als primäre Wissensquelle. |
@@ -263,7 +263,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Artefakt, das zeigt, wo etwas ist — nicht was es bedeutet. In Lenskit: `agent_reading_pack`, `dump_index_json`, `index_sidecar_json`, `citation_map_jsonl`, `derived_manifest_json`. |
+| **Definition** | Artefakt, das zeigt, wo etwas ist — nicht was es bedeutet. In RepoGround: `agent_reading_pack`, `dump_index_json`, `index_sidecar_json`, `citation_map_jsonl`, `derived_manifest_json`. |
 | **allowed_inference** | Pfade zu Artefakten auflösen; als Einstiegspunkt für weitere Lookup-Operationen nutzen; Navigation innerhalb des Bundles. |
 | **forbidden_inference** | Semantische Wichtigkeit aus Position oder Ranking ableiten; Navigation als Wahrheit über Inhalt behandeln; Abwesenheit in einem Index als Abwesenheit im Repo deuten. |
 | **valid_consumers** | Agents (als Einstiegspunkt), CLI, WebUI. Immer mit Resolve-Pflicht (`must_resolve_to: role_specific_authority`). |
@@ -285,7 +285,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Konzeptionelle Klasse für Artefakte, die aus vorhandenen Artefakten projiziert werden, ohne neue Informationen hinzuzufügen und ohne diagnostischen Charakter. Kein bestehender Lenskit-Artefakttyp wird durch C1 in diese Klasse umklassifiziert. |
+| **Definition** | Konzeptionelle Klasse für Artefakte, die aus vorhandenen Artefakten projiziert werden, ohne neue Informationen hinzuzufügen und ohne diagnostischen Charakter. Kein bestehender RepoGround-Artefakttyp wird durch C1 in diese Klasse umklassifiziert. |
 | **allowed_inference** | Den projizierten Zustand zum Projektionszeitpunkt lesen; als Zusammenfassung vorhandener Signale verwenden. |
 | **forbidden_inference** | Als autoritative Aussage über Repo-Inhalt; als Beweis für irgendeine Property der zugrundeliegenden Artefakte; `projection_status=complete` als Vollständigkeitsbeweis. |
 | **valid_consumers** | Entwickler, CI (als Übersicht), Debug-Tools. |
@@ -302,7 +302,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Artefakt, das nur zur Beschleunigung existiert. Enthält keine Informationen, die nicht in der Quelle vorhanden wären. In Lenskit: `sqlite_index`. |
+| **Definition** | Artefakt, das nur zur Beschleunigung existiert. Enthält keine Informationen, die nicht in der Quelle vorhanden wären. In RepoGround: `sqlite_index`. |
 | **allowed_inference** | Schnellerer Zugriff auf Informationen aus der Quellartefakt; SQLite-Ergebnis als approximativen Hinweis auf Chunk-Inhalt lesen. |
 | **forbidden_inference** | SQLite-Ergebnis als Beweis für Repo-Inhalt; Abwesenheit im Index als Abwesenheit im Repo; SQLite-Ranking als Beweis für Relevanz oder Wichtigkeit. |
 | **valid_consumers** | `retrieval.query_core`, `retrieval.eval_core`. Immer mit Fallback auf `canonical_md`/`chunk_index_jsonl`. |
@@ -319,7 +319,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Spur eines einzelnen Laufzeitvorgangs. Beschreibt, was zu einem bestimmten Zeitpunkt passiert ist — nicht den Repo-Zustand. In Lenskit: `agent_query_session`, `query_trace`, `query_context_bundle`, `federation_trace`. |
+| **Definition** | Spur eines einzelnen Laufzeitvorgangs. Beschreibt, was zu einem bestimmten Zeitpunkt passiert ist — nicht den Repo-Zustand. In RepoGround: `agent_query_session`, `query_trace`, `query_context_bundle`, `federation_trace`. |
 | **allowed_inference** | Den Ablauf einer einzelnen Query rekonstruieren; Provenienz eines Query-Ergebnisses nachvollziehen; Debug-Informationen lesen. |
 | **forbidden_inference** | Laufzeitbeobachtung als Beweis für Repo-Inhalt; Session-Ergebnis als autoritativen Kontext; Query-Trace als Vollständigkeitsbeweis für Retrieval. |
 | **valid_consumers** | Debug-Tools, CI (für Trace-Analyse), Entwickler. Nicht: LLM-Agents als primäre Wissensquelle. |
@@ -336,7 +336,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Ausgabe, die ein Agent (LLM oder automatisiertes System) erzeugt hat. Enthält keine inhärente Autorität — nur die Inputs, aus denen der Agent erzeugt hat, tragen ggf. Autorität. In Lenskit: Agent-Antworten, RAG-basierte Ausgaben, MCP-Outputs. |
+| **Definition** | Ausgabe, die ein Agent (LLM oder automatisiertes System) erzeugt hat. Enthält keine inhärente Autorität — nur die Inputs, aus denen der Agent erzeugt hat, tragen ggf. Autorität. In RepoGround: Agent-Antworten, RAG-basierte Ausgaben, MCP-Outputs. |
 | **allowed_inference** | Als Arbeitshypothese oder Entwurf lesen; Inputs zur Verifikation zurückverfolgen. |
 | **forbidden_inference** | Authority-Vererbung: ein Agent, der aus `canonical_content` gelesen hat, erzeugt keine `canonical_content`-Ausgabe; Agent-Output als Wahrheit über Repo-Inhalt; Agent-Zusammenfassung als vollständig. |
 | **valid_consumers** | Mensch (mit Vorbehalt), weitere Agents (mit explizitem Downstream-Disclaimer). |
@@ -353,7 +353,7 @@ nicht umklassifiziert; die Matrix normiert Inferenzgrenzen explizit.
 
 | Feld | Wert |
 | :--- | :--- |
-| **Definition** | Informationen, die aus einer Quelle außerhalb des Lenskit-kontrollierten Bereichs stammen. In Lenskit: externe URLs, unverifizierten Cross-Repo-Links (`confidence: inferred`), externe APIs. |
+| **Definition** | Informationen, die aus einer Quelle außerhalb des RepoGround-kontrollierten Bereichs stammen. In RepoGround: externe URLs, unverifizierten Cross-Repo-Links (`confidence: inferred`), externe APIs. |
 | **allowed_inference** | Als Hinweis auf externe Quelle lesen; für manuelle Verifikation vormerken. |
 | **forbidden_inference** | Als Beweis für irgendeine interne Property; als Ergänzung zu `canonical_content`. |
 | **valid_consumers** | Mensch (für manuelle Verifikation). |
@@ -640,7 +640,7 @@ machen, in Artefakten mit niedrigerer Authority.
 (als Verdicts), `verified`, `correct`, `complete`.
 
 **Warum gefährlich:** Diese Terme suggerieren Wahrheitsaussagen, die kein
-Lenskit-Artefakt unterhalb von `canonical_content` beweisen kann.
+RepoGround-Artefakt unterhalb von `canonical_content` beweisen kann.
 
 **Mögliche CI-Integration:** Lexikalische Suche nach verbotenen Feldnamen in
 Schema-Definitionen und Artefakt-Outputs für niedrige Authority-Klassen.
@@ -689,7 +689,7 @@ direkt mit LLM-Input. Das erzeugt folgende epistemische Probleme:
   Information nicht im Repo existiert.
 - **Top-k ≠ Vollständig:** Die besten k Treffer sind nicht alle relevanten Treffer.
 
-### 7.2 Lenskit-Artefakte mit erhöhtem Agent-Risiko
+### 7.2 RepoGround-Artefakte mit erhöhtem Agent-Risiko
 
 | Artefakt | Risiko | Begründung |
 | :--- | :--- | :--- |
@@ -816,13 +816,13 @@ ergänzt. `does_not_prove`-Arrays werden gegen die Matrix validiert.
 ### 10.2 Aktueller Zustand vs. emergente Richtung
 
 **Aktueller Zustand:**  
-Lenskit ist ein Retrieval- und Indexing-System mit diagnostischen Artefakten und
+RepoGround ist ein Retrieval- und Indexing-System mit diagnostischen Artefakten und
 partiellen epistemischen Grenzen. Die bestehenden `does_not_prove`-Implementierungen
 sind korrekt und notwendig. Ein systemweiter Governance-Layer fehlt.
 
 **Emergente Richtung:**  
 Durch B1 (Context Quality), B2 (Retrieval Miss Taxonomy), A4 (Post-Emit Health),
-A1 (Agent Reading Pack Governance) entwickelt sich Lenskit in Richtung eines Systems
+A1 (Agent Reading Pack Governance) entwickelt sich RepoGround in Richtung eines Systems
 mit expliziten epistemischen Grenzen. Ohne C1 bleibt diese Entwicklung additiv ohne
 normative Kohärenz.
 
@@ -832,21 +832,21 @@ normative Kohärenz.
    Oberfläche ohne entsprechende Governance.
 2. **Fragmentierte Disclaimer:** `does_not_prove` wird pro Artefakt implementiert,
    aber nicht systemweit aggregiert oder validiert.
-3. **Agent-Gefährdung:** LLM-Agents, die Lenskit-Artefakte konsumieren, haben
+3. **Agent-Gefährdung:** LLM-Agents, die RepoGround-Artefakte konsumieren, haben
    keinen maschinenlesbaren Überblick über Inferenzgrenzen.
 4. **Authority-Drift:** Ohne explizite Normierung können neue Producer-Komponenten
    Authority-Terme inkonsistent verwenden.
 
-### 10.3 Was Lenskit nicht ist und nicht werden soll
+### 10.3 Was RepoGround nicht ist und nicht werden soll
 
-- Lenskit ist **keine Wahrheitsmaschine.** Lenskit sammelt, indiziert, klassifiziert
+- RepoGround ist **keine Wahrheitsmaschine.** RepoGround sammelt, indiziert, klassifiziert
   und adressiert — es bewertet keine Wahrheit.
-- Lenskit ist **kein Vollständigkeitsbeweis.** Kein Lenskit-Artefakt kann beweisen,
+- RepoGround ist **kein Vollständigkeitsbeweis.** Kein RepoGround-Artefakt kann beweisen,
   dass ein Repo vollständig erfasst wurde.
-- Lenskit ist **kein Safety-Layer.** Lenskit macht keine Aussagen über die Sicherheit
+- RepoGround ist **kein Safety-Layer.** RepoGround macht keine Aussagen über die Sicherheit
   von Agent-Ausgaben oder LLM-Antworten.
 
-**C1 soll zeigen:** Lenskit entwickelt sich nicht zu einer Wahrheitsmaschine,
+**C1 soll zeigen:** RepoGround entwickelt sich nicht zu einer Wahrheitsmaschine,
 sondern zu einem System expliziter epistemischer Grenzen.
 
 ---

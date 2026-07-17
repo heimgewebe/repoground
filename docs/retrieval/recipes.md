@@ -3,7 +3,7 @@
 > FTS5 + bm25 sind Voraussetzung für den FTS-Modus. Meta-only Queries (ohne Suchtext `--q`) funktionieren weiterhin ohne FTS.
 
 ## Manifest Policy
-Um zirkuläre Hashes zu vermeiden, teilt Lenskit die Artefakte strikt in zwei Manifest-Schichten auf (basierend auf Suffix-Konventionen):
+Um zirkuläre Hashes zu vermeiden, teilt RepoGround die Artefakte strikt in zwei Manifest-Schichten auf (basierend auf Suffix-Konventionen):
 - `<base>.dump_index.json`: Kanonische Wahrheit (Markdown, JSON Sidecar, Chunk Index). Stabil und forensisch prüfbar.
 - `<base>.derived_index.json`: Beschleunigungsschicht (SQLite Index, Retrieval Eval). Enthält `canonical_dump_sha256` als Rückreferenz auf das Hauptmanifest. `canonical_dump_sha256` dient als Bindeglied, um stale Indizes erkennen zu lassen (durch Vergleich gegen das aktuelle dump manifest).
 
@@ -12,7 +12,7 @@ Um zirkuläre Hashes zu vermeiden, teilt Lenskit die Artefakte strikt in zwei Ma
 Indexieren eines "<base>.dump_index.json" und "<base>.chunk_index.jsonl" Paares.
 
 ```bash
-python -m merger.lenskit.cli index \
+python -m merger.repoground.cli index \
   --dump output/<base>.dump_index.json \
   --chunk-index output/<base>.chunk_index.jsonl \
   --out output/<base>.chunk_index.index.sqlite
@@ -23,7 +23,7 @@ python -m merger.lenskit.cli index \
 Überprüfen, ob ein Index aktuell (fresh) ist.
 
 ```bash
-python -m merger.lenskit.cli index --dump output/my_dump.json --chunk-index output/my_chunks.jsonl --verify
+python -m merger.repoground.cli index --dump output/my_dump.json --chunk-index output/my_chunks.jsonl --verify
 ```
 
 ## 3. Einfache Suche
@@ -31,7 +31,7 @@ python -m merger.lenskit.cli index --dump output/my_dump.json --chunk-index outp
 Suche nach einem Begriff in allen Dateien.
 
 ```bash
-python -m merger.lenskit.cli query --index output/my_index.sqlite --q "authentication"
+python -m merger.repoground.cli query --index output/my_index.sqlite --q "authentication"
 ```
 
 ## 4. Suche mit Repo-Filter
@@ -39,7 +39,7 @@ python -m merger.lenskit.cli query --index output/my_index.sqlite --q "authentic
 Suche nach "user" nur im Repository "backend".
 
 ```bash
-python -m merger.lenskit.cli query --index output/my_index.sqlite --q "user" --repo backend
+python -m merger.repoground.cli query --index output/my_index.sqlite --q "user" --repo backend
 ```
 
 ## 5. Suche nach Dateityp
@@ -47,7 +47,7 @@ python -m merger.lenskit.cli query --index output/my_index.sqlite --q "user" --r
 Suche nach "schema" nur in SQL-Dateien.
 
 ```bash
-python -m merger.lenskit.cli query --index output/my_index.sqlite --q "schema" --ext sql
+python -m merger.repoground.cli query --index output/my_index.sqlite --q "schema" --ext sql
 ```
 
 ## 6. Suche im Core-Layer
@@ -55,7 +55,7 @@ python -m merger.lenskit.cli query --index output/my_index.sqlite --q "schema" -
 Suche nach "logging" nur im "core" Layer (Architektur).
 
 ```bash
-python -m merger.lenskit.cli query --index output/my_index.sqlite --q "logging" --layer core
+python -m merger.repoground.cli query --index output/my_index.sqlite --q "logging" --layer core
 ```
 
 ## 7. Pfad-basierte Suche
@@ -63,7 +63,7 @@ python -m merger.lenskit.cli query --index output/my_index.sqlite --q "logging" 
 Suche nach "config" in Dateien, deren Pfad "settings" enthält.
 
 ```bash
-python -m merger.lenskit.cli query --index output/my_index.sqlite --q "config" --path settings
+python -m merger.repoground.cli query --index output/my_index.sqlite --q "config" --path settings
 ```
 
 ## 8. JSON-Output für Agenten
@@ -71,7 +71,7 @@ python -m merger.lenskit.cli query --index output/my_index.sqlite --q "config" -
 Strukturierte Ausgabe für maschinelle Verarbeitung.
 
 ```bash
-python -m merger.lenskit.cli query --index output/my_index.sqlite --q "error" --emit json
+python -m merger.repoground.cli query --index output/my_index.sqlite --q "error" --emit json
 ```
 
 ## 9. Limitierte Ergebnisse
@@ -79,7 +79,7 @@ python -m merger.lenskit.cli query --index output/my_index.sqlite --q "error" --
 Nur die Top-3 Treffer anzeigen.
 
 ```bash
-python -m merger.lenskit.cli query --index output/my_index.sqlite --q "main" --k 3
+python -m merger.repoground.cli query --index output/my_index.sqlite --q "main" --k 3
 ```
 
 ## 10. Rebuild erzwingen
@@ -87,7 +87,7 @@ python -m merger.lenskit.cli query --index output/my_index.sqlite --q "main" --k
 Index neu bauen, auch wenn er aktuell scheint.
 
 ```bash
-python -m merger.lenskit.cli index --dump output/my_dump.json --chunk-index output/my_chunks.jsonl --rebuild
+python -m merger.repoground.cli index --dump output/my_dump.json --chunk-index output/my_chunks.jsonl --rebuild
 ```
 
 ## Retrieval Eval Claim Boundaries

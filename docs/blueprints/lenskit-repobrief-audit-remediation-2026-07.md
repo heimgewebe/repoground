@@ -4,7 +4,7 @@ status: active
 initiative: LENSKIT-REPOBRIEF-AUDIT-REMEDIATION-2026-07
 ---
 
-# Lenskit / RepoBrief Audit Remediation 2026-07
+# RepoGround Audit Remediation 2026-07
 
 ## Rolle
 
@@ -15,7 +15,7 @@ und bei Snapshots gegen das kanonische `*_merge.md` zu prüfen.
 
 ## Ziel
 
-RepoBrief soll für interne Operator-Arbeit nicht nur viele Diagnoseartefakte
+RepoGround soll für interne Operator-Arbeit nicht nur viele Diagnoseartefakte
 erzeugen, sondern eine widerspruchsfreie Abschlusskette besitzen:
 
 1. Profil- und Exportpolitik entscheiden zentral und fail-closed.
@@ -29,7 +29,7 @@ erzeugen, sondern eine widerspruchsfreie Abschlusskette besitzen:
 
 ### A — Final Control Plane (Audit F-01, F-02, F-04)
 
-- Zentrale Exportsemantik für alle RepoBrief-Profile.
+- Zentrale Exportsemantik für alle RepoGround-Profile.
 - Agent-Export-Gate und Export-Safety blockieren fehlende Redaction oder rote
   Kontrollberichte.
 - Zweiphasiger Bundle-Abschluss: Inhaltsartefakte fixieren, Kontrollflächen

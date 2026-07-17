@@ -9,7 +9,7 @@ task: BUREAU-LENSKIT-AUDIT-LANES-001
 ## Purpose
 
 This decision adopts the useful part of large specialist-lens audit systems without
-turning Lenskit into an agent runner or review authority. Lenskit plans a small,
+turning RepoGround into an agent runner or review authority. RepoGround plans a small,
 deterministic set of audit lanes from a concrete change surface. External operators
 may later execute those lanes in an isolated environment and must return evidence-bound
 results through separate contracts.
@@ -39,7 +39,7 @@ Adopt bounded **audit lanes**, not a mass agent runner:
 4. Keep the output `navigation_index` / `diagnostic`; it cannot establish a defect,
    correctness, severity or completeness.
 5. Do not execute agents, repository commands, issue creation, patches or merges in
-   Lenskit core.
+   RepoGround core.
 6. Measure usefulness against known findings before any default promotion.
 
 ## Phases
@@ -57,7 +57,7 @@ Acceptance gate: stable output, schema-valid examples, no agent or write surface
 
 ### Phase 2 — evidence adapter — registered follow-up
 
-Define a separate result contract that binds every claimed finding to resolvable Lenskit
+Define a separate result contract that binds every claimed finding to resolvable RepoGround
 citations, changed revision identity and the executed lane. It must distinguish
 `candidate`, `verified`, `stale`, `wrong` and `unresolved` without converting an LLM
 verdict into repository truth.
@@ -73,7 +73,7 @@ Acceptance gate: sandbox evidence, bounded cost and deterministic run manifest.
 
 ### Phase 4 — measured comparison — registered follow-up
 
-Compare baseline review against audit-lane-assisted review on closed Lenskit changes with
+Compare baseline review against audit-lane-assisted review on closed RepoGround changes with
 known true findings and known false positives.
 
 Metrics: precision, expected-finding recall, duplicate rate, validated findings per agent
@@ -102,7 +102,7 @@ confirmed defects without unacceptable noise.
 
 | Risk | Control |
 | --- | --- |
-| Prompt injection | No execution in Lenskit; later runner must be isolated and credential-free |
+| Prompt injection | No execution in RepoGround; later runner must be isolated and credential-free |
 | False positives | Separate evidence adapter and independent verification |
 | Cost explosion | Maximum eight planned lanes; pilot executes only 5–8 selected lanes with budgets |
 | Authority drift | `navigation_index`, `diagnostic`, explicit `does_not_establish` |
@@ -112,7 +112,7 @@ confirmed defects without unacceptable noise.
 ## Non-goals
 
 - copying external prompt inventories or implementation code
-- adding an LLM dependency to Lenskit core
+- adding an LLM dependency to RepoGround core
 - claiming review completeness
 - automatically filing issues or modifying repositories
 - making audit lanes the default review path before measurement

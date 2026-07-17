@@ -1,4 +1,4 @@
-# RepoBrief publication policy
+# RepoGround publication policy
 
 `rb-publication-policy` manages the durable identity and retention contract for RepoBrief publications. It does not generate RepoBrief bundles itself. The publisher reserves a generation before writing payload data, completes the durable record after validating the bundle manifest, and runs retention through an explicit dry-run/apply cycle.
 
@@ -7,7 +7,7 @@
 Two disjoint roots are mandatory:
 
 - **Evidence root:** durable publication records, pins, plans, locks and transaction journals. Record state transitions are written atomically; payload pruning never removes this evidence. Existing and newly created evidence/lock directories must be owned by the current user, must not be group- or world-writable, and symlinked directory chains are rejected. Metadata reads, hashes, atomic replacements and lock acquisition are anchored to already-open directory handles; parent replacement is detected. Lock files are opened without following symlinks and normalized to mode `0600`.
-- **Payload root:** large, regenerable RepoBrief bundle directories.
+- **Payload root:** large, regenerable RepoGround bundle directories.
 
 The policy refuses nested or identical roots. Retention removes only a validated payload directory. The durable record, identity digest, manifest digest, payload digest, byte count and prune receipt remain available after payload removal.
 
@@ -27,9 +27,9 @@ A publication identity contains:
 - owner-qualified repository key;
 - publication lane/ref;
 - full repository commit;
-- RepoBrief profile;
+- RepoGround profile;
 - canonical configuration SHA-256;
-- Lenskit version;
+- RepoGround version;
 - bundle schema;
 - generator-input SHA-256.
 

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+exec /home/alex/.local/bin/repoground-publish-fleet \
+  --if-changed \
+  --retention 3 \
+  --repo heimgewebe/systemkatalog

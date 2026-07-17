@@ -2,11 +2,11 @@
 #
 # Source-of-truth binding between documentation claims and the verifiable
 # code/test/proof evidence that proves or refutes them. Validated against
-# merger/lenskit/contracts/doc-freshness-registry.v1.schema.json.
+# merger/repoground/contracts/doc-freshness-registry.v1.schema.json.
 #
-# Verify:    python -m merger.lenskit.cli.main doc-freshness inspect
+# Verify:    python -m merger.repoground.cli.main doc-freshness inspect
 # Regenerate the human view + stamp last_verified:
-#            python -m merger.lenskit.cli.main doc-freshness update --write
+#            python -m merger.repoground.cli.main doc-freshness update --write
 #
 # Status values: none | partial | done | stale | historical
 # `historical` docs are never status-checked; `stale` declares a KNOWN, tracked
@@ -24,27 +24,27 @@ does_not_prove:
 
 entries:
   # --- Pilot: the drift the reconciliation proof explicitly deferred to a
-  # focused PR (repoLens-spec.md still framed ExtrasConfig as a TODO though it is
+  # focused PR (the former repoLens spec still framed ExtrasConfig as a TODO though it is
   # implemented at core/merge.py). This PR fixes the spec; the absent_text
   # evidence asserts the stale TODO heading is gone, the symbol asserts the
   # implementation exists. ------------------------------------------------------
-  - id: repolens-spec-super-merger-extras
-    doc: merger/lenskit/repoLens-spec.md
+  - id: repoground-build-spec-super-merger-extras
+    doc: merger/repoground/repoground-build-spec.md
     locator: "section 'Super-Merger / Extras'"
     claim: "Super-Merger extras (ExtrasConfig + extras flags) are implemented"
     status: done
     normative: true
-    owner: repolens-spec
-    last_verified: "2026-07-11"
+    owner: repoground-build-spec
+    last_verified: "2026-07-17"
     evidence:
       - kind: symbol
-        target: "merger/lenskit/core/merge.py::ExtrasConfig"
+        target: "merger/repoground/core/merge.py::ExtrasConfig"
       - kind: symbol
-        target: "merger/lenskit/core/merge.py::_build_extras_meta"
+        target: "merger/repoground/core/merge.py::_build_extras_meta"
       - kind: proof
         target: "docs/proofs/weiterentwicklungsplan-2026-05-reconciliation-proof.md"
       - kind: absent_text
-        target: "merger/lenskit/repoLens-spec.md::### TODO: Super-Merger / Extras"
+        target: "merger/repoground/repoground-build-spec.md::### TODO: Super-Merger / Extras"
     notes: >-
       Reconciliation proof §6.1 flagged this exact section as drift
       (ExtrasConfig at core/merge.py:458, spec still said "umzusetzen") and left
@@ -55,18 +55,18 @@ entries:
   # (system-map claimed federation modules "existieren derzeit nicht"). Tracked
   # so it cannot regress. ------------------------------------------------------
   - id: system-map-federation-exists
-    doc: docs/architecture/system-map.lenskit.md
+    doc: docs/architecture/system-map.repoground.md
     locator: "section 'Bekannte Lücken' / Federation"
     claim: "Federation modules exist in the source tree"
     status: done
     normative: false
     owner: architecture
-    last_verified: "2026-07-11"
+    last_verified: "2026-07-17"
     evidence:
       - kind: symbol
-        target: "merger/lenskit/core/federation.py::init_federation"
+        target: "merger/repoground/core/federation.py::init_federation"
       - kind: absent_text
-        target: "docs/architecture/system-map.lenskit.md::existieren derzeit nicht im Quellbaum"
+        target: "docs/architecture/system-map.repoground.md::existieren derzeit nicht im Quellbaum"
     notes: >-
       Corrected in the reconciliation PR (proof §6.2). The absent_text guard
       prevents the stale "do not exist" claim from reappearing.
@@ -74,20 +74,20 @@ entries:
   # --- A genuinely-open item: demonstrates that declared-`partial` work is NOT
   # false-flagged even though related v1 symbols exist. ------------------------
   - id: agent-reading-pack-v2-claim-evidence-map
-    doc: docs/roadmap/lenskit-master-roadmap.md
+    doc: docs/roadmap/repoground-master-roadmap.md
     locator: "Phase 5 / Agent Reading Pack v2"
     claim: "Agent Reading Pack v2 claim_evidence_map is produced (Arbeitspaket F)"
     status: done
     normative: false
     owner: roadmap
-    last_verified: "2026-07-11"
+    last_verified: "2026-07-17"
     evidence:
       - kind: symbol
-        target: "merger/lenskit/core/claim_evidence_map.py::produce_claim_evidence_map"
+        target: "merger/repoground/core/claim_evidence_map.py::produce_claim_evidence_map"
       - kind: test
-        target: "merger/lenskit/tests/test_claim_evidence_map.py::test_produce_claim_evidence_map_from_doc_freshness_registry"
+        target: "merger/repoground/tests/test_claim_evidence_map.py::test_produce_claim_evidence_map_from_doc_freshness_registry"
       - kind: symbol
-        target: "merger/lenskit/core/agent_reading_pack.py::produce_agent_reading_pack"
+        target: "merger/repoground/core/agent_reading_pack.py::produce_agent_reading_pack"
       - kind: proof
         target: "docs/proofs/claim-evidence-map-v1-proof.md"
     notes: >-
@@ -102,45 +102,45 @@ entries:
     status: done
     normative: true
     owner: task-control
-    last_verified: "2026-07-11"
+    last_verified: "2026-07-17"
     evidence:
       - kind: text
         target: "docs/tasks/board.md::der deklarierte Task-Scope ist abgeschlossen und belegt"
       - kind: test
-        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+        target: "merger/repoground/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
       - kind: proof
         target: docs/proofs/repobrief-status-truth-v1-proof.md
     notes: Board is a human projection of docs/tasks/index.json, not an independent authority.
 
   - id: upgrade-blueprint-target-architecture-boundary
-    doc: docs/lenskit-upgrade-blaupause.md
+    doc: docs/repoground-upgrade-blaupause.md
     locator: Statuswahrheit
     claim: Upgrade blueprint checkboxes are item-local and do not constitute canonical task or product-readiness status
     status: done
     normative: false
     owner: architecture
-    last_verified: "2026-07-11"
+    last_verified: "2026-07-17"
     evidence:
       - kind: text
-        target: "docs/lenskit-upgrade-blaupause.md::Häkchen gelten nur für den jeweiligen Arbeitspunkt"
+        target: "docs/repoground-upgrade-blaupause.md::Häkchen gelten nur für den jeweiligen Arbeitspunkt"
       - kind: test
-        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+        target: "merger/repoground/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
       - kind: proof
         target: docs/proofs/repobrief-status-truth-v1-proof.md
 
   - id: master-roadmap-item-local-boundary
-    doc: docs/roadmap/lenskit-master-roadmap.md
+    doc: docs/roadmap/repoground-master-roadmap.md
     locator: Statuswahrheit
     claim: Master-roadmap checkboxes are item-local and task status remains authoritative in the task index
     status: done
     normative: true
     owner: roadmap
-    last_verified: "2026-07-11"
+    last_verified: "2026-07-17"
     evidence:
       - kind: text
-        target: "docs/roadmap/lenskit-master-roadmap.md::Kanonische Taskstatus: `docs/tasks/index.json`"
+        target: "docs/roadmap/repoground-master-roadmap.md::Kanonische Taskstatus: `docs/tasks/index.json`"
       - kind: test
-        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+        target: "merger/repoground/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
       - kind: proof
         target: docs/proofs/repobrief-status-truth-v1-proof.md
 
@@ -151,11 +151,11 @@ entries:
     status: done
     normative: false
     owner: roadmap
-    last_verified: "2026-07-11"
+    last_verified: "2026-07-17"
     evidence:
       - kind: text
         target: "docs/roadmap/lenskit-agent-operationalization-roadmap.md::Diese Datei ist ein Ordnungs- oder Zieldokument und keine zweite Taskstatus-Autorität"
       - kind: test
-        target: "merger/lenskit/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
+        target: "merger/repoground/tests/test_status_truth.py::test_repository_status_truth_is_consistent"
       - kind: proof
         target: docs/proofs/repobrief-status-truth-v1-proof.md

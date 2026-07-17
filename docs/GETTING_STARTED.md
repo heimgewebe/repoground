@@ -1,24 +1,24 @@
-# Getting Started mit Lenskit
+# Getting Started mit RepoGround
 
 > Aktualisiert am 2026-05-31.
 > Einstieg in fünf Minuten: Repository aufbereiten, Ergebnis lesen, durchsuchen.
 > Für die normative Spezifikation siehe
-> [`merger/lenskit/repoLens-spec.md`](../merger/lenskit/repoLens-spec.md),
+> [`merger/repoground/RepoGround-spec.md`](../merger/repoground/RepoGround-spec.md),
 > für die Architektur die
-> [Systemkarte](architecture/system-map.lenskit.md), für Begriffe das
+> [Systemkarte](architecture/system-map.repoground.md), für Begriffe das
 > [Glossar](glossary.md).
 
-## 1. Was ist Lenskit?
+## 1. Was ist RepoGround?
 
-Lenskit ist **Merger** und **Scanner** im Heimgewebe-Organismus. Es überführt
+RepoGround ist **Merger** und **Scanner** im Heimgewebe-Organismus. Es überführt
 Arbeitskopien von Repositories in strukturierte, für LLMs navigierbare und
 **zitierbare** Hyper-Merge-Berichte (Bundles). Es gibt zwei funktionsgleiche
 Frontends:
 
-- **repoLens** — die Pythonista/iPad- und CLI-Oberfläche
-  (`merger/lenskit/frontends/pythonista/repolens.py`).
-- **rLens** — die Web-UI/Service-Schicht für Heim-PC/Server
-  (`merger/lenskit/cli/rlens.py`, `merger/lenskit/service/app.py`).
+- **RepoGround** — die Pythonista/iPad- und CLI-Oberfläche
+  (`merger/repoground/frontends/pythonista/build.py`).
+- **RepoGround** — die Web-UI/Service-Schicht für Heim-PC/Server
+  (`merger/repoground/cli/serve.py`, `merger/repoground/service/app.py`).
 
 Die **Wahrheitsquelle** ist immer der kanonische Markdown-Dump (`canonical_md`).
 Alle anderen Artefakte (Index, Citation-Map, Agent Reading Pack, Health) sind
@@ -32,11 +32,11 @@ Alle anderen Artefakte (Index, Citation-Map, Agent Reading Pack, Health) sind
 - Kern-Pipeline läuft ohne Drittpakete. Für Validierung/Service/Tests:
 
 ```bash
-python3 -m pip install --require-hashes -r requirements/repobrief-dev.lock.txt
+python3 -m pip install --require-hashes -r requirements/repoground-dev.lock.txt
 
 # Optionales semantisches Reranking, nur für CPython 3.12 / Linux x86-64 / CPU:
 python3 -m pip install --only-binary=:all: --require-hashes \
-  -r requirements/repobrief-semantic-linux-x86_64-py312.lock.txt
+  -r requirements/repoground-semantic-linux-x86_64-py312.lock.txt
 ```
 
 ## 3. Minimalbeispiel: einen Dump erzeugen
@@ -45,10 +45,10 @@ Aus dem Repo-Wurzelverzeichnis, das aktuelle Verzeichnis (`.`) aufbereiten:
 
 ```bash
 # Schneller Überblick
-python3 -m merger.lenskit.frontends.pythonista.repolens . --level overview
+python3 -m merger.repoground.frontends.pythonista.build . --level overview
 
 # Voller Merge mit Split (20MB), voller Metadichte, Dual-Output (MD + Index)
-python3 -m merger.lenskit.frontends.pythonista.repolens . \
+python3 -m merger.repoground.frontends.pythonista.build . \
   --level max \
   --split-size 20MB \
   --meta-density full \
@@ -91,35 +91,35 @@ Manifest → Content*. Die wichtigsten Dateien:
 Reihenfolge für LLM-Agents: **agent_reading_pack.md → manifest → canonical_md**.
 Zitiert wird ausschließlich gegen `canonical_md`.
 
-## 5. Durchsuchen & zitieren (`lenskit` CLI)
+## 5. Durchsuchen & zitieren (`repoground` CLI)
 
 ```bash
 # 1) Index bauen (SQLite FTS5)
-python3 -m merger.lenskit.cli.main index \
+python3 -m merger.repoground.cli.main index \
   --dump <dump_index.json> --chunk-index <chunk_index.jsonl> --out index.sqlite
 
 # 2) Volltextsuche
-python3 -m merger.lenskit.cli.main query --index index.sqlite --q "range resolver" --k 10
+python3 -m merger.repoground.cli.main query --index index.sqlite --q "range resolver" --k 10
 
 # 3) Deterministischen Byte-Bereich auflösen (verifiziert Hash)
-python3 -m merger.lenskit.cli.main range get --manifest <bundle.manifest.json> --ref ref.json
+python3 -m merger.repoground.cli.main range get --manifest <bundle.manifest.json> --ref ref.json
 
 # 4) Citation-Map erzeugen / Bundle-Health prüfen
-python3 -m merger.lenskit.cli.main citation produce <bundle.manifest.json> --json
-python3 -m merger.lenskit.cli.main bundle-health post <bundle.manifest.json>
+python3 -m merger.repoground.cli.main citation produce <bundle.manifest.json> --json
+python3 -m merger.repoground.cli.main bundle-health post <bundle.manifest.json>
 
 # 5) Agent Reading Pack regenerieren
-python3 -m merger.lenskit.cli.main agent-pack produce <bundle.manifest.json> --json
+python3 -m merger.repoground.cli.main agent-pack produce <bundle.manifest.json> --json
 ```
 
 Weitere Subkommandos: `eval`, `architecture`, `atlas`, `federation`,
-`context-quality`, `governance`, `parity`, `artifact`, `rlens-client`, `verify`,
+`context-quality`, `governance`, `parity`, `artifact`, `service-client`, `verify`,
 `pr-explain`. Jeweils `--help` für Details.
 
 Federierte Query ohne persistierten Index:
 
 ```bash
-lenskit federation query --bundle repo_a=/path/to/bundle-a --bundle repo_b=/path/to/bundle-b -q "symbol" --trace
+repoground federation query --bundle repo_a=/path/to/bundle-a --bundle repo_b=/path/to/bundle-b -q "symbol" --trace
 ```
 
 ## 6. Fehlerbehebung (Kurz)
@@ -136,7 +136,7 @@ lenskit federation query --bundle repo_a=/path/to/bundle-a --bundle repo_b=/path
 
 ## 7. Weiterlesen
 
-- [Master-Roadmap](roadmap/lenskit-master-roadmap.md) — Reihenfolge & Tracks
-- [Systemkarte](architecture/system-map.lenskit.md) — Modul-Zusammenspiel
+- [Master-Roadmap](roadmap/repoground-master-roadmap.md) — Reihenfolge & Tracks
+- [Systemkarte](architecture/system-map.repoground.md) — Modul-Zusammenspiel
 - [Glossar](glossary.md) · [FAQ](FAQ.md) · [CONTRIBUTING](../CONTRIBUTING.md)
 - [Service-API](service-api.md) · [Parity-Guard](PARITY_GUARD.md)

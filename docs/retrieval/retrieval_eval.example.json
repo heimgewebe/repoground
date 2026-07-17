@@ -33,10 +33,10 @@
         "build_index"
       ],
       "is_relevant": true,
-      "hit_path": "merger/lenskit/retrieval/index_db.py",
+      "hit_path": "merger/repoground/retrieval/index_db.py",
       "found_count": 1,
       "top_results": [
-        "merger/lenskit/retrieval/index_db.py"
+        "merger/repoground/retrieval/index_db.py"
       ]
     },
     {
@@ -48,11 +48,11 @@
         "iter_report_blocks"
       ],
       "is_relevant": true,
-      "hit_path": "merger/lenskit/core/merge.py",
+      "hit_path": "merger/repoground/core/merge.py",
       "found_count": 2,
       "top_results": [
-        "merger/lenskit/core/merge.py",
-        "merger/lenskit/frontends/pythonista/repolens.py"
+        "merger/repoground/core/merge.py",
+        "merger/repoground/frontends/pythonista/build.py"
       ]
     },
     {
@@ -61,9 +61,9 @@
       "filters": {},
       "expected": ["chunker.py", "Chunker"],
       "is_relevant": true,
-      "hit_path": "merger/lenskit/core/chunker.py",
+      "hit_path": "merger/repoground/core/chunker.py",
       "found_count": 1,
-      "top_results": ["merger/lenskit/core/chunker.py"]
+      "top_results": ["merger/repoground/core/chunker.py"]
     },
     {
       "query": "cli",
@@ -71,9 +71,9 @@
       "filters": {"layer": "cli"},
       "expected": ["argparse", "main.py", "cli/"],
       "is_relevant": true,
-      "hit_path": "merger/lenskit/cli/main.py",
+      "hit_path": "merger/repoground/cli/main.py",
       "found_count": 1,
-      "top_results": ["merger/lenskit/cli/main.py"]
+      "top_results": ["merger/repoground/cli/main.py"]
     },
     {
       "query": "test",
@@ -81,9 +81,9 @@
       "filters": {"layer": "test"},
       "expected": ["conftest.py", "fixtures/"],
       "is_relevant": true,
-      "hit_path": "merger/lenskit/tests/conftest.py",
+      "hit_path": "merger/repoground/tests/conftest.py",
       "found_count": 5,
-      "top_results": ["merger/lenskit/tests/conftest.py"]
+      "top_results": ["merger/repoground/tests/conftest.py"]
     },
     {
       "query": "find auth logic",
@@ -124,9 +124,9 @@
       "filters": {},
       "expected": ["exceptions.py", "error_handler"],
       "is_relevant": true,
-      "hit_path": "merger/lenskit/core/exceptions.py",
+      "hit_path": "merger/repoground/core/exceptions.py",
       "found_count": 1,
-      "top_results": ["merger/lenskit/core/exceptions.py"]
+      "top_results": ["merger/repoground/core/exceptions.py"]
     },
     {
       "query": "find logging setup",
@@ -156,9 +156,9 @@
       "filters": {},
       "expected": ["config.py", "settings.py"],
       "is_relevant": true,
-      "hit_path": "merger/lenskit/core/config.py",
+      "hit_path": "merger/repoground/core/config.py",
       "found_count": 1,
-      "top_results": ["merger/lenskit/core/config.py"]
+      "top_results": ["merger/repoground/core/config.py"]
     },
     {
       "query": "find rate limiting",

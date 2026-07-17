@@ -1,41 +1,41 @@
-# RepoBrief MCP Boundary
+# RepoGround MCP Boundary
 
-RepoBrief MCP is a read-first boundary for existing RepoBrief snapshots.
+RepoGround MCP is a read-first boundary for existing RepoGround snapshots.
 
 The MCP surface reads existing Brief Bundles. Reading a bundle must never trigger snapshot
 creation, refresh, Git mutation, network synchronization, pull-request actions, patch writing,
 shell execution, review automation, or secret access. An explicitly configured live-freshness
 check may run a bounded local read-only Git probe; it reports drift and never repairs it.
 
-RepoBrief has a local stdio protocol server. It is not a networked MCP protocol server:
+RepoGround has a local stdio protocol server. It is not a networked MCP protocol server:
 there is no TCP/HTTP listener, authentication layer, remote scheduler, or service deployment in
 this slice. The server binds existing code-level handlers and resources to MCP JSON-RPC without
 creating a parallel truth or retrieval layer.
 
-RepoBrief MCP may later expose integrated Agent Workbench resources when they are deterministic
+RepoGround MCP may later expose integrated Agent Workbench resources when they are deterministic
 read-only code-understanding surfaces. Mutable Patch Evaluation Sidecar authority for patch
 application, worktrees, shell/test execution, and patch-evaluation artifacts is defined separately
-in [RepoBrief Agent Workbench Boundary](repobrief-agent-workbench-boundary.md). That authority
-must not be smuggled into RepoBrief resources or read-only tools.
+in [RepoGround Agent Workbench Boundary](repobrief-agent-workbench-boundary.md). That authority
+must not be smuggled into RepoGround resources or read-only tools.
 
 ## Local stdio protocol server
 
 The implementation lives in:
 
 ```text
-merger.lenskit.cli.repobrief_mcp_stdio
+merger.repoground.cli.mcp_stdio
 ```
 
 The checkout-independent launcher lives in:
 
 ```text
-scripts/repobrief-mcp-stdio.py
+scripts/repoground-mcp-stdio.py
 ```
 
 Start the default read-only server with an absolute launcher path:
 
 ```bash
-python3 /absolute/path/to/lenskit/scripts/repobrief-mcp-stdio.py \
+python3 /absolute/path/to/lenskit/scripts/repoground-mcp-stdio.py \
   --bundle-root /absolute/path/to/briefs \
   --repo-root /absolute/path/to/repository
 ```
@@ -43,7 +43,7 @@ python3 /absolute/path/to/lenskit/scripts/repobrief-mcp-stdio.py \
 It implements the MCP initialization lifecycle and the `tools/list`, `tools/call`,
 `resources/list`, `resources/templates/list`, and `resources/read` methods over newline-delimited
 stdio JSON-RPC messages. Standard output is reserved for protocol messages. Client setup and the
-stable command contract are documented in [RepoBrief MCP stdio](../usage/repobrief-mcp-stdio.md).
+stable command contract are documented in [RepoGround MCP stdio](../usage/repobrief-mcp-stdio.md).
 
 `--repo-root` is the sole checkout permission for the protocol server. Without it, live freshness
 is `not_comparable` and no Git probe runs. A tool argument or bundle manifest cannot redirect the
@@ -52,7 +52,7 @@ not grant filesystem authority.
 
 ## Resources-first surface
 
-RepoBrief MCP exposes these stable resources:
+RepoGround MCP exposes these stable resources:
 
 - `repobrief://snapshot/{stem}/manifest`
 - `repobrief://snapshot/{stem}/canonical`
@@ -64,7 +64,7 @@ RepoBrief MCP exposes these stable resources:
 These resources are read-only views over files that already exist in a Brief Bundle.
 
 The concrete code-level resource adapter lives in
-`merger.lenskit.core.repobrief_mcp_resources`. It implements resource template listing and
+`merger.repoground.core.repobrief_mcp_resources`. It implements resource template listing and
 resource reads for `manifest`, `canonical`, `reading-pack`, `health`, `availability`, and arbitrary
 `artifact/{role}` resources. Each read returns health, freshness, and availability context or an
 explicit explanation when the manifest is unavailable. Resource content retains its existing
@@ -127,11 +127,11 @@ is never treated as fresh. No Git subprocess runs when `--repo-root` is absent.
 
 ## Explicit write path
 
-RepoBrief exposes one explicit write handler:
+RepoGround exposes one explicit write handler:
 
 - `snapshot_create`
 
-The handler lives in `merger.lenskit.core.repobrief_mcp_tools`. It may write only Brief Bundle
+The handler lives in `merger.repoground.core.repobrief_mcp_tools`. It may write only Brief Bundle
 artifacts. It must not be reachable as a side effect of resource reads or read-only tools.
 
 The stdio server does not list or accept `snapshot_create` by default. The operator must start it
@@ -150,7 +150,7 @@ This opt-in does not add Git mutation, patch, PR, shell, review, fix, secret, or
 
 ## Forbidden operations
 
-RepoBrief MCP must not expose or indirectly trigger these operations:
+RepoGround MCP must not expose or indirectly trigger these operations:
 
 - `git_push`
 - `git_pull`
@@ -170,7 +170,7 @@ permission is the design.
 
 ## Negative semantics
 
-RepoBrief MCP preserves RepoBrief negative semantics. A successful resource read, tool result,
+RepoGround MCP preserves RepoGround negative semantics. A successful resource read, tool result,
 health check, index query, protocol exchange, or `fresh` verdict does not establish:
 
 - `truth`

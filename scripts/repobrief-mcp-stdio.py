@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""Start RepoBrief MCP stdio from an absolute Lenskit checkout path."""
 from __future__ import annotations
-
 import sys
+import warnings
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-repo_root_text = str(REPO_ROOT)
-if repo_root_text not in sys.path:
-    sys.path.insert(0, repo_root_text)
-
-from merger.lenskit.cli.repobrief_mcp_stdio import main  # noqa: E402
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+warnings.warn(
+    "repobrief-mcp-stdio.py is deprecated; use repoground-mcp-stdio.py",
+    FutureWarning,
+    stacklevel=1,
+)
+from merger.repoground.cli.mcp_stdio import main
+raise SystemExit(main())

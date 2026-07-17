@@ -1,7 +1,7 @@
 name: Anti-Hallucination Contract Lint (C2.4)
 
 # Path-scoped blocking gate for the Governance Track C contract-static lint
-# (merger/lenskit/core/anti_hallucination_lint.py + the `lenskit governance lint`
+# (merger/repoground/core/anti_hallucination_lint.py + the `lenskit governance lint`
 # CLI). Enforces L3 (inference-boundary presence for self-declared
 # diagnostic_signal/runtime_observation contracts) and L5 (no truth-language
 # property names or verdict values). Runs only when contracts, the lint module,
@@ -12,28 +12,28 @@ on:
   push:
     branches: [ "main", "master" ]
     paths:
-      - "merger/lenskit/core/anti_hallucination_lint.py"
-      - "merger/lenskit/cli/cmd_governance.py"
-      - "merger/lenskit/cli/main.py"
-      - "merger/lenskit/contracts/**"
-      - "merger/lenskit/tests/test_anti_hallucination_lint.py"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/core/anti_hallucination_lint.py"
+      - "merger/repoground/cli/cmd_governance.py"
+      - "merger/repoground/cli/main.py"
+      - "merger/repoground/contracts/**"
+      - "merger/repoground/tests/test_anti_hallucination_lint.py"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/anti-hallucination-lint.yml"
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
   pull_request:
     branches: [ "main", "master" ]
     paths:
-      - "merger/lenskit/core/anti_hallucination_lint.py"
-      - "merger/lenskit/cli/cmd_governance.py"
-      - "merger/lenskit/cli/main.py"
-      - "merger/lenskit/contracts/**"
-      - "merger/lenskit/tests/test_anti_hallucination_lint.py"
-      - "merger/lenskit/requirements.txt"
+      - "merger/repoground/core/anti_hallucination_lint.py"
+      - "merger/repoground/cli/cmd_governance.py"
+      - "merger/repoground/cli/main.py"
+      - "merger/repoground/contracts/**"
+      - "merger/repoground/tests/test_anti_hallucination_lint.py"
+      - "merger/repoground/requirements.txt"
       - "requirements-dev.txt"
       - ".github/workflows/anti-hallucination-lint.yml"
 
-      - "requirements/repobrief-dev.lock.txt"
+      - "requirements/repoground-dev.lock.txt"
 permissions:
   contents: read
 
@@ -53,11 +53,11 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repobrief-dev.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
       - name: Run Contract Lint (blocking)
         # Exits non-zero on any L3/L5 error. Tracked deferrals are non-blocking.
-        run: python -m merger.lenskit.cli.main governance lint
+        run: python -m merger.repoground.cli.main governance lint
 
       - name: Run Lint Test Suite
-        run: pytest -q merger/lenskit/tests/test_anti_hallucination_lint.py
+        run: pytest -q merger/repoground/tests/test_anti_hallucination_lint.py

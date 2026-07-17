@@ -1,90 +1,41 @@
-# Naming and vocabulary
+# RepoGround naming and vocabulary
 
-RepoBrief is the preferred public name for this system.
+RepoGround is the sole current public product name. The repository target,
+command name and documentation identity are `repoground`; the canonical Python
+implementation namespace is `merger.repoground`.
 
-This document defines the phase-1 vocabulary migration from legacy Lenskit wording to RepoBrief wording. It changes language and future command direction only. It does not rename Python imports, schema kinds, repositories, or generated artifact formats.
+## Current product vocabulary
 
-## Phase-1 decision
-
-- Public system name: `RepoBrief`
-- Future CLI name: `repobrief`
-- Legacy repository name: `lenskit`
-- Legacy Python package namespace: `merger.lenskit`
-- Compatibility posture: keep existing commands, imports, schema kinds, and generated artifacts valid
-
-## Vocabulary table
-
-| Legacy term | RepoBrief term | Compatibility status |
+| Capability | RepoGround 3 term | Canonical surface |
 |---|---|---|
-| Lenskit | RepoBrief | preferred public system name |
-| lenskit | legacy/internal package | retained in phase 1 |
-| dump | Brief Snapshot | preferred user-facing term |
-| bundle | Brief Bundle | preferred user-facing term |
-| canonical_md | Canonical Brief Source | sole content authority |
-| sidecars | Brief Sidecars | navigation and diagnostics |
-| agent reading pack | Agent Brief / Reading Pack | retained as compatibility wording |
-| output health | Brief Health | formal diagnostic surface |
-| post emit health | Brief Health | formal diagnostic surface |
-| bundle surface | Brief Surface | artifact-surface coherence |
-| range refs | Brief Range References | canonical-source addressing |
-| citation map | Brief Citation Map | citation navigation surface |
+| repository ingestion and bundle generation | RepoGround build | `repoground build` |
+| indexed retrieval | RepoGround query | `repoground query` |
+| architecture and call navigation | RepoGround graph | `repoground graph` |
+| freshness and evidence checks | RepoGround verify | `repoground verify` |
+| snapshot and evidence operations | RepoGround ground | `repoground ground` |
+| HTTP and Web service | RepoGround service | `repoground serve` |
+| MCP stdio integration | RepoGround MCP | `repoground mcp` |
 
-## Compatibility rules
+The canonical Markdown artifact remains the sole content authority. Sidecars,
+indexes, graphs, reading packs and health reports remain derived navigation or
+diagnostic surfaces according to their declared contracts.
 
-Phase 1 must not:
+## Compatibility vocabulary
 
-- rename `merger.lenskit` imports,
-- rename existing JSON `kind` values,
-- remove existing CLI commands,
-- invalidate existing generated bundles,
-- reinterpret Sidecars as truth,
-- promote RepoBrief to an autonomous review or patch system.
+Lenskit, repoLens, rLens and RepoBrief are retired product names. During the 3.x
+compatibility window they may appear only in:
 
-Phase 1 may:
+- deprecated import, command and script delegates;
+- exact persisted 2.x schema, kind and artifact identifiers;
+- historical changelog, task, benchmark, diagnostic and proof records;
+- migration inventories that explain external consumer work.
 
-- add documentation that names RepoBrief,
-- add a `repobrief` CLI alias later,
-- add RepoBrief command groups while keeping old commands,
-- add generated metadata that says RepoBrief is the public system name,
-- describe old `lenskit` wording as legacy/internal.
+A compatibility name does not create a second implementation or a second
+product. New code, documentation and examples must use RepoGround.
 
-## Artifact authority language
+## Stability boundaries
 
-Use these phrases consistently:
-
-- Canonical Brief Source is the sole content authority inside a generated brief.
-- Brief Sidecars are navigation, diagnostics, evidence indexes, or caches.
-- Brief Health reports performed checks, not repository understanding.
-- Brief Bundles are snapshots at generation time.
-- Freshness must be explicit; it must not be inferred from naming.
-
-## Future command language
-
-Future user-facing commands should prefer:
-
-- `repobrief snapshot create`
-- `repobrief snapshot list`
-- `repobrief snapshot status`
-- `repobrief artifact get`
-- `repobrief required-reading resolve`
-- `repobrief range get`
-- `repobrief query`
-- `repobrief health`
-- `repobrief availability`
-
-Existing `lenskit` commands remain compatibility commands until a later migration decision.
-
-## Later rename decision
-
-A later decision may choose one of these paths:
-
-1. brand rename only: repository and package stay `lenskit`, CLI gains `repobrief`;
-2. repository rename: GitHub repository becomes `repobrief`;
-3. package rename: Python package gains `merger.repobrief`;
-4. compatibility bridge: `merger.lenskit` remains while `merger.repobrief` is introduced as a new alias layer.
-
-No later path is selected by this document.
-
-## 2026-07-12 namespace decision
-
-The 2.x line keeps the repository name `lenskit` and Python namespace `merger.lenskit`. RepoBrief remains the product and primary CLI name. The machine-readable consumer inventory and future breaking-major gate are in `../decisions/repobrief-package-namespace-decision.v1.json`.
+The 3.0 rename changes product and implementation identity. It does not silently reinterpret stored bundles. Any future persisted identifier migration requires a
+paired producer, schema, reader and test change. The full migration and rollback
+contract is recorded in
+`docs/decisions/repoground-3-naming-and-migration.md`.

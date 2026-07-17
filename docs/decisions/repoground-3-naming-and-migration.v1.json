@@ -1,0 +1,31 @@
+{
+  "kind": "repoground.identity_migration_decision",
+  "version": "1.0",
+  "observed_on": "2026-07-17",
+  "decision": "adopt_repoground_for_3_x",
+  "repository_target_name": "repoground",
+  "python_namespace": "merger.repoground",
+  "product_name": "RepoGround",
+  "primary_cli_name": "repoground",
+  "compatibility": {
+    "supported_through_major": 3,
+    "removal_eligible_major": 4,
+    "legacy_python_namespace": "merger.lenskit",
+    "legacy_product_names": [
+      "Lenskit",
+      "repoLens",
+      "rLens",
+      "RepoBrief"
+    ],
+    "persisted_2_x_identifiers_reinterpreted": false
+  },
+  "external_consumer_inventory_required": true,
+  "rollback_required": true,
+  "does_not_establish": [
+    "GitHub repository rename completion",
+    "external consumer migration completion",
+    "public distribution permission",
+    "package, domain or trademark reservation"
+  ],
+  "status": "decision_complete"
+}

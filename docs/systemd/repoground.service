@@ -1,0 +1,22 @@
+[Unit]
+Description=RepoGround Web UI
+After=network.target
+ConditionPathIsDirectory=%h/repos/repoground
+
+[Service]
+Type=simple
+WorkingDirectory=%h/repos/repoground
+Environment=REPOGROUND_HUB=%h/repos
+Environment=REPOGROUND_MERGES=%h/repoground-out
+Environment=REPOGROUND_HOST=127.0.0.1
+Environment=REPOGROUND_PORT=8787
+Environment=REPOGROUND_SERVICE_UNIT=repoground
+# Required local file; never commit its secrets.
+EnvironmentFile=%h/.config/repoground/env
+ExecStartPre=/bin/sh -c 'test -n "$REPOGROUND_TOKEN" || { echo "REPOGROUND_TOKEN is required" >&2; exit 1; }'
+ExecStart=/usr/bin/python3 -m merger.repoground serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

@@ -2,7 +2,7 @@
 
 ## 1. Zweck und Scope
 
-Dieses Dokument normiert die Begriffe und Schichtengrenzen der Lenskit-Linsenarchitektur.
+Dieses Dokument normiert die Begriffe und Schichtengrenzen der RepoGround-Linsenarchitektur.
 Es ist Architekturdefinition, Begriffsschicht und Grundlage für spätere Contracts.
 
 Das englische `lens` geht auf das lateinische `lens` zurück, das die
@@ -12,7 +12,7 @@ Gegenstand, nicht einen neuen Gegenstand und keine neue Wahrheit.
 
 Normativer Kernsatz:
 
-> Eine Lenskit-Linse ist eine deterministische, abgeleitete Sicht auf Repo- oder Bundle-Artefakte. Sie besitzt eine dokumentierte Ableitungsregel und eine explizite Geltungsgrenze. Sie dient der Navigation und erzeugt kein eigenes Wahrheits-, Review-, Sicherheits- oder Impact-Urteil.
+> Eine RepoGround-Linse ist eine deterministische, abgeleitete Sicht auf Repo- oder Bundle-Artefakte. Sie besitzt eine dokumentierte Ableitungsregel und eine explizite Geltungsgrenze. Sie dient der Navigation und erzeugt kein eigenes Wahrheits-, Review-, Sicherheits- oder Impact-Urteil.
 
 Dieses Dokument ist nicht Runtime-Evidence, kein JSON-Schema, kein Implementierungsbeweis,
 kein Bundle-Artefakt, kein Review-Bericht und kein Statusbeweis.
@@ -101,7 +101,7 @@ Das bestehende Feld `possible_facets` im Primary Lens Audit ist derzeit nur ein 
 Platzhalter. Der aktuelle Producer emittiert dort leere Listen. Dieses Feld beweist
 nicht, dass Facet-Zuordnung oder ein Facet Model bereits implementiert ist.
 Das Facet Model v1 ist ein eigener Report (`lenskit.lens_facet_report`,
-`merger/lenskit/contracts/lens-facet.v1.schema.json`) und befüllt `possible_facets`
+`merger/repoground/contracts/lens-facet.v1.schema.json`) und befüllt `possible_facets`
 nicht; die Verknüpfung beider Flächen bleibt einem späteren Slice vorbehalten.
 
 Der aktuelle Blueprint nennt als erste, nicht finale Kandidaten:
@@ -495,7 +495,7 @@ Modellentscheidung zugeordnet.
 ### Facet Model v1 — entschieden
 
 Facet Model v1 ist als Contract/Core/Test-Slice entschieden und umgesetzt
-(siehe Abschnitt 17 und `merger/lenskit/contracts/lens-facet.v1.schema.json`):
+(siehe Abschnitt 17 und `merger/repoground/contracts/lens-facet.v1.schema.json`):
 
 - Taxonomie: kontrollierte v1-Facets `contract`, `test`, `retrieval`
   (bewusst unvollständig);
@@ -516,7 +516,7 @@ Facet Model v1 ist als Contract/Core/Test-Slice entschieden und umgesetzt
   Default `unicodeRegExp`) lehnt ungepaarte UTF-16-Surrogat-Einheiten ab. Gültige
   internationale Unicode- und astrale Skalare (z. B. Emoji, ZWJ-Sequenzen)
   bleiben zulässig. Diese Entscheidung gilt nur für die Facet-v1-Artefaktfläche,
-  nicht als globale Lenskit-Dateinamenpolitik; Begründung und Belege stehen im
+  nicht als globale RepoGround-Dateinamenpolitik; Begründung und Belege stehen im
   Proof. Das Schema prüft nur die emittierte Stringrepräsentation;
 - Aufrufgrenze: `produce_facet_report()` erwartet ein Iterable mehrerer
   Pfadwerte; ein einzelner pfadartiger Wert (`str`, `bytes`, `bytearray`,

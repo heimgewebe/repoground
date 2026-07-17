@@ -213,7 +213,7 @@ cmp /tmp/a.json "$COMMITTED"
 
 # falsification tests (the gate must reject tampered manifests)
 python3 -m pytest -q \
-  merger/lenskit/tests/test_guard_relation_validates_schema_audit.py
+  merger/repoground/tests/test_guard_relation_validates_schema_audit.py
 
 # negative control: a tampered relation callsite must fail closed
 python3 - "$COMMITTED" > /tmp/tampered.json <<'PY'
@@ -222,14 +222,31 @@ import sys
 
 with open(sys.argv[1], encoding="utf-8") as handle:
     data = json.load(handle)
-line_index = data["fields"].index("relation_call_line")
-row_index = next(
-    index for index, row in enumerate(data["flows"])
-    if row.startswith(
-        "merger/lenskit/core/relation_card_validate.py|"
-        "validate_relation_card|226|_schema_check|159"
+fields = data["fields"]
+line_index = fields.index("relation_call_line")
+source_index = fields.index("source_path")
+relation_owner_index = fields.index("relation_owner_symbol")
+engine_owner_index = fields.index("engine_owner_symbol")
+schema_index = fields.index("schema_path")
+matches = []
+for index, row in enumerate(data["flows"]):
+    values = row.split("|")
+    if len(values) != len(fields):
+        raise SystemExit(f"invalid flow width at index {index}")
+    if (
+        values[source_index].endswith("/core/relation_card_validate.py")
+        and values[relation_owner_index] == "validate_relation_card"
+        and values[engine_owner_index] == "_schema_check"
+        and values[schema_index].endswith(
+            "/contracts/relation-card.v1.schema.json"
+        )
+    ):
+        matches.append(index)
+if len(matches) != 1:
+    raise SystemExit(
+        f"expected exactly one relation-card flow, found {len(matches)}"
     )
-)
+row_index = matches[0]
 values = data["flows"][row_index].split("|")
 values[line_index] = str(int(values[line_index]) + 10_000)
 data["flows"][row_index] = "|".join(values)

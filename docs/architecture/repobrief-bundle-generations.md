@@ -1,6 +1,6 @@
-# RepoBrief Bundle Generations
+# RepoGround Bundle Generations
 
-RepoBrief bundle emission keeps the historical flat files readable, but a
+RepoGround bundle emission keeps the historical flat files readable, but a
 completed bundle is also published as an immutable generation below the bundle
 output root:
 
@@ -28,7 +28,7 @@ create-only, fail-closed rule. If a matching generation already exists, it is
 verified and reused.
 
 Publishers for one bundle lane serialize installation and pointer selection with
-`.publish.lock`. This lock coordinates Lenskit publishers; it is not presented as
+`.publish.lock`. This lock coordinates RepoGround publishers; it is not presented as
 a security boundary against a privileged process that ignores advisory locks.
 The lane directory itself is opened once and remains descriptor-bound across the
 lock, pointer snapshot, generation installation, pointer switch, post-switch
@@ -71,7 +71,7 @@ before publishing.
 ## Final health binding
 
 `post_emit_health` remains outside the manifest artifact list to avoid a hash
-cycle. After the final manifest write, Lenskit stores its SHA-256 in
+cycle. After the final manifest write, RepoGround stores its SHA-256 in
 `bundle_manifest_sha256` inside the health sidecar. A consumer can therefore
 verify a byte-identical immutable generation even when the legacy absolute
 `bundle_manifest_path` still names the flat publication path. A present but

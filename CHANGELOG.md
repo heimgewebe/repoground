@@ -1,11 +1,24 @@
 # Changelog
 
-Alle nennenswerten Änderungen an Lenskit werden hier dokumentiert.
+Alle nennenswerten Änderungen an RepoGround werden hier dokumentiert.
 
 Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/).
 Das Projekt führt (noch) **keine** formalen Versions-Tags; Einträge sind daher
 datums- und Track-basiert. Roadmap-Phasen/Tracks: siehe
-[`docs/roadmap/lenskit-master-roadmap.md`](docs/roadmap/lenskit-master-roadmap.md).
+[`docs/roadmap/repoground-master-roadmap.md`](docs/roadmap/repoground-master-roadmap.md).
+
+## [3.0.0] - 2026-07-17
+
+### Changed
+
+- Renamed the public product, repository target, canonical Python namespace and
+  command surface to RepoGround / `repoground` / `merger.repoground`.
+- Replaced repoLens, rLens and RepoBrief product surfaces with RepoGround
+  operations: build, query/search, graph, verify, ground, serve and MCP.
+- Added tested 3.x compatibility bridges for existing imports, commands,
+  environment variables and the currently running legacy service.
+- Preserved persisted 2.x identifiers and immutable historical evidence instead
+  of silently rewriting stored bundles or prior proofs.
 
 ## [2.4.0-rc.1] - 2026-07-11
 

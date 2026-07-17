@@ -39,25 +39,25 @@ def setup_mocks():
         # imports as a group. When FastAPI/Pydantic are available, import the
         # real modules: process-global MagicMocks would contaminate later tests
         # in the same pytest session.
-        # BUT DO NOT mock merger.lenskit.adapters.security.
-        sys.modules.setdefault("merger.lenskit.service.jobstore", MagicMock())
-        sys.modules.setdefault("merger.lenskit.service.runner", MagicMock())
-        sys.modules.setdefault("merger.lenskit.service.logging_provider", MagicMock())
-        sys.modules.setdefault("merger.lenskit.service.auth", MagicMock())
-        sys.modules.setdefault("merger.lenskit.adapters.atlas", MagicMock())
-        sys.modules.setdefault("merger.lenskit.adapters.metarepo", MagicMock())
-        sys.modules.setdefault("merger.lenskit.adapters.sources", MagicMock())
-        sys.modules.setdefault("merger.lenskit.adapters.diagnostics", MagicMock())
-        sys.modules.setdefault("merger.lenskit.core.merge", MagicMock())
+        # BUT DO NOT mock merger.repoground.adapters.security.
+        sys.modules.setdefault("merger.repoground.service.jobstore", MagicMock())
+        sys.modules.setdefault("merger.repoground.service.runner", MagicMock())
+        sys.modules.setdefault("merger.repoground.service.logging_provider", MagicMock())
+        sys.modules.setdefault("merger.repoground.service.auth", MagicMock())
+        sys.modules.setdefault("merger.repoground.adapters.atlas", MagicMock())
+        sys.modules.setdefault("merger.repoground.adapters.metarepo", MagicMock())
+        sys.modules.setdefault("merger.repoground.adapters.sources", MagicMock())
+        sys.modules.setdefault("merger.repoground.adapters.diagnostics", MagicMock())
+        sys.modules.setdefault("merger.repoground.core.merge", MagicMock())
 
 setup_mocks()
 # Ensure repo root is in path
 sys.path.insert(0, os.getcwd())
 
-from merger.lenskit.service.app import app, init_service, resolve_atlas_root
-from merger.lenskit.service.models import AtlasRequest
-from merger.lenskit.adapters.security import get_security_config, AccessDeniedError
-from merger.lenskit.adapters.filesystem import list_allowed_roots, resolve_fs_path
+from merger.repoground.service.app import app, init_service, resolve_atlas_root
+from merger.repoground.service.models import AtlasRequest
+from merger.repoground.adapters.security import get_security_config, AccessDeniedError
+from merger.repoground.adapters.filesystem import list_allowed_roots, resolve_fs_path
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -65,7 +65,7 @@ def test_security_config_allowlist_invariant(tmp_path):
     """
     Unit Test: Verify that SecurityConfig enforces boundaries correctly.
     """
-    from merger.lenskit.adapters.security import SecurityConfig, AccessDeniedError
+    from merger.repoground.adapters.security import SecurityConfig, AccessDeniedError
     sec = SecurityConfig()
     hub = (tmp_path / "hub").resolve()
     hub.mkdir(parents=True, exist_ok=True)
@@ -94,7 +94,7 @@ def _reset_allowlist(sec):
     sec.allowlist_roots = []
 
 def test_sensitive_home_preset_must_already_be_allowlisted(tmp_path):
-    from merger.lenskit.adapters.security import SecurityConfig
+    from merger.repoground.adapters.security import SecurityConfig
 
     sec = SecurityConfig()
     untrusted_home = (tmp_path / "untrusted-home").resolve()
@@ -554,7 +554,7 @@ def test_init_service_fs_token_secret_without_bearer_refuses_root(monkeypatch, t
     assert not sec.token
 
 def test_static_source_check_app_py():
-    app_path = Path("merger/lenskit/service/app.py")
+    app_path = Path("merger/repoground/service/app.py")
     content = app_path.read_text(encoding="utf-8")
 
     # Legacy flags should be gone
@@ -568,7 +568,7 @@ def test_static_source_check_app_py():
     assert "add_allowlist_root(" in content
 
 def test_static_source_check_rlens_cli():
-    cli_path = Path("merger/lenskit/cli/rlens.py")
+    cli_path = Path("merger/repoground/cli/serve.py")
     content = cli_path.read_text(encoding="utf-8")
 
     # Flags should be gone

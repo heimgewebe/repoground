@@ -25,8 +25,8 @@
       "relation_type": "tests_by_name",
       "candidate_status": "accepted",
       "expected_status": "accepted",
-      "subject": "merger/lenskit/tests/test_router.py",
-      "object": "merger/lenskit/retrieval/router.py",
+      "subject": "merger/repoground/tests/test_router.py",
+      "object": "merger/repoground/retrieval/router.py",
       "evidence": "v1a basename candidate plus manual goldset label"
     },
     {
@@ -34,8 +34,8 @@
       "relation_type": "tests_by_name",
       "candidate_status": "accepted",
       "expected_status": "accepted",
-      "subject": "merger/lenskit/tests/test_range_resolver.py",
-      "object": "merger/lenskit/core/range_resolver.py",
+      "subject": "merger/repoground/tests/test_range_resolver.py",
+      "object": "merger/repoground/core/range_resolver.py",
       "evidence": "v1a basename candidate plus manual goldset label"
     },
     {
@@ -43,8 +43,8 @@
       "relation_type": "tests_by_name",
       "candidate_status": "accepted",
       "expected_status": "rejected",
-      "subject": "merger/lenskit/tests/test_router.py",
-      "object": "merger/lenskit/core/router.py",
+      "subject": "merger/repoground/tests/test_router.py",
+      "object": "merger/repoground/core/router.py",
       "evidence": "negative control; same basename but wrong package/layer"
     },
     {
@@ -52,7 +52,7 @@
       "relation_type": "tests_by_name",
       "candidate_status": "unresolved",
       "expected_status": "unresolved",
-      "subject": "merger/lenskit/tests/test_extractor_schema.py",
+      "subject": "merger/repoground/tests/test_extractor_schema.py",
       "object": null,
       "evidence": "v1a unresolved-only class"
     },
@@ -61,8 +61,8 @@
       "relation_type": "validates_schema",
       "candidate_status": "accepted",
       "expected_status": "accepted",
-      "subject": "merger/lenskit/core/range_resolver.py|resolve_range_ref",
-      "object": "merger/lenskit/contracts/range-ref.v2.schema.json",
+      "subject": "merger/repoground/core/range_resolver.py|resolve_range_ref",
+      "object": "merger/repoground/contracts/range-ref.v2.schema.json",
       "evidence": "v1b accepted schema coverage"
     },
     {
@@ -70,8 +70,8 @@
       "relation_type": "validates_schema",
       "candidate_status": "accepted",
       "expected_status": "accepted",
-      "subject": "merger/lenskit/core/relation_cards.py|_validate_source_graph",
-      "object": "merger/lenskit/contracts/architecture.graph.v1.schema.json",
+      "subject": "merger/repoground/core/relation_cards.py|_validate_source_graph",
+      "object": "merger/repoground/contracts/architecture.graph.v1.schema.json",
       "evidence": "v1b manual_source_review accepted schema flow"
     },
     {
@@ -79,8 +79,8 @@
       "relation_type": "validates_schema",
       "candidate_status": "accepted",
       "expected_status": "rejected",
-      "subject": "merger/lenskit/core/relation_card_validate.py|_schema_check",
-      "object": "merger/lenskit/contracts/bundle-manifest.v1.schema.json",
+      "subject": "merger/repoground/core/relation_card_validate.py|_schema_check",
+      "object": "merger/repoground/contracts/bundle-manifest.v1.schema.json",
       "evidence": "negative control; wrong schema target for validator surface"
     },
     {

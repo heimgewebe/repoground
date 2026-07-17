@@ -1,29 +1,29 @@
 # FAQ
 
 > Aktualisiert am 2026-05-31.
-> Praxisfragen rund um Lenskit. Einstieg: [Getting Started](GETTING_STARTED.md);
+> Praxisfragen rund um RepoGround. Einstieg: [Getting Started](GETTING_STARTED.md);
 > Begriffe: [Glossar](glossary.md).
 
 ## Bedienung
 
-### Welches Frontend nehme ich — repoLens oder rLens?
-- **repoLens** (`python3 -m merger.lenskit.frontends.pythonista.repolens …`) für
+### Welches Frontend nehme ich — RepoGround oder RepoGround?
+- **RepoGround** (`python3 -m merger.repoground.frontends.pythonista.build …`) für
   lokale/iPad-/Pythonista-Aufrufe und CLI-Dumps.
-- **rLens** (Service/Web-UI) als Heim-PC/Server-Schicht. Beide sind
+- **RepoGround** (Service/Web-UI) als Heim-PC/Server-Schicht. Beide sind
   funktionsgleich — neue Features müssen in beiden existieren (Parität).
 
 ### Wie scanne ich nur bestimmte Ordner oder Dateitypen?
-Über Filter-Flags von repoLens:
+Über Filter-Flags von RepoGround:
 
 ```bash
 # Nur docs/
-python3 -m merger.lenskit.frontends.pythonista.repolens . --path-filter docs/
+python3 -m merger.repoground.frontends.pythonista.build . --path-filter docs/
 
 # Nur Markdown + Python
-python3 -m merger.lenskit.frontends.pythonista.repolens . --extensions .md,.py
+python3 -m merger.repoground.frontends.pythonista.build . --extensions .md,.py
 
 # Nur Code/Test/Config/Contract-Kategorien
-python3 -m merger.lenskit.frontends.pythonista.repolens . --code-only
+python3 -m merger.repoground.frontends.pythonista.build . --code-only
 ```
 
 > Sobald ein Filter aktiv ist, schaltet `--meta-density auto` automatisch auf
@@ -41,9 +41,9 @@ Zitiert wird danach gegen `canonical_md` (`*.merge.md`).
 
 ### Wie regeneriere ich Agent-Pack / Citation-Map / Health?
 ```bash
-python3 -m merger.lenskit.cli.main agent-pack produce <bundle.manifest.json> --json
-python3 -m merger.lenskit.cli.main citation produce <bundle.manifest.json> --json
-python3 -m merger.lenskit.cli.main bundle-health post <bundle.manifest.json>
+python3 -m merger.repoground.cli.main agent-pack produce <bundle.manifest.json> --json
+python3 -m merger.repoground.cli.main citation produce <bundle.manifest.json> --json
+python3 -m merger.repoground.cli.main bundle-health post <bundle.manifest.json>
 ```
 
 ## Fehlerbehebung
@@ -66,7 +66,7 @@ Häufige Meldungen aus dem Range-Resolver:
 
 Auflösung testen:
 ```bash
-python3 -m merger.lenskit.cli.main range get --manifest <bundle.manifest.json> --ref ref.json
+python3 -m merger.repoground.cli.main range get --manifest <bundle.manifest.json> --ref ref.json
 ```
 
 ### Der FTS-Index ist leer — warum?
@@ -95,7 +95,7 @@ Atlas akzeptiert nur `preset`, server-signierte `token` oder absolute Pfade
 
 ### Wie führe ich Tests und Lint lokal aus?
 ```bash
-python3 -m pip install --require-hashes -r requirements/repobrief-dev.lock.txt
+python3 -m pip install --require-hashes -r requirements/repoground-dev.lock.txt
 python3 -m pytest
 ruff check --select=F401,F811 --exclude='**/fixtures/**' .
 ```
@@ -105,7 +105,7 @@ Parität sicherstellen:
 ```bash
 python3 tools/parity_guard.py
 ```
-Das Feld muss in repoLens-CLI **und** rLens-WebUI existieren. Siehe
+Das Feld muss in RepoGround-CLI **und** RepoGround-WebUI existieren. Siehe
 [CONTRIBUTING](../CONTRIBUTING.md) und [PARITY_GUARD](PARITY_GUARD.md).
 
 ### Wo ist „die Wahrheit"?

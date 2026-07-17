@@ -4,7 +4,7 @@
 
 This is the contract boundary required before the Python import graph may resolve configured roots such as `src/` layouts or namespace-package roots.
 
-The schema is `merger/lenskit/contracts/architecture.source_roots.v1.schema.json`. A minimal example is `merger/lenskit/contracts/examples/source_roots_minimal.json`.
+The schema is `merger/repoground/contracts/architecture.source_roots.v1.schema.json`. A minimal example is `merger/repoground/contracts/examples/source_roots_minimal.json`.
 
 The declaration is now consumed by the graph producer, the architecture CLI (`--source-roots` / `--source-roots-file`), and the bundle graph-source producer when a single-repo summary supplies `source_roots`. Ranking and default retrieval behavior do not consume it.
 

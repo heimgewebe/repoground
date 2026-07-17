@@ -10,8 +10,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from merger.lenskit.retrieval.eval_core import do_eval
-from merger.lenskit.retrieval.review_eval import build_review_retrieval_baseline
+from merger.repoground.core.bundle_identity import is_bundle_manifest
+from merger.repoground.retrieval.eval_core import do_eval
+from merger.repoground.retrieval.review_eval import build_review_retrieval_baseline
 
 SCHEMA = "lenskit.review_intent_router_audit.v1"
 PROOF_PATHS = (
@@ -63,8 +64,8 @@ def _load_manifest_bundle(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ValueError(f"invalid bundle manifest: {manifest_path}") from exc
-    if manifest.get("kind") != "repolens.bundle.manifest":
-        raise ValueError("manifest kind must be repolens.bundle.manifest")
+    if not is_bundle_manifest(manifest):
+        raise ValueError("manifest identity must be RepoGround v2 or documented legacy v1")
 
     role_entries: dict[str, dict[str, Any]] = {}
     for entry in manifest.get("artifacts", []):

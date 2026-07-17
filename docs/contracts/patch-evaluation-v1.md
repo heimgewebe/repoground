@@ -1,8 +1,8 @@
 # Patch Evaluation Artifact v1 (`repobrief.patch_evaluation`)
 
-- Schema: [`merger/lenskit/contracts/patch-evaluation.v1.schema.json`](../../merger/lenskit/contracts/patch-evaluation.v1.schema.json)
-- Consumer: [`merger/lenskit/core/patch_evaluation.py`](../../merger/lenskit/core/patch_evaluation.py)
-- Example: [`merger/lenskit/contracts/examples/patch-evaluation.v1.json`](../../merger/lenskit/contracts/examples/patch-evaluation.v1.json)
+- Schema: [`merger/repoground/contracts/patch-evaluation.v1.schema.json`](../../merger/repoground/contracts/patch-evaluation.v1.schema.json)
+- Consumer: [`merger/repoground/core/patch_evaluation.py`](../../merger/repoground/core/patch_evaluation.py)
+- Example: [`merger/repoground/contracts/examples/patch-evaluation.v1.json`](../../merger/repoground/contracts/examples/patch-evaluation.v1.json)
 - Boundary: [`docs/architecture/repobrief-agent-workbench-boundary.md`](../architecture/repobrief-agent-workbench-boundary.md) (owns tasks RBAW-V1-T002 / RBAW-V1-T003)
 
 ## What this contract is
@@ -80,14 +80,14 @@ generalize to correctness or to runtime behavior elsewhere.
 
 ## Consumer API (read-only)
 
-`merger/lenskit/core/patch_evaluation.py` exposes:
+`merger/repoground/core/patch_evaluation.py` exposes:
 
 - `load_patch_evaluation(path_or_obj)` — read JSON (or accept a mapping). Pure read.
 - `validate_patch_evaluation(data)` — fail-closed schema validation, lens-family report. `pass` means only schema conformance.
 - `summarize_patch_evaluation(data)` — bounded summary; pins `authority`, echoes declared `does_not_establish`, surfaces citations/ranges only as reference lists.
 - `patch_evaluation_diagnostics(data)` — structured, non-fatal degradations (missing non-claims, non-isolated workspace, no recorded commands).
 
-CLI (read-only): `python -m merger.lenskit.cli.main repobrief patch-evaluation validate PATH [--summary]`.
+CLI (read-only): `python -m merger.repoground.cli.main repobrief patch-evaluation validate PATH [--summary]`.
 Exit code `0` when the artifact validates, `1` when it fails validation, `2`
 when it cannot be read.
 

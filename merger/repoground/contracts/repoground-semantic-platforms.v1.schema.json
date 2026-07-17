@@ -1,0 +1,206 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/repoground-semantic-platforms.v1.schema.json",
+  "title": "RepoGround semantic extension platform contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "repoground.semantic_platforms"
+    },
+    "version": {
+      "const": "v1"
+    },
+    "status": {
+      "const": "optional_locked"
+    },
+    "default_enabled": {
+      "const": false
+    },
+    "unsupported_target_policy": {
+      "const": "fail_closed"
+    },
+    "core_dependency": {
+      "const": false
+    },
+    "snapshot_read_dependency": {
+      "const": false
+    },
+    "default_ranking_dependency": {
+      "const": false
+    },
+    "compiler": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "script": {
+          "const": "scripts/release/compile_semantic_lock.sh"
+        },
+        "image": {
+          "const": "mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69"
+        },
+        "reproduction_command": {
+          "const": "scripts/release/compile_semantic_lock.sh --check"
+        }
+      },
+      "required": [
+        "script",
+        "image",
+        "reproduction_command"
+      ]
+    },
+    "supported_targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "const": "cpython-312-linux-x86_64"
+          },
+          "python_implementation": {
+            "const": "CPython"
+          },
+          "python_version": {
+            "const": "3.12"
+          },
+          "operating_system": {
+            "const": "linux"
+          },
+          "architecture": {
+            "const": "x86_64"
+          },
+          "accelerator": {
+            "const": "cpu_only"
+          },
+          "artifact_policy": {
+            "const": "selected_binary_wheels_only"
+          },
+          "input": {
+            "$ref": "#/definitions/hashedPath"
+          },
+          "constraints": {
+            "$ref": "#/definitions/hashedPath"
+          },
+          "lock": {
+            "$ref": "#/definitions/hashedPath"
+          },
+          "package_count": {
+            "const": 58
+          },
+          "root_pins": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "sentence-transformers": {
+                "const": "5.6.0"
+              },
+              "torch": {
+                "const": "2.13.0+cpu"
+              }
+            },
+            "required": [
+              "sentence-transformers",
+              "torch"
+            ]
+          },
+          "install_verification_command": {
+            "const": "scripts/release/compile_semantic_lock.sh --verify-install <empty-target>"
+          }
+        },
+        "required": [
+          "id",
+          "python_implementation",
+          "python_version",
+          "operating_system",
+          "architecture",
+          "accelerator",
+          "artifact_policy",
+          "input",
+          "constraints",
+          "lock",
+          "package_count",
+          "root_pins",
+          "install_verification_command"
+        ]
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "uniqueItems": true,
+      "allOf": [
+        {
+          "contains": {
+            "const": "semantic_quality"
+          }
+        },
+        {
+          "contains": {
+            "const": "cross_platform_completeness"
+          }
+        },
+        {
+          "contains": {
+            "const": "vulnerability_absence"
+          }
+        },
+        {
+          "contains": {
+            "const": "default_promotion_readiness"
+          }
+        },
+        {
+          "contains": {
+            "const": "gpu_support"
+          }
+        }
+      ],
+      "items": {
+        "enum": [
+          "semantic_quality",
+          "cross_platform_completeness",
+          "vulnerability_absence",
+          "default_promotion_readiness",
+          "gpu_support",
+          "model_availability",
+          "model_license_approval"
+        ]
+      }
+    }
+  },
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "default_enabled",
+    "unsupported_target_policy",
+    "core_dependency",
+    "snapshot_read_dependency",
+    "default_ranking_dependency",
+    "compiler",
+    "supported_targets",
+    "does_not_establish"
+  ],
+  "definitions": {
+    "hashedPath": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ]
+    }
+  }
+}

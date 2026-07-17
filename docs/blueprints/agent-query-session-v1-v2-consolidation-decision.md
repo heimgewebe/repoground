@@ -13,14 +13,14 @@ The shapes are intentionally different, but the naming is close enough to invite
 - Produced by the `lenskit query --trace` path.
 - Carries `refs.integrity` with SHA256 values.
 - Carries `environment` with `lenskit_version`, `index_path`, and `timestamp_utc`.
-- Validated against `merger/lenskit/contracts/agent-query-session.v1.schema.json`.
+- Validated against `merger/repoground/contracts/agent-query-session.v1.schema.json`.
 
 ### v2: Runtime inline service form
 - Produced by the service runtime path.
 - Carries `artifact_refs` and `claim_boundaries`.
 - Carries `session_authority` and top-level `context_source` as projection metadata.
 - Does not encode v1-style Integrity/Environment semantics.
-- Validated against `merger/lenskit/contracts/agent-query-session.v2.schema.json`.
+- Validated against `merger/repoground/contracts/agent-query-session.v2.schema.json`.
 
 ## Decision Options
 

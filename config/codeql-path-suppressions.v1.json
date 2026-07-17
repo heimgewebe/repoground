@@ -4,29 +4,29 @@
       "authority": "CLI policy paths are explicit local-operator selections; service policy paths are root-bounded siblings of a validated index.",
       "expected_occurrences": 3,
       "files": [
-        "merger/lenskit/cli/policy_loader.py"
+        "merger/repoground/cli/policy_loader.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/cli/policy_loader.py",
+          "path": "merger/repoground/cli/policy_loader.py",
           "scope": "_resolve_policy_file",
           "statement": "resolved = path.resolve(strict=True)"
         },
         {
-          "path": "merger/lenskit/cli/policy_loader.py",
+          "path": "merger/repoground/cli/policy_loader.py",
           "scope": "_resolve_policy_file",
           "statement": "if not resolved.is_file():"
         },
         {
-          "path": "merger/lenskit/cli/policy_loader.py",
+          "path": "merger/repoground/cli/policy_loader.py",
           "scope": "load_and_validate_embedding_policy",
           "statement": "with resolved_policy.open(\"r\", encoding=\"utf-8\") as handle:"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_policy_loader.py::test_load_and_validate_embedding_policy_success",
-        "merger/lenskit/tests/test_policy_loader.py::test_load_embedding_policy_rejects_directory",
-        "merger/lenskit/tests/test_policy_loader.py::test_load_embedding_policy_rejects_nul_path"
+        "merger/repoground/tests/test_policy_loader.py::test_load_and_validate_embedding_policy_success",
+        "merger/repoground/tests/test_policy_loader.py::test_load_embedding_policy_rejects_directory",
+        "merger/repoground/tests/test_policy_loader.py::test_load_embedding_policy_rejects_nul_path"
       ],
       "validation": [
         "NUL, empty and non-JSON paths are rejected.",
@@ -37,17 +37,17 @@
       "authority": "Service federation bundle paths are confined beneath the already resolved federation directory.",
       "expected_occurrences": 1,
       "files": [
-        "merger/lenskit/retrieval/federation_query.py"
+        "merger/repoground/retrieval/federation_query.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_resolve_persisted_bundle_path",
           "statement": "resolved = candidate.resolve(strict=True)"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_code_scanning_security.py::test_federation_api_mode_rejects_external_bundle_path"
+        "merger/repoground/tests/test_code_scanning_security.py::test_federation_api_mode_rejects_external_bundle_path"
       ],
       "validation": [
         "Absolute targets must remain beneath the federation directory after canonicalization.",
@@ -58,39 +58,39 @@
       "authority": "The path has already been resolved by the persisted-bundle or explicit local-operator resolver before deterministic index discovery.",
       "expected_occurrences": 5,
       "files": [
-        "merger/lenskit/retrieval/federation_query.py"
+        "merger/repoground/retrieval/federation_query.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_find_bundle_index",
           "statement": "if bundle_path.is_file() and bundle_path.name.endswith(\".index.sqlite\"):"
         },
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_find_bundle_index",
           "statement": "if not bundle_path.is_dir():"
         },
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_find_bundle_index",
           "statement": "chunk_indices = list(bundle_path.glob(\"*.chunk_index.index.sqlite\"))"
         },
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_find_bundle_index",
           "statement": "generic_indices = list(bundle_path.glob(\"*.index.sqlite\"))"
         },
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_find_bundle_index",
           "statement": "generic_indices = list(bundle_path.glob(\"*.index.sqlite\"))"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_federation_query.py::test_execute_federated_query_find_bundle_index_direct_file",
-        "merger/lenskit/tests/test_federation_query.py::test_execute_federated_query_find_bundle_index_generic_fallback",
-        "merger/lenskit/tests/test_federation_query.py::test_execute_federated_query_find_bundle_index_ambiguous"
+        "merger/repoground/tests/test_federation_query.py::test_execute_federated_query_find_bundle_index_direct_file",
+        "merger/repoground/tests/test_federation_query.py::test_execute_federated_query_find_bundle_index_generic_fallback",
+        "merger/repoground/tests/test_federation_query.py::test_execute_federated_query_find_bundle_index_ambiguous"
       ],
       "validation": [
         "API mode rejects external bundle paths and confines relative paths beneath the federation directory.",
@@ -101,19 +101,19 @@
       "authority": "The API supplies a root-bounded federation index while CLI callers exercise explicit local-operator authority.",
       "expected_occurrences": 1,
       "files": [
-        "merger/lenskit/retrieval/federation_query.py"
+        "merger/repoground/retrieval/federation_query.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "execute_federated_query",
           "statement": "resolved_federation_index = federation_index_path.resolve(strict=True)"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_code_scanning_security.py::test_federation_api_rejects_index_symlink_escape",
-        "merger/lenskit/tests/test_api_federation.py::test_api_federation_query_valid",
-        "merger/lenskit/tests/test_api_federation.py::test_api_federation_query_file_not_found"
+        "merger/repoground/tests/test_code_scanning_security.py::test_federation_api_rejects_index_symlink_escape",
+        "merger/repoground/tests/test_api_federation.py::test_api_federation_query_valid",
+        "merger/repoground/tests/test_api_federation.py::test_api_federation_query_file_not_found"
       ],
       "validation": [
         "The target must exist before loading.",
@@ -124,50 +124,50 @@
       "authority": "Federation index paths are explicit CLI selections or already root-bounded service paths.",
       "expected_occurrences": 7,
       "files": [
-        "merger/lenskit/core/federation.py"
+        "merger/repoground/core/federation.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/core/federation.py",
+          "path": "merger/repoground/core/federation.py",
           "scope": "_resolve_new_federation_index",
           "statement": "parent = index_path.parent.resolve(strict=True)"
         },
         {
-          "path": "merger/lenskit/core/federation.py",
+          "path": "merger/repoground/core/federation.py",
           "scope": "_resolve_existing_federation_index",
           "statement": "resolved = index_path.resolve(strict=True)"
         },
         {
-          "path": "merger/lenskit/core/federation.py",
+          "path": "merger/repoground/core/federation.py",
           "scope": "_resolve_existing_federation_index",
           "statement": "if not resolved.is_file():"
         },
         {
-          "path": "merger/lenskit/core/federation.py",
+          "path": "merger/repoground/core/federation.py",
           "scope": "init_federation",
           "statement": "with out_path.open(\"x\", encoding=\"utf-8\") as handle:"
         },
         {
-          "path": "merger/lenskit/core/federation.py",
+          "path": "merger/repoground/core/federation.py",
           "scope": "load_federation_index_data",
           "statement": "with resolved_index.open(\"r\", encoding=\"utf-8\") as handle:"
         },
         {
-          "path": "merger/lenskit/core/federation.py",
+          "path": "merger/repoground/core/federation.py",
           "scope": "add_bundle",
           "statement": "with index_path.open(\"r\", encoding=\"utf-8\") as handle:"
         },
         {
-          "path": "merger/lenskit/core/federation.py",
+          "path": "merger/repoground/core/federation.py",
           "scope": "add_bundle",
           "statement": "with index_path.open(\"w\", encoding=\"utf-8\") as handle:"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_code_scanning_security.py::test_init_federation_rejects_non_json_output",
-        "merger/lenskit/tests/test_code_scanning_security.py::test_init_federation_rejects_missing_parent",
-        "merger/lenskit/tests/test_code_scanning_security.py::test_init_federation_rejects_dangling_symlink_output",
-        "merger/lenskit/tests/test_federation_cli.py::test_federation_add_cli_dispatch"
+        "merger/repoground/tests/test_code_scanning_security.py::test_init_federation_rejects_non_json_output",
+        "merger/repoground/tests/test_code_scanning_security.py::test_init_federation_rejects_missing_parent",
+        "merger/repoground/tests/test_code_scanning_security.py::test_init_federation_rejects_dangling_symlink_output",
+        "merger/repoground/tests/test_federation_cli.py::test_federation_add_cli_dispatch"
       ],
       "validation": [
         "Only .json files are accepted.",
@@ -179,18 +179,18 @@
       "authority": "Repeated CLI --bundle inputs are explicit local-operator filesystem selections, not remote service input.",
       "expected_occurrences": 1,
       "files": [
-        "merger/lenskit/retrieval/federation_query.py"
+        "merger/repoground/retrieval/federation_query.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_resolve_existing_local_path",
           "statement": "resolved = candidate.resolve(strict=True)"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_federation_query.py::test_execute_federated_query_from_inline_bundles",
-        "merger/lenskit/tests/test_federation_cli.py::test_federation_query_cli_inline_bundles"
+        "merger/repoground/tests/test_federation_query.py::test_execute_federated_query_from_inline_bundles",
+        "merger/repoground/tests/test_federation_cli.py::test_federation_query_cli_inline_bundles"
       ],
       "validation": [
         "URI syntax and NUL bytes are rejected.",
@@ -201,17 +201,17 @@
       "authority": "The SQLite path is the unique deterministic index selected from an already resolved bundle path.",
       "expected_occurrences": 1,
       "files": [
-        "merger/lenskit/retrieval/federation_query.py"
+        "merger/repoground/retrieval/federation_query.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/retrieval/federation_query.py",
+          "path": "merger/repoground/retrieval/federation_query.py",
           "scope": "_execute_federated_query_data",
           "statement": "with sqlite3.connect(db_uri, uri=True) as conn:"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_federation_query.py::test_stale_bundle_is_marked_in_federation_trace"
+        "merger/repoground/tests/test_federation_query.py::test_stale_bundle_is_marked_in_federation_trace"
       ],
       "validation": [
         "The connection uses SQLite URI mode=ro and immutable=1.",
@@ -222,23 +222,23 @@
       "authority": "The graph path is produced by resolve_secure_path from an established root and normalized relative artifact name.",
       "expected_occurrences": 2,
       "files": [
-        "merger/lenskit/architecture/graph_index.py"
+        "merger/repoground/architecture/graph_index.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/architecture/graph_index.py",
+          "path": "merger/repoground/architecture/graph_index.py",
           "scope": "load_graph_index",
           "statement": "if not path.exists():"
         },
         {
-          "path": "merger/lenskit/architecture/graph_index.py",
+          "path": "merger/repoground/architecture/graph_index.py",
           "scope": "load_graph_index",
           "statement": "with path.open(encoding=\"utf-8\") as handle:"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_graph_index.py::test_graph_loader_keeps_existing_status_contract",
-        "merger/lenskit/tests/test_graph_index.py::test_graph_loader_rejects_absolute_path"
+        "merger/repoground/tests/test_graph_index.py::test_graph_loader_keeps_existing_status_contract",
+        "merger/repoground/tests/test_graph_index.py::test_graph_loader_rejects_absolute_path"
       ],
       "validation": [
         "Traversal and symlink escapes are rejected before filesystem access.",
@@ -249,23 +249,23 @@
       "authority": "Service prescan passes a root-bounded repository path; CLI prescan uses an explicit local-operator repository root.",
       "expected_occurrences": 2,
       "files": [
-        "merger/lenskit/core/merge.py"
+        "merger/repoground/core/merge.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/core/merge.py",
+          "path": "merger/repoground/core/merge.py",
           "scope": "prescan_repo",
           "statement": "repo_root = repo_root.resolve(strict=True)"
         },
         {
-          "path": "merger/lenskit/core/merge.py",
+          "path": "merger/repoground/core/merge.py",
           "scope": "prescan_repo._walk",
           "statement": "with os.scandir(path) as it:"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_code_scanning_security.py::test_prescan_api_rejects_repo_symlink_escape",
-        "merger/lenskit/tests/test_code_scanning_security.py::test_prescan_skips_internal_directory_symlink"
+        "merger/repoground/tests/test_code_scanning_security.py::test_prescan_api_rejects_repo_symlink_escape",
+        "merger/repoground/tests/test_code_scanning_security.py::test_prescan_skips_internal_directory_symlink"
       ],
       "validation": [
         "The root must resolve to an existing directory.",
@@ -276,20 +276,20 @@
       "authority": "Read-only query callers pass an absolute canonical index selected from validated artifact or bundle metadata.",
       "expected_occurrences": 1,
       "files": [
-        "merger/lenskit/retrieval/query_core.py"
+        "merger/repoground/retrieval/query_core.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/retrieval/query_core.py",
+          "path": "merger/repoground/retrieval/query_core.py",
           "scope": "execute_query",
           "statement": "conn = sqlite3.connect(db_uri, uri=True)"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_api_query.py::test_api_query_valid",
-        "merger/lenskit/tests/test_api_query.py::test_api_query_invalid_paths",
-        "merger/lenskit/tests/test_federation_query.py::test_execute_federated_query",
-        "merger/lenskit/tests/test_retrieval_query.py::test_query_read_only_uses_immutable_sqlite_uri"
+        "merger/repoground/tests/test_api_query.py::test_api_query_valid",
+        "merger/repoground/tests/test_api_query.py::test_api_query_invalid_paths",
+        "merger/repoground/tests/test_federation_query.py::test_execute_federated_query",
+        "merger/repoground/tests/test_retrieval_query.py::test_query_read_only_uses_immutable_sqlite_uri"
       ],
       "validation": [
         "Read-only mode requires the canonical chunk-index SQLite suffix and an absolute path.",
@@ -300,24 +300,24 @@
       "authority": "The root is application/operator registered and the relative path has passed strict component validation.",
       "expected_occurrences": 2,
       "files": [
-        "merger/lenskit/core/path_security.py"
+        "merger/repoground/core/path_security.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/core/path_security.py",
+          "path": "merger/repoground/core/path_security.py",
           "scope": "resolve_secure_path",
           "statement": "root_abs = Path(root).resolve(strict=True)"
         },
         {
-          "path": "merger/lenskit/core/path_security.py",
+          "path": "merger/repoground/core/path_security.py",
           "scope": "resolve_secure_path",
           "statement": "resolved = candidate.resolve(strict=False)"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_code_scanning_security.py::test_resolve_secure_path_accepts_normalized_descendant",
-        "merger/lenskit/tests/test_code_scanning_security.py::test_resolve_secure_path_rejects_untrusted_syntax",
-        "merger/lenskit/tests/test_code_scanning_security.py::test_resolve_secure_path_rejects_symlink_escape"
+        "merger/repoground/tests/test_code_scanning_security.py::test_resolve_secure_path_accepts_normalized_descendant",
+        "merger/repoground/tests/test_code_scanning_security.py::test_resolve_secure_path_rejects_untrusted_syntax",
+        "merger/repoground/tests/test_code_scanning_security.py::test_resolve_secure_path_rejects_symlink_escape"
       ],
       "validation": [
         "Absolute, padded, empty, dot, parent, alternate-separator, colon and NUL forms are rejected.",
@@ -328,35 +328,35 @@
       "authority": "Remote API filenames are reduced to normalized relative names and resolved beneath established Hub, merges, or artifact directories.",
       "expected_occurrences": 4,
       "files": [
-        "merger/lenskit/service/app.py"
+        "merger/repoground/service/app.py"
       ],
       "sites": [
         {
-          "path": "merger/lenskit/service/app.py",
+          "path": "merger/repoground/service/app.py",
           "scope": "api_prescan",
           "statement": "if not repo_root.exists() or not repo_root.is_dir():"
         },
         {
-          "path": "merger/lenskit/service/app.py",
+          "path": "merger/repoground/service/app.py",
           "scope": "api_federation_query",
           "statement": "if not fed_index_path.exists():"
         },
         {
-          "path": "merger/lenskit/service/app.py",
+          "path": "merger/repoground/service/app.py",
           "scope": "api_query",
           "statement": "if not index_path.exists():"
         },
         {
-          "path": "merger/lenskit/service/app.py",
+          "path": "merger/repoground/service/app.py",
           "scope": "api_query",
           "statement": "if not graph_index_path.exists():"
         }
       ],
       "tests": [
-        "merger/lenskit/tests/test_code_scanning_security.py::test_prescan_api_rejects_repo_symlink_escape",
-        "merger/lenskit/tests/test_code_scanning_security.py::test_federation_api_rejects_index_symlink_escape",
-        "merger/lenskit/tests/test_api_query.py::test_api_query_invalid_paths",
-        "merger/lenskit/tests/test_api_query.py::test_api_query_graph_index_not_found"
+        "merger/repoground/tests/test_code_scanning_security.py::test_prescan_api_rejects_repo_symlink_escape",
+        "merger/repoground/tests/test_code_scanning_security.py::test_federation_api_rejects_index_symlink_escape",
+        "merger/repoground/tests/test_api_query.py::test_api_query_invalid_paths",
+        "merger/repoground/tests/test_api_query.py::test_api_query_graph_index_not_found"
       ],
       "validation": [
         "resolve_secure_path rejects traversal, absolute paths, alternate separators, colons and symlink escapes.",
