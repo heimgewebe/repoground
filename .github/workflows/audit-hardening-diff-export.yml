@@ -1,0 +1,35 @@
+name: audit-hardening-diff-export
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Export substantive PR diff
+        run: |
+          git diff --binary "origin/${{ github.base_ref }}...HEAD" -- \
+            . \
+            ':(exclude).github/workflows/audit-hardening-diff-export.yml' \
+            > lenskit-pr-1036.diff
+          test -s lenskit-pr-1036.diff
+          sha256sum lenskit-pr-1036.diff > lenskit-pr-1036.diff.sha256
+
+      - name: Upload diff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: lenskit-pr-1036-substantive-diff-${{ github.run_id }}
+          path: |
+            lenskit-pr-1036.diff
+            lenskit-pr-1036.diff.sha256
+          if-no-files-found: error
+          retention-days: 1
