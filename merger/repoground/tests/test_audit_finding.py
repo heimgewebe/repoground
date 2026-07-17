@@ -156,6 +156,13 @@ def test_rejects_invalid_verification_contracts(mutation):
         _adapt(verification_records=[record])
 
 
+def test_rejects_omitted_required_verification_negative_semantic():
+    record = _record()
+    record["does_not_prove"].pop()
+    with pytest.raises(AuditFindingError, match="does_not_prove"):
+        _adapt(verification_records=[record])
+
+
 def test_accepts_verification_negative_semantics_in_any_order():
     record = _record()
     record["does_not_prove"].reverse()

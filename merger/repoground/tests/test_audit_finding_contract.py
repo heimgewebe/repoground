@@ -17,6 +17,11 @@ def _schema(version="v2"):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _verification_schema():
+    path = Path(__file__).parents[1] / "contracts" / "audit-verification-record.v1.schema.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def _result():
     return adapt_audit_findings(
         plan_audit_lanes(["src/cache/publish.py"]),
@@ -108,6 +113,14 @@ def _accepted_record(result):
             "permission to create issues, patches, commits, pushes, or merges",
         ],
     }
+
+
+def test_verification_contract_rejects_omitted_required_negative_semantic():
+    schema = _verification_schema()
+    record = _accepted_record(_result())
+    record["does_not_prove"].pop()
+    with pytest.raises(ValidationError):
+        Draft7Validator(schema).validate(record)
 
 
 def test_contract_rejects_record_marked_not_supplied():

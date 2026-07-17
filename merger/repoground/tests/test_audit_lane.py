@@ -153,6 +153,14 @@ def test_contract_rejects_weak_or_incomplete_negative_semantics():
         Draft7Validator(schema).validate(plan)
 
 
+def test_contract_rejects_omitted_required_negative_semantic():
+    schema = _schema()
+    plan = plan_audit_lanes(["src/auth/token.py"])
+    plan["does_not_establish"].pop()
+    with pytest.raises(ValidationError):
+        Draft7Validator(schema).validate(plan)
+
+
 def test_contract_accepts_negative_semantics_in_any_order():
     schema = _schema()
     plan = plan_audit_lanes(["src/auth/token.py"])
