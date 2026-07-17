@@ -15,6 +15,12 @@ REV_A = "a" * 40
 REV_B = "b" * 40
 CIT_A = "cit_1111111111111111"
 CIT_B = "cit_2222222222222222"
+VERIFICATION_NEG = [
+    "repository truth",
+    "review completeness",
+    "freshness beyond the recorded revision",
+    "permission to create issues, patches, commits, pushes, or merges",
+]
 
 
 def _plan():
@@ -26,6 +32,26 @@ def _candidate():
         "lane_id": "cache_publication",
         "claim": "Pointer publication can expose stale content.",
         "citation_ids": [CIT_A, CIT_B],
+    }
+
+
+def _finding_id():
+    return make_audit_finding_id(
+        "cache_publication", _candidate()["claim"], [CIT_A, CIT_B]
+    )
+
+
+def _record(decision="accepted", revision=REV_A):
+    return {
+        "version": "audit_verification_record.v1",
+        "authority": "diagnostic_signal",
+        "risk_class": "diagnostic",
+        "finding_id": _finding_id(),
+        "reviewed_revision": revision,
+        "decision": decision,
+        "verifier_id": "independent-reviewer-v1",
+        "note": "Citation ranges reproduce the recorded review decision.",
+        "does_not_prove": list(VERIFICATION_NEG),
     }
 
 
@@ -41,26 +67,11 @@ def _adapt(**overrides):
     return adapt_audit_findings(**kwargs)
 
 
-def _finding_id():
-    return make_audit_finding_id(
-        "cache_publication", _candidate()["claim"], [CIT_A, CIT_B]
-    )
-
-
-def _verdict(state="verified"):
-    return {
-        "finding_id": _finding_id(),
-        "state": state,
-        "verifier_id": "independent-reviewer-v1",
-        "note": "Citation ranges reproduce the recorded review decision.",
-    }
-
-
 def _count(result, state):
     return next(row["count"] for row in result["state_counts"] if row["state"] == state)
 
 
-def test_finding_id_is_stable_across_whitespace_and_citation_order():
+def test_finding_id_is_stable_and_version_domain_separated():
     first = make_audit_finding_id(
         "cache_publication",
         "Pointer  publication\ncan expose stale content.",
@@ -72,7 +83,8 @@ def test_finding_id_is_stable_across_whitespace_and_citation_order():
         [CIT_A, CIT_B],
     )
     assert first == second
-    assert first.startswith("af_")
+    assert first.startswith("af2_")
+    assert _adapt()["finding_id_algorithm"] == "lenskit.audit_finding_id.v2"
 
 
 def test_fresh_unverified_candidate_remains_candidate():
@@ -80,42 +92,99 @@ def test_fresh_unverified_candidate_remains_candidate():
     finding = result["findings"][0]
     assert finding["state"] == "candidate"
     assert finding["state_reason"] == "verification_missing"
+    assert finding["verification_disposition"] == "not_supplied"
     assert _count(result, "candidate") == 1
 
 
-def test_fresh_resolved_verdict_can_be_applied():
-    result = _adapt(verifier_verdicts=[_verdict()])
+def test_fresh_resolved_neutral_decision_can_be_applied():
+    result = _adapt(verification_records=[_record()])
     finding = result["findings"][0]
     assert finding["state"] == "verified"
     assert finding["verification_applied"] is True
-    assert _count(result, "verified") == 1
+    assert finding["verification_disposition"] == "applied"
+    assert finding["verification_record"]["decision"] == "accepted"
 
 
-def test_stale_revision_overrides_but_preserves_verifier_decision():
-    result = _adapt(current_revision=REV_B, verifier_verdicts=[_verdict()])
+def test_stale_revision_overrides_but_preserves_record_explicitly():
+    result = _adapt(current_revision=REV_B, verification_records=[_record()])
     finding = result["findings"][0]
     assert finding["state"] == "stale"
-    assert finding["verification_record"]["state"] == "verified"
+    assert finding["verification_record"]["decision"] == "accepted"
     assert finding["verification_applied"] is False
-    assert result["revision_fresh"] is False
+    assert finding["verification_disposition"] == "blocked_revision"
 
 
-def test_unresolved_citation_overrides_verifier_decision():
+def test_unresolved_citation_overrides_but_preserves_record_explicitly():
     result = _adapt(
         resolvable_citation_ids=[CIT_A],
-        verifier_verdicts=[_verdict()],
+        verification_records=[_record()],
     )
     finding = result["findings"][0]
     assert finding["state"] == "unresolved"
     assert finding["unresolved_citation_ids"] == [CIT_B]
-    assert finding["verification_applied"] is False
+    assert finding["verification_disposition"] == "blocked_citation"
 
 
-@pytest.mark.parametrize("state", ["wrong", "unresolved"])
-def test_supported_negative_verdicts_are_preserved(state):
-    result = _adapt(verifier_verdicts=[_verdict(state)])
+@pytest.mark.parametrize(
+    ("decision", "state"),
+    [("rejected", "wrong"), ("unresolved", "unresolved")],
+)
+def test_neutral_decisions_map_to_output_states(decision, state):
+    result = _adapt(verification_records=[_record(decision)])
     assert result["findings"][0]["state"] == state
+
+
+def test_verification_record_revision_must_match_adapter_revision():
+    with pytest.raises(AuditFindingError, match="does not match"):
+        _adapt(verification_records=[_record(revision=REV_B)])
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"version": "wrong"},
+        {"authority": "canonical_content"},
+        {"decision": "verified"},
+        {"finding_id": "af2_0000000000000000"},
+        {"does_not_prove": ["A", "B", "C", "D"]},
+    ],
+)
+def test_rejects_invalid_verification_contracts(mutation):
+    record = _record()
+    record.update(mutation)
+    with pytest.raises(AuditFindingError):
+        _adapt(verification_records=[record])
+
+
+def test_accepts_verification_negative_semantics_in_any_order():
+    record = _record()
+    record["does_not_prove"].reverse()
+    result = _adapt(verification_records=[record])
     assert result["findings"][0]["verification_applied"] is True
+
+
+def test_rejects_oversized_candidate_and_verification_text():
+    candidate = _candidate()
+    candidate["claim"] = "x" * 4097
+    with pytest.raises(AuditFindingError, match="4096"):
+        _adapt(candidates=[candidate])
+
+    record = _record()
+    record["verifier_id"] = "v" * 257
+    with pytest.raises(AuditFindingError, match="256"):
+        _adapt(verification_records=[record])
+
+    record = _record()
+    record["note"] = "n" * 2049
+    with pytest.raises(AuditFindingError, match="2048"):
+        _adapt(verification_records=[record])
+
+
+def test_rejects_duplicate_registry_and_bounded_candidate_overflow():
+    with pytest.raises(AuditFindingError, match="duplicates"):
+        _adapt(resolvable_citation_ids=[CIT_A, CIT_A])
+    with pytest.raises(AuditFindingError, match="at most 200"):
+        _adapt(candidates=[_candidate()] * 201)
 
 
 def test_output_order_is_stable_by_finding_id():
@@ -151,12 +220,7 @@ def test_output_order_is_stable_by_finding_id():
         {"lane_id": "cache_publication", "claim": "x", "citation_ids": ["bad"]},
         {"lane_id": "cache_publication", "claim": "x", "citation_ids": [CIT_A, CIT_A]},
         {"lane_id": "cache_publication", "claim": "x", "citation_ids": [1]},
-        {
-            "lane_id": "cache_publication",
-            "claim": "x",
-            "citation_ids": [CIT_A],
-            "hidden": "not admitted",
-        },
+        {"lane_id": "cache_publication", "claim": "x", "citation_ids": [CIT_A], "hidden": "x"},
         "not-an-object",
     ],
 )
@@ -182,83 +246,25 @@ def test_rejects_invalid_revisions(revision):
         _adapt(reviewed_revision=revision)
 
 
-def test_rejects_plan_with_wrong_authority():
-    plan = _plan()
-    plan["authority"] = "diagnostic_signal"
-    with pytest.raises(AuditFindingError, match="authority"):
-        _adapt(plan=plan)
+def test_output_and_verification_record_validate_against_contracts():
+    root = Path(__file__).parents[1] / "contracts"
+    output_schema = json.loads((root / "audit-finding-set.v2.schema.json").read_text())
+    record_schema = json.loads((root / "audit-verification-record.v1.schema.json").read_text())
+    record = _record()
+    result = _adapt(verification_records=[record])
+    Draft7Validator.check_schema(output_schema)
+    Draft7Validator.check_schema(record_schema)
+    Draft7Validator(record_schema).validate(record)
+    Draft7Validator(output_schema).validate(result)
 
 
-def test_rejects_plan_with_invalid_lane_identifier():
-    plan = _plan()
-    plan["lanes"][0]["id"] = "Bad-Lane"
-    with pytest.raises(AuditFindingError, match="identifier"):
-        _adapt(plan=plan)
-
-
-def test_rejects_verdict_for_unknown_finding():
-    verdict = _verdict()
-    verdict["finding_id"] = "af_0000000000000000"
-    with pytest.raises(AuditFindingError, match="unknown finding"):
-        _adapt(verifier_verdicts=[verdict])
-
-
-def test_rejects_invalid_verdict_finding_identifier():
-    verdict = _verdict()
-    verdict["finding_id"] = "finding-1"
-    with pytest.raises(AuditFindingError, match="identifier"):
-        _adapt(verifier_verdicts=[verdict])
-
-
-def test_rejects_duplicate_verdicts():
-    verdict = _verdict()
-    with pytest.raises(AuditFindingError, match="duplicate verifier verdict"):
-        _adapt(verifier_verdicts=[verdict, verdict])
-
-
-@pytest.mark.parametrize("verdicts", [None, "verdict", 123])
-def test_rejects_malformed_verdict_collections(verdicts):
-    with pytest.raises(AuditFindingError):
-        _adapt(verifier_verdicts=verdicts)
-
-
-def test_rejects_extra_verdict_fields():
-    verdict = _verdict()
-    verdict["hidden"] = "not admitted"
-    with pytest.raises(AuditFindingError, match="verdict fields"):
-        _adapt(verifier_verdicts=[verdict])
-
-
-def test_rejects_invalid_citation_registry():
-    with pytest.raises(AuditFindingError):
-        _adapt(resolvable_citation_ids=[CIT_A, 1])
-
-
-def test_rejects_oversized_claim_and_citation_set():
-    candidate = _candidate()
-    candidate["claim"] = "x" * 8193
-    with pytest.raises(AuditFindingError, match="exceeds"):
-        _adapt(candidates=[candidate])
-
-    candidate = _candidate()
-    candidate["citation_ids"] = [f"cit_{index:016x}" for index in range(65)]
-    with pytest.raises(AuditFindingError, match="at most"):
-        _adapt(candidates=[candidate])
-
-
-def test_output_validates_against_contract():
-    schema_path = (
-        Path(__file__).parents[1] / "contracts" / "audit-finding-set.v1.schema.json"
-    )
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    result = _adapt()
-    Draft7Validator.check_schema(schema)
-    Draft7Validator(schema).validate(result)
-
-
-def test_does_not_prove_blocks_authority_upgrade():
-    result = _adapt()
-    boundary = " ".join(result["does_not_prove"])
-    assert "repository truth" in boundary
-    assert "review completeness" in boundary
-    assert "merges" in boundary
+def test_rejects_unhashable_verification_negative_semantics_as_contract_error():
+    record = _record()
+    record["does_not_prove"] = [
+        "repository truth",
+        "review completeness",
+        ["not", "hashable"],
+        "permission to create issues, patches, commits, pushes, or merges",
+    ]
+    with pytest.raises(AuditFindingError, match="does_not_prove"):
+        _adapt(verification_records=[record])

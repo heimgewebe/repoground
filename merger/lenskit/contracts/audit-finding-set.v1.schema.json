@@ -19,13 +19,29 @@
     "does_not_prove"
   ],
   "properties": {
-    "version": {"const": "audit_finding_set.v1"},
-    "authority": {"const": "diagnostic_signal"},
-    "risk_class": {"const": "diagnostic"},
-    "plan_version": {"const": "audit_lane_plan.v1"},
-    "reviewed_revision": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
-    "current_revision": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
-    "revision_fresh": {"type": "boolean"},
+    "version": {
+      "const": "audit_finding_set.v1"
+    },
+    "authority": {
+      "const": "diagnostic_signal"
+    },
+    "risk_class": {
+      "const": "diagnostic"
+    },
+    "plan_version": {
+      "const": "audit_lane_plan.v1"
+    },
+    "reviewed_revision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "current_revision": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "revision_fresh": {
+      "type": "boolean"
+    },
     "findings": {
       "type": "array",
       "items": {
@@ -43,19 +59,38 @@
           "verification_applied"
         ],
         "properties": {
-          "finding_id": {"type": "string", "pattern": "^af_[a-f0-9]{16}$"},
-          "lane_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-          "claim": {"type": "string", "minLength": 1, "maxLength": 8192},
+          "finding_id": {
+            "type": "string",
+            "pattern": "^af_[a-f0-9]{16}$"
+          },
+          "lane_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "claim": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192
+          },
           "citation_ids": {
             "type": "array",
             "minItems": 1,
             "maxItems": 64,
             "uniqueItems": true,
-            "items": {"type": "string", "pattern": "^cit_[a-f0-9]{16}$"}
+            "items": {
+              "type": "string",
+              "pattern": "^cit_[a-f0-9]{16}$"
+            }
           },
           "state": {
             "type": "string",
-            "enum": ["candidate", "verified", "stale", "wrong", "unresolved"]
+            "enum": [
+              "candidate",
+              "verified",
+              "stale",
+              "wrong",
+              "unresolved"
+            ]
           },
           "state_reason": {
             "type": "string",
@@ -69,46 +104,92 @@
           "unresolved_citation_ids": {
             "type": "array",
             "uniqueItems": true,
-            "items": {"type": "string", "pattern": "^cit_[a-f0-9]{16}$"}
+            "items": {
+              "type": "string",
+              "pattern": "^cit_[a-f0-9]{16}$"
+            }
           },
           "verification_record": {
             "oneOf": [
-              {"type": "null"},
+              {
+                "type": "null"
+              },
               {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["finding_id", "state", "verifier_id", "note"],
+                "required": [
+                  "finding_id",
+                  "state",
+                  "verifier_id",
+                  "note"
+                ],
                 "properties": {
-                  "finding_id": {"type": "string", "pattern": "^af_[a-f0-9]{16}$"},
-                  "state": {"type": "string", "enum": ["verified", "wrong", "unresolved"]},
-                  "verifier_id": {"type": "string", "minLength": 1, "maxLength": 8192},
-                  "note": {"type": "string", "minLength": 1, "maxLength": 8192}
+                  "finding_id": {
+                    "type": "string",
+                    "pattern": "^af_[a-f0-9]{16}$"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "verified",
+                      "wrong",
+                      "unresolved"
+                    ]
+                  },
+                  "verifier_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  }
                 }
               }
             ]
           },
-          "verification_applied": {"type": "boolean"}
+          "verification_applied": {
+            "type": "boolean"
+          }
         },
         "allOf": [
           {
             "if": {
-              "properties": {"verification_applied": {"const": true}}
+              "properties": {
+                "verification_applied": {
+                  "const": true
+                }
+              }
             },
             "then": {
               "properties": {
-                "verification_record": {"type": "object"},
-                "state_reason": {"const": "verifier_verdict"}
+                "verification_record": {
+                  "type": "object"
+                },
+                "state_reason": {
+                  "const": "verifier_verdict"
+                }
               }
             }
           },
           {
             "if": {
-              "properties": {"state_reason": {"const": "verifier_verdict"}}
+              "properties": {
+                "state_reason": {
+                  "const": "verifier_verdict"
+                }
+              }
             },
             "then": {
               "properties": {
-                "verification_record": {"type": "object"},
-                "verification_applied": {"const": true}
+                "verification_record": {
+                  "type": "object"
+                },
+                "verification_applied": {
+                  "const": true
+                }
               }
             }
           }
@@ -123,46 +204,86 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["state", "count"],
+          "required": [
+            "state",
+            "count"
+          ],
           "properties": {
-            "state": {"const": "candidate"},
-            "count": {"type": "integer", "minimum": 0}
+            "state": {
+              "const": "candidate"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["state", "count"],
+          "required": [
+            "state",
+            "count"
+          ],
           "properties": {
-            "state": {"const": "verified"},
-            "count": {"type": "integer", "minimum": 0}
+            "state": {
+              "const": "verified"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["state", "count"],
+          "required": [
+            "state",
+            "count"
+          ],
           "properties": {
-            "state": {"const": "stale"},
-            "count": {"type": "integer", "minimum": 0}
+            "state": {
+              "const": "stale"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["state", "count"],
+          "required": [
+            "state",
+            "count"
+          ],
           "properties": {
-            "state": {"const": "wrong"},
-            "count": {"type": "integer", "minimum": 0}
+            "state": {
+              "const": "wrong"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["state", "count"],
+          "required": [
+            "state",
+            "count"
+          ],
           "properties": {
-            "state": {"const": "unresolved"},
-            "count": {"type": "integer", "minimum": 0}
+            "state": {
+              "const": "unresolved"
+            },
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            }
           }
         }
       ],
@@ -171,14 +292,70 @@
     "allowed_inferences": {
       "type": "array",
       "minItems": 2,
+      "maxItems": 2,
       "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1}
+      "items": {
+        "type": "string",
+        "enum": [
+          "which candidate claims were bound to selected lanes and known citations",
+          "whether verifier decisions were applied under the recorded revision"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "which candidate claims were bound to selected lanes and known citations"
+          }
+        },
+        {
+          "contains": {
+            "const": "whether verifier decisions were applied under the recorded revision"
+          }
+        }
+      ]
     },
     "does_not_prove": {
       "type": "array",
       "minItems": 5,
+      "maxItems": 5,
       "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1}
+      "items": {
+        "type": "string",
+        "enum": [
+          "repository truth",
+          "review completeness",
+          "runtime correctness",
+          "severity correctness",
+          "permission to create issues, patches, commits, pushes, or merges"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "repository truth"
+          }
+        },
+        {
+          "contains": {
+            "const": "review completeness"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime correctness"
+          }
+        },
+        {
+          "contains": {
+            "const": "severity correctness"
+          }
+        },
+        {
+          "contains": {
+            "const": "permission to create issues, patches, commits, pushes, or merges"
+          }
+        }
+      ]
     }
   }
 }
