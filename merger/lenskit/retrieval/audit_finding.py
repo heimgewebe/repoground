@@ -291,8 +291,7 @@ def adapt_audit_findings(
 
     reviewed = _require_revision(reviewed_revision, "reviewed_revision")
     current = _require_revision(current_revision, "current_revision")
-    lane_ids = _plan_lane_ids(plan)
-    citation_registry = _citation_registry(resolvable_citation_ids)
+    lane_ids = _plan_lane_ids(plan)J    citation_registry = _citation_registry(resolvable_citation_ids)
     normalized = [
         _normalize_candidate(value, lane_ids)
         for value in _require_items(candidates, "candidates", _MAX_CANDIDATES)
