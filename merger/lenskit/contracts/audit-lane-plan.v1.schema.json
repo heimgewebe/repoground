@@ -1,0 +1,100 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lenskit.merger/schemas/audit-lane-plan.v1.json",
+  "title": "Lenskit Audit Lane Plan",
+  "description": "Deterministic, planning-only routing of a bounded change surface into specialist audit lanes.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "authority",
+    "risk_class",
+    "inputs",
+    "routing",
+    "lanes",
+    "does_not_establish"
+  ],
+  "properties": {
+    "version": {"const": "audit_lane_plan.v1"},
+    "authority": {"const": "navigation_index"},
+    "risk_class": {"const": "diagnostic"},
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changed_paths", "review_query", "max_lanes"],
+      "properties": {
+        "changed_paths": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+          }
+        },
+        "review_query": {"type": "string"},
+        "max_lanes": {"type": "integer", "minimum": 1, "maximum": 8}
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "path_signal_weight",
+        "query_signal_weight",
+        "tie_break",
+        "selected_count"
+      ],
+      "properties": {
+        "method": {"const": "weighted_signal_match"},
+        "path_signal_weight": {"const": 2},
+        "query_signal_weight": {"const": 1},
+        "tie_break": {"const": "catalog_order"},
+        "selected_count": {"type": "integer", "minimum": 1, "maximum": 8}
+      }
+    },
+    "lanes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "score", "reasons", "required_evidence", "suggested_checks"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+          "title": {"type": "string", "minLength": 1},
+          "score": {"type": "integer", "minimum": 0},
+          "reasons": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path_signals", "query_signals"],
+            "properties": {
+              "path_signals": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+              "query_signals": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+            }
+          },
+          "required_evidence": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "suggested_checks": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 5,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  }
+}
