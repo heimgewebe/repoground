@@ -88,25 +88,85 @@
             ]
           },
           "verification_applied": {"type": "boolean"}
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"verification_applied": {"const": true}}
+            },
+            "then": {
+              "properties": {
+                "verification_record": {"type": "object"},
+                "state_reason": {"const": "verifier_verdict"}
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {"state_reason": {"const": "verifier_verdict"}}
+            },
+            "then": {
+              "properties": {
+                "verification_record": {"type": "object"},
+                "verification_applied": {"const": true}
+              }
+            }
+          }
+        ]
       }
     },
     "state_counts": {
       "type": "array",
       "minItems": 5,
       "maxItems": 5,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["state", "count"],
-        "properties": {
-          "state": {
-            "type": "string",
-            "enum": ["candidate", "verified", "stale", "wrong", "unresolved"]
-          },
-          "count": {"type": "integer", "minimum": 0}
+      "items": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "candidate"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "verified"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "stale"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "wrong"},
+            "count": {"type": "integer", "minimum": 0}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["state", "count"],
+          "properties": {
+            "state": {"const": "unresolved"},
+            "count": {"type": "integer", "minimum": 0}
+          }
         }
-      }
+      ],
+      "additionalItems": false
     },
     "allowed_inferences": {
       "type": "array",
