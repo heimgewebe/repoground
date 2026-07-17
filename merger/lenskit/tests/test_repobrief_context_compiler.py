@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from merger.lenskit.cli.main import main
+from merger.lenskit.core import repobrief_context_compiler
 from merger.lenskit.core.citation_id import make_citation_id
 from merger.lenskit.core.repobrief_context_compiler import compile_context_plan
 
@@ -205,6 +206,18 @@ def _write_fallback_bundle(tmp_path: Path) -> Path:
     return manifest
 
 
+def _refresh_artifact_metadata(manifest: Path, *, role: str, artifact_path: Path) -> None:
+    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
+    artifact = next(
+        item
+        for item in manifest_payload["artifacts"]
+        if item["role"] == role
+    )
+    artifact["bytes"] = artifact_path.stat().st_size
+    artifact["sha256"] = _sha256(artifact_path)
+    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+
 def test_compile_context_plan_selects_ordered_evidence_with_citations(tmp_path):
     manifest = _write_complete_bundle(tmp_path)
 
@@ -262,15 +275,7 @@ def test_compile_context_plan_bounds_invalid_relation_row_details(tmp_path):
     valid_row = relation_cards.read_text(encoding="utf-8")
     relation_cards.write_text("not-json\n" * 12 + valid_row, encoding="utf-8")
 
-    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
-    relation_artifact = next(
-        artifact
-        for artifact in manifest_payload["artifacts"]
-        if artifact["role"] == "relation_cards_jsonl"
-    )
-    relation_artifact["bytes"] = relation_cards.stat().st_size
-    relation_artifact["sha256"] = _sha256(relation_cards)
-    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+    _refresh_artifact_metadata(manifest, role="relation_cards_jsonl", artifact_path=relation_cards)
 
     plan = compile_context_plan(
         manifest,
@@ -285,23 +290,118 @@ def test_compile_context_plan_bounds_invalid_relation_row_details(tmp_path):
     relation_gap = next(gap for gap in plan["gaps"] if gap["source"] == "relation_cards_jsonl")
     assert signal["status"] == "warn"
     assert signal["invalid_row_count"] == 12
+    assert signal["invalid_row_count_scope"] == "complete_artifact"
+    assert signal["json_row_validation_complete"] is True
+    assert signal["candidate_limit_reached"] is False
+    assert signal["row_error_sample_count"] == 10
+    assert signal["row_errors_truncated"] is True
+    assert relation_gap["invalid_row_count"] == 12
+    assert relation_gap["row_error_sample_limit"] == 10
+    assert relation_gap["row_errors_truncated"] is True
     assert len(relation_gap["row_errors"]) == 10
+    assert {item["error_type"] for item in relation_gap["row_errors"]} == {"json_decode"}
 
 
-def test_compile_context_plan_rejects_invalid_utf8_after_relation_hit(tmp_path):
+def test_compile_context_plan_does_not_match_missing_values_as_none(tmp_path):
     manifest = _write_complete_bundle(tmp_path)
     relation_cards = tmp_path / "demo.relation_cards.jsonl"
-    relation_cards.write_bytes(relation_cards.read_bytes() + b"\xff")
+    relation_card = json.loads(relation_cards.read_text(encoding="utf-8"))
+    relation_card.pop("relation")
+    relation_cards.write_text(json.dumps(relation_card) + "\n", encoding="utf-8")
+    _refresh_artifact_metadata(manifest, role="relation_cards_jsonl", artifact_path=relation_cards)
 
-    manifest_payload = json.loads(manifest.read_text(encoding="utf-8"))
-    relation_artifact = next(
-        artifact
-        for artifact in manifest_payload["artifacts"]
-        if artifact["role"] == "relation_cards_jsonl"
+    plan = compile_context_plan(
+        manifest,
+        task="Find none",
+        task_profile="basic_repo_question",
+        query="none",
+        context_budget_tokens=120,
+        bytes_per_token=4.0,
     )
-    relation_artifact["bytes"] = relation_cards.stat().st_size
-    relation_artifact["sha256"] = _sha256(relation_cards)
-    manifest.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    signal = plan["signals"]["relation_cards_jsonl"]
+    assert signal["status"] == "available"
+    assert signal["hit_count"] == 0
+    assert not any(item["source"] == "relation_cards_jsonl" for item in plan["selected_context"])
+
+
+def test_compile_context_plan_prioritizes_relation_match_order_not_source_row(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+    relation_cards = tmp_path / "demo.relation_cards.jsonl"
+    matching_card = json.loads(relation_cards.read_text(encoding="utf-8"))
+    filler_cards = [
+        {
+            "kind": "lenskit.relation_card",
+            "version": "1.0",
+            "id": f"filler-{index}",
+            "relation": "imports",
+            "source": {"kind": "repo_path", "path": f"pkg/filler_{index}.py"},
+            "target": {"kind": "repo_path", "path": "pkg/other.py"},
+            "evidence": {},
+            "evidence_level": "S1",
+        }
+        for index in range(100)
+    ]
+    rows = [*filler_cards, matching_card]
+    relation_cards.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    _refresh_artifact_metadata(manifest, role="relation_cards_jsonl", artifact_path=relation_cards)
+
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        task_profile="basic_repo_question",
+        query="context compiler",
+        context_budget_tokens=120,
+        signal_k=1,
+        bytes_per_token=4.0,
+    )
+
+    relation_items = [
+        item
+        for item in plan["selected_context"] + plan["omitted_context"]
+        if item["source"] == "relation_cards_jsonl"
+    ]
+    assert len(relation_items) == 1
+    assert relation_items[0]["id"] == "relation:101"
+    assert relation_items[0]["priority"] == 25
+
+
+def test_compile_context_plan_reports_json_validation_scope_after_hit_limit(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+    relation_cards = tmp_path / "demo.relation_cards.jsonl"
+    relation_cards.write_text(
+        relation_cards.read_text(encoding="utf-8") + "not-json\n",
+        encoding="utf-8",
+    )
+    _refresh_artifact_metadata(manifest, role="relation_cards_jsonl", artifact_path=relation_cards)
+
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        task_profile="basic_repo_question",
+        query="context compiler",
+        context_budget_tokens=120,
+        signal_k=1,
+        bytes_per_token=4.0,
+    )
+
+    signal = plan["signals"]["relation_cards_jsonl"]
+    assert signal["status"] == "available"
+    assert signal["candidate_limit_reached"] is True
+    assert signal["json_row_validation_complete"] is False
+    assert signal["tail_utf8_validation_complete"] is True
+    assert signal["invalid_row_count"] == 0
+    assert signal["invalid_row_count_scope"] == "parsed_prefix"
+
+
+def test_compile_context_plan_rejects_invalid_utf8_before_relation_hit(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+    relation_cards = tmp_path / "demo.relation_cards.jsonl"
+    relation_cards.write_bytes(b"\xff" + relation_cards.read_bytes())
+    _refresh_artifact_metadata(manifest, role="relation_cards_jsonl", artifact_path=relation_cards)
 
     plan = compile_context_plan(
         manifest,
@@ -320,6 +420,43 @@ def test_compile_context_plan_rejects_invalid_utf8_after_relation_hit(tmp_path):
     assert relation_gap["error_code"] == "relation_cards_jsonl_unreadable"
     assert not any(item["source"] == "relation_cards_jsonl" for item in plan["selected_context"])
 
+
+def test_compile_context_plan_rejects_invalid_utf8_after_relation_hit(tmp_path, monkeypatch):
+    manifest = _write_complete_bundle(tmp_path)
+    relation_cards = tmp_path / "demo.relation_cards.jsonl"
+    relation_cards.write_bytes(
+        relation_cards.read_bytes()
+        + b" " * (256 * 1024)
+        + b"\xff"
+    )
+    _refresh_artifact_metadata(manifest, role="relation_cards_jsonl", artifact_path=relation_cards)
+    consumed_tail = False
+    original_consume = repobrief_context_compiler._consume_text_stream
+
+    def tracking_consume(handle):
+        nonlocal consumed_tail
+        consumed_tail = True
+        return original_consume(handle)
+
+    monkeypatch.setattr(repobrief_context_compiler, "_consume_text_stream", tracking_consume)
+
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        task_profile="basic_repo_question",
+        query="context compiler",
+        context_budget_tokens=120,
+        signal_k=1,
+        bytes_per_token=4.0,
+    )
+
+    signal = plan["signals"]["relation_cards_jsonl"]
+    relation_gap = next(gap for gap in plan["gaps"] if gap["source"] == "relation_cards_jsonl")
+    assert consumed_tail is True
+    assert signal["status"] == "invalid"
+    assert signal["error_code"] == "relation_cards_jsonl_unreadable"
+    assert relation_gap["error_code"] == "relation_cards_jsonl_unreadable"
+    assert not any(item["source"] == "relation_cards_jsonl" for item in plan["selected_context"])
 
 def test_compile_context_plan_falls_back_to_required_reading_when_signals_missing(tmp_path):
     manifest = _write_fallback_bundle(tmp_path)

@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, TextIO
 
 from merger.lenskit.core.graph_degradation import graph_gap_from_availability
 from merger.lenskit.core.repobrief_access import (
@@ -24,7 +24,9 @@ KIND = "repobrief.context_compiler"
 VERSION = "v1"
 MAX_CONTEXT_BUDGET_TOKENS = 1_000_000
 MAX_SIGNAL_HITS = 50
-RELATION_STREAM_VALIDATION_CHARS = 64 * 1024
+RELATION_ERROR_SAMPLE_LIMIT = 10
+# Preserve strict whole-artifact UTF-8 validation without retaining the unread tail.
+RELATION_STREAM_VALIDATION_CHUNK_CHARS = 64 * 1024
 DEFAULT_BYTES_PER_TOKEN = 4.0
 
 DOES_NOT_ESTABLISH = (
@@ -280,45 +282,58 @@ def _relation_path_value(value: Any) -> str | None:
     return None
 
 
+def _relation_search_text(
+    card: Mapping[str, Any],
+    *,
+    source_path: str | None,
+    target_path: str | None,
+    evidence: Mapping[str, Any],
+) -> str:
+    values = (
+        card.get("relation"),
+        source_path,
+        target_path,
+        evidence.get("source_path"),
+        evidence.get("start_line"),
+        evidence.get("end_line"),
+    )
+    return " ".join(str(value) for value in values if value not in (None, "")).casefold()
+
+
 def _relation_candidate_from_line(
     line: str,
     *,
     row_number: int,
+    match_ordinal: int,
     query: str,
     compact_query: str,
     bytes_per_token: float,
-) -> tuple[dict[str, Any] | None, str | None]:
+) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
     try:
         card = json.loads(line)
-    except ValueError as exc:
-        return None, str(exc)
+    except json.JSONDecodeError as exc:
+        return None, {"error_type": "json_decode", "message": str(exc)}
     if not isinstance(card, dict):
-        return None, "row_not_object"
+        return None, {"error_type": "row_not_object", "message": "row_not_object"}
 
     source_path = _relation_path_value(card.get("source"))
     target_path = _relation_path_value(card.get("target"))
     evidence = card.get("evidence") if isinstance(card.get("evidence"), dict) else {}
-    haystack = " ".join(
-        str(value)
-        for value in (
-            card.get("relation"),
-            source_path,
-            target_path,
-            evidence.get("source_path"),
-            evidence.get("start_line"),
-            evidence.get("end_line"),
-        )
-    ).casefold()
+    haystack = _relation_search_text(
+        card,
+        source_path=source_path,
+        target_path=target_path,
+        evidence=evidence,
+    )
     if query and query not in haystack:
-        compact_haystack = _compact_match_text(haystack)
-        if not compact_query or compact_query not in compact_haystack:
+        if not compact_query or compact_query not in _compact_match_text(haystack):
             return None, None
 
     label = f"{source_path or '?'} -> {target_path or '?'} {card.get('relation') or ''}"
     return _candidate(
         candidate_id=f"relation:{row_number}",
         source="relation_cards_jsonl",
-        priority=25 + row_number,
+        priority=25 + match_ordinal,
         estimated_tokens=_estimate_tokens_from_text(label, bytes_per_token),
         selection_reason="relation_card_match",
         citations=[{
@@ -338,6 +353,14 @@ def _relation_candidate_from_line(
             "evidence": evidence,
         },
     ), None
+
+
+def _consume_text_stream(handle: TextIO) -> bool:
+    """Strictly decode the tail in bounded chunks and report whether any tail existed."""
+    tail_present = False
+    while handle.read(RELATION_STREAM_VALIDATION_CHUNK_CHARS):
+        tail_present = True
+    return tail_present
 
 
 def _relation_candidates(
@@ -365,34 +388,42 @@ def _relation_candidates(
             "reason": "relation_cards_jsonl artifact file does not exist",
         }]
 
-    q = query.strip().casefold()
-    compact_query = _compact_match_text(q) if q else ""
+    stripped_query = query.strip()
+    q = stripped_query.casefold()
+    compact_query = _compact_match_text(stripped_query) if stripped_query else ""
     candidates: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     invalid_row_count = 0
+    candidate_limit_reached = False
+    unparsed_tail_present = False
     try:
-        with path.open("r", encoding="utf-8") as rows:
+        with path.open("r", encoding="utf-8", errors="strict") as rows:
             for row_number, line in enumerate(rows, start=1):
                 if not line.strip():
                     continue
                 candidate, error = _relation_candidate_from_line(
                     line,
                     row_number=row_number,
+                    match_ordinal=len(candidates),
                     query=q,
                     compact_query=compact_query,
                     bytes_per_token=bytes_per_token,
                 )
                 if error is not None:
                     invalid_row_count += 1
-                    if len(errors) < 10:
-                        errors.append({"row": row_number, "error": error})
+                    if len(errors) < RELATION_ERROR_SAMPLE_LIMIT:
+                        errors.append({
+                            "row": row_number,
+                            "error": error["message"],
+                            "error_type": error["error_type"],
+                        })
                     continue
                 if candidate is None:
                     continue
                 candidates.append(candidate)
                 if len(candidates) >= signal_k:
-                    while rows.read(RELATION_STREAM_VALIDATION_CHARS):
-                        pass
+                    candidate_limit_reached = True
+                    unparsed_tail_present = _consume_text_stream(rows)
                     break
     except (OSError, UnicodeError) as exc:
         return [], {"status": "invalid", "error_code": "relation_cards_jsonl_unreadable"}, [{
@@ -402,13 +433,34 @@ def _relation_candidates(
             "reason": str(exc),
         }]
 
+    errors_truncated = invalid_row_count > len(errors)
+    json_row_validation_complete = not unparsed_tail_present
+    invalid_row_count_scope = "complete_artifact" if json_row_validation_complete else "parsed_prefix"
     gaps: list[dict[str, Any]] = []
     if invalid_row_count:
-        gaps.append({"source": "relation_cards_jsonl", "status": "invalid_rows", "row_errors": errors})
+        gaps.append({
+            "source": "relation_cards_jsonl",
+            "status": "invalid_rows",
+            "invalid_row_count": invalid_row_count,
+            "invalid_row_count_scope": invalid_row_count_scope,
+            "row_errors": errors,
+            "row_error_sample_limit": RELATION_ERROR_SAMPLE_LIMIT,
+            "row_errors_truncated": errors_truncated,
+        })
     if not candidates:
         gaps.append({"source": "relation_cards_jsonl", "status": "empty", "reason": "relation card search returned no candidates"})
     signal_status = "warn" if invalid_row_count else "available"
-    return candidates, {"status": signal_status, "hit_count": len(candidates), "invalid_row_count": invalid_row_count}, gaps
+    return candidates, {
+        "status": signal_status,
+        "hit_count": len(candidates),
+        "invalid_row_count": invalid_row_count,
+        "invalid_row_count_scope": invalid_row_count_scope,
+        "row_error_sample_count": len(errors),
+        "row_errors_truncated": errors_truncated,
+        "candidate_limit_reached": candidate_limit_reached,
+        "json_row_validation_complete": json_row_validation_complete,
+        "tail_utf8_validation_complete": True,
+    }, gaps
 
 def _required_reading_candidates(
     status: Mapping[str, Any],
