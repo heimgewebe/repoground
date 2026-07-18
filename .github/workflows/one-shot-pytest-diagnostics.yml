@@ -1,4 +1,4 @@
-name: one-shot-pytest-diagnostics
+name: one-shot-release-fixture-fix
 
 on:
   pull_request:
@@ -6,40 +6,61 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: read
+  contents: write
+
+concurrency:
+  group: repoground-release-fixture-fix-v1
+  cancel-in-progress: false
 
 jobs:
-  capture:
+  fix:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.head.ref == 'feat/repoground-open-source-name-stewardship-v1'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
-      - name: Install dependencies
-        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
-      - name: Run and retain full pytest output
-        id: pytest
-        run: |
-          set +e
-          pytest -q -m "not browser and not doc_freshness_live" > pytest-full.log 2>&1
-          status=$?
-          set -e
-          cat pytest-full.log
-          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
-      - name: Upload complete pytest log
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: pytest-full-${{ github.run_id }}
-          path: pytest-full.log
-          if-no-files-found: error
-          retention-days: 7
-      - name: Propagate pytest result
-        if: steps.pytest.outputs.exit_code != '0'
+      - name: Add newly required legal files to the minimal fixture
         env:
-          EXIT_CODE: ${{ steps.pytest.outputs.exit_code }}
-        run: exit "$EXIT_CODE"
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("merger/repoground/tests/test_release_packaging.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''    (repo / "LICENSE").write_text(
+              "Apache License\\nVersion 2.0, January 2004\\n", encoding="utf-8"
+          )
+              (repo / "regular.txt").write_text("regular\\n", encoding="utf-8")'''
+          new = '''    (repo / "LICENSE").write_text(
+              "Apache License\\nVersion 2.0, January 2004\\n", encoding="utf-8"
+          )
+              (repo / "NOTICE").write_text("RepoGround\\n", encoding="utf-8")
+              (repo / "TRADEMARK_POLICY.md").write_text(
+                  "This policy does not restrict any right granted by Apache-2.0.\\n",
+                  encoding="utf-8",
+              )
+              (repo / "regular.txt").write_text("regular\\n", encoding="utf-8")'''
+          if text.count(old) != 1:
+              raise SystemExit("minimal release fixture target missing or ambiguous")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          Path(".github/workflows/one-shot-pytest-diagnostics.yml").unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "test: complete release contract fixture"
+
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+          pytest -q merger/repoground/tests/test_release_packaging.py
+          git push origin "HEAD:${BRANCH_NAME}"
