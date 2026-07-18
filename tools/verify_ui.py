@@ -71,8 +71,8 @@ def verify_ui(args) -> int:
                     try:
                         with open(os.path.join(UI_DIR, "index.html"), "r") as f:
                             content = f.read()
-                        content = content.replace("__RLENS_ASSET_BASE__", "./")
-                        content = content.replace("__RLENS_BUILD__", "verify-tool-v1")
+                        content = content.replace("__REPOGROUND_ASSET_BASE__", "./")
+                        content = content.replace("__REPOGROUND_BUILD__", "verify-tool-v1")
                         route.fulfill(body=content, content_type="text/html")
                     except Exception as e:
                         print(f"Error serving index: {e}")

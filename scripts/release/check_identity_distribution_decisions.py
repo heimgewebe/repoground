@@ -46,12 +46,8 @@ def _check_identity(identity: dict[str, Any], naming_text: str) -> list[str]:
         findings.append("RepoGround identity mismatch")
 
     compatibility = identity.get("compatibility") or {}
-    observed_compatibility = (
-        compatibility.get("legacy_python_namespace"),
-        compatibility.get("persisted_2_x_identifiers_reinterpreted"),
-    )
-    if observed_compatibility != ("merger.lenskit", False):
-        findings.append("compatibility boundary drift")
+    if compatibility.get("persisted_2_x_identifiers_reinterpreted") is not False:
+        findings.append("persisted-identity boundary drift")
 
     required_names = ("RepoGround", "merger.repoground")
     if not all(name in naming_text for name in required_names):

@@ -307,7 +307,7 @@ def test_create_job_fresh_hub_no_state_dir(client_and_hub):
     assert (storage_dir / "jobs.json").exists(), "jobs.json was not created"
 
 def test_get_server_version_logs_debug_on_git_failure(monkeypatch, caplog):
-    monkeypatch.delenv("RLENS_VERSION", raising=False)
+    monkeypatch.delenv("REPOGROUND_VERSION", raising=False)
 
     def fail_check_output(*args, **kwargs):
         raise RuntimeError("git unavailable")
@@ -323,7 +323,7 @@ def test_get_server_version_logs_debug_on_git_failure(monkeypatch, caplog):
 def test_app_module_import_survives_git_failure_during_server_version_init():
     """SERVER_VERSION falls back to 'dev' when git is unavailable at import time (subprocess-isolated)."""
     repo_root = Path(__file__).resolve().parents[3]
-    env = {k: v for k, v in os.environ.items() if k != "RLENS_VERSION"}
+    env = {k: v for k, v in os.environ.items() if k != "REPOGROUND_VERSION"}
     env["PATH"] = "/nonexistent"
     existing_pythonpath = os.environ.get("PYTHONPATH", "")
     pythonpath_parts = [str(repo_root)]

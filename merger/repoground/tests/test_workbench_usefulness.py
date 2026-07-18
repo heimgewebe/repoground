@@ -106,7 +106,7 @@ def test_eval_cli_emits_reproducible_report(tmp_path: Path, capsys) -> None:
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "workbench-eval",
             "--config",
             str(config),

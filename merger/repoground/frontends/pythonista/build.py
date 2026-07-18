@@ -3688,15 +3688,15 @@ class MergerUI(object):
 def _is_headless_requested() -> bool:
     # Headless wenn:
     # 1) --headless Flag, oder
-    # 2) REPOLENS_HEADLESS=1 in der Umgebung, oder
+    # 2) REPOGROUND_HEADLESS=1 in the environment, or
     # 3) ui-Framework nicht verfügbar
-    return ("--headless" in sys.argv) or ((os.environ.get("REPOGROUND_HEADLESS") == "1" or os.environ.get("REPOLENS_HEADLESS") == "1")) or (ui is None)
+    return ("--headless" in sys.argv) or (os.environ.get("REPOGROUND_HEADLESS") == "1") or (ui is None)
 
 def main_cli():
     import argparse
     parser = argparse.ArgumentParser(description="RepoGround build")
     parser.add_argument("paths", nargs="*", help="Repositories to merge")
-    parser.add_argument("--hub", help="Base directory (repolens-hub)")
+    parser.add_argument("--hub", help="RepoGround hub base directory")
     parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default=DEFAULT_LEVEL)
     parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default=DEFAULT_MODE)
     # 0 = unbegrenzt pro Datei

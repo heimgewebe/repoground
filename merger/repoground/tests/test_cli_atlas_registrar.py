@@ -2,10 +2,10 @@
 handle_atlas_command in cmd_atlas.py).
 
 Scope:
-- Both lenskit (cli/main.py) and rlens (cli/rlens.py) consume the same
+- Both repoground (cli/main.py) and repoground (cli/repoground.py) consume the same
   registrar, so every subcommand only needs to be defined once.
 - These tests verify: shared registrar shape (stable atlas subcommand set),
-  dispatch via lenskit for `machines`, dispatch via rlens for `machines`,
+  dispatch via repoground for `machines`, dispatch via repoground for `machines`,
   and the `analyze growth` positional args are wired correctly.
 """
 import argparse
@@ -13,8 +13,8 @@ import sys
 import pytest
 
 from merger.repoground.cli import cmd_atlas as cmd_atlas_module
-from merger.repoground.cli.main import main as lenskit_main
-from merger.repoground.cli.serve import main as rlens_main
+from merger.repoground.cli.main import main as repoground_main
+from merger.repoground.cli.serve import main as service_launcher_main
 
 
 _EXPECTED_ATLAS_SUBCOMMANDS = {
@@ -50,11 +50,11 @@ def test_registrar_exposes_expected_subcommands():
 
 
 # ---------------------------------------------------------------------------
-# Dispatch tests via lenskit_main
+# Dispatch tests via repoground_main
 # ---------------------------------------------------------------------------
 
 def test_lenskit_dispatches_atlas_machines(monkeypatch):
-    """lenskit atlas machines routes to run_atlas_machines via handle_atlas_command."""
+    """repoground atlas machines routes to run_atlas_machines via handle_atlas_command."""
     called = False
 
     def mock_run_machines(args):
@@ -65,13 +65,13 @@ def test_lenskit_dispatches_atlas_machines(monkeypatch):
 
     monkeypatch.setattr(cmd_atlas_module, "run_atlas_machines", mock_run_machines)
 
-    exit_code = lenskit_main(["atlas", "machines"])
+    exit_code = repoground_main(["atlas", "machines"])
     assert exit_code == 0
     assert called
 
 
 def test_lenskit_dispatches_atlas_machine_health(monkeypatch):
-    """lenskit atlas machine-health routes to run_atlas_machine_health."""
+    """repoground atlas machine-health routes to run_atlas_machine_health."""
     called = False
 
     def mock_handler(args):
@@ -82,13 +82,13 @@ def test_lenskit_dispatches_atlas_machine_health(monkeypatch):
 
     monkeypatch.setattr(cmd_atlas_module, "run_atlas_machine_health", mock_handler)
 
-    exit_code = lenskit_main(["atlas", "machine-health"])
+    exit_code = repoground_main(["atlas", "machine-health"])
     assert exit_code == 0
     assert called
 
 
 def test_lenskit_dispatches_atlas_analyze_growth(monkeypatch):
-    """lenskit atlas analyze growth <src> <tgt> parses positional args correctly."""
+    """repoground atlas analyze growth <src> <tgt> parses positional args correctly."""
     called = False
 
     def mock_run_analyze(args):
@@ -102,25 +102,25 @@ def test_lenskit_dispatches_atlas_analyze_growth(monkeypatch):
 
     monkeypatch.setattr(cmd_atlas_module, "run_atlas_analyze", mock_run_analyze)
 
-    exit_code = lenskit_main(["atlas", "analyze", "growth", "snap_src", "snap_tgt"])
+    exit_code = repoground_main(["atlas", "analyze", "growth", "snap_src", "snap_tgt"])
     assert exit_code == 0
     assert called
 
 
 # ---------------------------------------------------------------------------
-# Dispatch tests via rlens_main
+# Dispatch tests via repoground_main
 # ---------------------------------------------------------------------------
 
-def _run_rlens(monkeypatch, argv):
-    """Run rlens_main with a given argv, catching SystemExit, and return exit code."""
+def _run_service_launcher(monkeypatch, argv):
+    """Run repoground_main with a given argv, catching SystemExit, and return exit code."""
     monkeypatch.setattr(sys, "argv", argv)
     with pytest.raises(SystemExit) as exc:
-        rlens_main()
+        service_launcher_main()
     return exc.value.code
 
 
-def test_rlens_dispatches_atlas_machines(monkeypatch):
-    """rlens atlas machines routes to run_atlas_machines via handle_atlas_command."""
+def test_repoground_dispatches_atlas_machines(monkeypatch):
+    """repoground atlas machines routes to run_atlas_machines via handle_atlas_command."""
     called = False
 
     def mock_run_machines(args):
@@ -131,13 +131,13 @@ def test_rlens_dispatches_atlas_machines(monkeypatch):
 
     monkeypatch.setattr(cmd_atlas_module, "run_atlas_machines", mock_run_machines)
 
-    code = _run_rlens(monkeypatch, ["rlens", "atlas", "machines"])
+    code = _run_service_launcher(monkeypatch, ["repoground", "atlas", "machines"])
     assert code == 0
     assert called
 
 
-def test_rlens_dispatches_atlas_machine_health(monkeypatch):
-    """rlens atlas machine-health routes to run_atlas_machine_health."""
+def test_repoground_dispatches_atlas_machine_health(monkeypatch):
+    """repoground atlas machine-health routes to run_atlas_machine_health."""
     called = False
 
     def mock_handler(args):
@@ -148,13 +148,13 @@ def test_rlens_dispatches_atlas_machine_health(monkeypatch):
 
     monkeypatch.setattr(cmd_atlas_module, "run_atlas_machine_health", mock_handler)
 
-    code = _run_rlens(monkeypatch, ["rlens", "atlas", "machine-health"])
+    code = _run_service_launcher(monkeypatch, ["repoground", "atlas", "machine-health"])
     assert code == 0
     assert called
 
 
-def test_rlens_dispatches_atlas_analyze_growth(monkeypatch):
-    """rlens atlas analyze growth <src> <tgt> parses positional args correctly."""
+def test_repoground_dispatches_atlas_analyze_growth(monkeypatch):
+    """repoground atlas analyze growth <src> <tgt> parses positional args correctly."""
     called = False
 
     def mock_run_analyze(args):
@@ -168,7 +168,7 @@ def test_rlens_dispatches_atlas_analyze_growth(monkeypatch):
 
     monkeypatch.setattr(cmd_atlas_module, "run_atlas_analyze", mock_run_analyze)
 
-    code = _run_rlens(monkeypatch, ["rlens", "atlas", "analyze", "growth", "snap_src", "snap_tgt"])
+    code = _run_service_launcher(monkeypatch, ["repoground", "atlas", "analyze", "growth", "snap_src", "snap_tgt"])
     assert code == 0
     assert called
 
@@ -181,7 +181,7 @@ def _registered_atlas_subcommands() -> set:
     """Extract the set of atlas subcommand names from the shared registrar.
 
     This builds a parser and calls register_atlas_commands to verify the
-    registrar state; it does not inspect the real lenskit or rlens entry
+    registrar state; it does not inspect the real repoground or repoground entry
     points, but rather tests the registered parser shape directly.
     """
     root = argparse.ArgumentParser()
@@ -197,9 +197,9 @@ def _registered_atlas_subcommands() -> set:
 def test_shared_registrar_subcommand_set_is_stable():
     """Shared registrar provides a stable, consistent set of atlas subcommands.
 
-    This test verifies the registrar state directly, not the actual lenskit or
-    rlens entry-point parsers. Entry-point parity is verified by the dispatch
-    tests (test_lenskit_dispatches_* / test_rlens_dispatches_*).
+    This test verifies the registrar state directly, not the actual repoground or
+    repoground entry-point parsers. Entry-point parity is verified by the dispatch
+    tests (test_lenskit_dispatches_* / test_repoground_dispatches_*).
     """
     registered = _registered_atlas_subcommands()
     assert registered == _EXPECTED_ATLAS_SUBCOMMANDS

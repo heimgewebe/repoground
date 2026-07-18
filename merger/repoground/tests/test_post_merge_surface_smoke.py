@@ -7,7 +7,7 @@ from merger.repoground.core.merge import ExtrasConfig, scan_repo, write_reports_
 from merger.repoground.tests._test_constants import make_generator_info
 
 SCRATCH_PATH = ".tmp/forensic-preflight-ci-canary/artifacts/forensic-preflight-canary.json"
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "rlens-post-merge-surface-smoke.sh"
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "repoground-post-merge-surface-smoke.sh"
 
 
 def _write_bundle(tmp_path: Path, *, include_noise: bool = True):
@@ -77,7 +77,7 @@ def _run_smoke(merges: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_rlens_surface_smoke_allows_documented_scratch_path_mentions(tmp_path):
+def test_repoground_surface_smoke_allows_documented_scratch_path_mentions(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     # The canonical artifact legitimately contains the scratch path as prose in
@@ -94,7 +94,7 @@ def test_rlens_surface_smoke_allows_documented_scratch_path_mentions(tmp_path):
     assert int(count_match.group(1)) > 0
 
 
-def test_rlens_surface_smoke_fails_structured_chunk_path_leak(tmp_path):
+def test_repoground_surface_smoke_fails_structured_chunk_path_leak(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     lines = artifacts.chunk_index.read_text(encoding="utf-8").splitlines()
@@ -111,7 +111,7 @@ def test_rlens_surface_smoke_fails_structured_chunk_path_leak(tmp_path):
     assert "chunk_index_jsonl" in combined
 
 
-def test_rlens_surface_smoke_fails_structured_sidecar_file_index_leak(tmp_path):
+def test_repoground_surface_smoke_fails_structured_sidecar_file_index_leak(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     sidecar = json.loads(artifacts.index_json.read_text(encoding="utf-8"))
@@ -126,7 +126,7 @@ def test_rlens_surface_smoke_fails_structured_sidecar_file_index_leak(tmp_path):
     assert "index_sidecar_json" in combined
 
 
-def test_rlens_surface_smoke_fails_when_output_health_noise_unavailable_with_zero_count(tmp_path):
+def test_repoground_surface_smoke_fails_when_output_health_noise_unavailable_with_zero_count(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     def mutate(output_health):
@@ -143,7 +143,7 @@ def test_rlens_surface_smoke_fails_when_output_health_noise_unavailable_with_zer
     assert "output_health noise_hygiene.available is not true" in combined
 
 
-def test_rlens_surface_smoke_fails_when_post_emit_noise_unavailable(tmp_path):
+def test_repoground_surface_smoke_fails_when_post_emit_noise_unavailable(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     def mutate(post_emit):
@@ -158,7 +158,7 @@ def test_rlens_surface_smoke_fails_when_post_emit_noise_unavailable(tmp_path):
     assert "post_emit_health.noise_hygiene.available is not true" in combined
 
 
-def test_rlens_surface_smoke_fails_structured_dump_index_path_leak(tmp_path):
+def test_repoground_surface_smoke_fails_structured_dump_index_path_leak(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     dump_index = json.loads(artifacts.dump_index.read_text(encoding="utf-8"))
@@ -173,7 +173,7 @@ def test_rlens_surface_smoke_fails_structured_dump_index_path_leak(tmp_path):
     assert "dump_index_json" in combined
 
 
-def test_rlens_surface_smoke_allows_zero_excluded_noise_when_diagnostics_available(tmp_path):
+def test_repoground_surface_smoke_allows_zero_excluded_noise_when_diagnostics_available(tmp_path):
     merges, _artifacts = _write_bundle(tmp_path, include_noise=False)
 
     result = _run_smoke(merges)
@@ -184,7 +184,7 @@ def test_rlens_surface_smoke_allows_zero_excluded_noise_when_diagnostics_availab
     assert '"post_emit_health_noise_available": true' in result.stdout
 
 
-def test_rlens_surface_smoke_fails_when_excluded_noise_count_missing(tmp_path):
+def test_repoground_surface_smoke_fails_when_excluded_noise_count_missing(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     def mutate(output_health):
@@ -199,7 +199,7 @@ def test_rlens_surface_smoke_fails_when_excluded_noise_count_missing(tmp_path):
     assert "output_health checks.excluded_noise.count missing" in combined
 
 
-def test_rlens_surface_smoke_fails_when_excluded_noise_count_is_bool(tmp_path):
+def test_repoground_surface_smoke_fails_when_excluded_noise_count_is_bool(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     def mutate(output_health):
@@ -214,7 +214,7 @@ def test_rlens_surface_smoke_fails_when_excluded_noise_count_is_bool(tmp_path):
     assert "output_health checks.excluded_noise.count is not an integer" in combined
 
 
-def test_rlens_surface_smoke_fails_when_output_health_noise_count_mismatches_excluded_count(tmp_path):
+def test_repoground_surface_smoke_fails_when_output_health_noise_count_mismatches_excluded_count(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     def mutate(output_health):
@@ -231,7 +231,7 @@ def test_rlens_surface_smoke_fails_when_output_health_noise_count_mismatches_exc
     assert "output_health noise_hygiene.excluded_noise_count does not match excluded_noise.count" in combined
 
 
-def test_rlens_surface_smoke_fails_when_post_emit_noise_count_mismatches_excluded_count(tmp_path):
+def test_repoground_surface_smoke_fails_when_post_emit_noise_count_mismatches_excluded_count(tmp_path):
     merges, artifacts = _write_bundle(tmp_path)
 
     def mutate(post_emit):

@@ -44,13 +44,13 @@ def _is_loopback_host(host: str) -> bool:
 
 
 def _get_port() -> int:
-    raw = os.environ.get("REPOGROUND_PORT") or os.environ.get("RLENS_PORT", "")
+    raw = os.environ.get("REPOGROUND_PORT", "")
     if not raw:
         return 8787
     try:
         return int(raw)
     except ValueError:
-        print(f"[repoground] Warning: Invalid RLENS_PORT='{raw}', defaulting to 8787", file=sys.stderr)
+        print(f"[repoground] Warning: Invalid REPOGROUND_PORT='{raw}', defaulting to 8787", file=sys.stderr)
         return 8787
 
 
@@ -72,17 +72,17 @@ def main(*, init_service_fn=None, uvicorn_module=None):
     arch_parser.add_argument("--entrypoints", action="store_true", help="Extract python entrypoints as JSON")
 
     # Server mode (default when no subcommands provided)
-    parser.add_argument("--host", default=os.environ.get("REPOGROUND_HOST") or os.environ.get("RLENS_HOST", "127.0.0.1"))
+    parser.add_argument("--host", default=os.environ.get("REPOGROUND_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=_get_port())
-    parser.add_argument("--hub", default=os.environ.get("REPOGROUND_HUB") or os.environ.get("RLENS_HUB"), help="Path to the Hub directory (Required)")
-    parser.add_argument("--merges", default=os.environ.get("REPOGROUND_MERGES") or os.environ.get("RLENS_MERGES"), help="Path to output directory")
-    parser.add_argument("--token", default=os.environ.get("REPOGROUND_TOKEN") or os.environ.get("RLENS_TOKEN"), help="Auth token (Required for non-loopback)")
+    parser.add_argument("--hub", default=os.environ.get("REPOGROUND_HUB"), help="Path to the Hub directory (Required)")
+    parser.add_argument("--merges", default=os.environ.get("REPOGROUND_MERGES"), help="Path to output directory")
+    parser.add_argument("--token", default=os.environ.get("REPOGROUND_TOKEN"), help="Auth token (Required for non-loopback)")
     parser.add_argument("--open", action="store_true", help="ignored (legacy)")
 
     args, unknown = parser.parse_known_args()
 
     if unknown:
-        print(f"rlens: error: unrecognized arguments: {' '.join(unknown)}", file=sys.stderr)
+        print(f"repoground: error: unrecognized arguments: {' '.join(unknown)}", file=sys.stderr)
         parser.print_help(sys.stderr)
         sys.exit(2)
 
@@ -100,7 +100,7 @@ def main(*, init_service_fn=None, uvicorn_module=None):
 
     # 1. Validate Hub Path
     if not args.hub:
-         print("[repoground] Error: Missing hub path. Set --hub or REPOGROUND_HUB (legacy: RLENS_HUB).", file=sys.stderr)
+         print("[repoground] Error: Missing hub path. Set --hub or REPOGROUND_HUB.", file=sys.stderr)
          sys.exit(1)
 
     try:
@@ -132,7 +132,7 @@ def main(*, init_service_fn=None, uvicorn_module=None):
     token = args.token
     if not _is_loopback_host(args.host) and not token:
         print(f"[repoground] Security Error: Refusing to bind to non-loopback host '{args.host}' without a token.", file=sys.stderr)
-        print("[repoground] Hint: Set --token or REPOGROUND_TOKEN (legacy: RLENS_TOKEN).", file=sys.stderr)
+        print("[repoground] Hint: Set --token or REPOGROUND_TOKEN.", file=sys.stderr)
         sys.exit(1)
 
     if not _is_loopback_host(args.host):

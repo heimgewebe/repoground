@@ -330,8 +330,8 @@ def test_init_service_loopback_without_token_refuses_root(monkeypatch, tmp_path)
     _reset_allowlist(sec)
 
     # Ensure no tokens in env
-    monkeypatch.delenv("RLENS_TOKEN", raising=False)
-    monkeypatch.delenv("RLENS_FS_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("REPOGROUND_TOKEN", raising=False)
+    monkeypatch.delenv("REPOGROUND_FS_TOKEN_SECRET", raising=False)
 
     init_service(hub, host="127.0.0.1", token=None)
 
@@ -424,7 +424,7 @@ def test_atlas_abs_path_rejects_parent_components_before_resolution(tmp_path):
 def test_fs_roots_api_omits_system_without_auth(tmp_path, monkeypatch):
     hub = tmp_path / "hub"
     hub.mkdir()
-    monkeypatch.setenv("RLENS_FS_TOKEN_SECRET", "synthetic-fs-signing-secret")
+    monkeypatch.setenv("REPOGROUND_FS_TOKEN_SECRET", "synthetic-fs-signing-secret")
     init_service(hub, host="127.0.0.1", token=None)
 
     with TestClient(app) as client:
@@ -531,7 +531,7 @@ def test_init_service_removes_stale_root_when_binding_becomes_non_loopback(tmp_p
 
 def test_init_service_fs_token_secret_without_bearer_refuses_root(monkeypatch, tmp_path):
     """
-    Regression: RLENS_FS_TOKEN_SECRET signs FS download tokens but does NOT
+    Regression: REPOGROUND_FS_TOKEN_SECRET signs FS download tokens but does NOT
     enable bearer auth. On its own it must not widen the jail to system root,
     otherwise root browsing would be reachable with auth effectively disabled.
     Invariant: root allowlisted <=> verify_token is actually enforced.
@@ -542,8 +542,8 @@ def test_init_service_fs_token_secret_without_bearer_refuses_root(monkeypatch, t
     _reset_allowlist(sec)
     sec.set_token(None)
 
-    monkeypatch.delenv("RLENS_TOKEN", raising=False)
-    monkeypatch.setenv("RLENS_FS_TOKEN_SECRET", "fs-signing-secret")
+    monkeypatch.delenv("REPOGROUND_TOKEN", raising=False)
+    monkeypatch.setenv("REPOGROUND_FS_TOKEN_SECRET", "fs-signing-secret")
 
     init_service(hub, host="127.0.0.1", token=None)
 
@@ -558,8 +558,8 @@ def test_static_source_check_app_py():
     content = app_path.read_text(encoding="utf-8")
 
     # Legacy flags should be gone
-    assert "RLENS_ALLOW_FS_ROOT" not in content
-    assert "RLENS_OPERATOR_MODE" not in content
+    assert "REPOGROUND_ALLOW_FS_ROOT" not in content
+    assert "REPOGROUND_OPERATOR_MODE" not in content
 
     # Core Logic Markers should be present
     assert "_is_loopback_host(host)" in content
@@ -572,8 +572,8 @@ def test_static_source_check_rlens_cli():
     content = cli_path.read_text(encoding="utf-8")
 
     # Flags should be gone
-    assert "RLENS_ALLOW_FS_ROOT" not in content
-    assert "RLENS_OPERATOR_MODE" not in content
+    assert "REPOGROUND_ALLOW_FS_ROOT" not in content
+    assert "REPOGROUND_OPERATOR_MODE" not in content
 
     # Notice for non-loopback should be present
     assert "Home and root browsing will be refused by policy (non-loopback host)" in content

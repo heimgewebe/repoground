@@ -26,15 +26,14 @@ Lenskit, repoLens, rLens and RepoBrief are retired product names. They may appea
 only in the surface-specific compatibility categories recorded in
 `docs/contracts/repoground-compatibility-exit.v1.json`:
 
-- deprecated import, command and script delegates;
 - exact persisted 2.x schema, kind and artifact identifiers;
 - historical changelog, task, benchmark, diagnostic and proof records;
 - migration inventories that explain external consumer work.
 
 A compatibility name does not create a second implementation or a second
-product. New code, documentation and examples use RepoGround. Each removable
-adapter has an owner, a review date, measurable usage and a zero-usage gate;
-unknown usage blocks removal.
+product. New code, documentation and examples use RepoGround. The active
+repository contains no legacy import, command, script, or environment adapter;
+the inventory reports any observed external residue without restoring it.
 
 ## Stability boundaries
 

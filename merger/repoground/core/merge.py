@@ -1730,7 +1730,7 @@ LANG_MAP = {
     "ai-context": "yaml"
 }
 
-HUB_PATH_FILENAME = ".repolens-hub-path.txt"
+HUB_PATH_FILENAME = ".repoground-hub-path.txt"
 
 # Constants
 # Load Epistemic Charter from assets or fallback
@@ -1804,7 +1804,7 @@ class FileInfo(object):
 # --- Utilities ---
 
 def _hub_path_file(script_path: Path) -> Path:
-    # liegt im repoLens-Skriptordner (neben repolens.py)
+    # Stored beside the RepoGround Pythonista entry point.
     return script_path.parent / HUB_PATH_FILENAME
 
 
@@ -2067,7 +2067,7 @@ def detect_hub_dir(script_path: Path, arg_base_dir: Optional[str] = None) -> Pat
         if p.is_dir():
             return p
 
-    env_base = os.environ.get("REPOLENS_BASEDIR")
+    env_base = os.environ.get("REPOGROUND_BASEDIR")
     if env_base:
         p = Path(env_base).expanduser()
         if p.is_dir():
@@ -5488,7 +5488,7 @@ def write_reports_v2(
         generator_info = {
             "name": "lenskit",
             "platform": "unknown",
-            "version": os.getenv("REPOGROUND_VERSION") or os.getenv("RLENS_VERSION", CORE_VERSION)
+            "version": os.getenv("REPOGROUND_VERSION", CORE_VERSION)
         }
     elif not isinstance(generator_info, dict):
         try:
@@ -5497,7 +5497,7 @@ def write_reports_v2(
             generator_info = {
                 "name": "lenskit",
                 "platform": "unknown",
-                "version": os.getenv("REPOGROUND_VERSION") or os.getenv("RLENS_VERSION", CORE_VERSION)
+                "version": os.getenv("REPOGROUND_VERSION", CORE_VERSION)
             }
 
     def _json_safe(obj):

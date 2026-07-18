@@ -4,12 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from merger.repoground.cli.mcp_stdio import (
-    PROTOCOL_VERSION,
-    RepoBriefMcpStdioServer as LegacyRepoBriefMcpStdioServer,
-    RepoGroundMcpStdioServer,
-    serve_stdio,
-)
+from merger.repoground.cli.mcp_stdio import PROTOCOL_VERSION, RepoGroundMcpStdioServer, serve_stdio
 from merger.repoground.core import mcp_resources, mcp_tools
 
 
@@ -53,8 +48,7 @@ def _tools(server: RepoGroundMcpStdioServer) -> list[dict]:
     return response["result"]["tools"]
 
 
-def test_canonical_mcp_server_identity_and_legacy_class_alias(tmp_path):
-    assert LegacyRepoBriefMcpStdioServer is RepoGroundMcpStdioServer
+def test_canonical_mcp_server_identity(tmp_path):
     server = RepoGroundMcpStdioServer(bundle_root=tmp_path)
     initialized = _initialize(server)
     assert initialized["result"]["serverInfo"]["name"] == "repoground"
@@ -216,7 +210,7 @@ def test_mcp_stdio_calls_existing_ask_handler_and_adds_freshness(tmp_path, monke
 
     def fake_ask_context(**arguments):
         seen.update(arguments)
-        return {"kind": "repobrief.mcp.read_only_frontdoor", "status": "ok"}
+        return {"kind": "repoground.mcp.read_only_frontdoor", "status": "ok"}
 
     monkeypatch.setattr(mcp_tools, "ask_context", fake_ask_context)
     monkeypatch.setattr(
@@ -279,8 +273,8 @@ def test_mcp_stdio_resource_read_preserves_content_and_adds_metadata(tmp_path, m
     assert result["contents"] == [
         {"uri": uri, "mimeType": "text/markdown", "text": "# Demo\n"}
     ]
-    assert result["_meta"]["repobrief"]["liveFreshness"]["status"] == "stale"
-    assert result["_meta"]["repobrief"]["implicitRefresh"] is False
+    assert result["_meta"]["repoground"]["liveFreshness"]["status"] == "stale"
+    assert result["_meta"]["repoground"]["implicitRefresh"] is False
 
 
 def test_mcp_stdio_without_configured_repo_reports_not_comparable(tmp_path):
@@ -377,7 +371,7 @@ def test_mcp_stdio_dispatches_get_callees_and_adds_freshness(tmp_path, monkeypat
     def fake_get_callees(**arguments):
         seen.update(arguments)
         return {
-            "kind": "repobrief.mcp.read_only_frontdoor",
+            "kind": "repoground.mcp.read_only_frontdoor",
             "tool": "get_callees",
             "status": "available",
             "result": {"callees": [], "unresolved_call_sites": []},

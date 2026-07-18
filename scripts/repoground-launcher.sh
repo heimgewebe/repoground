@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Canonical RepoGround launcher (systemd wrapper).
 # It validates the API contract, authentication boundary and running version.
-HOST=${REPOGROUND_HOST:-${RLENS_HOST:-127.0.0.1}}
-PORT=${REPOGROUND_PORT:-${RLENS_PORT:-8787}}
+HOST=${REPOGROUND_HOST:-127.0.0.1}
+PORT=${REPOGROUND_PORT:-8787}
 URL="http://${HOST}:${PORT}"
 HEALTH_URL="${URL}/api/health"
 UNIT=${REPOGROUND_SERVICE_UNIT:-repoground}
@@ -32,7 +32,7 @@ expected_server_version() {
         local process_version
         process_version=$(
             tr '\0' '\n' <"/proc/${pid}/environ" |
-                sed -n -e 's/^REPOGROUND_VERSION=//p' -e 's/^RLENS_VERSION=//p' |
+                sed -n -e 's/^REPOGROUND_VERSION=//p' |
                 head -n 1
         )
         if [[ -n "$process_version" ]]; then

@@ -112,7 +112,7 @@ def test_ask_evaluation_cli_emits_report(tmp_path, capsys):
     goldset = _write_goldset(tmp_path / "ask_goldset.json")
 
     rc = main([
-        "repobrief",
+        "ground",
         "ask-eval",
         "--bundle-manifest",
         str(bundle["manifest"]),

@@ -20,11 +20,11 @@ DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_SSE_TIMEOUT_SECONDS = 300
 
 # Profile config keys allowed at the profile level. Tokens or secrets are
-# deliberately not part of this set — secrets must come from env (REPOGROUND_TOKEN,
-# legacy RLENS_TOKEN, or a profile-named token_env) or from --token, never from a repo-tracked or
+# deliberately not part of this set — secrets must come from env
+# (REPOGROUND_TOKEN or a profile-named token_env) or from --token, never from a repo-tracked or
 # config file.
 _PROFILE_ALLOWED_KEYS = frozenset({"base_url", "token_env"})
-_PROFILE_FORBIDDEN_KEYS = frozenset({"token", "rlens_token", "secret"})
+_PROFILE_FORBIDDEN_KEYS = frozenset({"token", "secret"})
 
 
 def _validate_profile_config(data: Any, path: pathlib.Path) -> dict:
@@ -70,16 +70,13 @@ def _validate_profile_config(data: Any, path: pathlib.Path) -> dict:
 
 
 def _profile_config_path() -> pathlib.Path:
-    explicit = os.environ.get("REPOGROUND_PROFILES") or os.environ.get("LENSKIT_RLENS_PROFILES")
+    explicit = os.environ.get("REPOGROUND_PROFILES")
     if explicit:
         return pathlib.Path(explicit).expanduser()
     xdg = os.environ.get("XDG_CONFIG_HOME")
     base = pathlib.Path(xdg).expanduser() if xdg else pathlib.Path.home() / ".config"
     canonical = base / "repoground" / "profiles.json"
-    legacy = base / "lenskit" / "rlens-profiles.json"
-    if canonical.exists() or not legacy.exists():
-        return canonical
-    return legacy
+    return canonical
 
 
 def _load_profile_config(path: pathlib.Path) -> dict:
@@ -95,7 +92,7 @@ def _load_profile_config(path: pathlib.Path) -> dict:
 
 def _is_profile_explicitly_requested(args: argparse.Namespace) -> bool:
     name = getattr(args, "leaf_profile", None) or getattr(args, "profile", None)
-    env_name = os.environ.get("REPOGROUND_PROFILE") or os.environ.get("RLENS_PROFILE") or None
+    env_name = os.environ.get("REPOGROUND_PROFILE") or None
     return bool(name or env_name)
 
 
@@ -113,7 +110,7 @@ def _select_profile(args: argparse.Namespace) -> Optional[Tuple[str, dict]]:
     config_error exit code.
     """
     name = getattr(args, "leaf_profile", None) or getattr(args, "profile", None)
-    env_name = os.environ.get("REPOGROUND_PROFILE") or os.environ.get("RLENS_PROFILE") or None
+    env_name = os.environ.get("REPOGROUND_PROFILE") or None
     explicit_request = bool(name or env_name)
     if not name:
         name = env_name
@@ -146,7 +143,7 @@ def _resolve_base_url(args: argparse.Namespace) -> str:
     if _is_profile_explicitly_requested(args):
         profile = _select_profile(args)
     if not base_url:
-        base_url = os.environ.get("REPOGROUND_BASE_URL") or os.environ.get("RLENS_BASE_URL")
+        base_url = os.environ.get("REPOGROUND_BASE_URL")
     if not base_url:
         if profile is None:
             profile = _select_profile(args)
@@ -164,7 +161,7 @@ def _resolve_token(args: argparse.Namespace) -> Optional[str]:
     token = getattr(args, "leaf_token", None) or getattr(args, "token", None)
     if token:
         return token
-    env_token = os.environ.get("REPOGROUND_TOKEN") or os.environ.get("RLENS_TOKEN")
+    env_token = os.environ.get("REPOGROUND_TOKEN")
     if env_token:
         return env_token
     profile = _select_profile(args)
@@ -286,13 +283,13 @@ def _add_common_options(
         "--base-url",
         dest=f"{dest_prefix}base_url",
         default=scalar_default,
-        help="RepoGround service base URL (overrides REPOGROUND_BASE_URL; legacy: RLENS_BASE_URL; default: http://127.0.0.1:8787)",
+        help="RepoGround service base URL (overrides REPOGROUND_BASE_URL; default: http://127.0.0.1:8787)",
     )
     parser.add_argument(
         "--token",
         dest=f"{dest_prefix}token",
         default=scalar_default,
-        help="Bearer token (overrides REPOGROUND_TOKEN; legacy: RLENS_TOKEN)",
+        help="Bearer token (overrides REPOGROUND_TOKEN)",
     )
     parser.add_argument(
         "--profile",
@@ -300,8 +297,7 @@ def _add_common_options(
         default=scalar_default,
         help=(
             "Host profile name from RepoGround profiles.json "
-            "(legacy file: lenskit/rlens-profiles.json; overrides REPOGROUND_PROFILE; "
-            "legacy env: RLENS_PROFILE; --base-url/REPOGROUND_BASE_URL take precedence)"
+            "(overrides REPOGROUND_PROFILE; --base-url/REPOGROUND_BASE_URL take precedence)"
         ),
     )
     parser.add_argument(
@@ -316,12 +312,11 @@ def _add_common_options(
 def register_service_client_commands(subparsers: argparse._SubParsersAction) -> None:
     client_parser = subparsers.add_parser(
         "service-client",
-        aliases=["rlens-client"],
-        help="Read-only RepoGround service client (legacy alias: rlens-client)",
+        help="Read-only RepoGround service client",
     )
     _add_common_options(client_parser)
     client_subparsers = client_parser.add_subparsers(
-        dest="rlens_cmd", help="RepoGround service-client subcommands"
+        dest="service_client_cmd", help="RepoGround service-client subcommands"
     )
 
     health_parser = client_subparsers.add_parser("health", help="Check service health")
@@ -932,35 +927,33 @@ def _cmd_profiles(args: argparse.Namespace) -> int:
 
 
 def run_service_client(args: argparse.Namespace) -> int:
-    if not hasattr(args, "rlens_cmd") or args.rlens_cmd is None:
+    if not hasattr(args, "service_client_cmd") or args.service_client_cmd is None:
         print("Usage: repoground service-client <subcommand>", file=sys.stderr)
         print(
             "Subcommands: health, artifacts, latest, jobs, job, run, cancel, logs, profiles",
             file=sys.stderr,
         )
         return 2
-    if args.rlens_cmd == "health":
+    if args.service_client_cmd == "health":
         return _cmd_health(args)
-    if args.rlens_cmd == "artifacts":
+    if args.service_client_cmd == "artifacts":
         return _cmd_artifacts(args)
-    if args.rlens_cmd == "latest":
+    if args.service_client_cmd == "latest":
         return _cmd_latest(args)
-    if args.rlens_cmd == "jobs":
+    if args.service_client_cmd == "jobs":
         return _cmd_jobs(args)
-    if args.rlens_cmd == "job":
+    if args.service_client_cmd == "job":
         return _cmd_job(args)
-    if args.rlens_cmd == "run":
+    if args.service_client_cmd == "run":
         return _cmd_run(args)
-    if args.rlens_cmd == "cancel":
+    if args.service_client_cmd == "cancel":
         return _cmd_cancel(args)
-    if args.rlens_cmd == "logs":
+    if args.service_client_cmd == "logs":
         return _cmd_logs(args)
-    if args.rlens_cmd == "profiles":
+    if args.service_client_cmd == "profiles":
         return _cmd_profiles(args)
-    print(f"Unknown service-client subcommand: {args.rlens_cmd!r}", file=sys.stderr)
+    print(f"Unknown service-client subcommand: {args.service_client_cmd!r}", file=sys.stderr)
     return 2
 
 
 # Bounded source compatibility for callers importing the old names.
-register_rlens_client_commands = register_service_client_commands
-run_rlens_client = run_service_client

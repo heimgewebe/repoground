@@ -279,7 +279,7 @@ def test_delta_context_cli_outputs_json(tmp_path, capsys):
     diff.write_text(_sample_diff(), encoding="utf-8")
 
     rc = main([
-        "repobrief",
+        "ground",
         "delta-context",
         "compile",
         "--diff",

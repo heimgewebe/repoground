@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable, MutableMapping
 from typing import Any
 
 
-_ACCESS_LOGGER = logging.getLogger("uvicorn.error.rlens_access")
+_ACCESS_LOGGER = logging.getLogger("uvicorn.error.repoground_access")
 _MAX_METHOD_CHARS = 16
 _MAX_ROUTE_CHARS = 256
 

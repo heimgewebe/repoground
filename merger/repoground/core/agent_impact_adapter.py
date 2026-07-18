@@ -279,8 +279,4 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
         return super().dispatch(request)
 
 
-__all__ = ["RepoGroundAgentImpactAdapter", "RepoBriefAgentImpactAdapter"]
-
-
-# Bounded source-compatibility class alias.
-RepoBriefAgentImpactAdapter = RepoGroundAgentImpactAdapter
+__all__ = ["RepoGroundAgentImpactAdapter"]

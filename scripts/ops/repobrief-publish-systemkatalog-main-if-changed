@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
-printf '%s\n' 'repobrief-publish-systemkatalog-main-if-changed is deprecated; use repoground-publish-systemkatalog-main-if-changed' >&2
-exec "$(dirname "$0")/repoground-publish-systemkatalog-main-if-changed" "$@"

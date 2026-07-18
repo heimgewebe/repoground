@@ -736,8 +736,3 @@ class RepoGroundReadonlyAdapter:
         )
         result.update({"error_code": "adapter_request_invalid", "error": error})
         return result
-
-
-# Bounded source-compatibility class aliases.
-RepoBriefReadonlyAdapterError = RepoGroundReadonlyAdapterError
-RepoBriefReadonlyAdapter = RepoGroundReadonlyAdapter

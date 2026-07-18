@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 from datetime import datetime, timezone
@@ -12,6 +13,17 @@ from typing import Any, Iterable
 
 MAX_CONFIG_BYTES = 1024 * 1024
 MAX_CMDLINE_BYTES = 1024 * 1024
+
+# Repository findings intentionally cover only executable source and tests.  The
+# historical record and versioned contracts are not active compatibility APIs.
+REPOSITORY_SCAN_ROOTS = ("merger/repoground", "scripts", "tests", "tools")
+ACTIVE_ALIAS_PATTERNS: dict[str, tuple[str, ...]] = {
+    "legacy-mcp-resource-scheme": ("repobrief://",),
+    "legacy-response-key": ('"repobrief": resource_meta',),
+    "legacy-class-forwarder": (r"RepoBrief\w+\s*=\s*RepoGround",),
+    "legacy-cli-option": ("--lenskit-version",),
+    "legacy-runtime-environment": ("RLENS_", "REPOLENS_"),
+}
 
 SURFACE_PATTERNS: dict[str, tuple[str, ...]] = {
     "legacy-python-namespace": ("merger.lenskit",),
@@ -121,6 +133,41 @@ def scan_configs(paths: Iterable[str | Path]) -> list[dict[str, Any]]:
     return findings
 
 
+def scan_repository(repo_root: str | Path) -> list[dict[str, Any]]:
+    """Find active source aliases without treating historical contracts as code."""
+    root = Path(repo_root).resolve()
+    findings: list[dict[str, Any]] = []
+    for relative_root in REPOSITORY_SCAN_ROOTS:
+        scan_root = root / relative_root
+        if not scan_root.is_dir():
+            continue
+        for path in sorted(scan_root.rglob("*")):
+            if not path.is_file() or path.suffix not in {".py", ".sh"}:
+                continue
+            relative = path.relative_to(root).as_posix()
+            if "/contracts/" in f"/{relative}/":
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            if relative == "merger/repoground/core/compatibility_inventory.py":
+                continue
+            matches = sorted(
+                category
+                for category, patterns in ACTIVE_ALIAS_PATTERNS.items()
+                if any(
+                    re.search(pattern, text)
+                    if category == "legacy-class-forwarder"
+                    else pattern in text
+                    for pattern in patterns
+                )
+            )
+            if matches:
+                findings.append({"path": relative, "matched_surfaces": matches})
+    return findings
+
+
 def service_state(unit: str) -> dict[str, Any]:
     """Read a bounded systemd user-unit state without changing it."""
     command = [
@@ -161,10 +208,12 @@ def build_inventory(
     *,
     config_paths: Iterable[str | Path] = (),
     proc_root: str | Path = "/proc",
+    repo_root: str | Path | None = None,
     include_services: bool = True,
 ) -> dict[str, Any]:
     processes = scan_processes(proc_root)
     configs = scan_configs(config_paths)
+    repository = scan_repository(repo_root) if repo_root is not None else []
     services = (
         [service_state("repoground.service"), service_state("rlens.service")]
         if include_services
@@ -186,6 +235,8 @@ def build_inventory(
         "raw_command_lines_included": False,
         "raw_config_contents_included": False,
         "matched_surfaces": matched,
+        "repository_alias_findings": repository,
+        "repository_aliases_zero": not repository,
         "process_findings": processes,
         "config_findings": configs,
         "service_states": services,

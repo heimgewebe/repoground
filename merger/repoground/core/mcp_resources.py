@@ -13,11 +13,8 @@ from merger.repoground.core import bundle_access
 
 KIND = "repoground.mcp.resource_read"
 LIST_KIND = "repoground.mcp.resource_list"
-LEGACY_KIND = "repobrief.mcp.resource_read"
-LEGACY_LIST_KIND = "repobrief.mcp.resource_list"
 VERSION = "v1"
 RESOURCE_PREFIX = "repoground://snapshot/"
-LEGACY_RESOURCE_PREFIX = "repobrief://snapshot/"
 MANIFEST_SUFFIX = ".bundle.manifest.json"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_RESOURCE_BYTES = 16 * 1024 * 1024
@@ -207,11 +204,8 @@ def _resource_uri(stem: str, suffix: str) -> str:
 
 def _parse_resource_uri(uri: str) -> tuple[str, str, str | None]:
     parsed = urlparse(uri)
-    if parsed.scheme not in {"repoground", "repobrief"} or parsed.netloc != "snapshot":
-        raise RepoGroundMcpResourceError(
-            "resource URI must start with repoground://snapshot/ "
-            "(legacy repobrief://snapshot/ remains accepted temporarily)"
-        )
+    if parsed.scheme != "repoground" or parsed.netloc != "snapshot":
+        raise RepoGroundMcpResourceError("resource URI must start with repoground://snapshot/")
     parts = [unquote(part) for part in parsed.path.split("/") if part]
     if len(parts) < 2:
         raise RepoGroundMcpResourceError("resource URI must include snapshot stem and resource name")
@@ -308,15 +302,12 @@ def _context_for_manifest(manifest: Path | None, *, reason: str | None = None) -
 
 
 def _base_result(uri: str, manifest: Path | None, *, status: str, reason: str | None = None) -> dict[str, Any]:
-    legacy_identity = urlparse(uri).scheme == "repobrief"
     return {
         "kind": KIND,
         "version": VERSION,
         "uri": uri,
         "identity": {
             "canonical_prefix": RESOURCE_PREFIX,
-            "legacy_prefix_used": legacy_identity,
-            "legacy_prefix": LEGACY_RESOURCE_PREFIX if legacy_identity else None,
         },
         "status": status,
         "bundle_manifest": str(manifest) if manifest else None,
@@ -399,14 +390,6 @@ def resource_templates() -> dict[str, Any]:
             "repoground://snapshot/{stem}/availability",
             "repoground://snapshot/{stem}/artifact/{role}",
         ],
-        "legacy_templates": [
-            "repobrief://snapshot/{stem}/manifest",
-            "repobrief://snapshot/{stem}/canonical",
-            "repobrief://snapshot/{stem}/reading-pack",
-            "repobrief://snapshot/{stem}/health",
-            "repobrief://snapshot/{stem}/availability",
-            "repobrief://snapshot/{stem}/artifact/{role}",
-        ],
         "mutation_boundary": _read_only_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
@@ -430,10 +413,9 @@ def list_mcp_resources(bundle_root: str | Path) -> dict[str, Any]:
         "version": VERSION,
         "status": "ok",
         "bundle_root": str(Path(bundle_root).expanduser().resolve()),
-        "resources": resources,
-        "templates": resource_templates()["templates"],
-        "legacy_templates": resource_templates()["legacy_templates"],
-        "mutation_boundary": _read_only_boundary(),
+            "resources": resources,
+            "templates": resource_templates()["templates"],
+            "mutation_boundary": _read_only_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
 
@@ -464,7 +446,3 @@ def read_mcp_resource(uri: str, *, bundle_root: str | Path) -> dict[str, Any]:
         return _read_artifact_resource(uri, manifest, role)
     mapped_role = FIXED_RESOURCE_KINDS[resource_name]
     return _read_artifact_resource(uri, manifest, mapped_role)
-
-
-# Bounded source-compatibility aliases. New code imports RepoGround names.
-RepoBriefMcpResourceError = RepoGroundMcpResourceError

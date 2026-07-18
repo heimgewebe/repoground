@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 def _get_server_version():
     # 1. Env Var (Canonical for builds)
-    env_ver = os.getenv("REPOGROUND_VERSION") or os.getenv("RLENS_VERSION")
+    env_ver = os.getenv("REPOGROUND_VERSION")
     if env_ver:
         return env_ver
 
@@ -83,10 +83,10 @@ def _get_server_version():
 SERVER_VERSION = _get_server_version()
 
 # Build ID for cache busting
-# If REPOGROUND_BUILD_ID is set (legacy: RLENS_BUILD_ID), use it (stable per build).
+# If REPOGROUND_BUILD_ID is set, use it (stable per build).
 # Else fall back to SERVER_VERSION (if git hash).
 # If dev/unknown, append timestamp to force reload on restarts.
-_env_build_id = os.getenv("REPOGROUND_BUILD_ID") or os.getenv("RLENS_BUILD_ID")
+_env_build_id = os.getenv("REPOGROUND_BUILD_ID")
 if _env_build_id:
     BUILD_ID = _env_build_id
 elif SERVER_VERSION != "dev":
@@ -146,7 +146,7 @@ def _count_active_jobs() -> int:
 
 
 def _service_restart_feature_flag_enabled() -> bool:
-    return (os.getenv("REPOGROUND_ENABLE_SERVICE_RESTART") or os.getenv("RLENS_ENABLE_SERVICE_RESTART")) == "1"
+    return os.getenv("REPOGROUND_ENABLE_SERVICE_RESTART") == "1"
 
 
 def _service_restart_unit() -> Optional[str]:
@@ -155,6 +155,9 @@ def _service_restart_unit() -> Optional[str]:
         return None
     if not SERVICE_UNIT_NAME_RE.fullmatch(raw):
         logger.warning("Refusing invalid REPOGROUND_SERVICE_UNIT=%r", raw)
+        return None
+    if raw != "repoground":
+        logger.warning("Refusing non-canonical REPOGROUND_SERVICE_UNIT=%r", raw)
         return None
     return raw
 
@@ -211,8 +214,8 @@ async def access_denied_handler(request: Request, exc: AccessDeniedError):
     return JSONResponse(status_code=403, content={"detail": str(exc)})
 
 # GC Configuration
-GC_MAX_JOBS = int(os.getenv("REPOGROUND_GC_MAX_JOBS") or os.getenv("RLENS_GC_MAX_JOBS", "100"))
-GC_MAX_AGE_HOURS = int(os.getenv("REPOGROUND_GC_MAX_AGE_HOURS") or os.getenv("RLENS_GC_MAX_AGE_HOURS", "24"))
+GC_MAX_JOBS = int(os.getenv("REPOGROUND_GC_MAX_JOBS", "100"))
+GC_MAX_AGE_HOURS = int(os.getenv("REPOGROUND_GC_MAX_AGE_HOURS", "24"))
 # SSE Configuration
 SSE_IDLE_RECHECK_SEC = 5.0
 
@@ -298,7 +301,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     # Sensitive filesystem access is available only on loopback with the
     # bearer token that verify_token actually enforces. Loopback alone is not
     # an authorization boundary: other local processes or users can connect.
-    # REPOGROUND_FS_TOKEN_SECRET (legacy: RLENS_FS_TOKEN_SECRET) signs navigation tokens but is not request auth.
+    # REPOGROUND_FS_TOKEN_SECRET signs navigation tokens but is not request auth.
     is_loopback = _is_loopback_host(host)
     has_token = bool(sec.token)
 
@@ -356,7 +359,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
             allow_origin_regex=allow_origin_regex,
             allow_credentials=False,
             allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type", "x-rlens-token"],
+            allow_headers=["Authorization", "Content-Type"],
         )
 
 def _list_dir(candidate: Path) -> Dict[str, Any]:
@@ -2297,7 +2300,7 @@ def get_raw_index_template():
         if index_path.exists():
             content = index_path.read_text(encoding="utf-8")
             # Inject Build ID (Static per process)
-            content = content.replace("__REPOGROUND_BUILD__", BUILD_ID).replace("__RLENS_BUILD__", BUILD_ID)
+            content = content.replace("__REPOGROUND_BUILD__", BUILD_ID)
             _raw_index_template = content
         else:
             _raw_index_template = ""
@@ -2331,7 +2334,7 @@ def serve_index(request: Request):
     # We mount at /ui. So base is {root_path}/ui/
     asset_base = f"{root_path}/ui/"
 
-    final_content = content.replace("__REPOGROUND_ASSET_BASE__", asset_base).replace("__RLENS_ASSET_BASE__", asset_base)
+    final_content = content.replace("__REPOGROUND_ASSET_BASE__", asset_base)
 
     headers = {
         "Cache-Control": "no-store, max-age=0",

@@ -3,7 +3,7 @@
 Parity Guard
 ------------
 Ensures feature parity between the Backend Model (JobRequest),
-Pythonista UI (repoLens), and Web UI (rLens).
+Pythonista UI (RepoGround Pythonista build), and Web UI (rLens).
 
 Checks:
 1. JobRequest model fields (Source of Truth).
@@ -25,66 +25,66 @@ FEATURES = {
         "cli_arg": "--level",
         "html_id": "profile",
         "js_key": "level",
-        "repolens_usage": "args.level"
+        "pythonista_usage": "args.level"
     },
     "mode": {
         "cli_arg": "--mode",
         "html_id": "mode",
         "js_key": "mode",
-        "repolens_usage": "args.mode"
+        "pythonista_usage": "args.mode"
     },
     "max_bytes": {
         "cli_arg": "--max-bytes",
         "html_id": "maxBytes",
         "js_key": "max_bytes",
-        "repolens_usage": "args.max_bytes" # ArgumentParser automatically converts - to _
+        "pythonista_usage": "args.max_bytes" # ArgumentParser automatically converts - to _
     },
     "split_size": {
         "cli_arg": "--split-size",
         "html_id": "splitSize",
         "js_key": "split_size",
-        "repolens_usage": "args.split_size"
+        "pythonista_usage": "args.split_size"
     },
     "plan_only": {
         "cli_arg": "--plan-only",
         "html_id": "planOnly",
         "js_key": "plan_only",
-        "repolens_usage": "args.plan_only"
+        "pythonista_usage": "args.plan_only"
     },
     "code_only": {
         "cli_arg": "--code-only",
         "html_id": "codeOnly",
         "js_key": "code_only",
-        "repolens_usage": "args.code_only"
+        "pythonista_usage": "args.code_only"
     },
     "meta_density": {
         "cli_arg": "--meta-density",
         "html_id": "metaDensity",
         "js_key": "meta_density",
-        "repolens_usage": "args.meta_density"
+        "pythonista_usage": "args.meta_density"
     },
     "json_sidecar": {
         "cli_arg": "--json-sidecar",
         # Explicit decision: Treat as a payload key in JS (even if logic is derived).
         # In JobRequest it is a field.
         "js_key": "json_sidecar",
-        "repolens_usage": "args.json_sidecar"
+        "pythonista_usage": "args.json_sidecar"
     },
     # Filters
     "extensions": {
         "cli_arg": "--extensions",
         "html_id": "extFilter",
         "js_key": "extensions",
-        "repolens_usage": "args.extensions"
+        "pythonista_usage": "args.extensions"
     },
     "path_filter": {
         "cli_arg": "--path-filter",
         "html_id": "pathFilter",
         "js_key": "path_filter",
-        "repolens_usage": "args.path_filter"
+        "pythonista_usage": "args.path_filter"
     },
     # Surface parity only: this guard checks that the --pre-pull flag, the #prePull
-    # WebUI element, the pre_pull payload key and repoLens' args.pre_pull all exist.
+    # WebUI element, the pre_pull payload key and RepoGround Pythonista build' args.pre_pull all exist.
     # It does NOT (and need not) assert the shared semantics — effective_pre_pull =
     # pre_pull and not plan_only, two-phase plan/apply, fast-forward-only — which are
     # covered by test_repo_sync.py / test_service_runner_pre_pull.py /
@@ -93,11 +93,11 @@ FEATURES = {
         "cli_arg": "--pre-pull",
         "html_id": "prePull",
         "js_key": "pre_pull",
-        "repolens_usage": "args.pre_pull"
+        "pythonista_usage": "args.pre_pull"
     },
     # rLens Source Acquisition v1. Surface-parity only: the guard checks that the
     # --source-mode/--remote-ref/--remote-ref-policy flags, the WebUI elements,
-    # the payload keys and repoLens' args all exist across surfaces. The shared
+    # the payload keys and RepoGround Pythonista build' args all exist across surfaces. The shared
     # semantics (effective source mode, remote_snapshot non-mutation, ref policy,
     # dry-plan) are covered by test_source_acquisition.py and the service/CLI/UI
     # tests, not by this guard.
@@ -105,26 +105,26 @@ FEATURES = {
         "cli_arg": "--source-mode",
         "html_id": "sourceMode",
         "js_key": "repo_source_mode",
-        "repolens_usage": "args.source_mode"
+        "pythonista_usage": "args.source_mode"
     },
     "remote_ref": {
         "cli_arg": "--remote-ref",
         "html_id": "remoteRef",
         "js_key": "remote_ref",
-        "repolens_usage": "args.remote_ref"
+        "pythonista_usage": "args.remote_ref"
     },
     "remote_ref_policy": {
         "cli_arg": "--remote-ref-policy",
         "html_id": "remoteRefPolicy",
         "js_key": "remote_ref_policy",
-        "repolens_usage": "args.remote_ref_policy"
+        "pythonista_usage": "args.remote_ref_policy"
     }
 }
 
 # Paths
 ROOT = Path(__file__).parent.parent.resolve()
 MODEL_PATH = ROOT / "merger/repoground/service/models.py"
-REPOLENS_PATH = ROOT / "merger/repoground/frontends/pythonista/build.py"
+PYTHONISTA_BUILD_PATH = ROOT / "merger/repoground/frontends/pythonista/build.py"
 WEBUI_HTML_PATH = ROOT / "merger/repoground/frontends/webui/index.html"
 WEBUI_JS_PATH = ROOT / "merger/repoground/frontends/webui/app.js"
 
@@ -165,11 +165,11 @@ class ParityChecker:
             else:
                 self.log_pass(f"Feature '{feature}' present in JobRequest.")
 
-    def check_repolens(self):
+    def check_pythonista_build(self):
         """Check Pythonista UI/CLI using AST."""
-        print(f"Checking repoLens in {REPOLENS_PATH}...")
+        print(f"Checking RepoGround Pythonista build in {PYTHONISTA_BUILD_PATH}...")
         try:
-            content = REPOLENS_PATH.read_text("utf-8")
+            content = PYTHONISTA_BUILD_PATH.read_text("utf-8")
             tree = ast.parse(content)
         except Exception as e:
             self.log_error(f"Could not parse repolens.py: {e}")
@@ -242,22 +242,22 @@ class ParityChecker:
             cli_arg = config.get("cli_arg")
             if cli_arg:
                 if cli_arg in defined_cli_args:
-                    self.log_pass(f"repoLens CLI: {cli_arg} definition found (AST).")
+                    self.log_pass(f"RepoGround Pythonista build CLI: {cli_arg} definition found (AST).")
                 else:
-                    self.log_error(f"repoLens CLI: Definition for {cli_arg} missing (feature: {feature}).")
+                    self.log_error(f"RepoGround Pythonista build CLI: Definition for {cli_arg} missing (feature: {feature}).")
 
             # Check Usage
-            usage_key = config.get("repolens_usage")
+            usage_key = config.get("pythonista_usage")
             if usage_key:
                 field_name = usage_key.split('.')[-1]
 
                 if usage_key in accessed_args:
-                    self.log_pass(f"repoLens Usage: {usage_key} accessed (AST).")
+                    self.log_pass(f"RepoGround Pythonista build Usage: {usage_key} accessed (AST).")
                 elif has_generic_usage_ast and field_name in accessed_keys:
                     # Strict Generic: requires vars(args) AND usage as a subscript key anywhere
-                    self.log_pass(f"repoLens Usage: {usage_key} accessed (Generic AST + Key Usage).")
+                    self.log_pass(f"RepoGround Pythonista build Usage: {usage_key} accessed (Generic AST + Key Usage).")
                 else:
-                    self.log_error(f"repoLens Usage: {usage_key} not explicitly accessed and key literal not used as subscript.")
+                    self.log_error(f"RepoGround Pythonista build Usage: {usage_key} not explicitly accessed and key literal not used as subscript.")
 
     def check_webui_html(self):
         """Check index.html for IDs."""
@@ -322,7 +322,7 @@ class ParityChecker:
             sys.exit(0)
 
         self.check_model_fields()
-        self.check_repolens()
+        self.check_pythonista_build()
         self.check_webui_html()
         self.check_webui_js()
 

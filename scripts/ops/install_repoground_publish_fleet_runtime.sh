@@ -36,17 +36,11 @@ for unit in "${OLD_TIMERS[@]}"; do
 done
 
 install -m 0755 "$ROOT/scripts/ops/repoground-publish-fleet" "$BIN_DIR/repoground-publish-fleet"
-install -m 0755 "$ROOT/scripts/ops/rb-publish-fleet" "$BIN_DIR/rb-publish-fleet"
 install -m 0755 "$ROOT/scripts/ops/repoground-publication-policy" "$BIN_DIR/repoground-publication-policy"
-install -m 0755 "$ROOT/scripts/ops/rb-publication-policy" "$BIN_DIR/rb-publication-policy"
 install -m 0755 "$ROOT/scripts/ops/repoground-publish-systemkatalog-main" \
   "$BIN_DIR/repoground-publish-systemkatalog-main"
 install -m 0755 "$ROOT/scripts/ops/repoground-publish-systemkatalog-main-if-changed" \
   "$BIN_DIR/repoground-publish-systemkatalog-main-if-changed"
-install -m 0755 "$ROOT/scripts/ops/repobrief-publish-systemkatalog-main" \
-  "$BIN_DIR/repobrief-publish-systemkatalog-main"
-install -m 0755 "$ROOT/scripts/ops/repobrief-publish-systemkatalog-main-if-changed" \
-  "$BIN_DIR/repobrief-publish-systemkatalog-main-if-changed"
 for unit in "$ROOT"/ops/systemd/repoground-fleet/*.{service,timer}; do
   install -m 0644 "$unit" "$UNIT_DIR/$(basename "$unit")"
 done

@@ -427,13 +427,13 @@ def test_resolved_evidence_hits_are_directly_usable(tmp_path):
     assert hit["freshness"] == result["freshness"]
 
 
-def test_repobrief_query_cli_defaults_to_resolved_evidence(tmp_path, capsys):
+def test_repoground_query_cli_defaults_to_resolved_evidence(tmp_path, capsys):
     from merger.repoground.cli.main import main
 
     bundle = _build_resolved_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "query",
         "--bundle-manifest",
         str(bundle["manifest"]),
@@ -462,13 +462,13 @@ def test_repobrief_query_cli_defaults_to_resolved_evidence(tmp_path, capsys):
     assert data["mutation_boundary"]["read_paths_do_not_refresh"] is True
 
 
-def test_repobrief_query_cli_can_emit_raw_bounded_index_result(tmp_path, capsys):
+def test_repoground_query_cli_can_emit_raw_bounded_index_result(tmp_path, capsys):
     from merger.repoground.cli.main import main
 
     bundle = _build_resolved_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "query",
         "--bundle-manifest",
         str(bundle["manifest"]),

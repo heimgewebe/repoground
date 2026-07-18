@@ -28,11 +28,9 @@ def test_watcher_is_only_a_compatibility_entrypoint() -> None:
     assert "--repo" not in text
 
 
-def test_legacy_systemkatalog_entrypoints_are_thin_delegates() -> None:
-    for path in (LEGACY_PUBLISH, LEGACY_WATCH):
-        text = path.read_text(encoding="utf-8")
-        assert "is deprecated; use repoground-" in text
-        assert "systemctl" not in text
+def test_legacy_systemkatalog_entrypoints_are_removed() -> None:
+    assert not LEGACY_PUBLISH.exists()
+    assert not LEGACY_WATCH.exists()
 
 
 def test_compatibility_installer_delegates_to_single_fleet_installer() -> None:
