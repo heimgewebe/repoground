@@ -4,7 +4,7 @@
   "observed_on": "2026-07-18",
   "scope": {
     "included": [
-      "tracked repository source",
+      "tracked repository source for which the project has authority to grant Apache-2.0 rights",
       "documentation and configuration",
       "deterministic source-candidate archives produced from an exact Git commit"
     ],
@@ -14,6 +14,11 @@
       "vendored dependency source not already tracked in the repository",
       "model weights and external datasets"
     ]
+  },
+  "relationship_to_prior_review": {
+    "review": "docs/release/third-party-license-review.v1.json",
+    "effect": "supersedes its 2026-07-12 no-publication conclusion only for the source-only scope named here",
+    "preserved_boundary": "bundled dependencies and other excluded artifacts remain uncleared"
   },
   "evidence": {
     "inventory": "docs/release/third-party-license-review.v1.json",
@@ -28,10 +33,11 @@
     "source_distribution_allowed": true,
     "project_license_expression": "Apache-2.0",
     "bundled_dependency_distribution_allowed": false,
-    "reason": "The reviewed source candidate contains project source and dependency references, not installed third-party packages. Metadata ambiguity therefore does not block publication of the project source, but remains a review boundary for bundled artifacts."
+    "reason": "The reviewed source candidate contains project source and dependency references, not installed third-party packages. Metadata ambiguity therefore does not block publication of project-controlled source, but remains a review boundary for bundled artifacts."
   },
   "does_not_establish": [
     "legal advice",
+    "authority to relicense independently copyrighted historical contributions without any consent legally required",
     "clearance for binary, wheel, container, model, or dataset distribution",
     "absence of third-party copyright or trademark claims",
     "security or release readiness"
