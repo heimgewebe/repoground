@@ -10,6 +10,18 @@ Subject to that license, anyone may use, copy, modify, and redistribute the
 project, including for commercial purposes. The license includes its own
 conditions, warranty disclaimer, and patent terms.
 
+## Rights-authority boundary
+
+The project license can grant only rights held by, or validly licensed to,
+the relevant copyright holder. This change does not silently override an
+independent copyright notice or separate license attached to particular
+material, and it is not a substitute for consent from a historical contributor
+where such consent is legally required.
+
+No complete authorship-chain legal audit is claimed here. A concrete conflict
+must be resolved against the affected file and contribution history rather than
+by assuming that repository-level metadata settles ownership.
+
 ## Project identity is separate
 
 Apache-2.0 does not grant a general right to present a modified or unrelated
@@ -23,9 +35,10 @@ granted by Apache-2.0.
 ## Source-candidate distribution
 
 Deterministic source-candidate archives bind source bytes to an exact Git
-commit. They may be distributed under Apache-2.0. Building such an archive
-does not by itself make it an official project release or establish product,
-security, or deployment readiness.
+commit. They may be distributed under Apache-2.0 to the extent that the
+repository has authority to grant the corresponding rights. Building such an
+archive does not by itself make it an official project release or establish
+product, security, or deployment readiness.
 
 ## Third-party boundary
 
@@ -38,8 +51,9 @@ review. See `third-party-source-distribution-review.v1.json`.
 ## Contributions
 
 Unless explicitly stated otherwise, contributions intentionally submitted
-for inclusion are handled under Apache-2.0, consistent with section 5 of the
-license. Contributors retain copyright in their own contributions.
+for inclusion after adoption of this policy are handled under Apache-2.0,
+consistent with section 5 of the license. Contributors retain copyright in
+their own contributions.
 
 ## Decision history
 
