@@ -74,6 +74,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_evidence_query import register_evidence_query_commands
     register_evidence_query_commands(subparsers)
 
+    # Explicit incremental retrieval snapshot writer and optional watcher.
+    from .cmd_incremental_snapshot import register_incremental_snapshot_commands
+    register_incremental_snapshot_commands(subparsers)
+
     # RepoGround service client command
     from .cmd_service_client import register_service_client_commands
     register_service_client_commands(subparsers)
@@ -291,13 +295,15 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)
-    elif parsed_args.command in {"token-budget", "evidence-query"}:
+    elif parsed_args.command in {"token-budget", "evidence-query", "retrieval-snapshot"}:
         from .cmd_evidence_query import run_evidence_query
+        from .cmd_incremental_snapshot import run_incremental_snapshot
         from .cmd_token_budget import run_token_budget
 
         handlers = {
             "token-budget": run_token_budget,
             "evidence-query": run_evidence_query,
+            "retrieval-snapshot": run_incremental_snapshot,
         }
         return handlers[parsed_args.command](parsed_args)
     elif parsed_args.command == "artifact":
