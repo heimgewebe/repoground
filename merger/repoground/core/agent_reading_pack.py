@@ -500,6 +500,27 @@ def render_agent_reading_pack(model: PackModel) -> str:
         lines.append(f"- `{role}` — {guide}")
     lines.append("")
 
+    # ── REPOSITORY_GUIDE ────────────────────────────────────────────────
+    lines.append("## REPOSITORY_GUIDE")
+    lines.append(
+        "Navigate in this order: use `sqlite_index` to locate candidates, resolve "
+        "their range or citation, then read the corresponding `canonical_md` bytes."
+    )
+    lines.append(
+        "For a live working-tree address, use `live_repo_address` only when its "
+        "status is `available`; otherwise report its explicit reason instead of "
+        "inventing a source line."
+    )
+    lines.append(
+        "For natural-language zero hits, retry once with the deterministic "
+        "snake_case-aware OR fallback; its BM25 ordering is a candidate ranking, not evidence."
+    )
+    lines.append(
+        "Use `repoground evidence-query --bundle-manifest <path> --q <query>` "
+        "for compact live path:line navigation."
+    )
+    lines.append("")
+
     # ── REQUIRED_READING_BY_TASK ─────────────────────────────────────────
     lines.append("## REQUIRED_READING_BY_TASK")
     lines.append(

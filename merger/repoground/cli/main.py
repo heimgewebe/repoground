@@ -70,6 +70,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_token_budget import register_token_budget_commands
     register_token_budget_commands(subparsers)
 
+    # Canonical compact evidence navigation surface.
+    from .cmd_evidence_query import register_evidence_query_commands
+    register_evidence_query_commands(subparsers)
+
     # RepoGround service client command
     from .cmd_service_client import register_service_client_commands
     register_service_client_commands(subparsers)
@@ -290,6 +294,9 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "token-budget":
         from .cmd_token_budget import run_token_budget
         return run_token_budget(parsed_args)
+    elif parsed_args.command == "evidence-query":
+        from .cmd_evidence_query import run_evidence_query
+        return run_evidence_query(parsed_args)
     elif parsed_args.command == "artifact":
         from . import cmd_artifact
         return cmd_artifact.run_artifact_lookup(parsed_args)

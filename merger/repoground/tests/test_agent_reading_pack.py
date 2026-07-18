@@ -274,6 +274,7 @@ def test_pack_has_governance_and_sentinel(tmp_path):
     for section in (
         "## BUNDLE_IDENTITY",
         "## READING_POLICY",
+        "## REPOSITORY_GUIDE",
         "## REQUIRED_READING_BY_TASK",
         "## WHEN_CANONICAL_MD_ONLY_IS_INSUFFICIENT",
         "## SIDECAR_USAGE_RULES",
@@ -287,6 +288,15 @@ def test_pack_has_governance_and_sentinel(tmp_path):
         "## EPISTEMIC_EMPTINESS",
     ):
         assert section in body, f"missing section {section}"
+
+
+def test_repository_guide_requires_live_resolution_or_an_explicit_reason(tmp_path):
+    body = Path(produce_agent_reading_pack(str(_make_bundle(tmp_path)))["output_path"]).read_text()
+    section = _section(body, "REPOSITORY_GUIDE")
+
+    assert "live_repo_address" in section
+    assert "explicit reason" in section
+    assert "snake_case-aware OR fallback" in section
 
 
 def test_pack_front_door_task_profiles_and_artifact_roles(tmp_path):
