@@ -21,6 +21,10 @@ At least once per calendar quarter, search and record:
 7. fundraising pages or social accounts presenting themselves as the
    official RepoGround project.
 
+Automated alerts may supplement this process, but they are discovery signals,
+not verified findings. A relevant alert must still be checked against the
+primary source and recorded below before it is treated as project evidence.
+
 ## Record format
 
 Add a dated entry under `docs/legal/name-watch-log/` containing:
