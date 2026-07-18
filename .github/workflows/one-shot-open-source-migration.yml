@@ -1,0 +1,892 @@
+name: one-shot-open-source-migration
+
+on:
+  push:
+    branches:
+      - feat/repoground-open-source-name-stewardship-v1
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repoground-open-source-migration-v1
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Apply owner decision and defensive name stewardship
+        env:
+          BRANCH_NAME: feat/repoground-open-source-name-stewardship-v1
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import re
+          import urllib.request
+          from pathlib import Path
+
+          ROOT = Path.cwd()
+
+          def read(path: str) -> str:
+              return (ROOT / path).read_text(encoding="utf-8")
+
+          def write(path: str, content: str) -> None:
+              target = ROOT / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content.rstrip() + "\n", encoding="utf-8")
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one replacement, found {count}: {old!r}")
+              write(path, text.replace(old, new, 1))
+
+          # Use the canonical license text from the Apache Software Foundation.
+          with urllib.request.urlopen(
+              "https://www.apache.org/licenses/LICENSE-2.0.txt", timeout=30
+          ) as response:
+              apache_license = response.read().decode("utf-8")
+          if not apache_license.startswith("Apache License"):
+              raise SystemExit("unexpected Apache license prefix")
+          if "Version 2.0, January 2004" not in apache_license:
+              raise SystemExit("unexpected Apache license version")
+          if "END OF TERMS AND CONDITIONS" not in apache_license:
+              raise SystemExit("incomplete Apache license text")
+          write("LICENSE", apache_license)
+
+          write(
+              "NOTICE",
+              """RepoGround
+          Copyright 2026 Alexander Mohr
+
+          RepoGround is made available under the Apache License, Version 2.0.
+          The RepoGround project name and logos are governed separately by
+          TRADEMARK_POLICY.md. The trademark policy does not limit rights granted
+          by the Apache License to use, modify, or distribute the software.
+          """,
+          )
+
+          write(
+              "TRADEMARK_POLICY.md",
+              """# RepoGround name and trademark policy
+
+          ## Purpose
+
+          RepoGround is free and open-source software. The project name is kept
+          separately from the software license so that nobody can impersonate the
+          official project, redirect community donations, or distribute a changed
+          version while presenting it as an official RepoGround release.
+
+          This policy is intentionally permissive. It governs use of the RepoGround
+          name and project logos; it does not restrict any right granted by the
+          Apache License, Version 2.0. It does not claim that RepoGround is a
+          registered trademark in every or any jurisdiction.
+
+          ## Current custodian
+
+          Until a neutral, non-profit community steward exists, Alexander Mohr acts
+          as custodian of the RepoGround project identity. The role is fiduciary in
+          spirit: the name is to be protected for the project community, not used to
+          create a paywall around the software.
+
+          ## Uses allowed without permission
+
+          You may, truthfully and without implying endorsement:
+
+          - refer to RepoGround in articles, documentation, research, talks, reviews,
+            bug reports, and comparisons;
+          - say that software uses, supports, integrates with, or is compatible with
+            RepoGround;
+          - redistribute an unmodified official RepoGround release under its original
+            name;
+          - use the name for non-commercial community meetings, study groups, and
+            contribution events;
+          - create and distribute a fork, provided its primary name is distinguishable
+            and it clearly states that it is modified and not an official RepoGround
+            release;
+          - use screenshots or small excerpts of official project branding for
+            truthful commentary and identification.
+
+          ## Uses requiring prior permission
+
+          Permission is required before you:
+
+          - use RepoGround as the primary name of another product, service,
+            organization, company, package, domain, or application;
+          - distribute a modified version under the sole or dominant name RepoGround;
+          - use project logos or presentation in a way likely to imply official
+            sponsorship, certification, control, or endorsement;
+          - collect money, donations, sponsorships, or fees while representing the
+            activity as official RepoGround fundraising;
+          - register RepoGround or a confusingly similar sign as a trademark,
+            company name, package identity, social-media identity, or domain for an
+            unrelated or competing undertaking.
+
+          ## Fork naming
+
+          Forks are welcome. A fork may explain its origin using wording such as
+          “based on RepoGround” or “compatible with RepoGround”. Its main product name
+          must remain distinguishable, and prominent surfaces must disclose that the
+          fork is independent when it differs from the official project.
+
+          ## Enforcement principles
+
+          Enforcement is limited to preventing material confusion, impersonation,
+          fraud, deceptive fundraising, or misattribution. The normal first step is a
+          clear notice and a reasonable opportunity to correct the presentation.
+          Good-faith community use, criticism, interoperability, and exercise of the
+          Apache-2.0 software freedoms are not enforcement targets.
+
+          ## Community transition
+
+          When a durable non-profit community entity with transparent governance
+          exists, the intended path is to transfer or license stewardship of the
+          RepoGround identity to that entity under safeguards against sale,
+          enclosure, or donor control.
+
+          ## Contact
+
+          Until a dedicated project contact exists, requests may be opened publicly
+          as a GitHub issue in `heimgewebe/repoground`. Sensitive disputes should not
+          include private personal information in a public issue.
+          """,
+          )
+
+          write(
+              "FUNDING.md",
+              """# RepoGround funding principles
+
+          RepoGround is free to use, study, modify, and redistribute under the
+          Apache License, Version 2.0. Payment is not required for access to the
+          software or its source code.
+
+          Funding, if introduced, should follow these principles:
+
+          - contributions are voluntary donations or transparent sponsorships;
+          - donors receive no ownership of the community, project name, roadmap, or
+            maintainer decisions merely because they donated;
+          - no essential feature is intentionally withheld to pressure payment;
+          - material income and project spending should be reported transparently;
+          - fundraising under the official RepoGround name must follow
+            `TRADEMARK_POLICY.md` and be attributable to the official project;
+          - a future non-profit steward is preferred over permanent personal control
+            when the community is mature enough to sustain it.
+
+          No donation channel is currently declared by this document. It records the
+          conditions that any future channel should satisfy.
+          """,
+          )
+
+          write(
+              "docs/legal/name-and-stewardship.md",
+              """# RepoGround name, origin, and stewardship record
+
+          ## Recorded public use
+
+          The name **RepoGround** is documented as the canonical project and product
+          identity no later than 2026-07-17 in this public repository. Supporting
+          repository evidence includes:
+
+          - `docs/decisions/repoground-3-naming-and-migration.v1.json`;
+          - the public repository `heimgewebe/repoground`;
+          - the 3.0.0 changelog entry dated 2026-07-17;
+          - public Git history preserving the migration from earlier product names.
+
+          This record is evidence of project chronology. It is not a representation
+          that a trademark registration has been obtained or that no earlier third-
+          party rights exist.
+
+          ## Defensive purpose
+
+          Name stewardship exists to keep users able to identify the official
+          project and to prevent impersonation, deceptive fundraising, and false
+          attribution. It is not intended to stop independent implementations,
+          forks, interoperability, criticism, or use of the Apache-licensed code.
+
+          ## Custodial commitment
+
+          While Alexander Mohr remains the custodian, the RepoGround identity should:
+
+          1. not be sold or exclusively licensed to enclose the free project;
+          2. not be used to revoke or narrow Apache-2.0 rights;
+          3. be enforced proportionally and primarily against material confusion or
+             deception;
+          4. move to a suitable non-profit community steward when a durable and
+             accountable organization exists.
+
+          ## Separation of rights
+
+          - `LICENSE` controls copyright and patent permissions for the software.
+          - `TRADEMARK_POLICY.md` controls potentially confusing use of the project
+            identity.
+          - `FUNDING.md` records the intended voluntary and community-independent
+            funding model.
+          """,
+          )
+
+          write(
+              "docs/legal/name-watch.md",
+              """# RepoGround name watch
+
+          ## Goal
+
+          Detect potentially conflicting uses early without paying for a commercial
+          watch service. A hit is not automatically a legal conflict; relevance
+          depends on similarity, territory, goods or services, timing, and actual
+          likelihood of confusion.
+
+          ## Quarterly check
+
+          At least once per calendar quarter, search and record:
+
+          1. DPMAregister for `RepoGround`, `Repo Ground`, and close variants;
+          2. EUIPO/TMview for the same variants, especially software and technology
+             services;
+          3. WIPO Global Brand Database for international registrations;
+          4. GitHub repository and organization names;
+          5. package registries including PyPI, npm, and crates.io;
+          6. major search engines and relevant domain registrations;
+          7. fundraising pages or social accounts presenting themselves as the
+             official RepoGround project.
+
+          ## Record format
+
+          Add a dated entry under `docs/legal/name-watch-log/` containing:
+
+          - exact search date and database;
+          - query strings used;
+          - candidate name, owner, territory, classes or product area;
+          - source link or stable identifier;
+          - initial classification: irrelevant, monitor, or investigate;
+          - reason and next review date.
+
+          Do not publish unnecessary personal data. A potentially serious hit should
+          be verified from the primary registry before any contact or accusation.
+          """,
+          )
+
+          write(
+              "docs/legal/name-watch-log/2026-07-18-baseline.md",
+              """# RepoGround name-watch baseline — 2026-07-18
+
+          ## Scope
+
+          This baseline records the start of the free name-watch process. It is not a
+          professional clearance search and does not establish availability of the
+          name in every jurisdiction.
+
+          ## Known project identity
+
+          - canonical spelling: `RepoGround`;
+          - repository: `heimgewebe/repoground`;
+          - documented canonical adoption: 2026-07-17;
+          - relevant field: repository analysis, developer tooling, source-code and
+            AI context preparation.
+
+          ## Follow-up
+
+          Complete and record the primary-registry queries listed in
+          `docs/legal/name-watch.md` during each quarterly review. Escalate only
+          materially similar uses in related fields or deceptive claims of official
+          project status.
+          """,
+          )
+
+          source_review = {
+              "kind": "repoground.third_party_source_distribution_review",
+              "version": "1.0",
+              "observed_on": "2026-07-18",
+              "scope": {
+                  "included": [
+                      "tracked repository source",
+                      "documentation and configuration",
+                      "deterministic source-candidate archives produced from an exact Git commit",
+                  ],
+                  "excluded": [
+                      "third-party wheels",
+                      "container images containing installed dependencies",
+                      "vendored dependency source not already tracked in the repository",
+                      "model weights and external datasets",
+                  ],
+              },
+              "evidence": {
+                  "inventory": "docs/release/third-party-license-review.v1.json",
+                  "source_candidate_embeds_third_party_packages": False,
+                  "dependencies_are_referenced_not_vendored": True,
+                  "inventory_package_count": 57,
+                  "inventory_identified_count": 53,
+                  "inventory_metadata_ambiguous_count": 4,
+                  "inventory_unresolved_count": 0,
+              },
+              "decision": {
+                  "source_distribution_allowed": True,
+                  "project_license_expression": "Apache-2.0",
+                  "bundled_dependency_distribution_allowed": False,
+                  "reason": (
+                      "The reviewed source candidate contains project source and dependency references, "
+                      "not installed third-party packages. Metadata ambiguity therefore does not block "
+                      "publication of the project source, but remains a review boundary for bundled artifacts."
+                  ),
+              },
+              "does_not_establish": [
+                  "legal advice",
+                  "clearance for binary, wheel, container, model, or dataset distribution",
+                  "absence of third-party copyright or trademark claims",
+                  "security or release readiness",
+              ],
+              "status": "source_distribution_review_complete",
+          }
+          write(
+              "docs/release/third-party-source-distribution-review.v1.json",
+              json.dumps(source_review, indent=2, ensure_ascii=False),
+          )
+
+          license_decision = {
+              "kind": "repoground.public_license_decision",
+              "version": "1.1",
+              "observed_on": "2026-07-18",
+              "decision": "grant_public_open_source_distribution",
+              "current_license_expression": "Apache-2.0",
+              "license_file": "LICENSE",
+              "repository_visibility": "public",
+              "distribution_status": "permitted_under_project_license",
+              "distribution_scope": [
+                  "tracked repository source",
+                  "documentation and configuration under the repository license",
+                  "deterministic source-candidate archives produced from an exact Git commit",
+              ],
+              "reasoning": [
+                  "The owner explicitly requested that RepoGround remain open source and free to use.",
+                  "Apache-2.0 permits use, modification, and redistribution and provides an explicit patent grant.",
+                  "The source-candidate boundary references dependencies but does not embed installed third-party packages.",
+                  "Project-name stewardship is separated from software copyright permissions through TRADEMARK_POLICY.md.",
+              ],
+              "references": [
+                  {
+                      "title": "Apache License, Version 2.0",
+                      "url": "https://www.apache.org/licenses/LICENSE-2.0",
+                  },
+                  {
+                      "title": "OSI approved licenses",
+                      "url": "https://opensource.org/licenses",
+                  },
+              ],
+              "reviewed_evidence": [
+                  "LICENSE",
+                  "NOTICE",
+                  "TRADEMARK_POLICY.md",
+                  "FUNDING.md",
+                  "docs/decisions/repoground-3-naming-and-migration.v1.json",
+                  "docs/release/third-party-license-review.v1.json",
+                  "docs/release/third-party-source-distribution-review.v1.json",
+                  "docs/release/release-policy.md",
+              ],
+              "supersedes": {
+                  "observed_on": "2026-07-17",
+                  "decision": "do_not_grant_public_redistribution_license",
+                  "reason": "The documented reopen condition was satisfied by the explicit owner instruction on 2026-07-18.",
+              },
+              "does_not_establish": [
+                  "legal advice",
+                  "trademark registration or global name clearance",
+                  "permission to misrepresent modified builds as official RepoGround releases",
+                  "clearance for bundled third-party binaries, containers, model weights, or datasets",
+                  "product, security, or deployment readiness",
+              ],
+              "status": "decision_complete_public_source_distribution_enabled",
+              "current_license_notice": "Licensed under the Apache License, Version 2.0.",
+          }
+          write(
+              "docs/decisions/repoground-public-license-decision.v1.json",
+              json.dumps(license_decision, indent=2, ensure_ascii=False),
+          )
+
+          write(
+              "docs/release/licensing.md",
+              """# RepoGround licensing boundary
+
+          ## Project license
+
+          RepoGround source code and documentation are licensed under the
+          **Apache License, Version 2.0** (`Apache-2.0`). The controlling text is the
+          root `LICENSE` file.
+
+          Subject to that license, anyone may use, copy, modify, and redistribute the
+          project, including for commercial purposes. The license includes its own
+          conditions, warranty disclaimer, and patent terms.
+
+          ## Project identity is separate
+
+          Apache-2.0 does not grant a general right to present a modified or unrelated
+          product as the official RepoGround project. Truthful references,
+          compatibility statements, unmodified official releases, and clearly named
+          forks are broadly permitted by `TRADEMARK_POLICY.md`.
+
+          The trademark policy must not be interpreted to narrow software rights
+          granted by Apache-2.0.
+
+          ## Source-candidate distribution
+
+          Deterministic source-candidate archives bind source bytes to an exact Git
+          commit. They may be distributed under Apache-2.0. Building such an archive
+          does not by itself make it an official project release or establish product,
+          security, or deployment readiness.
+
+          ## Third-party boundary
+
+          Dependency lock files identify third-party packages but do not relicense
+          them. The reviewed source candidate does not embed installed dependencies.
+          Binary, wheel, container, model, or dataset publication remains subject to
+          the corresponding third-party terms and a separate artifact-specific
+          review. See `third-party-source-distribution-review.v1.json`.
+
+          ## Contributions
+
+          Unless explicitly stated otherwise, contributions intentionally submitted
+          for inclusion are handled under Apache-2.0, consistent with section 5 of the
+          license. Contributors retain copyright in their own contributions.
+
+          ## Decision history
+
+          The earlier fail-closed non-distribution decision was superseded on
+          2026-07-18 after the owner explicitly selected open-source publication and
+          the source-only third-party boundary was re-evaluated.
+          """,
+          )
+
+          replace_once(
+              "README.md",
+              "- 🤝 [CONTRIBUTING](CONTRIBUTING.md) · [CHANGELOG](CHANGELOG.md)\n\n## Nutzung (Beispiele)",
+              """- 🤝 [CONTRIBUTING](CONTRIBUTING.md) · [CHANGELOG](CHANGELOG.md)
+
+          ## Frei, offen und gemeinschaftlich
+
+          RepoGround is free and open-source software under the
+          [Apache License 2.0](LICENSE). It may be used, studied, modified, and
+          redistributed without a usage fee. The project name is protected only as a
+          defensive identity boundary; broad community, compatibility, and clearly
+          identified fork use is described in [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md).
+
+          Funding, if introduced, is intended to come from voluntary donations or
+          transparent sponsorships rather than access fees. See [FUNDING.md](FUNDING.md)
+          and the [name stewardship record](docs/legal/name-and-stewardship.md).
+
+          ## Nutzung (Beispiele)""",
+          )
+
+          replace_once(
+              "CONTRIBUTING.md",
+              "## Lokale Checks vor dem Commit",
+              """## Contribution license and project name
+
+          Unless explicitly marked otherwise, a contribution intentionally submitted
+          for inclusion in RepoGround is provided under Apache-2.0, consistent with
+          section 5 of the project license. Contributors retain copyright in their
+          own contributions.
+
+          Contributions do not transfer ownership of the RepoGround project name.
+          Forks and integrations are welcome; naming and attribution should follow
+          [`TRADEMARK_POLICY.md`](TRADEMARK_POLICY.md).
+
+          ## Lokale Checks vor dem Commit""",
+          )
+
+          replace_once(
+              "CHANGELOG.md",
+              "## [Unreleased]\n\n### Added",
+              """## [Unreleased]
+
+          ### Changed
+
+          - Relicensed RepoGround source and documentation from a restrictive
+            inspection-only boundary to Apache-2.0 following the explicit owner
+            decision of 2026-07-18.
+          - Added a permissive defensive name policy, voluntary-funding principles,
+            public name-stewardship record, and free quarterly name-watch process.
+          - Kept binary, container, model, and bundled third-party publication outside
+            the source-only clearance until each exact artifact is reviewed.
+
+          ### Added""",
+          )
+
+          replace_once(
+              "docs/release/release-policy.md",
+              """A release candidate is a deterministic source archive used to verify that one
+          Git commit can be packaged, hashed and reconstructed consistently. It is not a
+          public release and does not grant distribution permission.""",
+              """A release candidate is a deterministic source archive used to verify that one
+          Git commit can be packaged, hashed and reconstructed consistently. RepoGround
+          source candidates are distributable under Apache-2.0, but candidate creation
+          alone does not designate an archive as an official project release.""",
+          )
+          replace_once(
+              "docs/release/release-policy.md",
+              "It does not upload or publish the source archive.",
+              """It does not upload or publish the source archive automatically. This is an
+          operational CI boundary, not a restriction on distribution rights granted by
+          Apache-2.0.""",
+          )
+
+          # Release builder and verifier: bind generated manifests to the new decision.
+          replace_once(
+              "scripts/release/build_release_candidate.py",
+              'LICENSE_EXPRESSION = "LicenseRef-RepoGround-All-Rights-Reserved"',
+              'LICENSE_EXPRESSION = "Apache-2.0"\nDISTRIBUTION_STATUS = "permitted_under_project_license"',
+          )
+          replace_once(
+              "scripts/release/build_release_candidate.py",
+              '    "public_distribution_permission",\n    "open_source_status",',
+              '    "official_release_status",',
+          )
+          replace_once(
+              "scripts/release/build_release_candidate.py",
+              """    license_text = read_blob(repo_path, commit, "LICENSE").decode("utf-8")
+              if LICENSE_EXPRESSION not in license_text:
+                  raise ValueError("LICENSE does not declare the required LicenseRef")""",
+              """    license_text = read_blob(repo_path, commit, "LICENSE").decode("utf-8")
+              if "Apache License" not in license_text or "Version 2.0" not in license_text:
+                  raise ValueError("LICENSE does not contain the Apache-2.0 license text")""",
+          )
+          replace_once(
+              "scripts/release/build_release_candidate.py",
+              '            "distribution_status": "blocked_without_separate_written_permission",',
+              '            "distribution_status": DISTRIBUTION_STATUS,',
+          )
+          replace_once(
+              "scripts/release/build_release_candidate.py",
+              '        "distribution_status": "blocked_without_separate_written_permission",',
+              '        "distribution_status": DISTRIBUTION_STATUS,',
+          )
+
+          replace_once(
+              "scripts/release/verify_release_candidate.py",
+              """    CONTRACT_VERSION,
+              DOES_NOT_ESTABLISH,""",
+              """    CONTRACT_VERSION,
+              DISTRIBUTION_STATUS,
+              DOES_NOT_ESTABLISH,""",
+          )
+          replace_once(
+              "scripts/release/verify_release_candidate.py",
+              """    if contract.license_expression not in license_content:
+                  raise ValueError("archived LICENSE does not contain the manifest LicenseRef")""",
+              """    if "Apache License" not in license_content or "Version 2.0" not in license_content:
+                  raise ValueError("archived LICENSE does not contain Apache-2.0")""",
+          )
+          replace_once(
+              "scripts/release/verify_release_candidate.py",
+              """    if license_data.get("distribution_status") != (
+                  "blocked_without_separate_written_permission"
+              ):
+                  raise ValueError("distribution boundary mismatch")""",
+              """    if license_data.get("distribution_status") != DISTRIBUTION_STATUS:
+                  raise ValueError("distribution boundary mismatch")""",
+          )
+          replace_once(
+              "scripts/release/verify_release_candidate.py",
+              '        "distribution_status": "blocked_without_separate_written_permission",',
+              '        "distribution_status": DISTRIBUTION_STATUS,',
+          )
+
+          # Release contract checker remains fail-closed, now against Apache markers.
+          replace_once(
+              "scripts/release/check_release_contract.py",
+              '    "LICENSE",\n    "CHANGELOG.md",',
+              '    "LICENSE",\n    "NOTICE",\n    "TRADEMARK_POLICY.md",\n    "CHANGELOG.md",',
+          )
+          replace_once(
+              "scripts/release/check_release_contract.py",
+              """    license_text = (repo / "LICENSE").read_text(encoding="utf-8")
+              if LICENSE_EXPRESSION not in license_text:
+                  findings.append(_finding("LICENSE_REF_MISSING", "LICENSE", LICENSE_EXPRESSION))
+              if "No permission is granted" not in license_text:
+                  findings.append(_finding("LICENSE_BOUNDARY_MISSING", "LICENSE", "restrictive boundary is absent"))""",
+              """    license_text = (repo / "LICENSE").read_text(encoding="utf-8")
+              if "Apache License" not in license_text or "Version 2.0" not in license_text:
+                  findings.append(_finding("LICENSE_TEXT_INVALID", "LICENSE", LICENSE_EXPRESSION))
+              trademark_text = (repo / "TRADEMARK_POLICY.md").read_text(encoding="utf-8")
+              if "does not restrict any right granted" not in trademark_text:
+                  findings.append(
+                      _finding(
+                          "TRADEMARK_SOFTWARE_BOUNDARY_MISSING",
+                          "TRADEMARK_POLICY.md",
+                          "software freedoms must remain independent of name stewardship",
+                      )
+                  )""",
+          )
+          replace_once(
+              "scripts/release/check_release_contract.py",
+              '            "public_distribution_permission",',
+              '            "official_release_status",',
+          )
+
+          identity_checker = '''#!/usr/bin/env python3
+          """Fail-closed checks for RepoGround identity and distribution decisions."""
+
+          from __future__ import annotations
+
+          import argparse
+          import json
+          from pathlib import Path
+
+          ROOT = Path(__file__).resolve().parents[2]
+          IDENTITY = Path("docs/decisions/repoground-3-naming-and-migration.v1.json")
+          LICENSE_DECISION = Path("docs/decisions/repoground-public-license-decision.v1.json")
+          THIRD_PARTY = Path("docs/release/third-party-license-review.v1.json")
+          SOURCE_DISTRIBUTION = Path(
+              "docs/release/third-party-source-distribution-review.v1.json"
+          )
+          ALLOWED_METADATA_STATUSES = {
+              "identified",
+              "metadata_ambiguous",
+              "metadata_unresolved",
+          }
+
+
+          def check(root: Path) -> list[str]:
+              """Return decision drift findings for a repository root."""
+
+              findings: list[str] = []
+              identity = json.loads((root / IDENTITY).read_text(encoding="utf-8"))
+              license_decision = json.loads(
+                  (root / LICENSE_DECISION).read_text(encoding="utf-8")
+              )
+              third_party = json.loads((root / THIRD_PARTY).read_text(encoding="utf-8"))
+              source_distribution = json.loads(
+                  (root / SOURCE_DISTRIBUTION).read_text(encoding="utf-8")
+              )
+              license_text = (root / "LICENSE").read_text(encoding="utf-8")
+              trademark_text = (root / "TRADEMARK_POLICY.md").read_text(encoding="utf-8")
+              naming_text = (root / "docs/architecture/naming.md").read_text(
+                  encoding="utf-8"
+              )
+              release_policy = (root / "docs/release/release-policy.md").read_text(
+                  encoding="utf-8"
+              )
+
+              if identity.get("decision") != "adopt_repoground_for_3_x":
+                  findings.append("RepoGround identity decision changed")
+              if (
+                  identity.get("repository_target_name") != "repoground"
+                  or identity.get("python_namespace") != "merger.repoground"
+                  or identity.get("product_name") != "RepoGround"
+                  or identity.get("primary_cli_name") != "repoground"
+              ):
+                  findings.append("RepoGround identity mismatch")
+              compatibility = identity.get("compatibility") or {}
+              if (
+                  compatibility.get("legacy_python_namespace") != "merger.lenskit"
+                  or compatibility.get("persisted_2_x_identifiers_reinterpreted") is not False
+              ):
+                  findings.append("compatibility boundary drift")
+              if "RepoGround" not in naming_text or "merger.repoground" not in naming_text:
+                  findings.append("naming document drift")
+
+              expression = license_decision.get("current_license_expression")
+              if expression != "Apache-2.0":
+                  findings.append("license expression changed")
+              if (
+                  "Apache License" not in license_text
+                  or "Version 2.0" not in license_text
+              ):
+                  findings.append("LICENSE does not match decision")
+              if license_decision.get("decision") != "grant_public_open_source_distribution":
+                  findings.append("open-source owner decision changed")
+              if (
+                  license_decision.get("distribution_status")
+                  != "permitted_under_project_license"
+              ):
+                  findings.append("public source distribution unexpectedly blocked")
+
+              normalized_policy = release_policy.casefold()
+              if (
+                  "distributable under apache-2.0" not in normalized_policy
+                  or "does not upload or publish" not in normalized_policy
+              ):
+                  findings.append("release policy open-source boundary drift")
+              if (
+                  "does not restrict any right granted" not in trademark_text
+                  or "good-faith community use" not in trademark_text
+              ):
+                  findings.append("trademark policy software-freedom boundary drift")
+
+              summary = third_party.get("summary") or {}
+              packages = third_party.get("packages") or []
+              if summary.get("package_count") != len(packages) or not packages:
+                  findings.append("third-party inventory count mismatch")
+              for item in packages:
+                  if not item.get("name") or not item.get("version"):
+                      findings.append("third-party package identity incomplete")
+                  if item.get("metadata_status") not in ALLOWED_METADATA_STATUSES:
+                      findings.append(f"invalid metadata status: {item.get('name')}")
+
+              source_decision = source_distribution.get("decision") or {}
+              evidence = source_distribution.get("evidence") or {}
+              if source_decision.get("source_distribution_allowed") is not True:
+                  findings.append("source distribution review does not permit source")
+              if source_decision.get("project_license_expression") != "Apache-2.0":
+                  findings.append("source distribution license mismatch")
+              if source_decision.get("bundled_dependency_distribution_allowed") is not False:
+                  findings.append("bundled dependency boundary unexpectedly enabled")
+              if evidence.get("source_candidate_embeds_third_party_packages") is not False:
+                  findings.append("source candidate embedding boundary drift")
+              if evidence.get("inventory_package_count") != summary.get("package_count"):
+                  findings.append("source review inventory count mismatch")
+              return findings
+
+
+          def main(argv: list[str] | None = None) -> int:
+              parser = argparse.ArgumentParser()
+              parser.add_argument("--root", type=Path, default=ROOT)
+              parser.add_argument("--format", choices=("text", "json"), default="text")
+              args = parser.parse_args(argv)
+              findings = check(args.root.resolve())
+              report = {
+                  "kind": "repoground.identity_distribution_decision_check",
+                  "version": "1.1",
+                  "status": "pass" if not findings else "fail",
+                  "findings": findings,
+              }
+              if args.format == "json":
+                  print(json.dumps(report, indent=2))
+              elif findings:
+                  print("\\n".join(findings))
+              else:
+                  print("Identity/distribution decisions: pass")
+              return 1 if findings else 0
+
+
+          if __name__ == "__main__":
+              raise SystemExit(main())
+          '''
+          write(
+              "scripts/release/check_identity_distribution_decisions.py",
+              re.sub(r"^          ", "", identity_checker, flags=re.MULTILINE),
+          )
+
+          # Mutate the JSON schema structurally to avoid formatting-sensitive edits.
+          schema_path = ROOT / "merger/repoground/contracts/repoground-release-candidate.v1.schema.json"
+          schema = json.loads(schema_path.read_text(encoding="utf-8"))
+          schema["description"] = (
+              "Commit-bound, deterministic RepoGround source-candidate manifest. "
+              "The source is licensed under Apache-2.0; candidate validity does not "
+              "establish official release status."
+          )
+          schema["properties"]["does_not_establish"]["contains"]["const"] = (
+              "official_release_status"
+          )
+          schema["properties"]["license"]["properties"]["distribution_status"][
+              "const"
+          ] = "permitted_under_project_license"
+          schema["properties"]["license"]["properties"]["expression"]["const"] = (
+              "Apache-2.0"
+          )
+          write(schema_path.relative_to(ROOT).as_posix(), json.dumps(schema, indent=2))
+
+          # Canonical tests must prove the new positive boundary and preserve failures.
+          replace_once(
+              "tests/test_repository_hygiene.py",
+              '    assert "LicenseRef-RepoGround-All-Rights-Reserved" in licensing',
+              '    assert "Apache-2.0" in licensing',
+          )
+          replace_once(
+              "merger/repoground/tests/test_release_packaging.py",
+              'LICENSE_REF = "LicenseRef-RepoGround-All-Rights-Reserved"',
+              'LICENSE_EXPRESSION = "Apache-2.0"',
+          )
+          replace_once(
+              "merger/repoground/tests/test_release_packaging.py",
+              '        f"{LICENSE_REF}\\nNo permission is granted.\\n", encoding="utf-8"',
+              '        "Apache License\\nVersion 2.0, January 2004\\n", encoding="utf-8"',
+          )
+          replace_once(
+              "merger/repoground/tests/test_release_packaging.py",
+              """    assert result["distribution_status"] == (
+                  "blocked_without_separate_written_permission"
+              )""",
+              '    assert result["distribution_status"] == "permitted_under_project_license"',
+          )
+
+          replace_once(
+              "merger/repoground/tests/test_identity_distribution_decisions.py",
+              '    "docs/release/third-party-license-review.v1.json",\n    "docs/architecture/naming.md",',
+              '    "docs/release/third-party-license-review.v1.json",\n    "docs/release/third-party-source-distribution-review.v1.json",\n    "docs/architecture/naming.md",',
+          )
+          replace_once(
+              "merger/repoground/tests/test_identity_distribution_decisions.py",
+              '    "docs/release/release-policy.md",\n    "LICENSE",',
+              '    "docs/release/release-policy.md",\n    "LICENSE",\n    "TRADEMARK_POLICY.md",',
+          )
+          replace_once(
+              "merger/repoground/tests/test_identity_distribution_decisions.py",
+              """def test_checker_rejects_distribution_enablement(tmp_path: Path) -> None:
+              _copy_fixture(tmp_path)
+              policy = tmp_path / "docs/release/release-policy.md"
+              policy.write_text(
+                  "Public release is allowed and artifacts are published.\\n",
+                  encoding="utf-8",
+              )
+              assert "release policy distribution must remain blocked" in check(tmp_path)""",
+              """def test_checker_rejects_open_source_policy_drift(tmp_path: Path) -> None:
+              _copy_fixture(tmp_path)
+              policy = tmp_path / "docs/release/release-policy.md"
+              policy.write_text(
+                  "Source candidates are private and may not be distributed.\\n",
+                  encoding="utf-8",
+              )
+              assert "release policy open-source boundary drift" in check(tmp_path)""",
+          )
+
+          # Replace the one canonical contracts-matrix row without touching history.
+          matrix_path = ROOT / "docs/contracts/contracts-matrix.md"
+          matrix_lines = matrix_path.read_text(encoding="utf-8").splitlines()
+          matches = [
+              index
+              for index, line in enumerate(matrix_lines)
+              if line.startswith("| `repoground-release-candidate.v1.schema.json`")
+          ]
+          if len(matches) != 1:
+              raise SystemExit(f"contracts matrix row count: {len(matches)}")
+          matrix_lines[matches[0]] = (
+              "| `repoground-release-candidate.v1.schema.json` | Commit- und baumgebundenes "
+              "Manifest für deterministische RepoGround-Quellkandidaten. Quellverteilung ist "
+              "unter Apache-2.0 erlaubt; Kandidatenerzeugung ist keine offizielle Release-Freigabe. "
+              "| `project`, `source`, `license`, `archive`, `dependency_locks`, "
+              "`semantic_extension`, `verification`, `does_not_establish` | "
+              "`license.expression` const `Apache-2.0`; `distribution_status` const "
+              "`permitted_under_project_license`; Non-Claim `official_release_status`; semantische "
+              "Erweiterung weiterhin optional und fail-closed | bindet Plattformvertrag und Lockdateien "
+              "an denselben Commit | Hoch. Drift könnte Lizenz, Quellidentität oder den Unterschied "
+              "zwischen reproduzierbarem Kandidaten und offizieller Veröffentlichung falsch darstellen. |"
+          )
+          write("docs/contracts/contracts-matrix.md", "\n".join(matrix_lines))
+
+          # The migration workflow is a temporary transport, not repository policy.
+          (ROOT / ".github/workflows/one-shot-open-source-migration.yml").unlink()
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: open RepoGround and protect its community identity"
+
+          python -m compileall -q scripts/release
+          python scripts/release/check_identity_distribution_decisions.py
+          python scripts/release/check_release_contract.py
+          rm -rf /tmp/repoground-open-source-candidate
+          python scripts/release/build_release_candidate.py \
+            --repo . --ref HEAD --out /tmp/repoground-open-source-candidate
+          python scripts/release/verify_release_candidate.py \
+            --candidate-dir /tmp/repoground-open-source-candidate --repo .
+
+          git push origin "HEAD:${BRANCH_NAME}"
