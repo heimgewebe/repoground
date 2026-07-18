@@ -1,0 +1,143 @@
+name: T006 tested product commit
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated T006 branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: fix/repoground-runtime-contracts-t006
+          fetch-depth: 0
+
+      - name: Verify exact bootstrap source
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=a33400f7090c368838bcdf02bcf2087c719fae84
+          git merge-base --is-ancestor "$BASE" HEAD
+          mapfile -t changed < <(git diff --name-only "$BASE"..HEAD | sort)
+          expected=(
+            .github/workflows/t006-bootstrap-repair.yml
+            .github/workflows/t006-bootstrap.yml
+            .github/workflows/t006-product-runner.yml
+          )
+          test "${changed[*]}" = "${expected[*]}"
+          test "$(git hash-object .github/workflows/t006-bootstrap.yml)" = "159431cf7ca645438cecfec8bb2d9be8dcf2d7cd"
+
+      - name: Apply exact embedded product patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import tempfile
+
+          workflow = Path('.github/workflows/t006-bootstrap.yml')
+          lines = workflow.read_text(encoding='utf-8').splitlines()
+          targets = (
+              'Patch retrieval content contract',
+              'Replace launcher with version-bound health probe',
+              'Add focused regression tests',
+          )
+
+          def extract(name: str) -> str:
+              marker = f'- name: {name}'
+              start = next(i for i, line in enumerate(lines) if line.strip() == marker)
+              run_index = next(
+                  i for i in range(start + 1, len(lines))
+                  if lines[i].strip() == 'run: |'
+              )
+              block = []
+              for line in lines[run_index + 1:]:
+                  if line.startswith('      - name:'):
+                      break
+                  if line.startswith('          '):
+                      block.append(line[10:])
+                  elif not line.strip():
+                      block.append('')
+                  else:
+                      raise SystemExit(f'unexpected indentation while extracting {name!r}')
+              if not block:
+                  raise SystemExit(f'empty embedded run block for {name!r}')
+              return '\n'.join(block) + '\n'
+
+          for target in targets:
+              script = extract(target)
+              with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix='.sh') as handle:
+                  handle.write(script)
+                  handle.flush()
+                  subprocess.run(['bash', handle.name], check=True)
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+
+      - name: Install locked test dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+
+      - name: Run focused contract proof
+        id: proof
+        shell: bash
+        run: |
+          set +e
+          set -o pipefail
+          python -m pytest -q \
+            merger/repoground/tests/test_runtime_contract_regressions.py \
+            merger/repoground/tests/test_retrieval_index.py \
+            merger/repoground/tests/test_chunk_index_dual_ranges.py \
+            2>&1 | tee t006-pytest.log
+          pytest_status=${PIPESTATUS[0]}
+          python -m ruff check merger/repoground/tests/test_runtime_contract_regressions.py \
+            2>&1 | tee t006-ruff.log
+          ruff_status=${PIPESTATUS[0]}
+          git diff --check 2>&1 | tee t006-diff-check.log
+          diff_status=${PIPESTATUS[0]}
+          printf 'pytest=%s\nruff=%s\ndiff=%s\n' \
+            "$pytest_status" "$ruff_status" "$diff_status" | tee t006-status.txt
+          if ((pytest_status != 0 || ruff_status != 0 || diff_status != 0)); then
+            exit 1
+          fi
+
+      - name: Upload diagnostics after failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: t006-product-diagnostics-${{ github.run_id }}
+          path: |
+            t006-pytest.log
+            t006-ruff.log
+            t006-diff-check.log
+            t006-status.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Commit product files only
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$(printf '%s\n' \
+            merger/repoground/core/merge.py \
+            merger/repoground/tests/test_runtime_contract_regressions.py \
+            scripts/repoground-launcher.sh | sort)
+          actual=$(git diff --name-only | grep -v '^t006-' | sort)
+          test "$actual" = "$expected"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            merger/repoground/core/merge.py \
+            merger/repoground/tests/test_runtime_contract_regressions.py \
+            scripts/repoground-launcher.sh
+          git commit -m "fix(runtime): bind health and retrieval content contracts"
+          git push origin HEAD:fix/repoground-runtime-contracts-t006
