@@ -73,7 +73,7 @@ def test_snapshot_create_dispatches_existing_generator(monkeypatch, tmp_path, ca
     )
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -98,7 +98,7 @@ def test_snapshot_create_dispatches_existing_generator(monkeypatch, tmp_path, ca
     assert (out / "repo_merge.export_safety_report.json").exists()
 
     emitted = json.loads(capsys.readouterr().out)
-    assert emitted["command"] == "repobrief snapshot create"
+    assert emitted["command"] == "repoground snapshot create"
     assert emitted["mutation_boundary"]["writes"] == ["brief_bundle_artifacts"]
     assert emitted["mutation_boundary"]["read_paths_do_not_refresh"] is True
     assert emitted["export_safety_report"].endswith(".export_safety_report.json")
@@ -110,7 +110,7 @@ def test_snapshot_create_rejects_missing_repo_without_creating_snapshot(tmp_path
     out = tmp_path / "briefs"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -129,7 +129,7 @@ def test_snapshot_create_rejects_output_inside_repo(tmp_path):
     out = repo / "briefs"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -167,7 +167,7 @@ def test_local_private_does_not_emit_optional_export_safety(monkeypatch, tmp_pat
     )
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -224,7 +224,7 @@ def test_public_share_removes_profile_excluded_sqlite(monkeypatch, tmp_path, cap
     )
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -251,7 +251,7 @@ def test_snapshot_create_graph_index_is_not_verified_as_primary_json(tmp_path, c
     (repo / "README.md").write_text("hello\n", encoding="utf-8")
     out = tmp_path / "briefs"
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -294,7 +294,7 @@ def test_public_share_uses_archive_output_mode_by_default(monkeypatch, tmp_path,
     )
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -317,7 +317,7 @@ def test_public_share_rejects_explicit_dual_output_mode(tmp_path):
     out = tmp_path / "briefs"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -448,7 +448,7 @@ def test_snapshot_create_json_pointer_outputs_resolved_immutable_manifest(
     )
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -478,7 +478,7 @@ def test_snapshot_create_emits_snapshot_plan_report(tmp_path, capsys):
     out = tmp_path / "briefs"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -500,7 +500,7 @@ def test_snapshot_create_emits_snapshot_plan_report(tmp_path, capsys):
 # access test marker
 
 
-def test_repobrief_snapshot_status_reads_existing_manifest(tmp_path, capsys):
+def test_repoground_snapshot_status_reads_existing_manifest(tmp_path, capsys):
     artifact = tmp_path / "demo.md"
     artifact.write_text("# demo\n", encoding="utf-8")
     manifest = tmp_path / "demo.bundle.manifest.json"
@@ -515,7 +515,7 @@ def test_repobrief_snapshot_status_reads_existing_manifest(tmp_path, capsys):
         "capabilities": {"repobrief_profile": "agent-portable", "repobrief_profile_evaluation": {"status": "pass"}},
     }), encoding="utf-8")
 
-    rc = main(["repobrief", "snapshot", "status", "--bundle-manifest", str(manifest)])
+    rc = main(["ground", "snapshot", "status", "--bundle-manifest", str(manifest)])
 
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -525,7 +525,7 @@ def test_repobrief_snapshot_status_reads_existing_manifest(tmp_path, capsys):
     assert out["mutation_boundary"]["writes"] == []
 
 
-def test_repobrief_core_get_artifact_reports_available_and_missing(tmp_path):
+def test_repoground_core_get_artifact_reports_available_and_missing(tmp_path):
     from merger.repoground.core.bundle_access import get_artifact
 
     artifact = tmp_path / "demo.md"
@@ -545,7 +545,7 @@ def test_repobrief_core_get_artifact_reports_available_and_missing(tmp_path):
     assert missing["artifact"] is None
 
 
-def test_repobrief_artifact_get_cli_reports_available_missing_and_path_only(tmp_path, capsys):
+def test_repoground_artifact_get_cli_reports_available_missing_and_path_only(tmp_path, capsys):
     artifact = tmp_path / "demo.md"
     artifact.write_text("# demo\n", encoding="utf-8")
     manifest = tmp_path / "demo.bundle.manifest.json"
@@ -560,23 +560,23 @@ def test_repobrief_artifact_get_cli_reports_available_missing_and_path_only(tmp_
         "capabilities": {},
     }), encoding="utf-8")
 
-    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md"])
+    rc = main(["ground", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md"])
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
     assert out["status"] == "available"
     assert out["artifact"]["role"] == "canonical_md"
 
-    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "missing_role"])
+    rc = main(["ground", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "missing_role"])
     out = json.loads(capsys.readouterr().out)
     assert rc == 1
     assert out["status"] == "missing"
 
-    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md", "--path-only"])
+    rc = main(["ground", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md", "--path-only"])
     assert rc == 0
     assert capsys.readouterr().out.strip() == str(artifact.resolve())
 
 
-def test_repobrief_artifact_list_cli_reports_artifacts_and_roles_only(tmp_path, capsys):
+def test_repoground_artifact_list_cli_reports_artifacts_and_roles_only(tmp_path, capsys):
     first = tmp_path / "demo.md"
     second = tmp_path / "plan.json"
     first.write_text("# demo\n", encoding="utf-8")
@@ -596,7 +596,7 @@ def test_repobrief_artifact_list_cli_reports_artifacts_and_roles_only(tmp_path, 
         "capabilities": {},
     }), encoding="utf-8")
 
-    rc = main(["repobrief", "artifact", "list", "--bundle-manifest", str(manifest)])
+    rc = main(["ground", "artifact", "list", "--bundle-manifest", str(manifest)])
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
     assert out["kind"] == "repobrief.artifact_list"
@@ -604,12 +604,12 @@ def test_repobrief_artifact_list_cli_reports_artifacts_and_roles_only(tmp_path, 
     assert out["artifact_count"] == 2
     assert out["mutation_boundary"]["writes"] == []
 
-    rc = main(["repobrief", "artifact", "list", "--bundle-manifest", str(manifest), "--roles-only"])
+    rc = main(["ground", "artifact", "list", "--bundle-manifest", str(manifest), "--roles-only"])
     assert rc == 0
     assert capsys.readouterr().out.splitlines() == ["canonical_md", "snapshot_plan_json"]
 
 
-def test_repobrief_required_reading_resolve_cli_uses_bundle_roles(tmp_path, capsys):
+def test_repoground_required_reading_resolve_cli_uses_bundle_roles(tmp_path, capsys):
     manifest = tmp_path / "demo.bundle.manifest.json"
     manifest.write_text(json.dumps({
         "kind": "repolens.bundle.manifest",
@@ -628,7 +628,7 @@ def test_repobrief_required_reading_resolve_cli_uses_bundle_roles(tmp_path, caps
     }), encoding="utf-8")
 
     rc = main([
-        "repobrief",
+        "ground",
         "required-reading",
         "resolve",
         "--bundle-manifest",
@@ -647,7 +647,7 @@ def test_repobrief_required_reading_resolve_cli_uses_bundle_roles(tmp_path, caps
     assert out["mutation_boundary"]["writes"] == []
 
 
-def test_repobrief_snapshot_check_cli_summarizes_read_only_surfaces(tmp_path, capsys):
+def test_repoground_snapshot_check_cli_summarizes_read_only_surfaces(tmp_path, capsys):
     manifest = tmp_path / "demo.bundle.manifest.json"
     manifest.write_text(json.dumps({
         "kind": "repolens.bundle.manifest",
@@ -666,7 +666,7 @@ def test_repobrief_snapshot_check_cli_summarizes_read_only_surfaces(tmp_path, ca
     }), encoding="utf-8")
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "check",
         "--bundle-manifest",
@@ -686,7 +686,7 @@ def test_repobrief_snapshot_check_cli_summarizes_read_only_surfaces(tmp_path, ca
     assert out["mutation_boundary"]["writes"] == []
 
 
-def test_repobrief_snapshot_check_propagates_failed_profile_evaluation(tmp_path, capsys):
+def test_repoground_snapshot_check_propagates_failed_profile_evaluation(tmp_path, capsys):
     manifest = tmp_path / "demo.bundle.manifest.json"
     manifest.write_text(json.dumps({
         "kind": "repolens.bundle.manifest",
@@ -708,7 +708,7 @@ def test_repobrief_snapshot_check_propagates_failed_profile_evaluation(tmp_path,
     }), encoding="utf-8")
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "check",
         "--bundle-manifest",
@@ -724,7 +724,7 @@ def test_repobrief_snapshot_check_propagates_failed_profile_evaluation(tmp_path,
     assert out["required_reading"]["status"] == "pass"
 
 
-def test_repobrief_snapshot_status_matches_contract_schema(tmp_path, capsys):
+def test_repoground_snapshot_status_matches_contract_schema(tmp_path, capsys):
     import pytest
 
     jsonschema = pytest.importorskip("jsonschema")
@@ -756,14 +756,14 @@ def test_repobrief_snapshot_status_matches_contract_schema(tmp_path, capsys):
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     jsonschema.Draft7Validator.check_schema(schema)
-    rc = main(["repobrief", "snapshot", "status", "--bundle-manifest", str(manifest)])
+    rc = main(["ground", "snapshot", "status", "--bundle-manifest", str(manifest)])
 
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
     jsonschema.validate(instance=out, schema=schema)
 
 
-def test_repobrief_artifact_ref_matches_contract_schema(tmp_path, capsys):
+def test_repoground_artifact_ref_matches_contract_schema(tmp_path, capsys):
     import pytest
 
     jsonschema = pytest.importorskip("jsonschema")
@@ -792,19 +792,19 @@ def test_repobrief_artifact_ref_matches_contract_schema(tmp_path, capsys):
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     jsonschema.Draft7Validator.check_schema(schema)
-    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md"])
+    rc = main(["ground", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "canonical_md"])
     available = json.loads(capsys.readouterr().out)
     assert rc == 0
     jsonschema.validate(instance=available, schema=schema)
 
-    rc = main(["repobrief", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "missing_role"])
+    rc = main(["ground", "artifact", "get", "--bundle-manifest", str(manifest), "--role", "missing_role"])
     missing = json.loads(capsys.readouterr().out)
     assert rc == 1
     jsonschema.validate(instance=missing, schema=schema)
 
 
 
-def test_repobrief_artifact_list_matches_contract_schema(tmp_path, capsys):
+def test_repoground_artifact_list_matches_contract_schema(tmp_path, capsys):
     import pytest
 
     jsonschema = pytest.importorskip("jsonschema")
@@ -830,14 +830,14 @@ def test_repobrief_artifact_list_matches_contract_schema(tmp_path, capsys):
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
     jsonschema.Draft7Validator.check_schema(schema)
-    rc = main(["repobrief", "artifact", "list", "--bundle-manifest", str(manifest)])
+    rc = main(["ground", "artifact", "list", "--bundle-manifest", str(manifest)])
 
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
     jsonschema.validate(instance=out, schema=schema)
 
 
-def test_repobrief_rr_resolution_matches_contract_schema(tmp_path, capsys):
+def test_repoground_rr_resolution_matches_contract_schema(tmp_path, capsys):
     import pytest
 
     jsonschema = pytest.importorskip("jsonschema")
@@ -864,7 +864,7 @@ def test_repobrief_rr_resolution_matches_contract_schema(tmp_path, capsys):
     jsonschema.Draft7Validator.check_schema(schema)
     command = "required" + "-reading"
     rc = main([
-        "repobrief",
+        "ground",
         command,
         "resolve",
         "--bundle-manifest",
@@ -878,7 +878,7 @@ def test_repobrief_rr_resolution_matches_contract_schema(tmp_path, capsys):
     jsonschema.validate(instance=out, schema=schema)
 
 
-def test_repobrief_rr_resolution_schema_rejects_status_only_inner_result():
+def test_repoground_rr_resolution_schema_rejects_status_only_inner_result():
     import pytest
 
     jsonschema = pytest.importorskip("jsonschema")
@@ -905,7 +905,7 @@ def test_repobrief_rr_resolution_schema_rejects_status_only_inner_result():
         jsonschema.validate(instance=payload, schema=schema)
 
 
-def test_repobrief_snapshot_check_matches_contract_schema(tmp_path, capsys):
+def test_repoground_snapshot_check_matches_contract_schema(tmp_path, capsys):
     import pytest
 
     jsonschema = pytest.importorskip("jsonschema")
@@ -930,7 +930,7 @@ def test_repobrief_snapshot_check_matches_contract_schema(tmp_path, capsys):
 
     jsonschema.Draft7Validator.check_schema(schema)
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "check",
         "--bundle-manifest",
@@ -944,7 +944,7 @@ def test_repobrief_snapshot_check_matches_contract_schema(tmp_path, capsys):
     jsonschema.validate(instance=out, schema=schema)
 
 
-def test_repobrief_snapshot_check_schema_requires_profile_evaluation_status():
+def test_repoground_snapshot_check_schema_requires_profile_evaluation_status():
     import pytest
 
     jsonschema = pytest.importorskip("jsonschema")
@@ -971,22 +971,21 @@ def test_repobrief_snapshot_check_schema_requires_profile_evaluation_status():
         jsonschema.validate(instance=payload, schema=schema)
 
 
-def test_direct_repobrief_alias_help_uses_direct_command_surface(capsys):
-    from merger.repoground.cli import repobrief as repobrief_cli
+def test_direct_ground_help_uses_canonical_command_surface(capsys):
+    from merger.repoground.cli.ground import main as ground_main
 
     with pytest.raises(SystemExit) as excinfo:
-        repobrief_cli.main(["--help"])
+        ground_main(["--help"])
 
     assert excinfo.value.code == 0
     out = capsys.readouterr().out
-    assert "usage: repobrief" in out
-    assert "repobrief repobrief" not in out
+    assert "usage: repoground ground" in out
     assert "snapshot" in out
     assert "artifact" in out
 
 
-def test_direct_repobrief_alias_dispatches_snapshot_status(tmp_path, capsys):
-    from merger.repoground.cli.ground import main as repobrief_main
+def test_direct_ground_dispatches_snapshot_status(tmp_path, capsys):
+    from merger.repoground.cli.ground import main as ground_main
 
     artifact = tmp_path / "demo.md"
     artifact.write_text("# demo\n", encoding="utf-8")
@@ -1002,7 +1001,7 @@ def test_direct_repobrief_alias_dispatches_snapshot_status(tmp_path, capsys):
         "capabilities": {"repobrief_profile": "agent-portable"},
     }), encoding="utf-8")
 
-    rc = repobrief_main(["snapshot", "status", "--bundle-manifest", str(manifest)])
+    rc = ground_main(["snapshot", "status", "--bundle-manifest", str(manifest)])
 
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -1011,7 +1010,7 @@ def test_direct_repobrief_alias_dispatches_snapshot_status(tmp_path, capsys):
     assert out["mutation_boundary"]["writes"] == []
 
 
-def test_legacy_lenskit_repobrief_subcommand_still_dispatches_snapshot_status(tmp_path, capsys):
+def test_ground_subcommand_dispatches_snapshot_status(tmp_path, capsys):
     artifact = tmp_path / "demo.md"
     artifact.write_text("# demo\n", encoding="utf-8")
     manifest = tmp_path / "demo.bundle.manifest.json"
@@ -1026,7 +1025,7 @@ def test_legacy_lenskit_repobrief_subcommand_still_dispatches_snapshot_status(tm
         "capabilities": {"repobrief_profile": "agent-portable"},
     }), encoding="utf-8")
 
-    rc = main(["repobrief", "snapshot", "status", "--bundle-manifest", str(manifest)])
+    rc = main(["ground", "snapshot", "status", "--bundle-manifest", str(manifest)])
 
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -1040,7 +1039,7 @@ def test_snapshot_create_finalizes_every_manifest_artifact(tmp_path, capsys):
     out = tmp_path / "briefs"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -1080,7 +1079,7 @@ def test_snapshot_create_defaults_required_profiles_to_redaction(
     out = tmp_path / "briefs"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",
@@ -1113,7 +1112,7 @@ def test_snapshot_create_rejects_explicit_redaction_disable_before_output(
     out = tmp_path / "briefs"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",

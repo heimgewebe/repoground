@@ -590,23 +590,17 @@ def test_systemkatalog_entrypoints_delegate_to_bounded_fleet_runtime() -> None:
     assert "repoground-publish-fleet" not in watch
     assert "--repo" not in watch
 
-    for path in (LEGACY_SYSTEMKATALOG_PUBLISH, LEGACY_SYSTEMKATALOG_WATCH):
-        text = path.read_text(encoding="utf-8")
-        assert "is deprecated; use repoground-" in text
-        assert 'exec "$(dirname "$0")/repoground-' in text
+    assert not LEGACY_SYSTEMKATALOG_PUBLISH.exists()
+    assert not LEGACY_SYSTEMKATALOG_WATCH.exists()
 
     compatibility = SYSTEMKATALOG_INSTALLER.read_text(encoding="utf-8")
     assert "install_repoground_publish_fleet_runtime.sh" in compatibility
     assert "systemkatalog-publish" not in compatibility
 
 
-def test_legacy_fleet_and_installer_entrypoints_are_thin_delegates() -> None:
-    publisher = LEGACY_PUBLISHER.read_text(encoding="utf-8")
-    assert "repoground-publish-fleet" in publisher
-    assert "runpy.run_path" in publisher
-    installer = LEGACY_INSTALLER.read_text(encoding="utf-8")
-    assert "install_repoground_publish_fleet_runtime.sh" in installer
-    assert "systemctl" not in installer
+def test_legacy_fleet_and_installer_entrypoints_are_removed() -> None:
+    assert not LEGACY_PUBLISHER.exists()
+    assert not LEGACY_INSTALLER.exists()
 
 
 def test_special_history_pruning_keeps_referenced_evidence(

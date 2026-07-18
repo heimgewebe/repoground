@@ -107,7 +107,7 @@ class FakeEventSource {
     close() {}
 }
 
-const localStorageMock = makeStorage({ rlens_state_version: 'test' });
+const localStorageMock = makeStorage({ repoground_state_version: 'test' });
 
 const context = {
     window: {
@@ -233,23 +233,23 @@ async function run() {
     els.sourceMode.value = 'remote_snapshot';
     els.prePull.checked = false;
     context.saveConfig();
-    const saved = JSON.parse(localStorageMock.getItem('rlens_config'));
+    const saved = JSON.parse(localStorageMock.getItem('repoground_config'));
     assert(saved.sourceMode === 'remote_snapshot', 'saveConfig persists sourceMode=remote_snapshot');
     assert(saved.prePull === false, 'saveConfig still persists legacy prePull=false');
     let defaults = context.getEffectiveMergeFormDefaults();
     assert(defaults.sourceMode === 'remote_snapshot', 'getEffectiveMergeFormDefaults loads sourceMode=remote_snapshot');
 
     // 7. Factory default sourceMode is local_ff when nothing is stored.
-    localStorageMock.removeItem('rlens_config');
+    localStorageMock.removeItem('repoground_config');
     defaults = context.getEffectiveMergeFormDefaults();
     assert(defaults.sourceMode === 'local_ff', 'factory default sourceMode is local_ff');
     assert(defaults.prePull === true, 'factory default prePull is true when no config stored');
 
     // 8. Legacy migration: a stored prePull=false (no sourceMode) maps to local_current.
-    localStorageMock.setItem('rlens_config', JSON.stringify({ prePull: false }));
+    localStorageMock.setItem('repoground_config', JSON.stringify({ prePull: false }));
     defaults = context.getEffectiveMergeFormDefaults();
     assert(defaults.sourceMode === 'local_current', 'legacy prePull=false migrates to sourceMode=local_current');
-    localStorageMock.removeItem('rlens_config');
+    localStorageMock.removeItem('repoground_config');
 
     // 9. UI coupling: plan-only disables the pre_pull checkbox.
     if (typeof context.syncPrePullWithPlanOnly === 'function') {

@@ -137,7 +137,7 @@ function createContext(options = {}) {
             querySelectorAll() { return []; },
             addEventListener() {},
         },
-        localStorage: makeStorage({ rlens_state_version: 'test' }),
+        localStorage: makeStorage({ repoground_state_version: 'test' }),
         sessionStorage: makeStorage(),
         navigator: { serviceWorker: { getRegistrations: async () => [] } },
         console: { info() {}, warn() {}, log() {}, error() {} },

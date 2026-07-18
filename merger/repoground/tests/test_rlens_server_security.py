@@ -1,4 +1,4 @@
-from merger.repoground.cli import rlens
+from merger.repoground.cli import serve
 
 
 def test_server_disables_access_log_to_avoid_query_token_leaks(monkeypatch, tmp_path):
@@ -8,12 +8,12 @@ def test_server_disables_access_log_to_avoid_query_token_leaks(monkeypatch, tmp_
 
     monkeypatch.setattr(
         "sys.argv",
-        ["rlens", "--hub", str(hub), "--token", "synthetic-token"],
+        ["repoground", "--hub", str(hub), "--token", "synthetic-token"],
     )
-    monkeypatch.setattr(rlens, "init_service", lambda **kwargs: captured.setdefault("init", kwargs))
-    monkeypatch.setattr(rlens.uvicorn, "run", lambda app, **kwargs: captured.setdefault("run", kwargs))
+    monkeypatch.setattr(serve, "init_service", lambda **kwargs: captured.setdefault("init", kwargs))
+    monkeypatch.setattr(serve.uvicorn, "run", lambda app, **kwargs: captured.setdefault("run", kwargs))
 
-    rlens.main()
+    serve.main()
 
     assert captured["run"]["access_log"] is False
     assert captured["run"]["host"] == "127.0.0.1"

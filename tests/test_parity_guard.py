@@ -25,9 +25,9 @@ print(args.level)
     with patch("pathlib.Path.read_text", return_value=code):
         # Patch the module-level FEATURES dictionary directly on the module object
         with patch.object(parity_guard, "FEATURES", {
-            "level": {"cli_arg": "--level", "repolens_usage": "args.level"}
+            "level": {"cli_arg": "--level", "pythonista_usage": "args.level"}
         }):
-            checker.check_repolens()
+            checker.check_pythonista_build()
             assert not checker.errors
 
 def test_ast_valid_getattr_usage(checker):
@@ -39,9 +39,9 @@ val = getattr(args, 'level')
     """
     with patch("pathlib.Path.read_text", return_value=code):
         with patch.object(parity_guard, "FEATURES", {
-            "level": {"cli_arg": None, "repolens_usage": "args.level"}
+            "level": {"cli_arg": None, "pythonista_usage": "args.level"}
         }):
-            checker.check_repolens()
+            checker.check_pythonista_build()
             assert not checker.errors
 
 def test_ast_invalid_getattr_usage(checker):
@@ -53,9 +53,9 @@ val = getattr(other, 'level')
     """
     with patch("pathlib.Path.read_text", return_value=code):
         with patch.object(parity_guard, "FEATURES", {
-            "level": {"cli_arg": None, "repolens_usage": "args.level"}
+            "level": {"cli_arg": None, "pythonista_usage": "args.level"}
         }):
-            checker.check_repolens()
+            checker.check_pythonista_build()
             assert len(checker.errors) == 1
             # Check for failure message (robust against specific failure path)
             err = checker.errors[0]
@@ -71,9 +71,9 @@ print(d['level'])
     """
     with patch("pathlib.Path.read_text", return_value=code):
         with patch.object(parity_guard, "FEATURES", {
-            "level": {"cli_arg": None, "repolens_usage": "args.level"}
+            "level": {"cli_arg": None, "pythonista_usage": "args.level"}
         }):
-            checker.check_repolens()
+            checker.check_pythonista_build()
             assert not checker.errors
 
 def test_ast_generic_usage_invalid_help_only(checker):
@@ -88,9 +88,9 @@ print("Configure the level of detail")
     """
     with patch("pathlib.Path.read_text", return_value=code):
         with patch.object(parity_guard, "FEATURES", {
-            "level": {"cli_arg": None, "repolens_usage": "args.level"}
+            "level": {"cli_arg": None, "pythonista_usage": "args.level"}
         }):
-            checker.check_repolens()
+            checker.check_pythonista_build()
             assert len(checker.errors) == 1, "Should fail if 'level' is only in a string description"
             # AST logic falls back to generic check (vars(args) is present) -> finds no subscript -> failure
             assert "not explicitly accessed" in checker.errors[0]
@@ -105,8 +105,8 @@ print("Use the 'level' flag to set...")
     """
     with patch("pathlib.Path.read_text", return_value=code):
         with patch.object(parity_guard, "FEATURES", {
-            "level": {"cli_arg": None, "repolens_usage": "args.level"}
+            "level": {"cli_arg": None, "pythonista_usage": "args.level"}
         }):
-            checker.check_repolens()
+            checker.check_pythonista_build()
             assert len(checker.errors) == 1
             assert "not explicitly accessed" in checker.errors[0]

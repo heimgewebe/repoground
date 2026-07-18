@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-
 import pytest
 
 from merger.repoground.core import mcp_tools
@@ -59,7 +58,7 @@ def test_mcp_snapshot_create_dispatches_existing_generator_with_guards(monkeypat
     assert result["mutation_boundary"]["not_reachable_from_read_tools"] is True
     assert result["mutation_boundary"]["writes"] == ["brief_bundle_artifacts"]
     assert "git_push" in result["mutation_boundary"]["forbidden_operations"]
-    assert result["created_snapshot"]["command"] == "repobrief snapshot create"
+    assert result["created_snapshot"]["command"] == "repoground snapshot create"
     assert result["created_snapshot"]["mutation_boundary"]["read_paths_do_not_refresh"] is True
     assert calls["scan"]["args"][0] == repo.resolve()
     assert calls["scan"]["kwargs"]["include_hidden"] is False
@@ -150,8 +149,3 @@ def test_read_only_access_does_not_trigger_mcp_snapshot_create(monkeypatch, tmp_
     assert status["mutation_boundary"]["writes"] == []
     assert status["mutation_boundary"]["read_paths_do_not_refresh"] is True
     assert found["status"] == "available"
-
-
-def test_legacy_mcp_tool_error_aliases_are_identical() -> None:
-    assert mcp_tools.RepoBriefMcpToolError is mcp_tools.RepoGroundMcpToolError
-    assert mcp_tools.RepoBriefMcpToolTimeout is mcp_tools.RepoGroundMcpToolTimeout

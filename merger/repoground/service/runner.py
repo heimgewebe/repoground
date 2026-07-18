@@ -873,7 +873,7 @@ class JobRunner:
 
             generator_info = {
                 "name": "rlens",
-                "version": os.getenv("REPOGROUND_VERSION") or os.getenv("RLENS_VERSION", "dev"),
+                "version": os.getenv("REPOGROUND_VERSION", "dev"),
                 "platform": "service"
             }
 

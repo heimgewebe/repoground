@@ -3,7 +3,7 @@
 
 Persisted v1 records retain their historical ``repobrief.*`` schemas and
 ``lenskit_version`` field. The command surface uses RepoGround terminology while
-accepting documented 3.x compatibility options.
+using canonical RepoGround options.
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-def _env_path(primary: str, legacy: str, default: Path) -> Path:
-    raw = os.environ.get(primary) or os.environ.get(legacy)
+def _env_path(primary: str, default: Path) -> Path:
+    raw = os.environ.get(primary)
     return Path(raw).expanduser() if raw else default
 
 
@@ -24,7 +24,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from merger.repoground.core.repobrief_publication_policy import (  # noqa: E402
+from merger.repoground.core.publication_policy import (  # noqa: E402
     PublicationIdentity,
     PublicationPolicyError,
     PublicationPolicyStore,
@@ -34,12 +34,10 @@ from merger.repoground.core.repobrief_publication_policy import (  # noqa: E402
 
 DEFAULT_EVIDENCE_ROOT = _env_path(
     "REPOGROUND_PUBLICATION_EVIDENCE_ROOT",
-    "RB_PUBLICATION_EVIDENCE_ROOT",
     Path.home() / ".local" / "state" / "repobrief-publication-policy",
 )
 DEFAULT_PAYLOAD_ROOT = _env_path(
     "REPOGROUND_PUBLICATION_PAYLOAD_ROOT",
-    "RB_PUBLICATION_PAYLOAD_ROOT",
     Path.home() / "repos" / "manifest-publications",
 )
 
@@ -81,13 +79,9 @@ def add_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--configuration-sha256", required=True)
     parser.add_argument(
         "--repoground-version",
-        "--lenskit-version",
         dest="lenskit_version",
         required=True,
-        help=(
-            "RepoGround generator version; --lenskit-version remains a 3.x alias "
-            "for the persisted v1 lenskit_version field"
-        ),
+        help="RepoGround generator version for the persisted v1 lenskit_version field",
     )
     parser.add_argument("--bundle-schema", required=True)
     parser.add_argument("--generator-inputs-sha256", required=True)

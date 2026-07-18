@@ -401,8 +401,6 @@ class RepoGroundMcpStdioServer:
             "contents": [{"uri": uri, "mimeType": mime_type, "text": text}],
             "_meta": {
                 "repoground": resource_meta,
-                # Temporary compatibility alias for clients that still read the old key.
-                "repobrief": resource_meta,
             },
         }
 
@@ -582,10 +580,6 @@ def _error_response(request_id: Any, code: int, message: str, data: Any = None) 
     if data is not None:
         error["data"] = data
     return {"jsonrpc": "2.0", "id": request_id, "error": error}
-
-
-# Deprecated import alias for 3.x consumers; the implementation is RepoGround.
-RepoBriefMcpStdioServer = RepoGroundMcpStdioServer
 
 
 def serve_stdio(

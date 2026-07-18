@@ -237,7 +237,7 @@ def test_review_coverage_cli_outputs_json_and_advisory_warn_exit_zero(tmp_path, 
     review.write_text("Only merger/repoground/core/example.py#L10-L13 was inspected.", encoding="utf-8")
 
     rc = main([
-        "repobrief",
+        "ground",
         "review-coverage",
         "compile",
         "--delta-context",

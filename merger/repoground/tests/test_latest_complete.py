@@ -311,7 +311,7 @@ def test_latest_complete_cli_write_and_status(tmp_path, capsys):
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "latest-complete",
             "write",
             "--bundle-manifest",
@@ -335,7 +335,7 @@ def test_latest_complete_cli_write_and_status(tmp_path, capsys):
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "latest-complete",
             "status",
             "--registry",
@@ -1365,7 +1365,7 @@ def test_latest_complete_cli_emits_json_validation_error(tmp_path, capsys):
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "latest-complete",
             "write",
             "--bundle-manifest",
@@ -1428,7 +1428,7 @@ def test_latest_complete_cli_reports_uncertain_after_replace(
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "latest-complete",
             "write",
             "--bundle-manifest",
@@ -1462,7 +1462,7 @@ def test_latest_complete_cli_reports_unresolvable_output_path_as_json(
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "latest-complete",
             "write",
             "--bundle-manifest",
@@ -1563,7 +1563,7 @@ def test_snapshot_create_can_explicitly_write_latest_complete_registry(
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "snapshot",
             "create",
             "--repo",
@@ -1639,7 +1639,7 @@ def test_snapshot_create_does_not_advance_latest_registry_when_finalization_fail
 
     rc = main(
         [
-            "repobrief",
+            "ground",
             "snapshot",
             "create",
             "--repo",

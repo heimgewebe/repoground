@@ -1,15 +1,15 @@
 // RepoGround UI logic
 
 // Single Source of Truth from index.html (fallback to dev if missing)
-const REPOGROUND_UI_VERSION = window.__REPOGROUND_UI_VERSION__ || window.__RLENS_UI_VERSION__ || "dev";
+const REPOGROUND_UI_VERSION = window.__REPOGROUND_UI_VERSION__ || "dev";
 console.info(`[RepoGround] UI Version: ${REPOGROUND_UI_VERSION}`);
 
 // --- State Migration & Cache Busting ---
 try {
-    const storedVersion = localStorage.getItem('rlens_state_version');
+    const storedVersion = localStorage.getItem('repoground_state_version');
     if (storedVersion !== REPOGROUND_UI_VERSION) {
         // RELOAD LOOP GUARD: Check if we just reset this version in this session
-        if (sessionStorage.getItem('rlens_reset_once') === REPOGROUND_UI_VERSION) {
+        if (sessionStorage.getItem('repoground_reset_once') === REPOGROUND_UI_VERSION) {
             console.warn(`[RepoGround] Reload loop detected for version ${REPOGROUND_UI_VERSION}. Aborting automatic reset/reload.`);
             // Show a non-blocking UI warning after DOM load
             window.addEventListener('DOMContentLoaded', () => {
@@ -22,16 +22,16 @@ try {
             console.warn(`[RepoGround] Version mismatch (Stored: ${storedVersion} != Current: ${REPOGROUND_UI_VERSION}). Performing hard reset.`);
 
             // Set guard flag BEFORE actions
-            sessionStorage.setItem('rlens_reset_once', REPOGROUND_UI_VERSION);
+            sessionStorage.setItem('repoground_reset_once', REPOGROUND_UI_VERSION);
 
             // 1. Clear LocalStorage
             localStorage.clear();
 
-            // 2. Clear IndexedDB (Safer: rlens_ prefix only)
+            // 2. Clear IndexedDB (RepoGround-owned databases only)
             if (window.indexedDB && window.indexedDB.databases) {
                 window.indexedDB.databases().then(dbs => {
                     dbs.forEach(db => {
-                        if (db.name && db.name.startsWith('rlens_')) {
+                        if (db.name && db.name.startsWith('repoground_')) {
                             console.log(`Deleting DB: ${db.name}`);
                             window.indexedDB.deleteDatabase(db.name);
                         }
@@ -52,7 +52,7 @@ try {
             }
 
             // 4. Update Version
-            localStorage.setItem('rlens_state_version', REPOGROUND_UI_VERSION);
+            localStorage.setItem('repoground_state_version', REPOGROUND_UI_VERSION);
 
             // 5. Force Reload (to ensure clean slate)
             setTimeout(() => {
@@ -69,7 +69,6 @@ const API_BASE = '/api';
 // Guard: Ensure materialize.js is loaded
 if (typeof materializeRawFromCompressed !== 'function' || typeof normalizePath !== 'function') {
     window.__REPOGROUND_MATERIALIZE_MISSING__ = true;
-    window.__RLENS_MATERIALIZE_MISSING__ = true; // legacy test/extension alias
     const errorMsg = "CRITICAL: materialize.js not loaded. Application logic will fail.";
     console.error(errorMsg);
     // Attempt to show UI error if DOM is ready, otherwise wait
@@ -84,12 +83,12 @@ if (typeof materializeRawFromCompressed !== 'function' || typeof normalizePath !
 }
 
 // Token handling
-const TOKEN_KEY = 'rlens_token';
-const SETS_KEY = 'rlens_sets';
-const CONFIG_KEY = 'rlens_config';
-const ATLAS_CONFIG_KEY = 'rlens_atlas_config_v2';
-const ATLAS_CONFIG_LEGACY_KEY = 'rlens_atlas_config';
-const PRESCAN_SAVED_KEY = "lenskit.prescan.savedSelections.v1";
+const TOKEN_KEY = 'repoground_token';
+const SETS_KEY = 'repoground_sets';
+const CONFIG_KEY = 'repoground_config';
+const ATLAS_CONFIG_KEY = 'repoground_atlas_config_v2';
+const ATLAS_CONFIG_LEGACY_KEY = 'repoground_atlas_config';
+const PRESCAN_SAVED_KEY = "repoground.prescan.savedSelections.v1";
 
 // Global State
 let currentPickerTarget = null;
@@ -114,8 +113,8 @@ let prescanExpandedPaths = new Set(); // Stores paths of expanded directories (r
 let savedPrescanSelections = loadSavedPrescanSelections(); // repoName -> { raw: Set|null, compressed: Array|null }
 
 // Conditional Test Hook (explicit flag instead of heuristic)
-if (window.__REPOGROUND_TEST__ || window.__RLENS_TEST__) {
-    window.__rlens_pool_ready = true;
+if (window.__REPOGROUND_TEST__) {
+    window.__repoground_pool_ready = true;
 }
 
 // DOCS: savedPrescanSelections acts as the "Selection Pool".
@@ -2649,10 +2648,9 @@ async function storePrescanSelectionInternal(append) {
                      // representation (and causing UI inconsistencies on reload), fall back to
                      // materializing raw from the tree using compressed rules.
                      if (!mergedRaw && mergedCompressed.size > 0) {
-                         if (window.__REPOGROUND_MATERIALIZE_MISSING__ || window.__RLENS_MATERIALIZE_MISSING__) {
-                             if (!window.__REPOGROUND_MATERIALIZE_WARNED__ && !window.__RLENS_MATERIALIZE_WARNED__) {
+                         if (window.__REPOGROUND_MATERIALIZE_MISSING__) {
+                             if (!window.__REPOGROUND_MATERIALIZE_WARNED__) {
                                  window.__REPOGROUND_MATERIALIZE_WARNED__ = true;
-                                 window.__RLENS_MATERIALIZE_WARNED__ = true; // legacy alias
                                  console.warn('Cannot materialize raw: materialize.js missing (degraded)');
                              }
                              mergedRaw = null;

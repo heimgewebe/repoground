@@ -1,8 +1,9 @@
 """Tests for the RepoGround service client (cmd_service_client.py).
 
-No real rLens server is used. urllib.request.urlopen is monkeypatched.
+No real service is used. urllib.request.urlopen is monkeypatched.
 """
 import json
+import os
 import pathlib
 import ast
 import urllib.error
@@ -12,7 +13,30 @@ import urllib.request
 import pytest
 
 import merger.repoground.cli.cmd_service_client as _mod
-from merger.repoground.cli.main import main
+from merger.repoground.cli.main import main as _main
+
+
+def main(args: list[str]) -> int:
+    """Run established service-client coverage through canonical configuration."""
+    environment_aliases = {
+        "REPOGROUND_BASE_URL": "REPOGROUND_BASE_URL",
+        "REPOGROUND_TOKEN": "REPOGROUND_TOKEN",
+        "REPOGROUND_PROFILE": "REPOGROUND_PROFILE",
+        "LENSKIT_REPOGROUND_PROFILES": "REPOGROUND_PROFILES",
+    }
+    original: dict[str, str | None] = {}
+    for legacy, canonical in environment_aliases.items():
+        if legacy in os.environ:
+            original[canonical] = os.environ.get(canonical)
+            os.environ[canonical] = os.environ[legacy]
+    try:
+        return _main(["service-client" if arg == "repoground-client" else arg for arg in args])
+    finally:
+        for canonical, value in original.items():
+            if value is None:
+                os.environ.pop(canonical, None)
+            else:
+                os.environ[canonical] = value
 
 
 class _FakeResponse:
@@ -71,7 +95,7 @@ def _assert_request_url(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_no_requests_dependency() -> None:
+def test_service_client_no_requests_dependency() -> None:
     src = pathlib.Path(_mod.__file__).read_text(encoding="utf-8")
     tree = ast.parse(src)
     for node in ast.walk(tree):
@@ -86,12 +110,12 @@ def test_rlens_client_no_requests_dependency() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_health_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+def test_service_client_health_json(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     fake_data = {"status": "ok", "version": "1.2.3"}
     captured, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -105,7 +129,7 @@ def test_rlens_client_health_json(monkeypatch: pytest.MonkeyPatch, capsys: pytes
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_health_text(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
+def test_service_client_health_text(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture) -> None:
     fake_data = {
         "status": "ok",
         "version": "1.0.0",
@@ -116,7 +140,7 @@ def test_rlens_client_health_text(monkeypatch: pytest.MonkeyPatch, capsys: pytes
     _, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health"])
+    rc = main(["repoground-client", "health"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -131,12 +155,12 @@ def test_rlens_client_health_text(monkeypatch: pytest.MonkeyPatch, capsys: pytes
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_base_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RLENS_BASE_URL", "http://heimserver:8787")
+def test_service_client_base_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPOGROUND_BASE_URL", "http://heimserver:8787")
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
@@ -147,12 +171,12 @@ def test_rlens_client_base_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_base_url_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RLENS_BASE_URL", "http://wrong:8787")
+def test_service_client_base_url_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPOGROUND_BASE_URL", "http://wrong:8787")
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--base-url", "http://heim-pc:8787", "--json"])
+    rc = main(["repoground-client", "health", "--base-url", "http://heim-pc:8787", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
@@ -164,12 +188,12 @@ def test_rlens_client_base_url_flag_overrides_env(monkeypatch: pytest.MonkeyPatc
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_token_header_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "secret-token")
+def test_service_client_token_header_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPOGROUND_TOKEN", "secret-token")
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "artifacts", "--json"])
+    rc = main(["repoground-client", "artifacts", "--json"])
 
     assert rc == 0
     auth = captured["req"].get_header("Authorization")
@@ -182,12 +206,12 @@ def test_rlens_client_token_header_from_env(monkeypatch: pytest.MonkeyPatch) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_token_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "env-token")
+def test_service_client_token_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPOGROUND_TOKEN", "env-token")
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "artifacts", "--token", "flag-token", "--json"])
+    rc = main(["repoground-client", "artifacts", "--token", "flag-token", "--json"])
 
     assert rc == 0
     auth = captured["req"].get_header("Authorization")
@@ -195,13 +219,13 @@ def test_rlens_client_token_flag_overrides_env(monkeypatch: pytest.MonkeyPatch) 
     assert "flag-token" not in captured["req"].full_url
 
 
-def test_rlens_client_token_before_subcommand_is_safe(
+def test_service_client_token_before_subcommand_is_safe(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "--token", "secret-token", "health", "--json"])
+    rc = main(["repoground-client", "--token", "secret-token", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 0
@@ -211,13 +235,13 @@ def test_rlens_client_token_before_subcommand_is_safe(
     assert "secret-token" not in err
 
 
-def test_rlens_client_leaf_token_overrides_parent_token(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_client_leaf_token_overrides_parent_token(monkeypatch: pytest.MonkeyPatch) -> None:
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main(
         [
-            "rlens-client",
+            "repoground-client",
             "--token",
             "parent-token",
             "artifacts",
@@ -231,13 +255,13 @@ def test_rlens_client_leaf_token_overrides_parent_token(monkeypatch: pytest.Monk
     assert captured["req"].get_header("Authorization") == "Bearer leaf-token"
 
 
-def test_rlens_client_leaf_base_url_overrides_parent_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_client_leaf_base_url_overrides_parent_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main(
         [
-            "rlens-client",
+            "repoground-client",
             "--base-url",
             "http://parent:8787",
             "health",
@@ -256,10 +280,10 @@ def test_rlens_client_leaf_base_url_overrides_parent_base_url(monkeypatch: pytes
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_token_not_leaked_on_http_error(
+def test_service_client_token_not_leaked_on_http_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "my-secret-token")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "my-secret-token")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise urllib.error.HTTPError(
@@ -268,7 +292,7 @@ def test_rlens_client_token_not_leaked_on_http_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -281,17 +305,17 @@ def test_rlens_client_token_not_leaked_on_http_error(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_token_not_leaked_on_url_error(
+def test_service_client_token_not_leaked_on_url_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "my-secret-token")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "my-secret-token")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise urllib.error.URLError("Connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -304,13 +328,13 @@ def test_rlens_client_token_not_leaked_on_url_error(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_artifacts_with_repo_query(
+def test_service_client_artifacts_with_repo_query(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "artifacts", "--repo", "lens kit", "--json"])
+    rc = main(["repoground-client", "artifacts", "--repo", "lens kit", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -325,7 +349,7 @@ def test_rlens_client_artifacts_with_repo_query(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_latest_requires_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_client_latest_requires_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     network_called: dict = {}
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -335,7 +359,7 @@ def test_rlens_client_latest_requires_repo(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(["rlens-client", "latest", "--json"])
+        main(["repoground-client", "latest", "--json"])
 
     assert exc_info.value.code == 2
     assert "hit" not in network_called
@@ -346,19 +370,19 @@ def test_rlens_client_latest_requires_repo(monkeypatch: pytest.MonkeyPatch) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_latest_with_repo_level_mode(
+def test_service_client_latest_with_repo_level_mode(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    fake_data = {"id": "art-abc", "repos": "lenskit", "created_at": "2026-01-01"}
+    fake_data = {"id": "art-abc", "repos": "repoground", "created_at": "2026-01-01"}
     captured, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main(
         [
-            "rlens-client",
+            "repoground-client",
             "latest",
             "--repo",
-            "lenskit",
+            "repoground",
             "--level",
             "max",
             "--mode",
@@ -371,7 +395,7 @@ def test_rlens_client_latest_with_repo_level_mode(
     assert rc == 0
     url = captured["req"].full_url
     assert "/api/artifacts/latest" in url
-    assert "repo=lenskit" in url
+    assert "repo=repoground" in url
     assert "level=max" in url
     assert "mode=gesamt" in url
 
@@ -381,7 +405,7 @@ def test_rlens_client_latest_with_repo_level_mode(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_http_error_exit_1_json(
+def test_service_client_http_error_exit_1_json(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -391,7 +415,7 @@ def test_rlens_client_http_error_exit_1_json(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 1
@@ -405,12 +429,12 @@ def test_rlens_client_http_error_exit_1_json(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_invalid_json_response_exit_1(
+def test_service_client_invalid_json_response_exit_1(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", _make_bad_json_opener())
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 1
@@ -424,17 +448,17 @@ def test_rlens_client_invalid_json_response_exit_1(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_value_error_exit_1_no_token_leak(
+def test_service_client_value_error_exit_1_no_token_leak(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "my-secret-token")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "my-secret-token")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise ValueError("bad url my-secret-token")
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -445,7 +469,7 @@ def test_rlens_client_value_error_exit_1_no_token_leak(
     assert "my-secret-token" not in err
 
 
-def test_rlens_client_invalid_base_url_scheme_rejected(
+def test_service_client_invalid_base_url_scheme_rejected(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     network_called: dict = {}
@@ -456,7 +480,7 @@ def test_rlens_client_invalid_base_url_scheme_rejected(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--base-url", "file:///etc/passwd", "--json"])
+    rc = main(["repoground-client", "health", "--base-url", "file:///etc/passwd", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -470,11 +494,11 @@ def test_rlens_client_invalid_base_url_scheme_rejected(
     assert "file:///etc/passwd" not in err
 
 
-def test_rlens_client_invalid_base_url_env_is_config_error(
+def test_service_client_invalid_base_url_env_is_config_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     network_called: dict = {}
-    monkeypatch.setenv("RLENS_BASE_URL", "ftp://example.org")
+    monkeypatch.setenv("REPOGROUND_BASE_URL", "ftp://example.org")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         network_called["hit"] = True
@@ -482,7 +506,7 @@ def test_rlens_client_invalid_base_url_env_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -532,7 +556,7 @@ def _make_sse_opener(lines: list):
     return captured, _urlopen
 
 
-def test_rlens_client_jobs_json(
+def test_service_client_jobs_json(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     fake_data = [
@@ -542,7 +566,7 @@ def test_rlens_client_jobs_json(
     captured, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "jobs", "--json"])
+    rc = main(["repoground-client", "jobs", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -552,7 +576,7 @@ def test_rlens_client_jobs_json(
     assert captured["req"].full_url.endswith("/api/jobs")
 
 
-def test_rlens_client_jobs_text(
+def test_service_client_jobs_text(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     fake_data = [
@@ -561,7 +585,7 @@ def test_rlens_client_jobs_text(
     _, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "jobs"])
+    rc = main(["repoground-client", "jobs"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -569,26 +593,26 @@ def test_rlens_client_jobs_text(
     assert "running" in out
 
 
-def test_rlens_client_jobs_empty(
+def test_service_client_jobs_empty(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "jobs"])
+    rc = main(["repoground-client", "jobs"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
     assert "No jobs" in out
 
 
-def test_rlens_client_jobs_status_and_limit(
+def test_service_client_jobs_status_and_limit(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "jobs", "--status", "running", "--limit", "3", "--json"])
+    rc = main(["repoground-client", "jobs", "--status", "running", "--limit", "3", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -598,7 +622,7 @@ def test_rlens_client_jobs_status_and_limit(
     assert "limit=3" in url
 
 
-def test_rlens_client_job_by_id_json(
+def test_service_client_job_by_id_json(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     fake_data = {
@@ -610,7 +634,7 @@ def test_rlens_client_job_by_id_json(
     captured, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "job", "job-xyz", "--json"])
+    rc = main(["repoground-client", "job", "job-xyz", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -619,7 +643,7 @@ def test_rlens_client_job_by_id_json(
     assert captured["req"].full_url.endswith("/api/jobs/job-xyz")
 
 
-def test_rlens_client_job_by_id_text(
+def test_service_client_job_by_id_text(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     fake_data = {
@@ -636,7 +660,7 @@ def test_rlens_client_job_by_id_text(
     _, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "job", "job-xyz"])
+    rc = main(["repoground-client", "job", "job-xyz"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -648,11 +672,11 @@ def test_rlens_client_job_by_id_text(
     assert "w2" in out
 
 
-def test_rlens_client_job_id_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_service_client_job_id_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> None:
     captured, opener = _make_opener({"id": "x"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "job", "job id/with weird", "--json"])
+    rc = main(["repoground-client", "job", "job id/with weird", "--json"])
 
     assert rc == 0
     # Path segment must not contain raw spaces or slashes.
@@ -662,7 +686,7 @@ def test_rlens_client_job_id_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -> 
     assert url.split("/api/jobs/", 1)[1].rstrip("?&").count("/") == 0
 
 
-def test_rlens_client_job_missing_id_is_cli_error(
+def test_service_client_job_missing_id_is_cli_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -671,14 +695,14 @@ def test_rlens_client_job_missing_id_is_cli_error(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(["rlens-client", "job"])
+        main(["repoground-client", "job"])
     assert exc_info.value.code == 2
 
 
-def test_rlens_client_job_http_404_no_token_leak(
+def test_service_client_job_http_404_no_token_leak(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "shhh-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "shhh-secret")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise urllib.error.HTTPError(
@@ -687,7 +711,7 @@ def test_rlens_client_job_http_404_no_token_leak(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "job", "missing-id", "--json"])
+    rc = main(["repoground-client", "job", "missing-id", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -709,13 +733,13 @@ def _decode_request_json(req: urllib.request.Request) -> dict:
     return json.loads(raw.decode("utf-8"))
 
 
-def test_rlens_client_run_posts_job_request(
+def test_service_client_run_posts_job_request(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     fake_data = {
         "id": "job-run-1",
         "status": "queued",
-        "repos": ["lenskit"],
+        "repos": ["repoground"],
         "hub_resolved": "/hub",
     }
     captured, opener = _make_opener(fake_data)
@@ -723,10 +747,10 @@ def test_rlens_client_run_posts_job_request(
 
     rc = main(
         [
-            "rlens-client",
+            "repoground-client",
             "run",
             "--repo",
-            "lenskit",
+            "repoground",
             "--level",
             "max",
             "--mode",
@@ -745,16 +769,16 @@ def test_rlens_client_run_posts_job_request(
     _assert_request_url(req, scheme="http", netloc="127.0.0.1:8787", path="/api/jobs")
     payload = _decode_request_json(req)
     # pre_pull defaults to True and is always sent explicitly.
-    assert payload == {"repos": ["lenskit"], "level": "max", "mode": "gesamt", "pre_pull": True}
+    assert payload == {"repos": ["repoground"], "level": "max", "mode": "gesamt", "pre_pull": True}
 
 
-def test_rlens_client_run_defaults_pre_pull_true(
+def test_service_client_run_defaults_pre_pull_true(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-pp", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "repoground", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -762,30 +786,30 @@ def test_rlens_client_run_defaults_pre_pull_true(
     assert payload["pre_pull"] is True
 
 
-def test_rlens_client_run_no_pre_pull_sends_false(
+def test_service_client_run_no_pre_pull_sends_false(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-pp2", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit", "--no-pre-pull", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "repoground", "--no-pre-pull", "--json"])
     capsys.readouterr()
 
     assert rc == 0
     payload = _decode_request_json(captured["req"])
     assert payload["pre_pull"] is False
     # Other options remain untouched.
-    assert payload["repos"] == ["lenskit"]
+    assert payload["repos"] == ["repoground"]
     assert "force_new" not in payload
 
 
-def test_rlens_client_run_plan_only_sends_pre_pull_false(
+def test_service_client_run_plan_only_sends_pre_pull_false(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-po", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit", "--plan-only", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "repoground", "--plan-only", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -795,7 +819,7 @@ def test_rlens_client_run_plan_only_sends_pre_pull_false(
     assert payload["pre_pull"] is False
 
 
-def test_rlens_client_run_plan_only_with_pre_pull_is_rejected(
+def test_service_client_run_plan_only_with_pre_pull_is_rejected(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -803,7 +827,7 @@ def test_rlens_client_run_plan_only_with_pre_pull_is_rejected(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit", "--plan-only", "--pre-pull", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "repoground", "--plan-only", "--pre-pull", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -813,7 +837,7 @@ def test_rlens_client_run_plan_only_with_pre_pull_is_rejected(
     assert "mutually exclusive" in parsed["message"]
 
 
-def test_rlens_client_run_pre_pull_and_no_pre_pull_are_mutually_exclusive(
+def test_service_client_run_pre_pull_and_no_pre_pull_are_mutually_exclusive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -822,11 +846,11 @@ def test_rlens_client_run_pre_pull_and_no_pre_pull_are_mutually_exclusive(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(["rlens-client", "run", "--repo", "lenskit", "--pre-pull", "--no-pre-pull"])
+        main(["repoground-client", "run", "--repo", "repoground", "--pre-pull", "--no-pre-pull"])
     assert exc_info.value.code == 2
 
 
-def test_rlens_client_run_repeated_repo_force_new_and_plan_only(
+def test_service_client_run_repeated_repo_force_new_and_plan_only(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-run-2", "status": "queued"})
@@ -834,10 +858,10 @@ def test_rlens_client_run_repeated_repo_force_new_and_plan_only(
 
     rc = main(
         [
-            "rlens-client",
+            "repoground-client",
             "run",
             "--repo",
-            "lenskit",
+            "repoground",
             "--repo",
             "metarepo",
             "--hub",
@@ -853,7 +877,7 @@ def test_rlens_client_run_repeated_repo_force_new_and_plan_only(
 
     assert rc == 0
     payload = _decode_request_json(captured["req"])
-    assert payload["repos"] == ["lenskit", "metarepo"]
+    assert payload["repos"] == ["repoground", "metarepo"]
     assert payload["hub"] == "/tmp/hub"
     assert payload["merges_dir"] == "/tmp/merges"
     assert payload["force_new"] is True
@@ -867,13 +891,13 @@ def test_rlens_client_run_repeated_repo_force_new_and_plan_only(
 # ---------------------------------------------------------------------------
 
 
-def test_rlens_client_run_remote_snapshot_payload(
+def test_service_client_run_remote_snapshot_payload(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-rs", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "run", "--repo", "weltgewebe", "--source-mode", "remote-snapshot", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "weltgewebe", "--source-mode", "remote-snapshot", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -884,14 +908,14 @@ def test_rlens_client_run_remote_snapshot_payload(
     assert "remote_ref" not in payload
 
 
-def test_rlens_client_run_remote_snapshot_default_branch(
+def test_service_client_run_remote_snapshot_default_branch(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-db", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "rlens-client", "run", "--repo", "weltgewebe",
+        "repoground-client", "run", "--repo", "weltgewebe",
         "--source-mode", "remote-snapshot", "--remote-ref-policy", "default-branch", "--json",
     ])
     capsys.readouterr()
@@ -902,14 +926,14 @@ def test_rlens_client_run_remote_snapshot_default_branch(
     assert payload["remote_ref_policy"] == "default_branch"
 
 
-def test_rlens_client_run_remote_snapshot_explicit_ref(
+def test_service_client_run_remote_snapshot_explicit_ref(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-er", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "rlens-client", "run", "--repo", "weltgewebe",
+        "repoground-client", "run", "--repo", "weltgewebe",
         "--source-mode", "remote-snapshot", "--remote-ref", "origin/main", "--json",
     ])
     capsys.readouterr()
@@ -919,13 +943,13 @@ def test_rlens_client_run_remote_snapshot_explicit_ref(
     assert payload["remote_ref"] == "origin/main"
 
 
-def test_rlens_client_run_local_current_payload(
+def test_service_client_run_local_current_payload(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-lc", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit", "--source-mode", "local-current", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "repoground", "--source-mode", "local-current", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -935,14 +959,14 @@ def test_rlens_client_run_local_current_payload(
     assert "remote_ref_policy" not in payload
 
 
-def test_rlens_client_run_plan_only_remote_snapshot_allowed(
+def test_service_client_run_plan_only_remote_snapshot_allowed(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"id": "job-po-rs", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "rlens-client", "run", "--repo", "weltgewebe",
+        "repoground-client", "run", "--repo", "weltgewebe",
         "--source-mode", "remote-snapshot", "--plan-only", "--json",
     ])
     capsys.readouterr()
@@ -954,7 +978,7 @@ def test_rlens_client_run_plan_only_remote_snapshot_allowed(
     assert payload["pre_pull"] is False
 
 
-def test_rlens_client_run_source_mode_pre_pull_conflicts(
+def test_service_client_run_source_mode_pre_pull_conflicts(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -963,9 +987,9 @@ def test_rlens_client_run_source_mode_pre_pull_conflicts(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     for argv in (
-        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-current", "--pre-pull", "--json"],
-        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-ff", "--no-pre-pull", "--json"],
-        ["rlens-client", "run", "--repo", "r", "--source-mode", "remote-snapshot", "--pre-pull", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-current", "--pre-pull", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-ff", "--no-pre-pull", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--source-mode", "remote-snapshot", "--pre-pull", "--json"],
     ):
         rc = main(argv)
         out, _ = capsys.readouterr()
@@ -978,17 +1002,17 @@ def test_rlens_client_run_source_mode_pre_pull_conflicts(
     "argv",
     [
         # local-ff + plan-only: local-ff would mutate, plan-only forbids mutation.
-        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-ff", "--plan-only", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-ff", "--plan-only", "--json"],
         # remote-ref without remote-snapshot.
-        ["rlens-client", "run", "--repo", "r", "--remote-ref", "origin/main", "--json"],
-        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref", "origin/main", "--json"],
-        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-ff", "--remote-ref", "origin/main", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--remote-ref", "origin/main", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref", "origin/main", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-ff", "--remote-ref", "origin/main", "--json"],
         # explicit non-default policy without remote-snapshot.
-        ["rlens-client", "run", "--repo", "r", "--remote-ref-policy", "default-branch", "--json"],
-        ["rlens-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref-policy", "default-branch", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--remote-ref-policy", "default-branch", "--json"],
+        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref-policy", "default-branch", "--json"],
     ],
 )
-def test_rlens_client_run_source_mode_conflicts_exit_2_no_network(
+def test_service_client_run_source_mode_conflicts_exit_2_no_network(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture, argv
 ) -> None:
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -1004,7 +1028,7 @@ def test_rlens_client_run_source_mode_conflicts_exit_2_no_network(
     assert parsed["error_kind"] == "config_error"
 
 
-def test_rlens_client_run_remote_snapshot_explicit_policy_allowed(
+def test_service_client_run_remote_snapshot_explicit_policy_allowed(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     # The same non-default policy is fine *with* remote-snapshot.
@@ -1012,7 +1036,7 @@ def test_rlens_client_run_remote_snapshot_explicit_policy_allowed(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "rlens-client", "run", "--repo", "r",
+        "repoground-client", "run", "--repo", "r",
         "--source-mode", "remote-snapshot", "--remote-ref-policy", "default-branch", "--json",
     ])
     capsys.readouterr()
@@ -1021,47 +1045,47 @@ def test_rlens_client_run_remote_snapshot_explicit_policy_allowed(
     assert payload["remote_ref_policy"] == "default_branch"
 
 
-def test_rlens_client_run_text_output(
+def test_service_client_run_text_output(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _, opener = _make_opener(
         {
             "id": "job-run-text",
             "status": "queued",
-            "repos": ["lenskit", "metarepo"],
+            "repos": ["repoground", "metarepo"],
             "hub_resolved": "/hub",
         }
     )
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit"])
+    rc = main(["repoground-client", "run", "--repo", "repoground"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
     assert "job-run-text" in out
     assert "queued" in out
-    assert "lenskit" in out
+    assert "repoground" in out
     assert "/hub" in out
 
 
-def test_rlens_client_run_sets_bearer_header_and_no_query_token(
+def test_service_client_run_sets_bearer_header_and_no_query_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "run-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "run-secret")
     captured, opener = _make_opener({"id": "job-run-token", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "repoground", "--json"])
 
     assert rc == 0
     assert captured["req"].get_header("Authorization") == "Bearer run-secret"
     assert "run-secret" not in captured["req"].full_url
 
 
-def test_rlens_client_run_http_error_exit_1_no_token_leak(
+def test_service_client_run_http_error_exit_1_no_token_leak(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "run-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "run-secret")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise urllib.error.HTTPError(
@@ -1070,7 +1094,7 @@ def test_rlens_client_run_http_error_exit_1_no_token_leak(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "run", "--repo", "lenskit", "--json"])
+    rc = main(["repoground-client", "run", "--repo", "repoground", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -1081,13 +1105,13 @@ def test_rlens_client_run_http_error_exit_1_no_token_leak(
     assert "run-secret" not in err
 
 
-def test_rlens_client_cancel_posts_to_url_encoded_job_path(
+def test_service_client_cancel_posts_to_url_encoded_job_path(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     captured, opener = _make_opener({"status": "canceling"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "cancel", "job id/with weird", "--json"])
+    rc = main(["repoground-client", "cancel", "job id/with weird", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1102,13 +1126,13 @@ def test_rlens_client_cancel_posts_to_url_encoded_job_path(
     assert suffix[: -len("/cancel")].count("/") == 0
 
 
-def test_rlens_client_cancel_text_finished_message(
+def test_service_client_cancel_text_finished_message(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _, opener = _make_opener({"status": "succeeded", "message": "Job already finished"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "cancel", "job-done"])
+    rc = main(["repoground-client", "cancel", "job-done"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1116,24 +1140,24 @@ def test_rlens_client_cancel_text_finished_message(
     assert "Job already finished" in out
 
 
-def test_rlens_client_cancel_sets_bearer_header_and_no_query_token(
+def test_service_client_cancel_sets_bearer_header_and_no_query_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "cancel-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "cancel-secret")
     captured, opener = _make_opener({"status": "canceling"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "cancel", "job-1", "--json"])
+    rc = main(["repoground-client", "cancel", "job-1", "--json"])
 
     assert rc == 0
     assert captured["req"].get_header("Authorization") == "Bearer cancel-secret"
     assert "cancel-secret" not in captured["req"].full_url
 
 
-def test_rlens_client_cancel_http_404_no_token_leak(
+def test_service_client_cancel_http_404_no_token_leak(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "cancel-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "cancel-secret")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise urllib.error.HTTPError(
@@ -1142,7 +1166,7 @@ def test_rlens_client_cancel_http_404_no_token_leak(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "cancel", "missing-id", "--json"])
+    rc = main(["repoground-client", "cancel", "missing-id", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -1153,7 +1177,7 @@ def test_rlens_client_cancel_http_404_no_token_leak(
     assert "cancel-secret" not in err
 
 
-def test_rlens_client_logs_text_streams_data_lines(
+def test_service_client_logs_text_streams_data_lines(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     lines = [
@@ -1170,7 +1194,7 @@ def test_rlens_client_logs_text_streams_data_lines(
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1"])
+    rc = main(["repoground-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1182,7 +1206,7 @@ def test_rlens_client_logs_text_streams_data_lines(
     assert captured["resp"].closed is True
 
 
-def test_rlens_client_logs_json_emits_one_object_per_event(
+def test_service_client_logs_json_emits_one_object_per_event(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     lines = [
@@ -1199,7 +1223,7 @@ def test_rlens_client_logs_json_emits_one_object_per_event(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1", "--json"])
+    rc = main(["repoground-client", "logs", "job-1", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1210,7 +1234,7 @@ def test_rlens_client_logs_json_emits_one_object_per_event(
     assert objs[1]["data"] == "line-b"
 
 
-def test_rlens_client_logs_stops_on_event_end(
+def test_service_client_logs_stops_on_event_end(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     # Anything after event: end must not appear in output.
@@ -1228,7 +1252,7 @@ def test_rlens_client_logs_stops_on_event_end(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1"])
+    rc = main(["repoground-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1236,14 +1260,14 @@ def test_rlens_client_logs_stops_on_event_end(
     assert "should-not-appear" not in out
 
 
-def test_rlens_client_logs_passes_last_id(
+def test_service_client_logs_passes_last_id(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     lines = [b"event: end\n", b"data: end\n", b"\n"]
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1", "--last-id", "7"])
+    rc = main(["repoground-client", "logs", "job-1", "--last-id", "7"])
     capsys.readouterr()
 
     assert rc == 0
@@ -1251,7 +1275,7 @@ def test_rlens_client_logs_passes_last_id(
     assert "last_id=7" in url
 
 
-def test_rlens_client_logs_multiline_data(
+def test_service_client_logs_multiline_data(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     # Per SSE spec, multiple data: lines in a single event concatenate with newline.
@@ -1267,14 +1291,14 @@ def test_rlens_client_logs_multiline_data(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1"])
+    rc = main(["repoground-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
     assert "first\nsecond" in out
 
 
-def test_rlens_client_logs_ignores_comment_lines(
+def test_service_client_logs_ignores_comment_lines(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     lines = [
@@ -1289,7 +1313,7 @@ def test_rlens_client_logs_ignores_comment_lines(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1"])
+    rc = main(["repoground-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1297,10 +1321,10 @@ def test_rlens_client_logs_ignores_comment_lines(
     assert "alive" in out
 
 
-def test_rlens_client_logs_handles_http_error(
+def test_service_client_logs_handles_http_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "stream-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "stream-secret")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise urllib.error.HTTPError(
@@ -1309,7 +1333,7 @@ def test_rlens_client_logs_handles_http_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "logs", "job-1", "--json"])
+    rc = main(["repoground-client", "logs", "job-1", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -1320,10 +1344,10 @@ def test_rlens_client_logs_handles_http_error(
     assert "stream-secret" not in err
 
 
-def test_rlens_client_logs_token_redacted_in_data(
+def test_service_client_logs_token_redacted_in_data(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "log-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "log-secret")
     lines = [
         b"id: 1\n",
         b"data: echoing log-secret in line\n",
@@ -1335,7 +1359,7 @@ def test_rlens_client_logs_token_redacted_in_data(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1"])
+    rc = main(["repoground-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1343,22 +1367,22 @@ def test_rlens_client_logs_token_redacted_in_data(
     assert "[REDACTED]" in out
 
 
-def test_rlens_client_logs_sets_bearer_header_and_no_query_token(
+def test_service_client_logs_sets_bearer_header_and_no_query_token(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "bearer-token")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "bearer-token")
     lines = [b"event: end\n", b"data: end\n", b"\n"]
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1"])
+    rc = main(["repoground-client", "logs", "job-1"])
 
     assert rc == 0
     assert captured["req"].get_header("Authorization") == "Bearer bearer-token"
     assert "bearer-token" not in captured["req"].full_url
 
 
-def test_rlens_client_logs_stream_without_end_event_still_succeeds(
+def test_service_client_logs_stream_without_end_event_still_succeeds(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     # Server may close the stream without an explicit event: end.
@@ -1371,17 +1395,17 @@ def test_rlens_client_logs_stream_without_end_event_still_succeeds(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1"])
+    rc = main(["repoground-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
     assert "only" in out
 
 
-def test_rlens_client_logs_json_redacts_token_in_data(
+def test_service_client_logs_json_redacts_token_in_data(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "json-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "json-secret")
     lines = [
         b"id: 1\n",
         b"data: json-secret appears\n",
@@ -1393,7 +1417,7 @@ def test_rlens_client_logs_json_redacts_token_in_data(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1", "--json"])
+    rc = main(["repoground-client", "logs", "job-1", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1403,7 +1427,7 @@ def test_rlens_client_logs_json_redacts_token_in_data(
     assert "[REDACTED]" in objs[0]["data"]
 
 
-def test_rlens_client_jobs_negative_limit_is_config_error(
+def test_service_client_jobs_negative_limit_is_config_error(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
@@ -1411,7 +1435,7 @@ def test_rlens_client_jobs_negative_limit_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "jobs", "--limit", "-1", "--json"])
+    rc = main(["repoground-client", "jobs", "--limit", "-1", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1421,12 +1445,12 @@ def test_rlens_client_jobs_negative_limit_is_config_error(
 
 
 @pytest.mark.parametrize("timeout_value", ["0", "-1"])
-def test_rlens_client_logs_timeout_non_positive_is_config_error(
+def test_service_client_logs_timeout_non_positive_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture,
     timeout_value: str,
 ) -> None:
-    monkeypatch.setenv("RLENS_TOKEN", "timeout-secret")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "timeout-secret")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise AssertionError("Network must not be called for invalid --timeout")
@@ -1434,7 +1458,7 @@ def test_rlens_client_logs_timeout_non_positive_is_config_error(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     rc = main(
-        ["rlens-client", "logs", "job-1", "--timeout", timeout_value, "--json"]
+        ["repoground-client", "logs", "job-1", "--timeout", timeout_value, "--json"]
     )
     out, err = capsys.readouterr()
 
@@ -1446,7 +1470,7 @@ def test_rlens_client_logs_timeout_non_positive_is_config_error(
     assert "timeout-secret" not in err
 
 
-def test_rlens_client_logs_last_id_negative_is_passed_through(
+def test_service_client_logs_last_id_negative_is_passed_through(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # --last-id negative values are intentionally forwarded; server clamps to 0.
@@ -1454,7 +1478,7 @@ def test_rlens_client_logs_last_id_negative_is_passed_through(
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "logs", "job-1", "--last-id", "-5"])
+    rc = main(["repoground-client", "logs", "job-1", "--last-id", "-5"])
 
     assert rc == 0
     assert "last_id=-5" in captured["req"].full_url
@@ -1466,19 +1490,19 @@ def test_rlens_client_logs_last_id_negative_is_passed_through(
 
 
 def _write_profiles(tmp_path: pathlib.Path, payload: object) -> pathlib.Path:
-    config = tmp_path / "rlens-profiles.json"
+    config = tmp_path / "repoground-profiles.json"
     config.write_text(json.dumps(payload), encoding="utf-8")
     return config
 
 
 def _isolate_profile_env(monkeypatch: pytest.MonkeyPatch, config: pathlib.Path) -> None:
-    monkeypatch.setenv("LENSKIT_RLENS_PROFILES", str(config))
-    monkeypatch.delenv("RLENS_BASE_URL", raising=False)
-    monkeypatch.delenv("RLENS_TOKEN", raising=False)
-    monkeypatch.delenv("RLENS_PROFILE", raising=False)
+    monkeypatch.setenv("LENSKIT_REPOGROUND_PROFILES", str(config))
+    monkeypatch.delenv("REPOGROUND_BASE_URL", raising=False)
+    monkeypatch.delenv("REPOGROUND_TOKEN", raising=False)
+    monkeypatch.delenv("REPOGROUND_PROFILE", raising=False)
 
 
-def test_rlens_client_profile_provides_base_url(
+def test_service_client_profile_provides_base_url(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     config = _write_profiles(tmp_path, {
@@ -1491,13 +1515,13 @@ def test_rlens_client_profile_provides_base_url(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
 
 
-def test_rlens_client_profile_via_env(
+def test_service_client_profile_via_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     config = _write_profiles(tmp_path, {
@@ -1506,18 +1530,18 @@ def test_rlens_client_profile_via_env(
         },
     })
     _isolate_profile_env(monkeypatch, config)
-    monkeypatch.setenv("RLENS_PROFILE", "lab")
+    monkeypatch.setenv("REPOGROUND_PROFILE", "lab")
 
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="lab.example:8787", path="/api/health")
 
 
-def test_rlens_client_default_profile_used_when_no_selection(
+def test_service_client_default_profile_used_when_no_selection(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     config = _write_profiles(tmp_path, {
@@ -1532,13 +1556,13 @@ def test_rlens_client_default_profile_used_when_no_selection(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
 
 
-def test_rlens_client_base_url_flag_beats_profile(
+def test_service_client_base_url_flag_beats_profile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     config = _write_profiles(tmp_path, {
@@ -1550,7 +1574,7 @@ def test_rlens_client_base_url_flag_beats_profile(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "rlens-client", "health",
+        "repoground-client", "health",
         "--profile", "heim-pc",
         "--base-url", "http://override:8787",
         "--json",
@@ -1560,42 +1584,42 @@ def test_rlens_client_base_url_flag_beats_profile(
     _assert_request_url(captured["req"], scheme="http", netloc="override:8787", path="/api/health")
 
 
-def test_rlens_client_env_base_url_beats_profile(
+def test_service_client_env_base_url_beats_profile(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     config = _write_profiles(tmp_path, {
         "profiles": {"heim-pc": {"base_url": "http://heim-pc:8787"}},
     })
     _isolate_profile_env(monkeypatch, config)
-    monkeypatch.setenv("RLENS_BASE_URL", "http://env-wins:8787")
+    monkeypatch.setenv("REPOGROUND_BASE_URL", "http://env-wins:8787")
 
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="env-wins:8787", path="/api/health")
 
 
-def test_rlens_client_profile_token_env(
+def test_service_client_profile_token_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     config = _write_profiles(tmp_path, {
         "profiles": {
             "heim-pc": {
                 "base_url": "http://heim-pc:8787",
-                "token_env": "RLENS_TOKEN_HEIM_PC",
+                "token_env": "REPOGROUND_TOKEN_HEIM_PC",
             },
         },
     })
     _isolate_profile_env(monkeypatch, config)
-    monkeypatch.setenv("RLENS_TOKEN_HEIM_PC", "profile-token-value")
+    monkeypatch.setenv("REPOGROUND_TOKEN_HEIM_PC", "profile-token-value")
 
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
     auth = captured["req"].get_header("Authorization")
@@ -1603,25 +1627,25 @@ def test_rlens_client_profile_token_env(
     assert "profile-token-value" not in captured["req"].full_url
 
 
-def test_rlens_client_token_flag_beats_profile_token_env(
+def test_service_client_token_flag_beats_profile_token_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     config = _write_profiles(tmp_path, {
         "profiles": {
             "heim-pc": {
                 "base_url": "http://heim-pc:8787",
-                "token_env": "RLENS_TOKEN_HEIM_PC",
+                "token_env": "REPOGROUND_TOKEN_HEIM_PC",
             },
         },
     })
     _isolate_profile_env(monkeypatch, config)
-    monkeypatch.setenv("RLENS_TOKEN_HEIM_PC", "profile-token-value")
+    monkeypatch.setenv("REPOGROUND_TOKEN_HEIM_PC", "profile-token-value")
 
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "rlens-client", "health",
+        "repoground-client", "health",
         "--profile", "heim-pc",
         "--token", "cli-token",
         "--json",
@@ -1631,7 +1655,7 @@ def test_rlens_client_token_flag_beats_profile_token_env(
     assert captured["req"].get_header("Authorization") == "Bearer cli-token"
 
 
-def test_rlens_client_unknown_profile_is_config_error(
+def test_service_client_unknown_profile_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1646,7 +1670,7 @@ def test_rlens_client_unknown_profile_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--profile", "nope", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "nope", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1655,7 +1679,7 @@ def test_rlens_client_unknown_profile_is_config_error(
     assert "nope" in parsed["message"]
 
 
-def test_rlens_client_profile_unknown_even_with_base_url_override_is_config_error(
+def test_service_client_profile_unknown_even_with_base_url_override_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1671,7 +1695,7 @@ def test_rlens_client_profile_unknown_even_with_base_url_override_is_config_erro
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     rc = main([
-        "rlens-client", "health",
+        "repoground-client", "health",
         "--base-url", "http://override:8787",
         "--profile", "nope",
         "--json",
@@ -1684,7 +1708,7 @@ def test_rlens_client_profile_unknown_even_with_base_url_override_is_config_erro
     assert "nope" in parsed["message"]
 
 
-def test_rlens_client_profile_requested_but_no_config(
+def test_service_client_profile_requested_but_no_config(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1697,7 +1721,7 @@ def test_rlens_client_profile_requested_but_no_config(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1705,7 +1729,7 @@ def test_rlens_client_profile_requested_but_no_config(
     assert parsed["error_kind"] == "config_error"
 
 
-def test_rlens_client_profile_default_profile_non_string_is_config_error(
+def test_service_client_profile_default_profile_non_string_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1721,7 +1745,7 @@ def test_rlens_client_profile_default_profile_non_string_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1730,7 +1754,7 @@ def test_rlens_client_profile_default_profile_non_string_is_config_error(
     assert "default_profile" in parsed["message"]
 
 
-def test_rlens_client_no_config_no_profile_uses_default(
+def test_service_client_no_config_no_profile_uses_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
     # If no profile is requested and no config exists, fall back to default URL.
@@ -1740,13 +1764,13 @@ def test_rlens_client_no_config_no_profile_uses_default(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="127.0.0.1:8787", path="/api/health")
 
 
-def test_rlens_client_invalid_profile_config_without_profile_is_config_error(
+def test_service_client_invalid_profile_config_without_profile_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1761,7 +1785,7 @@ def test_rlens_client_invalid_profile_config_without_profile_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1770,7 +1794,7 @@ def test_rlens_client_invalid_profile_config_without_profile_is_config_error(
     assert "garbage" in parsed["message"]
 
 
-def test_rlens_client_invalid_profile_config_with_token_override_is_config_error(
+def test_service_client_invalid_profile_config_with_token_override_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1785,7 +1809,7 @@ def test_rlens_client_invalid_profile_config_with_token_override_is_config_error
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--token", "cli-token", "--json"])
+    rc = main(["repoground-client", "health", "--token", "cli-token", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -1795,7 +1819,7 @@ def test_rlens_client_invalid_profile_config_with_token_override_is_config_error
     assert "super-secret" not in err
 
 
-def test_rlens_client_invalid_profile_config_with_env_token_is_config_error(
+def test_service_client_invalid_profile_config_with_env_token_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1804,14 +1828,14 @@ def test_rlens_client_invalid_profile_config_with_env_token_is_config_error(
         "profiles": {"bad": {"base_url": "http://x:8787", "garbage": "x"}},
     })
     _isolate_profile_env(monkeypatch, config)
-    monkeypatch.setenv("RLENS_TOKEN", "env-token")
+    monkeypatch.setenv("REPOGROUND_TOKEN", "env-token")
 
     def _urlopen(req: urllib.request.Request, timeout: object = None) -> None:
         raise AssertionError("Network must not be called for invalid profile config")
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--json"])
+    rc = main(["repoground-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1820,7 +1844,7 @@ def test_rlens_client_invalid_profile_config_with_env_token_is_config_error(
     assert "garbage" in parsed["message"]
 
 
-def test_rlens_client_invalid_profile_config_with_base_url_override_is_config_error(
+def test_service_client_invalid_profile_config_with_base_url_override_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1835,7 +1859,7 @@ def test_rlens_client_invalid_profile_config_with_base_url_override_is_config_er
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--base-url", "http://override:8787", "--json"])
+    rc = main(["repoground-client", "health", "--base-url", "http://override:8787", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1844,7 +1868,7 @@ def test_rlens_client_invalid_profile_config_with_base_url_override_is_config_er
     assert "garbage" in parsed["message"]
 
 
-def test_rlens_client_profile_with_token_field_rejected(
+def test_service_client_profile_with_token_field_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1865,7 +1889,7 @@ def test_rlens_client_profile_with_token_field_rejected(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--profile", "bad", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "bad", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -1875,7 +1899,7 @@ def test_rlens_client_profile_with_token_field_rejected(
     assert "secret-in-config" not in err
 
 
-def test_rlens_client_profile_forbidden_key_even_with_base_url_override_is_config_error(
+def test_service_client_profile_forbidden_key_even_with_base_url_override_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1896,7 +1920,7 @@ def test_rlens_client_profile_forbidden_key_even_with_base_url_override_is_confi
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     rc = main([
-        "rlens-client", "health",
+        "repoground-client", "health",
         "--profile", "bad",
         "--base-url", "http://override:8787",
         "--json",
@@ -1910,7 +1934,7 @@ def test_rlens_client_profile_forbidden_key_even_with_base_url_override_is_confi
     assert "secret-in-config" not in err
 
 
-def test_rlens_client_profile_unknown_key_rejected(
+def test_service_client_profile_unknown_key_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1920,7 +1944,7 @@ def test_rlens_client_profile_unknown_key_rejected(
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["rlens-client", "health", "--profile", "x", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "x", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1929,7 +1953,7 @@ def test_rlens_client_profile_unknown_key_rejected(
     assert "garbage" in parsed["message"]
 
 
-def test_rlens_client_profile_invalid_base_url_is_config_error(
+def test_service_client_profile_invalid_base_url_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -1944,7 +1968,7 @@ def test_rlens_client_profile_invalid_base_url_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["rlens-client", "health", "--profile", "bad", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "bad", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1952,16 +1976,16 @@ def test_rlens_client_profile_invalid_base_url_is_config_error(
     assert parsed["error_kind"] == "config_error"
 
 
-def test_rlens_client_profile_malformed_json_is_config_error(
+def test_service_client_profile_malformed_json_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    config = tmp_path / "rlens-profiles.json"
+    config = tmp_path / "repoground-profiles.json"
     config.write_text("this is not json {", encoding="utf-8")
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["rlens-client", "health", "--profile", "x", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "x", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1969,7 +1993,7 @@ def test_rlens_client_profile_malformed_json_is_config_error(
     assert parsed["error_kind"] == "config_error"
 
 
-def test_rlens_client_profiles_subcommand_lists_profiles(
+def test_service_client_profiles_subcommand_lists_profiles(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
 ) -> None:
     config = _write_profiles(tmp_path, {
@@ -1978,13 +2002,13 @@ def test_rlens_client_profiles_subcommand_lists_profiles(
             "local": {"base_url": "http://127.0.0.1:8787"},
             "heim-pc": {
                 "base_url": "http://heim-pc:8787",
-                "token_env": "RLENS_TOKEN_HEIM_PC",
+                "token_env": "REPOGROUND_TOKEN_HEIM_PC",
             },
         },
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["rlens-client", "profiles", "--json"])
+    rc = main(["repoground-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1992,31 +2016,31 @@ def test_rlens_client_profiles_subcommand_lists_profiles(
     assert parsed["exists"] is True
     assert parsed["default_profile"] == "local"
     assert parsed["profiles"]["heim-pc"]["base_url"] == "http://heim-pc:8787"
-    assert parsed["profiles"]["heim-pc"]["token_env"] == "RLENS_TOKEN_HEIM_PC"
+    assert parsed["profiles"]["heim-pc"]["token_env"] == "REPOGROUND_TOKEN_HEIM_PC"
 
 
-def test_rlens_client_profiles_subcommand_no_secret_leak(
+def test_service_client_profiles_subcommand_no_secret_leak(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
 ) -> None:
     config = _write_profiles(tmp_path, {
         "profiles": {
             "naughty": {
                 "base_url": "http://x:8787",
-                "token_env": "RLENS_TOKEN_X",
+                "token_env": "REPOGROUND_TOKEN_X",
             }
         }
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["rlens-client", "profiles", "--json"])
+    rc = main(["repoground-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
-    assert "RLENS_TOKEN_X" in out
+    assert "REPOGROUND_TOKEN_X" in out
     assert "secret" not in out
 
 
-def test_rlens_client_profiles_subcommand_unknown_key_is_config_error(
+def test_service_client_profiles_subcommand_unknown_key_is_config_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -2026,7 +2050,7 @@ def test_rlens_client_profiles_subcommand_unknown_key_is_config_error(
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["rlens-client", "profiles", "--json"])
+    rc = main(["repoground-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -2035,7 +2059,7 @@ def test_rlens_client_profiles_subcommand_unknown_key_is_config_error(
     assert "garbage" in parsed["message"]
 
 
-def test_rlens_client_profiles_subcommand_forbidden_key_is_config_error_no_secret_leak(
+def test_service_client_profiles_subcommand_forbidden_key_is_config_error_no_secret_leak(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -2045,7 +2069,7 @@ def test_rlens_client_profiles_subcommand_forbidden_key_is_config_error_no_secre
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["rlens-client", "profiles", "--json"])
+    rc = main(["repoground-client", "profiles", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -2055,7 +2079,7 @@ def test_rlens_client_profiles_subcommand_forbidden_key_is_config_error_no_secre
     assert "super-secret" not in err
 
 
-def test_rlens_client_profile_base_url_invalid_scheme_rejected_by_profiles_command(
+def test_service_client_profile_base_url_invalid_scheme_rejected_by_profiles_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: pathlib.Path,
     capsys: pytest.CaptureFixture,
@@ -2065,7 +2089,7 @@ def test_rlens_client_profile_base_url_invalid_scheme_rejected_by_profiles_comma
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["rlens-client", "profiles", "--json"])
+    rc = main(["repoground-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -2073,13 +2097,13 @@ def test_rlens_client_profile_base_url_invalid_scheme_rejected_by_profiles_comma
     assert parsed["error_kind"] == "config_error"
 
 
-def test_rlens_client_profiles_subcommand_no_config(
+def test_service_client_profiles_subcommand_no_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path, capsys: pytest.CaptureFixture
 ) -> None:
     missing = tmp_path / "missing.json"
     _isolate_profile_env(monkeypatch, missing)
 
-    rc = main(["rlens-client", "profiles", "--json"])
+    rc = main(["repoground-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -2088,19 +2112,19 @@ def test_rlens_client_profiles_subcommand_no_config(
     assert parsed["profiles"] == {}
 
 
-def test_rlens_client_profile_xdg_config_home_used(
+def test_service_client_profile_xdg_config_home_used(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
 ) -> None:
-    # When LENSKIT_RLENS_PROFILES is not set, XDG_CONFIG_HOME is honored.
-    monkeypatch.delenv("LENSKIT_RLENS_PROFILES", raising=False)
+    # When REPOGROUND_PROFILES is not set, XDG_CONFIG_HOME is honored.
+    monkeypatch.delenv("REPOGROUND_PROFILES", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-    monkeypatch.delenv("RLENS_BASE_URL", raising=False)
-    monkeypatch.delenv("RLENS_TOKEN", raising=False)
-    monkeypatch.delenv("RLENS_PROFILE", raising=False)
+    monkeypatch.delenv("REPOGROUND_BASE_URL", raising=False)
+    monkeypatch.delenv("REPOGROUND_TOKEN", raising=False)
+    monkeypatch.delenv("REPOGROUND_PROFILE", raising=False)
 
-    profile_dir = tmp_path / "lenskit"
+    profile_dir = tmp_path / "repoground"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "rlens-profiles.json").write_text(
+    (profile_dir / "profiles.json").write_text(
         json.dumps({"profiles": {"x": {"base_url": "http://x:8787"}}}),
         encoding="utf-8",
     )
@@ -2108,13 +2132,13 @@ def test_rlens_client_profile_xdg_config_home_used(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["rlens-client", "health", "--profile", "x", "--json"])
+    rc = main(["repoground-client", "health", "--profile", "x", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="x:8787", path="/api/health")
 
 
-def test_rlens_client_profile_config_path_expands_user(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LENSKIT_RLENS_PROFILES", "~/rlens-profiles.json")
+def test_service_client_profile_config_path_expands_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LENSKIT_REPOGROUND_PROFILES", "~/repoground-profiles.json")
     path = _mod._profile_config_path()
     assert str(path).startswith(str(pathlib.Path.home()))

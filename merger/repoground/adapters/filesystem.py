@@ -48,7 +48,7 @@ def _b64url_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode((s + pad).encode("utf-8"))
 
 def _token_secret() -> bytes:
-    s = os.getenv("REPOGROUND_FS_TOKEN_SECRET") or os.getenv("RLENS_FS_TOKEN_SECRET") or os.getenv("REPOGROUND_TOKEN") or os.getenv("RLENS_TOKEN") or ""
+    s = os.getenv("REPOGROUND_FS_TOKEN_SECRET") or os.getenv("REPOGROUND_TOKEN") or ""
     if not s:
         raise HTTPException(status_code=500, detail="FS token secret not configured")
     return s.encode("utf-8")

@@ -2,7 +2,7 @@
 import unittest
 import tempfile
 from pathlib import Path
-from merger.repoground.frontends.pythonista import repolens
+from merger.repoground.frontends.pythonista import build
 from merger.repoground.service.models import JobRequest
 from merger.repoground.core import merge
 
@@ -12,7 +12,7 @@ class TestDefaultsAndMarkers(unittest.TestCase):
         Verify that DEFAULT_EXTRAS is set to minimal configuration:
         json_sidecar and augment_sidecar only.
         """
-        defaults = repolens.DEFAULT_EXTRAS
+        defaults = build.DEFAULT_EXTRAS
         self.assertIn("json_sidecar", defaults)
         self.assertIn("augment_sidecar", defaults)
         self.assertNotIn("health", defaults)
@@ -30,7 +30,7 @@ class TestDefaultsAndMarkers(unittest.TestCase):
             return sorted([x.strip() for x in (s or "").split(',') if x.strip()])
 
         service_defaults = normalize(req.extras)
-        frontend_defaults = normalize(repolens.DEFAULT_EXTRAS)
+        frontend_defaults = normalize(build.DEFAULT_EXTRAS)
 
         self.assertEqual(service_defaults, frontend_defaults,
                          f"Service defaults {service_defaults} do not match frontend {frontend_defaults}")

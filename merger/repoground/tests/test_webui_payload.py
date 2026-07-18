@@ -25,9 +25,9 @@ def page_with_static(page: Page):
         content = f.read()
 
     content = content.replace("__REPOGROUND_ASSET_BASE__", "./")
-    content = content.replace("__RLENS_ASSET_BASE__", "./")
+    content = content.replace("__REPOGROUND_ASSET_BASE__", "./")
     content = content.replace("__REPOGROUND_BUILD__", "test-v1")
-    content = content.replace("__RLENS_BUILD__", "test-v1")
+    content = content.replace("__REPOGROUND_BUILD__", "test-v1")
     assert "__REPOGROUND_ASSET_BASE__" not in content
     assert "__REPOGROUND_BUILD__" not in content
 
@@ -82,15 +82,15 @@ def test_run_merge_picks_up_pool_selections(page_with_static: Page):
         "repoB": {"raw": ["fileB.txt"], "compressed": ["fileB.txt"]} # Partial selection
     }
 
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
 
     page_with_static.evaluate(f"""
         const pool = {json.dumps(pool_state)};
-        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify(pool));
+        localStorage.setItem("repoground.prescan.savedSelections.v1", JSON.stringify(pool));
     """)
     page_with_static.reload()
-    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_function("() => window.__repoground_pool_ready === true")
     page_with_static.wait_for_selector("#repoList input[name='repos']")
 
     # Select repoA and repoB
@@ -148,15 +148,15 @@ def test_run_merge_mixed_pool_and_non_pool(page_with_static: Page):
         # repoB NOT in pool
     }
 
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
 
     page_with_static.evaluate(f"""
         const pool = {json.dumps(pool_state)};
-        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify(pool));
+        localStorage.setItem("repoground.prescan.savedSelections.v1", JSON.stringify(pool));
     """)
     page_with_static.reload()
-    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_function("() => window.__repoground_pool_ready === true")
     page_with_static.wait_for_selector("#repoList input[name='repos']")
 
     page_with_static.evaluate("""
@@ -200,7 +200,7 @@ def test_run_merge_blocks_dirty_keys(page_with_static: Page):
     """
     Verifies that selecting a repo with a dirty name blocks submission.
     """
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
     page_with_static.wait_for_selector("#repoList input[name='repos']")
 
@@ -247,15 +247,15 @@ def test_run_merge_clears_global_filters_for_pool(page_with_static: Page):
     pool_state = {
         "repoA": {"raw": ["foo.txt"], "compressed": ["foo.txt"]}
     }
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
 
     page_with_static.evaluate(f"""
         const pool = {json.dumps(pool_state)};
-        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify(pool));
+        localStorage.setItem("repoground.prescan.savedSelections.v1", JSON.stringify(pool));
     """)
     page_with_static.reload()
-    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_function("() => window.__repoground_pool_ready === true")
 
     # 2. Set global filters in UI (the trap)
     page_with_static.fill("#pathFilter", "src/")
@@ -308,15 +308,15 @@ def test_run_merge_clears_global_filters_for_all_pool_selection(page_with_static
     pool_state = {
         "repoA": {"raw": None, "compressed": None}
     }
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
 
     page_with_static.evaluate(f"""
         const pool = {json.dumps(pool_state)};
-        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify(pool));
+        localStorage.setItem("repoground.prescan.savedSelections.v1", JSON.stringify(pool));
     """)
     page_with_static.reload()
-    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_function("() => window.__repoground_pool_ready === true")
 
     # 2. Set global filters in UI
     page_with_static.fill("#pathFilter", "src/")
@@ -355,7 +355,7 @@ def test_run_merge_plan_only_omits_force_new(page_with_static: Page):
     Verifies that when 'Plan Only' is checked, the generated payload
     omits the 'force_new' parameter to allow caching.
     """
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
     page_with_static.wait_for_selector("#repoList input[name='repos']")
 
@@ -395,21 +395,21 @@ def test_run_merge_plan_only_omits_force_new(page_with_static: Page):
 def test_run_merge_resets_form_to_factory_defaults_when_none_saved(page_with_static: Page):
     """
     Test A: Verify that after successful submit, form resets to factory defaults
-    when no saved defaults exist in rlens_config.
+    when no saved defaults exist in repoground_config.
     """
     pool_state = {
         "repoA": {"raw": ["src/a.py"], "compressed": ["src/a.py"]},
         "repoB": {"raw": None, "compressed": None},
     }
 
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
 
     page_with_static.evaluate(f"""
-        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
+        localStorage.setItem("repoground.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
     """)
     page_with_static.reload()
-    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_function("() => window.__repoground_pool_ready === true")
     page_with_static.wait_for_selector("#repoList input[name='repos']")
 
     page_with_static.evaluate("""
@@ -481,7 +481,7 @@ def test_run_merge_resets_form_to_factory_defaults_when_none_saved(page_with_sta
     assert repo_fetch_count_after_submit > repo_fetch_count_before_submit
 
     pool_after = page_with_static.evaluate("""
-        () => JSON.parse(localStorage.getItem('lenskit.prescan.savedSelections.v1') || '{}')
+        () => JSON.parse(localStorage.getItem('repoground.prescan.savedSelections.v1') || '{}')
     """)
     assert pool_after == {}
 
@@ -493,7 +493,7 @@ def test_run_merge_resets_form_to_factory_defaults_when_none_saved(page_with_sta
 def test_run_merge_respects_saved_defaults_after_success(page_with_static: Page):
     """
     Test B: Verify that after successful submit, form resets to SAVED defaults
-    (not factory defaults) when rlens_config contains user-saved defaults.
+    (not factory defaults) when repoground_config contains user-saved defaults.
     This ensures user preferences from 'Save Defaults' are preserved across submits.
     """
     pool_state = {
@@ -517,15 +517,15 @@ def test_run_merge_respects_saved_defaults_after_success(page_with_static: Page)
         "mergesPath": "/env/merges"
     }
 
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
 
     page_with_static.evaluate(f"""
-        localStorage.setItem("lenskit.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
-        localStorage.setItem("rlens_config", JSON.stringify({json.dumps(saved_config)}));
+        localStorage.setItem("repoground.prescan.savedSelections.v1", JSON.stringify({json.dumps(pool_state)}));
+        localStorage.setItem("repoground_config", JSON.stringify({json.dumps(saved_config)}));
     """)
     page_with_static.reload()
-    page_with_static.wait_for_function("() => window.__rlens_pool_ready === true")
+    page_with_static.wait_for_function("() => window.__repoground_pool_ready === true")
     page_with_static.wait_for_selector("#repoList input[name='repos']")
 
     # Verify saved defaults were loaded into form
@@ -590,7 +590,7 @@ def test_run_merge_respects_saved_defaults_after_success(page_with_static: Page)
 
     # Check pool was cleared
     pool_after = page_with_static.evaluate("""
-        () => JSON.parse(localStorage.getItem('lenskit.prescan.savedSelections.v1') || '{}')
+        () => JSON.parse(localStorage.getItem('repoground.prescan.savedSelections.v1') || '{}')
     """)
     assert pool_after == {}
 
@@ -611,9 +611,9 @@ def test_run_merge_respects_saved_defaults_after_success(page_with_static: Page)
         "() => document.querySelector('input[name=\"extras\"][value=\"augment_sidecar\"]')?.checked"
     ) is False
 
-    # Crucially: rlens_config must NOT be overwritten — saved defaults remain unchanged
+    # Crucially: repoground_config must NOT be overwritten — saved defaults remain unchanged
     stored_config = page_with_static.evaluate("""
-        () => JSON.parse(localStorage.getItem('rlens_config') || '{}')
+        () => JSON.parse(localStorage.getItem('repoground_config') || '{}')
     """)
     assert stored_config.get("profile") == "dev"
     assert stored_config.get("mode") == "pro-repo"
@@ -634,7 +634,7 @@ def test_query_tab_submits_payload(page_with_static: Page):
     import os
     if os.environ.get("DEBUG_PLAYWRIGHT_REQUESTS") == "1":
         page_with_static.on("request", lambda r: print(f"REQ: {r.method} {r.url}"))
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true; localStorage.setItem('rlens_state_version', 'test-v1');")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true; localStorage.setItem('repoground_state_version', 'test-v1');")
 
     def handle_query(route: Route):
         if route.request.method == "POST":
@@ -685,7 +685,12 @@ def test_query_tab_submits_payload(page_with_static: Page):
     page_with_static.locator("#queryK").fill("5", force=True)
     page_with_static.locator("#queryContextMode").select_option("window", force=True)
     page_with_static.locator("#queryWindowLines").fill("3", force=True)
-    page_with_static.locator("#queryTrace").check(force=True)
+    page_with_static.locator("#queryTrace").evaluate(
+        """element => {
+            element.checked = true;
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+        }"""
+    )
 
     with page_with_static.expect_request("**/api/query*", timeout=5000) as req_info:
         page_with_static.locator("#queryForm button[type='submit']").click(force=True)
@@ -720,7 +725,7 @@ def test_run_merge_local_ff_plus_plan_only_is_blocked(page_with_static: Page):
     UI with a visible error and NO /api/jobs request — never silently coerced to
     local_current.
     """
-    page_with_static.add_init_script("window.__RLENS_TEST__ = true;")
+    page_with_static.add_init_script("window.__REPOGROUND_TEST__ = true;")
     page_with_static.goto("http://localhost:8000/")
     page_with_static.wait_for_selector("#repoList input[name='repos']")
 

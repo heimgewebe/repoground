@@ -83,12 +83,12 @@ const context = {
         addEventListener: () => {}
     },
     localStorage: {
-        getItem: (key) => key === 'rlens_state_version' ? 'test' : null,
+        getItem: (key) => key === 'repoground_state_version' ? 'test' : null,
         setItem: () => {},
         clear: () => {}
     },
     sessionStorage: {
-        getItem: (key) => key === 'rlens_state_version' ? 'test' : null,
+        getItem: (key) => key === 'repoground_state_version' ? 'test' : null,
         setItem: () => {},
         clear: () => {}
     },

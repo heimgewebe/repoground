@@ -16,8 +16,8 @@ def _clear_restart_env(monkeypatch):
     for name in (
         "REPOGROUND_ENABLE_SERVICE_RESTART",
         "REPOGROUND_SERVICE_UNIT",
-        "RLENS_ENABLE_SERVICE_RESTART",
-        "RLENS_SERVICE_UNIT",
+        "REPOGROUND_ENABLE_SERVICE_RESTART",
+        "REPOGROUND_SERVICE_UNIT",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -56,25 +56,19 @@ def test_admin_restart_returns_202_when_enabled(service_client, monkeypatch):
     assert called == ["repoground"]
 
 
-def test_admin_restart_ignores_legacy_unit_name_after_cutover(
+def test_admin_restart_rejects_retired_unit_name_after_cutover(
     service_client, monkeypatch
 ):
-    # The legacy feature flag remains a bounded configuration fallback, but the
-    # retired rlens.service unit can no longer be selected.
-    monkeypatch.setenv("RLENS_ENABLE_SERVICE_RESTART", "1")
-    monkeypatch.setenv("RLENS_SERVICE_UNIT", "rlens")
+    monkeypatch.setenv("REPOGROUND_ENABLE_SERVICE_RESTART", "1")
+    monkeypatch.setenv("REPOGROUND_SERVICE_UNIT", "rlens")
     called = []
     monkeypatch.setattr(service_app, "_schedule_service_restart", lambda unit: called.append(unit))
 
     resp = service_client.client.post("/api/admin/restart", headers=service_client.headers)
 
-    assert resp.status_code == 202
-    assert resp.json() == {
-        "status": "scheduled",
-        "unit": "repoground",
-        "message": "RepoGround restart scheduled",
-    }
-    assert called == ["repoground"]
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Service restart is disabled"
+    assert called == []
 
 
 def test_admin_capabilities_true_when_restart_enabled(service_client, monkeypatch):

@@ -595,7 +595,7 @@ def test_context_compile_cli_outputs_plan(tmp_path, capsys):
     manifest = _write_complete_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "context",
         "compile",
         "--bundle-manifest",

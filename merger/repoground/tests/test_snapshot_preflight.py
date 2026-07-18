@@ -142,7 +142,7 @@ def test_preflight_cli_missing_manifest_returns_usage_error(tmp_path, capsys):
     from merger.repoground.cli.main import main
 
     rc = main([
-        'repobrief',
+        'ground',
         'preflight',
         '--bundle-manifest',
         str(tmp_path / 'missing.bundle.manifest.json'),
@@ -161,7 +161,7 @@ def test_preflight_cli_invalid_manifest_json_returns_usage_error(tmp_path, capsy
     manifest.write_text('{bad json', encoding='utf-8')
 
     rc = main([
-        'repobrief',
+        'ground',
         'preflight',
         '--bundle-manifest',
         str(manifest),
@@ -224,7 +224,7 @@ def test_bundle_surface_sidecar_warn_warns(tmp_path):
 def test_preflight_cli_valid_manifest_prints_preflight_json(tmp_path, capsys):
     from merger.repoground.cli.main import main
 
-    rc = main(['repobrief', 'preflight', '--bundle-manifest', str(_bundle(tmp_path, FULL_BASIC))])
+    rc = main(['ground', 'preflight', '--bundle-manifest', str(_bundle(tmp_path, FULL_BASIC))])
 
     captured = capsys.readouterr()
     assert rc == 0

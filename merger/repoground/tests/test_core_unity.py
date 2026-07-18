@@ -18,10 +18,10 @@ def test_core_version_exists():
     # We set it to 2.4.0
     assert merger.repoground.core.__core_version__ == "2.4.0"
 
-def test_repolens_imports_correct_core():
+def test_repo_ground_imports_correct_core():
     # Wrap in try-except to avoid CI failures if Pythonista dependencies (ui, etc.) are missing
     try:
-        from merger.repoground.frontends.pythonista import repolens
+        from merger.repoground.frontends.pythonista import repo_ground
     except ImportError as e:
         pytest.skip(f"Skipping pythonista import check: {e}")
     except Exception as e:
@@ -31,8 +31,8 @@ def test_repolens_imports_correct_core():
     # Check what 'scan_repo' it uses
     import merger.repoground.core.merge as core_merge
 
-    assert repolens.scan_repo is core_merge.scan_repo
-    assert repolens.write_reports_v2 is core_merge.write_reports_v2
+    assert repo_ground.scan_repo is core_merge.scan_repo
+    assert repo_ground.write_reports_v2 is core_merge.write_reports_v2
 
     assert "merger.repoground.core" in sys.modules
 
@@ -63,10 +63,10 @@ def test_generator_info_version(tmp_path):
     from merger.repoground.core.merge import scan_repo
     summary = scan_repo(repo_dir)
 
-    # Temporarily unset RLENS_VERSION env var if set
-    old_env = os.environ.get("RLENS_VERSION")
+    # Temporarily unset REPOGROUND_VERSION env var if set
+    old_env = os.environ.get("REPOGROUND_VERSION")
     if old_env is not None:
-        del os.environ["RLENS_VERSION"]
+        del os.environ["REPOGROUND_VERSION"]
 
     # Need to enable json_sidecar in extras
     from merger.repoground.core.merge import ExtrasConfig
@@ -106,4 +106,4 @@ def test_generator_info_version(tmp_path):
 
     finally:
         if old_env is not None:
-            os.environ["RLENS_VERSION"] = old_env
+            os.environ["REPOGROUND_VERSION"] = old_env

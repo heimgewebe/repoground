@@ -18,7 +18,7 @@ def safe_script_path() -> Path:
         return Path(__file__).resolve()
     except Exception:
         # letzte Rettung: aktuelles Verzeichnis
-        return Path.cwd().resolve() / "repolens-hub-pathfinder.py"
+        return Path.cwd().resolve() / "repoground-hub-pathfinder.py"
 
 
 def _is_pythonista_runtime() -> bool:
@@ -69,10 +69,6 @@ def find_repolens_dirs(home: Path) -> list[Path]:
         # Canonical RepoGround path
         home / "merger" / "repoground" / "frontends" / "pythonista",
 
-        # Legacy paths (deprecated)
-        home / "merger" / "lenskit" / "frontends" / "pythonista",
-        home / "merger" / "repoLens",
-        home / "repoLens",
         home / "wc-merger",
         home / "merger" / "wc-merger",
     ]
@@ -83,9 +79,6 @@ def find_repolens_dirs(home: Path) -> list[Path]:
     if icloud_docs.exists():
         candidates.extend([
             icloud_docs / "merger" / "repoground" / "frontends" / "pythonista",
-            icloud_docs / "merger" / "lenskit" / "frontends" / "pythonista",
-            icloud_docs / "merger" / "repoLens",
-            icloud_docs / "repoLens",
             icloud_docs / "wc-merger",
             icloud_docs / "merger" / "wc-merger",
         ])
@@ -95,12 +88,8 @@ def find_repolens_dirs(home: Path) -> list[Path]:
         try:
             if d.is_dir():
                 # RepoGround 3.x and legacy installs can be recognized by repolens.py
-                if (d / "repolens.py").exists() or (d / "repolens_app.py").exists():
+                if (d / "build.py").exists():
                     found.append(d)
-                else:
-                    # preserve discovery of explicitly named legacy repoLens directories
-                    if d.name.lower() == "repolens":
-                        found.append(d)
         except Exception as e:
             print(f"[pathfinder] Error checking candidate {d}: {e}", file=sys.stderr)
 
@@ -113,7 +102,7 @@ def find_repolens_dirs(home: Path) -> list[Path]:
 
 
 def write_pathfile(target_dir: Path, hub_dir: Path) -> tuple[bool, str]:
-    out_file = target_dir / ".repolens-hub-path.txt"
+    out_file = target_dir / ".repoground-hub-path.txt"
     try:
         out_file.write_text(str(hub_dir), encoding="utf-8")
         return True, str(out_file)

@@ -199,7 +199,7 @@ def emit_snapshot_plan_report(
     report = {
         "kind": "repobrief.snapshot_plan",
         "version": "v1",
-        "command": "repobrief snapshot create",
+        "command": "repoground snapshot create",
         "profile": profile,
         "output_plan": output_plan,
         "mutation_boundary": {
@@ -845,10 +845,10 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     )
 
 
-def register_legacy_repobrief_command(subparsers: argparse._SubParsersAction) -> None:
+def register_ground_command(subparsers: argparse._SubParsersAction) -> None:
     ground_parser = subparsers.add_parser(
-        "repobrief",
-        help="Deprecated RepoBrief compatibility command; use RepoGround ground",
+        "ground",
+        help="RepoGround evidence and snapshot operations",
     )
     register_ground_command_groups(ground_parser)
 
@@ -1186,7 +1186,7 @@ def run_snapshot_check(args: argparse.Namespace) -> int:
     try:
         result = snapshot_check(args.bundle_manifest, args.task_profile)
     except ValueError as exc:
-        print("repobrief snapshot check: " + str(exc), file=sys.stderr)
+        print("repoground snapshot check: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") in {"pass", "warn"} else 1
@@ -1198,7 +1198,7 @@ def run_snapshot_status(args: argparse.Namespace) -> int:
     try:
         result = snapshot_status(args.bundle_manifest)
     except ValueError as exc:
-        print("repobrief snapshot status: " + str(exc), file=sys.stderr)
+        print("repoground snapshot status: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -1454,7 +1454,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     )
     generator_info = {
         "name": "repobrief",
-        "version": os.getenv("REPOGROUND_VERSION") or os.getenv("RLENS_VERSION", "dev"),
+        "version": os.getenv("REPOGROUND_VERSION", "dev"),
         "platform": getattr(args, "platform", "cli"),
         "repobrief_output_plan": output_plan,
     }
@@ -1530,7 +1530,7 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
 
     return {
         "status": "ok" if finalization.get("status") == "pass" else "fail",
-        "command": "repobrief snapshot create",
+        "command": "repoground snapshot create",
         "profile": profile,
         "output_mode": output_mode,
         "output_plan": output_plan,
@@ -1579,7 +1579,7 @@ def run_snapshot_create(args: argparse.Namespace) -> int:
         if isinstance(receipt, dict):
             print(json.dumps(receipt, indent=2, sort_keys=True), file=sys.stderr)
             return 1 if receipt.get("publication_result") == "uncertain" else 2
-        print(f"repobrief snapshot create: {exc}", file=sys.stderr)
+        print(f"repoground snapshot create: {exc}", file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "ok" else 1
@@ -1660,6 +1660,3 @@ def refresh_entry(bundle_manifest: Path | None) -> list[Path]:
 
 
 # Bounded callable aliases for source compatibility.
-register_repobrief_command_groups = register_ground_command_groups
-register_repobrief_commands = register_legacy_repobrief_command
-run_repobrief = run_ground

@@ -33,9 +33,9 @@ def secure_env(tmp_path):
     # forbidden is NOT included
     # Explicitly UNSET token to avoid implicit root allowlisting on loopback
     import os
-    old_token = os.environ.get("RLENS_TOKEN")
-    if "RLENS_TOKEN" in os.environ:
-        del os.environ["RLENS_TOKEN"]
+    old_token = os.environ.get("REPOGROUND_TOKEN")
+    if "REPOGROUND_TOKEN" in os.environ:
+        del os.environ["REPOGROUND_TOKEN"]
 
     try:
         # Now init service without token in env
@@ -55,9 +55,9 @@ def secure_env(tmp_path):
         state.log_provider = None
 
         # Restore token if it was set, else ensure it's unset
-        os.environ.pop("RLENS_TOKEN", None)
+        os.environ.pop("REPOGROUND_TOKEN", None)
         if old_token is not None:
-            os.environ["RLENS_TOKEN"] = old_token
+            os.environ["REPOGROUND_TOKEN"] = old_token
 
         # Reset Security Config allowlist
         sec = get_security_config()

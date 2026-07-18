@@ -244,13 +244,13 @@ def test_publish_external_manifest_references_can_publish_one_family(
     ).exists()
 
 
-def test_repobrief_cli_publishes_external_manifest_references(tmp_path: Path) -> None:
-    from merger.repoground.cli.ground import main as repobrief_main
+def test_repoground_cli_publishes_external_manifest_references(tmp_path: Path) -> None:
+    from merger.repoground.cli.ground import main as ground_main
 
     root = tmp_path / "published"
     bundle_path = write_bundle(root)
 
-    rc = repobrief_main(
+    rc = ground_main(
         [
             "external-manifest",
             "publish",
@@ -366,7 +366,7 @@ def test_linked_sidecar_must_remain_inside_bundle_directory(tmp_path: Path) -> N
 def test_external_manifest_refresh_rejects_output_outside_publication_root(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from merger.repoground.cli.ground import main as repobrief_main
+    from merger.repoground.cli.ground import main as ground_main
 
     repo = tmp_path / "source"
     repo.mkdir()
@@ -374,7 +374,7 @@ def test_external_manifest_refresh_rejects_output_outside_publication_root(
     publication_root = tmp_path / "published"
     outside = tmp_path / "legacy-output"
 
-    rc = repobrief_main(
+    rc = ground_main(
         [
             "external-manifest",
             "refresh",
@@ -400,7 +400,7 @@ def test_external_manifest_refresh_rejects_output_outside_publication_root(
 def test_external_manifest_refresh_creates_portable_bundle_and_references(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from merger.repoground.cli.ground import main as repobrief_main
+    from merger.repoground.cli.ground import main as ground_main
 
     repo = tmp_path / "source"
     repo.mkdir()
@@ -408,7 +408,7 @@ def test_external_manifest_refresh_creates_portable_bundle_and_references(
     publication_root = tmp_path / "published"
     out = publication_root / "bundles" / "source" / "main" / "run-1"
 
-    rc = repobrief_main(
+    rc = ground_main(
         [
             "external-manifest",
             "refresh",
@@ -460,7 +460,7 @@ def test_external_manifest_refresh_creates_portable_bundle_and_references(
 def test_external_manifest_refresh_rejects_symlink_escape_from_publication_root(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from merger.repoground.cli.ground import main as repobrief_main
+    from merger.repoground.cli.ground import main as ground_main
 
     repo = tmp_path / "source"
     repo.mkdir()
@@ -472,7 +472,7 @@ def test_external_manifest_refresh_rejects_symlink_escape_from_publication_root(
     escaped = publication_root / "bundles"
     escaped.symlink_to(outside, target_is_directory=True)
 
-    rc = repobrief_main(
+    rc = ground_main(
         [
             "external-manifest",
             "refresh",

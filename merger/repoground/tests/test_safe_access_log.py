@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from merger.repoground.service.access_log import SafeAccessLogMiddleware
 
 
-LOGGER_NAME = "uvicorn.error.rlens_access"
+LOGGER_NAME = "uvicorn.error.repoground_access"
 
 
 def _records(caplog: pytest.LogCaptureFixture) -> list[dict[str, object]]:

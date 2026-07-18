@@ -289,13 +289,13 @@ def test_adapter_cli_list_and_call(tmp_path: Path, capsys) -> None:
         encoding="utf-8",
     )
 
-    assert main(["repobrief", "adapter", "list", "--config", str(config)]) == 0
+    assert main(["ground", "adapter", "list", "--config", str(config)]) == 0
     listed = json.loads(capsys.readouterr().out)
     assert listed["snapshot_count"] == 1
 
     assert main(
         [
-            "repobrief",
+                "ground",
             "adapter",
             "call",
             "--config",

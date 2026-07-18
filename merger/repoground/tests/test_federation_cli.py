@@ -1,7 +1,7 @@
 import json
 import pytest
 from pathlib import Path
-from merger.repoground.cli.main import main as lenskit_main
+from merger.repoground.cli.main import main as repoground_main
 from merger.repoground.core.federation import init_federation, add_bundle
 
 def test_federation_add_cli_dispatch(tmp_path: Path, capsys):
@@ -11,7 +11,7 @@ def test_federation_add_cli_dispatch(tmp_path: Path, capsys):
     bundle_path = tmp_path / "b1"
     bundle_path.mkdir()
 
-    exit_code = lenskit_main(["federation", "add", "--index", str(out_path), "--repo", "r1", "--bundle", str(bundle_path)])
+    exit_code = repoground_main(["federation", "add", "--index", str(out_path), "--repo", "r1", "--bundle", str(bundle_path)])
     assert exit_code == 0
 
     captured = capsys.readouterr()
@@ -21,7 +21,7 @@ def test_federation_inspect_cli_dispatch(tmp_path: Path, capsys):
     out_path = tmp_path / "fed.json"
     init_federation("my-fed", out_path)
 
-    exit_code = lenskit_main(["federation", "inspect", "--index", str(out_path)])
+    exit_code = repoground_main(["federation", "inspect", "--index", str(out_path)])
     assert exit_code == 0
 
     captured = capsys.readouterr()
@@ -32,13 +32,13 @@ def test_federation_validate_cli_dispatch(tmp_path: Path, capsys):
     out_path = tmp_path / "fed.json"
     init_federation("my-fed", out_path)
 
-    exit_code = lenskit_main(["federation", "validate", "--index", str(out_path)])
+    exit_code = repoground_main(["federation", "validate", "--index", str(out_path)])
     assert exit_code == 0
 
     captured = capsys.readouterr()
     assert "is valid" in captured.out
 
-def test_rlens_federation_add_dispatch(tmp_path: Path, monkeypatch, capsys):
+def test_repoground_federation_add_dispatch(tmp_path: Path, monkeypatch, capsys):
     out_path = tmp_path / "fed.json"
     init_federation("my-fed", out_path)
 
@@ -47,55 +47,55 @@ def test_rlens_federation_add_dispatch(tmp_path: Path, monkeypatch, capsys):
 
     monkeypatch.setattr(
         "sys.argv",
-        ["rlens", "federation", "add", "--index", str(out_path), "--repo", "r1", "--bundle", str(bundle_path)]
+        ["repoground", "federation", "add", "--index", str(out_path), "--repo", "r1", "--bundle", str(bundle_path)]
     )
 
-    from merger.repoground.cli import rlens
+    from merger.repoground.cli import serve as service_launcher
 
     with pytest.raises(SystemExit) as exc_info:
-        rlens.main()
+        service_launcher.main()
 
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "Successfully added bundle 'r1'" in captured.out
 
-def test_rlens_federation_inspect_dispatch(tmp_path: Path, monkeypatch, capsys):
+def test_repoground_federation_inspect_dispatch(tmp_path: Path, monkeypatch, capsys):
     out_path = tmp_path / "fed.json"
     init_federation("my-fed", out_path)
 
     monkeypatch.setattr(
         "sys.argv",
-        ["rlens", "federation", "inspect", "--index", str(out_path)]
+        ["repoground", "federation", "inspect", "--index", str(out_path)]
     )
 
-    from merger.repoground.cli import rlens
+    from merger.repoground.cli import serve as service_launcher
 
     with pytest.raises(SystemExit) as exc_info:
-        rlens.main()
+        service_launcher.main()
 
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "my-fed" in captured.out
 
-def test_rlens_federation_validate_dispatch(tmp_path: Path, monkeypatch, capsys):
+def test_repoground_federation_validate_dispatch(tmp_path: Path, monkeypatch, capsys):
     out_path = tmp_path / "fed.json"
     init_federation("my-fed", out_path)
 
     monkeypatch.setattr(
         "sys.argv",
-        ["rlens", "federation", "validate", "--index", str(out_path)]
+        ["repoground", "federation", "validate", "--index", str(out_path)]
     )
 
-    from merger.repoground.cli import rlens
+    from merger.repoground.cli import serve as service_launcher
 
     with pytest.raises(SystemExit) as exc_info:
-        rlens.main()
+        service_launcher.main()
 
     assert exc_info.value.code == 0
     captured = capsys.readouterr()
     assert "is valid" in captured.out
 
-def test_rlens_federation_query_dispatch(tmp_path: Path, monkeypatch, capsys):
+def test_repoground_federation_query_dispatch(tmp_path: Path, monkeypatch, capsys):
     out_path = tmp_path / "fed.json"
     init_federation("my-fed", out_path)
 
@@ -121,13 +121,13 @@ def test_rlens_federation_query_dispatch(tmp_path: Path, monkeypatch, capsys):
 
     monkeypatch.setattr(
         "sys.argv",
-        ["rlens", "federation", "query", "--index", str(out_path), "-q", "hello"]
+        ["repoground", "federation", "query", "--index", str(out_path), "-q", "hello"]
     )
 
-    from merger.repoground.cli import rlens
+    from merger.repoground.cli import serve as service_launcher
 
     with pytest.raises(SystemExit) as excinfo:
-        rlens.main()
+        service_launcher.main()
 
     assert excinfo.value.code == 0
     captured = capsys.readouterr()
@@ -753,4 +753,3 @@ def test_federation_trace_schema_does_not_describe_runtime_form():
     # carries additional fields that additionalProperties:false rejects.
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=runtime_federation_trace, schema=schema)
-

@@ -511,8 +511,3 @@ def get_callees(
         result,
         "repobrief.call_callees.v1",
     )
-
-
-# Bounded source-compatibility aliases. New code imports RepoGround names.
-RepoBriefMcpToolError = RepoGroundMcpToolError
-RepoBriefMcpToolTimeout = RepoGroundMcpToolTimeout

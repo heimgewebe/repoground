@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import ast
-import importlib
 import json
 import re
 from collections import Counter
 import subprocess
 import sys
-import warnings
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,52 +38,8 @@ def test_build_help_uses_repoground_identity() -> None:
     assert "RepoGround build" in result.stdout
 
 
-def test_legacy_namespace_is_a_warning_bridge_to_canonical_tree() -> None:
-    sys.modules.pop("merger.lenskit", None)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        import merger.lenskit as legacy
-    assert any(
-        item.category is DeprecationWarning
-        and "merger.repoground" in str(item.message)
-        for item in caught
-    )
-    assert Path(legacy.__path__[0]).resolve() == (ROOT / "merger" / "repoground").resolve()
-
-
-def test_legacy_submodule_is_the_canonical_module_object() -> None:
-    canonical_name = "merger.repoground.core.range_resolver"
-    legacy_name = "merger.lenskit.core.range_resolver"
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        importlib.import_module("merger.lenskit")
-
-    canonical = importlib.import_module(canonical_name)
-    legacy = importlib.import_module(legacy_name)
-
-    assert legacy is canonical
-    assert canonical.__name__ == canonical_name
-    assert canonical.__spec__ is not None
-    assert canonical.__spec__.name == canonical_name
-    assert canonical.__package__ == "merger.repoground.core"
-    assert sys.modules[legacy_name] is canonical
-    assert importlib.reload(canonical) is canonical
-    assert sys.modules[legacy_name] is canonical
-
-
-def test_legacy_first_import_preserves_canonical_identity() -> None:
-    result = _run(
-        "-c",
-        "import importlib, warnings; "
-        "warnings.simplefilter('ignore', DeprecationWarning); "
-        "legacy=importlib.import_module('merger.lenskit.core.range_resolver'); "
-        "canonical=importlib.import_module('merger.repoground.core.range_resolver'); "
-        "assert legacy is canonical; "
-        "assert canonical.__name__ == 'merger.repoground.core.range_resolver'; "
-        "assert canonical.__spec__.name == 'merger.repoground.core.range_resolver'",
-    )
-    assert result.returncode == 0, result.stderr
+def test_legacy_namespace_is_not_packaged() -> None:
+    assert not (ROOT / "merger" / "lenskit" / "__init__.py").exists()
 
 
 def test_release_identity_is_3() -> None:
@@ -200,7 +154,11 @@ def test_active_python_strings_have_only_documented_legacy_identity_values() -> 
     implementation = ROOT / "merger" / "repoground"
     for path in implementation.rglob("*.py"):
         relative = path.relative_to(ROOT).as_posix()
-        if "/tests/" in f"/{relative}/" or relative in compatibility_modules:
+        if (
+            "/tests/" in f"/{relative}/"
+            or relative in compatibility_modules
+            or relative == "merger/repoground/core/compatibility_inventory.py"
+        ):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
         for node in ast.walk(tree):
@@ -216,20 +174,8 @@ def test_active_python_strings_have_only_documented_legacy_identity_values() -> 
                 ".repoLens-state.json",
             ): 1,
             (
-                "merger/repoground/frontends/pythonista/pathfinder.py",
-                "repoLens",
-            ): 4,
-            (
-                "merger/repoground/cli/cmd_ground.py",
-                "Deprecated RepoBrief compatibility command; use RepoGround ground",
-            ): 1,
-            (
                 "merger/repoground/core/merge.py",
                 "# repoLens Report",
-            ): 1,
-            (
-                "merger/repoground/core/agent_impact_adapter.py",
-                "RepoBriefAgentImpactAdapter",
             ): 1,
             (
                 "merger/repoground/adapters/sources.py",

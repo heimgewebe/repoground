@@ -161,7 +161,7 @@ def test_symbol_search_cli_returns_symbol_hits(tmp_path, capsys):
     manifest = _write_symbol_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "symbol",
         "search",
         "--bundle-manifest",
@@ -186,7 +186,7 @@ def test_public_share_snapshot_excludes_python_symbol_index(tmp_path, capsys):
     out = tmp_path / "out"
 
     rc = main([
-        "repobrief",
+        "ground",
         "snapshot",
         "create",
         "--repo",

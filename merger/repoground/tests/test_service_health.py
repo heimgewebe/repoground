@@ -11,7 +11,7 @@ def health_client(tmp_path):
     (hub / "repo1").mkdir()
 
     import os
-    os.environ["RLENS_TOKEN"] = "test-health-token"
+    os.environ["REPOGROUND_TOKEN"] = "test-health-token"
 
     app.middleware_stack = None
     init_service(hub, token="test-health-token")

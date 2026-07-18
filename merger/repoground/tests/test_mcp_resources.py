@@ -410,18 +410,8 @@ def test_mcp_resource_rejects_invalid_or_escape_uris(tmp_path, uri):
         read_mcp_resource(uri, bundle_root=tmp_path)
 
 
-def test_legacy_mcp_resource_scheme_is_accepted_and_reported(tmp_path):
+def test_mcp_resource_rejects_retired_scheme(tmp_path):
     bundle = _bundle_with_health(tmp_path)
 
-    result = read_mcp_resource(
-        "repobrief://snapshot/demo/manifest",
-        bundle_root=bundle["manifest"].parent,
-    )
-
-    assert result["status"] == "available"
-    assert result["kind"] == "repoground.mcp.resource_read"
-    assert result["identity"] == {
-        "canonical_prefix": "repoground://snapshot/",
-        "legacy_prefix_used": True,
-        "legacy_prefix": "repobrief://snapshot/",
-    }
+    with pytest.raises(RepoGroundMcpResourceError):
+        read_mcp_resource("repo" + "brief://snapshot/demo/manifest", bundle_root=bundle["manifest"].parent)

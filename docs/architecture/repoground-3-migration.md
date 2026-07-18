@@ -15,15 +15,12 @@ is `heimgewebe/repoground`, the primary command is `repoground`, and the sole
 implementation namespace is `merger.repoground`.
 
 Lenskit, repoLens, rLens and RepoBrief are not parallel products. They remain
-only where an exact historical statement, a persisted 2.x identifier, or a
-bounded compatibility delegate requires them.
+only in exact historical statements and persisted 2.x identifiers.
 
 ## One implementation tree
 
-All implementation modules live below `merger/repoground`. The package
-`merger/lenskit` contains only the tested 3.x import bridge. Legacy launchers
-must delegate into RepoGround and emit warnings on stderr, never on a
-machine-readable stdout protocol.
+All implementation modules live below `merger/repoground`. There is no legacy
+Python namespace bridge or legacy launcher in the active repository.
 
 The short package `repoground` is a facade for installed entry points. It does
 not own an engine, cache, registry, service or command dispatcher.
@@ -56,7 +53,9 @@ not such a migration.
 
 ## Environment variables
 
-New configuration uses `REPOGROUND_*`. Each documented `RLENS_*` fallback has its own owner, review date and removal criteria in the compatibility exit contract. When both old and new values are set, the RepoGround value wins. `RLENS_SERVICE_UNIT` is no longer accepted after the HTTP service cutover.
+Configuration uses `REPOGROUND_*` and `~/.config/repoground/env` only. The
+hard-cut status and inventory closeout conditions are recorded in the
+compatibility exit contract.
 
 ## Service cutover
 
@@ -83,11 +82,9 @@ the listed current public documents.
 
 ## Rollback
 
-Before the GitHub rename, rollback means reverting the core merge while leaving
-the running legacy service untouched. After the rename, GitHub redirects remain
-verified and the old service unit can be re-enabled with its unchanged legacy
-launcher and environment file. Persisted 2.x artifacts never require rollback
-because they are not rewritten.
+Rollback is performed by reverting the RepoGround change set; it does not
+reactivate retired launchers, aliases, namespaces, or environment fallbacks.
+Persisted 2.x artifacts never require rollback because they are not rewritten.
 
 ## Non-claims
 

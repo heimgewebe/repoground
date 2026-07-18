@@ -8,6 +8,7 @@ from merger.repoground.core.compatibility_inventory import (
     dumps_inventory,
     scan_configs,
     scan_processes,
+    scan_repository,
 )
 
 
@@ -42,8 +43,9 @@ def test_process_inventory_reports_categories_without_raw_argv(tmp_path: Path) -
 
 def test_config_inventory_is_hash_only_and_bounded(tmp_path: Path) -> None:
     config = tmp_path / ".mcp.json"
+    legacy_scheme = "repo" + "brief://snapshot/demo/manifest"
     config.write_text(
-        '{"command":"repobrief-mcp-stdio.py","uri":"repobrief://snapshot/demo/manifest"}',
+        '{"command":"repobrief-mcp-stdio.py","uri":"' + legacy_scheme + '"}',
         encoding="utf-8",
     )
 
@@ -81,3 +83,23 @@ def test_process_inventory_excludes_observer_pid(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr("merger.repoground.core.compatibility_inventory.os.getpid", lambda: 123)
 
     assert scan_processes(proc) == []
+
+
+def test_repository_inventory_requires_zero_active_aliases(tmp_path: Path) -> None:
+    root = tmp_path
+    active = root / "merger" / "repoground" / "core"
+    active.mkdir(parents=True)
+    old_uri = "repo" + "brief://snapshot/demo/manifest"
+    (active / "mcp.py").write_text(f'uri = "{old_uri}"\n', encoding="utf-8")
+
+    assert scan_repository(root) == [
+        {"path": "merger/repoground/core/mcp.py", "matched_surfaces": ["legacy-mcp-resource-scheme"]}
+    ]
+
+
+def test_current_repository_has_no_active_aliases() -> None:
+    root = Path(__file__).resolve().parents[3]
+    inventory = build_inventory(repo_root=root, include_services=False)
+
+    assert inventory["repository_alias_findings"] == []
+    assert inventory["repository_aliases_zero"] is True

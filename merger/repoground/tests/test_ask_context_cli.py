@@ -86,7 +86,7 @@ def test_ask_context_cli_emits_json_context_pack(tmp_path, capsys):
     bundle = _complete_basic_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "ask",
         "--bundle-manifest",
         str(bundle["manifest"]),
@@ -115,7 +115,7 @@ def test_ask_context_cli_emits_human_context_pack(tmp_path, capsys):
     bundle = _complete_basic_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "ask",
         "--bundle-manifest",
         str(bundle["manifest"]),
@@ -136,7 +136,7 @@ def test_ask_context_cli_stricter_profile_smoke(tmp_path, capsys):
     bundle = _complete_pr_review_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "ask",
         "--bundle-manifest",
         str(bundle["manifest"]),
@@ -178,7 +178,7 @@ def test_ask_context_missing_required_profile_returns_failure(tmp_path, capsys):
     bundle = _build_resolved_bundle(tmp_path)
 
     rc = main([
-        "repobrief",
+        "ground",
         "ask",
         "--bundle-manifest",
         str(bundle["manifest"]),

@@ -3,11 +3,11 @@
 Parity Guard
 ------------
 Ensures feature parity between the Backend Model (JobRequest),
-Pythonista UI (repoLens), and Web UI (rLens).
+Pythonista UI (RepoGround Pythonista build), and RepoGround Web UI.
 
 Checks:
 1. JobRequest model fields (Source of Truth).
-2. repolens.py (CLI args, usage, and UI logic).
+2. RepoGround Pythonista build (CLI args, usage, and UI logic).
 3. Web UI (index.html inputs and app.js payload construction).
 """
 
@@ -25,66 +25,66 @@ FEATURES = {
         "cli_arg": "--level",
         "html_id": "profile",
         "js_key": "level",
-        "repolens_usage": "args.level"
+        "pythonista_usage": "args.level"
     },
     "mode": {
         "cli_arg": "--mode",
         "html_id": "mode",
         "js_key": "mode",
-        "repolens_usage": "args.mode"
+        "pythonista_usage": "args.mode"
     },
     "max_bytes": {
         "cli_arg": "--max-bytes",
         "html_id": "maxBytes",
         "js_key": "max_bytes",
-        "repolens_usage": "args.max_bytes" # ArgumentParser automatically converts - to _
+        "pythonista_usage": "args.max_bytes" # ArgumentParser automatically converts - to _
     },
     "split_size": {
         "cli_arg": "--split-size",
         "html_id": "splitSize",
         "js_key": "split_size",
-        "repolens_usage": "args.split_size"
+        "pythonista_usage": "args.split_size"
     },
     "plan_only": {
         "cli_arg": "--plan-only",
         "html_id": "planOnly",
         "js_key": "plan_only",
-        "repolens_usage": "args.plan_only"
+        "pythonista_usage": "args.plan_only"
     },
     "code_only": {
         "cli_arg": "--code-only",
         "html_id": "codeOnly",
         "js_key": "code_only",
-        "repolens_usage": "args.code_only"
+        "pythonista_usage": "args.code_only"
     },
     "meta_density": {
         "cli_arg": "--meta-density",
         "html_id": "metaDensity",
         "js_key": "meta_density",
-        "repolens_usage": "args.meta_density"
+        "pythonista_usage": "args.meta_density"
     },
     "json_sidecar": {
         "cli_arg": "--json-sidecar",
         # Explicit decision: Treat as a payload key in JS (even if logic is derived).
         # In JobRequest it is a field.
         "js_key": "json_sidecar",
-        "repolens_usage": "args.json_sidecar"
+        "pythonista_usage": "args.json_sidecar"
     },
     # Filters
     "extensions": {
         "cli_arg": "--extensions",
         "html_id": "extFilter",
         "js_key": "extensions",
-        "repolens_usage": "args.extensions"
+        "pythonista_usage": "args.extensions"
     },
     "path_filter": {
         "cli_arg": "--path-filter",
         "html_id": "pathFilter",
         "js_key": "path_filter",
-        "repolens_usage": "args.path_filter"
+        "pythonista_usage": "args.path_filter"
     },
     # Surface parity only: this guard checks that the --pre-pull flag, the #prePull
-    # WebUI element, the pre_pull payload key and repoLens' args.pre_pull all exist.
+    # WebUI element, the pre_pull payload key and RepoGround Pythonista build' args.pre_pull all exist.
     # It does NOT (and need not) assert the shared semantics — effective_pre_pull =
     # pre_pull and not plan_only, two-phase plan/apply, fast-forward-only — which are
     # covered by test_repo_sync.py / test_service_runner_pre_pull.py /
@@ -93,11 +93,11 @@ FEATURES = {
         "cli_arg": "--pre-pull",
         "html_id": "prePull",
         "js_key": "pre_pull",
-        "repolens_usage": "args.pre_pull"
+        "pythonista_usage": "args.pre_pull"
     },
-    # rLens Source Acquisition v1. Surface-parity only: the guard checks that the
+    # RepoGround Source Acquisition v1. Surface-parity only: the guard checks that the
     # --source-mode/--remote-ref/--remote-ref-policy flags, the WebUI elements,
-    # the payload keys and repoLens' args all exist across surfaces. The shared
+    # the payload keys and RepoGround Pythonista build' args all exist across surfaces. The shared
     # semantics (effective source mode, remote_snapshot non-mutation, ref policy,
     # dry-plan) are covered by test_source_acquisition.py and the service/CLI/UI
     # tests, not by this guard.
@@ -105,28 +105,101 @@ FEATURES = {
         "cli_arg": "--source-mode",
         "html_id": "sourceMode",
         "js_key": "repo_source_mode",
-        "repolens_usage": "args.source_mode"
+        "pythonista_usage": "args.source_mode"
     },
     "remote_ref": {
         "cli_arg": "--remote-ref",
         "html_id": "remoteRef",
         "js_key": "remote_ref",
-        "repolens_usage": "args.remote_ref"
+        "pythonista_usage": "args.remote_ref"
     },
     "remote_ref_policy": {
         "cli_arg": "--remote-ref-policy",
         "html_id": "remoteRefPolicy",
         "js_key": "remote_ref_policy",
-        "repolens_usage": "args.remote_ref_policy"
+        "pythonista_usage": "args.remote_ref_policy"
     }
 }
 
 # Paths
 ROOT = Path(__file__).parent.parent.resolve()
 MODEL_PATH = ROOT / "merger/repoground/service/models.py"
-REPOLENS_PATH = ROOT / "merger/repoground/frontends/pythonista/build.py"
+PYTHONISTA_BUILD_PATH = ROOT / "merger/repoground/frontends/pythonista/build.py"
 WEBUI_HTML_PATH = ROOT / "merger/repoground/frontends/webui/index.html"
 WEBUI_JS_PATH = ROOT / "merger/repoground/frontends/webui/app.js"
+
+
+def _defined_cli_arguments(tree: ast.AST) -> set[str]:
+    arguments: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "add_argument":
+            continue
+        arguments.update(
+            arg.value
+            for arg in node.args
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+        )
+    return arguments
+
+
+def _explicit_argument_accesses(tree: ast.AST) -> set[str]:
+    accesses = {
+        f"args.{node.attr}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "args"
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Name) or node.func.id != "getattr":
+            continue
+        if len(node.args) < 2:
+            continue
+        target, field = node.args[:2]
+        if (
+            isinstance(target, ast.Name)
+            and target.id == "args"
+            and isinstance(field, ast.Constant)
+            and isinstance(field.value, str)
+        ):
+            accesses.add(f"args.{field.value}")
+    return accesses
+
+
+def _uses_generic_argument_mapping(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "vars"
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "args"
+        ):
+            return True
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr == "__dict__"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "args"
+        ):
+            return True
+    return False
+
+
+def _literal_subscript_keys(tree: ast.AST) -> set[str]:
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Subscript):
+            continue
+        slice_node = node.slice
+        if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, str):
+            keys.add(slice_node.value)
+    return keys
 
 class ParityChecker:
     def __init__(self):
@@ -165,99 +238,50 @@ class ParityChecker:
             else:
                 self.log_pass(f"Feature '{feature}' present in JobRequest.")
 
-    def check_repolens(self):
-        """Check Pythonista UI/CLI using AST."""
-        print(f"Checking repoLens in {REPOLENS_PATH}...")
+    def check_pythonista_build(self):
+        """Check the RepoGround Pythonista CLI surface using its parsed AST."""
+        print(f"Checking RepoGround Pythonista build in {PYTHONISTA_BUILD_PATH}...")
         try:
-            content = REPOLENS_PATH.read_text("utf-8")
-            tree = ast.parse(content)
-        except Exception as e:
-            self.log_error(f"Could not parse repolens.py: {e}")
+            tree = ast.parse(PYTHONISTA_BUILD_PATH.read_text("utf-8"))
+        except Exception as error:
+            self.log_error(f"Could not parse RepoGround Pythonista build: {error}")
             return
 
-        # 1. Collect all add_argument args
-        defined_cli_args = set()
-
-        # 2. Collect all attribute access on 'args'
-        accessed_args = set()
-
-        # 3. Detect generic usage: vars(args) or args.__dict__
-        has_generic_usage_ast = False
-
-        # 4. Collect ALL string literals in the code (for generic fallback fallback)
-        # But we want to be strict. Let's start with strict AST.
-        # Strict Generic: literal string used as Subscript slice.
-        accessed_keys = set()
-
-        for node in ast.walk(tree):
-            # Check for add_argument calls
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Attribute) and node.func.attr == 'add_argument':
-                    # Extract string arguments
-                    for arg in node.args:
-                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                            defined_cli_args.add(arg.value)
-
-            # Check for usage: getattr(args, 'field')
-            # Strict check: first arg must be Name(id='args')
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'getattr':
-                if len(node.args) >= 2:
-                    arg1 = node.args[0]
-                    arg2 = node.args[1]
-                    if isinstance(arg1, ast.Name) and arg1.id == 'args':
-                        if isinstance(arg2, ast.Constant) and isinstance(arg2.value, str):
-                             accessed_args.add(f"args.{arg2.value}")
-
-            # Check for usage: args.field
-            if isinstance(node, ast.Attribute):
-                if isinstance(node.value, ast.Name) and node.value.id == 'args':
-                    accessed_args.add(f"args.{node.attr}")
-
-            # Check for generic usage: vars(args)
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'vars':
-                if len(node.args) == 1 and isinstance(node.args[0], ast.Name) and node.args[0].id == 'args':
-                    has_generic_usage_ast = True
-
-            # Check for generic usage: args.__dict__
-            if isinstance(node, ast.Attribute) and node.attr == '__dict__':
-                if isinstance(node.value, ast.Name) and node.value.id == 'args':
-                    has_generic_usage_ast = True
-
-            # Check for Subscript keys (e.g. d['key']) - assuming 'd' comes from vars(args)
-            # Since tracking 'd' is hard, we'll just accept ANY string literal used as a subscript key
-            # IF generic usage is detected. This eliminates help strings (usually args to calls, not slices).
-            if isinstance(node, ast.Subscript):
-                # node.slice is the index.
-                # In Python < 3.9, it might be Index(value=...)
-                slice_node = node.slice
-                # Handle Index wrapper for older python
-                if sys.version_info < (3, 9) and isinstance(slice_node, ast.Index):
-                    slice_node = slice_node.value
-
-                if isinstance(slice_node, ast.Constant) and isinstance(slice_node.value, str):
-                    accessed_keys.add(slice_node.value)
+        defined_cli_args = _defined_cli_arguments(tree)
+        accessed_args = _explicit_argument_accesses(tree)
+        has_generic_usage = _uses_generic_argument_mapping(tree)
+        accessed_keys = _literal_subscript_keys(tree)
 
         for feature, config in FEATURES.items():
-            # Check Definition
             cli_arg = config.get("cli_arg")
-            if cli_arg:
-                if cli_arg in defined_cli_args:
-                    self.log_pass(f"repoLens CLI: {cli_arg} definition found (AST).")
-                else:
-                    self.log_error(f"repoLens CLI: Definition for {cli_arg} missing (feature: {feature}).")
+            if cli_arg in defined_cli_args:
+                self.log_pass(
+                    f"RepoGround Pythonista build CLI: {cli_arg} definition found (AST)."
+                )
+            elif cli_arg:
+                self.log_error(
+                    f"RepoGround Pythonista build CLI: Definition for {cli_arg} "
+                    f"missing (feature: {feature})."
+                )
 
-            # Check Usage
-            usage_key = config.get("repolens_usage")
-            if usage_key:
-                field_name = usage_key.split('.')[-1]
-
-                if usage_key in accessed_args:
-                    self.log_pass(f"repoLens Usage: {usage_key} accessed (AST).")
-                elif has_generic_usage_ast and field_name in accessed_keys:
-                    # Strict Generic: requires vars(args) AND usage as a subscript key anywhere
-                    self.log_pass(f"repoLens Usage: {usage_key} accessed (Generic AST + Key Usage).")
-                else:
-                    self.log_error(f"repoLens Usage: {usage_key} not explicitly accessed and key literal not used as subscript.")
+            usage_key = config.get("pythonista_usage")
+            if not usage_key:
+                continue
+            field_name = usage_key.rsplit(".", 1)[-1]
+            if usage_key in accessed_args:
+                self.log_pass(
+                    f"RepoGround Pythonista build Usage: {usage_key} accessed (AST)."
+                )
+            elif has_generic_usage and field_name in accessed_keys:
+                self.log_pass(
+                    f"RepoGround Pythonista build Usage: {usage_key} accessed "
+                    "(Generic AST + Key Usage)."
+                )
+            else:
+                self.log_error(
+                    f"RepoGround Pythonista build Usage: {usage_key} not explicitly "
+                    "accessed and key literal not used as subscript."
+                )
 
     def check_webui_html(self):
         """Check index.html for IDs."""
@@ -322,7 +346,7 @@ class ParityChecker:
             sys.exit(0)
 
         self.check_model_fields()
-        self.check_repolens()
+        self.check_pythonista_build()
         self.check_webui_html()
         self.check_webui_js()
 

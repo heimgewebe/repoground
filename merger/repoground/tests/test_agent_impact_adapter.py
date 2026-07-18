@@ -6,7 +6,6 @@ from pathlib import Path
 
 from merger.repoground.cli.agent_impact import main as impact_cli_main
 from merger.repoground.core.agent_impact_adapter import (
-    RepoBriefAgentImpactAdapter,
     RepoGroundAgentImpactAdapter,
 )
 from merger.repoground.tests.test_readonly_adapter import (
@@ -16,8 +15,6 @@ from merger.repoground.tests.test_readonly_adapter import (
 )
 
 DIGEST = "b" * 64
-
-
 def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -302,7 +299,3 @@ def test_agent_impact_cli_uses_registered_snapshot(
     assert exit_code == 0
     assert result["action"] == "agent_impact_context"
     assert result["target"]["paths"] == ["src/demo.py"]
-
-
-def test_legacy_agent_impact_class_alias_is_identical() -> None:
-    assert RepoBriefAgentImpactAdapter is RepoGroundAgentImpactAdapter

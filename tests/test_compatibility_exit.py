@@ -83,37 +83,50 @@ def test_active_mcp_and_service_client_modules_are_canonical() -> None:
     assert "from merger.repoground.core import repobrief_mcp" not in mcp
 
 
-def test_legacy_python_modules_are_small_identity_adapters() -> None:
-    adapters = {
-        "merger/repoground/cli/cmd_repobrief.py": "cmd_ground",
-        "merger/repoground/cli/cmd_rlens_client.py": "cmd_service_client",
-        "merger/repoground/core/repobrief_access.py": "bundle_access",
-        "merger/repoground/core/repobrief_agent_impact_adapter.py": "agent_impact_adapter",
-        "merger/repoground/core/repobrief_ask.py": "ask_context",
-        "merger/repoground/core/repobrief_ask_eval.py": "ask_evaluation",
-        "merger/repoground/core/repobrief_availability.py": "availability",
-        "merger/repoground/core/repobrief_context_compiler.py": "context_compiler",
-        "merger/repoground/core/repobrief_delta_context.py": "delta_context",
-        "merger/repoground/core/repobrief_latest_complete.py": "latest_complete",
-        "merger/repoground/core/repobrief_live_freshness.py": "live_freshness",
-        "merger/repoground/core/repobrief_mcp_resources.py": "mcp_resources",
-        "merger/repoground/core/repobrief_mcp_tools.py": "mcp_tools",
-        "merger/repoground/core/repobrief_memory.py": "memory",
-        "merger/repoground/core/repobrief_preflight.py": "snapshot_preflight",
-        "merger/repoground/core/repobrief_profiles.py": "snapshot_profiles",
-        "merger/repoground/core/repobrief_publication_policy.py": "publication_policy",
-        "merger/repoground/core/repobrief_readonly_adapter.py": "readonly_adapter",
-        "merger/repoground/core/repobrief_review_coverage.py": "review_coverage",
-        "merger/repoground/core/repobrief_workbench_usefulness.py": "workbench_usefulness",
-    }
+def test_legacy_python_modules_and_launchers_are_absent() -> None:
+    removed = [
+        "merger/lenskit/__init__.py",
+        "merger/repoground/cli/cmd_repobrief.py",
+        "merger/repoground/cli/cmd_rlens_client.py",
+        "merger/repoground/cli/repobrief.py",
+        "merger/repoground/cli/repobrief_mcp_stdio.py",
+        "merger/repoground/cli/rlens.py",
+        "scripts/repobrief-mcp-stdio.py",
+        "scripts/rlens-launcher.sh",
+        "merger/repoground/frontends/pythonista/repolens.py",
+        "merger/repoground/frontends/pythonista/repolens_helpers.py",
+        "merger/repoground/frontends/pythonista/repolens_utils.py",
+        "scripts/rlens-post-merge-surface-smoke.sh",
+        "scripts/ops/rb-publish-fleet",
+        "scripts/ops/rb-publication-policy",
+        "scripts/ops/install_rb_publish_fleet_runtime.sh",
+    ]
 
-    for relative, canonical in adapters.items():
-        text = (ROOT / relative).read_text(encoding="utf-8")
-        assert len(text.splitlines()) <= 15
-        assert "deprecated" in text.lower()
-        assert canonical in text
-        assert "sys.modules[__name__] = _module" in text
-        assert "compatibility review:" in text
+    assert all(not (ROOT / relative).exists() for relative in removed)
+
+
+def test_active_cli_has_only_canonical_command_names() -> None:
+    text = (ROOT / "merger/repoground/cli/main.py").read_text(encoding="utf-8")
+    client = (ROOT / "merger/repoground/cli/cmd_service_client.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'register_ground_command(subparsers)' in text
+    assert '"ground"' in text
+    assert '"repobrief"' not in text
+    assert '"rlens-client"' not in client
+
+
+def test_active_runtime_uses_only_canonical_environment_variables() -> None:
+    active = [
+        ROOT / "merger/repoground/cli/cmd_service_client.py",
+        ROOT / "merger/repoground/cli/serve.py",
+        ROOT / "merger/repoground/service/app.py",
+        ROOT / "merger/repoground/service/runner.py",
+        ROOT / "scripts/repoground-launcher.sh",
+    ]
+
+    assert all("R" + "LENS_" not in path.read_text(encoding="utf-8") for path in active)
 
 
 def test_current_service_template_has_no_legacy_unit_or_environment_path() -> None:

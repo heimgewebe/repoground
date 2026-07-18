@@ -28,18 +28,19 @@
       "id": "legacy-cli-entrypoints",
       "surface": "repobrief command, rlens-client command and repobrief-mcp-stdio.py",
       "category": "command-compatibility",
-      "status": "bounded-adapter",
+      "status": "removed-hard-cut",
       "owner": "RepoGround maintainers",
       "canonical": "repoground ground, repoground service-client and repoground mcp",
-      "review_by": "2026-09-01",
+      "review_by": "2026-07-18",
+      "retired_at": "2026-07-18T00:00:00+02:00",
       "evidence": [
         "active-repository command scan",
         "current-user process command inventory"
       ],
       "removal_criteria": [
-        "no active configuration launches a legacy command",
-        "no observed legacy command process for 30 days",
-        "all current documentation and examples use canonical commands"
+        "legacy command adapters and launchers are absent from the active repository",
+        "all current documentation and examples use canonical commands",
+        "the compatibility inventory reports no active legacy command process"
       ]
     },
     {
@@ -68,14 +69,15 @@
       "id": "legacy-environment",
       "surface": "RLENS_* variables and rlens.env",
       "category": "configuration-compatibility",
-      "status": "bounded-fallback",
+      "status": "removed-hard-cut",
       "owner": "RepoGround operators",
       "canonical": "REPOGROUND_* variables and ~/.config/repoground/env",
-      "review_by": "2026-09-01",
+      "review_by": "2026-07-18",
+      "retired_at": "2026-07-18T00:00:00+02:00",
       "removal_criteria": [
-        "the installed service reads only the canonical environment file",
-        "no active service or client configuration contains RLENS_* variables for 30 days",
-        "fallback tests are removed in the same change as fallback code"
+        "the service and clients read only REPOGROUND_* variables and canonical configuration paths",
+        "RLENS_* fallback code and tests are absent",
+        "the compatibility inventory reports no active legacy environment configuration"
       ]
     },
     {
@@ -97,18 +99,19 @@
       "id": "legacy-python-namespace",
       "surface": "merger.lenskit and merger.lenskit.*",
       "category": "source-compatibility",
-      "status": "bounded-adapter",
+      "status": "removed-hard-cut",
       "owner": "RepoGround maintainers",
       "canonical": "merger.repoground",
-      "review_by": "2026-10-01",
+      "review_by": "2026-07-18",
+      "retired_at": "2026-07-18T00:00:00+02:00",
       "evidence": [
         "active-repository import scan",
         "current-user process command inventory"
       ],
       "removal_criteria": [
-        "no active repository imports merger.lenskit",
-        "no observed runtime process imports or launches the legacy namespace for 30 days",
-        "the alias identity regression suite passes after removal"
+        "the merger.lenskit compatibility package is absent",
+        "no active repository imports or launches the legacy namespace",
+        "canonical import and command regression tests pass"
       ]
     },
     {
