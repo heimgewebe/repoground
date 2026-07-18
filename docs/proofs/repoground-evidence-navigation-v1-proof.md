@@ -59,8 +59,13 @@ The decision is fail-closed and has three outcomes:
 The committed local report `repoground-vs-grep-read.v2.json` is
 `inconclusive`. On 20 fixed questions RepoGround missed 37 expected targets
 versus 60 for `grep/read`, but both conditions had 20 false-confidence cases.
-RepoGround used 566.081 ms versus 156.484 ms, emitted 292,150 raw bytes, and
-its 98,966-byte compact form was still larger than the 26,274-byte baseline.
+RepoGround used 551.335 ms versus 166.691 ms, emitted 292,150 raw bytes, and
+its 98,966-byte compact form was still larger than the 26,690-byte baseline.
+The committed run records `ripgrep` as the baseline search engine. When `rg` is
+not installed, the same harness uses a deterministic UTF-8 Python substring
+search, records `python_utf8_substring`, and starts no hidden subprocess. The
+report persists no absolute local paths and binds the benchmark script, index,
+question set and source tree by SHA-256.
 No category is recommended and no default activation follows from this slice.
 The benchmark does not claim repository understanding, answer correctness or
 quality beyond the measured cases.

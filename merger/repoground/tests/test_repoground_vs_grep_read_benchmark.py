@@ -49,7 +49,13 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     assert len(report["cases"]) == 20
     assert report["acceptance"]["same_question_set"] is True
     assert report["acceptance"]["same_k"] == 1
-    assert set(report["inputs"]) >= {"index_sha256", "questions_sha256", "repo_tree_sha256"}
+    assert set(report["inputs"]) >= {
+        "benchmark_script_sha256", "index_sha256", "questions_sha256", "repo_tree_sha256",
+    }
+    assert report["inputs"]["repo_root"] == "."
+    assert report["inputs"]["index_path"] == index.name
+    assert report["inputs"]["absolute_paths_persisted"] is False
+    assert str(tmp_path) not in json.dumps(report["inputs"])
     for case in report["cases"]:
         assert case["k"] == 1
         for condition in ("repoground", "grep_read"):
@@ -58,6 +64,7 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
                 "runtime_ms", "tool_calls", "process_calls", "response_bytes",
                 "token_proxy", "source_index_freshness", "false_confidence",
             }
+        assert case["grep_read"]["search_engine"] in {"ripgrep", "python_utf8_substring"}
         assert case["repoground"]["compaction"]["pass"] is True
         assert case["repoground"]["false_confidence"] is False
     assert report["aggregates"]["repoground"]["compaction"]["aggregate_pass"] is True
@@ -147,3 +154,16 @@ def test_benchmark_fails_on_quality_regression(monkeypatch, tmp_path):
 
     assert report["status"] == "fail"
     assert report["acceptance"]["failure_reasons"] == ["quality_or_freshness_regression"]
+
+
+def test_benchmark_uses_python_fallback_without_ripgrep(monkeypatch, tmp_path):
+    module = _benchmark_module()
+    root, _, _ = _fixture_index(tmp_path)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: None)
+
+    result, process_calls, read_calls = module._grep_read(root, "widget", 1)
+
+    assert result["search_engine"] == "python_utf8_substring"
+    assert result["paths"] == ["src/widget.py"]
+    assert process_calls == 0
+    assert read_calls == 1

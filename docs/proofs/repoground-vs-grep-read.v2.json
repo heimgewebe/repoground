@@ -16,13 +16,13 @@
       "expected_targets_missing": 60,
       "false_confidence_cases": 20,
       "process_calls": 20,
-      "response_bytes": 26274,
-      "runtime_ms": 156.484,
+      "response_bytes": 26690,
+      "runtime_ms": 166.691,
       "source_index_freshness": {
         "fresh": 20
       },
       "source_read_calls": 200,
-      "token_proxy": 6575,
+      "token_proxy": 6677,
       "tool_calls": 20
     },
     "repoground": {
@@ -38,7 +38,7 @@
       "false_confidence_cases": 20,
       "process_calls": 0,
       "response_bytes": 292150,
-      "runtime_ms": 566.081,
+      "runtime_ms": 551.335,
       "source_index_freshness": {
         "fresh": 20
       },
@@ -69,18 +69,19 @@
         "paths": [
           "scripts/ops/repoground-publish-fleet",
           "scripts/release/check_release_contract.py",
-          "scripts/docmeta/check_planning_registration.py",
           "scripts/docmeta/check_status_truth.py",
-          "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/ci/check_codeql_suppressions.py",
-          "scripts/ci/check_github_main_ruleset.py",
           "scripts/ci/check_graph_maintainability.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
           "scripts/ci/check_reusable_workflow_contracts.py",
-          "scripts/ci/check_browser_gate_environment.py"
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_github_main_ruleset.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1300,
-        "runtime_ms": 8.139,
+        "response_bytes": 1362,
+        "runtime_ms": 8.282,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -88,7 +89,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 325,
+        "token_proxy": 341,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -141,7 +142,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14427,
-        "runtime_ms": 59.76,
+        "runtime_ms": 59.432,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -172,19 +173,20 @@
         "false_confidence": true,
         "paths": [
           "scripts/ops/repoground-publish-fleet",
-          "scripts/release/check_release_contract.py",
-          "scripts/ci/assert_codeql_sarif_clean.py",
-          "scripts/ci/check_reusable_workflow_contracts.py",
-          "scripts/ci/check_graph_maintainability.py",
-          "scripts/docmeta/check_planning_registration.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
           "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
           "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py",
           "scripts/ci/check_github_main_ruleset.py",
-          "scripts/ci/check_codeql_suppressions.py"
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_github_actions_pins.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1260,
-        "runtime_ms": 8.56,
+        "response_bytes": 1280,
+        "runtime_ms": 8.942,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -192,7 +194,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 315,
+        "token_proxy": 320,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -243,7 +245,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14705,
-        "runtime_ms": 17.248,
+        "runtime_ms": 17.871,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -275,20 +277,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/ops/repoground-publish-fleet",
+          "scripts/docmeta/check_status_truth.py",
           "scripts/docmeta/check_planning_registration.py",
           "scripts/release/check_release_contract.py",
-          "scripts/docmeta/check_status_truth.py",
           "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/ops/repoground-publish-fleet",
           "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
           "scripts/ci/check_github_actions_pins.py",
-          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_browser_gate_environment.py",
           "scripts/ci/check_graph_maintainability.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1324,
-        "runtime_ms": 7.622,
+        "response_bytes": 1360,
+        "runtime_ms": 9.102,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -296,7 +299,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 331,
+        "token_proxy": 340,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -349,7 +352,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14706,
-        "runtime_ms": 27.724,
+        "runtime_ms": 27.882,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -381,20 +384,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "CONTRIBUTING.md",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/docmeta/check_status_truth.py",
           "scripts/ops/repoground-publish-fleet",
-          "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
-          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/docmeta/check_planning_registration.py",
           "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py",
           "scripts/ci/check_github_main_ruleset.py",
-          "scripts/ci/check_browser_gate_environment.py"
+          "scripts/ci/assert_codeql_sarif_clean.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1276,
-        "runtime_ms": 7.245,
+        "response_bytes": 1328,
+        "runtime_ms": 7.475,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -402,7 +406,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 319,
+        "token_proxy": 332,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -455,7 +459,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14643,
-        "runtime_ms": 28.585,
+        "runtime_ms": 27.417,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -491,16 +495,17 @@
           "scripts/release/check_release_contract.py",
           "scripts/ops/repoground-publish-fleet",
           "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/ci/check_graph_maintainability.py",
-          "scripts/docmeta/check_planning_registration.py",
           "scripts/docmeta/check_status_truth.py",
-          "scripts/ci/check_browser_gate_environment.py",
-          "scripts/ci/check_reusable_workflow_contracts.py",
-          "scripts/ci/check_github_main_ruleset.py"
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_reusable_workflow_contracts.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1305,
-        "runtime_ms": 6.66,
+        "response_bytes": 1353,
+        "runtime_ms": 8.345,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -508,7 +513,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 327,
+        "token_proxy": 339,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -561,7 +566,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14425,
-        "runtime_ms": 33.85,
+        "runtime_ms": 35.328,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -593,20 +598,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/release/check_release_contract.py",
-          "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/ops/repoground-publish-fleet",
           "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/docmeta/check_status_truth.py",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
           "scripts/ci/check_browser_gate_environment.py",
           "scripts/ci/check_graph_maintainability.py",
-          "scripts/ci/check_reusable_workflow_contracts.py"
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ci/check_github_actions_pins.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1322,
-        "runtime_ms": 6.845,
+        "response_bytes": 1304,
+        "runtime_ms": 9.29,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -614,7 +620,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 331,
+        "token_proxy": 326,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -667,7 +673,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14866,
-        "runtime_ms": 30.414,
+        "runtime_ms": 30.908,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -699,20 +705,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/release/check_identity_distribution_decisions.py",
           "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
           "scripts/ops/repoground-publish-fleet",
           "scripts/repoground-post-merge-surface-smoke.sh",
+          "config/codeql-path-suppressions.v1.json",
+          "config/github-main-required-checks.v1.json",
+          "config/repoground-c901-baseline.v1.json",
           "scripts/docmeta/check_status_truth.py",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/ci/assert_codeql_sarif_clean.py",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
           "scripts/ci/check_github_actions_pins.py",
           "scripts/ci/check_browser_gate_environment.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1342,
-        "runtime_ms": 7.687,
+        "response_bytes": 1324,
+        "runtime_ms": 8.444,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -720,7 +727,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 336,
+        "token_proxy": 331,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -773,7 +780,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14980,
-        "runtime_ms": 27.456,
+        "runtime_ms": 27.021,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -805,20 +812,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/release/check_release_contract.py",
           "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/release/check_release_contract.py",
           "scripts/ops/repoground-publish-fleet",
           "scripts/repoground-post-merge-surface-smoke.sh",
           "scripts/docmeta/check_status_truth.py",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/ci/check_github_actions_pins.py",
-          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_github_main_ruleset.py",
           "scripts/ci/check_browser_gate_environment.py",
-          "scripts/ci/check_graph_maintainability.py"
+          "scripts/ci/check_reusable_workflow_contracts.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1332,
-        "runtime_ms": 9.128,
+        "response_bytes": 1340,
+        "runtime_ms": 7.75,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -826,7 +834,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 333,
+        "token_proxy": 335,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -879,7 +887,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 15033,
-        "runtime_ms": 23.962,
+        "runtime_ms": 23.128,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -911,20 +919,21 @@
         },
         "false_confidence": true,
         "paths": [
+          "scripts/ops/repoground-publish-fleet",
           "scripts/release/check_identity_distribution_decisions.py",
           "scripts/release/check_release_contract.py",
-          "scripts/docmeta/check_status_truth.py",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
-          "scripts/ops/repoground-publish-fleet",
           "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/check_planning_registration.py",
           "scripts/ci/assert_codeql_sarif_clean.py",
-          "scripts/ci/check_graph_maintainability.py",
-          "scripts/ci/check_browser_gate_environment.py"
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_reusable_workflow_contracts.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1332,
-        "runtime_ms": 7.471,
+        "response_bytes": 1334,
+        "runtime_ms": 7.598,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -932,7 +941,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 333,
+        "token_proxy": 334,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -985,7 +994,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14621,
-        "runtime_ms": 34.087,
+        "runtime_ms": 34.198,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1017,20 +1026,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/release/check_release_contract.py",
-          "scripts/docmeta/check_status_truth.py",
           "scripts/ops/repoground-publish-fleet",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
-          "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
           "scripts/ci/check_github_main_ruleset.py",
-          "scripts/ci/check_browser_gate_environment.py"
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/docmeta/check_planning_registration.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1326,
-        "runtime_ms": 8.804,
+        "response_bytes": 1292,
+        "runtime_ms": 7.881,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1038,7 +1048,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 332,
+        "token_proxy": 323,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1091,7 +1101,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14242,
-        "runtime_ms": 21.741,
+        "runtime_ms": 21.787,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1123,20 +1133,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/release/check_identity_distribution_decisions.py",
           "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/docmeta/check_status_truth.py",
           "scripts/ops/repoground-publish-fleet",
           "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/docmeta/check_status_truth.py",
-          "scripts/ci/check_codeql_suppressions.py",
           "scripts/ci/check_github_actions_pins.py",
-          "scripts/ci/check_browser_gate_environment.py",
-          "scripts/ci/assert_codeql_sarif_clean.py"
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_codeql_suppressions.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1291,
-        "runtime_ms": 7.476,
+        "response_bytes": 1343,
+        "runtime_ms": 9.072,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1144,7 +1155,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 323,
+        "token_proxy": 336,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1197,7 +1208,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14275,
-        "runtime_ms": 15.526,
+        "runtime_ms": 12.84,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1229,20 +1240,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/repoground-post-merge-surface-smoke.sh",
           "scripts/ops/repoground-publish-fleet",
           "scripts/release/check_release_contract.py",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/docmeta/check_status_truth.py",
           "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
           "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
           "scripts/ci/check_codeql_suppressions.py",
-          "scripts/ci/check_graph_maintainability.py",
-          "scripts/ci/check_reusable_workflow_contracts.py"
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1346,
-        "runtime_ms": 8.008,
+        "response_bytes": 1366,
+        "runtime_ms": 8.594,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1250,7 +1262,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 337,
+        "token_proxy": 342,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1303,7 +1315,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14570,
-        "runtime_ms": 11.786,
+        "runtime_ms": 12.576,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1334,19 +1346,20 @@
         "false_confidence": true,
         "paths": [
           "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/docmeta/check_status_truth.py",
-          "scripts/release/check_release_contract.py",
           "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/ci/check_github_actions_pins.py",
-          "scripts/ci/check_github_main_ruleset.py",
-          "scripts/ci/check_graph_maintainability.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
           "scripts/ci/check_browser_gate_environment.py",
-          "scripts/ci/assert_codeql_sarif_clean.py"
+          "scripts/ci/check_codeql_suppressions.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1309,
-        "runtime_ms": 6.824,
+        "response_bytes": 1361,
+        "runtime_ms": 7.434,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1354,7 +1367,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 328,
+        "token_proxy": 341,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1405,7 +1418,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14817,
-        "runtime_ms": 33.566,
+        "runtime_ms": 34.252,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1437,20 +1450,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/release/check_release_contract.py",
-          "scripts/docmeta/check_status_truth.py",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/ops/repoground-publish-fleet",
-          "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
-          "scripts/repoground-post-merge-surface-smoke.sh",
           "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
           "scripts/ci/check_codeql_suppressions.py",
-          "scripts/ci/check_browser_gate_environment.py"
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/ops/repoground-publish-fleet"
         ],
         "process_calls": 1,
-        "response_bytes": 1333,
-        "runtime_ms": 8.028,
+        "response_bytes": 1319,
+        "runtime_ms": 8.005,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1458,7 +1472,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 334,
+        "token_proxy": 330,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1510,7 +1524,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14820,
-        "runtime_ms": 20.982,
+        "runtime_ms": 21.039,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1542,20 +1556,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/ops/repoground-publish-fleet",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/ci/check_github_actions_pins.py",
           "scripts/release/check_release_contract.py",
-          "scripts/ci/check_graph_maintainability.py",
-          "scripts/ci/check_reusable_workflow_contracts.py",
-          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/repoground-post-merge-surface-smoke.sh",
           "scripts/ci/check_github_main_ruleset.py",
-          "scripts/ci/check_browser_gate_environment.py"
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/assert_codeql_sarif_clean.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1312,
-        "runtime_ms": 7.394,
+        "response_bytes": 1352,
+        "runtime_ms": 9.523,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1563,7 +1578,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 328,
+        "token_proxy": 338,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1616,7 +1631,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14566,
-        "runtime_ms": 20.125,
+        "runtime_ms": 19.553,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1647,19 +1662,20 @@
         "false_confidence": true,
         "paths": [
           "scripts/ops/repoground-publish-fleet",
-          "scripts/docmeta/check_planning_registration.py",
           "scripts/release/check_release_contract.py",
           "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/docmeta/check_status_truth.py",
           "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
           "scripts/ci/assert_codeql_sarif_clean.py",
-          "scripts/ci/check_browser_gate_environment.py",
-          "scripts/ci/check_codeql_suppressions.py"
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/check_browser_gate_environment.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1316,
-        "runtime_ms": 9.746,
+        "response_bytes": 1346,
+        "runtime_ms": 8.646,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1667,7 +1683,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 329,
+        "token_proxy": 337,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1718,7 +1734,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14356,
-        "runtime_ms": 37.774,
+        "runtime_ms": 35.678,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1750,20 +1766,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/release/check_release_contract.py",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
-          "scripts/ops/repoground-publish-fleet",
-          "scripts/docmeta/check_planning_registration.py",
-          "scripts/docmeta/check_status_truth.py",
-          "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_graph_maintainability.py",
           "scripts/ci/check_browser_gate_environment.py",
-          "scripts/ci/check_reusable_workflow_contracts.py"
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_identity_distribution_decisions.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1354,
-        "runtime_ms": 7.702,
+        "response_bytes": 1324,
+        "runtime_ms": 8.497,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1771,7 +1788,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 339,
+        "token_proxy": 331,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1824,7 +1841,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14699,
-        "runtime_ms": 38.446,
+        "runtime_ms": 33.665,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1858,20 +1875,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/ci/check_codeql_suppressions.py",
-          "scripts/ci/check_graph_maintainability.py",
-          "scripts/ci/check_reusable_workflow_contracts.py",
-          "scripts/ci/check_browser_gate_environment.py",
-          "scripts/ci/check_github_main_ruleset.py",
-          "scripts/ci/assert_codeql_sarif_clean.py",
-          "scripts/ci/check_github_actions_pins.py",
           "scripts/release/check_release_contract.py",
           "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/ops/repoground-publish-fleet"
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_browser_gate_environment.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1298,
-        "runtime_ms": 8.775,
+        "response_bytes": 1364,
+        "runtime_ms": 8.238,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1879,7 +1897,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 325,
+        "token_proxy": 341,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -1934,7 +1952,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14562,
-        "runtime_ms": 44.181,
+        "runtime_ms": 39.865,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1970,20 +1988,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/ci/check_github_actions_pins.py",
-          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_codeql_suppressions.py",
           "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_browser_gate_environment.py",
           "scripts/ci/check_reusable_workflow_contracts.py",
           "scripts/ci/assert_codeql_sarif_clean.py",
           "scripts/ci/check_github_main_ruleset.py",
-          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/release/check_release_contract.py",
           "scripts/ops/repoground-publish-fleet",
-          "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/docmeta/check_status_truth.py"
+          "scripts/release/check_identity_distribution_decisions.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1270,
-        "runtime_ms": 7.262,
+        "response_bytes": 1324,
+        "runtime_ms": 7.348,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -1991,7 +2010,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 318,
+        "token_proxy": 331,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -2048,7 +2067,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14742,
-        "runtime_ms": 29.052,
+        "runtime_ms": 27.239,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -2080,20 +2099,21 @@
         },
         "false_confidence": true,
         "paths": [
-          "scripts/ops/repoground-publish-fleet",
+          "CONTRIBUTING.md",
+          "config/codeql-path-suppressions.v1.json",
           "scripts/release/check_release_contract.py",
-          "scripts/docmeta/check_status_truth.py",
-          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ops/repoground-publish-fleet",
           "scripts/release/check_identity_distribution_decisions.py",
-          "scripts/docmeta/tests/test_check_planning_registration.py",
           "scripts/repoground-post-merge-surface-smoke.sh",
-          "scripts/ci/check_github_actions_pins.py",
+          "scripts/docmeta/check_planning_registration.py",
           "scripts/ci/check_reusable_workflow_contracts.py",
-          "scripts/ci/check_graph_maintainability.py"
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py"
         ],
         "process_calls": 1,
-        "response_bytes": 1326,
-        "runtime_ms": 7.108,
+        "response_bytes": 1314,
+        "runtime_ms": 8.225,
+        "search_engine": "ripgrep",
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -2101,7 +2121,7 @@
           "status": "fresh"
         },
         "source_read_calls": 10,
-        "token_proxy": 332,
+        "token_proxy": 329,
         "tool_calls": 1,
         "useful_displayed": true
       },
@@ -2154,7 +2174,7 @@
         ],
         "process_calls": 0,
         "response_bytes": 14095,
-        "runtime_ms": 9.816,
+        "runtime_ms": 9.656,
         "source_index_freshness": {
           "checked_path_count": 10,
           "missing_paths": [],
@@ -2376,15 +2396,17 @@
     "unmeasured_query_quality"
   ],
   "environment": {
-    "pid": 2010052,
+    "pid": 2126213,
     "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
     "python": "3.10.12"
   },
   "inputs": {
-    "index_path": "/home/alex/repos/manifest-publications/bundles/heimgewebe__repoground/main/20260718T063017Z-dd3905c1eb07/heimgewebe__repoground__main-max-260718-0630_merge.chunk_index.index.sqlite",
+    "absolute_paths_persisted": false,
+    "benchmark_script_sha256": "27c597a15e51fa214ec8fde8d49ecc50b76594681329ec64bed7e280a14a2fc3",
+    "index_path": "heimgewebe__repoground__main-max-260718-0630_merge.chunk_index.index.sqlite",
     "index_sha256": "48df1af9afb2a32b01eb8ab4a64e10eff2126f46928d0c93b56b7221f037da76",
     "questions_sha256": "e6a123580e08d0d3cb3db3889b8a5f6b11981cc6f7528f3c90c00ae0bcb692a9",
-    "repo_root": "/home/alex/repos/.repoground-sources/heimgewebe__repoground__main",
+    "repo_root": ".",
     "repo_tree_sha256": "3cf72490e267182a8a294abfea310943c756db7b5091120f13cd0152e8e3c50a"
   },
   "kind": "repoground_vs_grep_read_benchmark",

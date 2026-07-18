@@ -291,12 +291,15 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)
-    elif parsed_args.command == "token-budget":
-        from .cmd_token_budget import run_token_budget
-        return run_token_budget(parsed_args)
-    elif parsed_args.command == "evidence-query":
+    elif parsed_args.command in {"token-budget", "evidence-query"}:
         from .cmd_evidence_query import run_evidence_query
-        return run_evidence_query(parsed_args)
+        from .cmd_token_budget import run_token_budget
+
+        handlers = {
+            "token-budget": run_token_budget,
+            "evidence-query": run_evidence_query,
+        }
+        return handlers[parsed_args.command](parsed_args)
     elif parsed_args.command == "artifact":
         from . import cmd_artifact
         return cmd_artifact.run_artifact_lookup(parsed_args)

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Measure local RepoGround retrieval against local ``rg`` plus bounded reads.
+"""Measure RepoGround retrieval against bounded local text search and reads.
 
+Ripgrep is preferred when installed.  A deterministic UTF-8 Python substring
+search is used otherwise, and every case records the selected search engine.
 No network, installation or repository mutation is performed.  A report is
 always written when argument validation succeeds, including when acceptance
 gates fail, so a failed run remains inspectable and reproducible.
@@ -117,19 +119,43 @@ def _compact_repoground_response(result: dict[str, Any], freshness: dict[str, An
     }
 
 
+def _python_matching_paths(root: Path, token: str) -> list[Path]:
+    """Return deterministic text-file matches when ripgrep is unavailable."""
+    needle = token.casefold()
+    matches: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        relative = path.relative_to(root)
+        if ".git" in relative.parts:
+            continue
+        try:
+            content = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            continue
+        if needle in content.casefold():
+            matches.append(path)
+    return matches
+
+
 def _grep_read(root: Path, question: str, k: int) -> tuple[dict[str, Any], int, int]:
     paths: list[str] = []
     process_calls = 0
+    ripgrep = shutil.which("rg")
+    search_engine = "ripgrep" if ripgrep else "python_utf8_substring"
     for token in _tokens(question):
-        process_calls += 1
-        run = subprocess.run(
-            ["rg", "-l", "-i", "--glob", "!.git", "--", token, str(root)],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        for raw in run.stdout.splitlines():
-            path = Path(raw)
+        if ripgrep:
+            process_calls += 1
+            run = subprocess.run(
+                [ripgrep, "-l", "-i", "--glob", "!.git", "--", token, str(root)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            candidates = [Path(raw) for raw in run.stdout.splitlines()]
+        else:
+            candidates = _python_matching_paths(root, token)
+        for path in candidates:
             try:
                 relative = path.relative_to(root).as_posix()
             except ValueError:
@@ -144,7 +170,15 @@ def _grep_read(root: Path, question: str, k: int) -> tuple[dict[str, Any], int, 
     for relative in paths:
         with (root / relative).open("rb") as handle:
             reads.append({"path": relative, "bytes_read": len(handle.read(READ_LIMIT_BYTES))})
-    return {"query": question, "k": k, "status": "available", "paths": paths, "reads": reads}, process_calls, len(reads)
+    result = {
+        "query": question,
+        "k": k,
+        "status": "available",
+        "search_engine": search_engine,
+        "paths": paths,
+        "reads": reads,
+    }
+    return result, process_calls, len(reads)
 
 
 def _measurement(condition: str, result: dict[str, Any], *, runtime_ns: int, process_calls: int,
@@ -170,6 +204,8 @@ def _measurement(condition: str, result: dict[str, Any], *, runtime_ns: int, pro
         "useful_displayed": useful_displayed,
         "false_confidence": false_confidence,
     }
+    if result.get("search_engine"):
+        item["search_engine"] = result["search_engine"]
     if compact is not None:
         compact_bytes = len(json.dumps(compact, sort_keys=True, separators=(",", ":")).encode("utf-8"))
         reduction = (1 - compact_bytes / max(response_bytes, 1)) * 100
@@ -327,11 +363,13 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
         "category_decisions": category_decisions,
         "configuration": {"k": k, "read_limit_bytes": READ_LIMIT_BYTES, "token_proxy_bytes_per_token": TOKEN_PROXY_BYTES_PER_TOKEN},
         "inputs": {
+            "benchmark_script_sha256": _sha256(Path(__file__)),
             "index_sha256": _sha256(index),
             "questions_sha256": _sha256(questions_path),
             "repo_tree_sha256": _tree_sha256(root),
-            "index_path": str(index),
-            "repo_root": str(root),
+            "index_path": index.name,
+            "repo_root": ".",
+            "absolute_paths_persisted": False,
         },
         "environment": {"python": sys.version.split()[0], "platform": platform.platform(), "pid": os.getpid()},
         "cases": cases,
@@ -348,8 +386,6 @@ def main() -> int:
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    if shutil.which("rg") is None:
-        raise SystemExit("rg is required for the grep/read baseline")
     report = run(args.index, args.repo_root, args.questions, args.k)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
