@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from merger.repoground.core.check_view import compact_check_projection
-from merger.repoground.core.repobrief_profiles import profile_export_semantics
+from merger.repoground.core.snapshot_profiles import profile_export_semantics
 
 _DOES_NOT_ESTABLISH = [
     "claims_true",

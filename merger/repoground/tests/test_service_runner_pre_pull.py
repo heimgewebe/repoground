@@ -549,12 +549,12 @@ def test_self_repo_fast_forwarded_emits_restart_warning(mock_job_store, temp_hub
 
         assert job.status == "succeeded"
         assert scan.call_count == 1
-        restart = [w for w in job.warnings if "Restart" in w and "rlens.service" in w]
+        restart = [w for w in job.warnings if "Restart" in w and "repoground.service" in w]
         assert restart, f"expected restart warning, got {job.warnings}"
         assert "does not reload modules automatically" in restart[0]
 
         log_lines = [call[0][1] for call in mock_job_store.append_log_line.call_args_list]
-        assert any("Restart rlens.service" in line for line in log_lines)
+        assert any("Restart repoground.service" in line for line in log_lines)
 
         ossystem.assert_not_called()
         for call in subproc.call_args_list:

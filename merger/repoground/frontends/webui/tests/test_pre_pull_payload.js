@@ -1,4 +1,4 @@
-// Tests for the rLens "Quelle" (source mode) dropdown and the legacy pre_pull
+// Tests for the RepoGround "Quelle" (source mode) dropdown and the legacy pre_pull
 // payload it now drives.
 //
 // Loads app.js into a VM context with a mock DOM (same approach as

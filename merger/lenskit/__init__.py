@@ -3,7 +3,7 @@
 New code must import :mod:`merger.repoground`.  Legacy submodule imports are
 redirected to the canonical module objects instead of loading the same source a
 second time.  This preserves class, cache, registry and singleton identity
-throughout the bounded 3.x compatibility window.
+until the contract review date of 2026-10-01.
 """
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ _LEGACY_PREFIX = "merger.lenskit."
 _CANONICAL_PREFIX = "merger.repoground."
 
 warnings.warn(
-    "merger.lenskit is deprecated; import merger.repoground instead",
+    "merger.lenskit is deprecated; import merger.repoground instead; compatibility review: 2026-10-01",
     DeprecationWarning,
     stacklevel=2,
 )

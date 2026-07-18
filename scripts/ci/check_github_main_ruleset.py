@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate an observed GitHub ruleset against Lenskit's required-check policy.
+"""Validate an observed GitHub ruleset against RepoGround's required-check policy.
 
 The observed ruleset JSON is read from stdin. This checker is deliberately
 read-only and network-free; callers remain responsible for obtaining current
@@ -16,7 +16,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = ROOT / "config" / "github-main-required-checks.v1.json"
-KIND = "lenskit.github_main_required_checks_validation"
+KIND = "repoground.github_main_required_checks_validation"
 VERSION = "v1"
 
 

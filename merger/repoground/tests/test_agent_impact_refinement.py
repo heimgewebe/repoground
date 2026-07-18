@@ -11,7 +11,7 @@ from merger.repoground.core.agent_impact_refinement import (
     refine_agent_impact_context,
     resolved_query_test_candidates,
 )
-from merger.repoground.tests.test_repobrief_agent_impact_adapter import (
+from merger.repoground.tests.test_agent_impact_adapter import (
     _impact_adapter,
 )
 

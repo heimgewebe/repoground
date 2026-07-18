@@ -67,7 +67,7 @@ function makeResponse(status, payload) {
 const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 assert(
     html.includes('Browser hard refresh only — does not restart RepoGround service'),
-    'hard refresh button title explicitly says it does not restart rLens'
+    'hard refresh button title explicitly says it does not restart RepoGround'
 );
 assert(
     html.includes('id="restartServiceBtn"') && html.includes('Restart RepoGround'),

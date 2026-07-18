@@ -22,8 +22,9 @@ diagnostic surfaces according to their declared contracts.
 
 ## Compatibility vocabulary
 
-Lenskit, repoLens, rLens and RepoBrief are retired product names. During the 3.x
-compatibility window they may appear only in:
+Lenskit, repoLens, rLens and RepoBrief are retired product names. They may appear
+only in the surface-specific compatibility categories recorded in
+`docs/contracts/repoground-compatibility-exit.v1.json`:
 
 - deprecated import, command and script delegates;
 - exact persisted 2.x schema, kind and artifact identifiers;
@@ -31,7 +32,9 @@ compatibility window they may appear only in:
 - migration inventories that explain external consumer work.
 
 A compatibility name does not create a second implementation or a second
-product. New code, documentation and examples must use RepoGround.
+product. New code, documentation and examples use RepoGround. Each removable
+adapter has an owner, a review date, measurable usage and a zero-usage gate;
+unknown usage blocks removal.
 
 ## Stability boundaries
 

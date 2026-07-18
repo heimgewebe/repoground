@@ -8,11 +8,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TextIO
 
-from merger.repoground.core import repobrief_mcp_resources, repobrief_mcp_tools
-from merger.repoground.core.repobrief_live_freshness import (
+from merger.repoground.core import mcp_resources, mcp_tools
+from merger.repoground.core.live_freshness import (
     DOES_NOT_ESTABLISH as FRESHNESS_DOES_NOT_ESTABLISH,
 )
-from merger.repoground.core.repobrief_live_freshness import evaluate_live_freshness
+from merger.repoground.core.live_freshness import evaluate_live_freshness
 
 PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS = (PROTOCOL_VERSION, "2025-03-26", "2024-11-05")
@@ -340,7 +340,7 @@ class RepoGroundMcpStdioServer:
             }
 
     def _resource_list(self) -> dict[str, Any]:
-        listed = repobrief_mcp_resources.list_mcp_resources(self.bundle_root)
+        listed = mcp_resources.list_mcp_resources(self.bundle_root)
         resources = []
         for item in listed.get("resources", []):
             if not isinstance(item, dict) or not isinstance(item.get("uri"), str):
@@ -370,7 +370,7 @@ class RepoGroundMcpStdioServer:
                     "description": "Read-only RepoGround snapshot resource template.",
                     "mimeType": "application/json",
                 }
-                for uri_template in repobrief_mcp_resources.resource_templates().get(
+                for uri_template in mcp_resources.resource_templates().get(
                     "templates", []
                 )
             ]
@@ -380,7 +380,7 @@ class RepoGroundMcpStdioServer:
         uri = params.get("uri")
         if not isinstance(uri, str) or not uri:
             raise McpProtocolError(-32602, "resources/read requires a non-empty uri")
-        result = repobrief_mcp_resources.read_mcp_resource(uri, bundle_root=self.bundle_root)
+        result = mcp_resources.read_mcp_resource(uri, bundle_root=self.bundle_root)
         manifest = result.get("bundle_manifest")
         live = None
         if isinstance(manifest, str) and manifest:
@@ -390,15 +390,19 @@ class RepoGroundMcpStdioServer:
             text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
         content_type = result.get("content_type")
         mime_type = content_type if isinstance(content_type, str) else "application/json"
+        resource_meta = {
+            "status": result.get("status"),
+            "snapshotContext": result.get("snapshot_context"),
+            "liveFreshness": live,
+            "implicitRefresh": False,
+            "identity": result.get("identity"),
+        }
         return {
             "contents": [{"uri": uri, "mimeType": mime_type, "text": text}],
             "_meta": {
-                "repobrief": {
-                    "status": result.get("status"),
-                    "snapshotContext": result.get("snapshot_context"),
-                    "liveFreshness": live,
-                    "implicitRefresh": False,
-                }
+                "repoground": resource_meta,
+                # Temporary compatibility alias for clients that still read the old key.
+                "repobrief": resource_meta,
             },
         }
 
@@ -406,7 +410,7 @@ class RepoGroundMcpStdioServer:
         call_args = dict(arguments)
         manifest = self._guard_manifest(call_args.get("bundle_manifest"))
         call_args["bundle_manifest"] = str(manifest)
-        payload = repobrief_mcp_tools.ask_context(**call_args)
+        payload = mcp_tools.ask_context(**call_args)
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
 
@@ -419,7 +423,7 @@ class RepoGroundMcpStdioServer:
             manifest,
             label="citation_map",
         )
-        payload = repobrief_mcp_tools.grounding_verify(**call_args)
+        payload = mcp_tools.grounding_verify(**call_args)
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
 
@@ -432,15 +436,15 @@ class RepoGroundMcpStdioServer:
         if not isinstance(name, str) or not name.strip():
             raise McpProtocolError(-32602, "find_symbol requires a non-empty name")
         kind = call_args.get("kind")
-        if kind is not None and kind not in repobrief_mcp_tools.FIND_SYMBOL_KINDS:
+        if kind is not None and kind not in mcp_tools.FIND_SYMBOL_KINDS:
             raise McpProtocolError(
                 -32602,
                 "find_symbol kind must be one of class, function, async_function, or null",
-                {"allowed_kinds": list(repobrief_mcp_tools.FIND_SYMBOL_KINDS)},
+                {"allowed_kinds": list(mcp_tools.FIND_SYMBOL_KINDS)},
             )
         manifest = self._guard_manifest(call_args.get("bundle_manifest"))
         call_args["bundle_manifest"] = str(manifest)
-        payload = repobrief_mcp_tools.find_symbol(**call_args)
+        payload = mcp_tools.find_symbol(**call_args)
         # Nav results reflect the snapshot; surface freshness so the agent knows
         # whether the index may lag the live working tree.
         payload["live_freshness"] = self._safe_live_freshness(manifest)
@@ -463,9 +467,9 @@ class RepoGroundMcpStdioServer:
         manifest = self._guard_manifest(call_args.get("bundle_manifest"))
         call_args["bundle_manifest"] = str(manifest)
         handlers = {
-            "find_references": repobrief_mcp_tools.find_references,
-            "get_callers": repobrief_mcp_tools.get_callers,
-            "get_callees": repobrief_mcp_tools.get_callees,
+            "find_references": mcp_tools.find_references,
+            "get_callers": mcp_tools.get_callers,
+            "get_callees": mcp_tools.get_callees,
         }
         handler = handlers[tool]
         payload = handler(**call_args)
@@ -487,7 +491,7 @@ class RepoGroundMcpStdioServer:
         call_args = dict(arguments)
         call_args["repo"] = str(self.repo_root)
         call_args["output_root"] = str(self.snapshot_output_root)
-        return repobrief_mcp_tools.snapshot_create(**call_args)
+        return mcp_tools.snapshot_create(**call_args)
 
     def _tool_payload(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "ask_context":
@@ -635,7 +639,7 @@ def main(argv: list[str] | None = None) -> int:
             enable_snapshot_create=args.enable_snapshot_create,
         )
     except ValueError as exc:
-        print(f"repobrief mcp stdio: {exc}", file=sys.stderr)
+        print(f"repoground mcp stdio: {exc}", file=sys.stderr)
         return 2
     return serve_stdio(server)
 

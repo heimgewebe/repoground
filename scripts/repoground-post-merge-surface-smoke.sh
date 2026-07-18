@@ -17,7 +17,7 @@
 #   - output_health and post_emit_health expose noise-hygiene diagnostics
 #
 # Usage:  bash scripts/repoground-post-merge-surface-smoke.sh [MERGES_DIR]
-# Default MERGES_DIR: $HOME/lenskit-out  (matches RLENS_MERGES in docs/systemd/rlens.service)
+# Default MERGES_DIR: $HOME/repoground-out (override with REPOGROUND_MERGES).
 #
 # Exits non-zero on the first failed check. Prints a JSON snapshot of the inspected
 # manifest so the result is greppable in CI logs and easy to copy into a proof.

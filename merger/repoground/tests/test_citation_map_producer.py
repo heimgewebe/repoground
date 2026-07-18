@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from merger.repoground.core import repobrief_access
+from merger.repoground.core import bundle_access
 from merger.repoground.core.citation_id import make_citation_id
 from merger.repoground.core.citation_map import (
     CitationMapError,
@@ -542,7 +542,7 @@ class TestRangeNormalisation:
         assert range_ref["end_line"] == row["canonical_range"]["end_line"]
         assert range_ref["content_sha256"] == row["canonical_range"]["content_sha256"]
         assert range_ref["chunk_id"] == row["chunk_id"]
-        resolved = repobrief_access.range_get(manifest_path, range_ref)
+        resolved = bundle_access.range_get(manifest_path, range_ref)
         assert resolved["status"] == "available"
         assert resolved["range"]["text"] == "ABCDE"
 

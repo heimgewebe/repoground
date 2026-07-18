@@ -230,7 +230,7 @@ def test_summary_tolerates_malformed_scalar_context_fields():
 
 
 def test_cli_summary_on_malformed_artifact_returns_validation_json_not_traceback(tmp_path, capsys):
-    from merger.repoground.cli import cmd_repobrief
+    from merger.repoground.cli import cmd_ground
 
     art = _minimal_artifact()
     art["repobrief_context"] = {"citations": 7}  # invalid scalar; schema will also reject
@@ -238,7 +238,7 @@ def test_cli_summary_on_malformed_artifact_returns_validation_json_not_traceback
     path.write_text(json.dumps(art), encoding="utf-8")
 
     args = argparse.Namespace(path=str(path), summary=True)
-    rc = cmd_repobrief.run_patch_evaluation_validate(args)  # must not raise
+    rc = cmd_ground.run_patch_evaluation_validate(args)  # must not raise
 
     assert rc == 1  # schema-invalid -> validation fails
     out = json.loads(capsys.readouterr().out)  # well-formed JSON, no traceback

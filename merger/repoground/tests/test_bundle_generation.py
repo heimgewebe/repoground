@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from merger.repoground.core import bundle_generation as generation_mod
-from merger.repoground.core import repobrief_access
+from merger.repoground.core import bundle_access
 from merger.repoground.core import rooted_filesystem
 from merger.repoground.core.bundle_generation import (
     BundleGenerationError,
@@ -21,9 +21,9 @@ from merger.repoground.core.bundle_generation import (
 
 @pytest.fixture(autouse=True)
 def _reset_call_navigation_caches():
-    repobrief_access._clear_call_navigation_caches()
+    bundle_access._clear_call_navigation_caches()
     yield
-    repobrief_access._clear_call_navigation_caches()
+    bundle_access._clear_call_navigation_caches()
 
 
 def _sha(data: bytes) -> str:
@@ -120,7 +120,7 @@ def _write_call_graph_bundle(
         "calls": calls,
         "skipped_files_count": 0,
         "skipped_errors": [],
-        "does_not_establish": list(repobrief_access._CALL_GRAPH_REQUIRED_NONCLAIMS),
+        "does_not_establish": list(bundle_access._CALL_GRAPH_REQUIRED_NONCLAIMS),
     }
     graph_bytes = json.dumps(graph, sort_keys=True).encode("utf-8")
     graph_path = root / "demo.python_call_graph.json"
@@ -256,15 +256,15 @@ def test_cache_access_via_current_manifest_sees_pointer_switch(tmp_path: Path) -
     first = publish_bundle_generation(manifest)
     current_manifest = first.current_manifest_path
 
-    before = repobrief_access.find_references(current_manifest, "target")
+    before = bundle_access.find_references(current_manifest, "target")
     assert before["status"] == "available"
     assert before["total_match_count"] == 1
 
     manifest = _write_call_graph_bundle(tmp_path, callee="renamed", run_id="run-2")
     publish_bundle_generation(manifest)
 
-    after_old_query = repobrief_access.find_references(current_manifest, "target")
-    after_new_query = repobrief_access.find_references(current_manifest, "renamed")
+    after_old_query = bundle_access.find_references(current_manifest, "target")
+    after_new_query = bundle_access.find_references(current_manifest, "renamed")
     assert after_old_query["status"] == "available"
     assert after_old_query["total_match_count"] == 0
     assert after_new_query["status"] == "available"
@@ -281,7 +281,7 @@ def test_current_reader_resolves_manifest_and_artifact_from_same_generation(tmp_
     flat_artifact = tmp_path / "demo.md"
     flat_artifact.write_bytes(b"mutated flat file\n")
 
-    artifact = repobrief_access.get_artifact(current_manifest, "canonical_md")["artifact"]
+    artifact = bundle_access.get_artifact(current_manifest, "canonical_md")["artifact"]
     assert Path(artifact["absolute_path"]).read_bytes() == b"second\n"
     assert str(second.generation_dir) in artifact["absolute_path"]
 

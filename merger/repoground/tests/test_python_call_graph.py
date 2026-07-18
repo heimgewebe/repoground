@@ -19,7 +19,7 @@ from merger.repoground.architecture.call_graph import (
     extract_python_calls,
     generate_call_graph_document,
 )
-from merger.repoground.core.repobrief_access import _call_record_is_valid
+from merger.repoground.core.bundle_access import _call_record_is_valid
 
 GOLDSET_TEXT_PY = '''import os.path
 import utilkit.numbers as num

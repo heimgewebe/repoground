@@ -150,11 +150,11 @@ def _service_restart_feature_flag_enabled() -> bool:
 
 
 def _service_restart_unit() -> Optional[str]:
-    raw = (os.getenv("REPOGROUND_SERVICE_UNIT") or os.getenv("RLENS_SERVICE_UNIT") or "repoground").strip()
+    raw = (os.getenv("REPOGROUND_SERVICE_UNIT") or "repoground").strip()
     if not raw:
         return None
     if not SERVICE_UNIT_NAME_RE.fullmatch(raw):
-        logger.warning("Refusing invalid REPOGROUND_SERVICE_UNIT/RLENS_SERVICE_UNIT=%r", raw)
+        logger.warning("Refusing invalid REPOGROUND_SERVICE_UNIT=%r", raw)
         return None
     return raw
 

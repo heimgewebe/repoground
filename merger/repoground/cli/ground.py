@@ -4,7 +4,7 @@ import argparse
 import sys
 from typing import Optional, Sequence
 
-from .cmd_repobrief import register_repobrief_command_groups, run_repobrief
+from .cmd_ground import register_ground_command_groups, run_ground
 
 
 def build_parser(
@@ -13,14 +13,14 @@ def build_parser(
     description: str = "RepoGround: evidence-bound snapshot and read-access commands",
 ) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog, description=description)
-    register_repobrief_command_groups(parser)
+    register_ground_command_groups(parser)
     return parser
 
 
 def main(args: Optional[Sequence[str]] = None) -> int:
     parser = build_parser()
     parsed_args = parser.parse_args(list(args) if args is not None else None)
-    return run_repobrief(parsed_args)
+    return run_ground(parsed_args)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
     "ai-context-guard",
     "browser-tests",
     "CodeQL",
-    "Lenskit CodeQL policy (python)",
+    "RepoGround CodeQL policy (python)",
     "pytest-full",
     "release-candidate",
     "ruff",
