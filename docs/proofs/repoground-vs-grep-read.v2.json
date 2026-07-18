@@ -1,0 +1,2415 @@
+{
+  "acceptance": {
+    "compaction_required_percent": 60.0,
+    "failure_reasons": [],
+    "inconclusive_reasons": [
+      "no_named_category_with_safe_reproducible_benefit"
+    ],
+    "preference_recommendation": null,
+    "recommended_categories": [],
+    "same_k": 10,
+    "same_question_set": true
+  },
+  "aggregates": {
+    "grep_read": {
+      "case_count": 20,
+      "expected_targets_missing": 60,
+      "false_confidence_cases": 20,
+      "process_calls": 20,
+      "response_bytes": 26690,
+      "runtime_ms": 166.691,
+      "source_index_freshness": {
+        "fresh": 20
+      },
+      "source_read_calls": 200,
+      "token_proxy": 6677,
+      "tool_calls": 20
+    },
+    "repoground": {
+      "case_count": 20,
+      "compaction": {
+        "aggregate_pass": true,
+        "all_cases_pass": true,
+        "byte_reduction_percent": 66.12,
+        "compact_response_bytes": 98966,
+        "required_percent": 60.0
+      },
+      "expected_targets_missing": 37,
+      "false_confidence_cases": 20,
+      "process_calls": 0,
+      "response_bytes": 292150,
+      "runtime_ms": 551.335,
+      "source_index_freshness": {
+        "fresh": 20
+      },
+      "source_read_calls": 0,
+      "token_proxy": 73046,
+      "tool_calls": 20
+    }
+  },
+  "cases": [
+    {
+      "category": "agent_pack",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/agent_reading_pack.py",
+            "merger/repoground/tests/test_agent_reading_pack.py",
+            "produce_agent_reading_pack"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/agent_reading_pack.py",
+            "merger/repoground/tests/test_agent_reading_pack.py",
+            "produce_agent_reading_pack"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_release_contract.py",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_github_main_ruleset.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1362,
+        "runtime_ms": 8.282,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 341,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 1,
+      "query": "Find the Agent Reading Pack producer and its primary tests",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.81,
+          "compact_response_bytes": 4932,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/agent_reading_pack.py",
+            "merger/repoground/tests/test_agent_reading_pack.py",
+            "produce_agent_reading_pack"
+          ],
+          "found": [
+            "merger/repoground/tests/test_agent_reading_pack.py"
+          ],
+          "missing": [
+            "merger/repoground/core/agent_reading_pack.py",
+            "produce_agent_reading_pack"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/tests/test_output_health.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/cli/cmd_agent_pack.py",
+          "merger/repoground/tests/test_agent_reading_pack_usage_rules.py",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/tests/test_agent_reading_pack.py",
+          "merger/repoground/tests/test_agent_export_gate.py",
+          "docs/proofs/lens-card-v1-proof.md",
+          "merger/repoground/core/bundle_surface_validate.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14427,
+        "runtime_ms": 59.432,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3607,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "agent_pack",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/tests/test_agent_reading_pack_usage_rules.py",
+            "REQUIRED_READING_BY_TASK"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/tests/test_agent_reading_pack_usage_rules.py",
+            "REQUIRED_READING_BY_TASK"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_github_actions_pins.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1280,
+        "runtime_ms": 8.942,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 320,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 2,
+      "query": "Find the Agent Reading Pack task-profile usage rules",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.4,
+          "compact_response_bytes": 4941,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/tests/test_agent_reading_pack_usage_rules.py",
+            "REQUIRED_READING_BY_TASK"
+          ],
+          "found": [
+            "merger/repoground/tests/test_agent_reading_pack_usage_rules.py"
+          ],
+          "missing": [
+            "REQUIRED_READING_BY_TASK"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "merger/repoground/tests/test_agent_reading_pack_usage_rules.py",
+          "merger/repoground/tests/test_agent_reading_pack.py",
+          "merger/repoground/core/agent_reading_pack.py",
+          "docs/blueprints/lenskit-agent-front-door-hardening.md",
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "docs/proofs/lens-card-v1-proof.md",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/core/required_reading.py",
+          "merger/repoground/tests/test_required_reading_protocol.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14705,
+        "runtime_ms": 17.871,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3677,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "claim_evidence",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/claim_evidence_map.py",
+            "merger/repoground/tests/test_claim_evidence_map.py",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/claim_evidence_map.py",
+            "merger/repoground/tests/test_claim_evidence_map.py",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1360,
+        "runtime_ms": 9.102,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 340,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 3,
+      "query": "Find claim-to-evidence map production, tests, and contract",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.16,
+          "compact_response_bytes": 4977,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/claim_evidence_map.py",
+            "merger/repoground/tests/test_claim_evidence_map.py",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json"
+          ],
+          "found": [
+            "merger/repoground/tests/test_claim_evidence_map.py",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json"
+          ],
+          "missing": [
+            "merger/repoground/core/claim_evidence_map.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/tests/test_agent_reading_pack_usage_rules.py",
+          "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/core/agent_reading_pack.py",
+          "merger/repoground/tests/test_claim_evidence_map.py",
+          "merger/repoground/contracts/post-emit-health.v1.schema.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/core/doc_freshness.py",
+          "merger/repoground/tests/test_bundle_manifest_schema.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14706,
+        "runtime_ms": 27.882,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3677,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "citation_map",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/citation_map.py",
+            "merger/repoground/tests/test_citation_map_producer.py",
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/citation_map.py",
+            "merger/repoground/tests/test_citation_map_producer.py",
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/assert_codeql_sarif_clean.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1328,
+        "runtime_ms": 7.475,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 332,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 4,
+      "query": "Find citation map production, producer tests, and schema",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.92,
+          "compact_response_bytes": 4991,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/citation_map.py",
+            "merger/repoground/tests/test_citation_map_producer.py",
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ],
+          "found": [
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ],
+          "missing": [
+            "merger/repoground/core/citation_map.py",
+            "merger/repoground/tests/test_citation_map_producer.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/contracts/citation-map.v1.schema.json",
+          "merger/repoground/tests/test_agent_reading_pack_usage_rules.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "docs/proofs/citation-map-pipeline-emission-proof.md",
+          "merger/repoground/tests/test_answer_grounding_delta.py",
+          "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/tests/test_answer_grounding_verifier.py",
+          "merger/repoground/contracts/bundle-manifest.v2.schema.json"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14643,
+        "runtime_ms": 27.417,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3661,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "post_emit_health",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/post_emit_health.py",
+            "merger/repoground/tests/test_post_emit_health.py",
+            "merger/repoground/contracts/post-emit-health.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/post_emit_health.py",
+            "merger/repoground/tests/test_post_emit_health.py",
+            "merger/repoground/contracts/post-emit-health.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_reusable_workflow_contracts.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1353,
+        "runtime_ms": 8.345,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 339,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 5,
+      "query": "Find post-emit health checks, tests, and contract",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.74,
+          "compact_response_bytes": 4942,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/post_emit_health.py",
+            "merger/repoground/tests/test_post_emit_health.py",
+            "merger/repoground/contracts/post-emit-health.v1.schema.json"
+          ],
+          "found": [
+            "merger/repoground/tests/test_post_emit_health.py"
+          ],
+          "missing": [
+            "merger/repoground/core/post_emit_health.py",
+            "merger/repoground/contracts/post-emit-health.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/proofs/post-emit-health-checkview-bridge-proof.md",
+          "merger/repoground/core/export_safety_report.py",
+          "merger/repoground/tests/test_post_emit_health.py",
+          "merger/repoground/contracts/export-safety-report.v1.schema.json",
+          "docs/proofs/validation-check-shape-consistency-audit.md",
+          "merger/repoground/core/forensic_preflight.py",
+          "merger/repoground/tests/test_rlens_post_merge_surface_smoke.py",
+          "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+          "merger/repoground/tests/test_bundle_surface_validate.py",
+          "merger/repoground/tests/test_snapshot_preflight.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14425,
+        "runtime_ms": 35.328,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3607,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "bundle_surface",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/bundle_surface_validate.py",
+            "merger/repoground/tests/test_bundle_surface_validate.py",
+            "merger/repoground/contracts/bundle-surface-validation.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/bundle_surface_validate.py",
+            "merger/repoground/tests/test_bundle_surface_validate.py",
+            "merger/repoground/contracts/bundle-surface-validation.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ci/check_github_actions_pins.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1304,
+        "runtime_ms": 9.29,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 326,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 6,
+      "query": "Find bundle surface validation implementation, tests, and contract",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.48,
+          "compact_response_bytes": 4983,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/bundle_surface_validate.py",
+            "merger/repoground/tests/test_bundle_surface_validate.py",
+            "merger/repoground/contracts/bundle-surface-validation.v1.schema.json"
+          ],
+          "found": [
+            "merger/repoground/tests/test_bundle_surface_validate.py",
+            "merger/repoground/contracts/bundle-surface-validation.v1.schema.json"
+          ],
+          "missing": [
+            "merger/repoground/core/bundle_surface_validate.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/core/snapshot_preflight.py",
+          "merger/repoground/tests/test_bundle_surface_validate.py",
+          "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/tests/test_validation_check_shapes.py",
+          "merger/repoground/contracts/bundle-manifest.v2.schema.json",
+          "docs/proofs/validation-diagnostics-schema-alignment-proof.md",
+          "merger/repoground/tests/test_snapshot_preflight.py",
+          "merger/repoground/contracts/bundle-surface-validation.v1.schema.json"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14866,
+        "runtime_ms": 30.908,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3717,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "bundle_manifest",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+            "merger/repoground/tests/test_bundle_manifest_integration.py",
+            "merger/repoground/tests/test_bundle_manifest_schema.py"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+            "merger/repoground/tests/test_bundle_manifest_integration.py",
+            "merger/repoground/tests/test_bundle_manifest_schema.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "config/codeql-path-suppressions.v1.json",
+          "config/github-main-required-checks.v1.json",
+          "config/repoground-c901-baseline.v1.json",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_browser_gate_environment.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1324,
+        "runtime_ms": 8.444,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 331,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 7,
+      "query": "Find the bundle manifest contract and its integration and schema tests",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 67.3,
+          "compact_response_bytes": 4899,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+            "merger/repoground/tests/test_bundle_manifest_integration.py",
+            "merger/repoground/tests/test_bundle_manifest_schema.py"
+          ],
+          "found": [
+            "merger/repoground/tests/test_bundle_manifest_integration.py"
+          ],
+          "missing": [
+            "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+            "merger/repoground/tests/test_bundle_manifest_schema.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/retrieval/review_queries.v1.json",
+          "docs/tasks/index.json",
+          "merger/repoground/tests/test_agent_reading_pack.py",
+          "docs/proofs/token-budget-report-v1-proof.md",
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "docs/architecture/agent-consumption-contract.md",
+          "docs/testing/test-matrix.md",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "docs/proofs/authority-contract-gap-audit.md",
+          "merger/repoground/tests/test_bundle_manifest_integration.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14980,
+        "runtime_ms": 27.021,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3745,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "retrieval",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/retrieval/eval_core.py",
+            "merger/repoground/tests/test_retrieval_eval.py",
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/retrieval/eval_core.py",
+            "merger/repoground/tests/test_retrieval_eval.py",
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_reusable_workflow_contracts.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1340,
+        "runtime_ms": 7.75,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 335,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 8,
+      "query": "Find retrieval evaluation metrics implementation, tests, and output contract",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.91,
+          "compact_response_bytes": 4975,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/retrieval/eval_core.py",
+            "merger/repoground/tests/test_retrieval_eval.py",
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json"
+          ],
+          "found": [
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json"
+          ],
+          "missing": [
+            "merger/repoground/retrieval/eval_core.py",
+            "merger/repoground/tests/test_retrieval_eval.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "docs/retrieval/semantic-reranking.md",
+          "merger/repoground/tests/test_review_retrieval_metrics.py",
+          "merger/repoground/contracts/retrieval-eval.v1.schema.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "docs/diagnostics/review-retrieval-baseline.md",
+          "merger/repoground/tests/test_eval_semantic.py",
+          "merger/repoground/contracts/retrieval-eval-diagnostics.v1.schema.json",
+          "docs/proofs/retrieval-miss-taxonomy-proof.md",
+          "merger/repoground/tests/test_ask_evaluation.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 15033,
+        "runtime_ms": 23.128,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3759,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "retrieval",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/retrieval/eval_diagnostics.py",
+            "merger/repoground/tests/test_retrieval_eval_diagnostics.py",
+            "miss_taxonomy"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/retrieval/eval_diagnostics.py",
+            "merger/repoground/tests/test_retrieval_eval_diagnostics.py",
+            "miss_taxonomy"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_reusable_workflow_contracts.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1334,
+        "runtime_ms": 7.598,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 334,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 9,
+      "query": "Find retrieval miss diagnostics implementation and tests",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.91,
+          "compact_response_bytes": 4984,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/retrieval/eval_diagnostics.py",
+            "merger/repoground/tests/test_retrieval_eval_diagnostics.py",
+            "miss_taxonomy"
+          ],
+          "found": [
+            "merger/repoground/tests/test_retrieval_eval_diagnostics.py"
+          ],
+          "missing": [
+            "merger/repoground/retrieval/eval_diagnostics.py",
+            "miss_taxonomy"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/contracts/retrieval-eval-diagnostics.v1.schema.json",
+          "merger/repoground/tests/test_review_retrieval_metrics.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/tests/test_retrieval_eval_diagnostics.py",
+          "docs/retrieval/review_queries.v1.json",
+          "docs/diagnostics/retrieval-eval-diagnostics.md",
+          "merger/repoground/tests/test_retrieval_eval.py",
+          "docs/diagnostics/review-retrieval-baseline.md",
+          "merger/repoground/retrieval/eval_diagnostics_integration.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14621,
+        "runtime_ms": 34.198,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3656,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "router",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/retrieval/router.py",
+            "merger/repoground/tests/test_router.py",
+            "route_query"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/retrieval/router.py",
+            "merger/repoground/tests/test_router.py",
+            "route_query"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/docmeta/check_planning_registration.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1292,
+        "runtime_ms": 7.881,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 323,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 10,
+      "query": "Find retrieval router selection logic and router tests",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.62,
+          "compact_response_bytes": 4896,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/retrieval/router.py",
+            "merger/repoground/tests/test_router.py",
+            "route_query"
+          ],
+          "found": [
+            "merger/repoground/tests/test_router.py"
+          ],
+          "missing": [
+            "merger/repoground/retrieval/router.py",
+            "route_query"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/retrieval/review_router.py",
+          "merger/repoground/tests/test_review_router.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/tests/test_router.py",
+          "docs/retrieval/review_queries.v1.json",
+          "docs/tasks/index.json",
+          "merger/repoground/tests/test_review_query.py",
+          "docs/proofs/review-intent-router-v1-target-proof.md",
+          "merger/repoground/tests/test_review_query_hardening.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14242,
+        "runtime_ms": 21.787,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3561,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "cli",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/cli/cmd_query.py",
+            "merger/repoground/cli/main.py",
+            "run_query"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/cli/cmd_query.py",
+            "merger/repoground/cli/main.py",
+            "run_query"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_codeql_suppressions.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1343,
+        "runtime_ms": 9.072,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 336,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 11,
+      "query": "Find the Lenskit query CLI command and its registration",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.56,
+          "compact_response_bytes": 4916,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/cli/cmd_query.py",
+            "merger/repoground/cli/main.py",
+            "run_query"
+          ],
+          "found": [
+            "merger/repoground/cli/main.py"
+          ],
+          "missing": [
+            "merger/repoground/cli/cmd_query.py",
+            "run_query"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/cli/main.py",
+          "merger/repoground/tests/test_review_retrieval_goldset.py",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/cli/cmd_eval.py",
+          "merger/repoground/tests/test_retrieval_eval.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/tests/test_federation_cli.py",
+          "merger/repoground/tests/test_review_retrieval_metrics.py",
+          "merger/repoground/retrieval/review_router.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14275,
+        "runtime_ms": 12.84,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3569,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "cli",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/cli/cmd_eval.py",
+            "merger/repoground/cli/main.py",
+            "run_eval"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/cli/cmd_eval.py",
+            "merger/repoground/cli/main.py",
+            "run_eval"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1366,
+        "runtime_ms": 8.594,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 342,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 12,
+      "query": "Find the Lenskit retrieval eval CLI command and its registration",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.12,
+          "compact_response_bytes": 4936,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/cli/cmd_eval.py",
+            "merger/repoground/cli/main.py",
+            "run_eval"
+          ],
+          "found": [
+            "merger/repoground/cli/cmd_eval.py"
+          ],
+          "missing": [
+            "merger/repoground/cli/main.py",
+            "run_eval"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/cli/cmd_ground.py",
+          "docs/proofs/repobrief-ask-gold-query-eval-v1.self-review.md",
+          "docs/retrieval/review_queries.v1.json",
+          "docs/proofs/repobrief-ask-cli-v1.self-review.md",
+          "merger/repoground/retrieval/eval_diagnostics_integration.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/cli/cmd_eval.py",
+          "merger/repoground/tests/test_review_retrieval_metrics.py",
+          "merger/repoground/retrieval/review_router.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14570,
+        "runtime_ms": 12.576,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3643,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "contracts",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/contracts/",
+            "docs/contracts/contracts-matrix.md"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/contracts/",
+            "docs/contracts/contracts-matrix.md"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_codeql_suppressions.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1361,
+        "runtime_ms": 7.434,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 341,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 13,
+      "query": "Find the contracts inventory and contracts matrix documentation",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.19,
+          "compact_response_bytes": 5009,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/contracts/",
+            "docs/contracts/contracts-matrix.md"
+          ],
+          "found": [
+            "merger/repoground/contracts/"
+          ],
+          "missing": [
+            "docs/contracts/contracts-matrix.md"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/contracts/answer-grounding-verdict.v1.schema.json",
+          "docs/proofs/repobrief-ask-frontdoor-contract-v1.self-review.md",
+          "merger/repoground/tests/test_reusable_workflow_contracts.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/contracts/repolens-delta.schema.json",
+          "docs/proofs/repobrief-ask-frontdoor-contract-v1-proof.md",
+          "merger/repoground/core/anti_hallucination_lint.py",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/contracts/audit-finding-set.v1.schema.json"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14817,
+        "runtime_ms": 34.252,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3705,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "contracts",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/ops/repoground-publish-fleet"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1319,
+        "runtime_ms": 8.005,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 330,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 14,
+      "query": "Find retrieval and evidence JSON contracts used during review",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.4,
+          "compact_response_bytes": 4980,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/contracts/retrieval-eval.v1.schema.json",
+            "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+            "merger/repoground/contracts/citation-map.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/contracts/retrieval-eval-diagnostics.v1.schema.json",
+          "docs/diagnostics/repobrief-workbench-usefulness-eval-20260712T2053Z.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/contracts/review-retrieval-goldset.v1.schema.json",
+          "docs/tasks/index.json",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+          "merger/repoground/core/context_quality.py",
+          "merger/repoground/retrieval/review_router.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14820,
+        "runtime_ms": 21.039,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3705,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "security",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/path_security.py",
+            "merger/repoground/tests/test_merge_security.py",
+            "safe_join"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/path_security.py",
+            "merger/repoground/tests/test_merge_security.py",
+            "safe_join"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/assert_codeql_sarif_clean.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1352,
+        "runtime_ms": 9.523,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 338,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 15,
+      "query": "Find repository path security enforcement and merge security tests",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.74,
+          "compact_response_bytes": 4991,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/path_security.py",
+            "merger/repoground/tests/test_merge_security.py",
+            "safe_join"
+          ],
+          "found": [
+            "merger/repoground/tests/test_merge_security.py"
+          ],
+          "missing": [
+            "merger/repoground/core/path_security.py",
+            "safe_join"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/tests/test_code_scanning_security.py",
+          "docs/proofs/lenskit-main-required-checks-v1-proof.md",
+          "config/codeql-path-suppressions.v1.json",
+          "merger/repoground/tests/test_merge_security.py",
+          "docs/proofs/rlens-sensitive-filesystem-access-v1.external-review.json",
+          "merger/repoground/tests/test_review_retrieval_metrics.py",
+          "docs/proofs/code-scanning-hardening-v1.external-review.json",
+          "merger/repoground/tests/test_merges_dir_drift.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14566,
+        "runtime_ms": 19.553,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3642,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "security",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/tests/test_service_artifact_security.py",
+            "artifact_path"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/tests/test_service_artifact_security.py",
+            "artifact_path"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/check_browser_gate_environment.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1346,
+        "runtime_ms": 8.646,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 337,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 16,
+      "query": "Find service artifact path security coverage",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.83,
+          "compact_response_bytes": 4906,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/tests/test_service_artifact_security.py",
+            "artifact_path"
+          ],
+          "found": [
+            "merger/repoground/tests/test_service_artifact_security.py"
+          ],
+          "missing": [
+            "artifact_path"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/tests/test_merges_dir_drift.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/tests/test_service_runner_pre_pull.py",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/tests/test_service_artifact_security.py",
+          "docs/proofs/facet-model-v1-proof.md",
+          "merger/repoground/tests/test_atlas_system.py",
+          "docs/testing/test-matrix.md",
+          "docs/proofs/code-scanning-hardening-v1-proof.md"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14356,
+        "runtime_ms": 35.678,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3589,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "source_acquisition",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/service/source_acquisition.py",
+            "merger/repoground/tests/test_source_acquisition.py",
+            "merger/repoground/contracts/source-acquisition-report.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/service/source_acquisition.py",
+            "merger/repoground/tests/test_source_acquisition.py",
+            "merger/repoground/contracts/source-acquisition-report.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_identity_distribution_decisions.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1324,
+        "runtime_ms": 8.497,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 331,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 17,
+      "query": "Find source acquisition implementation, tests, and report contract",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.47,
+          "compact_response_bytes": 4929,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/service/source_acquisition.py",
+            "merger/repoground/tests/test_source_acquisition.py",
+            "merger/repoground/contracts/source-acquisition-report.v1.schema.json"
+          ],
+          "found": [
+            "merger/repoground/contracts/source-acquisition-report.v1.schema.json"
+          ],
+          "missing": [
+            "merger/repoground/service/source_acquisition.py",
+            "merger/repoground/tests/test_source_acquisition.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/retrieval/review_queries.v1.json",
+          "docs/tasks/board.md",
+          "merger/repoground/tests/test_service_runner_pre_pull.py",
+          "merger/repoground/contracts/review-retrieval-goldset.v1.schema.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "docs/testing/test-matrix.md",
+          "merger/repoground/contracts/source-acquisition-report.v1.schema.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/tests/test_pythonista_pre_pull.py",
+          "docs/contracts/contracts-matrix.md"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14699,
+        "runtime_ms": 33.665,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3675,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "pr_schau",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/pr_schau_bundle.py",
+            "merger/repoground/cli/pr_schau_verify.py",
+            "merger/repoground/tests/test_pr_schau_verify_units.py",
+            "merger/repoground/contracts/pr-schau.v1.schema.json"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/pr_schau_bundle.py",
+            "merger/repoground/cli/pr_schau_verify.py",
+            "merger/repoground/tests/test_pr_schau_verify_units.py",
+            "merger/repoground/contracts/pr-schau.v1.schema.json"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/release/check_release_contract.py",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/docmeta/check_status_truth.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/tests/test_check_planning_registration.py",
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_browser_gate_environment.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1364,
+        "runtime_ms": 8.238,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 341,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 18,
+      "query": "Find PR-Schau bundle production, verification, tests, and contract",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.14,
+          "compact_response_bytes": 4931,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/pr_schau_bundle.py",
+            "merger/repoground/cli/pr_schau_verify.py",
+            "merger/repoground/tests/test_pr_schau_verify_units.py",
+            "merger/repoground/contracts/pr-schau.v1.schema.json"
+          ],
+          "found": [
+            "merger/repoground/cli/pr_schau_verify.py",
+            "merger/repoground/contracts/pr-schau.v1.schema.json"
+          ],
+          "missing": [
+            "merger/repoground/core/pr_schau_bundle.py",
+            "merger/repoground/tests/test_pr_schau_verify_units.py"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/tests/test_pr_schau_loader.py",
+          "merger/repoground/cli/pr_schau_verify.py",
+          "merger/repoground/tests/test_pr_schau_consumer_gate.py",
+          "merger/repoground/contracts/pr-schau-delta.v1.schema.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/cli/main.py",
+          "merger/repoground/contracts/pr-schau.v1.schema.json",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/core/PR_SCHAU_SMOKE.md"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14562,
+        "runtime_ms": 39.865,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3641,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "range_ref",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/range_resolver.py",
+            "merger/repoground/tests/test_range_resolver.py",
+            "merger/repoground/contracts/range-ref.v1.schema.json",
+            "merger/repoground/contracts/range-ref.v2.schema.json",
+            "range_ref_resolution"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/range_resolver.py",
+            "merger/repoground/tests/test_range_resolver.py",
+            "merger/repoground/contracts/range-ref.v1.schema.json",
+            "merger/repoground/contracts/range-ref.v2.schema.json",
+            "range_ref_resolution"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "scripts/ci/check_codeql_suppressions.py",
+          "scripts/ci/check_graph_maintainability.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/assert_codeql_sarif_clean.py",
+          "scripts/ci/check_github_main_ruleset.py",
+          "scripts/ci/check_github_actions_pins.py",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_identity_distribution_decisions.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1324,
+        "runtime_ms": 7.348,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 331,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 19,
+      "query": "Find range reference resolution, tests, and both contract versions",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 66.45,
+          "compact_response_bytes": 4946,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/range_resolver.py",
+            "merger/repoground/tests/test_range_resolver.py",
+            "merger/repoground/contracts/range-ref.v1.schema.json",
+            "merger/repoground/contracts/range-ref.v2.schema.json",
+            "range_ref_resolution"
+          ],
+          "found": [
+            "merger/repoground/contracts/range-ref.v1.schema.json",
+            "merger/repoground/contracts/range-ref.v2.schema.json"
+          ],
+          "missing": [
+            "merger/repoground/core/range_resolver.py",
+            "merger/repoground/tests/test_range_resolver.py",
+            "range_ref_resolution"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/scripts/bench_call_navigation.py",
+          "merger/repoground/tests/test_output_candidate_surface.py",
+          "merger/repoground/contracts/range-ref.v1.schema.json",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "merger/repoground/cli/cmd_ground.py",
+          "merger/repoground/tests/test_call_navigation.py",
+          "merger/repoground/contracts/range-ref.v2.schema.json",
+          "docs/retrieval/review_queries.v1.json",
+          "scripts/ci/check_codeql_suppressions.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14742,
+        "runtime_ms": 27.239,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3686,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    },
+    {
+      "category": "lenses",
+      "grep_read": {
+        "condition": "grep_read",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/lenses.py",
+            "merger/repoground/tests/test_lenses.py",
+            "infer_lens"
+          ],
+          "found": [],
+          "missing": [
+            "merger/repoground/core/lenses.py",
+            "merger/repoground/tests/test_lenses.py",
+            "infer_lens"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "CONTRIBUTING.md",
+          "config/codeql-path-suppressions.v1.json",
+          "scripts/release/check_release_contract.py",
+          "scripts/ops/repoground-publish-fleet",
+          "scripts/release/check_identity_distribution_decisions.py",
+          "scripts/repoground-post-merge-surface-smoke.sh",
+          "scripts/docmeta/check_planning_registration.py",
+          "scripts/ci/check_reusable_workflow_contracts.py",
+          "scripts/ci/check_browser_gate_environment.py",
+          "scripts/docmeta/tests/test_check_planning_registration.py"
+        ],
+        "process_calls": 1,
+        "response_bytes": 1314,
+        "runtime_ms": 8.225,
+        "search_engine": "ripgrep",
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 10,
+        "token_proxy": 329,
+        "tool_calls": 1,
+        "useful_displayed": true
+      },
+      "k": 10,
+      "ordinal": 20,
+      "query": "Find lens selection implementation and tests",
+      "repoground": {
+        "compaction": {
+          "byte_reduction_percent": 65.22,
+          "compact_response_bytes": 4902,
+          "pass": true,
+          "preserved": [
+            "chunk_id",
+            "path",
+            "line_range",
+            "content_sha256",
+            "range_ref",
+            "freshness",
+            "fallback"
+          ],
+          "required_percent": 60.0
+        },
+        "condition": "repoground",
+        "expected_targets": {
+          "expected": [
+            "merger/repoground/core/lenses.py",
+            "merger/repoground/tests/test_lenses.py",
+            "infer_lens"
+          ],
+          "found": [
+            "merger/repoground/tests/test_lenses.py"
+          ],
+          "missing": [
+            "merger/repoground/core/lenses.py",
+            "infer_lens"
+          ]
+        },
+        "false_confidence": true,
+        "paths": [
+          "merger/repoground/tests/test_review_router.py",
+          "merger/repoground/tests/test_primary_lens_audit.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-legacy-20260708T152502Z.json",
+          "merger/repoground/tests/test_lens_cards.py",
+          "docs/retrieval/review_queries.v1.json",
+          "merger/repoground/tests/test_lens_card_validate.py",
+          "merger/repoground/tests/test_lenses.py",
+          "docs/diagnostics/retrieval-v2-default-promotion-review-intent-20260708T152502Z.json",
+          "docs/proofs/checkview-consumer-inventory-v1.md",
+          "merger/repoground/core/merge.py"
+        ],
+        "process_calls": 0,
+        "response_bytes": 14095,
+        "runtime_ms": 9.656,
+        "source_index_freshness": {
+          "checked_path_count": 10,
+          "missing_paths": [],
+          "newer_than_index_paths": [],
+          "status": "fresh"
+        },
+        "source_read_calls": 0,
+        "token_proxy": 3524,
+        "tool_calls": 1,
+        "useful_displayed": true
+      }
+    }
+  ],
+  "category_decisions": {
+    "agent_pack": {
+      "case_count": 2,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 5,
+      "grep_read_false_confidence_cases": 2,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 3,
+      "repoground_false_confidence_cases": 2,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "bundle_manifest": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 2,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "bundle_surface": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 1,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "citation_map": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 2,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "claim_evidence": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 1,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "cli": {
+      "case_count": 2,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 6,
+      "grep_read_false_confidence_cases": 2,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 4,
+      "repoground_false_confidence_cases": 2,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "contracts": {
+      "case_count": 2,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 5,
+      "grep_read_false_confidence_cases": 2,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 4,
+      "repoground_false_confidence_cases": 2,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "lenses": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 2,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "post_emit_health": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 2,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "pr_schau": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 4,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 2,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "range_ref": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 5,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 3,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "retrieval": {
+      "case_count": 2,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 6,
+      "grep_read_false_confidence_cases": 2,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 4,
+      "repoground_false_confidence_cases": 2,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "router": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 2,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "security": {
+      "case_count": 2,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 5,
+      "grep_read_false_confidence_cases": 2,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 3,
+      "repoground_false_confidence_cases": 2,
+      "repoground_unsafe_freshness_cases": 0
+    },
+    "source_acquisition": {
+      "case_count": 1,
+      "compaction_pass": true,
+      "evidence_safe": false,
+      "grep_read_expected_targets_missing": 3,
+      "grep_read_false_confidence_cases": 1,
+      "measurable_benefit": true,
+      "no_quality_regression": true,
+      "recommended": false,
+      "repoground_expected_targets_missing": 2,
+      "repoground_false_confidence_cases": 1,
+      "repoground_unsafe_freshness_cases": 0
+    }
+  },
+  "configuration": {
+    "k": 10,
+    "read_limit_bytes": 4096,
+    "token_proxy_bytes_per_token": 4
+  },
+  "does_not_establish": [
+    "repository_understanding",
+    "answer_correctness",
+    "unmeasured_query_quality"
+  ],
+  "environment": {
+    "pid": 2126213,
+    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+    "python": "3.10.12"
+  },
+  "inputs": {
+    "absolute_paths_persisted": false,
+    "benchmark_script_sha256": "27c597a15e51fa214ec8fde8d49ecc50b76594681329ec64bed7e280a14a2fc3",
+    "index_path": "heimgewebe__repoground__main-max-260718-0630_merge.chunk_index.index.sqlite",
+    "index_sha256": "48df1af9afb2a32b01eb8ab4a64e10eff2126f46928d0c93b56b7221f037da76",
+    "questions_sha256": "e6a123580e08d0d3cb3db3889b8a5f6b11981cc6f7528f3c90c00ae0bcb692a9",
+    "repo_root": ".",
+    "repo_tree_sha256": "3cf72490e267182a8a294abfea310943c756db7b5091120f13cd0152e8e3c50a"
+  },
+  "kind": "repoground_vs_grep_read_benchmark",
+  "status": "inconclusive",
+  "version": "v2"
+}

@@ -35,10 +35,17 @@ def _content_tokens(query: str) -> list[str]:
     tokens: list[str] = []
     seen: set[str] = set()
     for token in re.findall(r"[a-z0-9_]+", query.lower()):
-        if token in _RETRIEVAL_STOPWORDS or token in seen:
-            continue
-        seen.add(token)
-        tokens.append(token)
+        # Retain the original identifier and additionally expose its snake_case
+        # parts.  FTS tokenizers differ in their underscore handling; the OR
+        # fallback must be deterministic across both behaviours.
+        candidates = [token]
+        if "_" in token:
+            candidates.extend(part for part in token.split("_") if part)
+        for candidate in candidates:
+            if candidate in _RETRIEVAL_STOPWORDS or candidate in seen:
+                continue
+            seen.add(candidate)
+            tokens.append(candidate)
     return tokens
 
 

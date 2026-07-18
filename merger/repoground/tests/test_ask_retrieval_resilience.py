@@ -82,5 +82,11 @@ def test_content_tokens_drop_stopwords_and_dedupe():
     assert _content_tokens("how does the is are") == []
 
 
+def test_content_tokens_adds_deterministic_snake_case_parts_for_or_fallback():
+    assert _content_tokens("How does build_live_repo_address work?") == [
+        "build_live_repo_address", "build", "live", "repo", "address", "work"
+    ]
+
+
 def test_or_fts_query_quotes_terms_to_keep_them_literal():
     assert _or_fts_query(["live", "freshness"]) == '"live" OR "freshness"'

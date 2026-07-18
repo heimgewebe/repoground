@@ -88,7 +88,7 @@ FEATURES = {
     # It does NOT (and need not) assert the shared semantics — effective_pre_pull =
     # pre_pull and not plan_only, two-phase plan/apply, fast-forward-only — which are
     # covered by test_repo_sync.py / test_service_runner_pre_pull.py /
-    # test_pythonista_pre_pull.py and the rLens-client tests.
+    # test_pythonista_pre_pull.py and the RepoGround service-client tests.
     "pre_pull": {
         "cli_arg": "--pre-pull",
         "html_id": "prePull",

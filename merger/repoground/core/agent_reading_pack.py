@@ -418,7 +418,7 @@ _ROLE_GUIDE = {
     _CITATION_MAP: "stable citation_id → canonical byte/line range mapping",
     _CLAIM_EVIDENCE_MAP: "claim → declared evidence_refs map (navigation/evidence index, not truth)",
     _AGENT_ENTRY_MANIFEST: "machine-readable agent front door (navigation index, not truth)",
-    "index_sidecar_json": "navigation index sidecar (repolens-agent contract)",
+    "index_sidecar_json": "navigation index sidecar (RepoGround agent-navigation contract)",
     "derived_manifest_json": "registry of derived artifacts",
     "graph_index_json": "import/entry-point graph for graph-aware retrieval",
     "retrieval_eval_json": "diagnostic retrieval-quality evaluation",
@@ -498,6 +498,27 @@ def render_agent_reading_pack(model: PackModel) -> str:
     for role in present_roles:
         guide = _ROLE_GUIDE.get(role, "see artifact role table below")
         lines.append(f"- `{role}` — {guide}")
+    lines.append("")
+
+    # ── REPOSITORY_GUIDE ────────────────────────────────────────────────
+    lines.append("## REPOSITORY_GUIDE")
+    lines.append(
+        "Navigate in this order: use `sqlite_index` to locate candidates, resolve "
+        "their range or citation, then read the corresponding `canonical_md` bytes."
+    )
+    lines.append(
+        "For a live working-tree address, use `live_repo_address` only when its "
+        "status is `available`; otherwise report its explicit reason instead of "
+        "inventing a source line."
+    )
+    lines.append(
+        "For natural-language zero hits, retry once with the deterministic "
+        "snake_case-aware OR fallback; its BM25 ordering is a candidate ranking, not evidence."
+    )
+    lines.append(
+        "Use `repoground evidence-query --bundle-manifest <path> --q <query>` "
+        "for compact live path:line navigation."
+    )
     lines.append("")
 
     # ── REQUIRED_READING_BY_TASK ─────────────────────────────────────────
@@ -739,7 +760,7 @@ def render_agent_reading_pack(model: PackModel) -> str:
         for artifact in symbol_index_artifacts:
             _append_artifact_bullet(lines, artifact)
         lines.append(
-            "- CLI: `python3 -m merger.repoground.cli.main repobrief symbol search "
+            "- CLI: `python3 -m merger.repoground.cli.main ground symbol search "
             "--bundle-manifest <manifest> --q <name>`"
         )
     else:
