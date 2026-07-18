@@ -72,6 +72,16 @@ jobs:
                   'textwrap.dedent(identity_checker).lstrip(),',
                   'identity checker dedent target',
               ),
+              (
+                  '"does not restrict any right granted" not in trademark_text',
+                  '"does not restrict any right granted" not in trademark_text.casefold()',
+                  'trademark software-freedom comparison',
+              ),
+              (
+                  '"good-faith community use" not in trademark_text',
+                  '"good-faith community use" not in trademark_text.casefold()',
+                  'trademark community-use comparison',
+              ),
           )
           for old, new, label in replacements:
               if script.count(old) != 1:
