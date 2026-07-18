@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "repoground": {
+      "command": "python3",
+      "args": [
+        "scripts/repoground-mcp-project.py"
+      ]
+    }
+  }
+}

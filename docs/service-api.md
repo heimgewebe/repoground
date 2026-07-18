@@ -268,7 +268,7 @@ Authenticated capability probe for small admin controls.
 `service_restart_enabled` is `true` only when all of the following are true:
 
 - `REPOGROUND_ENABLE_SERVICE_RESTART=1` (legacy fallback: `RLENS_ENABLE_SERVICE_RESTART=1`)
-- `REPOGROUND_SERVICE_UNIT` or its legacy fallback `RLENS_SERVICE_UNIT` is absent or matches `^[A-Za-z0-9_.@-]+$`
+- `REPOGROUND_SERVICE_UNIT` is absent or matches `^[A-Za-z0-9_.@-]+$`
 - the service is running in the existing local-trust mode (loopback-bound with auth configured)
 
 ### `POST /api/admin/restart`
@@ -282,7 +282,7 @@ or restart unrelated services.
 **Environment:**
 
 - `REPOGROUND_ENABLE_SERVICE_RESTART=1` enables the endpoint and WebUI button; `RLENS_ENABLE_SERVICE_RESTART=1` remains a 3.x fallback.
-- `REPOGROUND_SERVICE_UNIT=repoground` selects the canonical systemd user unit. `RLENS_SERVICE_UNIT=rlens` remains a 3.x fallback for the not-yet-cut-over legacy service.
+- `REPOGROUND_SERVICE_UNIT=repoground` selects the canonical systemd user unit. The retired `RLENS_SERVICE_UNIT` fallback is intentionally ignored after cutover.
 
 **Success (`202 Accepted`):**
 ```json
@@ -413,10 +413,10 @@ Notes:
   repo-sync check. A `pre_pull=false` (or `plan_only`) request may reuse a
   succeeded job, and an identical **active** job is always reusable.
 - **Self-repo caveat:** if the selected repo is the running RepoGround code itself
-  (currently the legacy checkout `repos/lenskit`; target `repos/repoground`), an actual fast-forward updates files on disk but
+  (the canonical checkout `repos/repoground`), an actual fast-forward updates files on disk but
   the live Python process keeps its already-loaded modules. The job emits a
   visible restart warning (logs + `job.warnings`) **only on an actual
-  `fast_forwarded`** and **never** auto-restarts the service. Restart the configured RepoGround unit manually after updating the checkout; during the 3.x transition this may still be the legacy `rlens.service`.
+  `fast_forwarded`** and **never** auto-restarts the service. Restart the configured `repoground.service` unit manually after updating the immutable runtime.
 - CLI: `repoground service-client run` (legacy alias: `rlens-client`) and RepoGround build headless send `pre_pull`
   explicitly; disable with `--no-pre-pull`. `--plan-only` implies
   `pre_pull=false`.

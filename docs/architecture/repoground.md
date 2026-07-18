@@ -6,8 +6,9 @@ coding agents, reviews and MCP clients.
 
 The canonical repository target is `heimgewebe/repoground`, the canonical Python
 namespace is `merger.repoground`, and the canonical command is `repoground`.
-Lenskit, repoLens, rLens and RepoBrief remain only as bounded RepoGround 3.x
-compatibility surfaces or as immutable historical/versioned identifiers.
+Lenskit, repoLens, rLens and RepoBrief remain only as surface-specific, measured
+compatibility adapters or as immutable historical/versioned identifiers. Their owners,
+review dates and removal criteria are defined in the compatibility exit contract.
 
 ## Purpose
 
@@ -49,9 +50,9 @@ former RepoBrief surface. `serve` contains the local service inherited from
 rLens. These are subcommands of one product, not separate products.
 
 The old `repobrief`, `rlens`, `repolens`, `merger.lenskit` and related module
-entry points remain warning-emitting delegates during RepoGround 3.x. They must
-dispatch to the canonical implementation and must not maintain a second code
-path.
+entry points remain warning-emitting delegates only until their individual review
+dates and zero-usage criteria are satisfied. They dispatch to the canonical
+implementation and do not maintain a second code path.
 
 ## Read/create separation
 
@@ -70,7 +71,7 @@ must not silently regenerate it.
 
 RepoGround MCP is a local stdio boundary over existing repository bundles and
 explicitly enabled tools. The implemented contract is documented in
-[RepoGround MCP Boundary](repobrief-mcp-boundary.md). The local MCP stdio server
+[RepoGround MCP Boundary](repoground-mcp-boundary.md). The local MCP stdio server
 binds the existing read-only resource and tool handlers; it is not a network
 service and grants no implicit shell, Git, patch, pull-request, review, secret,
 fix or merge authority.
@@ -140,5 +141,8 @@ contract was introduced, for example `repoground.bundle.manifest@2.0`.
 Compatibility readers may accept documented older generations, but producers
 must not mix an old kind with a new version or vice versa.
 
-The compatibility window is RepoGround 3.x. Removing old delegates or changing
-persisted identifiers requires a separately reviewed major-version migration.
+There is no blanket compatibility window for the entire 3.x line. Delegates are
+removed per surface after measured zero usage and the criteria in
+[`repoground-compatibility-exit.v1.json`](../contracts/repoground-compatibility-exit.v1.json).
+Persisted identifiers remain versioned data contracts and require a paired producer,
+schema, reader, contradiction test and rollback path before any semantic migration.

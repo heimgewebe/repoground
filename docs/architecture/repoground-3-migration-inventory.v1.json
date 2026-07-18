@@ -10,8 +10,6 @@
     "command": "repoground"
   },
   "legacy_policy": {
-    "compatibility_window": "3.x",
-    "removal_eligible_major": 4,
     "retired_product_names": [
       "Lenskit",
       "repoLens",
@@ -29,7 +27,6 @@
       "docs/decisions/repoground-3-",
       "docs/architecture/repoground-3-",
       "docs/architecture/naming.md",
-      "docs/systemd/rlens.service",
       "merger/lenskit/",
       "merger/repoground/contracts/",
       "merger/repoground/tests/",
@@ -38,7 +35,7 @@
     "allowed_exact_files": [
       "docs/architecture/repobrief.md",
       "docs/architecture/repoground.md",
-      "merger/repoground/cli/cmd_repobrief.py",
+      "merger/repoground/cli/cmd_ground.py",
       "merger/repoground/cli/cmd_rlens_client.py",
       "merger/repoground/cli/repobrief.py",
       "merger/repoground/cli/repobrief_mcp_stdio.py",
@@ -54,7 +51,11 @@
       "scripts/repobrief",
       "scripts/repolens",
       "scripts/rlens"
-    ]
+    ],
+    "compatibility_model": "surface-specific measured exit",
+    "compatibility_contract": "docs/contracts/repoground-compatibility-exit.v1.json",
+    "unknown_usage_blocks_removal": true,
+    "zero_usage_window_days": 30
   },
   "current_public_documents": [
     "README.md",
@@ -219,5 +220,6 @@
     "GitHub rename completed",
     "consumer cutovers completed",
     "service cutover completed"
-  ]
+  ],
+  "inventory_scope": "historical migration baseline; live state is reported by repoground.compatibility_inventory.v1"
 }

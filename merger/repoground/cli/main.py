@@ -71,12 +71,12 @@ def main(args: Optional[List[str]] = None) -> int:
     register_token_budget_commands(subparsers)
 
     # RepoGround service client command (legacy alias retained for 3.x)
-    from .cmd_rlens_client import register_rlens_client_commands
-    register_rlens_client_commands(subparsers)
+    from .cmd_service_client import register_service_client_commands
+    register_service_client_commands(subparsers)
 
     # Deprecated RepoGround compatibility command
-    from .cmd_repobrief import register_repobrief_commands
-    register_repobrief_commands(subparsers)
+    from .cmd_ground import register_legacy_repobrief_command
+    register_legacy_repobrief_command(subparsers)
 
     # Index command
     index_parser = subparsers.add_parser("index", help="Build or verify retrieval index")
@@ -294,11 +294,11 @@ def main(args: Optional[List[str]] = None) -> int:
         from . import cmd_artifact
         return cmd_artifact.run_artifact_lookup(parsed_args)
     elif parsed_args.command in {"service-client", "rlens-client"}:
-        from .cmd_rlens_client import run_rlens_client
-        return run_rlens_client(parsed_args)
+        from .cmd_service_client import run_service_client
+        return run_service_client(parsed_args)
     elif parsed_args.command == "repobrief":
-        from .cmd_repobrief import run_repobrief
-        return run_repobrief(parsed_args)
+        from .cmd_ground import run_ground
+        return run_ground(parsed_args)
 
     return 0
 

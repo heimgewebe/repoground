@@ -28,6 +28,14 @@ python3 -m merger.repoground.cli.mcp_stdio \
   --repo-root /absolute/path/to/repository
 ```
 
+## Project-local configuration
+
+The repository tracks `.mcp.json`, which starts `scripts/repoground-mcp-project.py`.
+For a checkout opened as an MCP-aware project, this is the canonical configuration. The launcher
+binds `--repo-root` to that checkout and uses `~/.local/share/repoground/bundles` by default.
+Set `REPOGROUND_BUNDLE_ROOT` only when an operator intentionally uses another existing bundle
+root. Snapshot creation remains disabled unless `REPOGROUND_MCP_ENABLE_SNAPSHOT_CREATE=1`.
+
 ## Generic MCP client configuration
 
 Clients that accept an MCP stdio command can use this shape:
@@ -87,15 +95,24 @@ default.
 
 The server lists and reads the existing resource surface:
 
-- `repobrief://snapshot/{stem}/manifest`
-- `repobrief://snapshot/{stem}/canonical`
-- `repobrief://snapshot/{stem}/reading-pack`
-- `repobrief://snapshot/{stem}/health`
-- `repobrief://snapshot/{stem}/availability`
-- `repobrief://snapshot/{stem}/artifact/{role}`
+- `repoground://snapshot/{stem}/manifest`
+- `repoground://snapshot/{stem}/canonical`
+- `repoground://snapshot/{stem}/reading-pack`
+- `repoground://snapshot/{stem}/health`
+- `repoground://snapshot/{stem}/availability`
+- `repoground://snapshot/{stem}/artifact/{role}`
 
 Resource results retain the existing health, availability, and snapshot-bound freshness
 metadata. When `--repo-root` is configured, the result metadata also includes live freshness.
+
+### Temporary resource compatibility
+
+The old `repobrief://snapshot/...` scheme remains accepted as a read-only alias until its
+contract review on **2026-10-01**. New clients must use `repoground://snapshot/...`. Results
+identify old-prefix requests through `identity.legacy_prefix_used=true`; this makes remaining
+usage measurable rather than extending compatibility for an entire major release. The owner,
+review dates, and removal criteria are defined in
+[`repoground-compatibility-exit.v1.json`](../contracts/repoground-compatibility-exit.v1.json).
 
 ## Freshness meanings
 

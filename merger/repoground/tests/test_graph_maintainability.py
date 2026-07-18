@@ -13,7 +13,7 @@ from scripts.ci.check_graph_maintainability import (
 )
 
 ROOT = Path(__file__).resolve().parents[3]
-POLICY = ROOT / "config/repobrief-graph-maintainability.v1.json"
+POLICY = ROOT / "config/repoground-graph-maintainability.v1.json"
 
 
 def _policy() -> dict:
@@ -46,7 +46,7 @@ def test_graph_policy_rejects_product_unknown_noise() -> None:
 
 def test_complexity_baseline_allows_resolved_debt() -> None:
     baseline = {
-        "kind": "repobrief.c901_baseline",
+        "kind": "repoground.c901_baseline",
         "version": "1.0",
         "finding_count": 2,
         "max_complexity": 14,
@@ -62,7 +62,7 @@ def test_complexity_baseline_allows_resolved_debt() -> None:
 
 def test_complexity_baseline_rejects_new_or_worse_debt() -> None:
     baseline = {
-        "kind": "repobrief.c901_baseline",
+        "kind": "repoground.c901_baseline",
         "version": "1.0",
         "finding_count": 1,
         "max_complexity": 14,

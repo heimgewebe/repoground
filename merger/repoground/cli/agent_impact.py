@@ -11,11 +11,11 @@ import argparse
 import json
 from collections.abc import Sequence
 
-from merger.repoground.core.repobrief_agent_impact_adapter import (
-    RepoBriefAgentImpactAdapter,
+from merger.repoground.core.agent_impact_adapter import (
+    RepoGroundAgentImpactAdapter,
 )
-from merger.repoground.core.repobrief_readonly_adapter import (
-    RepoBriefReadonlyAdapterError,
+from merger.repoground.core.readonly_adapter import (
+    RepoGroundReadonlyAdapterError,
 )
 
 
@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        adapter = RepoBriefAgentImpactAdapter.from_config(args.config)
+        adapter = RepoGroundAgentImpactAdapter.from_config(args.config)
         result = adapter.agent_impact_context(
             args.snapshot_id,
             target_path=args.target_path,
@@ -56,7 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             max_items=args.max_items,
             include_query_context=args.include_query_context,
         )
-    except (OSError, RepoBriefReadonlyAdapterError, ValueError) as exc:
+    except (OSError, RepoGroundReadonlyAdapterError, ValueError) as exc:
         result = {
             "kind": "repobrief.agent_impact_cli_error",
             "version": "1.0",

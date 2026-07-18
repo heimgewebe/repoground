@@ -49,7 +49,7 @@ def measure_graph_maintainability(repo_root: Path) -> dict[str, Any]:
     unknown_files = sum(node.get("layer") == "unknown" for node in file_nodes)
     entrypoint_counts = entrypoints["entrypoint_counts_by_projection"]
     return {
-        "kind": "repobrief.graph_maintainability_measurement",
+        "kind": "repoground.graph_maintainability_measurement",
         "version": "1.0",
         "graph": {
             "file_node_count": len(file_nodes),

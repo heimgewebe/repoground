@@ -220,7 +220,7 @@ def test_active_python_strings_have_only_documented_legacy_identity_values() -> 
                 "repoLens",
             ): 4,
             (
-                "merger/repoground/cli/cmd_repobrief.py",
+                "merger/repoground/cli/cmd_ground.py",
                 "Deprecated RepoBrief compatibility command; use RepoGround ground",
             ): 1,
             (
@@ -228,12 +228,8 @@ def test_active_python_strings_have_only_documented_legacy_identity_values() -> 
                 "# repoLens Report",
             ): 1,
             (
-                "merger/repoground/core/repobrief_agent_impact_adapter.py",
+                "merger/repoground/core/agent_impact_adapter.py",
                 "RepoBriefAgentImpactAdapter",
-            ): 1,
-            (
-                "merger/repoground/core/repobrief_readonly_adapter.py",
-                "RepoBriefReadonlyAdapter",
             ): 1,
             (
                 "merger/repoground/adapters/sources.py",

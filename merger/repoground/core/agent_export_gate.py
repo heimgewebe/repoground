@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional, Tuple
 from .clock import now_utc
 from .path_security import resolve_secure_path
 from .post_emit_health import derive_post_health_path
-from .repobrief_profiles import profile_export_semantics
+from .snapshot_profiles import profile_export_semantics
 
 try:
     import jsonschema
@@ -37,7 +37,7 @@ _POST_HEALTH_KIND = "lenskit.post_emit_health"
 _POST_HEALTH_VERSION = "1.0"
 _POST_STATUSES = {"pass", "warn", "fail", "blocked"}
 # Legacy profile compatibility. Canonical RepoGround profiles are resolved through
-# repobrief_profiles.profile_export_semantics instead of a second policy table.
+# snapshot_profiles.profile_export_semantics instead of a second policy table.
 _AGENT_FACING_PROFILES = {"agent_minimal", "agent-portable", "agent-safe"}
 _NON_AGENT_PROFILES = {
     "human_review",

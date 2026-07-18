@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from merger.repoground.architecture.call_graph import extract_python_calls
-from merger.repoground.core import repobrief_mcp_tools
+from merger.repoground.core import mcp_tools
 from merger.repoground.core.bundle_identity import (
     CANONICAL_BUNDLE_KIND,
     CANONICAL_BUNDLE_VERSION,
@@ -27,7 +27,7 @@ from merger.repoground.core.call_navigation_index import (
     linear_reference_calls,
     linear_target_related_calls,
 )
-from merger.repoground.core.repobrief_access import _clear_call_navigation_caches
+from merger.repoground.core.bundle_access import _clear_call_navigation_caches
 
 DEFAULT_SYNTHETIC_CALL_COUNT = 50_000
 
@@ -442,16 +442,16 @@ def benchmark_mcp(
 
         def batch() -> dict[str, Any]:
             return {
-                "references": repobrief_mcp_tools.find_references(
+                "references": mcp_tools.find_references(
                     bundle_manifest=manifest, name="target_7", k=25
                 ),
-                "callers": repobrief_mcp_tools.get_callers(
+                "callers": mcp_tools.get_callers(
                     bundle_manifest=manifest,
                     name="target_7",
                     path="pkg/targets/t7.py",
                     k=25,
                 ),
-                "callees": repobrief_mcp_tools.get_callees(
+                "callees": mcp_tools.get_callees(
                     bundle_manifest=manifest,
                     name="caller_7",
                     path="pkg/callers/c7.py",

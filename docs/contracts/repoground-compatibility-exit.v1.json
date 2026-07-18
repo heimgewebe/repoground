@@ -1,0 +1,148 @@
+{
+  "schema": "repoground.compatibility_exit.v1",
+  "version": 1,
+  "product": "RepoGround",
+  "effective_from": "2026-07-18",
+  "policy": {
+    "default_owner": "RepoGround maintainers",
+    "zero_usage_window_days": 30,
+    "unknown_usage_blocks_removal": true,
+    "legacy_names_are_not_allowed_as_new_public_entrypoints": true
+  },
+  "surfaces": [
+    {
+      "id": "legacy-bundle-storage-root",
+      "surface": "~/.local/share/repobrief/lenskit-briefs",
+      "category": "storage-compatibility",
+      "status": "foreign-process-blocked",
+      "owner": "RepoGround operators",
+      "canonical": "~/.local/share/repoground/bundles",
+      "review_by": "2026-08-18",
+      "removal_criteria": [
+        "canonical bundles are integrity-equivalent to the legacy bundle set",
+        "no running foreign process has the legacy root in its command line",
+        "no active MCP configuration points at the legacy root for 30 days"
+      ]
+    },
+    {
+      "id": "legacy-cli-entrypoints",
+      "surface": "repobrief command, rlens-client command and repobrief-mcp-stdio.py",
+      "category": "command-compatibility",
+      "status": "bounded-adapter",
+      "owner": "RepoGround maintainers",
+      "canonical": "repoground ground, repoground service-client and repoground mcp",
+      "review_by": "2026-09-01",
+      "evidence": [
+        "active-repository command scan",
+        "current-user process command inventory"
+      ],
+      "removal_criteria": [
+        "no active configuration launches a legacy command",
+        "no observed legacy command process for 30 days",
+        "all current documentation and examples use canonical commands"
+      ]
+    },
+    {
+      "id": "legacy-codeql-required-context",
+      "surface": "Lenskit CodeQL policy (python)",
+      "category": "github-ruleset-compatibility",
+      "status": "result-bound-transition-proxy",
+      "owner": "RepoGround maintainers",
+      "canonical": "RepoGround CodeQL policy (python)",
+      "review_by": "2026-07-19",
+      "removal_criteria": [
+        "the canonical RepoGround CodeQL job has completed successfully on main",
+        "the GitHub main ruleset requires RepoGround CodeQL policy (python)",
+        "the repository ruleset contract and required-check catalog match the live ruleset",
+        "the legacy proxy job is removed in a follow-up commit"
+      ]
+    },
+    {
+      "id": "legacy-environment",
+      "surface": "RLENS_* variables and rlens.env",
+      "category": "configuration-compatibility",
+      "status": "bounded-fallback",
+      "owner": "RepoGround operators",
+      "canonical": "REPOGROUND_* variables and ~/.config/repoground/env",
+      "review_by": "2026-09-01",
+      "removal_criteria": [
+        "the installed service reads only the canonical environment file",
+        "no active service or client configuration contains RLENS_* variables for 30 days",
+        "fallback tests are removed in the same change as fallback code"
+      ]
+    },
+    {
+      "id": "legacy-mcp-resource-scheme",
+      "surface": "repobrief://snapshot/...",
+      "category": "protocol-compatibility",
+      "status": "read-only-alias",
+      "owner": "RepoGround maintainers",
+      "canonical": "repoground://snapshot/...",
+      "review_by": "2026-10-01",
+      "usage_signal": "resource responses expose identity.legacy_prefix_used",
+      "removal_criteria": [
+        "no legacy-prefix reads are observed for 30 days",
+        "all registered MCP clients use repoground:// resources",
+        "a protocol-version note announces removal before release"
+      ]
+    },
+    {
+      "id": "legacy-python-namespace",
+      "surface": "merger.lenskit and merger.lenskit.*",
+      "category": "source-compatibility",
+      "status": "bounded-adapter",
+      "owner": "RepoGround maintainers",
+      "canonical": "merger.repoground",
+      "review_by": "2026-10-01",
+      "evidence": [
+        "active-repository import scan",
+        "current-user process command inventory"
+      ],
+      "removal_criteria": [
+        "no active repository imports merger.lenskit",
+        "no observed runtime process imports or launches the legacy namespace for 30 days",
+        "the alias identity regression suite passes after removal"
+      ]
+    },
+    {
+      "id": "legacy-service-unit",
+      "surface": "rlens.service",
+      "category": "host-runtime",
+      "status": "retired-after-cutover",
+      "owner": "RepoGround operators",
+      "canonical": "repoground.service",
+      "review_by": "2026-07-18",
+      "removal_criteria": [
+        "repoground.service is enabled and active",
+        "health and authenticated query smoke tests pass",
+        "boot persistence is enabled",
+        "rlens.service is inactive and disabled",
+        "rollback unit content is retained in repository history"
+      ]
+    },
+    {
+      "id": "persisted-legacy-identities",
+      "surface": "documented lenskit.*, repolens.* and repobrief.* schema, kind and manifest identities",
+      "category": "persisted-data-contract",
+      "status": "retained-versioned-contract",
+      "owner": "RepoGround artifact contract maintainers",
+      "canonical": "the exact identifier recorded by the producing schema version",
+      "review_by": null,
+      "removal_criteria": [
+        "a new versioned producer and schema exist",
+        "paired readers accept old and new versions without reinterpretation",
+        "contradiction tests and a rollback path are present",
+        "migration is justified by semantics rather than branding"
+      ]
+    }
+  ],
+  "inventory": {
+    "command": "scripts/ops/repoground-compatibility-inventory",
+    "schema": "repoground.compatibility_inventory.v1",
+    "privacy": {
+      "raw_command_lines_included": false,
+      "raw_config_contents_included": false
+    },
+    "closeout_gate": "--fail-on-legacy after each surface-specific zero-usage window"
+  }
+}

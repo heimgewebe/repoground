@@ -1,4 +1,4 @@
-"""Tests for the rLens CLI client (cmd_rlens_client.py).
+"""Tests for the RepoGround service client (cmd_service_client.py).
 
 No real rLens server is used. urllib.request.urlopen is monkeypatched.
 """
@@ -11,7 +11,7 @@ import urllib.request
 
 import pytest
 
-import merger.repoground.cli.cmd_rlens_client as _mod
+import merger.repoground.cli.cmd_service_client as _mod
 from merger.repoground.cli.main import main
 
 

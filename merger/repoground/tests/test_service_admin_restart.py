@@ -56,9 +56,11 @@ def test_admin_restart_returns_202_when_enabled(service_client, monkeypatch):
     assert called == ["repoground"]
 
 
-def test_admin_restart_accepts_legacy_rlens_environment_fallback(
+def test_admin_restart_ignores_legacy_unit_name_after_cutover(
     service_client, monkeypatch
 ):
+    # The legacy feature flag remains a bounded configuration fallback, but the
+    # retired rlens.service unit can no longer be selected.
     monkeypatch.setenv("RLENS_ENABLE_SERVICE_RESTART", "1")
     monkeypatch.setenv("RLENS_SERVICE_UNIT", "rlens")
     called = []
@@ -69,10 +71,10 @@ def test_admin_restart_accepts_legacy_rlens_environment_fallback(
     assert resp.status_code == 202
     assert resp.json() == {
         "status": "scheduled",
-        "unit": "rlens",
+        "unit": "repoground",
         "message": "RepoGround restart scheduled",
     }
-    assert called == ["rlens"]
+    assert called == ["repoground"]
 
 
 def test_admin_capabilities_true_when_restart_enabled(service_client, monkeypatch):

@@ -741,7 +741,7 @@ class JobRunner:
                     if result.status == PrePullStatus.FAST_FORWARDED and is_self_repo(Path(result.path)):
                         restart_warn = (
                             f"WARN pre_pull fast-forwarded the running RepoGround code repository "
-                            f"'{result.repo}'. Restart rlens.service after updating lenskit; a "
+                            f"'{result.repo}'. Restart repoground.service after updating RepoGround; a "
                             f"running Python service does not reload modules automatically."
                         )
                         log(restart_warn)

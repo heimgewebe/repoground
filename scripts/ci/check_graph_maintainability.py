@@ -22,7 +22,7 @@ from merger.repoground.architecture.graph_maintainability import (  # noqa: E402
     measure_graph_maintainability,
 )
 
-DEFAULT_POLICY = Path("config/repobrief-graph-maintainability.v1.json")
+DEFAULT_POLICY = Path("config/repoground-graph-maintainability.v1.json")
 _C901_PATTERN = re.compile(
     r"`(?P<name>[^`]+)` is too complex "
     r"\((?P<complexity>\d+) > (?P<limit>\d+)\)"
@@ -138,7 +138,7 @@ def _validate_complexity_baseline(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]] | None]:
     findings: list[dict[str, Any]] = []
     if (
-        baseline.get("kind") != "repobrief.c901_baseline"
+        baseline.get("kind") != "repoground.c901_baseline"
         or baseline.get("version") != "1.0"
     ):
         findings.append({"code": "complexity_baseline_identity_invalid"})
@@ -243,7 +243,7 @@ def check(repo_root: Path, policy_path: Path) -> dict[str, Any]:
     }
     current_identities = {item.identity for item in current_complexity}
     return {
-        "kind": "repobrief.graph_maintainability_check",
+        "kind": "repoground.graph_maintainability_check",
         "version": "1.0",
         "status": "pass" if not findings else "fail",
         "measurement": measurement,

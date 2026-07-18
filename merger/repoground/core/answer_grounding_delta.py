@@ -6,7 +6,7 @@ from typing import Any, Mapping
 
 from merger.repoground.core.answer_grounding import NON_CLAIMS
 from merger.repoground.core.range_resolver import resolve_range_ref
-from merger.repoground.core.repobrief_access import snapshot_status
+from merger.repoground.core.bundle_access import snapshot_status
 
 KIND = "repobrief.answer_grounding_delta_verdict"
 VERSION = "1.0"

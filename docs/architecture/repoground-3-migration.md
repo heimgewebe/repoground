@@ -1,10 +1,12 @@
 # RepoGround 3 migration architecture
 
-Status: normative for the RepoGround 3.x line
+Status: normative migration record; compatibility lifetimes are surface-specific
 
 Baseline: `3c342b23274fe1d87483d82b2ef88334fa35fa06`
 
 Machine inventory: `docs/architecture/repoground-3-migration-inventory.v1.json`
+
+Compatibility exit contract: `docs/contracts/repoground-compatibility-exit.v1.json`
 
 ## Decision
 
@@ -54,17 +56,16 @@ not such a migration.
 
 ## Environment variables
 
-New configuration uses `REPOGROUND_*`. During the bounded 3.x compatibility
-window, the service and clients may read documented `RLENS_*` values as a
-lower-priority fallback. When both are set, the RepoGround value wins.
+New configuration uses `REPOGROUND_*`. Each documented `RLENS_*` fallback has its own owner, review date and removal criteria in the compatibility exit contract. When both old and new values are set, the RepoGround value wins. `RLENS_SERVICE_UNIT` is no longer accepted after the HTTP service cutover.
 
 ## Service cutover
 
-The old `rlens.service` stays online until a separate `repoground.service` has
-passed a parallel smoke test on a distinct port and isolated temporary write
-paths. The cutover requires a health check, a real query, boot persistence and
-a rollback command. The two services must not write concurrently to the same
-mutable generation or cache path.
+The service cutover is complete only when `repoground.service` is enabled, active,
+health-checked, query-tested and bound to an immutable RepoGround runtime. The retired
+`rlens.service` must be inactive and disabled before its local unit file is removed.
+A foreign process that still launches an old MCP command blocks only that MCP/storage
+compatibility surface; it does not justify reactivating the old HTTP service. Live host claims
+remain evidence-bound and are not inferred from this document alone.
 
 ## External consumers
 

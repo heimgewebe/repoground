@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   analyze:
-    name: Lenskit CodeQL policy (python)
+    name: RepoGround CodeQL policy (python)
     runs-on: ubuntu-latest
 
     steps:
@@ -43,3 +43,15 @@ jobs:
         run: >-
           python3 scripts/ci/assert_codeql_sarif_clean.py
           "${{ steps.analyze.outputs.sarif-output }}"
+
+  legacy-context:
+    name: Lenskit CodeQL policy (python)
+    needs: analyze
+    if: ${{ always() }}
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require canonical RepoGround CodeQL policy
+        env:
+          CANONICAL_RESULT: ${{ needs.analyze.result }}
+        run: test "$CANONICAL_RESULT" = success

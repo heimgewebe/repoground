@@ -11,7 +11,7 @@ CURRENT_ENTRY_DOCS = (
     ROOT / "docs/GETTING_STARTED.md",
     ROOT / "docs/usage/repoground-mcp-stdio.md",
     ROOT / "docs/architecture/repoground.md",
-    ROOT / "docs/architecture/repobrief-mcp-boundary.md",
+    ROOT / "docs/architecture/repoground-mcp-boundary.md",
 )
 
 REMOVED_DEBRIS = (

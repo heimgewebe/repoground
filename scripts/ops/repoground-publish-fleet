@@ -91,7 +91,7 @@ GENERATOR_INPUT_PATHS = (
     "merger/repoground/__init__.py",
     "merger/repoground/cli/__init__.py",
     "merger/repoground/cli/ground.py",
-    "merger/repoground/cli/cmd_repobrief.py",
+    "merger/repoground/cli/cmd_ground.py",
     "merger/repoground/core",
     "merger/repoground/contracts",
     "merger/repoground/retrieval",
@@ -403,7 +403,7 @@ def generator_inputs_sha(worktree: Path) -> str:
     )
     required_files = {
         "merger/repoground/cli/ground.py",
-        "merger/repoground/cli/cmd_repobrief.py",
+        "merger/repoground/cli/cmd_ground.py",
     }
     present_paths = {entry["path"] for entry in entries}
     missing = sorted(required_files - present_paths)
