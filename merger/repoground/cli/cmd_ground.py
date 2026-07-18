@@ -614,7 +614,7 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
         help="Evaluate RepoGround ask context packs against a legacy-compatible gold-query set",
     )
     ask_eval_parser.add_argument("--bundle-manifest", required=True, help="Path to a RepoGround bundle manifest")
-    ask_eval_parser.add_argument("--goldset", required=True, help="Path to a legacy repobrief ask-goldset JSON contract")
+    ask_eval_parser.add_argument("--goldset", required=True, help="Path to a legacy repoground ground ask-goldset JSON contract")
     ask_eval_parser.add_argument("--baseline", help="Optional previous eval JSON or metrics JSON for promotion gating")
     ask_eval_parser.add_argument("--k", type=int, default=5, help="Maximum retrieval hits per query")
     ask_eval_parser.add_argument("--context-budget", type=int, default=8000, help="Maximum context token budget")
@@ -937,7 +937,7 @@ def run_external_manifest_publish(args: argparse.Namespace) -> int:
             artifact_families=args.artifact_families,
         )
     except ExternalManifestReferenceError as exc:
-        print("repobrief external-manifest publish: " + str(exc), file=sys.stderr)
+        print("repoground ground external-manifest publish: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -950,11 +950,11 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
     out_path = Path(args.out).expanduser().resolve()
     publication_root = Path(args.publication_root).expanduser().resolve()
     if publication_root == repo_path or repo_path in publication_root.parents:
-        print("repobrief external-manifest refresh: publication root must not be inside the source repo", file=sys.stderr)
+        print("repoground ground external-manifest refresh: publication root must not be inside the source repo", file=sys.stderr)
         return 2
     if out_path != publication_root and publication_root not in out_path.parents:
         print(
-            "repobrief external-manifest refresh: output directory must be inside "
+            "repoground ground external-manifest refresh: output directory must be inside "
             "publication_root for portable external publication",
             file=sys.stderr,
         )
@@ -975,7 +975,7 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
                 artifact_family=family,
             )
     except (ExternalManifestReferenceError, OSError, ValueError) as exc:
-        print("repobrief external-manifest refresh: " + str(exc), file=sys.stderr)
+        print("repoground ground external-manifest refresh: " + str(exc), file=sys.stderr)
         return 2
 
     snapshot_args = argparse.Namespace(
@@ -994,7 +994,7 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
     snapshot_result = json.loads(snapshot_stdout.getvalue())
     bundle_manifest = snapshot_result.get("bundle_manifest")
     if not isinstance(bundle_manifest, str) or not bundle_manifest:
-        print("repobrief external-manifest refresh: missing bundle_manifest", file=sys.stderr)
+        print("repoground ground external-manifest refresh: missing bundle_manifest", file=sys.stderr)
         return 1
     try:
         from merger.repoground.core.bundle_generation import (
@@ -1013,11 +1013,11 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
         OSError,
         ValueError,
     ) as exc:
-        print("repobrief external-manifest refresh: " + str(exc), file=sys.stderr)
+        print("repoground ground external-manifest refresh: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps({
         "status": "ok",
-        "command": "repobrief external-manifest refresh",
+        "command": "repoground ground external-manifest refresh",
         "snapshot": snapshot_result,
         "publication": publication,
         "does_not_establish": list(DOES_NOT_ESTABLISH),
@@ -1110,7 +1110,7 @@ def run_latest_complete_status(args: argparse.Namespace) -> int:
     try:
         result = latest_complete_status(args.registry, repo=args.repo)
     except ValueError as exc:
-        print("repobrief latest-complete status: " + str(exc), file=sys.stderr)
+        print("repoground ground latest-complete status: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") in {"ok", "warn"} else 1
@@ -1129,7 +1129,7 @@ def run_workbench_eval(args: argparse.Namespace) -> int:
             k=args.k,
         )
     except ValueError as exc:
-        print("repobrief workbench-eval: " + str(exc), file=sys.stderr)
+        print("repoground ground workbench-eval: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "pass" else 1
@@ -1154,7 +1154,7 @@ def run_readonly_adapter(args: argparse.Namespace) -> int:
                 )
             result = adapter.dispatch(request)
     except (RepoGroundReadonlyAdapterError, OSError, UnicodeError, json.JSONDecodeError) as exc:
-        print("repobrief adapter: " + str(exc), file=sys.stderr)
+        print("repoground ground adapter: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") in {"available", "pass", "warn"} else 1
@@ -1170,7 +1170,7 @@ def run_patch_evaluation_validate(args: argparse.Namespace) -> int:
     try:
         data = load_patch_evaluation(args.path)
     except ValueError as exc:
-        print("repobrief patch-evaluation validate: " + str(exc), file=sys.stderr)
+        print("repoground ground patch-evaluation validate: " + str(exc), file=sys.stderr)
         return 2
     report = validate_patch_evaluation(data)
     if getattr(args, "summary", False):
@@ -1210,7 +1210,7 @@ def run_artifact_get(args: argparse.Namespace) -> int:
     try:
         result = get_artifact(args.bundle_manifest, args.role)
     except ValueError as exc:
-        print("repobrief artifact get: " + str(exc), file=sys.stderr)
+        print("repoground ground artifact get: " + str(exc), file=sys.stderr)
         return 2
     if args.path_only:
         artifact = result.get("artifact") if isinstance(result, dict) else None
@@ -1227,7 +1227,7 @@ def run_artifact_list(args: argparse.Namespace) -> int:
     try:
         result = list_artifacts(args.bundle_manifest)
     except ValueError as exc:
-        print("repobrief artifact list: " + str(exc), file=sys.stderr)
+        print("repoground ground artifact list: " + str(exc), file=sys.stderr)
         return 2
     if args.roles_only:
         for role in result.get("roles", []):
@@ -1242,7 +1242,7 @@ def run_required_reading_resolve(args: argparse.Namespace) -> int:
     try:
         result = resolve_required_reading_for_bundle(args.bundle_manifest, args.task_profile)
     except ValueError as exc:
-        print("repobrief required-reading resolve: " + str(exc), file=sys.stderr)
+        print("repoground ground required-reading resolve: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") in {"pass", "warn"} else 1
@@ -1267,7 +1267,7 @@ def run_query_existing_index(args: argparse.Namespace) -> int:
             project_sources=not args.raw_index_result and not args.no_project_sources,
         )
     except ValueError as exc:
-        print("repobrief query: " + str(exc), file=sys.stderr)
+        print("repoground ground query: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "available" else 1
@@ -1289,7 +1289,7 @@ def run_ask(args: argparse.Namespace) -> int:
             k=args.k,
         )
     except ValueError as exc:
-        print("repobrief ask: " + str(exc), file=sys.stderr)
+        print("repoground ground ask: " + str(exc), file=sys.stderr)
         return 2
     if args.emit == "text":
         print(render_ask_context_pack_text(result), end="")
@@ -1315,7 +1315,7 @@ def run_ask_eval(args: argparse.Namespace) -> int:
             baseline_path=args.baseline,
         )
     except ValueError as exc:
-        print("repobrief ask-eval: " + str(exc), file=sys.stderr)
+        print("repoground ground ask-eval: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     status = result.get("status")
@@ -1338,7 +1338,7 @@ def run_symbol_search(args: argparse.Namespace) -> int:
             path=args.path,
         )
     except ValueError as exc:
-        print("repobrief symbol search: " + str(exc), file=sys.stderr)
+        print("repoground ground symbol search: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") == "available" else 1
@@ -1409,7 +1409,7 @@ def run_preflight(args: argparse.Namespace) -> int:
     try:
         result = run_consumption_preflight(args.bundle_manifest, args.task_profile)
     except ValueError as exc:
-        print("repobrief preflight: " + str(exc), file=sys.stderr)
+        print("repoground ground preflight: " + str(exc), file=sys.stderr)
         return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result.get("status") in {"pass", "warn"} else 1

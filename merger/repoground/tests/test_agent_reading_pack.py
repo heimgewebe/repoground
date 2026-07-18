@@ -1229,7 +1229,7 @@ def test_pack_renders_symbol_index_guidance(tmp_path):
 
     assert "## SYMBOL_INDEX" in body
     assert "python_symbol_index_json" in body
-    assert "repobrief symbol search" in body
+    assert "ground symbol search" in body
     assert "does_not_establish: call graph completeness" in body
 
 

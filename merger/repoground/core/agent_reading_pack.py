@@ -418,7 +418,7 @@ _ROLE_GUIDE = {
     _CITATION_MAP: "stable citation_id → canonical byte/line range mapping",
     _CLAIM_EVIDENCE_MAP: "claim → declared evidence_refs map (navigation/evidence index, not truth)",
     _AGENT_ENTRY_MANIFEST: "machine-readable agent front door (navigation index, not truth)",
-    "index_sidecar_json": "navigation index sidecar (repolens-agent contract)",
+    "index_sidecar_json": "navigation index sidecar (RepoGround agent-navigation contract)",
     "derived_manifest_json": "registry of derived artifacts",
     "graph_index_json": "import/entry-point graph for graph-aware retrieval",
     "retrieval_eval_json": "diagnostic retrieval-quality evaluation",
@@ -760,7 +760,7 @@ def render_agent_reading_pack(model: PackModel) -> str:
         for artifact in symbol_index_artifacts:
             _append_artifact_bullet(lines, artifact)
         lines.append(
-            "- CLI: `python3 -m merger.repoground.cli.main repobrief symbol search "
+            "- CLI: `python3 -m merger.repoground.cli.main ground symbol search "
             "--bundle-manifest <manifest> --q <name>`"
         )
     else:

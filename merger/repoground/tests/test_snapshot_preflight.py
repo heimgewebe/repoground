@@ -150,7 +150,7 @@ def test_preflight_cli_missing_manifest_returns_usage_error(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert rc == 2
-    assert 'repobrief preflight: bundle manifest does not exist' in captured.err
+    assert 'repoground ground preflight: bundle manifest does not exist' in captured.err
     assert 'Traceback' not in captured.err
 
 
@@ -169,7 +169,7 @@ def test_preflight_cli_invalid_manifest_json_returns_usage_error(tmp_path, capsy
 
     captured = capsys.readouterr()
     assert rc == 2
-    assert 'repobrief preflight: bundle manifest is not valid JSON' in captured.err
+    assert 'repoground ground preflight: bundle manifest is not valid JSON' in captured.err
     assert 'Traceback' not in captured.err
 
 
