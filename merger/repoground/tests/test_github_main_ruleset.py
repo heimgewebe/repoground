@@ -34,7 +34,7 @@ def test_required_checks_policy_matches_observed_ruleset():
     assert report["observed_source_type"] == "Repository"
     assert report["findings"] == []
     assert {item["context"] for item in report["required_checks"]} == {
-        "Lenskit CodeQL policy (python)",
+        "RepoGround CodeQL policy (python)",
         "CodeQL",
         "pytest-full",
         "release-candidate",
@@ -125,19 +125,16 @@ def test_required_checks_policy_detects_bypass_actor():
     assert any("bypass_actors mismatch" in finding for finding in report["findings"])
 
 
-def test_codeql_transition_context_is_bound_to_canonical_policy():
+def test_codeql_policy_context_is_canonical_and_unique():
     workflow = (ROOT / ".github" / "workflows" / "codeql.yml").read_text(
         encoding="utf-8"
     )
 
     assert workflow.count("name: RepoGround CodeQL policy (python)") == 1
-    assert workflow.count("name: Lenskit CodeQL policy (python)") == 1
+    assert "name: Lenskit CodeQL policy (python)" not in workflow
     assert "name: Validate CodeQL suppression inventory" in workflow
     assert "name: Require clean raw CodeQL SARIF" in workflow
-    assert "legacy-context:" in workflow
-    assert "needs: analyze" in workflow
-    assert "CANONICAL_RESULT: ${{ needs.analyze.result }}" in workflow
-    assert 'run: test "$CANONICAL_RESULT" = success' in workflow
+    assert "legacy-context:" not in workflow
 
 
 def test_required_checks_policy_rejects_invalid_policy_rule_shape():
