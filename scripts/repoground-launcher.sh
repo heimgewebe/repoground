@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# Canonical RepoGround Launcher (systemd wrapper).
-# It validates both the API contract and the exact running version.
+# Canonical RepoGround launcher (systemd wrapper).
+# It validates the API contract, authentication boundary and running version.
 HOST=${REPOGROUND_HOST:-${RLENS_HOST:-127.0.0.1}}
 PORT=${REPOGROUND_PORT:-${RLENS_PORT:-8787}}
 URL="http://${HOST}:${PORT}"
@@ -54,8 +54,26 @@ validate_health_payload() {
     local expected_version=$1
     python3 - "$HEALTH_FILE" "$expected_version" <<'PY_VALIDATE'
 import json
+import re
 import sys
 from pathlib import Path
+
+
+def versions_match(expected: str, actual: str) -> bool:
+    if actual == expected:
+        return True
+
+    expected_lower = expected.lower()
+    actual_lower = actual.lower()
+    sha_pattern = re.compile(r"[0-9a-f]{7,40}")
+    if not sha_pattern.fullmatch(expected_lower):
+        return False
+    if not sha_pattern.fullmatch(actual_lower):
+        return False
+
+    shorter, longer = sorted((expected_lower, actual_lower), key=len)
+    return longer.startswith(shorter)
+
 
 payload_path = Path(sys.argv[1])
 expected = sys.argv[2].strip()
@@ -71,11 +89,11 @@ if not isinstance(payload.get("version"), str) or not payload["version"]:
 actual = payload.get("server_version")
 if not isinstance(actual, str) or not actual or not expected:
     raise SystemExit(1)
-if actual != expected and not expected.startswith(actual):
+if not versions_match(expected, actual):
     raise SystemExit(1)
 if not isinstance(payload.get("hub"), str) or not payload["hub"]:
     raise SystemExit(1)
-if not isinstance(payload.get("auth_enabled"), bool):
+if payload.get("auth_enabled") is not True:
     raise SystemExit(1)
 PY_VALIDATE
 }
