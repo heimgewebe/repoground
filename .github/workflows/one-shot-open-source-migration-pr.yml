@@ -1,0 +1,55 @@
+name: one-shot-open-source-migration-pr
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repoground-open-source-migration-pr-v1
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feat/repoground-open-source-name-stewardship-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Execute reviewed one-shot migration
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('.github/workflows/one-shot-open-source-migration.yml')
+          lines = source.read_text(encoding='utf-8').splitlines()
+          marker = '        run: |'
+          try:
+              start = lines.index(marker) + 1
+          except ValueError as exc:
+              raise SystemExit('migration run block not found') from exc
+
+          block = []
+          for line in lines[start:]:
+              if line and not line.startswith('          '):
+                  break
+              block.append(line[10:] if line.startswith('          ') else '')
+          script = '\n'.join(block).rstrip() + '\n'
+          if "git push origin" not in script or "check_identity_distribution_decisions.py" not in script:
+              raise SystemExit('migration script boundary incomplete')
+          Path('/tmp/repoground-open-source-migrate.sh').write_text(script, encoding='utf-8')
+          PY
+          rm .github/workflows/one-shot-open-source-migration-pr.yml
+          bash /tmp/repoground-open-source-migrate.sh
