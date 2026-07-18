@@ -52,8 +52,8 @@ jobs:
               raise SystemExit('canonical license normalization target missing')
           script = script.replace(old, new, 1)
 
-          old = '              "It does not upload or publish the source archive.",'
-          new = '              """It does\\nnot upload or publish the source archive.""",'
+          old = '"It does not upload or publish the source archive."'
+          new = '"""It does\\nnot upload or publish the source archive."""'
           if script.count(old) != 1:
               raise SystemExit('wrapped release-policy target missing')
           script = script.replace(old, new, 1)
