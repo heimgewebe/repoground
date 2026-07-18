@@ -46,7 +46,7 @@
       "id": "legacy-codeql-required-context",
       "surface": "Lenskit CodeQL policy (python)",
       "category": "github-ruleset-compatibility",
-      "status": "result-bound-transition-proxy",
+      "status": "retired-after-ruleset-cutover",
       "owner": "RepoGround maintainers",
       "canonical": "RepoGround CodeQL policy (python)",
       "review_by": "2026-07-19",
@@ -55,7 +55,14 @@
         "the GitHub main ruleset requires RepoGround CodeQL policy (python)",
         "the repository ruleset contract and required-check catalog match the live ruleset",
         "the legacy proxy job is removed in a follow-up commit"
-      ]
+      ],
+      "retired_at": "2026-07-18T05:34:52+02:00",
+      "evidence": {
+        "ruleset_id": 18784275,
+        "ruleset_name": "main-required-checks",
+        "live_required_context": "RepoGround CodeQL policy (python)",
+        "source_merge_commit": "2f34dbe1b394a2858ce60430872152abd4e70496"
+      }
     },
     {
       "id": "legacy-environment",
