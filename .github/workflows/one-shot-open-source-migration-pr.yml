@@ -46,17 +46,37 @@ jobs:
               block.append(line[10:] if line.startswith('          ') else '')
           script = '\n'.join(block).rstrip() + '\n'
 
-          old = 'apache_license = response.read().decode("utf-8")'
-          new = 'apache_license = response.read().decode("utf-8").lstrip("\\ufeff\\r\\n ")'
-          if script.count(old) != 1:
-              raise SystemExit('canonical license normalization target missing')
-          script = script.replace(old, new, 1)
-
-          old = '"It does not upload or publish the source archive."'
-          new = '"""It does\\nnot upload or publish the source archive."""'
-          if script.count(old) != 1:
-              raise SystemExit('wrapped release-policy target missing')
-          script = script.replace(old, new, 1)
+          replacements = (
+              (
+                  'apache_license = response.read().decode("utf-8")',
+                  'apache_license = response.read().decode("utf-8").lstrip("\\ufeff\\r\\n ")',
+                  'canonical license normalization target',
+              ),
+              (
+                  '"It does not upload or publish the source archive."',
+                  '"""It does\\nnot upload or publish the source archive."""',
+                  'wrapped release-policy target',
+              ),
+              (
+                  'import json\nimport re\nimport urllib.request',
+                  'import json\nimport re\nimport textwrap\nimport urllib.request',
+                  'textwrap import target',
+              ),
+              (
+                  "identity_checker = '''#!/usr/bin/env python3",
+                  "identity_checker = '''\\n          #!/usr/bin/env python3",
+                  'identity checker opening target',
+              ),
+              (
+                  're.sub(r"^          ", "", identity_checker, flags=re.MULTILINE),',
+                  'textwrap.dedent(identity_checker).lstrip(),',
+                  'identity checker dedent target',
+              ),
+          )
+          for old, new, label in replacements:
+              if script.count(old) != 1:
+                  raise SystemExit(f'{label} missing or ambiguous')
+              script = script.replace(old, new, 1)
 
           if "git push origin" not in script or "check_identity_distribution_decisions.py" not in script:
               raise SystemExit('migration script boundary incomplete')
