@@ -1,9 +1,6 @@
 name: T006 bootstrap patch
 
 on:
-  push:
-    branches:
-      - fix/repoground-runtime-contracts-t006
   pull_request:
     branches:
       - main
@@ -26,7 +23,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD^)" = "a33400f7090c368838bcdf02bcf2087c719fae84"
+          BASE=a33400f7090c368838bcdf02bcf2087c719fae84
+          git merge-base --is-ancestor "$BASE" HEAD
+          test "$(git diff --name-only "$BASE"..HEAD)" = ".github/workflows/t006-bootstrap.yml"
           test "$(git branch --show-current)" = "fix/repoground-runtime-contracts-t006"
 
 
