@@ -39,77 +39,44 @@ jobs:
           merge_path = Path("merger/repoground/core/merge.py")
           merge_text = merge_path.read_text(encoding="utf-8")
 
-          old = (
-              '            source_git_blob_sha1 = (\n'
-              '                _compute_git_blob_sha1(fi.abs_path)\n'
-              '                if not was_redacted and not truncated\n'
-              '                else None\n'
-              '            )\n'
-          )
-          new = (
-              '            content_bytes = content.encode("utf-8")\n'
-              '            source_git_blob_sha1 = (\n'
-              '                _compute_git_blob_sha1(fi.abs_path)\n'
-              '                if not was_redacted and not truncated\n'
-              '                else None\n'
-              '            )\n'
-          )
-          if merge_text.count(old) != 1:
+          source_anchor = '            source_git_blob_sha1 = (\n'
+          if merge_text.count(source_anchor) != 1:
               raise SystemExit("unexpected source-content anchor count")
-          merge_text = merge_text.replace(old, new, 1)
+          merge_text = merge_text.replace(
+              source_anchor,
+              '            content_bytes = content.encode("utf-8")\n'
+              + source_anchor,
+              1,
+          )
 
-          old = (
-              '                    if canonical_md_bytes is not None:\n'
-              '                        d["canonical_range"] = {\n'
-              '                            "artifact_role": ArtifactRole.CANONICAL_MD.value,\n'
-              '                            "repo_id": fi.root_label,\n'
-              '                            "file_path": md_file_name,\n'
-              '                            "start_byte": abs_start,\n'
-              '                            "end_byte": abs_end,\n'
-              '                            "start_line": can_start_line,\n'
-              '                            "end_line": can_end_line,\n'
-              '                            "content_sha256": can_sha256,\n'
-              '                        }\n'
-              '\n'
-              '            # source_range: always present, coordinates in source content space.\n'
+          range_anchor = (
+              '                # source_range: always present, '
+              'coordinates in source content space.\n'
           )
-          new = (
-              '                    if canonical_md_bytes is not None:\n'
-              '                        d["canonical_range"] = {\n'
-              '                            "artifact_role": ArtifactRole.CANONICAL_MD.value,\n'
-              '                            "repo_id": fi.root_label,\n'
-              '                            "file_path": md_file_name,\n'
-              '                            "start_byte": abs_start,\n'
-              '                            "end_byte": abs_end,\n'
-              '                            "start_line": can_start_line,\n'
-              '                            "end_line": can_end_line,\n'
-              '                            "content_sha256": can_sha256,\n'
-              '                        }\n'
+          if merge_text.count(range_anchor) != 1:
+              raise SystemExit("unexpected source-range anchor count")
+          fallback = (
+              '                # Retrieval-only and noncanonical split chunks have no canonical\n'
+              '                # artifact from which SQLite can hydrate text. Store only those\n'
+              '                # exact, already-redacted bytes inline; canonical range-backed\n'
+              '                # chunks stay compact and preserve the existing authority model.\n'
+              '                if "canonical_range" not in d:\n'
+              '                    inline_bytes = content_bytes[d["start_byte"]:d["end_byte"]]\n'
+              '                    inline_sha256 = hashlib.sha256(inline_bytes).hexdigest()\n'
+              '                    if inline_sha256 != d["sha256"]:\n'
+              '                        raise RuntimeError(\n'
+              '                            f"Inline chunk hash mismatch for {d[\'chunk_id\']}: "\n'
+              '                            f"expected {d[\'sha256\']}, got {inline_sha256}"\n'
+              '                        )\n'
+              '                    try:\n'
+              '                        d["content"] = inline_bytes.decode("utf-8")\n'
+              '                    except UnicodeDecodeError as exc:\n'
+              '                        raise RuntimeError(\n'
+              '                            f"Inline chunk is not valid UTF-8 for {d[\'chunk_id\']}"\n'
+              '                        ) from exc\n'
               '\n'
-              '            # Retrieval-only and noncanonical split chunks have no canonical\n'
-              '            # artifact from which SQLite can hydrate text. Store only those\n'
-              '            # exact, already-redacted bytes inline; canonical range-backed\n'
-              '            # chunks stay compact and preserve the existing authority model.\n'
-              '            if "canonical_range" not in d:\n'
-              '                inline_bytes = content_bytes[d["start_byte"]:d["end_byte"]]\n'
-              '                inline_sha256 = hashlib.sha256(inline_bytes).hexdigest()\n'
-              '                if inline_sha256 != d["sha256"]:\n'
-              '                    raise RuntimeError(\n'
-              '                        f"Inline chunk hash mismatch for {d[\'chunk_id\']}: "\n'
-              '                        f"expected {d[\'sha256\']}, got {inline_sha256}"\n'
-              '                    )\n'
-              '                try:\n'
-              '                    d["content"] = inline_bytes.decode("utf-8")\n'
-              '                except UnicodeDecodeError as exc:\n'
-              '                    raise RuntimeError(\n'
-              '                        f"Inline chunk is not valid UTF-8 for {d[\'chunk_id\']}"\n'
-              '                    ) from exc\n'
-              '\n'
-              '            # source_range: always present, coordinates in source content space.\n'
           )
-          if merge_text.count(old) != 1:
-              raise SystemExit("unexpected canonical-range anchor count")
-          merge_text = merge_text.replace(old, new, 1)
+          merge_text = merge_text.replace(range_anchor, fallback + range_anchor, 1)
           merge_path.write_text(merge_text, encoding="utf-8")
           PY
 
