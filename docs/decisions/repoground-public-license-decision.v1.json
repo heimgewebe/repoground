@@ -1,50 +1,58 @@
 {
   "kind": "repoground.public_license_decision",
-  "version": "1.0",
-  "observed_on": "2026-07-17",
-  "decision": "do_not_grant_public_redistribution_license",
-  "current_license_expression": "LicenseRef-RepoGround-All-Rights-Reserved",
+  "version": "1.1",
+  "observed_on": "2026-07-18",
+  "decision": "grant_public_open_source_distribution",
+  "current_license_expression": "Apache-2.0",
   "license_file": "LICENSE",
   "repository_visibility": "public",
-  "distribution_status": "blocked_without_separate_written_permission",
+  "distribution_status": "permitted_under_project_license",
+  "distribution_scope": [
+    "tracked repository source for which the project has authority to grant Apache-2.0 rights",
+    "documentation and configuration under the repository license",
+    "deterministic source-candidate archives produced from an exact Git commit"
+  ],
   "reasoning": [
-    "RepoGround public visibility is not treated as an open-source grant.",
-    "No explicit owner decision selected an OSI-approved license for RepoGround.",
-    "The dependency review remains bounded and contains ambiguous metadata entries requiring exact-artifact review before redistribution.",
-    "The RepoGround release process produces internal deterministic candidates, not public publication authorization."
+    "The owner explicitly requested that RepoGround remain open source and free to use.",
+    "Apache-2.0 permits use, modification, and redistribution and provides an explicit patent grant.",
+    "The source-candidate boundary references dependencies but does not embed installed third-party packages.",
+    "Project-name stewardship is separated from software copyright permissions through TRADEMARK_POLICY.md.",
+    "The repository-level decision can grant only rights held by or validly licensed to the relevant copyright holder."
   ],
   "references": [
     {
-      "title": "GitHub Docs: Licensing a repository",
-      "url": "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository"
+      "title": "Apache License, Version 2.0",
+      "url": "https://www.apache.org/licenses/LICENSE-2.0"
     },
     {
-      "title": "SPDX 2.3: Other licensing information detected",
-      "url": "https://spdx.github.io/spdx-spec/v2.3/other-licensing-information-detected/"
-    },
-    {
-      "title": "Python Core Metadata: License-Expression",
-      "url": "https://packaging.python.org/en/latest/specifications/core-metadata/#license-expression"
+      "title": "OSI approved licenses",
+      "url": "https://opensource.org/licenses"
     }
   ],
   "reviewed_evidence": [
     "LICENSE",
+    "NOTICE",
+    "TRADEMARK_POLICY.md",
+    "FUNDING.md",
     "docs/decisions/repoground-3-naming-and-migration.v1.json",
     "docs/release/licensing.md",
-    "docs/release/release-policy.md",
-    "docs/release/third-party-license-review.v1.json"
+    "docs/release/third-party-license-review.v1.json",
+    "docs/release/third-party-source-distribution-review.v1.json",
+    "docs/release/release-policy.md"
   ],
-  "reopen_conditions": [
-    "owner explicitly requests public open-source distribution",
-    "proposed license and exact distribution artifact are named",
-    "third-party obligations are re-evaluated for that artifact"
-  ],
+  "supersedes": {
+    "observed_on": "2026-07-17",
+    "decision": "do_not_grant_public_redistribution_license",
+    "reason": "The documented reopen condition was satisfied by the explicit owner instruction on 2026-07-18."
+  },
   "does_not_establish": [
     "legal advice",
-    "that the restrictive terms are enforceable in every jurisdiction",
-    "permission to redistribute",
-    "permanent rejection of open-source publication"
+    "trademark registration or global name clearance",
+    "authority to relicense independently copyrighted historical contributions without any consent legally required",
+    "permission to misrepresent modified builds as official RepoGround releases",
+    "clearance for bundled third-party binaries, containers, model weights, or datasets",
+    "product, security, or deployment readiness"
   ],
-  "status": "decision_complete_public_distribution_blocked",
-  "current_license_notice": "All rights reserved; no public distribution without separate written permission."
+  "status": "decision_complete_public_source_distribution_enabled",
+  "current_license_notice": "Licensed under the Apache License, Version 2.0, subject to the rights-authority boundary documented in docs/release/licensing.md."
 }

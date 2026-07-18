@@ -27,7 +27,7 @@
       "type": "object"
     }
   },
-  "description": "Commit-bound, deterministic RepoGround source-candidate manifest. It is an internal verification artifact and does not grant distribution permission.",
+  "description": "Commit-bound, deterministic RepoGround source-candidate manifest. The source is licensed under Apache-2.0; candidate validity does not establish official release status.",
   "properties": {
     "$schema": {
       "const": "https://heimgewebe.local/schema/repoground-release-candidate.v1.schema.json"
@@ -133,7 +133,7 @@
     },
     "does_not_establish": {
       "contains": {
-        "const": "public_distribution_permission"
+        "const": "official_release_status"
       },
       "items": {
         "minLength": 1,
@@ -150,10 +150,10 @@
       "additionalProperties": false,
       "properties": {
         "distribution_status": {
-          "const": "blocked_without_separate_written_permission"
+          "const": "permitted_under_project_license"
         },
         "expression": {
-          "const": "LicenseRef-RepoGround-All-Rights-Reserved"
+          "const": "Apache-2.0"
         },
         "file": {
           "const": "LICENSE"

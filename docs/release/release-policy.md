@@ -3,8 +3,9 @@
 ## Purpose
 
 A release candidate is a deterministic source archive used to verify that one
-Git commit can be packaged, hashed and reconstructed consistently. It is not a
-public release and does not grant distribution permission.
+Git commit can be packaged, hashed and reconstructed consistently. RepoGround
+source candidates are distributable under Apache-2.0, but candidate creation
+alone does not designate an archive as an official project release.
 
 ## Version source
 
@@ -95,5 +96,6 @@ to enable semantic reranking by default.
 ## CI boundary
 
 The `release-candidate` job builds the same commit twice in separate output
-directories, compares all bytes and verifies the candidate against Git. It does
-not upload or publish the source archive.
+directories, compares all bytes and verifies the candidate against Git. It does not upload or publish the source archive automatically. This is an
+operational CI boundary, not a restriction on distribution rights granted by
+Apache-2.0.

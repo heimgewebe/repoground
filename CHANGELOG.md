@@ -38,6 +38,16 @@ a later owner decision explicitly replaces that boundary.
 
 ## [Unreleased]
 
+### Changed
+
+- Relicensed RepoGround source and documentation from a restrictive
+  inspection-only boundary to Apache-2.0 following the explicit owner
+  decision of 2026-07-18.
+- Added a permissive defensive name policy, voluntary-funding principles,
+  public name-stewardship record, and free quarterly name-watch process.
+- Kept binary, container, model, and bundled third-party publication outside
+  the source-only clearance until each exact artifact is reviewed.
+
 ### Added
 - **Full-Suite-CI-Gate (`test-suite.yml`, Komplettaudit 2026-07):** neuer
   Workflow führt die gesamte pytest-Suite (ohne `browser`/`doc_freshness_live`-

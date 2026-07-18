@@ -81,5 +81,5 @@ def test_release_surface_is_repoground_only() -> None:
     ).is_file()
 
     licensing = (ROOT / "docs/release/licensing.md").read_text(encoding="utf-8")
-    assert "LicenseRef-RepoGround-All-Rights-Reserved" in licensing
+    assert "Apache-2.0" in licensing
     assert "LicenseRef-RepoBrief-All-Rights-Reserved" not in licensing

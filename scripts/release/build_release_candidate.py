@@ -15,7 +15,8 @@ from typing import Iterable
 KIND = "repoground.release_candidate"
 CONTRACT_VERSION = "v1"
 SCHEMA_URI = "https://heimgewebe.local/schema/repoground-release-candidate.v1.schema.json"
-LICENSE_EXPRESSION = "LicenseRef-RepoGround-All-Rights-Reserved"
+LICENSE_EXPRESSION = "Apache-2.0"
+DISTRIBUTION_STATUS = "permitted_under_project_license"
 VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$")
 LOCK_PATHS = (
     "requirements/repoground-runtime.lock.txt",
@@ -31,8 +32,7 @@ SEMANTIC_CONSTRAINTS_PATH = (
 )
 SEMANTIC_LOCK_PATH = "requirements/repoground-semantic-linux-x86_64-py312.lock.txt"
 DOES_NOT_ESTABLISH = (
-    "public_distribution_permission",
-    "open_source_status",
+    "official_release_status",
     "product_readiness",
     "deployment_authorization",
     "runtime_correctness",
@@ -273,8 +273,8 @@ def build_release_candidate(
     tree = resolve_tree(repo_path, commit)
     release_version = read_release_version(repo_path, commit)
     license_text = read_blob(repo_path, commit, "LICENSE").decode("utf-8")
-    if LICENSE_EXPRESSION not in license_text:
-        raise ValueError("LICENSE does not declare the required LicenseRef")
+    if "Apache License" not in license_text or "Version 2.0" not in license_text:
+        raise ValueError("LICENSE does not contain the Apache-2.0 license text")
 
     entries = list_tree(repo_path, commit)
     candidate_id = f"{release_version}-g{commit[:12]}"
@@ -306,7 +306,7 @@ def build_release_candidate(
         "license": {
             "expression": LICENSE_EXPRESSION,
             "file": "LICENSE",
-            "distribution_status": "blocked_without_separate_written_permission",
+            "distribution_status": DISTRIBUTION_STATUS,
         },
         "archive": {
             "path": archive_name,
@@ -359,7 +359,7 @@ def build_release_candidate(
         "archive_sha256": _sha256_file(archive_path),
         "manifest_sha256": _sha256_file(manifest_path),
         "tracked_entry_count": len(entries),
-        "distribution_status": "blocked_without_separate_written_permission",
+        "distribution_status": DISTRIBUTION_STATUS,
     }
 
 

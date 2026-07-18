@@ -22,7 +22,7 @@ from scripts.release.verify_release_candidate import verify_release_candidate
 
 ROOT = Path(__file__).resolve().parents[3]
 SCHEMA = ROOT / "merger/repoground/contracts/repoground-release-candidate.v1.schema.json"
-LICENSE_REF = "LicenseRef-RepoGround-All-Rights-Reserved"
+LICENSE_EXPRESSION = "Apache-2.0"
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -45,7 +45,12 @@ def _repo(tmp_path: Path) -> Path:
     _git(repo, "config", "user.email", "release@example.invalid")
     (repo / "RELEASE_VERSION").write_text("2.4.0-rc.1\n", encoding="utf-8")
     (repo / "LICENSE").write_text(
-        f"{LICENSE_REF}\nNo permission is granted.\n", encoding="utf-8"
+        "Apache License\nVersion 2.0, January 2004\n", encoding="utf-8"
+    )
+    (repo / "NOTICE").write_text("RepoGround\n", encoding="utf-8")
+    (repo / "TRADEMARK_POLICY.md").write_text(
+        "This policy does not restrict any right granted by Apache-2.0.\n",
+        encoding="utf-8",
     )
     (repo / "regular.txt").write_text("regular\n", encoding="utf-8")
     executable = repo / "run.sh"
@@ -155,9 +160,7 @@ def test_candidate_build_is_byte_reproducible_and_source_bound(tmp_path: Path) -
     result = build_release_candidate(repo, first)
     build_release_candidate(repo, second)
     assert _files(first) == _files(second)
-    assert result["distribution_status"] == (
-        "blocked_without_separate_written_permission"
-    )
+    assert result["distribution_status"] == "permitted_under_project_license"
     self_report = verify_release_candidate(first)
     source_report = verify_release_candidate(first, repo=repo)
     assert self_report["status"] == "pass"

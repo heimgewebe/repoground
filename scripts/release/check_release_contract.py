@@ -30,6 +30,8 @@ INPUT_PATHS = (
 REQUIRED_FILES = (
     "RELEASE_VERSION",
     "LICENSE",
+    "NOTICE",
+    "TRADEMARK_POLICY.md",
     "CHANGELOG.md",
     "docs/release/licensing.md",
     "docs/release/release-policy.md",
@@ -470,10 +472,17 @@ def scan(root: str | Path) -> dict[str, object]:
     if not VERSION_RE.fullmatch(release_version):
         findings.append(_finding("RELEASE_VERSION_INVALID", "RELEASE_VERSION", release_version))
     license_text = (repo / "LICENSE").read_text(encoding="utf-8")
-    if LICENSE_EXPRESSION not in license_text:
-        findings.append(_finding("LICENSE_REF_MISSING", "LICENSE", LICENSE_EXPRESSION))
-    if "No permission is granted" not in license_text:
-        findings.append(_finding("LICENSE_BOUNDARY_MISSING", "LICENSE", "restrictive boundary is absent"))
+    if "Apache License" not in license_text or "Version 2.0" not in license_text:
+        findings.append(_finding("LICENSE_TEXT_INVALID", "LICENSE", LICENSE_EXPRESSION))
+    trademark_text = (repo / "TRADEMARK_POLICY.md").read_text(encoding="utf-8")
+    if "does not restrict any right granted" not in trademark_text.casefold():
+        findings.append(
+            _finding(
+                "TRADEMARK_SOFTWARE_BOUNDARY_MISSING",
+                "TRADEMARK_POLICY.md",
+                "software freedoms must remain independent of name stewardship",
+            )
+        )
     changelog = (repo / "CHANGELOG.md").read_text(encoding="utf-8")
     if f"## [{release_version}]" not in changelog:
         findings.append(_finding("CHANGELOG_VERSION_MISSING", "CHANGELOG.md", release_version))
@@ -502,7 +511,7 @@ def scan(root: str | Path) -> dict[str, object]:
         "lock_count": len(LOCK_PATHS),
         "findings": findings,
         "does_not_establish": [
-            "public_distribution_permission",
+            "official_release_status",
             "product_readiness",
             "semantic_quality",
             "cross_platform_semantic_support",

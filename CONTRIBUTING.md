@@ -41,6 +41,17 @@ python3 tools/parity_guard.py
 prüft Backend-Modell, CLI-Argumente (`repoground.py`), HTML-IDs (`index.html`)
 und JS-Payload-Keys (`app.js`). Details: [`docs/PARITY_GUARD.md`](docs/PARITY_GUARD.md).
 
+## Contribution license and project name
+
+Unless explicitly marked otherwise, a contribution intentionally submitted
+for inclusion in RepoGround is provided under Apache-2.0, consistent with
+section 5 of the project license. Contributors retain copyright in their
+own contributions.
+
+Contributions do not transfer ownership of the RepoGround project name.
+Forks and integrations are welcome; naming and attribution should follow
+[`TRADEMARK_POLICY.md`](TRADEMARK_POLICY.md).
+
 ## Lokale Checks vor dem Commit
 
 ```bash

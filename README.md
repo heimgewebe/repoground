@@ -13,6 +13,18 @@ Kurzüberblick über Ordner:
 - 🧭 [Master-Roadmap](docs/roadmap/repoground-master-roadmap.md) – Reihenfolge & Tracks
 - 🤝 [CONTRIBUTING](CONTRIBUTING.md) · [CHANGELOG](CHANGELOG.md)
 
+## Frei, offen und gemeinschaftlich
+
+RepoGround is free and open-source software under the
+[Apache License 2.0](LICENSE). It may be used, studied, modified, and
+redistributed without a usage fee. The project name is protected only as a
+defensive identity boundary; broad community, compatibility, and clearly
+identified fork use is described in [TRADEMARK_POLICY.md](TRADEMARK_POLICY.md).
+
+Funding, if introduced, is intended to come from voluntary donations or
+transparent sponsorships rather than access fees. See [FUNDING.md](FUNDING.md)
+and the [name stewardship record](docs/legal/name-and-stewardship.md).
+
 ## Nutzung (Beispiele)
 
 ### RepoGround (Empfohlen)

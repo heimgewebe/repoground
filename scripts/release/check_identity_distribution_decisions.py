@@ -5,12 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 IDENTITY = Path("docs/decisions/repoground-3-naming-and-migration.v1.json")
 LICENSE_DECISION = Path("docs/decisions/repoground-public-license-decision.v1.json")
 THIRD_PARTY = Path("docs/release/third-party-license-review.v1.json")
+SOURCE_DISTRIBUTION = Path(
+    "docs/release/third-party-source-distribution-review.v1.json"
+)
 ALLOWED_METADATA_STATUSES = {
     "identified",
     "metadata_ambiguous",
@@ -18,74 +23,176 @@ ALLOWED_METADATA_STATUSES = {
 }
 
 
+def _load_json(root: Path, relative: Path) -> dict[str, Any]:
+    value = json.loads((root / relative).read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"expected JSON object: {relative}")
+    return value
+
+
+def _check_identity(identity: dict[str, Any], naming_text: str) -> list[str]:
+    findings: list[str] = []
+    if identity.get("decision") != "adopt_repoground_for_3_x":
+        findings.append("RepoGround identity decision changed")
+
+    expected_identity = {
+        "repository_target_name": "repoground",
+        "python_namespace": "merger.repoground",
+        "product_name": "RepoGround",
+        "primary_cli_name": "repoground",
+    }
+    observed_identity = {key: identity.get(key) for key in expected_identity}
+    if observed_identity != expected_identity:
+        findings.append("RepoGround identity mismatch")
+
+    compatibility = identity.get("compatibility") or {}
+    observed_compatibility = (
+        compatibility.get("legacy_python_namespace"),
+        compatibility.get("persisted_2_x_identifiers_reinterpreted"),
+    )
+    if observed_compatibility != ("merger.lenskit", False):
+        findings.append("compatibility boundary drift")
+
+    required_names = ("RepoGround", "merger.repoground")
+    if not all(name in naming_text for name in required_names):
+        findings.append("naming document drift")
+    return findings
+
+
+def _check_license_decision(
+    decision: dict[str, Any],
+    license_text: str,
+    release_policy: str,
+    trademark_text: str,
+) -> list[str]:
+    findings: list[str] = []
+    if decision.get("current_license_expression") != "Apache-2.0":
+        findings.append("license expression changed")
+
+    required_license_markers = ("Apache License", "Version 2.0")
+    if not all(marker in license_text for marker in required_license_markers):
+        findings.append("LICENSE does not match decision")
+
+    if decision.get("decision") != "grant_public_open_source_distribution":
+        findings.append("open-source owner decision changed")
+    if decision.get("distribution_status") != "permitted_under_project_license":
+        findings.append("public source distribution unexpectedly blocked")
+
+    normalized_policy = release_policy.casefold()
+    required_policy_markers = (
+        "distributable under apache-2.0",
+        "does not upload or publish",
+    )
+    if not all(marker in normalized_policy for marker in required_policy_markers):
+        findings.append("release policy open-source boundary drift")
+
+    normalized_trademark = trademark_text.casefold()
+    required_trademark_markers = (
+        "does not restrict any right granted",
+        "good-faith community use",
+    )
+    if not all(marker in normalized_trademark for marker in required_trademark_markers):
+        findings.append("trademark policy software-freedom boundary drift")
+    return findings
+
+
+def _check_third_party_inventory(
+    third_party: dict[str, Any],
+) -> tuple[list[str], dict[str, Any]]:
+    findings: list[str] = []
+    summary = third_party.get("summary") or {}
+    packages = third_party.get("packages") or []
+    if not isinstance(packages, list) or not packages:
+        return ["third-party inventory count mismatch"], summary
+
+    status_counts: Counter[str] = Counter()
+    for item in packages:
+        if not isinstance(item, dict) or not item.get("name") or not item.get("version"):
+            findings.append("third-party package identity incomplete")
+            continue
+        status = item.get("metadata_status")
+        if status not in ALLOWED_METADATA_STATUSES:
+            findings.append(f"invalid metadata status: {item.get('name')}")
+            continue
+        status_counts[str(status)] += 1
+
+    expected_counts = {
+        "package_count": len(packages),
+        "identified_count": status_counts["identified"],
+        "ambiguous_count": status_counts["metadata_ambiguous"],
+        "unresolved_count": status_counts["metadata_unresolved"],
+    }
+    observed_counts = {key: summary.get(key) for key in expected_counts}
+    if observed_counts != expected_counts:
+        findings.append("third-party inventory count mismatch")
+    return findings, summary
+
+
+def _check_source_distribution(
+    source_distribution: dict[str, Any],
+    third_party: dict[str, Any],
+    summary: dict[str, Any],
+) -> list[str]:
+    findings: list[str] = []
+    source_decision = source_distribution.get("decision") or {}
+    evidence = source_distribution.get("evidence") or {}
+    prior_boundary = third_party.get("distribution_boundary") or {}
+
+    if source_decision.get("source_distribution_allowed") is not True:
+        findings.append("source distribution review does not permit source")
+    if source_decision.get("project_license_expression") != "Apache-2.0":
+        findings.append("source distribution license mismatch")
+    if source_decision.get("bundled_dependency_distribution_allowed") is not False:
+        findings.append("bundled dependency boundary unexpectedly enabled")
+
+    expected_evidence = {
+        "source_candidate_embeds_third_party_packages": False,
+        "dependencies_are_referenced_not_vendored": True,
+        "inventory_package_count": summary.get("package_count"),
+        "inventory_identified_count": summary.get("identified_count"),
+        "inventory_metadata_ambiguous_count": summary.get("ambiguous_count"),
+        "inventory_unresolved_count": summary.get("unresolved_count"),
+    }
+    observed_evidence = {key: evidence.get(key) for key in expected_evidence}
+    if observed_evidence != expected_evidence:
+        findings.append("source distribution evidence mismatch")
+
+    prior_source_boundary = (
+        prior_boundary.get("source_candidate_embeds_third_party_packages"),
+        prior_boundary.get("dependencies_are_referenced_not_vendored"),
+    )
+    if prior_source_boundary != (False, True):
+        findings.append("source candidate embedding boundary drift")
+    return findings
+
+
 def check(root: Path) -> list[str]:
     """Return decision drift findings for a repository root."""
 
-    findings: list[str] = []
-    identity = json.loads((root / IDENTITY).read_text(encoding="utf-8"))
-    license_decision = json.loads(
-        (root / LICENSE_DECISION).read_text(encoding="utf-8")
-    )
-    third_party = json.loads((root / THIRD_PARTY).read_text(encoding="utf-8"))
+    identity = _load_json(root, IDENTITY)
+    license_decision = _load_json(root, LICENSE_DECISION)
+    third_party = _load_json(root, THIRD_PARTY)
+    source_distribution = _load_json(root, SOURCE_DISTRIBUTION)
+
     license_text = (root / "LICENSE").read_text(encoding="utf-8")
+    trademark_text = (root / "TRADEMARK_POLICY.md").read_text(encoding="utf-8")
     naming_text = (root / "docs/architecture/naming.md").read_text(encoding="utf-8")
     release_policy = (root / "docs/release/release-policy.md").read_text(
         encoding="utf-8"
     )
 
-    if identity.get("decision") != "adopt_repoground_for_3_x":
-        findings.append("RepoGround identity decision changed")
-    if (
-        identity.get("repository_target_name") != "repoground"
-        or identity.get("python_namespace") != "merger.repoground"
-        or identity.get("product_name") != "RepoGround"
-        or identity.get("primary_cli_name") != "repoground"
-    ):
-        findings.append("RepoGround identity mismatch")
-    compatibility = identity.get("compatibility") or {}
-    if (
-        compatibility.get("legacy_python_namespace") != "merger.lenskit"
-        or compatibility.get("persisted_2_x_identifiers_reinterpreted") is not False
-    ):
-        findings.append("compatibility boundary drift")
-    if "RepoGround" not in naming_text or "merger.repoground" not in naming_text:
-        findings.append("naming document drift")
-
-    expression = license_decision.get("current_license_expression")
-    if expression != "LicenseRef-RepoGround-All-Rights-Reserved":
-        findings.append("license expression changed")
-    if expression not in license_text:
-        findings.append("LICENSE does not match decision")
-    if (
-        license_decision.get("distribution_status")
-        != "blocked_without_separate_written_permission"
-    ):
-        findings.append("public distribution unexpectedly enabled")
-
-    normalized_policy = release_policy.casefold()
-    if (
-        "does not grant distribution permission" not in normalized_policy
-        or "not upload or publish" not in normalized_policy
-    ):
-        findings.append("release policy distribution must remain blocked")
-
-    summary = third_party.get("summary") or {}
-    packages = third_party.get("packages") or []
-    if summary.get("package_count") != len(packages) or not packages:
-        findings.append("third-party inventory count mismatch")
-    for item in packages:
-        if not item.get("name") or not item.get("version"):
-            findings.append("third-party package identity incomplete")
-        if item.get("metadata_status") not in ALLOWED_METADATA_STATUSES:
-            findings.append(f"invalid metadata status: {item.get('name')}")
-    if (
-        third_party.get("distribution_boundary", {}).get(
-            "public_distribution_allowed"
-        )
-        is not False
-    ):
-        findings.append("third-party review must not authorize publication")
-    return findings
+    inventory_findings, summary = _check_third_party_inventory(third_party)
+    return [
+        *_check_identity(identity, naming_text),
+        *_check_license_decision(
+            license_decision,
+            license_text,
+            release_policy,
+            trademark_text,
+        ),
+        *inventory_findings,
+        *_check_source_distribution(source_distribution, third_party, summary),
+    ]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     findings = check(args.root.resolve())
     report = {
         "kind": "repoground.identity_distribution_decision_check",
-        "version": "1.0",
+        "version": "1.1",
         "status": "pass" if not findings else "fail",
         "findings": findings,
     }

@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
 
 from scripts.release.build_release_candidate import (
     CONTRACT_VERSION,
+    DISTRIBUTION_STATUS,
     DOES_NOT_ESTABLISH,
     KIND,
     LICENSE_EXPRESSION,
@@ -371,8 +372,8 @@ def _verify_manifest_contract(
     license_content = _read_archive_member(
         archive_path, f"{expected_prefix}LICENSE"
     ).decode("utf-8")
-    if contract.license_expression not in license_content:
-        raise ValueError("archived LICENSE does not contain the manifest LicenseRef")
+    if "Apache License" not in license_content or "Version 2.0" not in license_content:
+        raise ValueError("archived LICENSE does not contain Apache-2.0")
 
     _verify_semantic_extension(manifest, archive_path, expected_prefix, contract)
 
@@ -450,9 +451,7 @@ def _verify_release_candidate(
         raise ValueError("license object is missing")
     if license_data.get("expression") != contract.license_expression:
         raise ValueError("license expression mismatch")
-    if license_data.get("distribution_status") != (
-        "blocked_without_separate_written_permission"
-    ):
+    if license_data.get("distribution_status") != DISTRIBUTION_STATUS:
         raise ValueError("distribution boundary mismatch")
 
     members = _archive_members(manifest, archive_path)
@@ -470,7 +469,7 @@ def _verify_release_candidate(
         "manifest_sha256": _sha256(manifest_path),
         "member_count": len(members),
         "source_bound": repo is not None,
-        "distribution_status": "blocked_without_separate_written_permission",
+        "distribution_status": DISTRIBUTION_STATUS,
         "compatibility_mode": contract.compatibility_mode,
     }
 
