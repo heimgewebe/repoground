@@ -50,11 +50,14 @@ install -m 0755 "$ROOT/scripts/ops/repobrief-publish-systemkatalog-main-if-chang
 for unit in "$ROOT"/ops/systemd/repoground-fleet/*.{service,timer}; do
   install -m 0644 "$unit" "$UNIT_DIR/$(basename "$unit")"
 done
-for unit in "${OLD_UNITS[@]}"; do
+for unit in "${OLD_TIMERS[@]}" "${OLD_UNITS[@]}"; do
   rm -f -- "$UNIT_DIR/$unit"
 done
 
 systemctl --user daemon-reload
+for unit in "${OLD_TIMERS[@]}" "${OLD_UNITS[@]}"; do
+  systemctl --user reset-failed "$unit" 2>/dev/null || true
+done
 systemctl --user reset-failed repoground-publish-fleet-watch.service 2>/dev/null || true
 if (( ENABLE )); then
   systemctl --user enable --now repoground-publish-fleet-watch.timer

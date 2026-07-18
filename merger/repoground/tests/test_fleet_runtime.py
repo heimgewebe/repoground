@@ -1087,6 +1087,9 @@ def test_regression_canonical_unit_names_and_installer_cutover_order() -> None:
     assert "rb-publish-fleet-watch.timer" in installer
     assert "rb-publish-fleet-watch.service" in installer
     assert "systemctl --user disable --now" in installer
+    assert 'for unit in "${OLD_TIMERS[@]}" "${OLD_UNITS[@]}"' in installer
+    assert 'rm -f -- "$UNIT_DIR/$unit"' in installer
+    assert 'systemctl --user reset-failed "$unit"' in installer
     install_position = installer.index("ops/systemd/repoground-fleet")
     reload_position = installer.index("systemctl --user daemon-reload")
     enable_position = installer.index(
