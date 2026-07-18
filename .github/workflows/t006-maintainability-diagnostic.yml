@@ -1,0 +1,75 @@
+name: T006 maintainability diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: fix/repoground-runtime-contracts-t006
+          fetch-depth: 0
+
+      - name: Reapply exact candidate refactor
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import tempfile
+
+          lines = Path('.github/workflows/t006-complexity-refactor.yml').read_text(encoding='utf-8').splitlines()
+          marker = '- name: Extract inline hydration helper'
+          start = next(i for i, line in enumerate(lines) if line.strip() == marker)
+          run_index = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'run: |')
+          block = []
+          for line in lines[run_index + 1:]:
+              if line.startswith('      - name:'):
+                  break
+              if line.startswith('          '):
+                  block.append(line[10:])
+              elif not line.strip():
+                  block.append('')
+              else:
+                  raise SystemExit('unexpected refactor block indentation')
+          with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix='.sh') as handle:
+              handle.write('\n'.join(block) + '\n')
+              handle.flush()
+              subprocess.run(['bash', handle.name], check=True)
+          PY
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+
+      - name: Install locked dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+
+      - name: Capture complete maintainability report
+        shell: bash
+        run: |
+          set +e
+          python scripts/ci/check_graph_maintainability.py --format json > t006-maintainability.json
+          status=$?
+          printf '%s\n' "$status" > t006-maintainability.status
+          exit 0
+
+      - name: Upload report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: t006-maintainability-${{ github.run_id }}
+          path: |
+            t006-maintainability.json
+            t006-maintainability.status
+          if-no-files-found: error
+          retention-days: 7
