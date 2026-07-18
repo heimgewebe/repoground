@@ -27,26 +27,40 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
         with:
           python-version: "3.12"
-      - name: Add newly required legal files to the minimal fixture
+      - name: Apply and test fixture correction
+        id: fix
         env:
           BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
         run: |
-          set -euo pipefail
+          set +e
+          bash -euxo pipefail <<'FIX' > fixture-fix.log 2>&1
           python - <<'PY'
           from pathlib import Path
 
           path = Path("merger/repoground/tests/test_release_packaging.py")
-          text = path.read_text(encoding="utf-8")
-          anchor = '    (repo / "regular.txt").write_text("regular\\n", encoding="utf-8")'
-          inserted = '''    (repo / "NOTICE").write_text("RepoGround\\n", encoding="utf-8")
-          (repo / "TRADEMARK_POLICY.md").write_text(
-              "This policy does not restrict any right granted by Apache-2.0.\\n",
-              encoding="utf-8",
-          )
-          ''' + anchor
-          if text.count(anchor) != 1:
-              raise SystemExit("minimal release fixture anchor missing or ambiguous")
-          path.write_text(text.replace(anchor, inserted, 1), encoding="utf-8")
+          lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+          matches = [
+              index
+              for index, line in enumerate(lines)
+              if '(repo / "regular.txt").write_text' in line
+          ]
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"minimal release fixture anchor count is {len(matches)}, expected 1"
+              )
+          if any('(repo / "NOTICE").write_text' in line for line in lines):
+              raise SystemExit("minimal release fixture already contains NOTICE")
+          index = matches[0]
+          indent = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
+          insertion = [
+              f'{indent}(repo / "NOTICE").write_text("RepoGround\\n", encoding="utf-8")\n',
+              f'{indent}(repo / "TRADEMARK_POLICY.md").write_text(\n',
+              f'{indent}    "This policy does not restrict any right granted by Apache-2.0.\\n",\n',
+              f'{indent}    encoding="utf-8",\n',
+              f'{indent})\n',
+          ]
+          lines[index:index] = insertion
+          path.write_text("".join(lines), encoding="utf-8")
           Path(".github/workflows/one-shot-pytest-diagnostics.yml").unlink()
           PY
 
@@ -58,3 +72,22 @@ jobs:
           python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
           pytest -q merger/repoground/tests/test_release_packaging.py
           git push origin "HEAD:${BRANCH_NAME}"
+          FIX
+          status=$?
+          set -e
+          cat fixture-fix.log
+          echo "exit_code=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload fixture-fix diagnostics
+        if: steps.fix.outputs.exit_code != '0'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: release-fixture-fix-${{ github.run_id }}
+          path: fixture-fix.log
+          if-no-files-found: error
+          retention-days: 7
+      - name: Propagate fixture-fix failure
+        if: steps.fix.outputs.exit_code != '0'
+        env:
+          EXIT_CODE: ${{ steps.fix.outputs.exit_code }}
+        run: exit "$EXIT_CODE"
