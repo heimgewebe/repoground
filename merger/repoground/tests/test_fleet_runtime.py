@@ -23,13 +23,11 @@ SYSTEMKATALOG_PUBLISH = ROOT / "scripts/ops/repoground-publish-systemkatalog-mai
 SYSTEMKATALOG_WATCH = (
     ROOT / "scripts/ops/repoground-publish-systemkatalog-main-if-changed"
 )
-LEGACY_SYSTEMKATALOG_PUBLISH = (
-    ROOT / "scripts/ops/repobrief-publish-systemkatalog-main"
-)
+LEGACY_SYSTEMKATALOG_PUBLISH = ROOT / "scripts/ops/repobrief-publish-systemkatalog-main"
 LEGACY_SYSTEMKATALOG_WATCH = (
     ROOT / "scripts/ops/repobrief-publish-systemkatalog-main-if-changed"
 )
-UNIT_DIR = ROOT / "ops/systemd/repobrief-fleet"
+UNIT_DIR = ROOT / "ops/systemd/repoground-fleet"
 
 
 def load_publisher() -> ModuleType:
@@ -543,8 +541,12 @@ def test_targeted_force_requires_repo_and_reason() -> None:
 
 
 def test_runtime_has_one_hourly_changed_only_timer_and_no_force_fallback() -> None:
-    service = (UNIT_DIR / "rb-publish-fleet-watch.service").read_text(encoding="utf-8")
-    timer = (UNIT_DIR / "rb-publish-fleet-watch.timer").read_text(encoding="utf-8")
+    service = (UNIT_DIR / "repoground-publish-fleet-watch.service").read_text(
+        encoding="utf-8"
+    )
+    timer = (UNIT_DIR / "repoground-publish-fleet-watch.timer").read_text(
+        encoding="utf-8"
+    )
 
     assert "ExecStart=/home/alex/.local/bin/repoground-publish-fleet" in service
     assert "RepoGround fleet bundles" in service
@@ -557,8 +559,8 @@ def test_runtime_has_one_hourly_changed_only_timer_and_no_force_fallback() -> No
     assert "RandomizedDelaySec=10min" in timer
     assert "Persistent=true" in timer
     assert sorted(path.name for path in UNIT_DIR.iterdir()) == [
-        "rb-publish-fleet-watch.service",
-        "rb-publish-fleet-watch.timer",
+        "repoground-publish-fleet-watch.service",
+        "repoground-publish-fleet-watch.timer",
     ]
 
 
@@ -932,3 +934,287 @@ def test_transaction_journal_rejects_unexpected_entries(
 
     with pytest.raises(RuntimeError, match="unexpected retention transaction entries"):
         module.reconcile_prune_transactions(protected=set(), apply=False)
+
+
+def test_regression_canonical_inputs_only() -> None:
+    module = load_publisher()
+    assert "merger/repoground/cli/ground.py" in module.GENERATOR_INPUT_PATHS
+    assert "merger/repoground/cli/cmd_ground.py" in module.GENERATOR_INPUT_PATHS
+    assert not any("lenskit" in path for path in module.GENERATOR_INPUT_PATHS)
+    assert not any("repobrief" in path for path in module.GENERATOR_INPUT_PATHS)
+
+
+def test_regression_discover_captures_repoground_without_lenskit_alias(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repos_root = tmp_path / "repos"
+    repos_root.mkdir()
+    monkeypatch.setattr(module, "REPOS_ROOT", repos_root)
+
+    repoground, _ = initialize_repository(repos_root, "repoground")
+    git(
+        repoground,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:heimgewebe/repoground.git",
+    )
+    lenskit, _ = initialize_repository(repos_root, "lenskit")
+    git(
+        lenskit,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:heimgewebe/lenskit.git",
+    )
+
+    entries = {entry.key: entry for entry in module.discover()}
+    assert entries["heimgewebe/repoground"].path == repoground
+    assert entries["heimgewebe/lenskit"].path == lenskit
+    assert entries["heimgewebe/repoground"].path != entries["heimgewebe/lenskit"].path
+
+
+def test_publication_state_separates_generator_commit_and_input_hash(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    state_file = tmp_path / "heimgewebe__demo__main.state.json"
+    publication_dir = tmp_path / "publication"
+    publication_dir.mkdir()
+    manifest = publication_dir / "demo_merge.bundle.manifest.json"
+    manifest.write_text("{}\n", encoding="utf-8")
+    source_sha = "a" * 40
+    generator_inputs_sha = "b" * 64
+    tool_sha = "d" * 40
+    identity = {
+        "source_sha": source_sha,
+        "generator_inputs_sha": generator_inputs_sha,
+    }
+
+    module.write_state(
+        state_file,
+        fingerprint="c" * 64,
+        identity=identity,
+        tool_sha=tool_sha,
+        repository="heimgewebe__demo",
+        ref="main",
+        publication_dir=publication_dir,
+        manifest_path=str(manifest),
+        publication_created_at="2026-07-14T10:00:00Z",
+        previous_state=None,
+        remote_sha=source_sha,
+        remote_ref="origin/main",
+        published_now=True,
+    )
+
+    data = json.loads(state_file.read_text(encoding="utf-8"))
+    assert data["schema"] == module.STATE_SCHEMA
+    assert data["repo_id"] == "heimgewebe__demo"
+    assert data["stem"] == "heimgewebe__demo__main"
+    assert data["created_at"] == "2026-07-14T10:00:00Z"
+    assert data["created_at_basis"] == "external_manifest_generated_at"
+    assert data["source_commit"] == source_sha
+    assert data["generator_commit"] == tool_sha
+    assert data["generator_commit_status"] == "recorded"
+    assert data["generator_inputs_sha"] == generator_inputs_sha
+    assert data["manifest_path"] == str(manifest)
+    freshness = data["provenance"]["freshness"]
+    assert freshness["status"] == "fresh_at_publication"
+    assert freshness["remote_commit"] == source_sha
+    assert freshness["live_recheck_required"] is True
+
+
+def test_legacy_state_migration_uses_manifest_without_rebinding_generator(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    publication_dir = tmp_path / "publication"
+    publication_dir.mkdir()
+    manifest = publication_dir / "demo_merge.bundle.manifest.json"
+    manifest.write_text(
+        json.dumps({"created_at": "2026-07-01T12:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    source_sha = "a" * 40
+    generator_inputs_sha = "b" * 64
+    previous = {
+        "schema": module.STATE_SCHEMA,
+        "fingerprint": "c" * 64,
+        "identity": {
+            "source_sha": source_sha,
+            "generator_inputs_sha": generator_inputs_sha,
+        },
+        "publication_dir": str(publication_dir),
+        "updated_at": "2026-07-01T12:01:00Z",
+    }
+    state_file = tmp_path / "state.json"
+
+    module.write_state(
+        state_file,
+        fingerprint="c" * 64,
+        identity=previous["identity"],
+        tool_sha="d" * 40,
+        repository="heimgewebe__demo",
+        ref="main",
+        publication_dir=None,
+        manifest_path=None,
+        publication_created_at=None,
+        previous_state=previous,
+        remote_sha=source_sha,
+        remote_ref="origin/main",
+        published_now=False,
+    )
+
+    migrated = json.loads(state_file.read_text(encoding="utf-8"))
+    assert migrated["created_at"] == "2026-07-01T12:00:00Z"
+    assert migrated["created_at_basis"] == "bundle_manifest_created_at"
+    assert migrated["manifest_path"] == str(manifest)
+    assert migrated["generator_commit"] is None
+    assert migrated["generator_commit_status"] == "unavailable_legacy_state"
+    assert migrated["generator_inputs_sha"] == generator_inputs_sha
+    assert migrated["provenance"]["freshness"]["status"] == "fresh"
+
+
+def test_regression_canonical_unit_names_and_installer_cutover_order() -> None:
+    units = sorted(path.name for path in UNIT_DIR.iterdir())
+    assert units == [
+        "repoground-publish-fleet-watch.service",
+        "repoground-publish-fleet-watch.timer",
+    ]
+
+    installer = INSTALLER.read_text(encoding="utf-8")
+    assert "rb-publish-fleet-watch.timer" in installer
+    assert "rb-publish-fleet-watch.service" in installer
+    assert "systemctl --user disable --now" in installer
+    install_position = installer.index("ops/systemd/repoground-fleet")
+    reload_position = installer.index("systemctl --user daemon-reload")
+    enable_position = installer.index(
+        "systemctl --user enable --now repoground-publish-fleet-watch.timer"
+    )
+    assert install_position < reload_position < enable_position
+
+
+def test_missing_generator_inputs_fail_before_publication_and_write_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=tmp_path / "demo",
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+    monkeypatch.setattr(
+        module,
+        "ensure_tool_worktree",
+        lambda: (_ for _ in ()).throw(
+            RuntimeError("missing required generator inputs: ['cmd_ground.py']")
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "publish",
+        lambda *args, **kwargs: pytest.fail("publication must not start"),
+    )
+
+    assert module.main(["--repo", "heimgewebe/demo"]) == 1
+    receipt = json.loads((roots["log"] / "fleet-last.json").read_text(encoding="utf-8"))
+    assert receipt["status"] == "error"
+    assert receipt["phase"] == "generator_preflight"
+    assert "missing required generator inputs" in receipt["error"]
+    assert not roots["publication"].exists()
+
+
+def test_idempotent_second_run_does_not_publish_or_create_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+    monkeypatch.setattr(
+        module,
+        "reconcile_prune_transactions",
+        lambda *, protected, apply: {"status": "ok"},
+    )
+    publication_root = roots["publication"]
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=tmp_path / "demo",
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    source_sha = "a" * 40
+    tool_sha = "d" * 40
+    generator_inputs_sha = "b" * 64
+    publish_calls: list[Path] = []
+
+    def mock_publish(*args, **kwargs):
+        out_dir = (
+            publication_root
+            / "bundles"
+            / "heimgewebe__demo"
+            / "main"
+            / "20260714T100000Z"
+        )
+        out_dir.mkdir(parents=True, exist_ok=False)
+        manifest = out_dir / "demo_merge.bundle.manifest.json"
+        manifest.write_text("{}\n", encoding="utf-8")
+        publish_calls.append(out_dir)
+        data = {
+            "publication": {
+                "published": [
+                    {"generatedAt": "2026-07-14T10:00:00Z"},
+                    {"generatedAt": "2026-07-14T10:00:00Z"},
+                ]
+            }
+        }
+        return (
+            data,
+            out_dir,
+            tmp_path / "fake-lease.json",
+            str(manifest),
+            "2026-07-14T10:00:00Z",
+        )
+
+    monkeypatch.setattr(module, "publish", mock_publish)
+    monkeypatch.setattr(
+        module,
+        "ensure_tool_worktree",
+        lambda: (tool_sha, generator_inputs_sha),
+    )
+    monkeypatch.setattr(
+        module,
+        "remote_head",
+        lambda path: ("origin/main", "main", source_sha),
+    )
+    monkeypatch.setattr(module, "clear_active_publication_lease", lambda path: None)
+    monkeypatch.setattr(module, "prune_current_group", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+
+    argv = ["--repo", "heimgewebe/demo"]
+    assert module.main(argv) == 0
+    state_file = roots["state"] / "heimgewebe__demo__main.state.json"
+    first = json.loads(state_file.read_text(encoding="utf-8"))
+    version_parent = publication_root / "bundles" / "heimgewebe__demo" / "main"
+    assert [path.name for path in version_parent.iterdir()] == ["20260714T100000Z"]
+    assert len(publish_calls) == 1
+
+    assert module.main(argv) == 0
+    second = json.loads(state_file.read_text(encoding="utf-8"))
+    assert len(publish_calls) == 1
+    assert [path.name for path in version_parent.iterdir()] == ["20260714T100000Z"]
+    assert second["created_at"] == first["created_at"]
+    assert second["generator_commit"] == first["generator_commit"] == tool_sha
+    assert second["generator_inputs_sha"] == generator_inputs_sha
+    assert second["manifest_path"] == first["manifest_path"]
+    assert second["publication_dir"] == first["publication_dir"]
+    assert second["provenance"]["freshness"]["status"] == "fresh"
+    assert second["provenance"]["freshness"]["live_recheck_required"] is False

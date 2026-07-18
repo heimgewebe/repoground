@@ -21,6 +21,7 @@ OLD_TIMERS=(
   systemkatalog-repobrief-localize.path
 )
 OLD_UNITS=(
+  rb-publish-fleet-watch.service
   rb-publish-fleet-daily.service
   rb-publish-fleet-daily.timer
   repobrief-publish-systemkatalog-main-watch.service
@@ -46,7 +47,7 @@ install -m 0755 "$ROOT/scripts/ops/repobrief-publish-systemkatalog-main" \
   "$BIN_DIR/repobrief-publish-systemkatalog-main"
 install -m 0755 "$ROOT/scripts/ops/repobrief-publish-systemkatalog-main-if-changed" \
   "$BIN_DIR/repobrief-publish-systemkatalog-main-if-changed"
-for unit in "$ROOT"/ops/systemd/repobrief-fleet/*.{service,timer}; do
+for unit in "$ROOT"/ops/systemd/repoground-fleet/*.{service,timer}; do
   install -m 0644 "$unit" "$UNIT_DIR/$(basename "$unit")"
 done
 for unit in "${OLD_UNITS[@]}"; do
@@ -54,11 +55,11 @@ for unit in "${OLD_UNITS[@]}"; do
 done
 
 systemctl --user daemon-reload
-systemctl --user reset-failed rb-publish-fleet-watch.service 2>/dev/null || true
+systemctl --user reset-failed repoground-publish-fleet-watch.service 2>/dev/null || true
 if (( ENABLE )); then
-  systemctl --user enable --now rb-publish-fleet-watch.timer
+  systemctl --user enable --now repoground-publish-fleet-watch.timer
   echo "INSTALL-REPOGROUND-PUBLISH-FLEET-RUNTIME: PASS enabled"
 else
-  systemctl --user disable --now rb-publish-fleet-watch.timer 2>/dev/null || true
+  systemctl --user disable --now repoground-publish-fleet-watch.timer 2>/dev/null || true
   echo "INSTALL-REPOGROUND-PUBLISH-FLEET-RUNTIME: PASS paused"
 fi

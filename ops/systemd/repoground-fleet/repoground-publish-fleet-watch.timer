@@ -5,7 +5,7 @@ Description=Hourly changed-only RepoGround fleet publication
 OnCalendar=hourly
 RandomizedDelaySec=10min
 Persistent=true
-Unit=rb-publish-fleet-watch.service
+Unit=repoground-publish-fleet-watch.service
 
 [Install]
 WantedBy=timers.target

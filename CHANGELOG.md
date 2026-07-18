@@ -37,6 +37,12 @@ repository remains governed by `LicenseRef-RepoBrief-All-Rights-Reserved` until
 a later owner decision explicitly replaces that boundary.
 
 ## [Unreleased]
+### Fixed
+- **Fleet publication (Bureau #671):** the publisher now uses only canonical RepoGround generator paths, fails the service run on generator or repository errors, and installs the hourly watcher under `repoground-publish-fleet-watch.*`.
+
+### Changed
+- **Fleet state projection:** the existing `repobrief.fleet-publication-state.v1` record gains additive source-commit, generator-commit, generator-input, manifest, publication-time, and bounded freshness fields without changing the persisted schema identity.
+
 
 ### Changed
 

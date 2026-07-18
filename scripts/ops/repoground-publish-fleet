@@ -31,35 +31,23 @@ def _env_value(primary: str, legacy: str, default: str) -> str:
     return os.environ.get(primary) or os.environ.get(legacy) or default
 
 
-def _prefer_existing(canonical: Path, legacy: Path) -> Path:
-    if canonical.exists() or not legacy.exists():
-        return canonical
-    return legacy
-
-
 REPOS_ROOT = Path(
     _env_value("REPOGROUND_REPOS_ROOT", "RB_REPOS_ROOT", "/home/alex/repos")
 ).expanduser()
 REPOGROUND_REPO = Path(
     os.environ.get("REPOGROUND_REPOSITORY_PATH")
     or os.environ.get("RB_REPOSITORY_PATH")
-    or _prefer_existing(REPOS_ROOT / "repoground", REPOS_ROOT / "lenskit")
+    or (REPOS_ROOT / "repoground")
 )
 TOOL_WT = Path(
     os.environ.get("REPOGROUND_TOOL_WORKTREE")
     or os.environ.get("RB_TOOL_WORKTREE")
-    or _prefer_existing(
-        REPOS_ROOT / ".repoground-tools" / "repoground-main",
-        REPOS_ROOT / ".repobrief-tools" / "lenskit-main",
-    )
+    or (REPOS_ROOT / ".repoground-tools" / "repoground-main")
 )
 SOURCE_ROOT = Path(
     os.environ.get("REPOGROUND_SOURCE_ROOT")
     or os.environ.get("RB_SOURCE_ROOT")
-    or _prefer_existing(
-        REPOS_ROOT / ".repoground-sources",
-        REPOS_ROOT / ".repobrief-sources",
-    )
+    or (REPOS_ROOT / ".repoground-sources")
 )
 LEGACY_OUT_ROOT = REPOS_ROOT / "merges" / "repobrief-auto"
 PUB_ROOT = REPOS_ROOT / "manifest-publications"
@@ -501,20 +489,127 @@ def write_state(
     *,
     fingerprint: str,
     identity: dict[str, object],
+    tool_sha: str,
     repository: str,
     ref: str,
     publication_dir: Path | None,
+    manifest_path: str | None,
+    publication_created_at: str | None,
+    previous_state: dict[str, Any] | None,
+    remote_sha: str,
+    remote_ref: str,
+    published_now: bool,
 ) -> None:
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if published_now:
+        if identity.get("source_sha") != remote_sha:
+            raise ValueError(
+                "published source commit differs from observed remote commit"
+            )
+        if publication_dir is None or not manifest_path or not publication_created_at:
+            raise ValueError(
+                "published state requires publication directory, manifest, and timestamp"
+            )
+        recorded_identity = identity
+        recorded_source = identity["source_sha"]
+        generator_commit: object = tool_sha
+        generator_commit_status = "recorded"
+        generator_inputs_sha = identity["generator_inputs_sha"]
+        created_at = publication_created_at
+        created_at_basis = "external_manifest_generated_at"
+        freshness_status = "fresh_at_publication"
+        freshness_basis = "published_source_commit_equals_observed_remote_commit"
+        live_recheck_required = True
+    else:
+        if previous_state is None:
+            raise ValueError("unchanged state refresh requires previous state")
+        previous_identity = previous_state.get("identity")
+        recorded_identity = (
+            previous_identity if isinstance(previous_identity, dict) else identity
+        )
+        recorded_source = previous_state.get("source_commit") or recorded_identity.get(
+            "source_sha"
+        )
+        generator_commit = previous_state.get("generator_commit")
+        generator_commit_status = (
+            "recorded"
+            if isinstance(generator_commit, str)
+            else "unavailable_legacy_state"
+        )
+        generator_inputs_sha = previous_state.get(
+            "generator_inputs_sha"
+        ) or recorded_identity.get("generator_inputs_sha")
+        manifest_path = previous_state.get("manifest_path")
+        raw_publication_dir = previous_state.get("publication_dir")
+        publication_dir = Path(raw_publication_dir) if raw_publication_dir else None
+        if publication_dir is not None and not manifest_path:
+            manifests = sorted(publication_dir.glob("*_merge.bundle.manifest.json"))
+            if len(manifests) != 1:
+                raise ValueError(
+                    "legacy publication state must resolve exactly one bundle manifest"
+                )
+            manifest_path = str(manifests[0])
+        created_at = previous_state.get("created_at")
+        created_at_basis = previous_state.get("created_at_basis")
+        if not created_at and manifest_path:
+            try:
+                manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError("cannot derive legacy publication timestamp") from exc
+            created_at = manifest.get("created_at")
+            created_at_basis = "bundle_manifest_created_at"
+        if not created_at:
+            created_at = previous_state.get("updated_at")
+            created_at_basis = "legacy_state_updated_at_fallback"
+        if recorded_source == remote_sha:
+            freshness_status = "fresh"
+            freshness_basis = "stored_source_commit_equals_observed_remote_commit"
+        elif isinstance(recorded_source, str):
+            freshness_status = "stale"
+            freshness_basis = "stored_source_commit_differs_from_observed_remote_commit"
+        else:
+            freshness_status = "unknown"
+            freshness_basis = "stored_source_commit_unavailable"
+        live_recheck_required = False
+    if not isinstance(created_at, str) or not created_at:
+        raise ValueError("publication state requires a non-empty created_at timestamp")
+    if not isinstance(recorded_source, str) or not recorded_source:
+        raise ValueError("publication state requires a recorded source commit")
+    if not isinstance(generator_inputs_sha, str) or not generator_inputs_sha:
+        raise ValueError("publication state requires a generator-input digest")
+
+    freshness = {
+        "status": freshness_status,
+        "basis": freshness_basis,
+        "checked_at": now,
+        "source_commit": recorded_source,
+        "remote_commit": remote_sha,
+        "remote_ref": remote_ref,
+        "live_recheck_required": live_recheck_required,
+    }
     atomic_write_json(
         path,
         {
             "schema": STATE_SCHEMA,
+            "repo_id": repository,
+            "stem": f"{repository}__{ref}",
+            "created_at": created_at,
+            "created_at_basis": created_at_basis,
+            "source_commit": recorded_source,
+            "generator_commit": generator_commit,
+            "generator_commit_status": generator_commit_status,
+            "generator_inputs_sha": generator_inputs_sha,
+            "provenance": {
+                "freshness": freshness,
+                "git_commit": recorded_source,
+            },
+            "manifest_path": manifest_path,
             "fingerprint": fingerprint,
-            "identity": identity,
+            "identity": recorded_identity,
             "repository": repository,
             "ref": ref,
             "publication_dir": str(publication_dir) if publication_dir else None,
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "updated_at": now,
         },
     )
 
@@ -1424,7 +1519,7 @@ def publish(
     tool_sha: str,
     fingerprint: str,
     config: PublicationConfig,
-) -> tuple[dict[str, object], Path, Path]:
+) -> tuple[dict[str, object], Path, Path, str, str]:
     repository = safe_segment(entry.repo)
     registry_repository = publication_repository(entry)
     ref_segment = safe_segment(branch)
@@ -1483,11 +1578,30 @@ def publish(
             tail = cp.stdout[-2000:] if cp.stdout else "<empty stdout>"
             raise RuntimeError(f"RepoGround refresh failed rc={cp.returncode}: {tail}")
         data = parse_cli_json(cp.stdout)
-        manifests = list(out_dir.glob("*_merge.bundle.manifest.json"))
-        if not out_dir.is_dir() or not manifests:
+        manifests = sorted(out_dir.glob("*_merge.bundle.manifest.json"))
+        if not out_dir.is_dir() or len(manifests) != 1:
             raise RuntimeError(
-                "RepoBrief refresh returned success without a bundle manifest"
+                "RepoGround refresh must produce exactly one bundle manifest"
             )
+        manifest_path = str(manifests[0])
+        publication = data.get("publication")
+        published_rows = (
+            publication.get("published") if isinstance(publication, dict) else None
+        )
+        generated_values = (
+            {
+                row.get("generatedAt")
+                for row in published_rows
+                if isinstance(row, dict) and isinstance(row.get("generatedAt"), str)
+            }
+            if isinstance(published_rows, list)
+            else set()
+        )
+        if len(generated_values) != 1:
+            raise RuntimeError(
+                "RepoGround refresh lacks one coherent publication timestamp"
+            )
+        publication_created_at = generated_values.pop()
         repo_log = LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.json"
         repo_log.write_text(
             json.dumps(
@@ -1509,7 +1623,7 @@ def publish(
             + "\n",
             encoding="utf-8",
         )
-        return data, out_dir, active_lease
+        return data, out_dir, active_lease, manifest_path, publication_created_at
     except Exception:
         discard_generated_output(out_dir, root=out_base)
         clear_active_publication_lease(active_lease)
@@ -1684,7 +1798,21 @@ def main(argv: list[str]) -> int:
             f"== fleet {mode} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
             f"entries={len(entries)} limit={args.limit} retention={args.retention} =="
         )
-        tool_sha, generator_sha = ensure_tool_worktree()
+        try:
+            tool_sha, generator_sha = ensure_tool_worktree()
+        except Exception as exc:
+            summary = {
+                "status": "error",
+                "phase": "generator_preflight",
+                "count": len(entries),
+                "failed": len(entries),
+                "error": str(exc)[:4000],
+                "details": [],
+            }
+            atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
+            log(f"GENERATOR-PREFLIGHT-FAILED: {exc}")
+            print(json.dumps(summary, indent=2, sort_keys=True))
+            return 1
         changed = published = skipped = failed = queued = prune_failed = 0
         details: list[dict[str, object]] = []
         protected: set[Path] = set()
@@ -1709,12 +1837,28 @@ def main(argv: list[str]) -> int:
                 )
                 if not should_publish:
                     skipped += 1
+                    write_state(
+                        publication_state_path,
+                        fingerprint=fingerprint,
+                        identity=identity,
+                        tool_sha=tool_sha,
+                        repository=registry_repository,
+                        ref=ref_segment,
+                        publication_dir=None,
+                        manifest_path=None,
+                        publication_created_at=None,
+                        previous_state=state,
+                        remote_sha=source_sha,
+                        remote_ref=remote_ref,
+                        published_now=False,
+                    )
                     details.append(
                         {
                             "repo": entry.key,
                             "status": "unchanged",
                             "source_sha": source_sha,
                             "fingerprint": fingerprint,
+                            "freshness": "fresh",
                         }
                     )
                     continue
@@ -1730,22 +1874,31 @@ def main(argv: list[str]) -> int:
                         }
                     )
                     continue
-                data, out_dir, active_lease = publish(
-                    entry,
-                    remote_ref=remote_ref,
-                    branch=branch,
-                    sha=source_sha,
-                    tool_sha=tool_sha,
-                    fingerprint=fingerprint,
-                    config=config,
+                data, out_dir, active_lease, manifest_path, publication_created_at = (
+                    publish(
+                        entry,
+                        remote_ref=remote_ref,
+                        branch=branch,
+                        sha=source_sha,
+                        tool_sha=tool_sha,
+                        fingerprint=fingerprint,
+                        config=config,
+                    )
                 )
                 write_state(
                     publication_state_path,
                     fingerprint=fingerprint,
                     identity=identity,
-                    repository=entry.key,
+                    tool_sha=tool_sha,
+                    repository=registry_repository,
                     ref=ref_segment,
                     publication_dir=out_dir,
+                    manifest_path=manifest_path,
+                    publication_created_at=publication_created_at,
+                    previous_state=state,
+                    remote_sha=source_sha,
+                    remote_ref=remote_ref,
+                    published_now=True,
                 )
                 clear_active_publication_lease(active_lease)
                 published += 1
