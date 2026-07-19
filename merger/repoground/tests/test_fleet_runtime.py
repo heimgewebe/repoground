@@ -103,11 +103,29 @@ def isolate_retention_roots(
         "log": tmp_path / "log",
     }
     monkeypatch.setattr(module, "PUB_ROOT", roots["publication"])
-    monkeypatch.setattr(module, "LEGACY_OUT_ROOT", roots["legacy"])
-    monkeypatch.setattr(module, "SPECIAL_OUT_ROOT", roots["special"])
+    monkeypatch.setattr(module, "ARCHIVED_LEGACY_OUT_ROOT", roots["legacy"])
+    monkeypatch.setattr(module, "ARCHIVED_SPECIAL_OUT_ROOT", roots["special"])
     monkeypatch.setattr(module, "STATE_ROOT", roots["state"])
     monkeypatch.setattr(module, "LOG_ROOT", roots["log"])
     return roots
+
+
+def test_publisher_uses_only_canonical_active_environment_and_storage() -> None:
+    text = PUBLISHER.read_text(encoding="utf-8")
+    former_env_prefix = "R" + "B_"
+    former_state = "/home/alex/.local/state/" + "repobrief-publish/fleet"
+    former_log = "/home/alex/logs/" + "repobrief-publish"
+    former_quarantine = "." + "rb-prune-quarantine"
+
+    assert former_env_prefix not in text
+    assert former_state not in text
+    assert former_log not in text
+    assert former_quarantine not in text
+    assert "/home/alex/.local/state/repoground-publish/fleet" in text
+    assert "/home/alex/logs/repoground-publish" in text
+    assert ".repoground-prune-quarantine" in text
+    assert "ARCHIVED_LEGACY_OUT_ROOT" in text
+    assert "ARCHIVED_SPECIAL_OUT_ROOT" in text
 
 
 def test_fingerprint_is_stable_and_covers_all_output_inputs() -> None:
@@ -562,6 +580,71 @@ def test_runtime_has_one_hourly_changed_only_timer_and_no_force_fallback() -> No
         "repoground-publish-fleet-watch.service",
         "repoground-publish-fleet-watch.timer",
     ]
+
+
+def _run_installer(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    home = tmp_path / "home"
+    fake_bin = tmp_path / "bin"
+    home.mkdir(exist_ok=True)
+    fake_bin.mkdir(exist_ok=True)
+    systemctl = fake_bin / "systemctl"
+    systemctl.write_text(
+        "#!/bin/sh\nprintf '%s\n' \"$*\" >> \"$HOME/systemctl.log\"\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["PATH"] = str(fake_bin) + os.pathsep + env["PATH"]
+    return subprocess.run(
+        [str(INSTALLER)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=env,
+        check=False,
+    )
+
+
+def test_installer_atomically_migrates_state_and_starts_canonical_logs(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    old_state = home / ".local/state/repobrief-publish/fleet"
+    old_log = home / "logs/repobrief-publish"
+    old_state.mkdir(parents=True)
+    old_log.mkdir(parents=True)
+    (old_state / "marker.json").write_text("{}\n", encoding="utf-8")
+    (old_log / "historical.log").write_text("old\n", encoding="utf-8")
+
+    completed = _run_installer(tmp_path)
+
+    new_state = home / ".local/state/repoground-publish/fleet"
+    new_log = home / "logs/repoground-publish"
+    assert completed.returncode == 0, completed.stderr
+    assert not old_state.exists()
+    assert (new_state / "marker.json").read_text(encoding="utf-8") == "{}\n"
+    assert new_log.is_dir()
+    assert (old_log / "historical.log").read_text(encoding="utf-8") == "old\n"
+    assert (home / ".local/bin/repoground-publish-fleet").is_file()
+    assert "PASS paused" in completed.stdout
+
+
+def test_installer_refuses_dual_state_truth(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    old_state = home / ".local/state/repobrief-publish/fleet"
+    new_state = home / ".local/state/repoground-publish/fleet"
+    old_state.mkdir(parents=True)
+    new_state.mkdir(parents=True)
+    (old_state / "old").write_text("old", encoding="utf-8")
+    (new_state / "new").write_text("new", encoding="utf-8")
+
+    completed = _run_installer(tmp_path)
+
+    assert completed.returncode == 1
+    assert "refusing dual truth" in completed.stderr
+    assert (old_state / "old").is_file()
+    assert (new_state / "new").is_file()
 
 
 def test_installer_defaults_to_paused_and_removes_duplicate_generators() -> None:

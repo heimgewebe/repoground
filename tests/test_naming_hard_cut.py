@@ -48,7 +48,23 @@ def test_runtime_identity_is_canonical() -> None:
         "pythonista_state_file": ".repoground-state.json",
         "pr_workspace_directory": ".repoground/pr-schau",
         "generator_name": "repoground",
+        "fleet_state_directory": "~/.local/state/repoground-publish/fleet",
+        "fleet_log_directory": "~/logs/repoground-publish",
+        "retention_quarantine_directory": ".repoground-prune-quarantine",
     }
+
+
+def test_historical_runtime_archives_are_bounded_and_not_defaults() -> None:
+    data = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    evidence = data["historical_evidence"]
+    read_only = evidence["read_only_state_and_log_archives"]
+    prune_only = evidence["explicit_prune_only_publication_archives"]
+
+    assert evidence["runtime_archives_not_default_storage"] is True
+    assert evidence["publication_archive_mutation_requires_explicit_prune"] is True
+    assert "/home/alex/logs/repobrief-publish" in read_only
+    assert "/home/alex/repos/merges/repobrief-auto" in prune_only
+    assert "/home/alex/repos/manifest-publications/repobrief-auto" in prune_only
 
 
 def test_versioned_data_ids_are_not_reinterpreted_as_aliases() -> None:

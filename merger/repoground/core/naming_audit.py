@@ -128,6 +128,7 @@ def _external_alias_patterns() -> dict[str, tuple[str, ...]]:
             old_profile_var,
             ("r" + "lens_").upper(),
             ("repo" + "lens_").upper(),
+            ("r" + "b_").upper(),
         ),
         "former-runtime-storage": (
             "." + "r" + "lens-service",
@@ -135,6 +136,9 @@ def _external_alias_patterns() -> dict[str, tuple[str, ...]]:
             "r" + "lens-job-",
             ".repo" + "Lens-state.json",
             ".repo" + "lens/pr-schau",
+            "/.local/state/" + "repobrief-publish/",
+            "/logs/" + "repobrief-publish",
+            "." + "rb-prune-quarantine",
         ),
         "former-service-unit": (FORMER_SERVICE_UNIT,),
         "former-python-module": ("merger." + "lens" + "kit",),

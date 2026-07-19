@@ -145,6 +145,30 @@ def test_process_audit_detects_standalone_uri_env_and_storage_tokens(tmp_path: P
     ]
 
 
+def test_process_audit_detects_former_fleet_env_and_storage(tmp_path: Path) -> None:
+    proc = tmp_path / "proc"
+    old_env = ("r" + "b_state_root").upper() + "=/tmp/state"
+    old_state = "/home/alex/.local/state/" + "repobrief-publish/fleet"
+    old_log = "/home/alex/logs/" + "repobrief-publish"
+    old_quarantine = "." + "rb-prune-quarantine"
+    _write_process(
+        proc,
+        123,
+        "python3",
+        old_env,
+        old_state,
+        old_log,
+        old_quarantine,
+    )
+
+    finding = scan_processes(proc)[0]
+
+    assert finding["matched_aliases"] == [
+        "former-environment",
+        "former-runtime-storage",
+    ]
+
+
 def test_config_audit_is_hash_only_for_concrete_aliases(tmp_path: Path) -> None:
     config = tmp_path / "config.json"
     config.write_text(

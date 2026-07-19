@@ -5,6 +5,10 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 BIN_DIR=${HOME}/.local/bin
 UNIT_DIR=${HOME}/.config/systemd/user
 ENABLE=0
+OLD_STATE_ROOT=${HOME}/.local/state/repobrief-publish/fleet
+STATE_ROOT=${HOME}/.local/state/repoground-publish/fleet
+LOG_ROOT=${HOME}/logs/repoground-publish
+
 if [[ ${1:-} == "--enable" ]]; then
   ENABLE=1
 elif [[ $# -gt 0 ]]; then
@@ -31,9 +35,33 @@ OLD_UNITS=(
 )
 
 install -d -m 0755 "$BIN_DIR" "$UNIT_DIR"
+systemctl --user disable --now repoground-publish-fleet-watch.timer 2>/dev/null || true
+systemctl --user stop repoground-publish-fleet-watch.service 2>/dev/null || true
 for unit in "${OLD_TIMERS[@]}"; do
   systemctl --user disable --now "$unit" 2>/dev/null || true
 done
+
+if [[ -L $OLD_STATE_ROOT || -L $STATE_ROOT ]]; then
+  echo "publisher state roots must not be symlinks" >&2
+  exit 1
+fi
+if [[ -e $OLD_STATE_ROOT && ! -d $OLD_STATE_ROOT ]]; then
+  echo "old publisher state root is not a directory: $OLD_STATE_ROOT" >&2
+  exit 1
+fi
+if [[ -e $STATE_ROOT && ! -d $STATE_ROOT ]]; then
+  echo "RepoGround publisher state root is not a directory: $STATE_ROOT" >&2
+  exit 1
+fi
+if [[ -d $OLD_STATE_ROOT && -d $STATE_ROOT ]]; then
+  echo "both old and RepoGround publisher state roots exist; refusing dual truth" >&2
+  exit 1
+fi
+if [[ -d $OLD_STATE_ROOT ]]; then
+  install -d -m 0755 "$(dirname "$STATE_ROOT")"
+  mv -- "$OLD_STATE_ROOT" "$STATE_ROOT"
+fi
+install -d -m 0755 "$STATE_ROOT" "$LOG_ROOT"
 
 install -m 0755 "$ROOT/scripts/ops/repoground-publish-fleet" "$BIN_DIR/repoground-publish-fleet"
 install -m 0755 "$ROOT/scripts/ops/repoground-publication-policy" "$BIN_DIR/repoground-publication-policy"
