@@ -157,7 +157,7 @@ def test_active_python_strings_have_only_documented_legacy_identity_values() -> 
         if (
             "/tests/" in f"/{relative}/"
             or relative in compatibility_modules
-            or relative == "merger/repoground/core/compatibility_inventory.py"
+            or relative == "merger/repoground/core/naming_audit.py"
         ):
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=relative)
@@ -169,10 +169,6 @@ def test_active_python_strings_have_only_documented_legacy_identity_values() -> 
 
     expected = Counter(
         {
-            (
-                "merger/repoground/frontends/pythonista/build.py",
-                ".repoLens-state.json",
-            ): 1,
             (
                 "merger/repoground/core/merge.py",
                 "# repoLens Report",

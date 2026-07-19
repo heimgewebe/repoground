@@ -68,7 +68,7 @@ def test_generate_review_bundle_output_schema(schema):
         generate_review_bundle(old_repo, new_repo, repo_name, hub_dir)
 
         # Check output structure
-        pr_schau_dir = hub_dir / ".repolens" / "pr-schau" / repo_name
+        pr_schau_dir = hub_dir / ".repoground" / "pr-schau" / repo_name
         assert pr_schau_dir.exists()
 
         # Find the timestamp folder (should be only one)
@@ -135,7 +135,7 @@ def test_generate_review_bundle_splitting(schema):
         # Run generator
         generate_review_bundle(old_repo, new_repo, repo_name, hub_dir)
 
-        pr_schau_dir = hub_dir / ".repolens" / "pr-schau" / repo_name
+        pr_schau_dir = hub_dir / ".repoground" / "pr-schau" / repo_name
         assert pr_schau_dir.exists()
         bundle_dir = list(pr_schau_dir.iterdir())[0]
         bundle_json_path = bundle_dir / "bundle.json"

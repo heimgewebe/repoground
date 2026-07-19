@@ -1,0 +1,41 @@
+#!/usr/bin/env python3
+"""Emit a redacted, read-only RepoGround naming audit."""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from merger.repoground.core.naming_audit import build_audit, dumps_audit  # noqa: E402
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Report active former-name aliases without exposing raw secrets."
+    )
+    parser.add_argument("--config", action="append", default=[])
+    parser.add_argument("--repo-root", default=None)
+    parser.add_argument("--proc-root", default="/proc", help=argparse.SUPPRESS)
+    parser.add_argument("--no-services", action="store_true")
+    parser.add_argument("--fail-on-active-alias", action="store_true")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    audit = build_audit(
+        config_paths=args.config,
+        proc_root=args.proc_root,
+        repo_root=args.repo_root,
+        include_services=not args.no_services,
+    )
+    sys.stdout.write(dumps_audit(audit))
+    return 1 if args.fail_on_active_alias and not audit["active_aliases_zero"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

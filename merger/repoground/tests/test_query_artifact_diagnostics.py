@@ -28,7 +28,7 @@ _DIAGNOSTIC_FIELDS = {
 
 @pytest.fixture
 def storage_dir(tmp_path):
-    return tmp_path / ".rlens-service"
+    return tmp_path / ".repoground-service"
 
 
 @pytest.fixture

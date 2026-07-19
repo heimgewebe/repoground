@@ -919,7 +919,7 @@ def test_safe_extract_tar_wraps_fs_collision_as_extraction_error(tmp_path):
 
 
 def _snapshot_dir(root: Path, job_id: str, *, mtime: float, blocks: int = 1) -> Path:
-    directory = root / ".rlens-source-snapshots" / job_id
+    directory = root / ".repoground-source-snapshots" / job_id
     directory.mkdir(parents=True)
     (directory / "payload.bin").write_bytes(b"x" * max(1, blocks))
     os.utime(directory, (mtime, mtime))
@@ -973,7 +973,7 @@ def test_source_snapshot_retention_blocks_before_delete_on_unsafe_child(tmp_path
     safe = _snapshot_dir(tmp_path, "safe", mtime=1)
     outside = tmp_path / "outside"
     outside.mkdir()
-    link = tmp_path / ".rlens-source-snapshots" / "link"
+    link = tmp_path / ".repoground-source-snapshots" / "link"
     link.symlink_to(outside, target_is_directory=True)
 
     report = prune_source_snapshots(

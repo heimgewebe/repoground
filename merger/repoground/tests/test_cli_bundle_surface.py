@@ -61,7 +61,7 @@ def _make_bundle(tmp_path: Path, *, claim_present: bool, absence_reason=None) ->
         "run_id": "cli-bs-run",
         "created_at": "2026-06-02T00:00:00Z",
         "generator": {
-            "name": "rlens",
+            "name": "repoground",
             "version": "dev",
             "config_sha256": "a" * 64,
             "runtime": {"module": "merger.repoground.core.merge", "python_version": "3.11.0"},

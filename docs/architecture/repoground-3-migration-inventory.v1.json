@@ -33,29 +33,14 @@
       "scripts/proofs/"
     ],
     "allowed_exact_files": [
-      "docs/architecture/repobrief.md",
       "docs/architecture/repoground.md",
       "merger/repoground/cli/cmd_ground.py",
-      "merger/repoground/cli/cmd_rlens_client.py",
-      "merger/repoground/cli/repobrief.py",
-      "merger/repoground/cli/repobrief_mcp_stdio.py",
-      "merger/repoground/cli/rlens.py",
-      "merger/repoground/frontends/pythonista/repolens.py",
-      "merger/repoground/repoLens-spec.md",
-      "merger/repoground/repoground-build-spec.md",
-      "scripts/ops/install_rb_publish_fleet_runtime.sh",
-      "scripts/ops/rb-publication-policy",
-      "scripts/ops/rb-publish-fleet",
-      "scripts/ops/repobrief-publish-systemkatalog-main",
-      "scripts/ops/repobrief-publish-systemkatalog-main-if-changed",
-      "scripts/repobrief",
-      "scripts/repolens",
-      "scripts/rlens"
+      "merger/repoground/repoground-build-spec.md"
     ],
-    "compatibility_model": "surface-specific measured exit",
-    "compatibility_contract": "docs/contracts/repoground-compatibility-exit.v1.json",
+    "compatibility_model": "immediate active-alias hard cut; versioned data identifiers retained exactly",
+    "compatibility_contract": "docs/contracts/repoground-naming-hard-cut.v1.json",
     "unknown_usage_blocks_removal": true,
-    "zero_usage_window_days": 30
+    "zero_usage_window_days": 0
   },
   "current_public_documents": [
     "README.md",
@@ -92,7 +77,7 @@
         "src/grabowski_repobrief.py",
         "contracts/capability-catalog.v1.json"
       ],
-      "action": "add RepoGround tool vocabulary while preserving versioned rlens tool aliases and legacy bundle kinds"
+      "action": "replace active runtime and tool vocabulary; migrate versioned data contracts only through explicit new schema versions"
     },
     {
       "repository": "bureau",
@@ -221,5 +206,5 @@
     "consumer cutovers completed",
     "service cutover completed"
   ],
-  "inventory_scope": "historical migration baseline; live state is reported by repoground.compatibility_inventory.v1"
+  "inventory_scope": "historical migration baseline; live active-alias state is reported by repoground.naming_audit.v1"
 }

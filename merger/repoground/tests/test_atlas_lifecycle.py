@@ -9,7 +9,7 @@ from merger.repoground.service.app import app, init_service, verify_token
 def lifecycle_client(tmp_path: Path):
     # Setup test directories
     hub = tmp_path / "hub"
-    merges = hub / ".repolens" / "merges"
+    merges = hub / ".repoground" / "merges"
     merges.mkdir(parents=True)
 
     # Create test artifacts in reverse chronological order
@@ -106,7 +106,7 @@ def test_download_dirs_inventory(lifecycle_client: TestClient):
 def test_get_latest_artifact_404_if_none_completed(tmp_path: Path):
     # Setup hub with NO completed artifacts
     hub = tmp_path / "hub2"
-    merges = hub / ".repolens" / "merges"
+    merges = hub / ".repoground" / "merges"
     merges.mkdir(parents=True)
 
     running_data = {
@@ -139,7 +139,7 @@ def test_get_latest_artifact_404_if_none_completed(tmp_path: Path):
 def test_legacy_completed_status_normalized_in_list(tmp_path: Path):
     """Artifacts with legacy status 'completed' are normalized to 'complete' by list_atlas()."""
     hub = tmp_path / "hub_legacy"
-    merges = hub / ".repolens" / "merges"
+    merges = hub / ".repoground" / "merges"
     merges.mkdir(parents=True)
 
     # Legacy artifact uses "completed" (old vocabulary)
@@ -175,7 +175,7 @@ def test_legacy_completed_status_normalized_in_list(tmp_path: Path):
 def test_legacy_completed_status_found_by_get_latest(tmp_path: Path):
     """get_latest_atlas() recognizes legacy 'completed' artifacts as valid complete scans."""
     hub = tmp_path / "hub_legacy2"
-    merges = hub / ".repolens" / "merges"
+    merges = hub / ".repoground" / "merges"
     merges.mkdir(parents=True)
 
     # Only a legacy "completed" artifact exists — should be found by get_latest

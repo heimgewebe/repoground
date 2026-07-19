@@ -194,7 +194,7 @@ class TestResetMergeFormAfterSuccess(unittest.TestCase):
 
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory()
-        state_file = Path(self._tmpdir.name) / ".repoLens-state.json"
+        state_file = Path(self._tmpdir.name) / ".repoground-state.json"
         self.dummy = _DummyUI(state_file)
 
     def tearDown(self) -> None:
@@ -299,11 +299,11 @@ class TestResetMergeFormAfterSuccess(unittest.TestCase):
 
     def test_schedule_merge_form_reset_after_success_fallback(self) -> None:
         """Test scheduler fallback when ui.delay is not available."""
-        import merger.repoground.frontends.pythonista.build as repolens_module
+        import merger.repoground.frontends.pythonista.build as repoground_module
         
         # Simulate no ui.delay by patching the module's ui
-        original_ui = repolens_module.ui
-        repolens_module.ui = None
+        original_ui = repoground_module.ui
+        repoground_module.ui = None
         try:
             # Reset state first
             self.dummy.saved_prescan_selections = {
@@ -321,11 +321,11 @@ class TestResetMergeFormAfterSuccess(unittest.TestCase):
             self.assertTrue(self.dummy._update_repo_info_called)
         finally:
             # Restore original ui module
-            repolens_module.ui = original_ui
+            repoground_module.ui = original_ui
 
     def test_schedule_merge_form_reset_after_success_uses_ui_delay(self) -> None:
         """Test scheduler uses ui.delay when available."""
-        import merger.repoground.frontends.pythonista.build as repolens_module
+        import merger.repoground.frontends.pythonista.build as repoground_module
         
         # Track calls to ui.delay
         calls = []
@@ -336,8 +336,8 @@ class TestResetMergeFormAfterSuccess(unittest.TestCase):
                 calls.append((callback, seconds))
                 callback()
         
-        original_ui = repolens_module.ui
-        repolens_module.ui = FakeUI
+        original_ui = repoground_module.ui
+        repoground_module.ui = FakeUI
         try:
             # Reset state first
             self.dummy.saved_prescan_selections = {
@@ -357,7 +357,7 @@ class TestResetMergeFormAfterSuccess(unittest.TestCase):
             self.assertEqual(self.dummy.tv.selected_rows, [])
         finally:
             # Restore original ui module
-            repolens_module.ui = original_ui
+            repoground_module.ui = original_ui
 
 
 if __name__ == "__main__":

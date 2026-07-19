@@ -37,7 +37,7 @@ def test_pr_schau_verify_tool():
         # 1. Generate a valid bundle
         generate_review_bundle(old_repo, new_repo, repo_name, hub_dir)
 
-        pr_schau_dir = hub_dir / ".repolens" / "pr-schau" / repo_name
+        pr_schau_dir = hub_dir / ".repoground" / "pr-schau" / repo_name
         assert pr_schau_dir.exists()
         bundle_dir = list(pr_schau_dir.iterdir())[0]
         bundle_json = bundle_dir / "bundle.json"

@@ -111,7 +111,7 @@ const localStorageMock = makeStorage({ repoground_state_version: 'test' });
 
 const context = {
     window: {
-        __RLENS_UI_VERSION__: 'test',
+        __REPOGROUND_UI_VERSION__: 'test',
         __prescanOpen: false,
         location: { href: 'http://localhost/', search: '', pathname: '/', reload() {} },
         history: { replaceState() {} },

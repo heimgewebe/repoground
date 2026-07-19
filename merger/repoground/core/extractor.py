@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-repolens_extractor – ZIPs im repolens-hub entpacken und Repos aktualisieren.
+repoground_extractor – ZIPs im repolens-hub entpacken und Repos aktualisieren.
 Verwendet merge_core.
 
 Funktion:
@@ -448,7 +448,7 @@ def generate_review_bundle(
 ) -> None:
     """
     Erzeugt ein persistentes 'PR-Schau'-Bundle aus dem Vergleich zweier Repo-Stände.
-    Das Bundle wird unter wc-hub/.repolens/pr-schau/<repo>/<timestamp>/ abgelegt.
+    Das Bundle wird unter wc-hub/.repoground/pr-schau/<repo>/<timestamp>/ abgelegt.
 
     Enthält:
     - delta.json (Format 1)
@@ -1137,14 +1137,14 @@ def main() -> int:
 
     merges_dir = get_merges_dir(hub)
 
-    print("repolens_extractor-v2 – Hub:", hub)
+    print("RepoGround extractor – Hub:", hub)
     zips = sorted(hub.glob("*.zip"))
 
     if not zips:
         msg = "Keine ZIP-Dateien im Hub gefunden."
         print(msg)
         if console:
-            console.alert("repolens_extractor-v2", msg, "OK", hide_cancel_button=True)
+            console.alert("RepoGround extractor", msg, "OK", hide_cancel_button=True)
         return 0
 
     diff_paths = []
@@ -1173,7 +1173,7 @@ def main() -> int:
     print(summary)
 
     if console:
-        console.alert("repolens_extractor-v2", summary, "OK", hide_cancel_button=True)
+        console.alert("RepoGround extractor", summary, "OK", hide_cancel_button=True)
 
     return 0
 

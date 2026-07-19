@@ -1037,8 +1037,8 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
     def forbidden_stable_read(path):
         raise AssertionError(f"default warm cache hit must not read bytes: {path}")
 
-    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
-    monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
+    monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
+    monkeypatch.delenv("REPOGROUND_STRICT_CACHE_HASH", raising=False)
     monkeypatch.setattr(
         bundle_access,
         "_read_stable_regular_file_bytes",
@@ -1099,7 +1099,7 @@ def test_strict_navigation_cache_hash_uses_descriptor_pinned_read(
             call_graph_reads += 1
         return original_reader(path)
 
-    monkeypatch.setenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", "strict")
+    monkeypatch.setenv("REPOGROUND_CACHE_VALIDATION", "strict")
     monkeypatch.setattr(
         bundle_access, "_read_stable_artifact_bytes", counting_reader
     )
@@ -1125,7 +1125,7 @@ def test_invalid_cache_validation_mode_falls_back_to_strict(
             call_graph_reads += 1
         return original_reader(path)
 
-    monkeypatch.setenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", "typo")
+    monkeypatch.setenv("REPOGROUND_CACHE_VALIDATION", "typo")
     monkeypatch.setattr(
         bundle_access, "_read_stable_artifact_bytes", counting_reader
     )
@@ -1139,7 +1139,7 @@ def test_invalid_cache_validation_mode_falls_back_to_strict(
     warnings = [
         record
         for record in caplog.records
-        if "LENSKIT_REPOBRIEF_CACHE_VALIDATION" in record.getMessage()
+        if "REPOGROUND_CACHE_VALIDATION" in record.getMessage()
         and "typo" in record.getMessage()
     ]
     assert len(warnings) == 1
@@ -1181,8 +1181,8 @@ def test_weak_file_identity_automatically_uses_content_hash(
             call_graph_reads += 1
         return raw, stat_result, failure, detail
 
-    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
-    monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
+    monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
+    monkeypatch.delenv("REPOGROUND_STRICT_CACHE_HASH", raising=False)
     monkeypatch.setattr(os, "fstat", weak_fstat)
     monkeypatch.setattr(Path, "stat", weak_path_stat)
     monkeypatch.setattr(
@@ -1225,8 +1225,8 @@ def test_weak_manifest_identity_automatically_uses_content_hash(
             stat_result = WeakStat(stat_result)
         return raw, stat_result, failure, detail
 
-    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
-    monkeypatch.delenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", raising=False)
+    monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
+    monkeypatch.delenv("REPOGROUND_STRICT_CACHE_HASH", raising=False)
     monkeypatch.setattr(
         bundle_access,
         "_read_stable_regular_file_bytes",
@@ -1321,7 +1321,7 @@ def test_manifest_change_during_full_verification_is_rejected(tmp_path, monkeypa
             changed = True
         return result
 
-    monkeypatch.setenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", "strict")
+    monkeypatch.setenv("REPOGROUND_CACHE_VALIDATION", "strict")
     monkeypatch.setattr(
         bundle_access,
         "_read_stable_artifact_bytes",
@@ -1345,8 +1345,8 @@ def test_legacy_strict_hash_switch_remains_supported(tmp_path, monkeypatch):
             call_graph_reads += 1
         return original_reader(path)
 
-    monkeypatch.delenv("LENSKIT_REPOBRIEF_CACHE_VALIDATION", raising=False)
-    monkeypatch.setenv("LENSKIT_REPOBRIEF_STRICT_CACHE_HASH", "1")
+    monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
+    monkeypatch.setenv("REPOGROUND_STRICT_CACHE_HASH", "1")
     monkeypatch.setattr(
         bundle_access,
         "_read_stable_artifact_bytes",

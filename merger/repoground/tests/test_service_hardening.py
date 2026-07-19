@@ -266,19 +266,19 @@ def test_create_job_blocks_absolute_path_repo(client_and_hub):
 
 def test_create_job_fresh_hub_no_state_dir(client_and_hub):
     """
-    Job creation recreates the missing .rlens-service state directory.
+    Job creation recreates the missing .repoground-service state directory.
     """
     client, hub_path = client_and_hub
 
-    # 1. Simulate fresh state by deleting the .rlens-service directory
+    # 1. Simulate fresh state by deleting the .repoground-service directory
     from merger.repoground.core.merge import MERGES_DIR_NAME
-    storage_dir = Path(hub_path) / MERGES_DIR_NAME / ".rlens-service"
+    storage_dir = Path(hub_path) / MERGES_DIR_NAME / ".repoground-service"
 
     import shutil
     if storage_dir.exists():
         shutil.rmtree(storage_dir)
 
-    assert not storage_dir.exists(), "Setup failed: .rlens-service must not exist"
+    assert not storage_dir.exists(), "Setup failed: .repoground-service must not exist"
 
     # 2. Test saving with the existing JobStore instance when the state directory is gone.
     # Note: init_service in the fixture already created the directory,

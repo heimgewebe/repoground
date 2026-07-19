@@ -424,7 +424,7 @@ def make_surface_manifest(
     if absence_reason is not None:
         links["claim_evidence_map_absence_reason"] = absence_reason
 
-    generator = {"name": "rlens", "version": "dev", "config_sha256": "a" * 64}
+    generator = {"name": "repoground", "version": "dev", "config_sha256": "a" * 64}
     if include_runtime:
         generator["runtime"] = {
             "module": "merger.repoground.core.merge",

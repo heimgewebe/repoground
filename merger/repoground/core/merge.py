@@ -207,7 +207,7 @@ CANONICAL_REPORT_HEADING = "# RepoGround Report"
 LEGACY_REPORT_HEADING = "# repoLens Report"
 REPORT_HEADINGS = (CANONICAL_REPORT_HEADING, LEGACY_REPORT_HEADING)
 MERGES_DIR_NAME = "merges"
-PR_SCHAU_DIR = Path(".repolens") / "pr-schau"
+PR_SCHAU_DIR = Path(".repoground") / "pr-schau"
 
 # Formale Contract-Deklaration für alle repoLens-Reports.
 # Name/Version können von nachgelagerten Tools verwendet werden,
@@ -4988,7 +4988,7 @@ def generate_json_sidecar(
         },
         # keep existing useful fields for compatibility/traceability
         "spec_version": SPEC_VERSION,
-        "generator": generator_info or {"name": "lenskit", "platform": "unknown"},
+        "generator": generator_info or {"name": "repoground", "platform": "unknown"},
         "features": sorted(active_features),
         "profile": level,
         "output_mode": output_mode,
@@ -5486,7 +5486,7 @@ def write_reports_v2(
     # Ensure generator_info is safe
     if generator_info is None:
         generator_info = {
-            "name": "lenskit",
+            "name": "repoground",
             "platform": "unknown",
             "version": os.getenv("REPOGROUND_VERSION", CORE_VERSION)
         }
@@ -5495,7 +5495,7 @@ def write_reports_v2(
             generator_info = dict(generator_info)
         except Exception:
             generator_info = {
-                "name": "lenskit",
+                "name": "repoground",
                 "platform": "unknown",
                 "version": os.getenv("REPOGROUND_VERSION", CORE_VERSION)
             }

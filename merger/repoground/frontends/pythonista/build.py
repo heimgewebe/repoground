@@ -217,7 +217,7 @@ def force_close_files(paths: List[Path]) -> None:
 
 
 # Merger-UI merkt sich die letzte Auswahl in dieser JSON-Datei im Hub:
-LAST_STATE_FILENAME = ".repoLens-state.json"
+LAST_STATE_FILENAME = ".repoground-state.json"
 
 # Import core logic
 try:
@@ -621,7 +621,7 @@ def _pick_human_md(paths) -> Optional[Path]:
     return None
 
 
-def _load_repolens_extractor_module():
+def _load_repoground_extractor_module():
     """Load extractor module from core."""
     try:
         from merger.repoground.core import extractor
@@ -693,7 +693,7 @@ class PRSchauDataSource(object):
 def _run_extractor_on_start(hub: Path) -> None:
     """Run repolens-extractor automatically at app start (best-effort, quiet)."""
     try:
-        extractor = _load_repolens_extractor_module()
+        extractor = _load_repoground_extractor_module()
         if extractor is None:
             return
         # Preferred API (added for startup auto-run)
@@ -786,7 +786,7 @@ class MergerUI(object):
         # This makes delta/inspection features immediately usable and surfaces hub issues early,
         # without breaking the main UI if anything is missing.
         try:
-            mod = _load_repolens_extractor_module()
+            mod = _load_repoground_extractor_module()
             # Prefer passing the detected hub explicitly so extractor and UI agree.
             try:
                 mod.detect_hub(str(self.hub))
@@ -2274,7 +2274,7 @@ class MergerUI(object):
                 print(f"[RepoGround] {msg}")
             return
 
-        mod = _load_repolens_extractor_module()
+        mod = _load_repoground_extractor_module()
         if mod is None or not hasattr(mod, "create_delta_merge_from_diff"):
             msg = "Delta helper (repolens-extractor) not available."
             if console:
@@ -2430,7 +2430,7 @@ class MergerUI(object):
                 ext_filter=None,
                 extras=extras,
                 delta_meta=delta_meta,    # << NEW: real delta injected
-                generator_info={"name": "repolens", "platform": "ios"},
+                generator_info={"name": "repoground", "platform": "ios"},
             )
 
             # Close files
@@ -3560,7 +3560,7 @@ class MergerUI(object):
             if self.extras_config.delta_reports and len(summaries) == 1:
                 repo_name = summaries[0]["name"]
                 try:
-                    mod = _load_repolens_extractor_module()
+                    mod = _load_repoground_extractor_module()
                     if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
                         diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
                         if diff_path:
@@ -3598,7 +3598,7 @@ class MergerUI(object):
                 extras=self.extras_config,
                 delta_meta=delta_meta,
                 meta_density=meta_density,
-                generator_info={"name": "repolens", "platform": "ios"},
+                generator_info={"name": "repoground", "platform": "ios"},
             )
 
             all_out_paths.extend(artifacts.get_all_paths())
@@ -3954,7 +3954,7 @@ def main_cli():
         # Only try to find delta for single-repo merges
         repo_name = summaries[0]["name"]
         try:
-            mod = _load_repolens_extractor_module()
+            mod = _load_repoground_extractor_module()
             if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
                 diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
                 if diff_path:

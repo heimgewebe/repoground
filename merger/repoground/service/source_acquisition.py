@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT_SECONDS = 60
 
 # Job-bound snapshot root, created under the (already validated) merges_dir.
-SNAPSHOT_DIR_NAME = ".rlens-source-snapshots"
+SNAPSHOT_DIR_NAME = ".repoground-source-snapshots"
 DEFAULT_SNAPSHOT_RETENTION_COUNT = 3
 DEFAULT_SNAPSHOT_MAX_AGE_HOURS = 24
 DEFAULT_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024 * 1024

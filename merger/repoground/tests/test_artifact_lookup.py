@@ -41,7 +41,7 @@ _SCHEMA_PATH = Path(__file__).parent.parent / "contracts" / "artifact-lookup.v1.
 
 @pytest.fixture
 def store(tmp_path):
-    return QueryArtifactStore(tmp_path / ".rlens-service")
+    return QueryArtifactStore(tmp_path / ".repoground-service")
 
 
 @pytest.fixture
@@ -149,7 +149,7 @@ class TestQueryArtifactStore:
             assert store.get(aid) is not None
 
     def test_persistence_survives_reload(self, tmp_path):
-        storage_dir = tmp_path / ".rlens-service"
+        storage_dir = tmp_path / ".repoground-service"
         store1 = QueryArtifactStore(storage_dir)
         prov = {"source_query": "persist test", "timestamp": "2024-01-01T00:00:00+00:00"}
         aid = store1.store("query_trace", {"data": "value"}, prov)
@@ -203,7 +203,7 @@ class TestQueryArtifactStore:
         assert entry["authority"] == "runtime_observation"
 
     def test_runtime_metadata_survives_persistence_reload(self, tmp_path):
-        storage_dir = tmp_path / ".rlens-service"
+        storage_dir = tmp_path / ".repoground-service"
         store1 = QueryArtifactStore(storage_dir)
         prov = {"source_query": "persist", "timestamp": "2024-01-01T00:00:00+00:00"}
         aid = store1.store("context_bundle", {}, prov)
@@ -218,7 +218,7 @@ class TestQueryArtifactStore:
     def test_legacy_entry_without_runtime_metadata_is_backfilled(self, tmp_path):
         """Entries written before the metadata PR are backfilled by get()."""
         import json as _json
-        storage_dir = tmp_path / ".rlens-service"
+        storage_dir = tmp_path / ".repoground-service"
         storage_dir.mkdir(parents=True, exist_ok=True)
         store_file = storage_dir / "query_artifacts.json"
         legacy_entry = {
@@ -250,7 +250,7 @@ class TestQueryArtifactStore:
     def test_legacy_context_bundle_backfill_uses_projected_shape(self, tmp_path):
         """Legacy context_bundle entries are backfilled with artifact_shape='projected'."""
         import json as _json
-        storage_dir = tmp_path / ".rlens-service"
+        storage_dir = tmp_path / ".repoground-service"
         storage_dir.mkdir(parents=True, exist_ok=True)
         store_file = storage_dir / "query_artifacts.json"
         legacy_entry = {
@@ -271,7 +271,7 @@ class TestQueryArtifactStore:
     def test_backfill_does_not_overwrite_existing_fields(self, tmp_path):
         """If a field is already in the stored entry, backfill must not overwrite it."""
         import json as _json
-        storage_dir = tmp_path / ".rlens-service"
+        storage_dir = tmp_path / ".repoground-service"
         storage_dir.mkdir(parents=True, exist_ok=True)
         store_file = storage_dir / "query_artifacts.json"
         # Entry already has authority (e.g. from a future schema that uses a different value)
@@ -758,7 +758,7 @@ class TestApiArtifactLookup:
         jsonschema.validate(instance=not_found_payload, schema=schema)
 
     def test_store_path_uses_merges_dir_when_set(self, api_client_custom_merges):
-        """QueryArtifactStore must use merges_dir/.rlens-service when merges_dir is set."""
+        """QueryArtifactStore must use merges_dir/.repoground-service when merges_dir is set."""
         client, custom_merges = api_client_custom_merges
         resp = client.post(
             "/api/query",
@@ -777,7 +777,7 @@ class TestApiArtifactLookup:
         )
 
         # The query_artifacts.json must exist inside the custom merges dir.
-        store_file = custom_merges / ".rlens-service" / "query_artifacts.json"
+        store_file = custom_merges / ".repoground-service" / "query_artifacts.json"
         assert store_file.exists(), (
             f"QueryArtifactStore did not write to custom merges_dir: {store_file}"
         )

@@ -5,7 +5,7 @@ Ziel: Sicherstellen, dass PR-Schau-Bundle zuverlässig entsteht, bevor alte Ordn
 ## A) Setup (1×)
 - [ ] Auf iPad / Pythonista: `repolens.py` läuft auf dem aktuellen Branch (mit PR-Schau).
 - [ ] WC-Hub Root existiert.
-- [ ] Pfad `wc-hub/.repolens/pr-schau/` existiert oder wird automatisch angelegt.
+- [ ] Pfad `wc-hub/.repoground/pr-schau/` existiert oder wird automatisch angelegt.
 
 **Pass-Kriterium**: `repolens` startet ohne ImportError.
 
@@ -17,7 +17,7 @@ Ziel: Sicherstellen, dass PR-Schau-Bundle zuverlässig entsteht, bevor alte Ordn
     - „PR-Review-Bundle erfolgreich erstellt.“
     - „Alter Ordner gelöscht“
 - [ ] Prüfe Dateien:
-    - `wc-hub/.repolens/pr-schau/<repo_name>/<timestamp>/delta.json`
+    - `wc-hub/.repoground/pr-schau/<repo_name>/<timestamp>/delta.json`
     - `.../review.md`
     - `.../bundle.json`
 

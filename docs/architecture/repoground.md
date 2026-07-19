@@ -49,10 +49,9 @@ repoground service-client
 former RepoBrief surface. `serve` contains the local service inherited from
 rLens. These are subcommands of one product, not separate products.
 
-The old `repobrief`, `rlens`, `repolens`, `merger.lenskit` and related module
-entry points remain warning-emitting delegates only until their individual review
-dates and zero-usage criteria are satisfied. They dispatch to the canonical
-implementation and do not maintain a second code path.
+No warning delegate or alternate entry point is part of the active command
+surface. Unknown active use of a former command blocks closeout instead of
+reactivating an alias.
 
 ## Read/create separation
 
@@ -79,8 +78,8 @@ fix or merge authority.
 The explicit `snapshot_create` handler remains hidden unless the operator
 enables it at server startup. Stable startup and generic client configuration
 are documented in [RepoGround MCP stdio](../usage/repoground-mcp-stdio.md).
-Older files and protocol identifiers containing `repobrief` remain compatibility
-contracts until a separately versioned replacement is introduced.
+Older schema and kind identifiers retain their exact versioned data meaning.
+They do not create an alternate MCP scheme or command surface.
 
 ## Agent Workbench boundary
 
@@ -129,20 +128,14 @@ artifact roles as `required`, `recommended`, `optional`, `not_applicable` or
 `profile_excluded`. A missing required artifact is a profile-readiness signal;
 it is not proof that repository content is wrong.
 
-## Compatibility and persisted contracts
+## Naming hard cut and persisted contracts
 
-Existing persisted identifiers such as `lenskit.*`, `repolens.*`,
-`repobrief.*`, `repobrief://...`, `repolens-report`, old schema filenames and
-old state directories are not silently reinterpreted. They remain readable and
-retain their original meaning.
+Active commands, modules, environment variables, runtime paths, resource schemes
+and generator identities use RepoGround exclusively. The immediate rule and its
+negative audit are defined in
+[`repoground-naming-hard-cut.v1.json`](../contracts/repoground-naming-hard-cut.v1.json).
 
-New RepoGround 3.x artifacts use the new identity only where a new versioned
-contract was introduced, for example `repoground.bundle.manifest@2.0`.
-Compatibility readers may accept documented older generations, but producers
-must not mix an old kind with a new version or vice versa.
-
-There is no blanket compatibility window for the entire 3.x line. Delegates are
-removed per surface after measured zero usage and the criteria in
-[`repoground-compatibility-exit.v1.json`](../contracts/repoground-compatibility-exit.v1.json).
-Persisted identifiers remain versioned data contracts and require a paired producer,
-schema, reader, contradiction test and rollback path before any semantic migration.
+Existing versioned schema IDs, `kind` values and historical artifact identifiers
+retain their exact meaning. They are data contracts, not public aliases, and are
+not silently reinterpreted for branding. A future migration requires a new
+versioned producer, schema, reader, contradiction test and rollback path.

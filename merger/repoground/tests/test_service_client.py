@@ -3,7 +3,6 @@
 No real service is used. urllib.request.urlopen is monkeypatched.
 """
 import json
-import os
 import pathlib
 import ast
 import urllib.error
@@ -17,26 +16,8 @@ from merger.repoground.cli.main import main as _main
 
 
 def main(args: list[str]) -> int:
-    """Run established service-client coverage through canonical configuration."""
-    environment_aliases = {
-        "REPOGROUND_BASE_URL": "REPOGROUND_BASE_URL",
-        "REPOGROUND_TOKEN": "REPOGROUND_TOKEN",
-        "REPOGROUND_PROFILE": "REPOGROUND_PROFILE",
-        "LENSKIT_REPOGROUND_PROFILES": "REPOGROUND_PROFILES",
-    }
-    original: dict[str, str | None] = {}
-    for legacy, canonical in environment_aliases.items():
-        if legacy in os.environ:
-            original[canonical] = os.environ.get(canonical)
-            os.environ[canonical] = os.environ[legacy]
-    try:
-        return _main(["service-client" if arg == "repoground-client" else arg for arg in args])
-    finally:
-        for canonical, value in original.items():
-            if value is None:
-                os.environ.pop(canonical, None)
-            else:
-                os.environ[canonical] = value
+    """Run service-client coverage through the canonical command surface."""
+    return _main(args)
 
 
 class _FakeResponse:
@@ -115,7 +96,7 @@ def test_service_client_health_json(monkeypatch: pytest.MonkeyPatch, capsys: pyt
     captured, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -140,7 +121,7 @@ def test_service_client_health_text(monkeypatch: pytest.MonkeyPatch, capsys: pyt
     _, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health"])
+    rc = main(["service-client", "health"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -160,7 +141,7 @@ def test_service_client_base_url_env(monkeypatch: pytest.MonkeyPatch) -> None:
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
@@ -176,7 +157,7 @@ def test_service_client_base_url_flag_overrides_env(monkeypatch: pytest.MonkeyPa
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--base-url", "http://heim-pc:8787", "--json"])
+    rc = main(["service-client", "health", "--base-url", "http://heim-pc:8787", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
@@ -193,7 +174,7 @@ def test_service_client_token_header_from_env(monkeypatch: pytest.MonkeyPatch) -
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "artifacts", "--json"])
+    rc = main(["service-client", "artifacts", "--json"])
 
     assert rc == 0
     auth = captured["req"].get_header("Authorization")
@@ -211,7 +192,7 @@ def test_service_client_token_flag_overrides_env(monkeypatch: pytest.MonkeyPatch
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "artifacts", "--token", "flag-token", "--json"])
+    rc = main(["service-client", "artifacts", "--token", "flag-token", "--json"])
 
     assert rc == 0
     auth = captured["req"].get_header("Authorization")
@@ -225,7 +206,7 @@ def test_service_client_token_before_subcommand_is_safe(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "--token", "secret-token", "health", "--json"])
+    rc = main(["service-client", "--token", "secret-token", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 0
@@ -241,7 +222,7 @@ def test_service_client_leaf_token_overrides_parent_token(monkeypatch: pytest.Mo
 
     rc = main(
         [
-            "repoground-client",
+            "service-client",
             "--token",
             "parent-token",
             "artifacts",
@@ -261,7 +242,7 @@ def test_service_client_leaf_base_url_overrides_parent_base_url(monkeypatch: pyt
 
     rc = main(
         [
-            "repoground-client",
+            "service-client",
             "--base-url",
             "http://parent:8787",
             "health",
@@ -292,7 +273,7 @@ def test_service_client_token_not_leaked_on_http_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -315,7 +296,7 @@ def test_service_client_token_not_leaked_on_url_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -334,7 +315,7 @@ def test_service_client_artifacts_with_repo_query(
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "artifacts", "--repo", "lens kit", "--json"])
+    rc = main(["service-client", "artifacts", "--repo", "lens kit", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -359,7 +340,7 @@ def test_service_client_latest_requires_repo(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(["repoground-client", "latest", "--json"])
+        main(["service-client", "latest", "--json"])
 
     assert exc_info.value.code == 2
     assert "hit" not in network_called
@@ -379,7 +360,7 @@ def test_service_client_latest_with_repo_level_mode(
 
     rc = main(
         [
-            "repoground-client",
+            "service-client",
             "latest",
             "--repo",
             "repoground",
@@ -415,7 +396,7 @@ def test_service_client_http_error_exit_1_json(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 1
@@ -434,7 +415,7 @@ def test_service_client_invalid_json_response_exit_1(
 ) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", _make_bad_json_opener())
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 1
@@ -458,7 +439,7 @@ def test_service_client_value_error_exit_1_no_token_leak(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -480,7 +461,7 @@ def test_service_client_invalid_base_url_scheme_rejected(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--base-url", "file:///etc/passwd", "--json"])
+    rc = main(["service-client", "health", "--base-url", "file:///etc/passwd", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -506,7 +487,7 @@ def test_service_client_invalid_base_url_env_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -566,7 +547,7 @@ def test_service_client_jobs_json(
     captured, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "jobs", "--json"])
+    rc = main(["service-client", "jobs", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -585,7 +566,7 @@ def test_service_client_jobs_text(
     _, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "jobs"])
+    rc = main(["service-client", "jobs"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -599,7 +580,7 @@ def test_service_client_jobs_empty(
     _, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "jobs"])
+    rc = main(["service-client", "jobs"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -612,7 +593,7 @@ def test_service_client_jobs_status_and_limit(
     captured, opener = _make_opener([])
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "jobs", "--status", "running", "--limit", "3", "--json"])
+    rc = main(["service-client", "jobs", "--status", "running", "--limit", "3", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -634,7 +615,7 @@ def test_service_client_job_by_id_json(
     captured, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "job", "job-xyz", "--json"])
+    rc = main(["service-client", "job", "job-xyz", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -660,7 +641,7 @@ def test_service_client_job_by_id_text(
     _, opener = _make_opener(fake_data)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "job", "job-xyz"])
+    rc = main(["service-client", "job", "job-xyz"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -676,7 +657,7 @@ def test_service_client_job_id_is_url_encoded(monkeypatch: pytest.MonkeyPatch) -
     captured, opener = _make_opener({"id": "x"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "job", "job id/with weird", "--json"])
+    rc = main(["service-client", "job", "job id/with weird", "--json"])
 
     assert rc == 0
     # Path segment must not contain raw spaces or slashes.
@@ -695,7 +676,7 @@ def test_service_client_job_missing_id_is_cli_error(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(["repoground-client", "job"])
+        main(["service-client", "job"])
     assert exc_info.value.code == 2
 
 
@@ -711,7 +692,7 @@ def test_service_client_job_http_404_no_token_leak(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "job", "missing-id", "--json"])
+    rc = main(["service-client", "job", "missing-id", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -747,7 +728,7 @@ def test_service_client_run_posts_job_request(
 
     rc = main(
         [
-            "repoground-client",
+            "service-client",
             "run",
             "--repo",
             "repoground",
@@ -778,7 +759,7 @@ def test_service_client_run_defaults_pre_pull_true(
     captured, opener = _make_opener({"id": "job-pp", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground", "--json"])
+    rc = main(["service-client", "run", "--repo", "repoground", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -792,7 +773,7 @@ def test_service_client_run_no_pre_pull_sends_false(
     captured, opener = _make_opener({"id": "job-pp2", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground", "--no-pre-pull", "--json"])
+    rc = main(["service-client", "run", "--repo", "repoground", "--no-pre-pull", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -809,7 +790,7 @@ def test_service_client_run_plan_only_sends_pre_pull_false(
     captured, opener = _make_opener({"id": "job-po", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground", "--plan-only", "--json"])
+    rc = main(["service-client", "run", "--repo", "repoground", "--plan-only", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -827,7 +808,7 @@ def test_service_client_run_plan_only_with_pre_pull_is_rejected(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground", "--plan-only", "--pre-pull", "--json"])
+    rc = main(["service-client", "run", "--repo", "repoground", "--plan-only", "--pre-pull", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -846,7 +827,7 @@ def test_service_client_run_pre_pull_and_no_pre_pull_are_mutually_exclusive(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     with pytest.raises(SystemExit) as exc_info:
-        main(["repoground-client", "run", "--repo", "repoground", "--pre-pull", "--no-pre-pull"])
+        main(["service-client", "run", "--repo", "repoground", "--pre-pull", "--no-pre-pull"])
     assert exc_info.value.code == 2
 
 
@@ -858,7 +839,7 @@ def test_service_client_run_repeated_repo_force_new_and_plan_only(
 
     rc = main(
         [
-            "repoground-client",
+            "service-client",
             "run",
             "--repo",
             "repoground",
@@ -897,7 +878,7 @@ def test_service_client_run_remote_snapshot_payload(
     captured, opener = _make_opener({"id": "job-rs", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "run", "--repo", "weltgewebe", "--source-mode", "remote-snapshot", "--json"])
+    rc = main(["service-client", "run", "--repo", "weltgewebe", "--source-mode", "remote-snapshot", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -915,7 +896,7 @@ def test_service_client_run_remote_snapshot_default_branch(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "repoground-client", "run", "--repo", "weltgewebe",
+        "service-client", "run", "--repo", "weltgewebe",
         "--source-mode", "remote-snapshot", "--remote-ref-policy", "default-branch", "--json",
     ])
     capsys.readouterr()
@@ -933,7 +914,7 @@ def test_service_client_run_remote_snapshot_explicit_ref(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "repoground-client", "run", "--repo", "weltgewebe",
+        "service-client", "run", "--repo", "weltgewebe",
         "--source-mode", "remote-snapshot", "--remote-ref", "origin/main", "--json",
     ])
     capsys.readouterr()
@@ -949,7 +930,7 @@ def test_service_client_run_local_current_payload(
     captured, opener = _make_opener({"id": "job-lc", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground", "--source-mode", "local-current", "--json"])
+    rc = main(["service-client", "run", "--repo", "repoground", "--source-mode", "local-current", "--json"])
     capsys.readouterr()
 
     assert rc == 0
@@ -966,7 +947,7 @@ def test_service_client_run_plan_only_remote_snapshot_allowed(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "repoground-client", "run", "--repo", "weltgewebe",
+        "service-client", "run", "--repo", "weltgewebe",
         "--source-mode", "remote-snapshot", "--plan-only", "--json",
     ])
     capsys.readouterr()
@@ -987,9 +968,9 @@ def test_service_client_run_source_mode_pre_pull_conflicts(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     for argv in (
-        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-current", "--pre-pull", "--json"],
-        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-ff", "--no-pre-pull", "--json"],
-        ["repoground-client", "run", "--repo", "r", "--source-mode", "remote-snapshot", "--pre-pull", "--json"],
+        ["service-client", "run", "--repo", "r", "--source-mode", "local-current", "--pre-pull", "--json"],
+        ["service-client", "run", "--repo", "r", "--source-mode", "local-ff", "--no-pre-pull", "--json"],
+        ["service-client", "run", "--repo", "r", "--source-mode", "remote-snapshot", "--pre-pull", "--json"],
     ):
         rc = main(argv)
         out, _ = capsys.readouterr()
@@ -1002,14 +983,14 @@ def test_service_client_run_source_mode_pre_pull_conflicts(
     "argv",
     [
         # local-ff + plan-only: local-ff would mutate, plan-only forbids mutation.
-        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-ff", "--plan-only", "--json"],
+        ["service-client", "run", "--repo", "r", "--source-mode", "local-ff", "--plan-only", "--json"],
         # remote-ref without remote-snapshot.
-        ["repoground-client", "run", "--repo", "r", "--remote-ref", "origin/main", "--json"],
-        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref", "origin/main", "--json"],
-        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-ff", "--remote-ref", "origin/main", "--json"],
+        ["service-client", "run", "--repo", "r", "--remote-ref", "origin/main", "--json"],
+        ["service-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref", "origin/main", "--json"],
+        ["service-client", "run", "--repo", "r", "--source-mode", "local-ff", "--remote-ref", "origin/main", "--json"],
         # explicit non-default policy without remote-snapshot.
-        ["repoground-client", "run", "--repo", "r", "--remote-ref-policy", "default-branch", "--json"],
-        ["repoground-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref-policy", "default-branch", "--json"],
+        ["service-client", "run", "--repo", "r", "--remote-ref-policy", "default-branch", "--json"],
+        ["service-client", "run", "--repo", "r", "--source-mode", "local-current", "--remote-ref-policy", "default-branch", "--json"],
     ],
 )
 def test_service_client_run_source_mode_conflicts_exit_2_no_network(
@@ -1036,7 +1017,7 @@ def test_service_client_run_remote_snapshot_explicit_policy_allowed(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "repoground-client", "run", "--repo", "r",
+        "service-client", "run", "--repo", "r",
         "--source-mode", "remote-snapshot", "--remote-ref-policy", "default-branch", "--json",
     ])
     capsys.readouterr()
@@ -1058,7 +1039,7 @@ def test_service_client_run_text_output(
     )
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground"])
+    rc = main(["service-client", "run", "--repo", "repoground"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1075,7 +1056,7 @@ def test_service_client_run_sets_bearer_header_and_no_query_token(
     captured, opener = _make_opener({"id": "job-run-token", "status": "queued"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground", "--json"])
+    rc = main(["service-client", "run", "--repo", "repoground", "--json"])
 
     assert rc == 0
     assert captured["req"].get_header("Authorization") == "Bearer run-secret"
@@ -1094,7 +1075,7 @@ def test_service_client_run_http_error_exit_1_no_token_leak(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "run", "--repo", "repoground", "--json"])
+    rc = main(["service-client", "run", "--repo", "repoground", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -1111,7 +1092,7 @@ def test_service_client_cancel_posts_to_url_encoded_job_path(
     captured, opener = _make_opener({"status": "canceling"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "cancel", "job id/with weird", "--json"])
+    rc = main(["service-client", "cancel", "job id/with weird", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1132,7 +1113,7 @@ def test_service_client_cancel_text_finished_message(
     _, opener = _make_opener({"status": "succeeded", "message": "Job already finished"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "cancel", "job-done"])
+    rc = main(["service-client", "cancel", "job-done"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1147,7 +1128,7 @@ def test_service_client_cancel_sets_bearer_header_and_no_query_token(
     captured, opener = _make_opener({"status": "canceling"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "cancel", "job-1", "--json"])
+    rc = main(["service-client", "cancel", "job-1", "--json"])
 
     assert rc == 0
     assert captured["req"].get_header("Authorization") == "Bearer cancel-secret"
@@ -1166,7 +1147,7 @@ def test_service_client_cancel_http_404_no_token_leak(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "cancel", "missing-id", "--json"])
+    rc = main(["service-client", "cancel", "missing-id", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -1194,7 +1175,7 @@ def test_service_client_logs_text_streams_data_lines(
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1"])
+    rc = main(["service-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1223,7 +1204,7 @@ def test_service_client_logs_json_emits_one_object_per_event(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1", "--json"])
+    rc = main(["service-client", "logs", "job-1", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1252,7 +1233,7 @@ def test_service_client_logs_stops_on_event_end(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1"])
+    rc = main(["service-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1267,7 +1248,7 @@ def test_service_client_logs_passes_last_id(
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1", "--last-id", "7"])
+    rc = main(["service-client", "logs", "job-1", "--last-id", "7"])
     capsys.readouterr()
 
     assert rc == 0
@@ -1291,7 +1272,7 @@ def test_service_client_logs_multiline_data(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1"])
+    rc = main(["service-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1313,7 +1294,7 @@ def test_service_client_logs_ignores_comment_lines(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1"])
+    rc = main(["service-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1333,7 +1314,7 @@ def test_service_client_logs_handles_http_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "logs", "job-1", "--json"])
+    rc = main(["service-client", "logs", "job-1", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 1
@@ -1359,7 +1340,7 @@ def test_service_client_logs_token_redacted_in_data(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1"])
+    rc = main(["service-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1375,7 +1356,7 @@ def test_service_client_logs_sets_bearer_header_and_no_query_token(
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1"])
+    rc = main(["service-client", "logs", "job-1"])
 
     assert rc == 0
     assert captured["req"].get_header("Authorization") == "Bearer bearer-token"
@@ -1395,7 +1376,7 @@ def test_service_client_logs_stream_without_end_event_still_succeeds(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1"])
+    rc = main(["service-client", "logs", "job-1"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1417,7 +1398,7 @@ def test_service_client_logs_json_redacts_token_in_data(
     _, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1", "--json"])
+    rc = main(["service-client", "logs", "job-1", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -1435,7 +1416,7 @@ def test_service_client_jobs_negative_limit_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "jobs", "--limit", "-1", "--json"])
+    rc = main(["service-client", "jobs", "--limit", "-1", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1458,7 +1439,7 @@ def test_service_client_logs_timeout_non_positive_is_config_error(
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     rc = main(
-        ["repoground-client", "logs", "job-1", "--timeout", timeout_value, "--json"]
+        ["service-client", "logs", "job-1", "--timeout", timeout_value, "--json"]
     )
     out, err = capsys.readouterr()
 
@@ -1478,7 +1459,7 @@ def test_service_client_logs_last_id_negative_is_passed_through(
     captured, opener = _make_sse_opener(lines)
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "logs", "job-1", "--last-id", "-5"])
+    rc = main(["service-client", "logs", "job-1", "--last-id", "-5"])
 
     assert rc == 0
     assert "last_id=-5" in captured["req"].full_url
@@ -1496,7 +1477,7 @@ def _write_profiles(tmp_path: pathlib.Path, payload: object) -> pathlib.Path:
 
 
 def _isolate_profile_env(monkeypatch: pytest.MonkeyPatch, config: pathlib.Path) -> None:
-    monkeypatch.setenv("LENSKIT_REPOGROUND_PROFILES", str(config))
+    monkeypatch.setenv("REPOGROUND_PROFILES", str(config))
     monkeypatch.delenv("REPOGROUND_BASE_URL", raising=False)
     monkeypatch.delenv("REPOGROUND_TOKEN", raising=False)
     monkeypatch.delenv("REPOGROUND_PROFILE", raising=False)
@@ -1515,7 +1496,7 @@ def test_service_client_profile_provides_base_url(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["service-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heim-pc:8787", path="/api/health")
@@ -1535,7 +1516,7 @@ def test_service_client_profile_via_env(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="lab.example:8787", path="/api/health")
@@ -1556,7 +1537,7 @@ def test_service_client_default_profile_used_when_no_selection(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="heimserver:8787", path="/api/health")
@@ -1574,7 +1555,7 @@ def test_service_client_base_url_flag_beats_profile(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "repoground-client", "health",
+        "service-client", "health",
         "--profile", "heim-pc",
         "--base-url", "http://override:8787",
         "--json",
@@ -1596,7 +1577,7 @@ def test_service_client_env_base_url_beats_profile(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["service-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="env-wins:8787", path="/api/health")
@@ -1619,7 +1600,7 @@ def test_service_client_profile_token_env(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["service-client", "health", "--profile", "heim-pc", "--json"])
 
     assert rc == 0
     auth = captured["req"].get_header("Authorization")
@@ -1645,7 +1626,7 @@ def test_service_client_token_flag_beats_profile_token_env(
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
     rc = main([
-        "repoground-client", "health",
+        "service-client", "health",
         "--profile", "heim-pc",
         "--token", "cli-token",
         "--json",
@@ -1670,7 +1651,7 @@ def test_service_client_unknown_profile_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--profile", "nope", "--json"])
+    rc = main(["service-client", "health", "--profile", "nope", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1695,7 +1676,7 @@ def test_service_client_profile_unknown_even_with_base_url_override_is_config_er
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     rc = main([
-        "repoground-client", "health",
+        "service-client", "health",
         "--base-url", "http://override:8787",
         "--profile", "nope",
         "--json",
@@ -1721,7 +1702,7 @@ def test_service_client_profile_requested_but_no_config(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--profile", "heim-pc", "--json"])
+    rc = main(["service-client", "health", "--profile", "heim-pc", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1745,7 +1726,7 @@ def test_service_client_profile_default_profile_non_string_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1764,7 +1745,7 @@ def test_service_client_no_config_no_profile_uses_default(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="127.0.0.1:8787", path="/api/health")
@@ -1785,7 +1766,7 @@ def test_service_client_invalid_profile_config_without_profile_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1809,7 +1790,7 @@ def test_service_client_invalid_profile_config_with_token_override_is_config_err
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--token", "cli-token", "--json"])
+    rc = main(["service-client", "health", "--token", "cli-token", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -1835,7 +1816,7 @@ def test_service_client_invalid_profile_config_with_env_token_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--json"])
+    rc = main(["service-client", "health", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1859,7 +1840,7 @@ def test_service_client_invalid_profile_config_with_base_url_override_is_config_
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--base-url", "http://override:8787", "--json"])
+    rc = main(["service-client", "health", "--base-url", "http://override:8787", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1889,7 +1870,7 @@ def test_service_client_profile_with_token_field_rejected(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--profile", "bad", "--json"])
+    rc = main(["service-client", "health", "--profile", "bad", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -1920,7 +1901,7 @@ def test_service_client_profile_forbidden_key_even_with_base_url_override_is_con
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
     rc = main([
-        "repoground-client", "health",
+        "service-client", "health",
         "--profile", "bad",
         "--base-url", "http://override:8787",
         "--json",
@@ -1944,7 +1925,7 @@ def test_service_client_profile_unknown_key_rejected(
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["repoground-client", "health", "--profile", "x", "--json"])
+    rc = main(["service-client", "health", "--profile", "x", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1968,7 +1949,7 @@ def test_service_client_profile_invalid_base_url_is_config_error(
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
 
-    rc = main(["repoground-client", "health", "--profile", "bad", "--json"])
+    rc = main(["service-client", "health", "--profile", "bad", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -1985,7 +1966,7 @@ def test_service_client_profile_malformed_json_is_config_error(
     config.write_text("this is not json {", encoding="utf-8")
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["repoground-client", "health", "--profile", "x", "--json"])
+    rc = main(["service-client", "health", "--profile", "x", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -2008,7 +1989,7 @@ def test_service_client_profiles_subcommand_lists_profiles(
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["repoground-client", "profiles", "--json"])
+    rc = main(["service-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -2032,7 +2013,7 @@ def test_service_client_profiles_subcommand_no_secret_leak(
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["repoground-client", "profiles", "--json"])
+    rc = main(["service-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -2050,7 +2031,7 @@ def test_service_client_profiles_subcommand_unknown_key_is_config_error(
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["repoground-client", "profiles", "--json"])
+    rc = main(["service-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -2069,7 +2050,7 @@ def test_service_client_profiles_subcommand_forbidden_key_is_config_error_no_sec
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["repoground-client", "profiles", "--json"])
+    rc = main(["service-client", "profiles", "--json"])
     out, err = capsys.readouterr()
 
     assert rc == 2
@@ -2089,7 +2070,7 @@ def test_service_client_profile_base_url_invalid_scheme_rejected_by_profiles_com
     })
     _isolate_profile_env(monkeypatch, config)
 
-    rc = main(["repoground-client", "profiles", "--json"])
+    rc = main(["service-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 2
@@ -2103,7 +2084,7 @@ def test_service_client_profiles_subcommand_no_config(
     missing = tmp_path / "missing.json"
     _isolate_profile_env(monkeypatch, missing)
 
-    rc = main(["repoground-client", "profiles", "--json"])
+    rc = main(["service-client", "profiles", "--json"])
     out, _ = capsys.readouterr()
 
     assert rc == 0
@@ -2132,13 +2113,13 @@ def test_service_client_profile_xdg_config_home_used(
     captured, opener = _make_opener({"status": "ok"})
     monkeypatch.setattr(urllib.request, "urlopen", opener)
 
-    rc = main(["repoground-client", "health", "--profile", "x", "--json"])
+    rc = main(["service-client", "health", "--profile", "x", "--json"])
 
     assert rc == 0
     _assert_request_url(captured["req"], scheme="http", netloc="x:8787", path="/api/health")
 
 
 def test_service_client_profile_config_path_expands_user(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("LENSKIT_REPOGROUND_PROFILES", "~/repoground-profiles.json")
+    monkeypatch.setenv("REPOGROUND_PROFILES", "~/repoground-profiles.json")
     path = _mod._profile_config_path()
     assert str(path).startswith(str(pathlib.Path.home()))

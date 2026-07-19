@@ -567,7 +567,7 @@ def test_static_source_check_app_py():
     assert "is_loopback and has_token" in content
     assert "add_allowlist_root(" in content
 
-def test_static_source_check_rlens_cli():
+def test_static_source_check_service_cli():
     cli_path = Path("merger/repoground/cli/serve.py")
     content = cli_path.read_text(encoding="utf-8")
 

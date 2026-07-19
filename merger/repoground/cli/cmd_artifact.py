@@ -12,9 +12,9 @@ def _resolve_storage_dir(hub: Optional[str]) -> Optional[Path]:
         # When --hub is given the service may have used a custom merges_dir.
         # We can only probe the default path here; if a custom merges_dir was
         # used at service start the caller should pass --hub pointing at it.
-        return Path(hub) / "merges" / ".rlens-service"
+        return Path(hub) / "merges" / ".repoground-service"
     # Fall back to cwd-relative convention.
-    candidate = Path.cwd() / "merges" / ".rlens-service"
+    candidate = Path.cwd() / "merges" / ".repoground-service"
     if candidate.exists():
         return candidate
     return None
@@ -24,7 +24,7 @@ def run_artifact_lookup(args: argparse.Namespace) -> int:
     storage_dir = _resolve_storage_dir(getattr(args, "hub", None))
     if storage_dir is None:
         print(
-            "Error: could not locate .rlens-service directory. "
+            "Error: could not locate .repoground-service directory. "
             "Pass --hub <hub_path> explicitly.",
             file=sys.stderr,
         )

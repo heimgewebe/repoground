@@ -208,7 +208,7 @@ def test_stale_detection_on_running_artifact(tmp_path: Path):
     from merger.repoground.service.app import app, init_service, verify_token
 
     hub = tmp_path / "hub"
-    merges = hub / ".repolens" / "merges"
+    merges = hub / ".repoground" / "merges"
     merges.mkdir(parents=True)
 
     # Create a running artifact with stale progress (120s > 60s stale threshold)
@@ -255,7 +255,7 @@ def test_fresh_running_artifact_not_stalled(tmp_path: Path):
     from merger.repoground.service.app import app, init_service, verify_token
 
     hub = tmp_path / "hub"
-    merges = hub / ".repolens" / "merges"
+    merges = hub / ".repoground" / "merges"
     merges.mkdir(parents=True)
 
     fresh_time = datetime.now(timezone.utc).isoformat()

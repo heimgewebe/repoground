@@ -105,14 +105,12 @@ The server lists and reads the existing resource surface:
 Resource results retain the existing health, availability, and snapshot-bound freshness
 metadata. When `--repo-root` is configured, the result metadata also includes live freshness.
 
-### Temporary resource compatibility
+### Canonical resource identity
 
-The old `repobrief://snapshot/...` scheme remains accepted as a read-only alias until its
-contract review on **2026-10-01**. New clients must use `repoground://snapshot/...`. Results
-identify old-prefix requests through `identity.legacy_prefix_used=true`; this makes remaining
-usage measurable rather than extending compatibility for an entire major release. The owner,
-review dates, and removal criteria are defined in
-[`repoground-compatibility-exit.v1.json`](../contracts/repoground-compatibility-exit.v1.json).
+Only `repoground://snapshot/...` resource URIs are accepted. Former schemes are
+rejected before bundle lookup; there is no translation flag or read-only alias.
+The rule is defined by
+[`repoground-naming-hard-cut.v1.json`](../contracts/repoground-naming-hard-cut.v1.json).
 
 ## Freshness meanings
 

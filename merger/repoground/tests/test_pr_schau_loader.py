@@ -40,7 +40,7 @@ def test_loader_accepts_generated_bundle_basic():
 
         generate_review_bundle(old_repo, new_repo, "repo1", hub)
 
-        prdir = hub / ".repolens" / "pr-schau" / "repo1"
+        prdir = hub / ".repoground" / "pr-schau" / "repo1"
         # Find the timestamp folder
         ts_folders = list(prdir.iterdir())
         assert len(ts_folders) == 1
@@ -68,7 +68,7 @@ def test_loader_accepts_generated_bundle_full():
 
         generate_review_bundle(old_repo, new_repo, "repo2", hub)
 
-        prdir = hub / ".repolens" / "pr-schau" / "repo2"
+        prdir = hub / ".repoground" / "pr-schau" / "repo2"
         # Find the timestamp folder
         ts_folders = list(prdir.iterdir())
         assert len(ts_folders) == 1
@@ -157,7 +157,7 @@ def test_bundle_artifact_bytes_correctness():
 
         generate_review_bundle(old_repo, new_repo, "fixpoint-repo", hub)
 
-        prdir = hub / ".repolens" / "pr-schau" / "fixpoint-repo"
+        prdir = hub / ".repoground" / "pr-schau" / "fixpoint-repo"
         # Find the timestamp folder
         ts_folders = list(prdir.iterdir())
         assert len(ts_folders) == 1

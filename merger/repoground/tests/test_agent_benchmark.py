@@ -40,7 +40,7 @@ BINDINGS = {
     repository_id: {
         "manifest": f"/bench/{repository_id}.bundle.manifest.json",
         "manifest_sha256": (str(index + 1) * 64)[:64],
-        "mcp_command": ["python", "repobrief-mcp-stdio.py", "--bundle-root", "/bench"],
+        "mcp_command": ["python", "-m", "merger.repoground", "mcp", "--bundle-root", "/bench"],
     }
     for index, repository_id in enumerate(("lenskit", "grabowski", "weltgewebe"))
 }

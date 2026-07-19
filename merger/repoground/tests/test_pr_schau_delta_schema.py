@@ -129,7 +129,7 @@ def test_generated_delta_compliance(schema, tmp_path):
     generate_review_bundle(old_repo, new_repo, repo_name, hub_dir)
 
     # Locate output
-    pr_schau_dir = hub_dir / ".repolens" / "pr-schau" / repo_name
+    pr_schau_dir = hub_dir / ".repoground" / "pr-schau" / repo_name
     assert pr_schau_dir.exists()
 
     # Filter for directories only (defensive)

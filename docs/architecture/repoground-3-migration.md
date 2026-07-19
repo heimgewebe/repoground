@@ -1,12 +1,12 @@
 # RepoGround 3 migration architecture
 
-Status: normative migration record; compatibility lifetimes are surface-specific
+Status: migration closeout record; active aliases are removed
 
 Baseline: `3c342b23274fe1d87483d82b2ef88334fa35fa06`
 
 Machine inventory: `docs/architecture/repoground-3-migration-inventory.v1.json`
 
-Compatibility exit contract: `docs/contracts/repoground-compatibility-exit.v1.json`
+Naming hard-cut contract: `docs/contracts/repoground-naming-hard-cut.v1.json`
 
 ## Decision
 

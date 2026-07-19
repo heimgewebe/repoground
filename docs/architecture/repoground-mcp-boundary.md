@@ -188,4 +188,4 @@ MCP improves access to evidence. It must not turn access or freshness into proof
 
 ## Bounded legacy alias
 
-`repobrief://snapshot/...` remains a temporary read-only alias. It is reported through `identity.legacy_prefix_used` and governed by `docs/contracts/repoground-compatibility-exit.v1.json`; it is not a second canonical resource surface.
+Only `repoground://snapshot/...` is an active resource surface. Former schemes are rejected rather than translated. The rule is governed by `docs/contracts/repoground-naming-hard-cut.v1.json`.

@@ -160,7 +160,7 @@ def main(args: Optional[List[str]] = None) -> int:
         required=True,
         help="Expected artifact type. Returns status=not_found if ID exists but type mismatches.",
     )
-    artifact_parser.add_argument("--hub", help="Hub root path (used to locate .rlens-service store)")
+    artifact_parser.add_argument("--hub", help="Hub root path (used to locate .repoground-service store)")
 
     # Architecture command
     architecture_parser = subparsers.add_parser("architecture", help="Extract architecture views")

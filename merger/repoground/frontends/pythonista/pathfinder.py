@@ -34,7 +34,7 @@ def _depth(root: Path, p: Path) -> int:
         return 10**9
 
 
-def find_repolens_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
+def find_repoground_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
     found: list[Path] = []
     try:
         root_res = root.resolve()
@@ -43,7 +43,10 @@ def find_repolens_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
         root_res = root
 
     try:
-        for hit in root_res.rglob("repolens.py"):
+        for hit in root_res.rglob("build.py"):
+            expected_tail = ("merger", "repoground", "frontends", "pythonista", "build.py")
+            if tuple(hit.parts[-5:]) != expected_tail:
+                continue
             if _depth(root_res, hit) > max_depth:
                 continue
             d = hit.parent
@@ -60,10 +63,10 @@ def find_repolens_dirs_in_tree(root: Path, max_depth: int = 8) -> list[Path]:
     return uniq
 
 
-def find_repolens_dirs(home: Path) -> list[Path]:
+def find_repoground_dirs(home: Path) -> list[Path]:
     """
     Heuristik: typische Install-Orte in Pythonista.
-    Wir schreiben den Pfad in jedes gefundene RepoGround- oder Legacy-Verzeichnis.
+    Wir schreiben den Pfad in jedes gefundene kanonische RepoGround-Verzeichnis.
     """
     candidates = [
         # Canonical RepoGround path
@@ -87,7 +90,7 @@ def find_repolens_dirs(home: Path) -> list[Path]:
     for d in candidates:
         try:
             if d.is_dir():
-                # RepoGround 3.x and legacy installs can be recognized by repolens.py
+                # Canonical RepoGround installs are recognized by the Pythonista build entrypoint
                 if (d / "build.py").exists():
                     found.append(d)
         except Exception as e:
@@ -126,22 +129,22 @@ def main() -> int:
     # 1) immer in den Hub selbst schreiben
     ok_hub, info_hub = write_pathfile(hub_dir, hub_dir)
 
-    # 2) additionally update discovered RepoGround/legacy installation directories
-    repolens_dirs = find_repolens_dirs(home)
+    # 2) also update discovered canonical RepoGround installation directories
+    repoground_dirs = find_repoground_dirs(home)
 
     # NEW BLOCK: Scan current hub tree if not on Pythonista
     if not _is_pythonista_runtime():
-        repolens_dirs.extend(find_repolens_dirs_in_tree(hub_dir, max_depth=8))
+        repoground_dirs.extend(find_repoground_dirs_in_tree(hub_dir, max_depth=8))
 
     # final uniq
     uniq: list[Path] = []
-    for d in repolens_dirs:
+    for d in repoground_dirs:
         if d not in uniq:
             uniq.append(d)
-    repolens_dirs = uniq
+    repoground_dirs = uniq
 
     results = []
-    for d in repolens_dirs:
+    for d in repoground_dirs:
         ok, info = write_pathfile(d, hub_dir)
         results.append((ok, info))
 
@@ -151,13 +154,13 @@ def main() -> int:
 
     lines.append(f"- HUB: {'OK' if ok_hub else 'FAIL'}  {info_hub}")
 
-    if repolens_dirs:
-        for (d, (ok, info)) in zip(repolens_dirs, results):
-            lines.append(f"- RepoGround/legacy build @ {d}: {'OK' if ok else 'FAIL'}  {info}")
+    if repoground_dirs:
+        for (d, (ok, info)) in zip(repoground_dirs, results):
+            lines.append(f"- RepoGround build @ {d}: {'OK' if ok else 'FAIL'}  {info}")
 
         # Ambiguity check
-        if len(repolens_dirs) > 1:
-            warn_msg = f"WARNING: Found {len(repolens_dirs)} RepoGround/legacy build locations; clean up duplicate legacy installations."
+        if len(repoground_dirs) > 1:
+            warn_msg = f"WARNING: Found {len(repoground_dirs)} RepoGround build locations; clean up duplicate installations."
             lines.append("")
             lines.append(warn_msg)
             print(warn_msg, file=sys.stderr)

@@ -116,7 +116,7 @@ function createContext(options = {}) {
 
     const context = {
         window: {
-            __RLENS_UI_VERSION__: 'test',
+            __REPOGROUND_UI_VERSION__: 'test',
             location: { href: 'http://localhost/', host: 'localhost', search: '', pathname: '/', replace() {}, reload() {} },
             history: { replaceState() {} },
             addEventListener() {},

@@ -78,7 +78,7 @@ def test_make_entry_logic_with_errors(tmp_path, monkeypatch):
     generate_review_bundle(old_repo, new_repo, "test-repo", hub_dir)
 
     # Check delta.json
-    pr_schau_dir = hub_dir / ".repolens" / "pr-schau" / "test-repo"
+    pr_schau_dir = hub_dir / ".repoground" / "pr-schau" / "test-repo"
     assert pr_schau_dir.exists()
 
     # Find the timestamp folder robustly (latest by mtime)

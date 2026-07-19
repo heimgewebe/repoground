@@ -173,7 +173,7 @@ def test_post_emit_health_degraded_without_jsonschema(tmp_path):
         "run_id": "run-xyz",
         "created_at": "2026-06-02T00:00:00Z",
         "generator": {
-            "name": "rlens",
+            "name": "repoground",
             "version": "dev",
             "config_sha256": "a" * 64,
             "runtime": {
@@ -285,7 +285,7 @@ def test_bundle_surface_validate_is_unaffected_by_jsonschema(tmp_path):
         "run_id": "run-xyz",
         "created_at": "2026-06-02T00:00:00Z",
         "generator": {
-            "name": "rlens",
+            "name": "repoground",
             "version": "dev",
             "config_sha256": "a" * 64,
             "runtime": {

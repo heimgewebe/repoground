@@ -1404,8 +1404,8 @@ _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
     dict.fromkeys([*_DOES_NOT_ESTABLISH, *_CALL_GRAPH_DOES_NOT_ESTABLISH])
 )
 _CALL_NAVIGATION_CACHE_MAX_ENTRIES = 2
-_CALL_NAVIGATION_CACHE_VALIDATION_ENV = "LENSKIT_REPOBRIEF_CACHE_VALIDATION"
-_CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV = "LENSKIT_REPOBRIEF_STRICT_CACHE_HASH"
+_CALL_NAVIGATION_CACHE_VALIDATION_ENV = "REPOGROUND_CACHE_VALIDATION"
+_CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV = "REPOGROUND_STRICT_CACHE_HASH"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1546,10 +1546,10 @@ def _artifact_stat_matches_fingerprint(
 def _cache_validation_mode() -> str:
     """Return the cache-validation mode while preserving legacy semantics.
 
-    ``LENSKIT_REPOBRIEF_CACHE_VALIDATION`` accepts only ``auto`` and ``strict``.
+    ``REPOGROUND_CACHE_VALIDATION`` accepts only ``auto`` and ``strict``.
     Any other non-empty value falls back to ``strict`` and is logged once per
     distinct invalid value. The legacy
-    ``LENSKIT_REPOBRIEF_STRICT_CACHE_HASH`` switch remains supported when the
+    ``REPOGROUND_STRICT_CACHE_HASH`` switch remains supported when the
     new variable is unset or empty: unset/empty/0/false/no/off means ``auto``;
     every other non-empty legacy value means ``strict``.
     """
@@ -1726,7 +1726,7 @@ def _artifact_source_is_current(
 
     Cold loads and post-build checks always hash bytes read from one pinned file
     descriptor. Warm lookups use the manifest hash plus strong file identity
-    metadata. ``LENSKIT_REPOBRIEF_CACHE_VALIDATION=strict`` forces a full hash
+    metadata. ``REPOGROUND_CACHE_VALIDATION=strict`` forces a full hash
     on every lookup; the legacy strict-hash switch remains supported. Weak
     identities such as zero device or inode values automatically use strict
     validation.

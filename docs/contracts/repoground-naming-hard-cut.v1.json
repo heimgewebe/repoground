@@ -1,0 +1,61 @@
+{
+  "schema": "repoground.naming_hard_cut.v1",
+  "version": 1,
+  "effective_from": "2026-07-19",
+  "product": "RepoGround",
+  "policy": {
+    "active_command_aliases_allowed": false,
+    "active_environment_aliases_allowed": false,
+    "active_runtime_storage_aliases_allowed": false,
+    "active_symbol_aliases_allowed": false,
+    "unknown_active_usage_blocks_closeout": true,
+    "zero_usage_grace_period_days": 0
+  },
+  "canonical_runtime": {
+    "repository": "heimgewebe/repoground",
+    "python_namespace": "merger.repoground",
+    "command": "repoground",
+    "service_unit": "repoground.service",
+    "mcp_resource_scheme": "repoground",
+    "environment_prefix": "REPOGROUND_",
+    "service_state_directory": ".repoground-service",
+    "source_snapshot_directory": ".repoground-source-snapshots",
+    "pythonista_state_file": ".repoground-state.json",
+    "pr_workspace_directory": ".repoground/pr-schau",
+    "generator_name": "repoground"
+  },
+  "versioned_data_contracts": {
+    "policy": "retained_exactly_until_a_new_versioned_producer_schema_reader_migration_exists",
+    "not_public_aliases": true,
+    "not_reinterpreted_by_branding": true,
+    "examples": [
+      "repolens-report",
+      "lenskit.python_symbol_index",
+      "repobrief.snapshot_status"
+    ]
+  },
+  "historical_evidence": {
+    "allowed_path_prefixes": [
+      "docs/archive/",
+      "docs/decisions/",
+      "docs/diagnostics/",
+      "docs/proofs/",
+      "docs/reviews/"
+    ],
+    "must_be_non_executable": true,
+    "not_runtime_authority": true
+  },
+  "audit": {
+    "command": "scripts/ops/repoground-naming-audit --repo-root . --fail-on-active-alias",
+    "schema": "repoground.naming_audit.v1",
+    "raw_command_lines_included": false,
+    "raw_config_contents_included": false
+  },
+  "system_closeout": "heimgewebe/bureau#703",
+  "closeout_requires": [
+    "repository_aliases_zero",
+    "runtime_process_aliases_zero",
+    "consumer_cutover_complete",
+    "fresh_publication_on_merged_commit"
+  ]
+}

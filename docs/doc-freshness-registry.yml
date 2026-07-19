@@ -35,7 +35,7 @@ entries:
     status: done
     normative: true
     owner: repoground-build-spec
-    last_verified: "2026-07-17"
+    last_verified: "2026-07-19"
     evidence:
       - kind: symbol
         target: "merger/repoground/core/merge.py::ExtrasConfig"
@@ -61,7 +61,7 @@ entries:
     status: done
     normative: false
     owner: architecture
-    last_verified: "2026-07-17"
+    last_verified: "2026-07-19"
     evidence:
       - kind: symbol
         target: "merger/repoground/core/federation.py::init_federation"
@@ -80,7 +80,7 @@ entries:
     status: done
     normative: false
     owner: roadmap
-    last_verified: "2026-07-17"
+    last_verified: "2026-07-19"
     evidence:
       - kind: symbol
         target: "merger/repoground/core/claim_evidence_map.py::produce_claim_evidence_map"
@@ -102,7 +102,7 @@ entries:
     status: done
     normative: true
     owner: task-control
-    last_verified: "2026-07-17"
+    last_verified: "2026-07-19"
     evidence:
       - kind: text
         target: "docs/tasks/board.md::der deklarierte Task-Scope ist abgeschlossen und belegt"
@@ -119,7 +119,7 @@ entries:
     status: done
     normative: false
     owner: architecture
-    last_verified: "2026-07-17"
+    last_verified: "2026-07-19"
     evidence:
       - kind: text
         target: "docs/repoground-upgrade-blaupause.md::Häkchen gelten nur für den jeweiligen Arbeitspunkt"
@@ -135,7 +135,7 @@ entries:
     status: done
     normative: true
     owner: roadmap
-    last_verified: "2026-07-17"
+    last_verified: "2026-07-19"
     evidence:
       - kind: text
         target: "docs/roadmap/repoground-master-roadmap.md::Kanonische Taskstatus: `docs/tasks/index.json`"
@@ -151,7 +151,7 @@ entries:
     status: done
     normative: false
     owner: roadmap
-    last_verified: "2026-07-17"
+    last_verified: "2026-07-19"
     evidence:
       - kind: text
         target: "docs/roadmap/lenskit-agent-operationalization-roadmap.md::Diese Datei ist ein Ordnungs- oder Zieldokument und keine zweite Taskstatus-Autorität"

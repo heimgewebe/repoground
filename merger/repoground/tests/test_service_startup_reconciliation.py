@@ -15,7 +15,7 @@ def persisted_jobs_hub(tmp_path):
     hub.mkdir()
     (hub / "repo1").mkdir()
 
-    storage_dir = hub / "merges" / ".rlens-service"
+    storage_dir = hub / "merges" / ".repoground-service"
     storage_dir.mkdir(parents=True)
 
     return hub
@@ -33,7 +33,7 @@ def _make_job(job_id: str, status: str) -> Job:
 
 
 def _write_jobs_file(hub: Path, jobs: list[Job]) -> None:
-    jobs_file = hub / "merges" / ".rlens-service" / "jobs.json"
+    jobs_file = hub / "merges" / ".repoground-service" / "jobs.json"
     jobs_file.write_text(
         json.dumps([job.model_dump() for job in jobs], indent=2),
         encoding="utf-8",

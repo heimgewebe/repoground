@@ -20,20 +20,16 @@ The canonical Markdown artifact remains the sole content authority. Sidecars,
 indexes, graphs, reading packs and health reports remain derived navigation or
 diagnostic surfaces according to their declared contracts.
 
-## Compatibility vocabulary
+## Hard-cut boundary
 
-Lenskit, repoLens, rLens and RepoBrief are retired product names. They may appear
-only in the surface-specific compatibility categories recorded in
-`docs/contracts/repoground-compatibility-exit.v1.json`:
+Former product names are not active commands, modules, environment variables,
+runtime paths, generator names or protocol schemes. The repository audit blocks
+those mechanisms immediately; there is no 30-day alias window.
 
-- exact persisted 2.x schema, kind and artifact identifiers;
-- historical changelog, task, benchmark, diagnostic and proof records;
-- migration inventories that explain external consumer work.
-
-A compatibility name does not create a second implementation or a second
-product. New code, documentation and examples use RepoGround. The active
-repository contains no legacy import, command, script, or environment adapter;
-the inventory reports any observed external residue without restoring it.
+Exact versioned schema IDs, `kind` values and historical evidence may retain their
+original spelling because changing them in-place would reinterpret stored data.
+They are not public product aliases. The governing contract is
+`docs/contracts/repoground-naming-hard-cut.v1.json`.
 
 ## Stability boundaries
 

@@ -491,7 +491,7 @@ class JobRunner:
                 }
 
                 # Write to merges_dir
-                report_path = merges_dir / f"rlens-job-{job.id}_pre_pull_report.json"
+                report_path = merges_dir / f"repoground-job-{job.id}_pre_pull_report.json"
                 try:
                     with open(report_path, "w", encoding="utf-8") as f:
                         json.dump(report, f, indent=2, ensure_ascii=False, default=str)
@@ -554,7 +554,7 @@ class JobRunner:
                     "summary": summary,
                     "repos": repos_list,
                 }
-                report_path = merges_dir / f"rlens-job-{job.id}_source_acquisition_report.json"
+                report_path = merges_dir / f"repoground-job-{job.id}_source_acquisition_report.json"
                 try:
                     with open(report_path, "w", encoding="utf-8") as f:
                         json.dump(report, f, indent=2, ensure_ascii=False, default=str)
@@ -872,7 +872,7 @@ class JobRunner:
                 extras.json_sidecar = True
 
             generator_info = {
-                "name": "rlens",
+                "name": "repoground",
                 "version": os.getenv("REPOGROUND_VERSION", "dev"),
                 "platform": "service"
             }

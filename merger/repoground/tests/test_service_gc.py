@@ -158,7 +158,7 @@ def test_snapshot_cleanup_protects_active_jobs_and_removes_terminal_old_jobs(
     service_client,
 ):
     ctx = service_client
-    root = ctx.merges_dir / ".rlens-source-snapshots"
+    root = ctx.merges_dir / ".repoground-source-snapshots"
     active = Job.create(JobRequest())
     active.status = "running"
     terminal = Job.create(JobRequest())
@@ -184,7 +184,7 @@ def test_remove_job_removes_its_source_snapshot(service_client):
     ctx = service_client
     job = Job.create(JobRequest())
     ctx.store.add_job(job)
-    snapshot = ctx.merges_dir / ".rlens-source-snapshots" / job.id
+    snapshot = ctx.merges_dir / ".repoground-source-snapshots" / job.id
     snapshot.mkdir(parents=True)
     (snapshot / "payload").write_text("data", encoding="utf-8")
 

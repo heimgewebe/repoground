@@ -280,7 +280,7 @@ def init_service(hub_path: Path, token: Optional[str] = None, host: str = "127.0
     # land alongside the outputs they reference.  JobStore uses hub_path/merges
     # unconditionally; QueryArtifactStore follows state.merges_dir when set.
     _effective_merges = merges_dir if merges_dir else get_merges_dir(hub_path)
-    state.query_artifact_store = QueryArtifactStore(_effective_merges / ".rlens-service")
+    state.query_artifact_store = QueryArtifactStore(_effective_merges / ".repoground-service")
     state.runner = JobRunner(state.job_store)
     state.log_provider = FileLogProvider(state.job_store)
 
