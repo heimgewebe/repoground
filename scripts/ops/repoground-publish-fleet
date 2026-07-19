@@ -919,23 +919,117 @@ def path_is_protected(path: Path, protected: set[Path]) -> bool:
     )
 
 
+def _bounded_historical_current_symlink(
+    candidate: Path, *, root: Path
+) -> tuple[os.stat_result, str]:
+    """Validate the one historical internal symlink shape retained in bundles."""
+    metadata = candidate.lstat()
+    if not stat.S_ISLNK(metadata.st_mode):
+        raise RuntimeError(f"retention candidate is not a symlink: {candidate}")
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"retention candidate contains a symlink outside its root: {candidate}"
+        ) from exc
+
+    prefixes = {
+        (".repobrief-generations",),
+        ("bundle", ".repobrief-generations"),
+    }
+    if (
+        candidate.name != "current"
+        or len(relative.parts) not in {3, 4}
+        or relative.parts[:-2] not in prefixes
+    ):
+        raise RuntimeError(
+            f"retention candidate contains a symlink outside the bounded "
+            f"historical shape: {candidate}"
+        )
+
+    raw_target = os.readlink(candidate)
+    target = Path(raw_target)
+    if (
+        target.is_absolute()
+        or len(target.parts) != 1
+        or target.name != raw_target
+        or not SHA256_DIR_RE.fullmatch(raw_target)
+    ):
+        raise RuntimeError(
+            f"retention candidate contains an unsafe historical symlink: {candidate}"
+        )
+
+    sibling = candidate.parent / raw_target
+    try:
+        target_metadata = sibling.lstat()
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            f"retention candidate contains a dangling historical symlink: {candidate}"
+        ) from exc
+    if not stat.S_ISDIR(target_metadata.st_mode):
+        raise RuntimeError(
+            f"retention candidate contains a chained historical symlink: {candidate}"
+        )
+    confirmed_metadata = candidate.lstat()
+    initial_identity = (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+    )
+    confirmed_identity = (
+        confirmed_metadata.st_dev,
+        confirmed_metadata.st_ino,
+        confirmed_metadata.st_mode,
+        confirmed_metadata.st_size,
+        confirmed_metadata.st_mtime_ns,
+    )
+    if confirmed_identity != initial_identity:
+        raise RuntimeError(
+            f"retention candidate symlink changed during validation: {candidate}"
+        )
+    return confirmed_metadata, raw_target
+
+
+def _snapshot_symlink_row(candidate: Path, *, root: Path) -> list[object]:
+    metadata, raw_target = _bounded_historical_current_symlink(candidate, root=root)
+    return [
+        "l",
+        candidate.relative_to(root).as_posix(),
+        stat.S_IMODE(metadata.st_mode),
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        raw_target,
+    ]
+
+
 def tree_bytes(path: Path) -> int:
     total = 0
     for root, directories, files in os.walk(path, followlinks=False):
         root_path = Path(root)
         directories[:] = sorted(directories)
         for name in directories:
-            if (root_path / name).is_symlink():
-                raise RuntimeError(
-                    f"retention candidate contains a symlink: {root_path / name}"
-                )
-        for name in sorted(files):
             candidate = root_path / name
             if candidate.is_symlink():
-                raise RuntimeError(
-                    f"retention candidate contains a symlink: {candidate}"
+                metadata, _ = _bounded_historical_current_symlink(
+                    candidate, root=path
                 )
-            total += candidate.stat().st_size
+                total += metadata.st_size
+        for name in sorted(files):
+            candidate = root_path / name
+            metadata = candidate.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                link_metadata, _ = _bounded_historical_current_symlink(
+                    candidate, root=path
+                )
+                total += link_metadata.st_size
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeError(
+                    f"retention candidate contains a non-regular file: {candidate}"
+                )
+            total += metadata.st_size
     return total
 
 
@@ -962,13 +1056,14 @@ def tree_snapshot(path: Path) -> dict[str, object]:
         for name in directories:
             candidate = root_path / name
             if candidate.is_symlink():
-                raise RuntimeError(
-                    f"retention candidate contains a symlink: {candidate}"
-                )
+                rows.append(_snapshot_symlink_row(candidate, root=path))
         for name in sorted(files):
             candidate = root_path / name
             metadata = candidate.lstat()
-            if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+            if stat.S_ISLNK(metadata.st_mode):
+                rows.append(_snapshot_symlink_row(candidate, root=path))
+                continue
+            if not stat.S_ISREG(metadata.st_mode):
                 raise RuntimeError(
                     f"retention candidate contains a non-regular file: {candidate}"
                 )

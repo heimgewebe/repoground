@@ -5,6 +5,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -90,6 +91,22 @@ def write_version(
     os.utime(version, (mtime, mtime))
     digest = hashlib.sha256(payload).hexdigest()
     return version, digest
+
+
+def write_historical_generation_symlink(
+    candidate: Path,
+    *,
+    bundled: bool = False,
+    target_hash: str = "a" * 64,
+) -> tuple[Path, Path]:
+    bundle_root = candidate / "bundle" if bundled else candidate
+    generation = bundle_root / ".repobrief-generations" / "legacy-scope"
+    target = generation / target_hash
+    target.mkdir(parents=True)
+    (target / "payload.txt").write_text("historical payload", encoding="utf-8")
+    current = generation / "current"
+    current.symlink_to(target_hash, target_is_directory=True)
+    return current, target
 
 
 def isolate_retention_roots(
@@ -1002,6 +1019,188 @@ def test_reconciliation_records_completed_delete_after_crash(
     assert reports[0]["applied"] == "record_deleted"
     transaction = module.prune_transaction_root() / f"{'c' * 32}.json"
     assert json.loads(transaction.read_text())["state"] == "deleted"
+
+
+@pytest.mark.parametrize("bundled", [False, True])
+def test_transactional_prune_accepts_only_bounded_historical_current_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bundled: bool
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    current, _ = write_historical_generation_symlink(candidate, bundled=bundled)
+
+    snapshot = module.tree_snapshot(candidate)
+    removed_bytes = module.tree_bytes(candidate)
+    result = module.transactional_prune(
+        candidate,
+        root=group,
+        expected_snapshot=snapshot,
+        removed_bytes=removed_bytes,
+        protected=set(),
+    )
+
+    assert result["state"] == "deleted"
+    assert result["removed_bytes"] == removed_bytes
+    assert not candidate.exists()
+    assert not current.exists()
+
+
+def test_historical_current_symlink_rejects_unsafe_targets_and_locations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+
+    absolute, _ = write_version(group, "20260714T100001Z", b"absolute", 1)
+    absolute_generation = absolute / ".repobrief-generations" / "legacy-scope"
+    absolute_generation.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (absolute_generation / "current").symlink_to(
+        outside, target_is_directory=True
+    )
+
+    escaping, _ = write_version(group, "20260714T100002Z", b"escaping", 2)
+    escaping_generation = escaping / ".repobrief-generations" / "legacy-scope"
+    escaping_generation.mkdir(parents=True)
+    (escaping_generation / "current").symlink_to(
+        f"../{'b' * 64}", target_is_directory=True
+    )
+
+    chained, _ = write_version(group, "20260714T100003Z", b"chained", 3)
+    chained_generation = chained / ".repobrief-generations" / "legacy-scope"
+    chained_generation.mkdir(parents=True)
+    real_target = chained_generation / ("c" * 64 + "-real")
+    real_target.mkdir()
+    (chained_generation / ("c" * 64)).symlink_to(
+        real_target.name, target_is_directory=True
+    )
+    (chained_generation / "current").symlink_to(
+        "c" * 64, target_is_directory=True
+    )
+
+    misplaced, _ = write_version(group, "20260714T100004Z", b"misplaced", 4)
+    misplaced_target = misplaced / ("d" * 64)
+    misplaced_target.mkdir()
+    (misplaced / "current").symlink_to(
+        misplaced_target.name, target_is_directory=True
+    )
+
+    dangling, _ = write_version(group, "20260714T100005Z", b"dangling", 5)
+    dangling_generation = dangling / ".repobrief-generations" / "legacy-scope"
+    dangling_generation.mkdir(parents=True)
+    (dangling_generation / "current").symlink_to(
+        "e" * 64, target_is_directory=True
+    )
+
+    wrong_name, _ = write_version(group, "20260714T100006Z", b"wrong-name", 6)
+    wrong_name_generation = (
+        wrong_name / ".repobrief-generations" / "legacy-scope"
+    )
+    wrong_name_target = wrong_name_generation / ("f" * 64)
+    wrong_name_target.mkdir(parents=True)
+    (wrong_name_generation / "latest").symlink_to(
+        wrong_name_target.name, target_is_directory=True
+    )
+
+    for candidate in (absolute, escaping, chained, misplaced, dangling, wrong_name):
+        with pytest.raises(RuntimeError, match="contains .*symlink"):
+            module.tree_bytes(candidate)
+        with pytest.raises(RuntimeError, match="contains .*symlink"):
+            module.tree_snapshot(candidate)
+        assert candidate.is_dir()
+    assert outside.is_dir()
+
+
+def test_transaction_rejects_historical_current_target_swap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    current, _ = write_historical_generation_symlink(candidate)
+    replacement = current.parent / ("b" * 64)
+    replacement.mkdir()
+    (replacement / "payload.txt").write_text("replacement", encoding="utf-8")
+    snapshot = module.tree_snapshot(candidate)
+    removed_bytes = module.tree_bytes(candidate)
+
+    current.unlink()
+    current.symlink_to(replacement.name, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="changed after planning"):
+        module.transactional_prune(
+            candidate,
+            root=group,
+            expected_snapshot=snapshot,
+            removed_bytes=removed_bytes,
+            protected=set(),
+        )
+
+    assert candidate.is_dir()
+    assert current.readlink() == Path("b" * 64)
+    assert not module.prune_transaction_root().exists()
+
+
+def test_transaction_rejects_substituted_historical_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    current, _ = write_historical_generation_symlink(candidate)
+    generation = current.parent
+    snapshot = module.tree_snapshot(candidate)
+    removed_bytes = module.tree_bytes(candidate)
+    substitute = tmp_path / "substitute-generation"
+    substitute.mkdir()
+    substitute_target = substitute / ("a" * 64)
+    substitute_target.mkdir()
+    (substitute / "current").symlink_to(
+        substitute_target.name, target_is_directory=True
+    )
+
+    shutil.rmtree(generation)
+    generation.symlink_to(substitute, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="contains a symlink"):
+        module.transactional_prune(
+            candidate,
+            root=group,
+            expected_snapshot=snapshot,
+            removed_bytes=removed_bytes,
+            protected=set(),
+        )
+
+    assert candidate.is_dir()
+    assert generation.is_symlink()
+    assert substitute.is_dir()
+    assert not module.prune_transaction_root().exists()
+
+
+def test_retention_rejects_special_file_and_leaves_candidate_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    candidate, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    fifo = candidate / "special.fifo"
+    os.mkfifo(fifo)
+
+    with pytest.raises(RuntimeError, match="non-regular file"):
+        module.tree_bytes(candidate)
+    with pytest.raises(RuntimeError, match="non-regular file"):
+        module.tree_snapshot(candidate)
+
+    assert candidate.is_dir()
+    assert fifo.exists()
+    assert not module.prune_transaction_root().exists()
 
 
 def test_tree_snapshot_and_localized_groups_reject_ambiguous_content(
