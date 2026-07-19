@@ -842,6 +842,9 @@ def test_transactional_delete_is_journaled_and_confined(
     payload = json.loads(transaction.read_text())
     assert payload["state"] == "deleted"
     assert payload["source"] == str(candidate.resolve(strict=False))
+    quarantine_path = Path(payload["quarantine"])
+    assert quarantine_path.parent.parent.name == module.QUARANTINE_DIR_NAME
+    assert module.PERSISTED_V1_QUARANTINE_DIR_NAME not in quarantine_path.parts
 
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -853,6 +856,87 @@ def test_transactional_delete_is_journaled_and_confined(
             removed_bytes=0,
             protected=set(),
         )
+
+
+def test_reconciliation_accepts_terminal_persisted_v1_quarantine_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    group.mkdir(parents=True)
+    source = group / "20260714T100000Z"
+    transaction_id = "a" * 32
+    quarantine = (
+        group
+        / module.PERSISTED_V1_QUARANTINE_DIR_NAME
+        / transaction_id
+        / source.name
+    )
+    transaction = module.prune_transaction_root() / f"{transaction_id}.json"
+    module.atomic_write_json(
+        transaction,
+        {
+            "schema": module.PRUNE_TRANSACTION_SCHEMA,
+            "transaction_id": transaction_id,
+            "state": "deleted",
+            "source": str(source.resolve(strict=False)),
+            "quarantine": str(quarantine.resolve(strict=False)),
+            "root": str(group.resolve()),
+            "snapshot": {"device": 1, "inode": 2, "tree_sha256": "a" * 64},
+            "removed_bytes": 1,
+        },
+    )
+
+    reports = module.reconcile_prune_transactions(protected=set(), apply=True)
+
+    assert reports == [{"transaction": str(transaction), "state": "deleted"}]
+    assert json.loads(transaction.read_text(encoding="utf-8"))["quarantine"] == str(
+        quarantine.resolve(strict=False)
+    )
+
+
+def test_reconciliation_finishes_persisted_v1_quarantine_after_crash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    group = roots["publication"] / "bundles" / "demo" / "main"
+    source, _ = write_version(group, "20260714T100000Z", b"payload", 1)
+    snapshot = module.tree_snapshot(source)
+    removed_bytes = module.tree_bytes(source)
+    transaction_id = "9" * 32
+    quarantine = (
+        group
+        / module.PERSISTED_V1_QUARANTINE_DIR_NAME
+        / transaction_id
+        / source.name
+    )
+    quarantine.parent.mkdir(parents=True)
+    os.replace(source, quarantine)
+    transaction = module.prune_transaction_root() / f"{transaction_id}.json"
+    module.atomic_write_json(
+        transaction,
+        {
+            "schema": module.PRUNE_TRANSACTION_SCHEMA,
+            "transaction_id": transaction_id,
+            "state": "quarantined",
+            "source": str(source.resolve(strict=False)),
+            "quarantine": str(quarantine.resolve(strict=False)),
+            "root": str(group.resolve()),
+            "snapshot": snapshot,
+            "removed_bytes": removed_bytes,
+        },
+    )
+
+    assert module.version_dirs(group) == []
+    reports = module.reconcile_prune_transactions(protected=set(), apply=True)
+
+    assert reports[0]["applied"] == "delete"
+    assert not source.exists()
+    assert not quarantine.exists()
+    assert not (group / module.PERSISTED_V1_QUARANTINE_DIR_NAME).exists()
+    assert json.loads(transaction.read_text(encoding="utf-8"))["state"] == "deleted"
 
 
 def test_reconciliation_restores_planned_move_that_became_protected(
@@ -986,14 +1070,21 @@ def test_reconciliation_rejects_forged_quarantine_path(
     assert forged.is_dir()
 
 
+@pytest.mark.parametrize(
+    "directory_name_attribute",
+    ["QUARANTINE_DIR_NAME", "PERSISTED_V1_QUARANTINE_DIR_NAME"],
+)
 def test_unjournaled_quarantine_entry_fails_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    directory_name_attribute: str,
 ) -> None:
     module = load_publisher()
     roots = isolate_retention_roots(module, tmp_path, monkeypatch)
     group = roots["publication"] / "bundles" / "demo" / "main"
     write_version(group, "20260714T100000Z", b"payload", 1)
-    orphan = group / module.QUARANTINE_DIR_NAME / ("e" * 32) / "20260714T090000Z"
+    directory_name = getattr(module, directory_name_attribute)
+    orphan = group / directory_name / ("e" * 32) / "20260714T090000Z"
     orphan.mkdir(parents=True)
 
     with pytest.raises(RuntimeError, match="unexpected retention quarantine entries"):
