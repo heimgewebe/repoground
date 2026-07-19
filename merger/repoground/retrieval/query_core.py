@@ -68,6 +68,87 @@ def _get_semantic_model(model_name: str):
         _MODEL_CACHE[model_name] = SentenceTransformer(model_name)
     return _MODEL_CACHE[model_name]
 
+
+class _SemanticDimensionMismatch(RuntimeError):
+    """Raised when a model output violates embedding-policy dimensions."""
+
+    def __init__(self, embedding_kind: str, expected: int, actual: int):
+        self.embedding_kind = embedding_kind
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"Semantic {embedding_kind} embedding dimension mismatch: "
+            f"expected {expected}, got {actual}"
+        )
+
+
+def _embedding_vector_dimension(value: Any, *, label: str) -> int:
+    """Return one vector's dimension without requiring NumPy at runtime."""
+    shape = getattr(value, "shape", None)
+    if shape is not None:
+        dimensions = tuple(int(part) for part in shape)
+        if len(dimensions) == 1 and dimensions[0] > 0:
+            return dimensions[0]
+        if len(dimensions) == 2 and dimensions[0] == 1 and dimensions[1] > 0:
+            return dimensions[1]
+        raise RuntimeError(
+            f"Semantic {label} embedding has invalid shape {dimensions!r}."
+        )
+
+    if isinstance(value, (list, tuple)):
+        if not value:
+            raise RuntimeError(f"Semantic {label} embedding is empty.")
+        first = value[0]
+        if isinstance(first, (list, tuple)):
+            if len(value) != 1 or not first:
+                raise RuntimeError(
+                    f"Semantic {label} embedding must contain exactly one non-empty vector."
+                )
+            return len(first)
+        return len(value)
+
+    raise RuntimeError(
+        f"Semantic {label} embedding does not expose a supported vector shape."
+    )
+
+
+def _embedding_batch_dimensions(value: Any) -> tuple[int, int]:
+    """Return (vector_count, vector_dimension) for document embeddings."""
+    shape = getattr(value, "shape", None)
+    if shape is not None:
+        dimensions = tuple(int(part) for part in shape)
+        if len(dimensions) == 2 and dimensions[0] > 0 and dimensions[1] > 0:
+            return dimensions[0], dimensions[1]
+        if len(dimensions) == 1 and dimensions[0] > 0:
+            return 1, dimensions[0]
+        raise RuntimeError(
+            f"Semantic document embeddings have invalid shape {dimensions!r}."
+        )
+
+    if isinstance(value, (list, tuple)):
+        if not value:
+            raise RuntimeError("Semantic document embeddings are empty.")
+        first = value[0]
+        if not isinstance(first, (list, tuple)):
+            return 1, len(value)
+        row_dimensions = []
+        for row in value:
+            if not isinstance(row, (list, tuple)) or not row:
+                raise RuntimeError(
+                    "Semantic document embeddings must be a non-empty rectangular batch."
+                )
+            row_dimensions.append(len(row))
+        if len(set(row_dimensions)) != 1:
+            raise RuntimeError(
+                "Semantic document embeddings must be a rectangular batch."
+            )
+        return len(value), row_dimensions[0]
+
+    raise RuntimeError(
+        "Semantic document embeddings do not expose a supported batch shape."
+    )
+
+
 def execute_query(
     index_path: Path,
     query_text: str,
@@ -296,13 +377,22 @@ def execute_query(
         results = []
         semantic_enabled = embedding_policy is not None
         fallback = embedding_policy.get("fallback_behavior", "ignore") if semantic_enabled else "ignore"
+        expected_dimensions = None
 
         base_diagnostics = {}
         semantic_model = None
         if semantic_enabled:
-            # Note on F1b implementation limits:
-            # Currently only `provider=local` and `similarity_metric=cosine` are actively implemented.
-            # Other parameters like `dimensions` are structurally present but not actively validated here yet.
+            # F1b implements only provider=local and similarity_metric=cosine.
+            # The embedding-policy dimension is a runtime invariant, not metadata.
+            expected_dimensions = embedding_policy.get("dimensions")
+            if (
+                isinstance(expected_dimensions, bool)
+                or not isinstance(expected_dimensions, int)
+                or expected_dimensions < 1
+            ):
+                raise ValueError(
+                    "embedding_policy dimensions must be a positive integer"
+                )
             engine_type += "+semantic_requested"
             provider = embedding_policy.get("provider", "local")
             metric = embedding_policy.get("similarity_metric", "cosine")
@@ -348,7 +438,9 @@ def execute_query(
                         "fallback_behavior": fallback,
                         "candidate_k": fetch_k,
                         "provider": provider,
-                        "model_name": model_name
+                        "model_name": model_name,
+                        "expected_dimensions": expected_dimensions,
+                        "dimension_validation": "pending",
                     }
                 except ImportError as e:
                     if fallback == "fail":
@@ -598,10 +690,11 @@ def execute_query(
             results.append(hit)
 
         if semantic_model:
-            # Re-rank results using semantic model
+            # Re-rank results using semantic model.
+            semantic_diagnostics = base_diagnostics["semantic"]
             try:
                 # Use a lightweight dot product/cosine calculation if the model is mocked for tests,
-                # or import standard util if it's the real sentence_transformers.
+                # or import standard util if it is the real sentence_transformers package.
                 query_emb = semantic_model.encode(query_text)
                 if isinstance(query_emb, list):
                     try:
@@ -612,6 +705,18 @@ def execute_query(
                 if hasattr(query_emb, "shape") and len(query_emb.shape) == 2 and query_emb.shape[0] == 1:
                     query_emb = query_emb.flatten()
 
+                actual_query_dimensions = _embedding_vector_dimension(
+                    query_emb,
+                    label="query",
+                )
+                semantic_diagnostics["actual_query_dimensions"] = actual_query_dimensions
+                if actual_query_dimensions != expected_dimensions:
+                    raise _SemanticDimensionMismatch(
+                        "query",
+                        expected_dimensions,
+                        actual_query_dimensions,
+                    )
+
                 if candidate_texts:
                     doc_embs = semantic_model.encode(candidate_texts)
                     if isinstance(doc_embs, list):
@@ -621,11 +726,30 @@ def execute_query(
                         except ImportError:
                             pass
 
+                    document_count, actual_document_dimensions = _embedding_batch_dimensions(
+                        doc_embs
+                    )
+                    semantic_diagnostics["actual_document_dimensions"] = (
+                        actual_document_dimensions
+                    )
+                    if document_count != len(candidate_texts):
+                        raise RuntimeError(
+                            "Semantic document embedding count mismatch: "
+                            f"expected {len(candidate_texts)}, got {document_count}."
+                        )
+                    if actual_document_dimensions != expected_dimensions:
+                        raise _SemanticDimensionMismatch(
+                            "document",
+                            expected_dimensions,
+                            actual_document_dimensions,
+                        )
+                    semantic_diagnostics["dimension_validation"] = "pass"
+
                     try:
                         from sentence_transformers import util
                         cosine_scores = util.cos_sim(query_emb, doc_embs)[0]
                     except ImportError:
-                        # Fallback for mocked models in tests
+                        # Fallback for mocked models in tests.
                         try:
                             import numpy as np
                             q = np.array(query_emb)
@@ -637,8 +761,12 @@ def execute_query(
                             cosine_scores = np.dot(d, q) / (d_norm * q_norm)
                         except ImportError:
                             import math
-                            def _dot(a, b): return sum(x * y for x, y in zip(a, b))
-                            def _norm(a): return math.sqrt(sum(x * x for x in a))
+
+                            def _dot(a, b):
+                                return sum(x * y for x, y in zip(a, b))
+
+                            def _norm(a):
+                                return math.sqrt(sum(x * x for x in a))
 
                             q = query_emb
                             q_n = _norm(q) or 1.0
@@ -654,19 +782,40 @@ def execute_query(
                         hit["why"]["rank_features"] = hit["why"].get("rank_features", {})
                         hit["why"]["rank_features"]["semantic_score"] = float(cosine_scores[i])
                         hit["why"]["rank_features"]["original_bm25"] = old_score
+                else:
+                    semantic_diagnostics["dimension_validation"] = "query_only_pass"
+            except _SemanticDimensionMismatch as exc:
+                semantic_diagnostics["error"] = str(exc)
+                semantic_diagnostics["enabled"] = False
+                semantic_diagnostics["dimension_validation"] = "mismatch"
+                if trace_data:
+                    trace_data["semantic_status"] = "dimension_mismatch"
+                    trace_data["fallback_markers"].append(
+                        "semantic_fallback_dimension_mismatch"
+                    )
+                if fallback == "fail":
+                    raise RuntimeError(
+                        f"{exc} (fallback_behavior=fail)."
+                    ) from exc
             except Exception as exc:
                 logger.warning(
                     "Semantic encoding failed: %s",
                     type(exc).__name__,
                     exc_info=True,
                 )
+                if trace_data:
+                    trace_data["semantic_status"] = "encoding_error"
+                    trace_data["fallback_markers"].append(
+                        "semantic_fallback_encoding_error"
+                    )
                 if fallback == "fail":
                     raise RuntimeError(
                         "Semantic re-ranking failed during encoding "
                         "(fallback_behavior=fail)."
                     ) from exc
-                base_diagnostics["semantic"]["error"] = "semantic encoding unavailable"
-                base_diagnostics["semantic"]["enabled"] = False
+                semantic_diagnostics["error"] = "semantic encoding unavailable"
+                semantic_diagnostics["enabled"] = False
+                semantic_diagnostics["dimension_validation"] = "error"
 
         # Sort results deterministically to avoid random tie flips.
         results.sort(key=lambda x: (-x.get("final_score", 0), x["path"]))

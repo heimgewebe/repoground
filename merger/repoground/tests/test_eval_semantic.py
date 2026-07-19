@@ -50,7 +50,7 @@ def test_eval_semantic_delta(mini_index_for_eval, tmp_path, capsys, monkeypatch)
         "provider": "local",
         "similarity_metric": "cosine",
         "model_name": "mock-model",
-        "dimensions": 384,
+        "dimensions": 2,
         "fallback_behavior": "ignore"
     }), encoding="utf-8")
 
@@ -58,7 +58,8 @@ def test_eval_semantic_delta(mini_index_for_eval, tmp_path, capsys, monkeypatch)
         def encode(self, texts):
             # If input is string, make it list-like for uniform processing
             is_single = isinstance(texts, str)
-            if is_single: texts = [texts]
+            if is_single:
+                texts = [texts]
 
             embeddings = []
             for t in texts:

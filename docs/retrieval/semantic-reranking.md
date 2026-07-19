@@ -22,7 +22,11 @@ The parameters for this re-ranking step are defined by the `embedding-policy.v1.
 - **`dimensions`**: Specifies the expected vector size.
 - **`provider`**: Delineates `api` vs `local` model execution.
 - **`similarity_metric`**: Distance metric to compute similarity (e.g., `cosine`).
-- **`fallback_behavior`**: Crucially, if the semantic service fails (e.g., API timeout), the policy determines whether to `fail` the request or `ignore` the error and yield the raw BM25 candidates.
+- **`fallback_behavior`**: Crucially, if the semantic service fails (e.g., API timeout), the policy determines whether to `fail` the request or `ignore` the error and yield the pre-semantic candidates.
+
+### Runtime dimension invariant
+
+For the local provider, RepoGround validates the actual query-vector and document-vector dimensions before calculating similarity. Both must equal the policy's positive `dimensions` value. A mismatch is reported as `dimension_validation: mismatch`; `fallback_behavior: ignore` keeps the unchanged pre-semantic candidate scores and ordering, while `fallback_behavior: fail` raises a bounded error without exposing model internals. A matching size proves only shape compatibility, not semantic quality or model identity.
 
 ## Evaluation Strategy
 
