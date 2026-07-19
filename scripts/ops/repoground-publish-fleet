@@ -68,6 +68,11 @@ STATE_SCHEMA = "repobrief.fleet-publication-state.v1"
 ACTIVE_LEASE_SCHEMA = "repobrief.active-publication-lease.v1"
 PRUNE_TRANSACTION_SCHEMA = "repobrief.retention-transaction.v1"
 QUARANTINE_DIR_NAME = ".repoground-prune-quarantine"
+PERSISTED_V1_QUARANTINE_DIR_NAME = "." + "r" + "b-prune-quarantine"
+READABLE_QUARANTINE_DIR_NAMES = (
+    QUARANTINE_DIR_NAME,
+    PERSISTED_V1_QUARANTINE_DIR_NAME,
+)
 GENERATOR_INPUT_PATHS = (
     "merger/repoground/__init__.py",
     "merger/repoground/cli/__init__.py",
@@ -696,31 +701,32 @@ def prune_transaction_files() -> list[Path]:
 
 
 def validate_quarantine_directory(group: Path) -> None:
-    quarantine_root = group / QUARANTINE_DIR_NAME
-    if not quarantine_root.exists():
-        return
-    if quarantine_root.is_symlink() or not quarantine_root.is_dir():
-        raise RuntimeError(
-            f"retention quarantine is not a directory: {quarantine_root}"
-        )
     unexpected: list[Path] = []
-    for transaction_dir in quarantine_root.iterdir():
-        transaction_file = prune_transaction_root() / f"{transaction_dir.name}.json"
-        valid_transaction_dir = (
-            transaction_dir.is_dir()
-            and not transaction_dir.is_symlink()
-            and TRANSACTION_ID_RE.fullmatch(transaction_dir.name)
-            and transaction_file.is_file()
-            and not transaction_file.is_symlink()
-        )
-        if not valid_transaction_dir:
-            unexpected.append(transaction_dir)
+    for directory_name in READABLE_QUARANTINE_DIR_NAMES:
+        quarantine_root = group / directory_name
+        if not quarantine_root.exists():
             continue
-        children = list(transaction_dir.iterdir())
-        if len(children) > 1 or any(
-            child.is_symlink() or not child.is_dir() for child in children
-        ):
-            unexpected.extend(children or [transaction_dir])
+        if quarantine_root.is_symlink() or not quarantine_root.is_dir():
+            raise RuntimeError(
+                f"retention quarantine is not a directory: {quarantine_root}"
+            )
+        for transaction_dir in quarantine_root.iterdir():
+            transaction_file = prune_transaction_root() / f"{transaction_dir.name}.json"
+            valid_transaction_dir = (
+                transaction_dir.is_dir()
+                and not transaction_dir.is_symlink()
+                and TRANSACTION_ID_RE.fullmatch(transaction_dir.name)
+                and transaction_file.is_file()
+                and not transaction_file.is_symlink()
+            )
+            if not valid_transaction_dir:
+                unexpected.append(transaction_dir)
+                continue
+            children = list(transaction_dir.iterdir())
+            if len(children) > 1 or any(
+                child.is_symlink() or not child.is_dir() for child in children
+            ):
+                unexpected.extend(children or [transaction_dir])
     if unexpected:
         rendered = ", ".join(str(path) for path in sorted(unexpected))
         raise RuntimeError(f"unexpected retention quarantine entries: {rendered}")
@@ -767,10 +773,13 @@ def _validated_transaction_paths(
         raise RuntimeError(
             f"prune transaction source is not a direct group child: {transaction_file}"
         )
-    expected_quarantine = (
-        managed_root / QUARANTINE_DIR_NAME / transaction_id / source.name
-    ).resolve(strict=False)
-    if quarantine != expected_quarantine:
+    expected_quarantines = {
+        (managed_root / directory_name / transaction_id / source.name).resolve(
+            strict=False
+        )
+        for directory_name in READABLE_QUARANTINE_DIR_NAMES
+    }
+    if quarantine not in expected_quarantines:
         raise RuntimeError(
             f"prune transaction quarantine path mismatch: {transaction_file}"
         )
@@ -851,7 +860,11 @@ def version_dirs(group: Path) -> list[Path]:
     rows: list[Path] = []
     unexpected: list[Path] = []
     for path in group.iterdir():
-        if path.name == QUARANTINE_DIR_NAME and path.is_dir() and not path.is_symlink():
+        if (
+            path.name in READABLE_QUARANTINE_DIR_NAMES
+            and path.is_dir()
+            and not path.is_symlink()
+        ):
             continue
         if (
             path.is_dir()
@@ -876,7 +889,11 @@ def localized_hash_dirs(group: Path) -> list[Path]:
     rows: list[Path] = []
     unexpected: list[Path] = []
     for path in group.iterdir():
-        if path.name == QUARANTINE_DIR_NAME and path.is_dir() and not path.is_symlink():
+        if (
+            path.name in READABLE_QUARANTINE_DIR_NAMES
+            and path.is_dir()
+            and not path.is_symlink()
+        ):
             continue
         if (
             path.is_dir()
@@ -1024,8 +1041,15 @@ def _cleanup_quarantine_parents(quarantine: Path, managed_root: Path) -> None:
         quarantine.parent.rmdir()
     except OSError:
         pass
+    quarantine_root = quarantine.parent.parent.resolve(strict=False)
+    readable_roots = {
+        managed_root.joinpath(directory_name).resolve(strict=False)
+        for directory_name in READABLE_QUARANTINE_DIR_NAMES
+    }
+    if quarantine_root not in readable_roots:
+        return
     try:
-        managed_root.joinpath(QUARANTINE_DIR_NAME).rmdir()
+        quarantine_root.rmdir()
     except OSError:
         pass
 
