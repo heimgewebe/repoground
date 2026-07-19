@@ -1,0 +1,26 @@
+{
+  "schema": "repoground.compatibility_exit.v1",
+  "version": 1,
+  "product": "RepoGround",
+  "status": "closed-hard-cut",
+  "closed_on": "2026-07-19",
+  "successor_contract": "docs/contracts/repoground-naming-hard-cut.v1.json",
+  "runtime_authority": false,
+  "active_aliases": [],
+  "policy": {
+    "zero_usage_window_days": 0,
+    "unknown_usage_blocks_closeout": true,
+    "active_aliases_may_be_restored": false,
+    "rollback_method": "commit_revert_without_alias_restoration"
+  },
+  "historical_record": {
+    "purpose": "Preserve the protected contract path as a terminal closeout record.",
+    "does_not_establish": [
+      "command_alias",
+      "environment_fallback",
+      "runtime_storage_fallback",
+      "resource_scheme_alias",
+      "reader_compatibility"
+    ]
+  }
+}

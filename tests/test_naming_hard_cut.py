@@ -81,6 +81,18 @@ def test_active_repository_has_no_runtime_aliases() -> None:
     assert scan_repository(ROOT) == []
 
 
+
+def test_protected_compatibility_contract_is_terminal_only() -> None:
+    path = ROOT / "docs/contracts/repoground-compatibility-exit.v1.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["schema"] == "repoground.compatibility_exit.v1"
+    assert data["status"] == "closed-hard-cut"
+    assert data["successor_contract"] == "docs/contracts/repoground-naming-hard-cut.v1.json"
+    assert data["runtime_authority"] is False
+    assert data["active_aliases"] == []
+    assert data["policy"]["zero_usage_window_days"] == 0
+    assert data["policy"]["active_aliases_may_be_restored"] is False
+
 def test_removed_entrypoint_files_are_absent() -> None:
     former = _former_product()
     removed = [
