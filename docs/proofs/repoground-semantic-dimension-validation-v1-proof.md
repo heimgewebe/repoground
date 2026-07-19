@@ -17,7 +17,8 @@ Status: implemented and locally verified on branch `feat/semantic-dimension-vali
 - preserves pre-semantic candidate scores and ordering when `fallback_behavior=ignore`;
 - raises a bounded dimension-mismatch error when `fallback_behavior=fail`;
 - checks that the document embedding count matches the candidate count;
-- marks general semantic encoding fallbacks explicitly in query traces.
+- marks general semantic encoding fallbacks explicitly in query traces;
+- separates semantic conversion, validation, scoring and failure handling from `execute_query` so the repository maintainability ratchet remains satisfied.
 
 The implementation does not change lexical retrieval, graph scoring, model selection, provider support, similarity metrics or default semantic activation.
 
@@ -30,7 +31,7 @@ The implementation does not change lexical retrieval, graph scoring, model selec
 Targeted new and adjacent cases:
 
 ```text
-10 passed, 37 deselected
+10 passed, 37 deselected in 0.28s
 ```
 
 Full RepoGround Python suite:
@@ -38,10 +39,10 @@ Full RepoGround Python suite:
 ```text
 python3 -m pytest merger/repoground/tests -q
 
-4355 passed, 2 skipped in 127.86s
+4355 passed, 2 skipped in 180.39s
 ```
 
-Static and diff checks:
+Static, maintainability and diff checks:
 
 ```text
 python3 -m ruff check \
@@ -50,6 +51,13 @@ python3 -m ruff check \
   merger/repoground/tests/test_eval_semantic.py
 
 All checks passed!
+
+python3 scripts/ci/check_graph_maintainability.py --root . --format json
+
+status: pass
+new_count: 0
+resolved_count: 2
+findings: []
 
 git diff --check
 

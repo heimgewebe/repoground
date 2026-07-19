@@ -149,6 +149,203 @@ def _embedding_batch_dimensions(value: Any) -> tuple[int, int]:
     )
 
 
+def _as_optional_numpy_array(value: Any) -> Any:
+    """Convert list embeddings when NumPy is available without requiring it."""
+    if not isinstance(value, list):
+        return value
+    try:
+        import numpy as np
+    except ImportError:
+        return value
+    return np.array(value)
+
+
+def _flatten_single_embedding(value: Any) -> Any:
+    shape = getattr(value, "shape", None)
+    if shape is not None and len(shape) == 2 and shape[0] == 1:
+        return value.flatten()
+    return value
+
+
+def _python_cosine_scores(query_emb: Any, doc_embs: Any) -> List[float]:
+    import math
+
+    query_norm = math.sqrt(sum(component * component for component in query_emb)) or 1.0
+    scores = []
+    for document_emb in doc_embs:
+        document_norm = (
+            math.sqrt(sum(component * component for component in document_emb)) or 1.0
+        )
+        dot_product = sum(
+            query_component * document_component
+            for query_component, document_component in zip(query_emb, document_emb)
+        )
+        scores.append(dot_product / (query_norm * document_norm))
+    return scores
+
+
+def _semantic_cosine_scores(query_emb: Any, doc_embs: Any) -> Any:
+    try:
+        from sentence_transformers import util
+
+        return util.cos_sim(query_emb, doc_embs)[0]
+    except ImportError:
+        try:
+            import numpy as np
+        except ImportError:
+            return _python_cosine_scores(query_emb, doc_embs)
+
+    query_array = np.array(query_emb)
+    document_array = np.array(doc_embs)
+    query_norm = np.linalg.norm(query_array)
+    document_norms = np.linalg.norm(document_array, axis=1)
+    query_norm = query_norm if query_norm > 0 else 1.0
+    document_norms = np.where(document_norms > 0, document_norms, 1.0)
+    return np.dot(document_array, query_array) / (document_norms * query_norm)
+
+
+def _validated_semantic_embeddings(
+    *,
+    semantic_model: Any,
+    query_text: str,
+    candidate_texts: List[str],
+    expected_dimensions: int,
+    semantic_diagnostics: Dict[str, Any],
+) -> tuple[Any, Optional[Any]]:
+    query_emb = _flatten_single_embedding(
+        _as_optional_numpy_array(semantic_model.encode(query_text))
+    )
+    actual_query_dimensions = _embedding_vector_dimension(
+        query_emb,
+        label="query",
+    )
+    semantic_diagnostics["actual_query_dimensions"] = actual_query_dimensions
+    if actual_query_dimensions != expected_dimensions:
+        raise _SemanticDimensionMismatch(
+            "query",
+            expected_dimensions,
+            actual_query_dimensions,
+        )
+
+    if not candidate_texts:
+        semantic_diagnostics["dimension_validation"] = "query_only_pass"
+        return query_emb, None
+
+    doc_embs = _as_optional_numpy_array(semantic_model.encode(candidate_texts))
+    document_count, actual_document_dimensions = _embedding_batch_dimensions(doc_embs)
+    semantic_diagnostics["actual_document_dimensions"] = actual_document_dimensions
+    if document_count != len(candidate_texts):
+        raise RuntimeError(
+            "Semantic document embedding count mismatch: "
+            f"expected {len(candidate_texts)}, got {document_count}."
+        )
+    if actual_document_dimensions != expected_dimensions:
+        raise _SemanticDimensionMismatch(
+            "document",
+            expected_dimensions,
+            actual_document_dimensions,
+        )
+    semantic_diagnostics["dimension_validation"] = "pass"
+    return query_emb, doc_embs
+
+
+def _handle_semantic_dimension_mismatch(
+    *,
+    exc: _SemanticDimensionMismatch,
+    fallback: str,
+    semantic_diagnostics: Dict[str, Any],
+    trace_data: Optional[Dict[str, Any]],
+) -> None:
+    semantic_diagnostics["error"] = str(exc)
+    semantic_diagnostics["enabled"] = False
+    semantic_diagnostics["dimension_validation"] = "mismatch"
+    if trace_data:
+        trace_data["semantic_status"] = "dimension_mismatch"
+        trace_data["fallback_markers"].append(
+            "semantic_fallback_dimension_mismatch"
+        )
+    if fallback == "fail":
+        raise RuntimeError(
+            f"{exc} (fallback_behavior=fail)."
+        ) from exc
+
+
+def _handle_semantic_encoding_failure(
+    *,
+    exc: Exception,
+    fallback: str,
+    semantic_diagnostics: Dict[str, Any],
+    trace_data: Optional[Dict[str, Any]],
+) -> None:
+    logger.warning(
+        "Semantic encoding failed: %s",
+        type(exc).__name__,
+        exc_info=True,
+    )
+    if trace_data:
+        trace_data["semantic_status"] = "encoding_error"
+        trace_data["fallback_markers"].append(
+            "semantic_fallback_encoding_error"
+        )
+    if fallback == "fail":
+        raise RuntimeError(
+            "Semantic re-ranking failed during encoding "
+            "(fallback_behavior=fail)."
+        ) from exc
+    semantic_diagnostics["error"] = "semantic encoding unavailable"
+    semantic_diagnostics["enabled"] = False
+    semantic_diagnostics["dimension_validation"] = "error"
+
+
+def _apply_semantic_reranking(
+    *,
+    results: List[Dict[str, Any]],
+    candidate_texts: List[str],
+    semantic_model: Any,
+    query_text: str,
+    expected_dimensions: int,
+    fallback: str,
+    base_diagnostics: Dict[str, Any],
+    trace_data: Optional[Dict[str, Any]],
+) -> None:
+    """Apply optional semantic scoring while preserving bounded fallback behavior."""
+    semantic_diagnostics = base_diagnostics["semantic"]
+    try:
+        query_emb, doc_embs = _validated_semantic_embeddings(
+            semantic_model=semantic_model,
+            query_text=query_text,
+            candidate_texts=candidate_texts,
+            expected_dimensions=expected_dimensions,
+            semantic_diagnostics=semantic_diagnostics,
+        )
+        if doc_embs is None:
+            return
+
+        cosine_scores = _semantic_cosine_scores(query_emb, doc_embs)
+        for index, hit in enumerate(results):
+            old_score = hit.get("score", 0)
+            semantic_score = float(cosine_scores[index])
+            hit["score"] = semantic_score
+            hit["final_score"] = semantic_score
+            hit["why"]["rank_features"] = hit["why"].get("rank_features", {})
+            hit["why"]["rank_features"]["semantic_score"] = semantic_score
+            hit["why"]["rank_features"]["original_bm25"] = old_score
+    except _SemanticDimensionMismatch as exc:
+        _handle_semantic_dimension_mismatch(
+            exc=exc,
+            fallback=fallback,
+            semantic_diagnostics=semantic_diagnostics,
+            trace_data=trace_data,
+        )
+    except Exception as exc:
+        _handle_semantic_encoding_failure(
+            exc=exc,
+            fallback=fallback,
+            semantic_diagnostics=semantic_diagnostics,
+            trace_data=trace_data,
+        )
+
+
 def execute_query(
     index_path: Path,
     query_text: str,
@@ -690,132 +887,16 @@ def execute_query(
             results.append(hit)
 
         if semantic_model:
-            # Re-rank results using semantic model.
-            semantic_diagnostics = base_diagnostics["semantic"]
-            try:
-                # Use a lightweight dot product/cosine calculation if the model is mocked for tests,
-                # or import standard util if it is the real sentence_transformers package.
-                query_emb = semantic_model.encode(query_text)
-                if isinstance(query_emb, list):
-                    try:
-                        import numpy as np
-                        query_emb = np.array(query_emb)
-                    except ImportError:
-                        pass
-                if hasattr(query_emb, "shape") and len(query_emb.shape) == 2 and query_emb.shape[0] == 1:
-                    query_emb = query_emb.flatten()
-
-                actual_query_dimensions = _embedding_vector_dimension(
-                    query_emb,
-                    label="query",
-                )
-                semantic_diagnostics["actual_query_dimensions"] = actual_query_dimensions
-                if actual_query_dimensions != expected_dimensions:
-                    raise _SemanticDimensionMismatch(
-                        "query",
-                        expected_dimensions,
-                        actual_query_dimensions,
-                    )
-
-                if candidate_texts:
-                    doc_embs = semantic_model.encode(candidate_texts)
-                    if isinstance(doc_embs, list):
-                        try:
-                            import numpy as np
-                            doc_embs = np.array(doc_embs)
-                        except ImportError:
-                            pass
-
-                    document_count, actual_document_dimensions = _embedding_batch_dimensions(
-                        doc_embs
-                    )
-                    semantic_diagnostics["actual_document_dimensions"] = (
-                        actual_document_dimensions
-                    )
-                    if document_count != len(candidate_texts):
-                        raise RuntimeError(
-                            "Semantic document embedding count mismatch: "
-                            f"expected {len(candidate_texts)}, got {document_count}."
-                        )
-                    if actual_document_dimensions != expected_dimensions:
-                        raise _SemanticDimensionMismatch(
-                            "document",
-                            expected_dimensions,
-                            actual_document_dimensions,
-                        )
-                    semantic_diagnostics["dimension_validation"] = "pass"
-
-                    try:
-                        from sentence_transformers import util
-                        cosine_scores = util.cos_sim(query_emb, doc_embs)[0]
-                    except ImportError:
-                        # Fallback for mocked models in tests.
-                        try:
-                            import numpy as np
-                            q = np.array(query_emb)
-                            d = np.array(doc_embs)
-                            q_norm = np.linalg.norm(q)
-                            d_norm = np.linalg.norm(d, axis=1)
-                            q_norm = q_norm if q_norm > 0 else 1.0
-                            d_norm = np.where(d_norm > 0, d_norm, 1.0)
-                            cosine_scores = np.dot(d, q) / (d_norm * q_norm)
-                        except ImportError:
-                            import math
-
-                            def _dot(a, b):
-                                return sum(x * y for x, y in zip(a, b))
-
-                            def _norm(a):
-                                return math.sqrt(sum(x * x for x in a))
-
-                            q = query_emb
-                            q_n = _norm(q) or 1.0
-                            cosine_scores = []
-                            for d in doc_embs:
-                                d_n = _norm(d) or 1.0
-                                cosine_scores.append(_dot(q, d) / (q_n * d_n))
-
-                    for i, hit in enumerate(results):
-                        old_score = hit.get("score", 0)
-                        hit["score"] = float(cosine_scores[i])
-                        hit["final_score"] = float(cosine_scores[i])
-                        hit["why"]["rank_features"] = hit["why"].get("rank_features", {})
-                        hit["why"]["rank_features"]["semantic_score"] = float(cosine_scores[i])
-                        hit["why"]["rank_features"]["original_bm25"] = old_score
-                else:
-                    semantic_diagnostics["dimension_validation"] = "query_only_pass"
-            except _SemanticDimensionMismatch as exc:
-                semantic_diagnostics["error"] = str(exc)
-                semantic_diagnostics["enabled"] = False
-                semantic_diagnostics["dimension_validation"] = "mismatch"
-                if trace_data:
-                    trace_data["semantic_status"] = "dimension_mismatch"
-                    trace_data["fallback_markers"].append(
-                        "semantic_fallback_dimension_mismatch"
-                    )
-                if fallback == "fail":
-                    raise RuntimeError(
-                        f"{exc} (fallback_behavior=fail)."
-                    ) from exc
-            except Exception as exc:
-                logger.warning(
-                    "Semantic encoding failed: %s",
-                    type(exc).__name__,
-                    exc_info=True,
-                )
-                if trace_data:
-                    trace_data["semantic_status"] = "encoding_error"
-                    trace_data["fallback_markers"].append(
-                        "semantic_fallback_encoding_error"
-                    )
-                if fallback == "fail":
-                    raise RuntimeError(
-                        "Semantic re-ranking failed during encoding "
-                        "(fallback_behavior=fail)."
-                    ) from exc
-                semantic_diagnostics["error"] = "semantic encoding unavailable"
-                semantic_diagnostics["enabled"] = False
-                semantic_diagnostics["dimension_validation"] = "error"
+            _apply_semantic_reranking(
+                results=results,
+                candidate_texts=candidate_texts,
+                semantic_model=semantic_model,
+                query_text=query_text,
+                expected_dimensions=expected_dimensions,
+                fallback=fallback,
+                base_diagnostics=base_diagnostics,
+                trace_data=trace_data,
+            )
 
         # Sort results deterministically to avoid random tie flips.
         results.sort(key=lambda x: (-x.get("final_score", 0), x["path"]))
