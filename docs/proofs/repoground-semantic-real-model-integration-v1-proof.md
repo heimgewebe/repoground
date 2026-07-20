@@ -24,15 +24,20 @@ The optional semantic dependency installation proof deliberately downloaded no m
 
 - Docker `--network none` plus an in-container requirement that `/sys/class/net` exposes only `lo`;
 - a read-only root filesystem;
-- read-only repository and dependency mounts;
+- a fixed unprivileged numeric identity, UID/GID `65532:65532`, instead of the host user;
+- a temporary runtime copy produced only from regular files in `git archive HEAD`, normalized to file mode `0444` and directory mode `0555` before its read-only mount;
+- a read-only dependency mount whose complete host path is rejected when any component is a symlink;
+- Python isolated with `-P -S`, `PYTHONSAFEPATH=1`, and explicit `PYTHONPATH=/semantic-target:/work` rather than runtime `sys.path` mutation;
 - all Linux capabilities dropped;
 - `no-new-privileges`;
 - Hugging Face and Transformers offline flags;
 - an additional Python socket guard.
 
-The existing `semantic-lock` workflow now installs the 58-package SHA-256-locked dependency closure into a temporary repository-local target, invokes the network-disabled integration wrapper, and removes the target through an EXIT trap. The normal RepoGround Python suite remains independent of Torch and SentenceTransformers.
+The existing `semantic-lock` workflow now installs the 58-package SHA-256-locked dependency closure into a unique `mktemp` directory below `RUNNER_TEMP`. The EXIT trap is installed before the directory is created, so cancellation and early failure do not leave a fixed shared path. After installation, read/execute access is added without write access for the fixed container identity, the network-disabled integration wrapper runs, and the target is removed. The normal RepoGround Python suite remains independent of Torch and SentenceTransformers.
 
 The workflow path filter also now watches the real renamed platform contract, `docs/release/repoground-semantic-platforms.v1.json`, instead of the obsolete pre-cutover filename.
+
+The container image is not independently hard-coded in the integration wrapper. It is read from the digest-pinned `compiler.image` field in that platform contract. Updating the tag or digest therefore requires one explicit contract change, regenerated semantic locks, a new deterministic model-tree hash check, and renewed local and GitHub integration evidence. The `sentence-transformers==5.6.0` and `torch==2.13.0+cpu` roots are likewise compatibility pins for reproducibility; they are not an instruction to select versions dynamically at runtime.
 
 ## Real execution evidence
 
@@ -120,7 +125,10 @@ A repository-wide unconfigured `ruff check .` still reports 128 existing baselin
 The integration fails closed when:
 
 - the observed container network exposes any interface other than loopback;
-- the dependency target is relative, symlinked or not a directory;
+- the dependency target is not normalized and absolute, contains a symlink in any path component, or is not a directory;
+- the committed runtime archive contains a symlink, hard link or any other non-regular entry;
+- the generated model tree contains a symlink or another non-regular entry;
+- the explicit dependency and repository import roots are absent;
 - installed SentenceTransformers or Torch versions differ from the locked roots;
 - CUDA unexpectedly becomes the selected execution surface;
 - either generated model tree differs from the other or from the committed hash;

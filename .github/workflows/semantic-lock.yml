@@ -65,13 +65,20 @@ jobs:
 
       - name: Verify hash-locked install and offline real-model integration
         run: |
-          target=".semantic-real-model-target"
+          set -euo pipefail
+          umask 077
+          target=""
           cleanup() {
-            rm -rf -- "$target"
+            if [[ -n "$target" ]]; then
+              rm -rf -- "$target"
+            fi
           }
           trap cleanup EXIT
-          cleanup
-          mkdir -- "$target"
+          target="$(
+            mktemp -d \
+              "${RUNNER_TEMP:?}/repoground-semantic-real-model.XXXXXX"
+          )"
           scripts/release/compile_semantic_lock.sh \
             --verify-install "$target"
+          chmod -R a+rX -- "$target"
           scripts/ci/run_semantic_real_model_integration.sh "$target"

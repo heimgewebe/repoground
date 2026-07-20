@@ -53,7 +53,18 @@ def canonical_tree_sha256(root: Path) -> str:
         raise RuntimeError("model tree must be a real directory")
 
     def parts() -> Iterator[bytes]:
-        files = sorted(path for path in root.rglob("*") if path.is_file())
+        files: list[Path] = []
+        for path in sorted(root.rglob("*")):
+            relative_path = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                raise RuntimeError(f"model tree contains symlink: {relative_path}")
+            if path.is_dir():
+                continue
+            if not path.is_file():
+                raise RuntimeError(
+                    f"model tree contains non-regular entry: {relative_path}"
+                )
+            files.append(path)
         if not files:
             raise RuntimeError("model tree contains no files")
         for path in files:
@@ -66,9 +77,29 @@ def canonical_tree_sha256(root: Path) -> str:
 def _require_dependency_target(path: Path) -> Path:
     if not path.is_absolute():
         raise RuntimeError("dependency target must be an absolute path")
-    if path.is_symlink() or not path.is_dir():
+    normalized = Path(os.path.normpath(os.fspath(path)))
+    if normalized != path:
+        raise RuntimeError("dependency target must be a normalized absolute path")
+
+    current = Path(path.anchor)
+    for part in path.parts[1:]:
+        current /= part
+        if current.is_symlink():
+            raise RuntimeError(
+                "dependency target must contain no symlink components: "
+                f"{current}"
+            )
+    if not path.is_dir():
         raise RuntimeError("dependency target must be a real directory")
-    return path.resolve(strict=True)
+    resolved = path.resolve(strict=True)
+    if resolved != path:
+        raise RuntimeError("dependency target must resolve to itself")
+    return resolved
+
+
+def _dependency_target_argument(path: Path) -> Path:
+    candidate = path if path.is_absolute() else Path.cwd() / path
+    return _require_dependency_target(candidate)
 
 
 def _require_version(distribution: str, expected: str) -> str:
@@ -336,10 +367,19 @@ def _integration_report(
     }
 
 
+def _require_explicit_import_roots(dependency_target: Path) -> None:
+    required = {str(dependency_target), str(ROOT)}
+    missing = sorted(required.difference(sys.path))
+    if missing:
+        raise RuntimeError(
+            "required import roots are absent; invoke through the hardened wrapper: "
+            f"{missing!r}"
+        )
+
+
 def run_integration(dependency_target: Path) -> dict[str, Any]:
     dependency_target = _require_dependency_target(dependency_target)
-    sys.path.insert(0, str(dependency_target))
-    sys.path.insert(0, str(ROOT))
+    _require_explicit_import_roots(dependency_target)
     os.environ.update(
         {
             "HF_HUB_OFFLINE": "1",
@@ -381,9 +421,21 @@ def main() -> int:
             "local SentenceTransformer model"
         )
     )
-    parser.add_argument("--dependency-target", required=True, type=Path)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--dependency-target", type=Path)
+    mode.add_argument("--validate-dependency-target", type=Path)
     args = parser.parse_args()
+
+    if args.validate_dependency_target is not None:
+        try:
+            target = _dependency_target_argument(args.validate_dependency_target)
+        except Exception as exc:
+            parser.error(str(exc))
+        print(target)
+        return 0
+
     try:
+        assert args.dependency_target is not None
         result = run_integration(args.dependency_target)
     except Exception as exc:
         print(

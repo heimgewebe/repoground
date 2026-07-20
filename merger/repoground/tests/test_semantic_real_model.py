@@ -58,6 +58,13 @@ def test_canonical_model_tree_hash_is_path_and_content_bound(tmp_path: Path) -> 
     (second / "modules.json").unlink()
     assert canonical_tree_sha256(second) != first_hash
 
+    symlinked = tmp_path / "symlinked"
+    symlinked.mkdir()
+    (symlinked / "payload.json").write_text("{}\n", encoding="utf-8")
+    (symlinked / "external.json").symlink_to(second / "module" / "config.json")
+    with pytest.raises(RuntimeError, match="model tree contains symlink"):
+        canonical_tree_sha256(symlinked)
+
 
 def test_dependency_target_rejects_relative_links_and_files(tmp_path: Path) -> None:
     target = tmp_path / "target"
@@ -74,8 +81,16 @@ def test_dependency_target_rejects_relative_links_and_files(tmp_path: Path) -> N
 
     link_target = tmp_path / "link"
     link_target.symlink_to(target, target_is_directory=True)
-    with pytest.raises(RuntimeError, match="real directory"):
+    with pytest.raises(RuntimeError, match="symlink components"):
         _require_dependency_target(link_target)
+
+    real_parent = tmp_path / "real-parent"
+    nested_target = real_parent / "target"
+    nested_target.mkdir(parents=True)
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+    with pytest.raises(RuntimeError, match="symlink components"):
+        _require_dependency_target(linked_parent / "target")
 
 
 def test_network_observation_requires_only_loopback(tmp_path: Path) -> None:
@@ -108,26 +123,42 @@ def test_real_model_runner_is_network_disabled_and_workflow_wired() -> None:
     assert "docs/proofs/repoground-semantic-real-model-integration-v1-proof.md" not in workflow
     assert "docs/retrieval/semantic-reranking.md" not in workflow
     assert "docs/release/semantic-extension-platforms.v1.json" not in workflow
-    assert 'target=".semantic-real-model-target"' in workflow
+    assert 'target=""' in workflow
+    assert "mktemp -d" in workflow
+    assert "RUNNER_TEMP" in workflow
     assert "trap cleanup EXIT" in workflow
+    assert 'chmod -R a+rX -- "$target"' in workflow
     assert '--verify-install "$target"' in workflow
 
     assert "--network none" in wrapper
     assert "--read-only" in wrapper
     assert "--cap-drop ALL" in wrapper
     assert "--security-opt no-new-privileges" in wrapper
+    assert 'sandbox_uid=65532' in wrapper
+    assert 'sandbox_gid=65532' in wrapper
+    assert '--user "$sandbox_uid:$sandbox_gid"' in wrapper
+    assert '$(id -u):$(id -g)' not in wrapper
+    assert "PYTHONPATH=/semantic-target:/work" in wrapper
+    assert "PYTHONSAFEPATH=1" in wrapper
+    assert "python -P -S" in wrapper
     assert "HF_HUB_OFFLINE=1" in wrapper
     assert "TRANSFORMERS_OFFLINE=1" in wrapper
     assert ":/work:ro" in wrapper
     assert ":/semantic-target:ro" in wrapper
-    assert (
-        "mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:"
-        "a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69"
-        in wrapper
-    )
+    assert "docs/release/repoground-semantic-platforms.v1.json" in wrapper
+    assert "@sha256:" in wrapper
+    assert "mcr.microsoft.com/playwright/python:v1.61.0-noble" not in wrapper
+    assert '"archive", "--format=tar", "HEAD"' in wrapper
+    assert "runtime archive contains non-regular entry" in wrapper
+    assert 'destination.chmod(0o444)' in wrapper
+    assert 'directory.chmod(0o555)' in wrapper
+    assert '--volume "$runtime_work:/work:ro"' in wrapper
+    assert '--volume "$repo_root:/work:ro"' not in wrapper
 
     assert "local_files_only=True" in runner
     assert "deny_python_network" in runner
     assert "_require_loopback_only_network" in runner
+    assert "_require_explicit_import_roots" in runner
+    assert "sys.path.insert" not in runner
     assert '"downloaded": False' in runner
     assert EXPECTED_MODEL_TREE_SHA256 in runner
