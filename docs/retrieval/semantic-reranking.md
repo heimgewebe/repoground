@@ -22,7 +22,17 @@ The parameters for this re-ranking step are defined by the `embedding-policy.v1.
 - **`dimensions`**: Specifies the expected vector size.
 - **`provider`**: Delineates `api` vs `local` model execution.
 - **`similarity_metric`**: Distance metric to compute similarity (e.g., `cosine`).
-- **`fallback_behavior`**: Crucially, if the semantic service fails (e.g., API timeout), the policy determines whether to `fail` the request or `ignore` the error and yield the raw BM25 candidates.
+- **`fallback_behavior`**: Crucially, if the semantic service fails (e.g., API timeout), the policy determines whether to `fail` the request or `ignore` the error and yield the pre-semantic candidates.
+
+### Runtime dimension invariant
+
+For the local provider, RepoGround validates the actual query-vector and document-vector dimensions before calculating similarity. Both must equal the policy's positive `dimensions` value. A mismatch is reported as `dimension_validation: mismatch`; `fallback_behavior: ignore` keeps the unchanged pre-semantic candidate scores and ordering, while `fallback_behavior: fail` raises a bounded error without exposing model internals. A matching size proves only shape compatibility, not semantic quality or model identity.
+
+A direct runtime caller must provide a positive integer `dimensions` value. Omitting it, passing a boolean, or passing a non-positive or non-integer value is rejected instead of preserving the historical silent-ignore behavior. A one-dimensional document vector returned for exactly one candidate is normalized to a one-row batch before validation and scoring; this does not relax the declared dimension or candidate-count checks.
+
+Python lists and tuples may contain ordinary component scalars or vector rows supplied as array-like objects with a one-dimensional `.shape`, such as NumPy arrays or tensors. RepoGround distinguishes zero-dimensional array scalars from vector rows, validates every row dimension, and preserves the original batch count. This keeps the optional pure-Python path consistent with array-backed providers without importing NumPy merely for shape validation.
+
+RepoGround does not infer model identity from vector size. Different models can emit vectors with the same dimension, and runtime fingerprinting would require a separately versioned provenance contract covering model artifacts, revisions, tokenizer state, provider configuration, and reproducible loading. Phase F1 therefore proves shape compatibility only; model identity and semantic quality require independent evidence.
 
 ## Evaluation Strategy
 

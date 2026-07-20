@@ -36,4 +36,4 @@ scripts/release/compile_semantic_lock.sh --check
 - `similarity_metric` is fixed to `cosine`.
 - Without the optional packages, semantic reranking is unavailable and behavior follows the configured fallback policy.
 - Installing the packages does not download or approve a model and does not prove semantic quality.
-- `dimensions` configurations are not yet actively validated.
+- `dimensions` is enforced against both query and document vectors at runtime; mismatches follow `fallback_behavior` (`ignore` keeps the pre-semantic result ordering, `fail` aborts with a bounded diagnostic).
