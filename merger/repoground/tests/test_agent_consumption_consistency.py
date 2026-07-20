@@ -186,22 +186,36 @@ def test_scalar_string_role_shorthand_remains_compatible():
     _assert_schema_valid(trace)
 
 
-def test_invalid_passthrough_container_is_normalized_fail_closed():
+@pytest.mark.parametrize(
+    "field",
+    ["declared_citations", "declared_ranges", "epistemic_gaps"],
+)
+@pytest.mark.parametrize(
+    "invalid_value",
+    [123, True, "not-an-array", {"not": "an-array"}],
+)
+def test_invalid_passthrough_container_is_normalized_fail_closed(
+    field, invalid_value
+):
     trace = validate_agent_consumption(
         _required(),
-        _answer(declared_citations="not-an-array"),
+        _answer(**{field: invalid_value}),
     )
 
-    assert trace["declared_citations"] == []
+    assert trace[field] == []
     assert trace["status"] == "fail"
     assert "invalid_input_field" in _codes(trace)
     _assert_schema_valid(trace)
 
 
-def test_negative_semantics_scalar_does_not_crash():
+@pytest.mark.parametrize(
+    "invalid_value",
+    [1, True, "actual_reading_proven", {"boundary": "actual_reading_proven"}],
+)
+def test_negative_semantics_scalar_does_not_crash(invalid_value):
     trace = validate_agent_consumption(
         _required(),
-        _answer(does_not_establish=1),
+        _answer(does_not_establish=invalid_value),
     )
 
     assert trace["status"] == "fail"

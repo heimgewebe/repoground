@@ -42,6 +42,7 @@ DOES_NOT_ESTABLISH: tuple[str, ...] = (
     "runtime_behavior",
     "forensic_ready",
 )
+_DOES_NOT_ESTABLISH_SET = frozenset(DOES_NOT_ESTABLISH)
 
 _FAIL = "fail"
 _WARN = "warn"
@@ -346,7 +347,7 @@ def _has_exact_negative_semantics(answer_compliance: dict) -> bool:
         isinstance(item, str) for item in value
     ):
         return False
-    return set(value) == set(DOES_NOT_ESTABLISH) and len(value) == len(
+    return set(value) == _DOES_NOT_ESTABLISH_SET and len(value) == len(
         DOES_NOT_ESTABLISH
     )
 
