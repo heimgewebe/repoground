@@ -41,7 +41,7 @@
     "status": {
       "type": "string",
       "enum": ["pass", "warn", "fail", "not_applicable"],
-      "description": "pass: required artifacts declared and no warn/fail condition. warn: recommended missing/unread or unknown declared artifacts. fail: required missing/unread, task profile mismatch, or required negative semantics missing or invalid. not_applicable: no applicable task profile could be resolved and no failing contract invariant was detected."
+      "description": "pass: required artifacts declared and no warn/fail condition. warn: recommended missing/unread or unknown declared artifacts. fail: required missing/unread, task profile mismatch, malformed comparison input, contradictory declarations, unexpected unread classifications, or required negative semantics missing or invalid. not_applicable: no applicable task profile could be resolved and no failing contract invariant was detected."
     },
     "required_artifacts": {
       "$ref": "#/definitions/role_array",
@@ -69,26 +69,26 @@
     },
     "unread_required_artifacts": {
       "$ref": "#/definitions/role_array",
-      "description": "Required roles the Answer Compliance declaration reports as unread or unavailable. Adopted from the declaration."
+      "description": "Required roles the Answer Compliance declaration reports as unread or unavailable."
     },
     "unread_recommended_artifacts": {
       "$ref": "#/definitions/role_array",
-      "description": "Recommended roles the Answer Compliance declaration reports as unread or unavailable. Adopted from the declaration."
+      "description": "Recommended roles the Answer Compliance declaration reports as unread or unavailable."
     },
     "declared_citations": {
       "type": "array",
       "items": { "type": "object" },
-      "description": "Citation declarations adopted verbatim from the Answer Compliance declaration. Not re-validated here."
+      "description": "Citation declarations copied from Answer Compliance without semantic revalidation and without shared mutable identity."
     },
     "declared_ranges": {
       "type": "array",
       "items": { "type": "object" },
-      "description": "Range declarations adopted verbatim from the Answer Compliance declaration. Not re-validated here."
+      "description": "Range declarations copied from Answer Compliance without semantic revalidation and without shared mutable identity."
     },
     "epistemic_gaps": {
       "type": "array",
       "items": { "type": "object" },
-      "description": "Epistemic gaps adopted verbatim from the Answer Compliance declaration. Not re-validated here."
+      "description": "Epistemic gaps copied from Answer Compliance without semantic revalidation and without shared mutable identity."
     },
     "diagnostics": {
       "type": "array",
@@ -116,6 +116,7 @@
         "code": {
           "type": "string",
           "enum": [
+            "invalid_input_field",
             "task_profile_mismatch",
             "task_profile_not_applicable",
             "missing_required_artifact",
@@ -123,6 +124,8 @@
             "missing_recommended_artifact",
             "unread_recommended_artifact",
             "unknown_declared_artifact",
+            "contradictory_artifact_declaration",
+            "unexpected_unread_artifact",
             "missing_negative_semantics"
           ],
           "description": "Machine-readable diagnostic code."

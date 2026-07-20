@@ -7,8 +7,9 @@ Answer Compliance Contract v1 implemented.
 Agent Consumption Trace v1 implemented.
 The Agent Entry Manifest core is implemented with a contract, producer and
 focused tests.
-A dedicated CLI command, automatic bundle emission, bundle-manifest
-registration and stable consumer integration are not yet implemented.
+The dedicated Agent Consumption CLI is implemented. Automatic bundle emission,
+bundle-manifest registration and stable external consumer adoption are not yet
+implemented.
 Export Safety Report, Lens Cards, and Relation Cards exist as scoped contract/core surfaces. Agent Reading Pack v2 card indexes and any promoted Retrieval v2 default remain unimplemented.
 
 ---
@@ -155,10 +156,23 @@ It may report:
 
 - pass: required artifacts are declared and no warning/failure condition was found.
 - warn: required artifacts are declared, but recommended artifacts are missing/unread or unknown declared artifacts were observed.
-- fail: required artifacts are missing/unread, task profiles mismatch, or required negative semantics are missing or invalid.
-- not_applicable: no applicable task profile could be resolved and no failing contract invariant was detected.
+- fail: required artifacts are missing/unread, task profiles mismatch, input fields cannot be safely normalised, declarations contradict themselves, unread roles are assigned to the wrong expectation class, or required negative semantics are missing or invalid.
+- not_applicable: no applicable task profile could be resolved and no failing input or declaration invariant was detected.
 
 The trace is a declaration-comparison artifact only. It does not prove actual reading, answer correctness, complete context use, runtime behavior, test sufficiency, regression absence, forensic readiness, or repo understanding.
+
+### Consistency boundary
+
+The validator is not a replacement for full JSON Schema validation of Required Reading or Answer Compliance. It does enforce the minimum boundary needed for a deterministic, schema-shaped trace:
+
+- missing or malformed comparison fields (`task_profile`, Required Reading `status`, `required`, `recommended`, and Answer Compliance `declared_artifacts`) become `invalid_input_field` failures instead of being silently treated as empty;
+- a scalar string remains a compatibility shorthand for one role, while other scalar role values and mappings fail closed instead of being coerced;
+- one artifact cannot consistently be declared both read and unread;
+- one artifact cannot consistently be classified as both required-unread and recommended-unread;
+- unread declarations must match the required or recommended class of the resolved profile;
+- citation, range and epistemic-gap objects are deep-copied so later consumer mutation cannot rewrite the original declaration.
+
+These checks establish formal self-consistency only. They do not turn declarations into observed evidence.
 
 ### Files
 
@@ -166,13 +180,17 @@ The trace is a declaration-comparison artifact only. It does not prove actual re
 |------|------|
 | `merger/repoground/contracts/agent-consumption-trace.v1.schema.json` | JSON Schema (Draft-07) for the trace contract |
 | `merger/repoground/core/agent_consumption_validate.py` | Pure validator: `validate_agent_consumption(required_reading_result, answer_compliance, *, available_roles=None)` |
-| `merger/repoground/tests/test_agent_consumption_trace.py` | Schema validation and validator behaviour tests |
+| `merger/repoground/tests/test_agent_consumption_trace.py` | Base schema validation and validator behaviour tests |
+| `merger/repoground/tests/test_agent_consumption_consistency.py` | Contradiction, malformed-input and mutable-identity regression tests |
 
 ### Scope
 
 Implemented:
 - Agent Consumption Trace Contract
-- Core validator
+- Core validator split into bounded comparison helpers
+- fail-closed declaration consistency checks
+- schema-shaped malformed-input handling
+- deep-copy isolation for pass-through declaration objects
 - strict-mode validation
 - deterministic exit-code policy
 - CLI commands for Required Reading resolution, preflight, and trace validation
@@ -184,6 +202,8 @@ Deferred:
 - Output Health or Post-Emit Health integration
 - export-safety wiring
 - mandatory adoption by external agent wrappers
+- source-bound tool-read receipts that compare declarations with observed access events
+- cryptographic binding of those future receipts to task, commit and consumed artifact identities
 
 The validator performs no I/O, holds no global state, and reuses the existing Required Reading resolution rather than re-deriving it.
 
