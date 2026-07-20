@@ -73,6 +73,19 @@ READABLE_QUARANTINE_DIR_NAMES = (
     QUARANTINE_DIR_NAME,
     PERSISTED_V1_QUARANTINE_DIR_NAME,
 )
+# New publications use only the canonical root. Retention remains read-compatible
+# with the historical root so old immutable evidence can age out normally.
+CANONICAL_GENERATION_ROOT_NAME = ".repoground-generations"
+HISTORICAL_GENERATION_ROOT_NAME = ".repobrief-generations"
+READABLE_GENERATION_ROOT_NAMES = (
+    CANONICAL_GENERATION_ROOT_NAME,
+    HISTORICAL_GENERATION_ROOT_NAME,
+)
+BOUNDED_GENERATION_PREFIXES = frozenset(
+    prefix
+    for root_name in READABLE_GENERATION_ROOT_NAMES
+    for prefix in ((root_name,), ("bundle", root_name))
+)
 GENERATOR_INPUT_PATHS = (
     "merger/repoground/__init__.py",
     "merger/repoground/cli/__init__.py",
@@ -920,11 +933,14 @@ def path_is_protected(path: Path, protected: set[Path]) -> bool:
 
 
 def _bounded_generation_current_symlink(
-    candidate: Path, *, root: Path
+    candidate: Path,
+    *,
+    root: Path,
+    metadata: os.stat_result | None = None,
 ) -> tuple[os.stat_result, str]:
-    """Validate canonical or historical bounded internal current symlinks."""
-    metadata = candidate.lstat()
-    if not stat.S_ISLNK(metadata.st_mode):
+    """Validate one bounded current symlink and detect identity replacement."""
+    initial_metadata = candidate.lstat() if metadata is None else metadata
+    if not stat.S_ISLNK(initial_metadata.st_mode):
         raise RuntimeError(f"retention candidate is not a symlink: {candidate}")
     try:
         relative = candidate.relative_to(root)
@@ -933,16 +949,10 @@ def _bounded_generation_current_symlink(
             f"retention candidate contains a symlink outside its root: {candidate}"
         ) from exc
 
-    prefixes = {
-        (".repoground-generations",),
-        ("bundle", ".repoground-generations"),
-        (".repobrief-generations",),
-        ("bundle", ".repobrief-generations"),
-    }
     if (
         candidate.name != "current"
         or len(relative.parts) not in {3, 4}
-        or relative.parts[:-2] not in prefixes
+        or relative.parts[:-2] not in BOUNDED_GENERATION_PREFIXES
     ):
         raise RuntimeError(
             f"retention candidate contains a symlink outside the bounded "
@@ -974,11 +984,11 @@ def _bounded_generation_current_symlink(
         )
     confirmed_metadata = candidate.lstat()
     initial_identity = (
-        metadata.st_dev,
-        metadata.st_ino,
-        metadata.st_mode,
-        metadata.st_size,
-        metadata.st_mtime_ns,
+        initial_metadata.st_dev,
+        initial_metadata.st_ino,
+        initial_metadata.st_mode,
+        initial_metadata.st_size,
+        initial_metadata.st_mtime_ns,
     )
     confirmed_identity = (
         confirmed_metadata.st_dev,
@@ -994,14 +1004,21 @@ def _bounded_generation_current_symlink(
     return confirmed_metadata, raw_target
 
 
-def _snapshot_symlink_row(candidate: Path, *, root: Path) -> list[object]:
-    metadata, raw_target = _bounded_generation_current_symlink(candidate, root=root)
+def _snapshot_symlink_row(
+    candidate: Path,
+    *,
+    root: Path,
+    metadata: os.stat_result | None = None,
+) -> list[object]:
+    confirmed_metadata, raw_target = _bounded_generation_current_symlink(
+        candidate, root=root, metadata=metadata
+    )
     return [
         "l",
         candidate.relative_to(root).as_posix(),
-        stat.S_IMODE(metadata.st_mode),
-        metadata.st_size,
-        metadata.st_mtime_ns,
+        stat.S_IMODE(confirmed_metadata.st_mode),
+        confirmed_metadata.st_size,
+        confirmed_metadata.st_mtime_ns,
         raw_target,
     ]
 
@@ -1013,17 +1030,18 @@ def tree_bytes(path: Path) -> int:
         directories[:] = sorted(directories)
         for name in directories:
             candidate = root_path / name
-            if candidate.is_symlink():
-                metadata, _ = _bounded_generation_current_symlink(
-                    candidate, root=path
+            metadata = candidate.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                confirmed_metadata, _ = _bounded_generation_current_symlink(
+                    candidate, root=path, metadata=metadata
                 )
-                total += metadata.st_size
+                total += confirmed_metadata.st_size
         for name in sorted(files):
             candidate = root_path / name
             metadata = candidate.lstat()
             if stat.S_ISLNK(metadata.st_mode):
                 link_metadata, _ = _bounded_generation_current_symlink(
-                    candidate, root=path
+                    candidate, root=path, metadata=metadata
                 )
                 total += link_metadata.st_size
                 continue
@@ -1057,13 +1075,22 @@ def tree_snapshot(path: Path) -> dict[str, object]:
         )
         for name in directories:
             candidate = root_path / name
-            if candidate.is_symlink():
-                rows.append(_snapshot_symlink_row(candidate, root=path))
+            metadata = candidate.lstat()
+            if stat.S_ISLNK(metadata.st_mode):
+                rows.append(
+                    _snapshot_symlink_row(
+                        candidate, root=path, metadata=metadata
+                    )
+                )
         for name in sorted(files):
             candidate = root_path / name
             metadata = candidate.lstat()
             if stat.S_ISLNK(metadata.st_mode):
-                rows.append(_snapshot_symlink_row(candidate, root=path))
+                rows.append(
+                    _snapshot_symlink_row(
+                        candidate, root=path, metadata=metadata
+                    )
+                )
                 continue
             if not stat.S_ISREG(metadata.st_mode):
                 raise RuntimeError(
