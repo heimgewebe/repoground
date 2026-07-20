@@ -13,8 +13,12 @@ on:
       - "merger/repoground/contracts/repoground-release-candidate.v1.schema.json"
       - "merger/repoground/tests/test_semantic_extension_lock.py"
       - "merger/repoground/tests/test_release_packaging.py"
-      - "docs/release/semantic-extension-platforms.v1.json"
+      - "merger/repoground/retrieval/query_core.py"
+      - "docs/release/repoground-semantic-platforms.v1.json"
       - "scripts/release/compile_semantic_lock.py"
+      - "scripts/ci/run_semantic_real_model_integration.py"
+      - "scripts/ci/run_semantic_real_model_integration.sh"
+      - "merger/repoground/tests/test_semantic_real_model.py"
       - "scripts/release/compile_semantic_lock.sh"
       - "scripts/release/build_release_candidate.py"
       - "scripts/release/verify_release_candidate.py"
@@ -31,8 +35,12 @@ on:
       - "merger/repoground/contracts/repoground-release-candidate.v1.schema.json"
       - "merger/repoground/tests/test_semantic_extension_lock.py"
       - "merger/repoground/tests/test_release_packaging.py"
-      - "docs/release/semantic-extension-platforms.v1.json"
+      - "merger/repoground/retrieval/query_core.py"
+      - "docs/release/repoground-semantic-platforms.v1.json"
       - "scripts/release/compile_semantic_lock.py"
+      - "scripts/ci/run_semantic_real_model_integration.py"
+      - "scripts/ci/run_semantic_real_model_integration.sh"
+      - "merger/repoground/tests/test_semantic_real_model.py"
       - "scripts/release/compile_semantic_lock.sh"
       - "scripts/release/build_release_candidate.py"
       - "scripts/release/verify_release_candidate.py"
@@ -55,8 +63,15 @@ jobs:
       - name: Reproduce semantic constraints and lock
         run: scripts/release/compile_semantic_lock.sh --check
 
-      - name: Verify hash-locked isolated installation
+      - name: Verify hash-locked install and offline real-model integration
         run: |
-          target="$(mktemp -d)"
+          target=".semantic-real-model-target"
+          cleanup() {
+            rm -rf -- "$target"
+          }
+          trap cleanup EXIT
+          cleanup
+          mkdir -- "$target"
           scripts/release/compile_semantic_lock.sh \
             --verify-install "$target"
+          scripts/ci/run_semantic_real_model_integration.sh "$target"
