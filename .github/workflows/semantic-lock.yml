@@ -76,7 +76,7 @@ jobs:
           trap cleanup EXIT
           target="$(
             mktemp -d \
-              "${RUNNER_TEMP:?}/repoground-semantic-real-model.XXXXXX"
+              ".semantic-real-model-target.XXXXXX"
           )"
           scripts/release/compile_semantic_lock.sh \
             --verify-install "$target"

@@ -33,7 +33,7 @@ The optional semantic dependency installation proof deliberately downloaded no m
 - Hugging Face and Transformers offline flags;
 - an additional Python socket guard.
 
-The existing `semantic-lock` workflow now installs the 58-package SHA-256-locked dependency closure into a unique `mktemp` directory below `RUNNER_TEMP`. The EXIT trap is installed before the directory is created, so cancellation and early failure do not leave a fixed shared path. After installation, read/execute access is added without write access for the fixed container identity, the network-disabled integration wrapper runs, and the target is removed. The normal RepoGround Python suite remains independent of Torch and SentenceTransformers.
+The existing `semantic-lock` workflow now installs the 58-package SHA-256-locked dependency closure into a unique hidden `mktemp` directory inside the isolated checkout. The path deliberately remains relative because the lock compiler exposes only that checkout as `/work`; absolute host paths such as `RUNNER_TEMP` are outside its container namespace. The EXIT trap is installed before the directory is created, so cancellation and early failure do not leave a fixed shared path. After installation, read/execute access is added without write access for the fixed container identity, the network-disabled integration wrapper runs, and the target is removed. The normal RepoGround Python suite remains independent of Torch and SentenceTransformers.
 
 The workflow path filter also now watches the real renamed platform contract, `docs/release/repoground-semantic-platforms.v1.json`, instead of the obsolete pre-cutover filename.
 

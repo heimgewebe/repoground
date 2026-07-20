@@ -125,7 +125,9 @@ def test_real_model_runner_is_network_disabled_and_workflow_wired() -> None:
     assert "docs/release/semantic-extension-platforms.v1.json" not in workflow
     assert 'target=""' in workflow
     assert "mktemp -d" in workflow
-    assert "RUNNER_TEMP" in workflow
+    assert '".semantic-real-model-target.XXXXXX"' in workflow
+    assert "RUNNER_TEMP" not in workflow
+    assert "GITHUB_WORKSPACE" not in workflow
     assert "trap cleanup EXIT" in workflow
     assert 'chmod -R a+rX -- "$target"' in workflow
     assert '--verify-install "$target"' in workflow
