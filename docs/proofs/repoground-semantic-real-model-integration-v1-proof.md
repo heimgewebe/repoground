@@ -50,6 +50,17 @@ lifecycle_receipt_sha256: 9fa4def82ad77baa48d5de8390c46749c92bc80bfdbc41cc214edc
 result: success
 ```
 
+Exact final `semantic-lock` install-and-model sequence after correcting the checkout namespace:
+
+```text
+task_id: ac3b4188a2e14c4db2f3092e
+terminalization_sha256: d38e5808d6dd138c724bd10d90917970b46832bed0538e4438d9d616357de7ad
+lifecycle_receipt_sha256: f8edc02200edae47ebdde30f5ae04cef2e78ddcfab0bd730bebbe65eea6d0ea9
+lock_sha256: 8846ffb3e549726c90af6945664b2c83778629690d052d13ab474c585269205f
+result: success
+checkout_target_cleanup: pass, no .semantic-real-model-target.* path remained
+```
+
 Hardened fixed-identity, network-disabled integration wrapper with commit-staged runtime and cleanup verification:
 
 ```text
