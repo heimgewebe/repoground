@@ -139,6 +139,18 @@ def _fixture_documents() -> tuple[dict, dict, dict, list[dict], dict]:
                 "decorators": [],
             },
             {
+                "id": "sym-db",
+                "kind": "function",
+                "name": "load_data",
+                "qualified_name": "db.load_data",
+                "module": "db",
+                "path": "src/db.py",
+                "start_line": 2,
+                "end_line": 7,
+                "range_ref": "file:src/db.py#L2-L7",
+                "decorators": [],
+            },
+            {
                 "id": "sym-test",
                 "kind": "function",
                 "name": "test_run_app",
@@ -207,6 +219,141 @@ def _fixture_documents() -> tuple[dict, dict, dict, list[dict], dict]:
     return graph, symbols, entrypoints, relation_cards, query_context
 
 
+
+def _fixture_call_graph() -> dict:
+    def call(
+        *,
+        path: str,
+        line: int,
+        caller_id: str | None,
+        caller_name: str | None,
+        caller_start: int | None,
+        caller_end: int | None,
+        callee: str,
+        simple_name: str | None,
+        evidence: str,
+        status: str,
+        reason: str,
+        resolved: list[str],
+        candidates: list[str],
+    ) -> dict:
+        return {
+            "path": path,
+            "start_line": line,
+            "start_col": 4,
+            "end_line": line,
+            "end_col": 20,
+            "range_ref": f"file:{path}#L{line}-L{line}",
+            "callee_expression": callee,
+            "simple_name": simple_name,
+            "caller_scope": "symbol" if caller_id else "module",
+            "caller_symbol_id": caller_id,
+            "caller_qualified_name": caller_name,
+            "caller_kind": "function" if caller_id else "module",
+            "caller_start_line": caller_start,
+            "caller_end_line": caller_end,
+            "relation_type": "calls",
+            "evidence_level": evidence,
+            "resolution_status": status,
+            "resolution_reason": reason,
+            "resolved_target_ids": resolved,
+            "candidate_target_ids": candidates,
+        }
+
+    calls = [
+        call(
+            path="tests/test_app.py",
+            line=5,
+            caller_id="sym-test",
+            caller_name="tests.test_app.test_run_app",
+            caller_start=1,
+            caller_end=8,
+            callee="run_app",
+            simple_name="run_app",
+            evidence="S1",
+            status="resolved",
+            reason="unique_symbol_resolution",
+            resolved=["sym-app"],
+            candidates=[],
+        ),
+        call(
+            path="src/worker.py",
+            line=30,
+            caller_id="sym-worker",
+            caller_name="worker.process",
+            caller_start=25,
+            caller_end=35,
+            callee="run_app",
+            simple_name="run_app",
+            evidence="S1",
+            status="resolved",
+            reason="unique_symbol_resolution",
+            resolved=["sym-app"],
+            candidates=[],
+        ),
+        call(
+            path="src/app.py",
+            line=14,
+            caller_id="sym-app",
+            caller_name="app.run_app",
+            caller_start=10,
+            caller_end=20,
+            callee="load_data",
+            simple_name="load_data",
+            evidence="S1",
+            status="resolved",
+            reason="unique_symbol_resolution",
+            resolved=["sym-db"],
+            candidates=[],
+        ),
+        call(
+            path="src/plugin.py",
+            line=11,
+            caller_id="sym-plugin",
+            caller_name="plugin.activate",
+            caller_start=8,
+            caller_end=15,
+            callee="run_app",
+            simple_name="run_app",
+            evidence="S0",
+            status="candidate",
+            reason="name_match_not_unique",
+            resolved=[],
+            candidates=["sym-app"],
+        ),
+    ]
+    return {
+        "kind": "lenskit.python_call_graph",
+        "version": "1.0",
+        "run_id": "run-1",
+        "canonical_dump_index_sha256": DIGEST,
+        "language": "python",
+        "evidence_model": {"S0": "candidate", "S1": "resolved"},
+        "resolution_statuses": ["resolved", "candidate", "ambiguous", "unresolved"],
+        "relation_types": ["calls", "constructs"],
+        "call_count": len(calls),
+        "resolution_counts": {"resolved": 3, "candidate": 1, "ambiguous": 0, "unresolved": 0},
+        "evidence_counts": {"S0": 1, "S1": 3},
+        "relation_counts": {"calls": 4, "constructs": 0},
+        "calls": calls,
+        "skipped_files_count": 0,
+        "skipped_errors": [],
+        "skipped_errors_total_count": 0,
+        "skipped_errors_truncated": False,
+        "does_not_establish": [
+            "complete_call_graph",
+            "runtime_reachability",
+            "dynamic_dispatch_resolution",
+            "dependency_completeness",
+            "transitive_import_resolution",
+            "import_success",
+            "test_sufficiency",
+            "review_completeness",
+            "merge_readiness",
+        ],
+    }
+
+
 def _context(**overrides):
     graph, symbols, entrypoints, cards, query = _fixture_documents()
     values = {
@@ -215,6 +362,7 @@ def _context(**overrides):
         "max_items": 10,
         "architecture_graph": graph,
         "symbol_index": symbols,
+        "python_call_graph": _fixture_call_graph(),
         "entrypoints": entrypoints,
         "relation_cards": cards,
         "query_context": query,
@@ -301,6 +449,57 @@ def test_edit_context_bundles_target_support_and_entrypoint_reads() -> None:
     assert ("src/app.py", "target_symbol") in reads
     assert ("tests/test_app.py", "incoming_graph_relation") in reads
     assert result["composition"]["does_not_parse_or_apply_diff"] is True
+
+
+
+def test_edit_context_separately_budgets_proven_call_graph_relations() -> None:
+    result = _context(max_items=1)
+    selection = result["edit_context"]["selection"]
+    assert set(selection) == {
+        "target_definitions",
+        "direct_callers",
+        "direct_callees",
+        "entrypoints",
+        "tests",
+        "contracts",
+        "unresolved_risk_boundaries",
+    }
+    assert all(section["budget"] == 1 for section in selection.values())
+    assert all(len(section["selected"]) <= 1 for section in selection.values())
+    caller = selection["direct_callers"]["selected"][0]
+    callee = selection["direct_callees"]["selected"][0]
+    assert caller["relation_kind"] == "direct_caller"
+    assert callee["relation_kind"] == "direct_callee"
+    assert caller["evidence_level"] == callee["evidence_level"] == "S1"
+    assert caller["resolution_status"] == callee["resolution_status"] == "resolved"
+    assert caller["freshness"]["status"] == "coherent"
+    assert callee["freshness"]["status"] == "coherent"
+    assert caller["source_ranges"]["call_site"].startswith("file:")
+    assert caller["source_ranges"]["peer_definition"].startswith("file:")
+    assert callee["source_ranges"]["call_site"].startswith("file:")
+    assert callee["source_ranges"]["peer_definition"] == "file:src/db.py#L2-L7"
+    assert caller["omission_reason"] is None
+    assert callee["omission_reason"] is None
+    assert selection["direct_callers"]["omitted_count"] == 1
+    assert selection["direct_callers"]["omission_reasons"] == {
+        "section_budget_exceeded": 1
+    }
+    assert "omitted" not in selection["direct_callers"]
+    risk = selection["unresolved_risk_boundaries"]["selected"][0]
+    assert risk["evidence_level"] == "S0"
+    assert risk["omission_reason"] == "not_s1_resolved_unique_relation"
+    assert selection["entrypoints"]["selected"][0]["path"] == "src/app.py"
+    assert selection["tests"]["selected"][0]["path"] == "tests/test_app.py"
+    assert selection["contracts"]["selected"][0]["path"] == "contracts/app.schema.json"
+    assert set(result["edit_context"]["nonverdicts"]) == {
+        "complete_blast_radius",
+        "runtime_breakage",
+        "test_sufficiency",
+        "merge_readiness",
+    }
+    assert "complete_blast_radius" in result["does_not_establish"]
+    assert "test_sufficiency" in result["does_not_establish"]
+    assert "merge_readiness" in result["does_not_establish"]
 
 
 def test_mismatched_bundle_identities_block_impact_projection() -> None:

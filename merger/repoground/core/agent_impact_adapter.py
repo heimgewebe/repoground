@@ -24,6 +24,7 @@ MAX_RELATION_CARDS = 10_000
 _CORE_JSON_CONTRACTS = {
     "architecture_graph_json": ("lenskit.architecture.graph", "nodes", "edges"),
     "python_symbol_index_json": ("lenskit.python_symbol_index", "symbols"),
+    "python_call_graph_json": ("lenskit.python_call_graph", "calls"),
     "entrypoints_json": ("lenskit.entrypoints", "entrypoints"),
 }
 
@@ -32,6 +33,7 @@ _CORE_JSON_CONTRACTS = {
 class _SourceResponses:
     graph: dict[str, Any]
     symbols: dict[str, Any]
+    call_graph: dict[str, Any]
     entrypoints: dict[str, Any]
     cards: dict[str, Any]
 
@@ -148,6 +150,7 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
         return _SourceResponses(
             graph=self.artifact_get(snapshot_id, "architecture_graph_json"),
             symbols=self.artifact_get(snapshot_id, "python_symbol_index_json"),
+            call_graph=self.artifact_get(snapshot_id, "python_call_graph_json"),
             entrypoints=self.artifact_get(snapshot_id, "entrypoints_json"),
             cards=self.artifact_get(snapshot_id, "relation_cards_jsonl"),
         )
@@ -181,6 +184,12 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
             _core_json_status("entrypoints_json", sources.entrypoints),
             _artifact_status("relation_cards_jsonl", sources.cards),
         ]
+        call_graph_status = _core_json_status(
+            "python_call_graph_json",
+            sources.call_graph,
+        )
+        if call_graph_status.get("status") != "missing":
+            statuses.append(call_graph_status)
         if query_response:
             statuses.append(
                 {
@@ -228,6 +237,7 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
             max_items=max_items,
             architecture_graph=_json_document(sources.graph),
             symbol_index=_json_document(sources.symbols),
+            python_call_graph=_json_document(sources.call_graph),
             entrypoints=_json_document(sources.entrypoints),
             relation_cards=cards,
             query_context=query_response,

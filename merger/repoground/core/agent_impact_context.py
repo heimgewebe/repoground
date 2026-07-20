@@ -47,6 +47,7 @@ MUTATION_BOUNDARY = {
 _CORE_SOURCES = {
     "architecture_graph_json",
     "python_symbol_index_json",
+    "python_call_graph_json",
     "entrypoints_json",
 }
 _BLOCKING_SOURCE_STATUSES = {
@@ -394,6 +395,268 @@ def _matching_symbols(
         unique.setdefault(_symbol_key(symbol), symbol)
     ordered = list(unique.values())
     return ordered[:max_items], derived_paths, len(ordered) > max_items
+
+
+
+def _symbols_by_id(symbol_index: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    return {
+        str(raw["id"]): dict(raw)
+        for raw in _items(symbol_index.get("symbols"))
+        if isinstance(raw, Mapping)
+        and isinstance(raw.get("id"), str)
+        and raw.get("id")
+    }
+
+
+def _source_status(
+    source_states: list[dict[str, Any]],
+    source: str,
+) -> Mapping[str, Any]:
+    for item in source_states:
+        if item.get("source") == source:
+            return item
+    return {"source": source, "status": "missing"}
+
+
+def _call_graph_freshness(
+    call_graph: Mapping[str, Any],
+    *,
+    source_states: list[dict[str, Any]],
+    coherence: str,
+) -> dict[str, Any]:
+    status = _source_status(source_states, "python_call_graph_json")
+    run_id, digest = _identity(call_graph)
+    return {
+        "source": "python_call_graph_json",
+        "status": (
+            "coherent"
+            if call_graph
+            and coherence == "coherent"
+            and status.get("status") == "available"
+            else status.get("status", "missing")
+        ),
+        "run_id": run_id,
+        "canonical_dump_index_sha256": digest,
+        "artifact_sha256": status.get("sha256"),
+    }
+
+
+def _caller_definition_range(call: Mapping[str, Any]) -> str | None:
+    path = call.get("path")
+    start = call.get("caller_start_line")
+    end = call.get("caller_end_line")
+    if isinstance(path, str) and isinstance(start, int) and isinstance(end, int):
+        return f"file:{path}#L{start}-L{end}"
+    return None
+
+
+def _call_relation_record(
+    call: Mapping[str, Any],
+    *,
+    relation_kind: str,
+    peer_symbol: Mapping[str, Any] | None,
+    freshness: Mapping[str, Any],
+) -> dict[str, Any]:
+    if relation_kind == "direct_caller":
+        path = call.get("path")
+        symbol_id = call.get("caller_symbol_id")
+        qualified_name = call.get("caller_qualified_name")
+        peer_range = _caller_definition_range(call)
+        direction = "incoming"
+    else:
+        peer = peer_symbol or {}
+        path = peer.get("path")
+        symbol_id = peer.get("id")
+        qualified_name = peer.get("qualified_name")
+        peer_range = peer.get("range_ref")
+        direction = "outgoing"
+    return {
+        "relation_kind": relation_kind,
+        "direction": direction,
+        "path": path,
+        "symbol_id": symbol_id,
+        "qualified_name": qualified_name,
+        "relation_type": call.get("relation_type"),
+        "evidence_level": call.get("evidence_level"),
+        "resolution_status": call.get("resolution_status"),
+        "resolution_reason": call.get("resolution_reason"),
+        "source_ranges": {
+            "call_site": call.get("range_ref"),
+            "peer_definition": peer_range,
+        },
+        "freshness": dict(freshness),
+        "omission_reason": None,
+    }
+
+
+def _call_risk_record(
+    call: Mapping[str, Any],
+    *,
+    freshness: Mapping[str, Any],
+    omission_reason: str,
+) -> dict[str, Any]:
+    return {
+        "kind": "unresolved_call_relation",
+        "path": call.get("path"),
+        "caller_symbol_id": call.get("caller_symbol_id"),
+        "caller_qualified_name": call.get("caller_qualified_name"),
+        "callee_expression": call.get("callee_expression"),
+        "simple_name": call.get("simple_name"),
+        "candidate_target_ids": list(call.get("candidate_target_ids") or []),
+        "evidence_level": call.get("evidence_level"),
+        "resolution_status": call.get("resolution_status"),
+        "resolution_reason": call.get("resolution_reason"),
+        "source_ranges": {
+            "call_site": call.get("range_ref"),
+            "caller_definition": _caller_definition_range(call),
+        },
+        "freshness": dict(freshness),
+        "omission_reason": omission_reason,
+    }
+
+
+def _call_graph_context(
+    call_graph: Mapping[str, Any],
+    *,
+    target_symbols: list[dict[str, Any]],
+    symbol_index: Mapping[str, Any],
+    source_states: list[dict[str, Any]],
+    coherence: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    freshness = _call_graph_freshness(
+        call_graph,
+        source_states=source_states,
+        coherence=coherence,
+    )
+    if not call_graph:
+        return [], [], [
+            {
+                "kind": "call_graph_source_unavailable",
+                "freshness": freshness,
+                "omission_reason": "python_call_graph_json_unavailable",
+            }
+        ]
+    target_ids = {
+        str(item["id"])
+        for item in target_symbols
+        if isinstance(item.get("id"), str) and item.get("id")
+    }
+    target_names = {
+        str(value).casefold()
+        for item in target_symbols
+        for value in (item.get("name"), item.get("qualified_name"))
+        if isinstance(value, str) and value
+    }
+    target_names.update(name.rsplit(".", 1)[-1] for name in tuple(target_names))
+    symbols_by_id = _symbols_by_id(symbol_index)
+    callers: list[dict[str, Any]] = []
+    callees: list[dict[str, Any]] = []
+    risks: list[dict[str, Any]] = []
+    for raw in _items(call_graph.get("calls")):
+        if not isinstance(raw, Mapping):
+            continue
+        resolved_ids = {
+            str(value)
+            for value in _items(raw.get("resolved_target_ids"))
+            if isinstance(value, str) and value
+        }
+        candidate_ids = {
+            str(value)
+            for value in _items(raw.get("candidate_target_ids"))
+            if isinstance(value, str) and value
+        }
+        caller_id = raw.get("caller_symbol_id")
+        s1_resolved = (
+            raw.get("evidence_level") == "S1"
+            and raw.get("resolution_status") == "resolved"
+            and len(resolved_ids) == 1
+        )
+        if s1_resolved and target_ids.intersection(resolved_ids):
+            callers.append(
+                _call_relation_record(
+                    raw,
+                    relation_kind="direct_caller",
+                    peer_symbol=None,
+                    freshness=freshness,
+                )
+            )
+        if s1_resolved and isinstance(caller_id, str) and caller_id in target_ids:
+            resolved_id = next(iter(resolved_ids))
+            peer_symbol = symbols_by_id.get(resolved_id)
+            if peer_symbol is not None:
+                callees.append(
+                    _call_relation_record(
+                        raw,
+                        relation_kind="direct_callee",
+                        peer_symbol=peer_symbol,
+                        freshness=freshness,
+                    )
+                )
+            else:
+                risks.append(
+                    _call_risk_record(
+                        raw,
+                        freshness=freshness,
+                        omission_reason="resolved_target_missing_from_symbol_index",
+                    )
+                )
+        simple_name = raw.get("simple_name")
+        uncertain_relevant = (
+            not s1_resolved
+            and (
+                (isinstance(caller_id, str) and caller_id in target_ids)
+                or bool(target_ids.intersection(candidate_ids))
+                or (
+                    isinstance(simple_name, str)
+                    and simple_name.casefold() in target_names
+                )
+            )
+        )
+        if uncertain_relevant:
+            risks.append(
+                _call_risk_record(
+                    raw,
+                    freshness=freshness,
+                    omission_reason="not_s1_resolved_unique_relation",
+                )
+            )
+    skipped_files = call_graph.get("skipped_files_count")
+    skipped_errors = call_graph.get("skipped_errors_total_count")
+    if not isinstance(skipped_errors, int):
+        skipped_errors = len(_items(call_graph.get("skipped_errors")))
+    if isinstance(skipped_files, int) and (skipped_files > 0 or skipped_errors > 0):
+        risks.append(
+            {
+                "kind": "call_graph_parse_coverage_gap",
+                "skipped_files_count": skipped_files,
+                "skipped_errors_total_count": skipped_errors,
+                "freshness": freshness,
+                "omission_reason": "call_graph_parse_coverage_incomplete",
+            }
+        )
+    callers.sort(
+        key=lambda item: (
+            str(item.get("path", "")),
+            str(item.get("qualified_name", "")),
+            str(_mapping(item.get("source_ranges")).get("call_site", "")),
+        )
+    )
+    callees.sort(
+        key=lambda item: (
+            str(item.get("path", "")),
+            str(item.get("qualified_name", "")),
+            str(_mapping(item.get("source_ranges")).get("call_site", "")),
+        )
+    )
+    risks.sort(
+        key=lambda item: (
+            str(item.get("kind", "")),
+            str(item.get("path", "")),
+            str(_mapping(item.get("source_ranges")).get("call_site", "")),
+            str(item.get("omission_reason", "")),
+        )
+    )
+    return callers, callees, risks
 
 
 def _relation_record(
@@ -798,10 +1061,95 @@ def _section_reads(
     ]
 
 
+
+def _call_relation_reads(relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": item.get("path"),
+            "range_ref": (
+                _mapping(item.get("source_ranges")).get("peer_definition")
+                or _mapping(item.get("source_ranges")).get("call_site")
+            ),
+            "qualified_name": item.get("qualified_name"),
+            "reason": item.get("relation_kind"),
+            "priority": 2,
+        }
+        for item in relations
+        if isinstance(item.get("path"), str)
+    ]
+
+
+def _budgeted_section(
+    items: list[dict[str, Any]],
+    *,
+    max_items: int,
+) -> dict[str, Any]:
+    selected: list[dict[str, Any]] = []
+    for item in items[:max_items]:
+        value = dict(item)
+        value.setdefault("omission_reason", None)
+        selected.append(value)
+    omitted_count = max(0, len(items) - max_items)
+    return {
+        "budget": max_items,
+        "selected": selected,
+        "omitted_count": omitted_count,
+        "omission_reasons": (
+            {"section_budget_exceeded": omitted_count}
+            if omitted_count
+            else {}
+        ),
+    }
+
+
+def _edit_selection(
+    *,
+    target_symbols: list[dict[str, Any]],
+    direct_callers: list[dict[str, Any]],
+    direct_callees: list[dict[str, Any]],
+    entrypoints: list[dict[str, Any]],
+    related_tests: list[dict[str, Any]],
+    supporting: list[dict[str, Any]],
+    unresolved_risks: list[dict[str, Any]],
+    max_items: int,
+) -> dict[str, Any]:
+    target_definitions = [
+        {
+            "path": item.get("path"),
+            "range_ref": item.get("range_ref"),
+            "symbol_id": item.get("id"),
+            "qualified_name": item.get("qualified_name"),
+            "kind": item.get("kind"),
+        }
+        for item in target_symbols
+    ]
+    contract_items = [
+        dict(item)
+        for item in supporting
+        if item.get("path_class") == "contract"
+    ]
+    return {
+        "target_definitions": _budgeted_section(
+            target_definitions,
+            max_items=max_items,
+        ),
+        "direct_callers": _budgeted_section(direct_callers, max_items=max_items),
+        "direct_callees": _budgeted_section(direct_callees, max_items=max_items),
+        "entrypoints": _budgeted_section(entrypoints, max_items=max_items),
+        "tests": _budgeted_section(related_tests, max_items=max_items),
+        "contracts": _budgeted_section(contract_items, max_items=max_items),
+        "unresolved_risk_boundaries": _budgeted_section(
+            unresolved_risks,
+            max_items=max_items,
+        ),
+    }
+
+
 def _first_reads(
     *,
     target_paths: set[str],
     target_symbols: list[dict[str, Any]],
+    call_relations: list[dict[str, Any]],
     relations: list[dict[str, Any]],
     related_tests: list[dict[str, Any]],
     supporting: list[dict[str, Any]],
@@ -809,6 +1157,7 @@ def _first_reads(
 ) -> list[dict[str, Any]]:
     candidates = _symbol_reads(target_symbols)
     candidates.extend(_path_reads(target_paths, target_symbols))
+    candidates.extend(_call_relation_reads(call_relations))
     candidates.extend(_relation_reads(relations))
     candidates.extend(
         _section_reads(
@@ -976,6 +1325,7 @@ def build_agent_impact_context(
     max_items: Any = 25,
     architecture_graph: Any = None,
     symbol_index: Any = None,
+    python_call_graph: Any = None,
     entrypoints: Any = None,
     relation_cards: Any = None,
     query_context: Any = None,
@@ -1001,16 +1351,19 @@ def build_agent_impact_context(
 
     graph = _mapping(architecture_graph)
     symbols = _mapping(symbol_index)
+    call_graph = _mapping(python_call_graph)
     entrypoint_doc = _mapping(entrypoints)
     cards = list(relation_cards) if isinstance(relation_cards, list) else []
-    states = _merge_source_states(
-        [
-            _source_state("architecture_graph_json", graph),
-            _source_state("python_symbol_index_json", symbols),
-            _source_state("entrypoints_json", entrypoint_doc),
-        ],
-        source_statuses,
-    )
+    calculated_states = [
+        _source_state("architecture_graph_json", graph),
+        _source_state("python_symbol_index_json", symbols),
+        _source_state("entrypoints_json", entrypoint_doc),
+    ]
+    if call_graph:
+        calculated_states.append(
+            _source_state("python_call_graph_json", call_graph)
+        )
+    states = _merge_source_states(calculated_states, source_statuses)
     coherence, run_id, digest, gaps = _coherence(states)
     if coherence == "blocked":
         return _blocked_result(
@@ -1052,6 +1405,23 @@ def build_agent_impact_context(
     card_hits, cards_truncated = _relation_cards(
         cards,
         target_paths=paths,
+        max_items=request.max_items,
+    )
+    direct_callers, direct_callees, unresolved_risks = _call_graph_context(
+        call_graph,
+        target_symbols=target_symbols,
+        symbol_index=symbols,
+        source_states=states,
+        coherence=coherence,
+    )
+    edit_selection = _edit_selection(
+        target_symbols=target_symbols,
+        direct_callers=direct_callers,
+        direct_callees=direct_callees,
+        entrypoints=entrypoint_hits,
+        related_tests=related_tests,
+        supporting=supporting,
+        unresolved_risks=unresolved_risks,
         max_items=request.max_items,
     )
 
@@ -1114,16 +1484,30 @@ def build_agent_impact_context(
         }
     )
     if request.mode == "edit":
+        selected_call_relations = (
+            edit_selection["direct_callers"]["selected"]
+            + edit_selection["direct_callees"]["selected"]
+        )
         result["edit_context"] = {
             "recommended_first_reads": _first_reads(
                 target_paths=paths,
                 target_symbols=target_symbols,
+                call_relations=selected_call_relations,
                 relations=relations,
                 related_tests=related_tests,
                 supporting=supporting,
                 max_items=request.max_items,
             ),
+            "selection": edit_selection,
+            "nonverdicts": [
+                "complete_blast_radius",
+                "runtime_breakage",
+                "test_sufficiency",
+                "merge_readiness",
+            ],
             "relation_count": len(relations),
+            "direct_caller_count": len(direct_callers),
+            "direct_callee_count": len(direct_callees),
             "related_test_count": len(related_tests),
             "supporting_context_count": len(supporting),
             "entrypoint_count": len(entrypoint_hits),

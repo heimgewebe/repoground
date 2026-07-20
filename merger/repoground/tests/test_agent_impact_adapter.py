@@ -82,6 +82,73 @@ def _impact_adapter(
 
     _add_artifact(
         bundle,
+        "python_call_graph_json",
+        "demo.python_call_graph.json",
+        json.dumps(
+            {
+                "kind": "lenskit.python_call_graph",
+                "version": "1.0",
+                "run_id": "run-1",
+                "canonical_dump_index_sha256": DIGEST,
+                "language": "python",
+                "calls": [
+                    {
+                        "path": "tests/test_demo.py",
+                        "start_line": 3,
+                        "start_col": 4,
+                        "end_line": 3,
+                        "end_col": 20,
+                        "range_ref": "file:tests/test_demo.py#L3-L3",
+                        "callee_expression": "hello_adapter",
+                        "simple_name": "hello_adapter",
+                        "caller_scope": "symbol",
+                        "caller_symbol_id": "sym-test",
+                        "caller_qualified_name": (
+                            "tests.test_demo.test_hello_adapter"
+                        ),
+                        "caller_kind": "function",
+                        "caller_start_line": 1,
+                        "caller_end_line": 5,
+                        "relation_type": "calls",
+                        "evidence_level": "S1",
+                        "resolution_status": "resolved",
+                        "resolution_reason": "unique_symbol_resolution",
+                        "resolved_target_ids": ["sym-demo"],
+                        "candidate_target_ids": [],
+                    },
+                    {
+                        "path": "src/demo.py",
+                        "start_line": 4,
+                        "start_col": 4,
+                        "end_line": 4,
+                        "end_col": 20,
+                        "range_ref": "file:src/demo.py#L4-L4",
+                        "callee_expression": "test_hello_adapter",
+                        "simple_name": "test_hello_adapter",
+                        "caller_scope": "symbol",
+                        "caller_symbol_id": "sym-demo",
+                        "caller_qualified_name": "demo.hello_adapter",
+                        "caller_kind": "function",
+                        "caller_start_line": 3,
+                        "caller_end_line": 5,
+                        "relation_type": "calls",
+                        "evidence_level": "S1",
+                        "resolution_status": "resolved",
+                        "resolution_reason": "unique_symbol_resolution",
+                        "resolved_target_ids": ["sym-test"],
+                        "candidate_target_ids": [],
+                    },
+                ],
+                "skipped_files_count": 0,
+                "skipped_errors": [],
+                "skipped_errors_total_count": 0,
+            }
+        )
+        + "\n",
+    )
+
+    _add_artifact(
+        bundle,
         "architecture_graph_json",
         "demo.architecture_graph.json",
         json.dumps(
@@ -219,6 +286,14 @@ def test_agent_impact_adapter_composes_integrity_checked_reads_without_writes(
     assert result["relations"][0]["direction"] == "incoming"
     assert result["related_tests"][0]["path"] == "tests/test_demo.py"
     assert result["entrypoints"][0]["type"] == "cli"
+    selection = result["edit_context"]["selection"]
+    caller = selection["direct_callers"]["selected"][0]
+    callee = selection["direct_callees"]["selected"][0]
+    assert caller["path"] == "tests/test_demo.py"
+    assert callee["path"] == "tests/test_demo.py"
+    assert caller["evidence_level"] == callee["evidence_level"] == "S1"
+    assert caller["freshness"]["status"] == "coherent"
+    assert callee["freshness"]["status"] == "coherent"
     assert result["relation_cards"][0]["card_id"] == "dependency.demo"
     assert result["mutation_boundary"]["writes"] == []
     assert before == after
