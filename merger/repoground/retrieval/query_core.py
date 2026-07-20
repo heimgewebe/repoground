@@ -17,6 +17,25 @@ WHY_ZERO_NONE = "no results"
 _REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX = ".index.sqlite"
 _ALLOWED_SQLITE_INDEX_SUFFIXES = (_REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX, ".sqlite", ".sqlite3", ".db")
 _MODEL_CACHE = {}
+
+_DIMENSION_VALIDATION_PENDING = "pending"
+_DIMENSION_VALIDATION_PASS = "pass"
+_DIMENSION_VALIDATION_MISMATCH = "mismatch"
+_DIMENSION_VALIDATION_ERROR = "error"
+_DIMENSION_VALIDATION_QUERY_ONLY_PASS = "query_only_pass"
+
+_SEMANTIC_STATUS_UNKNOWN = "unknown"
+_SEMANTIC_STATUS_OK = "ok"
+_SEMANTIC_STATUS_UNSUPPORTED_PROVIDER = "unsupported_provider"
+_SEMANTIC_STATUS_UNSUPPORTED_METRIC = "unsupported_metric"
+_SEMANTIC_STATUS_DIMENSION_MISMATCH = "dimension_mismatch"
+_SEMANTIC_STATUS_ENCODING_ERROR = "encoding_error"
+
+_SEMANTIC_FALLBACK_UNSUPPORTED_PROVIDER = "semantic_fallback_unsupported_provider"
+_SEMANTIC_FALLBACK_UNSUPPORTED_METRIC = "semantic_fallback_unsupported_metric"
+_SEMANTIC_FALLBACK_DIMENSION_MISMATCH = "semantic_fallback_dimension_mismatch"
+_SEMANTIC_FALLBACK_ENCODING_ERROR = "semantic_fallback_encoding_error"
+
 logger = logging.getLogger(__name__)
 
 
@@ -131,72 +150,97 @@ def _embedding_batch_dimensions(value: Any) -> tuple[int, int]:
         first = value[0]
         if not isinstance(first, (list, tuple)):
             return 1, len(value)
-        row_dimensions = []
+        first_dimension = len(first)
         for row in value:
             if not isinstance(row, (list, tuple)) or not row:
                 raise RuntimeError(
                     "Semantic document embeddings must be a non-empty rectangular batch."
                 )
-            row_dimensions.append(len(row))
-        if len(set(row_dimensions)) != 1:
-            raise RuntimeError(
-                "Semantic document embeddings must be a rectangular batch."
-            )
-        return len(value), row_dimensions[0]
+            if len(row) != first_dimension:
+                raise RuntimeError(
+                    "Semantic document embeddings must be a rectangular batch."
+                )
+        return len(value), first_dimension
 
     raise RuntimeError(
         "Semantic document embeddings do not expose a supported batch shape."
     )
 
 
-def _as_optional_numpy_array(value: Any) -> Any:
-    """Convert list embeddings when NumPy is available without requiring it."""
-    if not isinstance(value, list):
-        return value
-    try:
-        import numpy as np
-    except ImportError:
-        return value
-    return np.array(value)
-
-
-def _flatten_single_embedding(value: Any) -> Any:
+def _normalize_query_embedding(value: Any) -> Any:
+    """Normalize one query embedding without importing optional dependencies."""
     shape = getattr(value, "shape", None)
-    if shape is not None and len(shape) == 2 and shape[0] == 1:
-        return value.flatten()
+    if shape is not None:
+        dimensions = tuple(int(part) for part in shape)
+        if len(dimensions) == 2 and dimensions[0] == 1:
+            return value.reshape(-1)
+        return value
+
+    if (
+        isinstance(value, (list, tuple))
+        and len(value) == 1
+        and isinstance(value[0], (list, tuple))
+    ):
+        return value[0]
+    return value
+
+
+def _normalize_document_embedding_batch(value: Any) -> Any:
+    """Normalize a single document vector to a one-row embedding batch."""
+    shape = getattr(value, "shape", None)
+    if shape is not None:
+        dimensions = tuple(int(part) for part in shape)
+        if len(dimensions) == 1:
+            return value.reshape(1, -1)
+        return value
+
+    if (
+        isinstance(value, (list, tuple))
+        and value
+        and not isinstance(value[0], (list, tuple))
+    ):
+        return (value,)
     return value
 
 
 def _python_cosine_scores(query_emb: Any, doc_embs: Any) -> List[float]:
     import math
 
-    query_norm = math.sqrt(sum(component * component for component in query_emb)) or 1.0
+    document_batch = _normalize_document_embedding_batch(doc_embs)
+    query_norm = float(
+        math.sqrt(sum(component * component for component in query_emb))
+    ) or 1.0
     scores = []
-    for document_emb in doc_embs:
-        document_norm = (
-            math.sqrt(sum(component * component for component in document_emb)) or 1.0
-        )
+    for document_emb in document_batch:
+        document_norm = float(
+            math.sqrt(sum(component * component for component in document_emb))
+        ) or 1.0
         dot_product = sum(
             query_component * document_component
             for query_component, document_component in zip(query_emb, document_emb)
         )
-        scores.append(dot_product / (query_norm * document_norm))
+        scores.append(float(dot_product / (query_norm * document_norm)))
     return scores
 
 
 def _semantic_cosine_scores(query_emb: Any, doc_embs: Any) -> Any:
+    document_batch = _normalize_document_embedding_batch(doc_embs)
     try:
         from sentence_transformers import util
 
-        return util.cos_sim(query_emb, doc_embs)[0]
+        return util.cos_sim(query_emb, document_batch)[0]
     except ImportError:
         try:
             import numpy as np
         except ImportError:
-            return _python_cosine_scores(query_emb, doc_embs)
+            return _python_cosine_scores(query_emb, document_batch)
 
-    query_array = np.array(query_emb)
-    document_array = np.array(doc_embs)
+    query_array = np.asarray(query_emb)
+    document_array = np.asarray(document_batch)
+    if query_array.ndim == 2 and query_array.shape[0] == 1:
+        query_array = query_array.reshape(-1)
+    if document_array.ndim == 1:
+        document_array = document_array.reshape(1, -1)
     query_norm = np.linalg.norm(query_array)
     document_norms = np.linalg.norm(document_array, axis=1)
     query_norm = query_norm if query_norm > 0 else 1.0
@@ -212,9 +256,7 @@ def _validated_semantic_embeddings(
     expected_dimensions: int,
     semantic_diagnostics: Dict[str, Any],
 ) -> tuple[Any, Optional[Any]]:
-    query_emb = _flatten_single_embedding(
-        _as_optional_numpy_array(semantic_model.encode(query_text))
-    )
+    query_emb = _normalize_query_embedding(semantic_model.encode(query_text))
     actual_query_dimensions = _embedding_vector_dimension(
         query_emb,
         label="query",
@@ -228,10 +270,12 @@ def _validated_semantic_embeddings(
         )
 
     if not candidate_texts:
-        semantic_diagnostics["dimension_validation"] = "query_only_pass"
+        semantic_diagnostics["dimension_validation"] = _DIMENSION_VALIDATION_QUERY_ONLY_PASS
         return query_emb, None
 
-    doc_embs = _as_optional_numpy_array(semantic_model.encode(candidate_texts))
+    doc_embs = _normalize_document_embedding_batch(
+        semantic_model.encode(candidate_texts)
+    )
     document_count, actual_document_dimensions = _embedding_batch_dimensions(doc_embs)
     semantic_diagnostics["actual_document_dimensions"] = actual_document_dimensions
     if document_count != len(candidate_texts):
@@ -245,7 +289,7 @@ def _validated_semantic_embeddings(
             expected_dimensions,
             actual_document_dimensions,
         )
-    semantic_diagnostics["dimension_validation"] = "pass"
+    semantic_diagnostics["dimension_validation"] = _DIMENSION_VALIDATION_PASS
     return query_emb, doc_embs
 
 
@@ -258,11 +302,11 @@ def _handle_semantic_dimension_mismatch(
 ) -> None:
     semantic_diagnostics["error"] = str(exc)
     semantic_diagnostics["enabled"] = False
-    semantic_diagnostics["dimension_validation"] = "mismatch"
+    semantic_diagnostics["dimension_validation"] = _DIMENSION_VALIDATION_MISMATCH
     if trace_data:
-        trace_data["semantic_status"] = "dimension_mismatch"
+        trace_data["semantic_status"] = _SEMANTIC_STATUS_DIMENSION_MISMATCH
         trace_data["fallback_markers"].append(
-            "semantic_fallback_dimension_mismatch"
+            _SEMANTIC_FALLBACK_DIMENSION_MISMATCH
         )
     if fallback == "fail":
         raise RuntimeError(
@@ -283,9 +327,9 @@ def _handle_semantic_encoding_failure(
         exc_info=True,
     )
     if trace_data:
-        trace_data["semantic_status"] = "encoding_error"
+        trace_data["semantic_status"] = _SEMANTIC_STATUS_ENCODING_ERROR
         trace_data["fallback_markers"].append(
-            "semantic_fallback_encoding_error"
+            _SEMANTIC_FALLBACK_ENCODING_ERROR
         )
     if fallback == "fail":
         raise RuntimeError(
@@ -294,7 +338,27 @@ def _handle_semantic_encoding_failure(
         ) from exc
     semantic_diagnostics["error"] = "semantic encoding unavailable"
     semantic_diagnostics["enabled"] = False
-    semantic_diagnostics["dimension_validation"] = "error"
+    semantic_diagnostics["dimension_validation"] = _DIMENSION_VALIDATION_ERROR
+
+
+def _score_results_with_cosine(
+    results: List[Dict[str, Any]],
+    cosine_scores: Any,
+) -> None:
+    """Apply validated semantic scores to the mutable retrieval result records."""
+    if len(cosine_scores) != len(results):
+        raise RuntimeError(
+            "Semantic score count mismatch: "
+            f"expected {len(results)}, got {len(cosine_scores)}."
+        )
+    for index, hit in enumerate(results):
+        old_score = hit.get("score", 0)
+        semantic_score = float(cosine_scores[index])
+        hit["score"] = semantic_score
+        hit["final_score"] = semantic_score
+        rank_features = hit["why"].setdefault("rank_features", {})
+        rank_features["semantic_score"] = semantic_score
+        rank_features["original_bm25"] = old_score
 
 
 def _apply_semantic_reranking(
@@ -322,14 +386,7 @@ def _apply_semantic_reranking(
             return
 
         cosine_scores = _semantic_cosine_scores(query_emb, doc_embs)
-        for index, hit in enumerate(results):
-            old_score = hit.get("score", 0)
-            semantic_score = float(cosine_scores[index])
-            hit["score"] = semantic_score
-            hit["final_score"] = semantic_score
-            hit["why"]["rank_features"] = hit["why"].get("rank_features", {})
-            hit["why"]["rank_features"]["semantic_score"] = semantic_score
-            hit["why"]["rank_features"]["original_bm25"] = old_score
+        _score_results_with_cosine(results, cosine_scores)
     except _SemanticDimensionMismatch as exc:
         _handle_semantic_dimension_mismatch(
             exc=exc,
@@ -599,8 +656,8 @@ def execute_query(
                     raise RuntimeError(f"Semantic re-ranking provider '{provider}' is not yet implemented (fallback_behavior=fail).")
                 else:
                     if trace_data:
-                        trace_data["semantic_status"] = "unsupported_provider"
-                        trace_data["fallback_markers"].append("semantic_fallback_unsupported_provider")
+                        trace_data["semantic_status"] = _SEMANTIC_STATUS_UNSUPPORTED_PROVIDER
+                        trace_data["fallback_markers"].append(_SEMANTIC_FALLBACK_UNSUPPORTED_PROVIDER)
                     base_diagnostics["semantic"] = {
                         "enabled": False,
                         "error": f"Provider '{provider}' not implemented",
@@ -614,8 +671,8 @@ def execute_query(
                     raise RuntimeError(f"Semantic re-ranking metric '{metric}' is not supported (fallback_behavior=fail).")
                 else:
                     if trace_data:
-                        trace_data["semantic_status"] = "unsupported_metric"
-                        trace_data["fallback_markers"].append("semantic_fallback_unsupported_metric")
+                        trace_data["semantic_status"] = _SEMANTIC_STATUS_UNSUPPORTED_METRIC
+                        trace_data["fallback_markers"].append(_SEMANTIC_FALLBACK_UNSUPPORTED_METRIC)
                     base_diagnostics["semantic"] = {
                         "enabled": False,
                         "error": f"Metric '{metric}' not supported",
@@ -629,7 +686,7 @@ def execute_query(
                     model_name = embedding_policy.get("model_name", "all-MiniLM-L6-v2")
                     semantic_model = _get_semantic_model(model_name)
                     if trace_data:
-                        trace_data["semantic_status"] = "ok"
+                        trace_data["semantic_status"] = _SEMANTIC_STATUS_OK
                     base_diagnostics["semantic"] = {
                         "enabled": True,
                         "fallback_behavior": fallback,
@@ -637,7 +694,7 @@ def execute_query(
                         "provider": provider,
                         "model_name": model_name,
                         "expected_dimensions": expected_dimensions,
-                        "dimension_validation": "pending",
+                        "dimension_validation": _DIMENSION_VALIDATION_PENDING,
                     }
                 except ImportError as e:
                     if fallback == "fail":
@@ -1129,7 +1186,7 @@ def build_context_bundle(query_text: str, results: List[Dict[str, Any]], raw_con
                 "bundle_origin": hit.get("repo_id", "local"),
                 "resolver_status": "resolved_explicit" if prov_type == "explicit" else ("resolved_derived" if derived_ref else "unresolved"),
                 "graph_status": hit.get("why", {}).get("diagnostics", {}).get("graph", {}).get("graph_status", "unknown"),
-                "semantic_status": "unknown",
+                "semantic_status": _SEMANTIC_STATUS_UNKNOWN,
                 "federation_status": "federated" if hit.get("federation_bundle") else "local",
                 "uncertainty": {
                     "explicit_provenance": prov_type == "explicit",

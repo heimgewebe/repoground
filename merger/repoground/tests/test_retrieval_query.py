@@ -449,6 +449,75 @@ def test_query_semantic_reranking(mini_index, monkeypatch):
     assert semantic["actual_document_dimensions"] == 2
 
 
+def test_python_cosine_scores_accepts_single_1d_document_vector():
+    scores = query_core._python_cosine_scores([1.0, 0.0], [1.0, 0.0])
+
+    assert scores == [1.0]
+
+
+def test_semantic_single_candidate_1d_document_embedding_is_scored(
+    mini_index,
+    monkeypatch,
+):
+    class SingleCandidateModel:
+        def encode(self, texts):
+            if isinstance(texts, str):
+                return [1.0, 0.0]
+            assert len(texts) == 1
+            return [1.0, 0.0]
+
+    monkeypatch.setattr(
+        query_core,
+        "_get_semantic_model",
+        lambda _name: SingleCandidateModel(),
+    )
+    policy = {
+        "model_name": "single-candidate-model",
+        "provider": "local",
+        "fallback_behavior": "ignore",
+        "similarity_metric": "cosine",
+        "dimensions": 2,
+    }
+
+    result = query_core.execute_query(
+        mini_index,
+        query_text="hello",
+        k=1,
+        embedding_policy=policy,
+        trace=True,
+    )
+
+    assert result["count"] == 1
+    assert result["query_trace"]["semantic_status"] == "ok"
+    semantic = result["results"][0]["why"]["diagnostics"]["semantic"]
+    assert semantic["enabled"] is True
+    assert semantic["dimension_validation"] == "pass"
+    assert semantic["actual_document_dimensions"] == 2
+    assert result["results"][0]["why"]["rank_features"]["semantic_score"] == 1.0
+
+
+def test_semantic_query_only_normalizes_single_vector_batch():
+    class QueryOnlyModel:
+        def encode(self, texts):
+            if not isinstance(texts, str):
+                raise AssertionError("document embeddings must not be requested")
+            return ((1.0, 0.0),)
+
+    diagnostics = {"dimension_validation": "pending"}
+    query_embedding, document_embeddings = query_core._validated_semantic_embeddings(
+        semantic_model=QueryOnlyModel(),
+        query_text="no candidates",
+        candidate_texts=[],
+        expected_dimensions=2,
+        semantic_diagnostics=diagnostics,
+    )
+
+    assert tuple(query_embedding) == (1.0, 0.0)
+    assert document_embeddings is None
+    assert diagnostics["actual_query_dimensions"] == 2
+    assert diagnostics["dimension_validation"] == "query_only_pass"
+
+
 def test_semantic_dimension_mismatch_falls_back_to_lexical_results(mini_index, monkeypatch):
     class WrongDimensionModel:
         def encode(self, texts):
@@ -581,11 +650,15 @@ def test_semantic_direct_policy_rejects_invalid_dimensions(mini_index, dimension
         )
 
 
-def test_semantic_document_count_mismatch_falls_back(mini_index, monkeypatch):
+def test_semantic_document_count_mismatch_reports_encoding_fallback(
+    mini_index,
+    monkeypatch,
+):
     class WrongDocumentCountModel:
         def encode(self, texts):
             if isinstance(texts, str):
                 return [1.0, 0.0]
+            # Deliberately return one vector for a multi-candidate request.
             return [[1.0, 0.0]]
 
     monkeypatch.setattr(

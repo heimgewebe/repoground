@@ -28,6 +28,8 @@ The parameters for this re-ranking step are defined by the `embedding-policy.v1.
 
 For the local provider, RepoGround validates the actual query-vector and document-vector dimensions before calculating similarity. Both must equal the policy's positive `dimensions` value. A mismatch is reported as `dimension_validation: mismatch`; `fallback_behavior: ignore` keeps the unchanged pre-semantic candidate scores and ordering, while `fallback_behavior: fail` raises a bounded error without exposing model internals. A matching size proves only shape compatibility, not semantic quality or model identity.
 
+A direct runtime caller must provide a positive integer `dimensions` value. Omitting it, passing a boolean, or passing a non-positive or non-integer value is rejected instead of preserving the historical silent-ignore behavior. A one-dimensional document vector returned for exactly one candidate is normalized to a one-row batch before validation and scoring; this does not relax the declared dimension or candidate-count checks.
+
 ## Evaluation Strategy
 
 We employ a strict **improvement delta vs non-semantic** strategy.
