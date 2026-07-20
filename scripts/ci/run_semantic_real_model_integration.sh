@@ -39,15 +39,36 @@ archive = subprocess.run(
     stdout=subprocess.PIPE,
 ).stdout
 
+
+def _archive_member_kind(member: tarfile.TarInfo) -> str:
+    if member.isdir():
+        return "directory"
+    if member.isfile():
+        return "regular file"
+    if member.issym():
+        return "symbolic link"
+    if member.islnk():
+        return "hard link"
+    if member.ischr():
+        return "character device"
+    if member.isblk():
+        return "block device"
+    if member.isfifo():
+        return "FIFO"
+    return f"unknown type {member.type!r}"
+
+
 with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as handle:
     members = handle.getmembers()
     for member in members:
         relative = PurePosixPath(member.name)
         if relative.is_absolute() or ".." in relative.parts:
             raise RuntimeError(f"unsafe archive path: {member.name!r}")
-        if not member.isdir() and not member.isfile():
+        member_kind = _archive_member_kind(member)
+        if member_kind not in {"directory", "regular file"}:
             raise RuntimeError(
-                f"runtime archive contains non-regular entry: {member.name!r}"
+                "runtime archive contains unsafe "
+                f"{member_kind}: {member.name!r}"
             )
 
     directories: set[Path] = {target}

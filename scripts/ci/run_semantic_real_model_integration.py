@@ -48,7 +48,10 @@ def _framed_sha256(parts: Iterator[bytes]) -> str:
 
 
 def canonical_tree_sha256(root: Path) -> str:
-    """Hash relative file names and bytes without relying on metadata or mtime."""
+    """Hash relative paths and bytes, deliberately excluding host metadata.
+
+    File modes, ownership and timestamps are enforced separately where required.
+    """
     if not root.is_dir() or root.is_symlink():
         raise RuntimeError("model tree must be a real directory")
 
@@ -380,6 +383,8 @@ def _require_explicit_import_roots(dependency_target: Path) -> None:
 def run_integration(dependency_target: Path) -> dict[str, Any]:
     dependency_target = _require_dependency_target(dependency_target)
     _require_explicit_import_roots(dependency_target)
+    # Keep all subsequently created model artifacts private by default.
+    os.umask(0o077)
     os.environ.update(
         {
             "HF_HUB_OFFLINE": "1",

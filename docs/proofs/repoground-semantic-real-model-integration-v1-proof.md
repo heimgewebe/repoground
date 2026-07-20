@@ -14,7 +14,8 @@ The optional semantic dependency installation proof deliberately downloaded no m
 
 - has an explicit eight-token vocabulary and therefore eight output dimensions;
 - contains no downloaded or pre-trained model weights;
-- is saved twice and requires the same canonical tree SHA-256 for both outputs;
+- is built and saved twice independently and requires the same canonical tree SHA-256 for both outputs;
+- hashes canonical relative paths and file bytes while deliberately excluding modes, ownership and timestamps, which are enforced separately where required;
 - is bound to tree SHA-256 `913b82d98b28add74e605bde8a807826ce1b995b783ddac158e7f0fdf5bcfc75`;
 - is reloaded from a local path with `local_files_only=True`;
 - emits actual NumPy query, single-document and document-batch embeddings;
@@ -25,15 +26,19 @@ The optional semantic dependency installation proof deliberately downloaded no m
 - Docker `--network none` plus an in-container requirement that `/sys/class/net` exposes only `lo`;
 - a read-only root filesystem;
 - a fixed unprivileged numeric identity, UID/GID `65532:65532`, instead of the host user;
+- a process-local `umask 077` before any model artifacts are created;
 - a temporary runtime copy produced only from regular files in `git archive HEAD`, normalized to file mode `0444` and directory mode `0555` before its read-only mount;
+- explicit tar-member classification that rejects symbolic links, hard links, devices, FIFOs and unknown member types before extraction;
 - a read-only dependency mount whose complete host path is rejected when any component is a symlink;
-- host orchestration isolated with Python 3.10 `-I -S`, while the pinned CPython 3.12 container uses `-P -S`, `PYTHONSAFEPATH=1`, and explicit `PYTHONPATH=/semantic-target:/work` rather than runtime `sys.path` mutation;
+- host orchestration isolated with Python 3.10 `-I -S`, while the pinned CPython 3.12 container uses `-P -S`; `PYTHONSAFEPATH=1` suppresses automatic unsafe start-path insertion, and explicit `PYTHONPATH=/semantic-target:/work` supplies only the two allowlisted roots whose presence is checked fail-closed by `_require_explicit_import_roots()`;
 - all Linux capabilities dropped;
 - `no-new-privileges`;
 - Hugging Face and Transformers offline flags;
 - an additional Python socket guard.
 
 The existing `semantic-lock` workflow now installs the 58-package SHA-256-locked dependency closure into a unique hidden `mktemp` directory inside the isolated checkout. The path deliberately remains relative because the lock compiler exposes only that checkout as `/work`; absolute host paths such as `RUNNER_TEMP` are outside its container namespace. The EXIT trap is installed before the directory is created, so cancellation and early failure do not leave a fixed shared path. After installation, read/execute access is added without write access for the fixed container identity, the network-disabled integration wrapper runs, and the target is removed. The normal RepoGround Python suite remains independent of Torch and SentenceTransformers.
+
+The model is intentionally serialized twice from two independently constructed library objects. Replacing the second build with `copytree()` would prove only copy integrity, not deterministic library serialization. The container `/tmp` is a private Docker `tmpfs`; ordinary cleanup failures remain fatal rather than being hidden with `ignore_cleanup_errors=True`, while abrupt container termination removes the container-scoped `tmpfs` even though no Python cleanup handler can run after `SIGKILL`.
 
 The workflow path filter also now watches the real renamed platform contract, `docs/release/repoground-semantic-platforms.v1.json`, instead of the obsolete pre-cutover filename.
 
