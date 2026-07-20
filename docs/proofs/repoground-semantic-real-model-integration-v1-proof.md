@@ -1,6 +1,6 @@
 # RepoGround Semantic Real-Model Integration v1 — Proof
 
-Status: implemented and locally verified after rebasing onto RepoGround main commit `f7f9ef29a45e0f3b43e303e8e4bf5bc888dfb1d3`. Executable evidence was produced from branch head `85b230455cf7c490fd60691d9946445f2aec42a4` before the final evidence-only proof update.
+Status: implemented and locally verified after rebasing onto RepoGround main commit `f7f9ef29a45e0f3b43e303e8e4bf5bc888dfb1d3`. Executable review-hardening evidence was produced from branch head `70b355af943aaf2efb164b80cd424c94707742f1` before this final evidence-only proof update.
 
 ## Problem
 
@@ -77,6 +77,20 @@ result: success
 runtime_copy_cleanup: pass, no repoground-semantic-runtime.* path remained
 ```
 
+Committed review-hardening install-and-model rerun on head `70b355af943aaf2efb164b80cd424c94707742f1`:
+
+```text
+task_id: 3d05a7816b7640809c7353f4
+terminalization_sha256: cf9cb332833b701f1bec8b07dfc16d11f08c0600267deaf0fba3ea2f6ca843be
+lifecycle_receipt_sha256: 1258363910a8ce76dc73d4b289ae31f8a5349815b09c7b68c9edac5b3932872e
+lock_sha256: 8846ffb3e549726c90af6945664b2c83778629690d052d13ab474c585269205f
+result: success
+install_status: 0
+wrapper_status: 0
+outer_cleanup_status: 0
+checkout_target_cleanup: pass, no review-hardening target remained
+```
+
 Observed runtime and outputs:
 
 ```text
@@ -97,31 +111,34 @@ actual document dimensions: 8
 cosine scores: [0.866025447845459, 0.0]
 ```
 
-Dependency-free contract tests:
+Dependency-free contract tests after review hardening:
 
 ```text
 python3 -m pytest \
   merger/repoground/tests/test_semantic_real_model.py \
   merger/repoground/tests/test_semantic_extension_lock.py -q
 
-13 passed in 0.13s
+16 passed in 0.17s
+
+task_id: f966b1e013d14b5c85f59499
+terminalization_sha256: 20700a28d694297b38aa8109b2baa750d0493af991344abd1b99dc11474a3d33
+lifecycle_receipt_sha256: 0289ec55c4019359451ef9743e5e31301a31807d217771fb60d266a89f1a1121
 ```
 
-Complete RepoGround Python suite:
+Complete RepoGround Python suite on committed review-hardening code:
 
 ```text
-python3 -m pytest merger/repoground/tests -q
+python3 -m pytest merger/repoground/tests -q -p no:cacheprovider
 
-4396 passed, 2 skipped in 115.60s
-```
+4399 passed, 2 skipped in 172.96s (0:02:52)
 
-Durable complete-suite task on the hardened final code, workflow and wrapper:
-
-```text
-task_id: ec821b25a8634ff6974354fa
-terminalization_sha256: e4c6cb852ac334d47043cab30e0cdbe290b9ed143dc72f8d8b3f540507a675b8
-lifecycle_receipt_sha256: 24de94e796ee8fdcbc5502d77ecdb4519d2e6e8899e218abd6ef353ef4b880af
-journal_tail_sha256: 1c36f5f0bdc8da5c9338ee10fbb88a2a4791629433386ae0129cbcae59efe8fb
+execution_task_id: db3bd0d1b2b243fe920d8116
+execution_terminalization_sha256: 4a69ad2dfa6a5c1eed30b1df4de816bada14e31d427ac34a3524c69cd1f5d357
+execution_lifecycle_receipt_sha256: b5dc4cca65b77f68355ef694dc80dc9402fdff5d142b4b39723654846936242b
+exact_output_sha256: 17418259e88483a58cc5439e3893ac313ded9a479782c612b8c4fcbe40bcca36
+readback_task_id: cd35487065c748a59aa7a7d0
+readback_terminalization_sha256: f5fbc0977fd79b9d02b60a79dc6be97c114053bf25b5ef9f6bda3c08fa9304aa
+readback_lifecycle_receipt_sha256: 2aba539c56df8dcad83be92ab0eeba779ea6f24786fca14aed3625dfd4c71b86
 ```
 
 Static and contract checks:
@@ -131,6 +148,10 @@ changed-file Ruff: pass
 Python syntax compilation: pass
 workflow YAML parse: pass
 wrapper bash syntax: pass
+local ShellCheck --severity=style: pass
+ShellCheck task_id: 24678ba5474e4bb69e5190f6
+ShellCheck terminalization_sha256: cd562fdf6aafad4b218d6b0eb8c1423c186069dc59b6fa9803cf34fdf5d322d3
+ShellCheck lifecycle_receipt_sha256: ef43915955239af43632d3cc1bdd6a4602f6c71cd2edd7d52442586b0bccffcc
 release contract: pass, findings=[]
 maintainability ratchet: pass, new_count=0, resolved_count=3, findings=[]
 git diff --check: pass
