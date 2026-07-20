@@ -155,15 +155,15 @@
       "path": "callkit/consumer.py"
     },
     {
-      "callee_expression": "registry.handle",
+      "callee_expression": "factory()",
       "caller_qualified_name": "dynamic",
       "category": "dynamic_dispatch",
       "expected_evidence_level": "S0",
-      "expected_reason": "dynamic_attribute_call",
+      "expected_reason": "dynamic_callee_expression",
       "expected_relation_type": "calls",
       "expected_status": "unresolved",
       "expected_target_id": null,
-      "id": "dynamic-registry-call",
+      "id": "dynamic-higher-order-call",
       "path": "callkit/consumer.py"
     },
     {
