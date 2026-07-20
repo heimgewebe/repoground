@@ -70,6 +70,7 @@ jobs:
           target=""
           cleanup() {
             if [[ -n "$target" ]]; then
+              chmod -R u+rwX -- "$target" 2>/dev/null || true
               rm -rf -- "$target"
             fi
           }

@@ -12,32 +12,33 @@ runtime_root="$(
 )"
 cleanup() {
   status=$?
-  trap - EXIT
+  trap - EXIT HUP INT TERM
   chmod -R u+rwX -- "$runtime_root" 2>/dev/null || true
   rm -rf -- "$runtime_root" || true
   exit "$status"
 }
+handle_signal() {
+  exit "$1"
+}
 trap cleanup EXIT
+trap 'handle_signal 129' HUP
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 runtime_work="$runtime_root/work"
 mkdir -- "$runtime_work"
 
 python3 -I -S - "$repo_root" "$runtime_work" <<'PY'
 from __future__ import annotations
 
-import io
 import shutil
 import subprocess
 import sys
 import tarfile
+import tempfile
 from pathlib import Path, PurePosixPath
 
 repo_root = Path(sys.argv[1])
 target = Path(sys.argv[2])
-archive = subprocess.run(
-    ["git", "-C", str(repo_root), "archive", "--format=tar", "HEAD"],
-    check=True,
-    stdout=subprocess.PIPE,
-).stdout
 
 
 def _archive_member_kind(member: tarfile.TarInfo) -> str:
@@ -58,59 +59,55 @@ def _archive_member_kind(member: tarfile.TarInfo) -> str:
     return f"unknown type {member.type!r}"
 
 
-with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as handle:
-    members = handle.getmembers()
-    for member in members:
-        relative = PurePosixPath(member.name)
-        if relative.is_absolute() or ".." in relative.parts:
-            raise RuntimeError(f"unsafe archive path: {member.name!r}")
-        member_kind = _archive_member_kind(member)
-        if member_kind not in {"directory", "regular file"}:
-            raise RuntimeError(
-                "runtime archive contains unsafe "
-                f"{member_kind}: {member.name!r}"
-            )
+with tempfile.TemporaryFile() as archive:
+    subprocess.run(
+        ["git", "-C", str(repo_root), "archive", "--format=tar", "HEAD"],
+        check=True,
+        stdout=archive,
+    )
+    archive.seek(0)
+    with tarfile.open(fileobj=archive, mode="r:") as handle:
+        members = handle.getmembers()
+        for member in members:
+            relative = PurePosixPath(member.name)
+            if relative.is_absolute() or ".." in relative.parts:
+                raise RuntimeError(f"unsafe archive path: {member.name!r}")
+            member_kind = _archive_member_kind(member)
+            if member_kind not in {"directory", "regular file"}:
+                raise RuntimeError(
+                    "runtime archive contains unsafe "
+                    f"{member_kind}: {member.name!r}"
+                )
 
-    directories: set[Path] = {target}
-    for member in members:
-        relative = PurePosixPath(member.name)
-        destination = target.joinpath(*relative.parts)
-        if member.isdir():
-            destination.mkdir(parents=True, exist_ok=True)
-            directories.add(destination)
-            continue
+        directories: set[Path] = {target}
+        for member in members:
+            relative = PurePosixPath(member.name)
+            destination = target.joinpath(*relative.parts)
+            if member.isdir():
+                destination.mkdir(parents=True, exist_ok=True)
+                directories.add(destination)
+                continue
 
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        directories.add(destination.parent)
-        source = handle.extractfile(member)
-        if source is None:
-            raise RuntimeError(f"archive file has no payload: {member.name!r}")
-        with source, destination.open("xb") as output:
-            shutil.copyfileobj(source, output)
-        destination.chmod(0o444)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            directories.add(destination.parent)
+            source = handle.extractfile(member)
+            if source is None:
+                raise RuntimeError(f"archive file has no payload: {member.name!r}")
+            with source, destination.open("xb") as output:
+                shutil.copyfileobj(source, output)
+            destination.chmod(0o444)
 
 for directory in sorted(directories, key=lambda path: len(path.parts), reverse=True):
     directory.chmod(0o555)
 PY
 
 runner="$runtime_work/scripts/ci/run_semantic_real_model_integration.py"
-platform_contract="$runtime_work/docs/release/repoground-semantic-platforms.v1.json"
 dependency_target="$(
   python3 -I -S "$runner" \
     --validate-dependency-target "$1"
 )"
 image="$(
-  python3 -I -S -c '
-import json
-import sys
-from pathlib import Path
-
-contract = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-image = contract.get("compiler", {}).get("image")
-if not isinstance(image, str) or "@sha256:" not in image:
-    raise SystemExit("semantic platform contract has no digest-pinned compiler image")
-print(image)
-' "$platform_contract"
+  python3 -I -S "$runner" --compiler-image
 )"
 sandbox_uid=65532
 sandbox_gid=65532
@@ -120,11 +117,15 @@ docker run --rm \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges \
+  --pids-limit 256 \
+  --memory 2g \
+  --memory-swap 2g \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,size=256m,mode=1777 \
   --user "$sandbox_uid:$sandbox_gid" \
   --env HOME=/tmp \
   --env PYTHONPATH=/semantic-target:/work \
   --env PYTHONSAFEPATH=1 \
+  --env PYTHONNOUSERSITE=1 \
   --env HF_HOME=/tmp/hf-home \
   --env HF_HUB_OFFLINE=1 \
   --env TRANSFORMERS_OFFLINE=1 \

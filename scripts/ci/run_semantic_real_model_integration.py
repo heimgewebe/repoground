@@ -16,8 +16,66 @@ from typing import Any, Iterator
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
-EXPECTED_SENTENCE_TRANSFORMERS_VERSION = "5.6.0"
-EXPECTED_TORCH_VERSION = "2.13.0+cpu"
+SEMANTIC_PLATFORM_CONTRACT = (
+    ROOT / "docs/release/repoground-semantic-platforms.v1.json"
+)
+SEMANTIC_TARGET_ID = "cpython-312-linux-x86_64"
+
+
+def _load_semantic_platform_contract(
+    path: Path = SEMANTIC_PLATFORM_CONTRACT,
+) -> dict[str, Any]:
+    contract = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(contract, dict):
+        raise RuntimeError("semantic platform contract must be a JSON object")
+    return contract
+
+
+def _locked_root_versions(
+    contract: dict[str, Any],
+    *,
+    target_id: str = SEMANTIC_TARGET_ID,
+) -> tuple[str, str]:
+    supported_targets = contract.get("supported_targets")
+    if not isinstance(supported_targets, list):
+        raise RuntimeError("semantic platform contract has no supported_targets list")
+    matches = [
+        target
+        for target in supported_targets
+        if isinstance(target, dict) and target.get("id") == target_id
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"semantic platform contract must define target {target_id!r} exactly once"
+        )
+    target = matches[0]
+    root_pins = target.get("root_pins")
+    if not isinstance(root_pins, dict):
+        raise RuntimeError("semantic platform target has no root_pins object")
+    sentence_transformers = root_pins.get("sentence-transformers")
+    torch = root_pins.get("torch")
+    if not isinstance(sentence_transformers, str) or not sentence_transformers:
+        raise RuntimeError("semantic platform contract has no sentence-transformers pin")
+    if not isinstance(torch, str) or not torch:
+        raise RuntimeError("semantic platform contract has no torch pin")
+    return sentence_transformers, torch
+
+
+def _compiler_image(contract: dict[str, Any] | None = None) -> str:
+    if contract is None:
+        contract = _load_semantic_platform_contract()
+    compiler = contract.get("compiler")
+    if not isinstance(compiler, dict):
+        raise RuntimeError("semantic platform contract has no compiler object")
+    image = compiler.get("image")
+    if not isinstance(image, str) or "@sha256:" not in image:
+        raise RuntimeError("semantic platform contract has no digest-pinned compiler image")
+    return image
+
+
+EXPECTED_SENTENCE_TRANSFORMERS_VERSION, EXPECTED_TORCH_VERSION = _locked_root_versions(
+    _load_semantic_platform_contract()
+)
 FIXTURE_VOCAB = (
     "commons",
     "community",
@@ -29,6 +87,9 @@ FIXTURE_VOCAB = (
     "knowledge",
 )
 FIXTURE_DIMENSIONS = len(FIXTURE_VOCAB)
+EXPECTED_FIXTURE_VOCAB_SHA256 = (
+    "f65f5462143c8530bd6ba6dec59e000970f3ba60070886f0cbd1956c576ef445"
+)
 EXPECTED_MODEL_TREE_SHA256 = (
     "913b82d98b28add74e605bde8a807826ce1b995b783ddac158e7f0fdf5bcfc75"
 )
@@ -338,9 +399,7 @@ def _integration_report(
             "source": "generated_local_fixture",
             "modules": ["BoW", "Normalize"],
             "dimensions": FIXTURE_DIMENSIONS,
-            "vocab_sha256": hashlib.sha256(
-                json.dumps(FIXTURE_VOCAB, separators=(",", ":")).encode("utf-8")
-            ).hexdigest(),
+            "vocab_sha256": EXPECTED_FIXTURE_VOCAB_SHA256,
             "tree_sha256": model["tree_sha256"],
             "repeat_tree_sha256": model["repeat_tree_sha256"],
             "files": model["files"],
@@ -390,6 +449,7 @@ def run_integration(dependency_target: Path) -> dict[str, Any]:
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
             "HF_HUB_DISABLE_TELEMETRY": "1",
+            "PYTHONNOUSERSITE": "1",
             "SENTENCE_TRANSFORMERS_HOME": "/tmp/repoground-semantic-model-cache",
         }
     )
@@ -429,7 +489,15 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dependency-target", type=Path)
     mode.add_argument("--validate-dependency-target", type=Path)
+    mode.add_argument("--compiler-image", action="store_true")
     args = parser.parse_args()
+
+    if args.compiler_image:
+        try:
+            print(_compiler_image())
+        except Exception as exc:
+            parser.error(str(exc))
+        return 0
 
     if args.validate_dependency_target is not None:
         try:
