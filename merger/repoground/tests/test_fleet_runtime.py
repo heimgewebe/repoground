@@ -1059,6 +1059,67 @@ def test_transactional_prune_accepts_only_bounded_generation_current_symlink(
     assert not current.exists()
 
 
+@pytest.mark.parametrize("scan_name", ["tree_bytes", "tree_snapshot"])
+def test_tree_scan_reuses_initial_current_symlink_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scan_name: str,
+) -> None:
+    module = load_publisher()
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    current, _ = write_historical_generation_symlink(
+        candidate,
+        generation_root_name=module.CANONICAL_GENERATION_ROOT_NAME,
+    )
+    original_lstat = Path.lstat
+    current_lstat_calls = 0
+
+    def counted_lstat(path: Path) -> os.stat_result:
+        nonlocal current_lstat_calls
+        if path == current:
+            current_lstat_calls += 1
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", counted_lstat)
+
+    getattr(module, scan_name)(candidate)
+
+    assert current_lstat_calls == 2
+
+
+def test_reused_current_symlink_metadata_keeps_final_identity_check(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    current, _ = write_historical_generation_symlink(
+        candidate,
+        generation_root_name=module.CANONICAL_GENERATION_ROOT_NAME,
+    )
+    initial_metadata = current.lstat()
+    changed_values = list(initial_metadata)
+    changed_values[1] = initial_metadata.st_ino + 1
+    changed_metadata = os.stat_result(changed_values)
+    original_lstat = Path.lstat
+
+    def changed_lstat(path: Path) -> os.stat_result:
+        if path == current:
+            return changed_metadata
+        return original_lstat(path)
+
+    monkeypatch.setattr(Path, "lstat", changed_lstat)
+
+    with pytest.raises(RuntimeError, match="symlink changed during validation"):
+        module._bounded_generation_current_symlink(
+            current,
+            root=candidate,
+            metadata=initial_metadata,
+        )
+
+
 def test_historical_current_symlink_rejects_unsafe_targets_and_locations(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
