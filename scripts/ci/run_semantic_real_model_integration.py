@@ -11,6 +11,7 @@ import socket
 import sys
 import tempfile
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
 from unittest.mock import patch
@@ -25,10 +26,28 @@ SEMANTIC_TARGET_ID = "cpython-312-linux-x86_64"
 def _load_semantic_platform_contract(
     path: Path = SEMANTIC_PLATFORM_CONTRACT,
 ) -> dict[str, Any]:
-    contract = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            f"cannot read semantic platform contract {path}: {exc}"
+        ) from exc
+    try:
+        contract = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "semantic platform contract contains invalid JSON "
+            f"at {path}:{exc.lineno}:{exc.colno}: {exc.msg}"
+        ) from exc
     if not isinstance(contract, dict):
-        raise RuntimeError("semantic platform contract must be a JSON object")
+        raise RuntimeError(f"semantic platform contract {path} must be a JSON object")
     return contract
+
+
+@lru_cache(maxsize=1)
+def _semantic_platform_contract() -> dict[str, Any]:
+    """Load the immutable platform contract only when a caller needs it."""
+    return _load_semantic_platform_contract()
 
 
 def _locked_root_versions(
@@ -61,9 +80,14 @@ def _locked_root_versions(
     return sentence_transformers, torch
 
 
+@lru_cache(maxsize=1)
+def _locked_runtime_versions() -> tuple[str, str]:
+    return _locked_root_versions(_semantic_platform_contract())
+
+
 def _compiler_image(contract: dict[str, Any] | None = None) -> str:
     if contract is None:
-        contract = _load_semantic_platform_contract()
+        contract = _semantic_platform_contract()
     compiler = contract.get("compiler")
     if not isinstance(compiler, dict):
         raise RuntimeError("semantic platform contract has no compiler object")
@@ -73,9 +97,6 @@ def _compiler_image(contract: dict[str, Any] | None = None) -> str:
     return image
 
 
-EXPECTED_SENTENCE_TRANSFORMERS_VERSION, EXPECTED_TORCH_VERSION = _locked_root_versions(
-    _load_semantic_platform_contract()
-)
 FIXTURE_VOCAB = (
     "commons",
     "community",
@@ -90,6 +111,15 @@ FIXTURE_DIMENSIONS = len(FIXTURE_VOCAB)
 EXPECTED_FIXTURE_VOCAB_SHA256 = (
     "f65f5462143c8530bd6ba6dec59e000970f3ba60070886f0cbd1956c576ef445"
 )
+
+
+def _fixture_vocab_sha256() -> str:
+    """Hash the fixture vocabulary actually used by this process."""
+    return hashlib.sha256(
+        json.dumps(FIXTURE_VOCAB, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 EXPECTED_MODEL_TREE_SHA256 = (
     "913b82d98b28add74e605bde8a807826ce1b995b783ddac158e7f0fdf5bcfc75"
 )
@@ -233,10 +263,13 @@ def _load_locked_runtime() -> dict[str, Any]:
 
     from merger.repoground.retrieval import query_core
 
-    sentence_transformers_version = _require_version(
-        "sentence-transformers", EXPECTED_SENTENCE_TRANSFORMERS_VERSION
+    expected_sentence_transformers_version, expected_torch_version = (
+        _locked_runtime_versions()
     )
-    torch_version = _require_version("torch", EXPECTED_TORCH_VERSION)
+    sentence_transformers_version = _require_version(
+        "sentence-transformers", expected_sentence_transformers_version
+    )
+    torch_version = _require_version("torch", expected_torch_version)
     if sentence_transformers.__version__ != sentence_transformers_version:
         raise RuntimeError("sentence-transformers package metadata/module mismatch")
     if torch.__version__ != torch_version:
@@ -399,7 +432,7 @@ def _integration_report(
             "source": "generated_local_fixture",
             "modules": ["BoW", "Normalize"],
             "dimensions": FIXTURE_DIMENSIONS,
-            "vocab_sha256": EXPECTED_FIXTURE_VOCAB_SHA256,
+            "vocab_sha256": _fixture_vocab_sha256(),
             "tree_sha256": model["tree_sha256"],
             "repeat_tree_sha256": model["repeat_tree_sha256"],
             "files": model["files"],
