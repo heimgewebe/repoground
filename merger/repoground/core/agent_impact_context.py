@@ -17,6 +17,13 @@ VERSION = "1.0"
 MODES = ("impact", "edit")
 MAX_ITEMS_LIMIT = 200
 
+_EDIT_CONTEXT_NONVERDICTS = (
+    "complete_blast_radius",
+    "runtime_breakage",
+    "test_sufficiency",
+    "merge_readiness",
+)
+
 DOES_NOT_ESTABLISH = (
     "complete_call_graph",
     "complete_blast_radius",
@@ -47,8 +54,14 @@ MUTATION_BOUNDARY = {
 _CORE_SOURCES = {
     "architecture_graph_json",
     "python_symbol_index_json",
-    "python_call_graph_json",
     "entrypoints_json",
+}
+_CALL_GRAPH_RELATION_TYPES = frozenset({"calls", "constructs"})
+_RISK_RELEVANCE_PRIORITY = {
+    "target_caller_symbol_id": 0,
+    "candidate_target_id": 1,
+    "qualified_name": 2,
+    "simple_name": 3,
 }
 _BLOCKING_SOURCE_STATUSES = {
     "blocked",
@@ -234,7 +247,8 @@ def _identity_set(sources: list[dict[str, Any]]) -> set[tuple[str, str]]:
     return {
         (str(item["run_id"]), str(item["canonical_dump_index_sha256"]))
         for item in sources
-        if item.get("status") == "available"
+        if item.get("source") in _CORE_SOURCES
+        and item.get("status") == "available"
         and item.get("run_id")
         and item.get("canonical_dump_index_sha256")
     }
@@ -365,7 +379,7 @@ def _matching_symbols(
     target_symbol: str | None,
     target_paths: set[str],
     max_items: int,
-) -> tuple[list[dict[str, Any]], set[str], bool]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], set[str], bool]:
     matches: list[dict[str, Any]] = []
     derived_paths: set[str] = set()
     folded = target_symbol.casefold() if target_symbol else None
@@ -394,17 +408,14 @@ def _matching_symbols(
     for symbol in matches:
         unique.setdefault(_symbol_key(symbol), symbol)
     ordered = list(unique.values())
-    return ordered[:max_items], derived_paths, len(ordered) > max_items
-
+    return ordered[:max_items], ordered, derived_paths, len(ordered) > max_items
 
 
 def _symbols_by_id(symbol_index: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         str(raw["id"]): dict(raw)
         for raw in _items(symbol_index.get("symbols"))
-        if isinstance(raw, Mapping)
-        and isinstance(raw.get("id"), str)
-        and raw.get("id")
+        if isinstance(raw, Mapping) and isinstance(raw.get("id"), str) and raw.get("id")
     }
 
 
@@ -418,26 +429,36 @@ def _source_status(
     return {"source": source, "status": "missing"}
 
 
-def _call_graph_freshness(
-    call_graph: Mapping[str, Any],
+def _artifact_freshness(
+    document: Mapping[str, Any],
     *,
+    source: str,
     source_states: list[dict[str, Any]],
     coherence: str,
+    expected_run_id: str | None,
+    expected_digest: str | None,
 ) -> dict[str, Any]:
-    status = _source_status(source_states, "python_call_graph_json")
-    run_id, digest = _identity(call_graph)
+    source_state = _source_status(source_states, source)
+    source_status = str(source_state.get("status", "missing"))
+    run_id, digest = _identity(document)
+    if source_status != "available":
+        freshness_status = source_status
+    elif not document:
+        freshness_status = "missing"
+    elif not run_id or not digest:
+        freshness_status = "identity_missing"
+    elif coherence != "coherent" or expected_run_id is None or expected_digest is None:
+        freshness_status = "coherence_unknown"
+    elif (run_id, digest) != (expected_run_id, expected_digest):
+        freshness_status = "stale_or_mismatched"
+    else:
+        freshness_status = "coherent"
     return {
-        "source": "python_call_graph_json",
-        "status": (
-            "coherent"
-            if call_graph
-            and coherence == "coherent"
-            and status.get("status") == "available"
-            else status.get("status", "missing")
-        ),
+        "source": source,
+        "status": freshness_status,
         "run_id": run_id,
         "canonical_dump_index_sha256": digest,
-        "artifact_sha256": status.get("sha256"),
+        "artifact_sha256": source_state.get("sha256"),
     }
 
 
@@ -455,7 +476,9 @@ def _call_relation_record(
     *,
     relation_kind: str,
     peer_symbol: Mapping[str, Any] | None,
-    freshness: Mapping[str, Any],
+    target_symbol_ids: set[str],
+    relation_freshness: Mapping[str, Any],
+    symbol_freshness: Mapping[str, Any],
 ) -> dict[str, Any]:
     if relation_kind == "direct_caller":
         path = call.get("path")
@@ -463,6 +486,7 @@ def _call_relation_record(
         qualified_name = call.get("caller_qualified_name")
         peer_range = _caller_definition_range(call)
         direction = "incoming"
+        peer_freshness = relation_freshness
     else:
         peer = peer_symbol or {}
         path = peer.get("path")
@@ -470,30 +494,118 @@ def _call_relation_record(
         qualified_name = peer.get("qualified_name")
         peer_range = peer.get("range_ref")
         direction = "outgoing"
+        peer_freshness = symbol_freshness
+    call_site = call.get("range_ref")
+    relation_type = call.get("relation_type")
     return {
         "relation_kind": relation_kind,
         "direction": direction,
         "path": path,
         "symbol_id": symbol_id,
         "qualified_name": qualified_name,
-        "relation_type": call.get("relation_type"),
+        "target_symbol_ids": sorted(target_symbol_ids),
+        "relation_type": relation_type,
+        "relation_types": ([relation_type] if isinstance(relation_type, str) else []),
         "evidence_level": call.get("evidence_level"),
         "resolution_status": call.get("resolution_status"),
         "resolution_reason": call.get("resolution_reason"),
         "source_ranges": {
-            "call_site": call.get("range_ref"),
+            "call_site": call_site,
+            "call_sites": [call_site] if isinstance(call_site, str) else [],
             "peer_definition": peer_range,
         },
-        "freshness": dict(freshness),
+        "freshness": dict(relation_freshness),
+        "provenance": {
+            "relation": dict(relation_freshness),
+            "peer_definition": dict(peer_freshness),
+        },
         "omission_reason": None,
     }
+
+
+def _call_relation_identity(item: Mapping[str, Any]) -> tuple[Any, ...]:
+    relation_kind = item.get("relation_kind")
+    symbol_id = item.get("symbol_id")
+    if isinstance(symbol_id, str) and symbol_id:
+        return (relation_kind, "symbol", symbol_id)
+    source_ranges = _mapping(item.get("source_ranges"))
+    return (
+        relation_kind,
+        "scope",
+        item.get("path"),
+        item.get("qualified_name"),
+        source_ranges.get("peer_definition"),
+    )
+
+
+def _aggregate_call_relations(
+    relations: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for relation in relations:
+        key = _call_relation_identity(relation)
+        if key not in grouped:
+            value = dict(relation)
+            value["source_ranges"] = dict(_mapping(relation.get("source_ranges")))
+            value["target_symbol_ids"] = list(relation.get("target_symbol_ids") or [])
+            value["relation_types"] = list(relation.get("relation_types") or [])
+            grouped[key] = value
+            continue
+        current = grouped[key]
+        current_ranges = dict(_mapping(current.get("source_ranges")))
+        incoming_ranges = _mapping(relation.get("source_ranges"))
+        call_sites = {
+            str(value)
+            for value in (
+                list(current_ranges.get("call_sites") or [])
+                + list(incoming_ranges.get("call_sites") or [])
+            )
+            if isinstance(value, str) and value
+        }
+        current_ranges["call_sites"] = sorted(call_sites)
+        current_ranges["call_site"] = (
+            current_ranges["call_sites"][0] if current_ranges["call_sites"] else None
+        )
+        current["source_ranges"] = current_ranges
+        current["target_symbol_ids"] = sorted(
+            {
+                str(value)
+                for value in (
+                    list(current.get("target_symbol_ids") or [])
+                    + list(relation.get("target_symbol_ids") or [])
+                )
+                if isinstance(value, str) and value
+            }
+        )
+        relation_types = sorted(
+            {
+                str(value)
+                for value in (
+                    list(current.get("relation_types") or [])
+                    + list(relation.get("relation_types") or [])
+                )
+                if isinstance(value, str) and value
+            }
+        )
+        current["relation_types"] = relation_types
+        current["relation_type"] = relation_types[0] if relation_types else None
+    ordered = list(grouped.values())
+    ordered.sort(
+        key=lambda item: (
+            str(item.get("path", "")),
+            str(item.get("qualified_name", "")),
+            str(item.get("symbol_id", "")),
+        )
+    )
+    return ordered
 
 
 def _call_risk_record(
     call: Mapping[str, Any],
     *,
     freshness: Mapping[str, Any],
-    omission_reason: str,
+    uncertainty_reason: str,
+    relevance_basis: str,
 ) -> dict[str, Any]:
     return {
         "kind": "unresolved_call_relation",
@@ -506,13 +618,45 @@ def _call_risk_record(
         "evidence_level": call.get("evidence_level"),
         "resolution_status": call.get("resolution_status"),
         "resolution_reason": call.get("resolution_reason"),
+        "relation_type": call.get("relation_type"),
+        "relevance_basis": relevance_basis,
+        "risk_priority": _RISK_RELEVANCE_PRIORITY[relevance_basis],
         "source_ranges": {
             "call_site": call.get("range_ref"),
             "caller_definition": _caller_definition_range(call),
         },
         "freshness": dict(freshness),
-        "omission_reason": omission_reason,
+        "provenance": {"relation": dict(freshness)},
+        "uncertainty_reason": uncertainty_reason,
+        # Backward-compatible projection; budget omissions remain in the
+        # section-level omission_reasons mapping.
+        "omission_reason": uncertainty_reason,
     }
+
+
+def _call_risk_relevance(
+    call: Mapping[str, Any],
+    *,
+    target_ids: set[str],
+    target_qualified_names: set[str],
+    target_simple_names: set[str],
+    candidate_ids: set[str],
+) -> str | None:
+    caller_id = call.get("caller_symbol_id")
+    if isinstance(caller_id, str) and caller_id in target_ids:
+        return "target_caller_symbol_id"
+    if target_ids.intersection(candidate_ids):
+        return "candidate_target_id"
+    callee_expression = call.get("callee_expression")
+    if (
+        isinstance(callee_expression, str)
+        and callee_expression.casefold() in target_qualified_names
+    ):
+        return "qualified_name"
+    simple_name = call.get("simple_name")
+    if isinstance(simple_name, str) and simple_name.casefold() in target_simple_names:
+        return "simple_name"
+    return None
 
 
 def _call_graph_context(
@@ -522,36 +666,77 @@ def _call_graph_context(
     symbol_index: Mapping[str, Any],
     source_states: list[dict[str, Any]],
     coherence: str,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    freshness = _call_graph_freshness(
+    expected_run_id: str | None,
+    expected_digest: str | None,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
+    relation_freshness = _artifact_freshness(
         call_graph,
+        source="python_call_graph_json",
         source_states=source_states,
         coherence=coherence,
+        expected_run_id=expected_run_id,
+        expected_digest=expected_digest,
     )
-    if not call_graph:
-        return [], [], [
+    symbol_freshness = _artifact_freshness(
+        symbol_index,
+        source="python_symbol_index_json",
+        source_states=source_states,
+        coherence=coherence,
+        expected_run_id=expected_run_id,
+        expected_digest=expected_digest,
+    )
+    if relation_freshness.get("status") != "coherent":
+        status = str(relation_freshness.get("status", "missing"))
+        return (
+            [],
+            [],
+            [],
+            [
             {
-                "kind": "call_graph_source_unavailable",
-                "freshness": freshness,
-                "omission_reason": "python_call_graph_json_unavailable",
+                    "kind": (
+                        "call_graph_source_unavailable"
+                        if status == "missing"
+                        else "call_graph_source_untrusted"
+                    ),
+                    "freshness": relation_freshness,
+                    "coverage_reason": (
+                        "python_call_graph_json_unavailable"
+                        if status == "missing"
+                        else "python_call_graph_json_not_coherent_with_core_sources"
+                    ),
             }
-        ]
+            ],
+        )
+
     target_ids = {
         str(item["id"])
         for item in target_symbols
         if isinstance(item.get("id"), str) and item.get("id")
     }
-    target_names = {
-        str(value).casefold()
+    target_qualified_names = {
+        str(item["qualified_name"]).casefold()
         for item in target_symbols
-        for value in (item.get("name"), item.get("qualified_name"))
-        if isinstance(value, str) and value
+        if isinstance(item.get("qualified_name"), str) and item.get("qualified_name")
     }
-    target_names.update(name.rsplit(".", 1)[-1] for name in tuple(target_names))
-    symbols_by_id = _symbols_by_id(symbol_index)
+    target_simple_names = {
+        str(item["name"]).casefold()
+        for item in target_symbols
+        if isinstance(item.get("name"), str) and item.get("name")
+    }
+    target_simple_names.update(
+        name.rsplit(".", 1)[-1] for name in target_qualified_names
+    )
+
+    symbols_by_id: dict[str, dict[str, Any]] | None = None
     callers: list[dict[str, Any]] = []
     callees: list[dict[str, Any]] = []
     risks: list[dict[str, Any]] = []
+    coverage_gaps: list[dict[str, Any]] = []
     for raw in _items(call_graph.get("calls")):
         if not isinstance(raw, Mapping):
             continue
@@ -566,22 +751,29 @@ def _call_graph_context(
             if isinstance(value, str) and value
         }
         caller_id = raw.get("caller_symbol_id")
+        relation_type_supported = raw.get("relation_type") in _CALL_GRAPH_RELATION_TYPES
         s1_resolved = (
-            raw.get("evidence_level") == "S1"
+            relation_type_supported
+            and raw.get("evidence_level") == "S1"
             and raw.get("resolution_status") == "resolved"
             and len(resolved_ids) == 1
         )
-        if s1_resolved and target_ids.intersection(resolved_ids):
+        matched_target_ids = target_ids.intersection(resolved_ids)
+        if s1_resolved and matched_target_ids:
             callers.append(
                 _call_relation_record(
                     raw,
                     relation_kind="direct_caller",
                     peer_symbol=None,
-                    freshness=freshness,
+                    target_symbol_ids=matched_target_ids,
+                    relation_freshness=relation_freshness,
+                    symbol_freshness=symbol_freshness,
                 )
             )
         if s1_resolved and isinstance(caller_id, str) and caller_id in target_ids:
             resolved_id = next(iter(resolved_ids))
+            if symbols_by_id is None:
+                symbols_by_id = _symbols_by_id(symbol_index)
             peer_symbol = symbols_by_id.get(resolved_id)
             if peer_symbol is not None:
                 callees.append(
@@ -589,74 +781,74 @@ def _call_graph_context(
                         raw,
                         relation_kind="direct_callee",
                         peer_symbol=peer_symbol,
-                        freshness=freshness,
+                        target_symbol_ids={caller_id},
+                        relation_freshness=relation_freshness,
+                        symbol_freshness=symbol_freshness,
                     )
                 )
             else:
                 risks.append(
                     _call_risk_record(
                         raw,
-                        freshness=freshness,
-                        omission_reason="resolved_target_missing_from_symbol_index",
+                        freshness=relation_freshness,
+                        uncertainty_reason="resolved_target_missing_from_symbol_index",
+                        relevance_basis="target_caller_symbol_id",
                     )
                 )
-        simple_name = raw.get("simple_name")
-        uncertain_relevant = (
-            not s1_resolved
-            and (
-                (isinstance(caller_id, str) and caller_id in target_ids)
-                or bool(target_ids.intersection(candidate_ids))
-                or (
-                    isinstance(simple_name, str)
-                    and simple_name.casefold() in target_names
-                )
+        if s1_resolved:
+            continue
+        relevance_basis = _call_risk_relevance(
+            raw,
+            target_ids=target_ids,
+            target_qualified_names=target_qualified_names,
+            target_simple_names=target_simple_names,
+            candidate_ids=candidate_ids,
+        )
+        if relevance_basis is None:
+            continue
+        uncertainty_reason = (
+            "unsupported_relation_type"
+            if not relation_type_supported
+            else "not_s1_resolved_unique_relation"
+        )
+        risks.append(
+            _call_risk_record(
+                raw,
+                freshness=relation_freshness,
+                uncertainty_reason=uncertainty_reason,
+                relevance_basis=relevance_basis,
             )
         )
-        if uncertain_relevant:
-            risks.append(
-                _call_risk_record(
-                    raw,
-                    freshness=freshness,
-                    omission_reason="not_s1_resolved_unique_relation",
-                )
-            )
+
     skipped_files = call_graph.get("skipped_files_count")
     skipped_errors = call_graph.get("skipped_errors_total_count")
     if not isinstance(skipped_errors, int):
         skipped_errors = len(_items(call_graph.get("skipped_errors")))
     if isinstance(skipped_files, int) and (skipped_files > 0 or skipped_errors > 0):
-        risks.append(
+        coverage_gaps.append(
             {
                 "kind": "call_graph_parse_coverage_gap",
                 "skipped_files_count": skipped_files,
                 "skipped_errors_total_count": skipped_errors,
-                "freshness": freshness,
-                "omission_reason": "call_graph_parse_coverage_incomplete",
+                "freshness": relation_freshness,
+                "coverage_reason": "call_graph_parse_coverage_incomplete",
             }
         )
-    callers.sort(
-        key=lambda item: (
-            str(item.get("path", "")),
-            str(item.get("qualified_name", "")),
-            str(_mapping(item.get("source_ranges")).get("call_site", "")),
-        )
-    )
-    callees.sort(
-        key=lambda item: (
-            str(item.get("path", "")),
-            str(item.get("qualified_name", "")),
-            str(_mapping(item.get("source_ranges")).get("call_site", "")),
-        )
-    )
+
     risks.sort(
         key=lambda item: (
-            str(item.get("kind", "")),
+            int(item.get("risk_priority", 99)),
             str(item.get("path", "")),
             str(_mapping(item.get("source_ranges")).get("call_site", "")),
-            str(item.get("omission_reason", "")),
+            str(item.get("uncertainty_reason", "")),
         )
     )
-    return callers, callees, risks
+    return (
+        _aggregate_call_relations(callers),
+        _aggregate_call_relations(callees),
+        risks,
+        coverage_gaps,
+    )
 
 
 def _relation_record(
@@ -1374,7 +1566,12 @@ def build_agent_impact_context(
         )
 
     paths = set(request.paths)
-    target_symbols, derived_paths, symbols_truncated = _matching_symbols(
+    (
+        target_symbols,
+        all_target_symbols,
+        derived_paths,
+        symbols_truncated,
+    ) = _matching_symbols(
         symbols,
         target_symbol=request.target_symbol,
         target_paths=paths,
@@ -1407,23 +1604,37 @@ def build_agent_impact_context(
         target_paths=paths,
         max_items=request.max_items,
     )
-    direct_callers, direct_callees, unresolved_risks = _call_graph_context(
-        call_graph,
-        target_symbols=target_symbols,
-        symbol_index=symbols,
-        source_states=states,
-        coherence=coherence,
-    )
-    edit_selection = _edit_selection(
-        target_symbols=target_symbols,
-        direct_callers=direct_callers,
-        direct_callees=direct_callees,
-        entrypoints=entrypoint_hits,
-        related_tests=related_tests,
-        supporting=supporting,
-        unresolved_risks=unresolved_risks,
-        max_items=request.max_items,
-    )
+    direct_callers: list[dict[str, Any]] = []
+    direct_callees: list[dict[str, Any]] = []
+    unresolved_risks: list[dict[str, Any]] = []
+    call_graph_coverage_gaps: list[dict[str, Any]] = []
+    edit_selection: dict[str, Any] = {}
+    if request.mode == "edit":
+        (
+            direct_callers,
+            direct_callees,
+            unresolved_risks,
+            call_graph_coverage_gaps,
+        ) = _call_graph_context(
+            call_graph,
+            target_symbols=all_target_symbols,
+            symbol_index=symbols,
+            source_states=states,
+            coherence=coherence,
+            expected_run_id=run_id,
+            expected_digest=digest,
+        )
+        gaps.extend(call_graph_coverage_gaps)
+        edit_selection = _edit_selection(
+            target_symbols=all_target_symbols,
+            direct_callers=direct_callers,
+            direct_callees=direct_callees,
+            entrypoints=entrypoint_hits,
+            related_tests=related_tests,
+            supporting=supporting,
+            unresolved_risks=unresolved_risks,
+            max_items=request.max_items,
+        )
 
     _nodes_by_id, id_by_path = _node_index(graph)
     gaps.extend(
@@ -1499,12 +1710,8 @@ def build_agent_impact_context(
                 max_items=request.max_items,
             ),
             "selection": edit_selection,
-            "nonverdicts": [
-                "complete_blast_radius",
-                "runtime_breakage",
-                "test_sufficiency",
-                "merge_readiness",
-            ],
+            "nonverdicts": list(_EDIT_CONTEXT_NONVERDICTS),
+            "call_graph_coverage_gaps": call_graph_coverage_gaps,
             "relation_count": len(relations),
             "direct_caller_count": len(direct_callers),
             "direct_callee_count": len(direct_callees),

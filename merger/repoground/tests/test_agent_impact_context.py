@@ -502,6 +502,289 @@ def test_edit_context_separately_budgets_proven_call_graph_relations() -> None:
     assert "merge_readiness" in result["does_not_establish"]
 
 
+
+def test_call_relations_aggregate_callsites_before_section_budgeting() -> None:
+    call_graph = _fixture_call_graph()
+    duplicate = dict(call_graph["calls"][0])
+    duplicate.update(
+        {
+            "start_line": 7,
+            "end_line": 7,
+            "range_ref": "file:tests/test_app.py#L7-L7",
+        }
+    )
+    call_graph["calls"].append(duplicate)
+
+    result = _context(max_items=2, python_call_graph=call_graph)
+    section = result["edit_context"]["selection"]["direct_callers"]
+
+    assert result["edit_context"]["direct_caller_count"] == 2
+    assert section["omitted_count"] == 0
+    by_symbol = {item["symbol_id"]: item for item in section["selected"]}
+    assert set(by_symbol) == {"sym-test", "sym-worker"}
+    assert by_symbol["sym-test"]["source_ranges"]["call_sites"] == [
+        "file:tests/test_app.py#L5-L5",
+        "file:tests/test_app.py#L7-L7",
+    ]
+
+
+def test_call_graph_discovery_uses_all_targets_before_target_budgeting() -> None:
+    graph, symbols, entrypoints, cards, query = _fixture_documents()
+    symbols["symbols"].extend(
+        [
+            {
+                "id": "sym-app-helper",
+                "kind": "function",
+                "name": "helper",
+                "qualified_name": "app.helper",
+                "module": "app",
+                "path": "src/app.py",
+                "start_line": 30,
+                "end_line": 35,
+                "range_ref": "file:src/app.py#L30-L35",
+                "decorators": [],
+            },
+            {
+                "id": "sym-late",
+                "kind": "function",
+                "name": "late_target",
+                "qualified_name": "late.late_target",
+                "module": "late",
+                "path": "src/late.py",
+                "start_line": 1,
+                "end_line": 4,
+                "range_ref": "file:src/late.py#L1-L4",
+                "decorators": [],
+            },
+        ]
+    )
+    call_graph = _fixture_call_graph()
+    late_call = dict(call_graph["calls"][2])
+    late_call.update(
+        {
+            "path": "src/app.py",
+            "start_line": 32,
+            "end_line": 32,
+            "range_ref": "file:src/app.py#L32-L32",
+            "caller_symbol_id": "sym-app-helper",
+            "caller_qualified_name": "app.helper",
+            "caller_start_line": 30,
+            "caller_end_line": 35,
+            "callee_expression": "late_target",
+            "simple_name": "late_target",
+            "resolved_target_ids": ["sym-late"],
+        }
+    )
+    call_graph["calls"].append(late_call)
+
+    result = build_agent_impact_context(
+        target_path="src/app.py",
+        mode="edit",
+        max_items=1,
+        architecture_graph=graph,
+        symbol_index=symbols,
+        python_call_graph=call_graph,
+        entrypoints=entrypoints,
+        relation_cards=cards,
+        query_context=query,
+    )
+
+    assert len(result["target_symbols"]) == 1
+    assert result["truncation"]["target_symbols"] is True
+    assert result["edit_context"]["direct_callee_count"] == 2
+    assert result["edit_context"]["selection"]["direct_callees"]["omitted_count"] == 1
+
+
+def test_missing_optional_call_graph_degrades_edit_context_without_blocking() -> None:
+    result = _context(python_call_graph=None)
+
+    assert result["status"] == "partial"
+    assert result["edit_context"]["direct_caller_count"] == 0
+    assert result["edit_context"]["direct_callee_count"] == 0
+    assert result["edit_context"]["call_graph_coverage_gaps"][0]["kind"] == (
+        "call_graph_source_unavailable"
+    )
+    assert result["provenance"]["status"] == "coherent"
+
+
+def test_mismatched_optional_call_graph_is_not_used_as_trusted_evidence() -> None:
+    call_graph = _fixture_call_graph()
+    call_graph["run_id"] = "other-run"
+
+    result = _context(python_call_graph=call_graph)
+
+    assert result["status"] == "partial"
+    assert result["provenance"]["status"] == "coherent"
+    assert result["edit_context"]["direct_caller_count"] == 0
+    gap = result["edit_context"]["call_graph_coverage_gaps"][0]
+    assert gap["kind"] == "call_graph_source_untrusted"
+    assert gap["freshness"]["status"] == "stale_or_mismatched"
+
+
+def test_unresolved_target_callee_stays_a_risk_boundary() -> None:
+    call_graph = _fixture_call_graph()
+    candidate = dict(call_graph["calls"][2])
+    candidate.update(
+        {
+            "start_line": 18,
+            "end_line": 18,
+            "range_ref": "file:src/app.py#L18-L18",
+            "callee_expression": "dynamic_peer",
+            "simple_name": "dynamic_peer",
+            "evidence_level": "S0",
+            "resolution_status": "candidate",
+            "resolution_reason": "name_match_not_unique",
+            "resolved_target_ids": [],
+            "candidate_target_ids": ["sym-dynamic"],
+        }
+    )
+    call_graph["calls"].append(candidate)
+
+    result = _context(python_call_graph=call_graph)
+    risks = result["edit_context"]["selection"]["unresolved_risk_boundaries"][
+        "selected"
+    ]
+
+    assert any(
+        item["relevance_basis"] == "target_caller_symbol_id"
+        and item["uncertainty_reason"] == "not_s1_resolved_unique_relation"
+        for item in risks
+    )
+    assert all(
+        item.get("symbol_id") != "sym-dynamic"
+        for item in result["edit_context"]["selection"]["direct_callees"]["selected"]
+    )
+
+
+def test_structured_risk_evidence_outranks_simple_name_fallback() -> None:
+    call_graph = _fixture_call_graph()
+    simple_only = dict(call_graph["calls"][3])
+    simple_only.update(
+        {
+            "path": "aaa_simple.py",
+            "caller_symbol_id": "sym-unrelated",
+            "caller_qualified_name": "unrelated.run",
+            "candidate_target_ids": [],
+        }
+    )
+    call_graph["calls"].insert(0, simple_only)
+
+    result = _context(max_items=1, python_call_graph=call_graph)
+    risk = result["edit_context"]["selection"]["unresolved_risk_boundaries"][
+        "selected"
+    ][0]
+
+    assert risk["relevance_basis"] == "candidate_target_id"
+    assert risk["risk_priority"] == 1
+
+
+def test_module_level_direct_caller_keeps_stable_scope_identity() -> None:
+    call_graph = _fixture_call_graph()
+    module_call = dict(call_graph["calls"][0])
+    module_call.update(
+        {
+            "path": "src/bootstrap.py",
+            "range_ref": "file:src/bootstrap.py#L4-L4",
+            "caller_scope": "module",
+            "caller_symbol_id": None,
+            "caller_qualified_name": None,
+            "caller_kind": "module",
+            "caller_start_line": None,
+            "caller_end_line": None,
+        }
+    )
+    call_graph["calls"].append(module_call)
+
+    result = _context(python_call_graph=call_graph)
+    callers = result["edit_context"]["selection"]["direct_callers"]["selected"]
+
+    assert any(
+        item["path"] == "src/bootstrap.py" and item["symbol_id"] is None
+        for item in callers
+    )
+
+
+def test_parse_coverage_gap_does_not_consume_relation_risk_budget() -> None:
+    call_graph = _fixture_call_graph()
+    call_graph["skipped_files_count"] = 3
+    call_graph["skipped_errors_total_count"] = 2
+
+    result = _context(max_items=1, python_call_graph=call_graph)
+
+    risk_section = result["edit_context"]["selection"]["unresolved_risk_boundaries"]
+    assert len(risk_section["selected"]) == 1
+    assert risk_section["selected"][0]["kind"] == "unresolved_call_relation"
+    coverage_gaps = result["edit_context"]["call_graph_coverage_gaps"]
+    assert len(coverage_gaps) == 1
+    gap = coverage_gaps[0]
+    assert gap["kind"] == "call_graph_parse_coverage_gap"
+    assert gap["skipped_files_count"] == 3
+    assert gap["skipped_errors_total_count"] == 2
+    assert gap["coverage_reason"] == "call_graph_parse_coverage_incomplete"
+    assert gap["freshness"]["source"] == "python_call_graph_json"
+    assert gap["freshness"]["status"] == "coherent"
+
+
+def test_constructs_relation_is_preserved_as_direct_callee() -> None:
+    graph, symbols, entrypoints, cards, query = _fixture_documents()
+    symbols["symbols"].append(
+        {
+            "id": "sym-widget",
+            "kind": "class",
+            "name": "Widget",
+            "qualified_name": "widget.Widget",
+            "module": "widget",
+            "path": "src/widget.py",
+            "start_line": 1,
+            "end_line": 8,
+            "range_ref": "file:src/widget.py#L1-L8",
+            "decorators": [],
+        }
+    )
+    call_graph = _fixture_call_graph()
+    construct = dict(call_graph["calls"][2])
+    construct.update(
+        {
+            "start_line": 16,
+            "end_line": 16,
+            "range_ref": "file:src/app.py#L16-L16",
+            "callee_expression": "Widget",
+            "simple_name": "Widget",
+            "relation_type": "constructs",
+            "resolved_target_ids": ["sym-widget"],
+        }
+    )
+    call_graph["calls"].append(construct)
+
+    result = build_agent_impact_context(
+        target_symbol="run_app",
+        mode="edit",
+        max_items=10,
+        architecture_graph=graph,
+        symbol_index=symbols,
+        python_call_graph=call_graph,
+        entrypoints=entrypoints,
+        relation_cards=cards,
+        query_context=query,
+    )
+    callees = result["edit_context"]["selection"]["direct_callees"]["selected"]
+    widget = next(item for item in callees if item["symbol_id"] == "sym-widget")
+
+    assert widget["relation_type"] == "constructs"
+    assert widget["relation_types"] == ["constructs"]
+
+
+def test_callee_provenance_retains_relation_and_symbol_sources() -> None:
+    result = _context()
+    callee = result["edit_context"]["selection"]["direct_callees"]["selected"][0]
+
+    assert callee["provenance"]["relation"]["source"] == "python_call_graph_json"
+    assert callee["provenance"]["relation"]["status"] == "coherent"
+    assert callee["provenance"]["peer_definition"]["source"] == (
+        "python_symbol_index_json"
+    )
+    assert callee["provenance"]["peer_definition"]["status"] == "coherent"
+
 def test_mismatched_bundle_identities_block_impact_projection() -> None:
     graph, symbols, entrypoints, cards, query = _fixture_documents()
     symbols["run_id"] = "other-run"

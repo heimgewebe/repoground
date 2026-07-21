@@ -350,6 +350,32 @@ def test_agent_impact_adapter_blocks_tampered_required_artifact(
     )
 
 
+
+def test_agent_impact_adapter_degrades_tampered_optional_call_graph(
+    tmp_path: Path,
+) -> None:
+    adapter, bundle, _config = _impact_adapter(tmp_path)
+    call_graph_path = (
+        bundle["manifest"].parent / "demo.python_call_graph.json"
+    )
+    call_graph_path.write_text("{}\n", encoding="utf-8")
+
+    result = adapter.agent_impact_context(
+        "demo",
+        target_symbol="hello_adapter",
+        mode="edit",
+        include_query_context=False,
+    )
+
+    assert result["status"] == "partial"
+    assert result["edit_context"]["direct_caller_count"] == 0
+    assert result["edit_context"]["direct_callee_count"] == 0
+    gap = result["edit_context"]["call_graph_coverage_gaps"][0]
+    assert gap["kind"] == "call_graph_source_untrusted"
+    assert gap["freshness"]["source"] == "python_call_graph_json"
+    assert gap["freshness"]["status"] == "blocked"
+
+
 def test_agent_impact_cli_uses_registered_snapshot(
     tmp_path: Path,
     capsys,
