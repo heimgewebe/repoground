@@ -3,21 +3,23 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import runpy
 import socket
 from pathlib import Path
 
 import pytest
 
 from merger.repoground.retrieval import query_core
+from scripts.ci import run_semantic_real_model_integration as semantic_runner
 from scripts.ci.run_semantic_real_model_integration import (
     EXPECTED_FIXTURE_VOCAB_SHA256,
     EXPECTED_MODEL_TREE_SHA256,
-    EXPECTED_SENTENCE_TRANSFORMERS_VERSION,
-    EXPECTED_TORCH_VERSION,
     FIXTURE_DIMENSIONS,
     FIXTURE_VOCAB,
     SEMANTIC_TARGET_ID,
     _compiler_image,
+    _fixture_vocab_sha256,
+    _locked_runtime_versions,
     _require_dependency_target,
     _require_loopback_only_network,
     canonical_tree_sha256,
@@ -31,18 +33,79 @@ RUNNER = ROOT / "scripts/ci/run_semantic_real_model_integration.py"
 
 
 def test_real_model_fixture_identity_is_explicit() -> None:
-    assert EXPECTED_SENTENCE_TRANSFORMERS_VERSION == "5.6.0"
-    assert EXPECTED_TORCH_VERSION == "2.13.0+cpu"
+    sentence_transformers_version, torch_version = _locked_runtime_versions()
+    assert sentence_transformers_version == "5.6.0"
+    assert torch_version == "2.13.0+cpu"
     assert SEMANTIC_TARGET_ID == "cpython-312-linux-x86_64"
     assert FIXTURE_DIMENSIONS == 8
     assert len(FIXTURE_VOCAB) == len(set(FIXTURE_VOCAB))
-    observed_vocab_sha256 = hashlib.sha256(
-        json.dumps(FIXTURE_VOCAB, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    assert EXPECTED_FIXTURE_VOCAB_SHA256 == observed_vocab_sha256
+    assert EXPECTED_FIXTURE_VOCAB_SHA256 == _fixture_vocab_sha256()
     assert re.fullmatch(r"[0-9a-f]{64}", EXPECTED_FIXTURE_VOCAB_SHA256)
     assert re.fullmatch(r"[0-9a-f]{64}", EXPECTED_MODEL_TREE_SHA256)
     assert "@sha256:" in _compiler_image()
+
+
+def test_runner_import_does_not_require_platform_contract(tmp_path: Path) -> None:
+    probe = tmp_path / "scripts/ci/run_semantic_real_model_integration.py"
+    probe.parent.mkdir(parents=True)
+    probe.write_text(RUNNER.read_text(encoding="utf-8"), encoding="utf-8")
+
+    namespace = runpy.run_path(str(probe), run_name="repoground_semantic_lazy_probe")
+
+    assert "_semantic_platform_contract" in namespace
+    assert not (tmp_path / "docs/release/repoground-semantic-platforms.v1.json").exists()
+
+
+def test_semantic_platform_contract_is_lazy_and_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    contract = {
+        "supported_targets": [
+            {
+                "id": SEMANTIC_TARGET_ID,
+                "root_pins": {
+                    "sentence-transformers": "5.6.0",
+                    "torch": "2.13.0+cpu",
+                },
+            }
+        ],
+        "compiler": {"image": "example.invalid/compiler@sha256:" + "a" * 64},
+    }
+    calls: list[str] = []
+
+    def fake_loader() -> dict[str, object]:
+        calls.append("load")
+        return contract
+
+    semantic_runner._semantic_platform_contract.cache_clear()
+    semantic_runner._locked_runtime_versions.cache_clear()
+    monkeypatch.setattr(semantic_runner, "_load_semantic_platform_contract", fake_loader)
+    try:
+        assert calls == []
+        assert semantic_runner._semantic_platform_contract() is contract
+        assert semantic_runner._semantic_platform_contract() is contract
+        assert calls == ["load"]
+        assert semantic_runner._locked_runtime_versions() == ("5.6.0", "2.13.0+cpu")
+        assert calls == ["load"]
+    finally:
+        semantic_runner._semantic_platform_contract.cache_clear()
+        semantic_runner._locked_runtime_versions.cache_clear()
+
+
+def test_semantic_platform_contract_errors_include_path(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.json"
+    with pytest.raises(RuntimeError, match=re.escape(str(missing))):
+        semantic_runner._load_semantic_platform_contract(missing)
+
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(RuntimeError, match=re.escape(str(invalid))):
+        semantic_runner._load_semantic_platform_contract(invalid)
+
+
+def test_compiler_image_can_be_validated_without_contract_io() -> None:
+    image = "example.invalid/compiler@sha256:" + "b" * 64
+    assert _compiler_image({"compiler": {"image": image}}) == image
+    with pytest.raises(RuntimeError, match="digest-pinned compiler image"):
+        _compiler_image({"compiler": {"image": "example.invalid/compiler:latest"}})
 
 
 def test_canonical_model_tree_hash_is_path_and_content_bound(tmp_path: Path) -> None:
@@ -168,8 +231,40 @@ def test_direct_dimension_validation_diagnostics_are_exact() -> None:
     assert "expected_dimensions" not in diagnostics
 
 
+def test_integration_report_hashes_actual_fixture_vocab(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    changed_vocab = ("changed", "fixture")
+    monkeypatch.setattr(semantic_runner, "FIXTURE_VOCAB", changed_vocab)
+    expected_actual_hash = hashlib.sha256(
+        json.dumps(changed_vocab, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+    report = semantic_runner._integration_report(
+        runtime={
+            "sentence_transformers_version": "5.6.0",
+            "torch_version": "2.13.0+cpu",
+            "numpy_version": "2.5.1",
+        },
+        model={
+            "tree_sha256": EXPECTED_MODEL_TREE_SHA256,
+            "repeat_tree_sha256": EXPECTED_MODEL_TREE_SHA256,
+            "files": [],
+        },
+        outputs={},
+        diagnostics={},
+        scores=[],
+        network_interfaces=["lo"],
+    )
+
+    assert report["model"]["vocab_sha256"] == expected_actual_hash
+    assert report["model"]["vocab_sha256"] != EXPECTED_FIXTURE_VOCAB_SHA256
+
+
 def test_python_network_guard_blocks_socket_calls() -> None:
     with deny_python_network():
+        with pytest.raises(RuntimeError, match="network access is forbidden"):
+            socket.getaddrinfo("example.invalid", 443)
         with pytest.raises(RuntimeError, match="network access is forbidden"):
             socket.create_connection(("example.invalid", 443))
 
@@ -213,6 +308,8 @@ def test_semantic_wrapper_hardens_container_and_import_roots() -> None:
     assert "--read-only" in wrapper
     assert "--cap-drop ALL" in wrapper
     assert "--security-opt no-new-privileges" in wrapper
+    assert "apparmor=unconfined" not in wrapper
+    assert "seccomp=unconfined" not in wrapper
     assert "--pids-limit 256" in wrapper
     assert "--memory 2g" in wrapper
     assert "--memory-swap 2g" in wrapper
@@ -261,6 +358,8 @@ def test_semantic_wrapper_classifies_archive_entries_and_cleans_up() -> None:
     assert "trap 'handle_signal 129' HUP" in wrapper
     assert "trap 'handle_signal 130' INT" in wrapper
     assert "trap 'handle_signal 143' TERM" in wrapper
+    assert 'cleanup "$1"' in wrapper
+    assert 'handle_signal() {\n  exit "$1"' not in wrapper
     assert 'chmod -R u+rwX -- "$runtime_root"' in wrapper
     assert 'exit "$status"' in wrapper
 
@@ -275,7 +374,10 @@ def test_semantic_runner_hardens_offline_execution() -> None:
     assert "os.umask(0o077)" in runner
     assert '"PYTHONNOUSERSITE": "1"' in runner
     assert "_load_semantic_platform_contract" in runner
+    assert "_semantic_platform_contract" in runner
     assert "_locked_root_versions" in runner
+    assert "_locked_runtime_versions" in runner
+    assert "EXPECTED_SENTENCE_TRANSFORMERS_VERSION, EXPECTED_TORCH_VERSION =" not in runner
     assert "sys.path.insert" not in runner
     assert "ignore_cleanup_errors=True" not in runner
     assert '"downloaded": False' in runner

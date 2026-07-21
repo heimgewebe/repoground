@@ -12,13 +12,16 @@ runtime_root="$(
 )"
 cleanup() {
   status=$?
+  if [[ "$#" -gt 0 ]]; then
+    status="$1"
+  fi
   trap - EXIT HUP INT TERM
   chmod -R u+rwX -- "$runtime_root" 2>/dev/null || true
   rm -rf -- "$runtime_root" || true
   exit "$status"
 }
 handle_signal() {
-  exit "$1"
+  cleanup "$1"
 }
 trap cleanup EXIT
 trap 'handle_signal 129' HUP
