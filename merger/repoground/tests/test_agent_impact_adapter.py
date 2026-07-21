@@ -91,6 +91,26 @@ def _impact_adapter(
                 "run_id": "run-1",
                 "canonical_dump_index_sha256": DIGEST,
                 "language": "python",
+                "evidence_model": {
+                    "S0": "unresolved or ambiguous static candidate",
+                    "S1": "one uniquely resolved local target",
+                },
+                "resolution_statuses": [
+                    "resolved",
+                    "candidate",
+                    "ambiguous",
+                    "unresolved",
+                ],
+                "relation_types": ["calls", "constructs"],
+                "call_count": 2,
+                "resolution_counts": {
+                    "resolved": 2,
+                    "candidate": 0,
+                    "ambiguous": 0,
+                    "unresolved": 0,
+                },
+                "evidence_counts": {"S0": 0, "S1": 2},
+                "relation_counts": {"calls": 2, "constructs": 0},
                 "calls": [
                     {
                         "path": "tests/test_demo.py",
@@ -142,6 +162,16 @@ def _impact_adapter(
                 "skipped_files_count": 0,
                 "skipped_errors": [],
                 "skipped_errors_total_count": 0,
+                "does_not_establish": [
+                    "complete_call_graph",
+                    "runtime_reachability",
+                    "dynamic_dispatch_resolution",
+                    "dependency_completeness",
+                    "import_success",
+                    "test_sufficiency",
+                    "review_completeness",
+                    "merge_readiness",
+                ],
             }
         )
         + "\n",
@@ -305,6 +335,34 @@ def test_agent_impact_adapter_composes_integrity_checked_reads_without_writes(
                 bundle["index_path"].name + suffix
             )
         ]
+    )
+
+
+def test_agent_impact_adapter_skips_large_call_graph_without_target_symbols(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    adapter, _bundle, _config = _impact_adapter(tmp_path)
+
+    def unexpected_projection(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("call graph projection should not run without target symbols")
+
+    monkeypatch.setattr(
+        "merger.repoground.core.agent_impact_adapter.project_call_graph_for_impact",
+        unexpected_projection,
+    )
+    result = adapter.agent_impact_context(
+        "demo",
+        target_path="docs/not-a-python-symbol.md",
+        mode="impact",
+        include_query_context=False,
+    )
+
+    assert result["call_graph_projection"]["status"] == "skipped"
+    assert result["call_graph_projection"]["reason"] == "no_target_symbols"
+    assert not any(
+        item.get("source") == "python_call_graph_json"
+        for item in result.get("source_statuses", [])
     )
 
 
