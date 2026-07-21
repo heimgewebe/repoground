@@ -32,7 +32,7 @@ integritätsgeprüften RepoBrief-Adapter. Sie erzeugt keinen zweiten Index und
 - Kernartefakte mit abweichendem `run_id` oder Digest blockieren.
 - Integritätsseitig blockierte Kernartefakte blockieren die Gesamtausgabe.
 - Graphkanten behalten Richtung, Typ, Evidenzniveau und Ursprungsbeleg.
-- Heuristische Testpfade sind als `heuristic` gekennzeichnet.
+- Unbelegte heuristische Testpfade werden nicht als `related_tests` ausgegeben; Graph- und Symbolindexpfade behalten ihre Evidenztypen.
 - Keine Git-, Patch-, Shell-, Test-, PR-, Snapshot- oder Memory-Mutation.
 - Kein Reviewverdikt, Risikoscore, Coverageversprechen oder Mergefreigabe.
 
@@ -42,7 +42,7 @@ Die Tests decken ab:
 
 - Schema- und Determinismusprüfung;
 - Richtung und Evidenz der Graphkanten;
-- Trennung von Graph-, Symbolpfad- und Heuristik-Testkandidaten;
+- Beschränkung verwandter Tests auf Graph- und Symbolindex-Evidenz;
 - Edit-Context-Erstleseliste;
 - Verträge, Dokumentation und Einstiegspunkte;
 - inkohärente Bundle-Identitäten;

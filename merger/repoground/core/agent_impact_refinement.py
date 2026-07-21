@@ -120,11 +120,7 @@ def _valid_test_candidates(current: Any) -> list[dict[str, Any]]:
 
 def _suppress_heuristics(
     candidates: list[dict[str, Any]],
-    *,
-    resolved_available: bool,
 ) -> tuple[list[dict[str, Any]], int]:
-    if not resolved_available:
-        return candidates, 0
     retained = [
         item
         for item in candidates
@@ -139,10 +135,7 @@ def _ordered_related_tests(
     *,
     max_items: int,
 ) -> tuple[list[dict[str, Any]], bool, int]:
-    candidates, suppressed = _suppress_heuristics(
-        _valid_test_candidates(current),
-        resolved_available=bool(resolved),
-    )
+    candidates, suppressed = _suppress_heuristics(_valid_test_candidates(current))
     candidates.extend(resolved)
     unique: dict[tuple[str, str], dict[str, Any]] = {}
     for item in candidates:
@@ -181,18 +174,13 @@ def _read_priority(reason: Any) -> int:
 
 def _valid_first_reads(
     edit_context: Mapping[str, Any],
-    *,
-    resolved_available: bool,
 ) -> list[dict[str, Any]]:
     return [
         dict(item)
         for item in _items(edit_context.get("recommended_first_reads"))
         if isinstance(item, Mapping)
         and is_repository_relative_path(item.get("path"))
-        and not (
-            resolved_available
-            and item.get("reason") == "related_test:heuristic"
-        )
+        and item.get("reason") != "related_test:heuristic"
     ]
 
 
@@ -205,10 +193,7 @@ def _refine_first_reads(
     if not isinstance(edit_context, Mapping):
         return None
     refined = dict(edit_context)
-    reads = _valid_first_reads(
-        edit_context,
-        resolved_available=bool(resolved),
-    )
+    reads = _valid_first_reads(edit_context)
     reads.extend(
         {
             "path": item["path"],
@@ -274,7 +259,8 @@ def refine_agent_impact_context(
         {
             "resolved_query_test_candidates_added": len(resolved),
             "heuristic_test_candidates_suppressed": suppressed,
-            "heuristics_suppressed_only_with_resolved_query_tests": True,
+            "heuristics_suppressed_only_with_resolved_query_tests": False,
+            "heuristic_test_candidates_always_suppressed": True,
             "resolved_query_tests_are_graph_edges": False,
             "resolved_query_tests_establish_coverage": False,
         }

@@ -1019,18 +1019,13 @@ def _conventional_test_candidates(
     ]
     for target_path in python_targets:
         for guess in sorted(_test_path_guesses(target_path)):
-            present = guess in known_paths
+            if guess not in known_paths:
+                continue
             candidates.append(
                 {
                     "path": guess,
-                    "evidence_type": (
-                        "symbol_index_path_match" if present else "heuristic"
-                    ),
-                    "reason": (
-                        "conventional_test_path_present_in_symbol_index"
-                        if present
-                        else "python_test_naming_convention"
-                    ),
+                    "evidence_type": "symbol_index_path_match",
+                    "reason": "conventional_test_path_present_in_symbol_index",
                 }
             )
     return candidates
@@ -1074,7 +1069,7 @@ def _related_tests(
     candidates.extend(_conventional_test_candidates(target_paths, known_paths))
     return _unique_ranked(
         candidates,
-        rank={"graph_edge": 0, "symbol_index_path_match": 1, "heuristic": 2},
+        rank={"graph_edge": 0, "symbol_index_path_match": 1},
         max_items=max_items,
     )
 

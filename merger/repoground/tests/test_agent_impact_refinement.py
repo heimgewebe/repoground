@@ -120,8 +120,9 @@ def test_refinement_keeps_strong_evidence_and_suppresses_guesses() -> None:
         refined["composition"][
             "heuristics_suppressed_only_with_resolved_query_tests"
         ]
-        is True
+        is False
     )
+    assert refined["composition"]["heuristic_test_candidates_always_suppressed"] is True
     assert refined["composition"]["resolved_query_tests_are_graph_edges"] is False
     assert refined["composition"]["resolved_query_tests_establish_coverage"] is False
     reads = refined["edit_context"]["recommended_first_reads"]
@@ -131,7 +132,7 @@ def test_refinement_keeps_strong_evidence_and_suppresses_guesses() -> None:
     ]
 
 
-def test_refinement_keeps_heuristics_without_resolved_test() -> None:
+def test_refinement_suppresses_heuristics_without_resolved_test() -> None:
     base = {
         "status": "available",
         "related_tests": [
@@ -160,11 +161,10 @@ def test_refinement_keeps_heuristics_without_resolved_test() -> None:
         max_items=20,
     )
 
-    assert refined["related_tests"] == base["related_tests"]
-    assert refined["composition"]["heuristic_test_candidates_suppressed"] == 0
-    assert refined["edit_context"]["recommended_first_reads"] == base[
-        "edit_context"
-    ]["recommended_first_reads"]
+    assert refined["related_tests"] == []
+    assert refined["composition"]["heuristic_test_candidates_suppressed"] == 1
+    assert refined["composition"]["heuristic_test_candidates_always_suppressed"] is True
+    assert refined["edit_context"]["recommended_first_reads"] == []
 
 
 def test_adapter_emits_resolved_query_test_candidate(
@@ -213,7 +213,8 @@ def test_adapter_emits_resolved_query_test_candidate(
         item for item in matches if item["evidence_type"] == "resolved_query"
     )
     assert resolved["citation_id"] == "resolved-test"
-    assert result["composition"]["heuristic_test_candidates_suppressed"] >= 1
+    assert result["composition"]["heuristic_test_candidates_suppressed"] == 0
+    assert result["composition"]["heuristic_test_candidates_always_suppressed"] is True
     assert result["mutation_boundary"]["writes"] == []
 
 

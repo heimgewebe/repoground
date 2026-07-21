@@ -411,7 +411,7 @@ def test_agent_impact_context_preserves_relation_direction_and_evidence() -> Non
     )
 
 
-def test_related_tests_keep_graph_symbol_and_heuristic_evidence_separate() -> None:
+def test_related_tests_require_graph_or_symbol_index_evidence() -> None:
     result = _context()
     observed = {
         (item["path"], item["evidence_type"])
@@ -420,10 +420,11 @@ def test_related_tests_keep_graph_symbol_and_heuristic_evidence_separate() -> No
 
     assert ("tests/test_app.py", "graph_edge") in observed
     assert ("tests/test_app.py", "symbol_index_path_match") in observed
-    assert (
-        "merger/repoground/tests/test_app.py",
-        "heuristic",
-    ) in observed
+    assert all(
+        item["evidence_type"] in {"graph_edge", "symbol_index_path_match"}
+        for item in result["related_tests"]
+    )
+    assert not any(item["evidence_type"] == "heuristic" for item in result["related_tests"])
     assert "test_sufficiency" in result["does_not_establish"]
     assert "test_coverage" in result["does_not_establish"]
 
