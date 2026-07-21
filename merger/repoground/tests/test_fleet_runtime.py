@@ -492,7 +492,6 @@ def test_managed_worktree_refuses_dirty_untracked_and_ignored_content(
     assert ignored.read_text(encoding="utf-8") == "preserve me too\n"
 
 
-
 def test_managed_worktree_cleanup_removes_only_bounded_disposable_artifacts(
     tmp_path: Path,
 ) -> None:
@@ -574,6 +573,32 @@ def test_managed_worktree_cleanup_rejects_symlink_inside_disposable_tree(
         module.cleanup_managed_disposable_artifacts(worktree, repo)
     assert outside.read_text(encoding="utf-8") == "preserve\n"
     assert pycache.is_dir()
+
+
+
+def test_managed_worktree_cleanup_validates_all_roots_before_any_removal(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path)
+    worktree = tmp_path / "managed"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+
+    safe_cache = worktree / ".pytest_cache"
+    safe_cache.mkdir()
+    (safe_cache / "README.md").write_text("preserve until batch is valid\n", encoding="utf-8")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("preserve\n", encoding="utf-8")
+    unsafe_cache = worktree / "pkg" / "__pycache__"
+    unsafe_cache.mkdir(parents=True)
+    (unsafe_cache / "escape.pyc").symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="unsafe file entry"):
+        module.cleanup_managed_disposable_artifacts(worktree, repo)
+
+    assert safe_cache.is_dir()
+    assert (safe_cache / "README.md").is_file()
+    assert outside.read_text(encoding="utf-8") == "preserve\n"
 
 
 def test_managed_worktree_cleanup_refuses_active_process_cwd(tmp_path: Path) -> None:

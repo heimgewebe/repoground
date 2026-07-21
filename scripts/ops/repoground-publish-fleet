@@ -416,7 +416,7 @@ def validate_removable_tree(path: Path) -> None:
                 )
 
 
-def remove_managed_disposable_artifact(path: Path, worktree: Path) -> None:
+def validate_managed_disposable_artifact(path: Path, worktree: Path) -> None:
     root = worktree.resolve()
     logical = path.parent.resolve() / path.name
     if root not in logical.parents:
@@ -430,19 +430,28 @@ def remove_managed_disposable_artifact(path: Path, worktree: Path) -> None:
         try:
             next(path.iterdir())
         except StopIteration:
-            path.rmdir()
             return
         raise RuntimeError(f"managed build residue is not empty; refusing cleanup: {path}")
     if stat.S_ISREG(metadata.st_mode):
         if path.suffix not in {".pyc", ".pyo"} and not path.name.endswith(".egg-info"):
             raise RuntimeError(f"managed disposable artifact is not removable: {path}")
-        path.unlink()
         return
     if not stat.S_ISDIR(metadata.st_mode):
         raise RuntimeError(f"managed disposable artifact is not regular: {path}")
     validate_removable_tree(path)
-    shutil.rmtree(path)
 
+
+def remove_managed_disposable_artifact(path: Path, worktree: Path) -> None:
+    # Revalidate immediately before the effect as well as in the batch preflight.
+    validate_managed_disposable_artifact(path, worktree)
+    metadata = path.lstat()
+    if path.relative_to(worktree) == Path("build"):
+        path.rmdir()
+        return
+    if stat.S_ISREG(metadata.st_mode):
+        path.unlink()
+        return
+    shutil.rmtree(path)
 
 def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> list[str]:
     assert_managed_worktree_identity(path, expected_repo)
@@ -466,6 +475,8 @@ def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> lis
         if any(parent == candidate or parent in candidate.parents for parent in retained):
             continue
         retained.append(candidate)
+    for relative in retained:
+        validate_managed_disposable_artifact(path / relative, path)
     for relative in retained:
         remove_managed_disposable_artifact(path / relative, path)
     return [item.as_posix() for item in retained]
