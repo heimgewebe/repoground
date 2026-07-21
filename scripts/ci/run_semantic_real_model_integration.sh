@@ -12,6 +12,8 @@ runtime_root="$(
 )"
 cleanup() {
   status=$?
+  # Signal handlers pass an explicit 128+signal status; it intentionally wins
+  # over the command status captured for the ordinary EXIT-trap path.
   if [[ "$#" -gt 0 ]]; then
     status="$1"
   fi

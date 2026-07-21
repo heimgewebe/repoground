@@ -40,7 +40,10 @@ def _load_semantic_platform_contract(
             f"at {path}:{exc.lineno}:{exc.colno}: {exc.msg}"
         ) from exc
     if not isinstance(contract, dict):
-        raise RuntimeError(f"semantic platform contract {path} must be a JSON object")
+        raise RuntimeError(
+            f"semantic platform contract {path} must be a JSON object, "
+            f"got {type(contract).__name__}"
+        )
     return contract
 
 

@@ -85,6 +85,16 @@ def test_semantic_platform_contract_is_lazy_and_cached(monkeypatch: pytest.Monke
         assert calls == ["load"]
         assert semantic_runner._locked_runtime_versions() == ("5.6.0", "2.13.0+cpu")
         assert calls == ["load"]
+
+        def fail_if_versions_are_recomputed(_contract: dict[str, object]) -> tuple[str, str]:
+            raise AssertionError("locked runtime versions cache was bypassed")
+
+        monkeypatch.setattr(
+            semantic_runner,
+            "_locked_root_versions",
+            fail_if_versions_are_recomputed,
+        )
+        assert semantic_runner._locked_runtime_versions() == ("5.6.0", "2.13.0+cpu")
     finally:
         semantic_runner._semantic_platform_contract.cache_clear()
         semantic_runner._locked_runtime_versions.cache_clear()
@@ -99,6 +109,11 @@ def test_semantic_platform_contract_errors_include_path(tmp_path: Path) -> None:
     invalid.write_text("{not-json", encoding="utf-8")
     with pytest.raises(RuntimeError, match=re.escape(str(invalid))):
         semantic_runner._load_semantic_platform_contract(invalid)
+
+    wrong_type = tmp_path / "wrong-type.json"
+    wrong_type.write_text("[]", encoding="utf-8")
+    with pytest.raises(RuntimeError, match=r"must be a JSON object, got list"):
+        semantic_runner._load_semantic_platform_contract(wrong_type)
 
 
 def test_compiler_image_can_be_validated_without_contract_io() -> None:
@@ -236,6 +251,7 @@ def test_integration_report_hashes_actual_fixture_vocab(
 ) -> None:
     changed_vocab = ("changed", "fixture")
     monkeypatch.setattr(semantic_runner, "FIXTURE_VOCAB", changed_vocab)
+    monkeypatch.setattr(semantic_runner, "FIXTURE_DIMENSIONS", len(changed_vocab))
     expected_actual_hash = hashlib.sha256(
         json.dumps(changed_vocab, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -257,6 +273,7 @@ def test_integration_report_hashes_actual_fixture_vocab(
         network_interfaces=["lo"],
     )
 
+    assert report["model"]["dimensions"] == len(changed_vocab)
     assert report["model"]["vocab_sha256"] == expected_actual_hash
     assert report["model"]["vocab_sha256"] != EXPECTED_FIXTURE_VOCAB_SHA256
 
@@ -308,6 +325,7 @@ def test_semantic_wrapper_hardens_container_and_import_roots() -> None:
     assert "--read-only" in wrapper
     assert "--cap-drop ALL" in wrapper
     assert "--security-opt no-new-privileges" in wrapper
+    # Regression guard: do not silently disable the host's LSM/seccomp sandboxing.
     assert "apparmor=unconfined" not in wrapper
     assert "seccomp=unconfined" not in wrapper
     assert "--pids-limit 256" in wrapper
