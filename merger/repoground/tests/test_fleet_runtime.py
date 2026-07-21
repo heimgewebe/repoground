@@ -72,7 +72,10 @@ def initialize_repository(tmp_path: Path, name: str = "repo") -> tuple[Path, str
         git(repo, "checkout", "-b", "main")
     git(repo, "config", "user.name", "RepoBrief Test")
     git(repo, "config", "user.email", "repobrief-test@example.invalid")
-    (repo / ".gitignore").write_text("ignored.txt\n__pycache__/\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(
+        "ignored.txt\n__pycache__/\n.pytest_cache/\n*.pyc\n*.pyo\n*.egg-info/\nbuild/\n",
+        encoding="utf-8",
+    )
     (repo / "tracked.txt").write_text("clean\n", encoding="utf-8")
     git(repo, "add", ".gitignore", "tracked.txt")
     git(repo, "commit", "-m", "initial")
@@ -487,6 +490,141 @@ def test_managed_worktree_refuses_dirty_untracked_and_ignored_content(
     assert tracked.read_text(encoding="utf-8") == "foreign change\n"
     assert untracked.read_text(encoding="utf-8") == "preserve me\n"
     assert ignored.read_text(encoding="utf-8") == "preserve me too\n"
+
+
+
+def test_managed_worktree_cleanup_removes_only_bounded_disposable_artifacts(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path)
+    worktree = tmp_path / "managed"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+
+    pycache = worktree / "pkg" / "__pycache__"
+    pycache.mkdir(parents=True)
+    (pycache / "module.cpython-312.pyc").write_bytes(b"cache")
+    pytest_cache = worktree / ".pytest_cache"
+    pytest_cache.mkdir()
+    (pytest_cache / "README.md").write_text("pytest cache\n", encoding="utf-8")
+    egg_info = worktree / "src" / "demo.egg-info"
+    egg_info.mkdir(parents=True)
+    (egg_info / "PKG-INFO").write_text("Metadata-Version: 2.4\n", encoding="utf-8")
+    loose = worktree / "loose.pyc"
+    loose.write_bytes(b"cache")
+    build = worktree / "build"
+    build.mkdir()
+
+    removed = module.cleanup_managed_disposable_artifacts(worktree, repo)
+
+    assert removed == [
+        ".pytest_cache",
+        "build",
+        "loose.pyc",
+        "pkg/__pycache__",
+        "src/demo.egg-info",
+    ]
+    assert not pycache.exists()
+    assert not pytest_cache.exists()
+    assert not egg_info.exists()
+    assert not loose.exists()
+    assert not build.exists()
+    module.assert_managed_worktree_clean(worktree, repo)
+
+
+def test_managed_worktree_cleanup_rejects_unrelated_and_nonempty_build(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path)
+    worktree = tmp_path / "managed"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+
+    unrelated = worktree / "notes.txt"
+    unrelated.write_text("preserve\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="not clean; refusing reset or cleanup"):
+        module.cleanup_managed_disposable_artifacts(worktree, repo)
+    assert unrelated.read_text(encoding="utf-8") == "preserve\n"
+    unrelated.unlink()
+
+    build = worktree / "build"
+    build.mkdir()
+    payload = build / "artifact.bin"
+    payload.write_bytes(b"preserve")
+    with pytest.raises(RuntimeError, match="build residue is not empty"):
+        module.cleanup_managed_disposable_artifacts(worktree, repo)
+    assert payload.read_bytes() == b"preserve"
+
+
+def test_managed_worktree_cleanup_rejects_symlink_inside_disposable_tree(
+    tmp_path: Path,
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path)
+    worktree = tmp_path / "managed"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+
+    outside = tmp_path / "outside.txt"
+    outside.write_text("preserve\n", encoding="utf-8")
+    pycache = worktree / "pkg" / "__pycache__"
+    pycache.mkdir(parents=True)
+    (pycache / "escape.pyc").symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="unsafe file entry"):
+        module.cleanup_managed_disposable_artifacts(worktree, repo)
+    assert outside.read_text(encoding="utf-8") == "preserve\n"
+    assert pycache.is_dir()
+
+
+def test_managed_worktree_cleanup_refuses_active_process_cwd(tmp_path: Path) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path)
+    worktree = tmp_path / "managed"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+    pycache = worktree / "pkg" / "__pycache__"
+    pycache.mkdir(parents=True)
+    (pycache / "module.pyc").write_bytes(b"cache")
+
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        cwd=worktree,
+    )
+    try:
+        with pytest.raises(RuntimeError, match="managed worktree is in active use"):
+            module.cleanup_managed_disposable_artifacts(worktree, repo)
+        assert pycache.exists()
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+    assert module.cleanup_managed_disposable_artifacts(worktree, repo) == [
+        "pkg/__pycache__"
+    ]
+
+
+def test_generation_environment_redirects_runtime_artifacts(tmp_path: Path) -> None:
+    module = load_publisher()
+    runtime = tmp_path / "runtime"
+
+    env = module.generation_environment(runtime)
+
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert Path(env["PYTHONPYCACHEPREFIX"]) == runtime / "pycache"
+    assert Path(env["XDG_CACHE_HOME"]) == runtime / "xdg-cache"
+    assert Path(env["PIP_CACHE_DIR"]) == runtime / "pip-cache"
+    assert Path(env["TMPDIR"]) == runtime / "tmp"
+    for key in ("PYTHONPYCACHEPREFIX", "XDG_CACHE_HOME", "PIP_CACHE_DIR", "TMPDIR"):
+        assert Path(env[key]).is_dir()
+
+
+def test_changed_source_hygiene_preflight_runs_before_publication_limit() -> None:
+    source = PUBLISHER.read_text(encoding="utf-8")
+    changed = source.index("changed += 1")
+    preflight = source.index("source_hygiene_cleanup = preflight_existing_source_worktree", changed)
+    limit = source.index("if args.limit and published >= args.limit", changed)
+
+    assert changed < preflight < limit
 
 
 def test_managed_worktree_refuses_attached_foreign_or_non_worktree_paths(

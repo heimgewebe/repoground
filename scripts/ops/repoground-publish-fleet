@@ -145,11 +145,15 @@ class PrunePlan:
 
 
 def run(
-    argv: list[str], cwd: Path | None = None, check: bool = True
+    argv: list[str],
+    cwd: Path | None = None,
+    check: bool = True,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cp = subprocess.run(
         argv,
         cwd=str(cwd) if cwd else None,
+        env=env,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -302,7 +306,7 @@ def git_common_dir(repo: Path) -> Path:
     return (raw if raw.is_absolute() else repo / raw).resolve()
 
 
-def assert_managed_worktree_clean(path: Path, expected_repo: Path) -> None:
+def assert_managed_worktree_identity(path: Path, expected_repo: Path) -> None:
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"managed worktree path is not a real directory: {path}")
     top = run(
@@ -321,22 +325,181 @@ def assert_managed_worktree_clean(path: Path, expected_repo: Path) -> None:
         raise RuntimeError(
             f"managed worktree is attached to a branch; refusing to move it: {path}"
         )
-    status = run(
+
+
+def managed_worktree_status(path: Path) -> list[tuple[str, str]]:
+    raw = run(
         [
             "git",
             "-C",
             str(path),
             "status",
             "--porcelain=v1",
+            "-z",
             "--untracked-files=all",
             "--ignored=matching",
         ]
-    ).stdout.strip()
+    ).stdout
+    rows: list[tuple[str, str]] = []
+    for record in raw.split("\0"):
+        if not record:
+            continue
+        if len(record) < 4 or record[2] != " ":
+            raise RuntimeError(
+                f"cannot parse managed worktree status entry: {record!r}"
+            )
+        rows.append((record[:2], record[3:]))
+    return rows
+
+
+def active_process_cwds(path: Path) -> list[tuple[int, str]]:
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return []
+    root = path.resolve()
+    current_pid = os.getpid()
+    active: list[tuple[int, str]] = []
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == current_pid:
+            continue
+        try:
+            cwd = (entry / "cwd").resolve(strict=True)
+        except (FileNotFoundError, OSError, PermissionError):
+            continue
+        if cwd == root or root in cwd.parents:
+            active.append((pid, str(cwd)))
+    return sorted(active)
+
+
+def assert_managed_worktree_idle(path: Path) -> None:
+    active = active_process_cwds(path)
+    if active:
+        sample = ", ".join(f"pid={pid} cwd={cwd}" for pid, cwd in active[:10])
+        raise RuntimeError(
+            f"managed worktree is in active use; refusing cleanup or reset: {path}: {sample}"
+        )
+
+
+def managed_disposable_artifact_root(relative: str) -> Path | None:
+    candidate = Path(relative.rstrip("/"))
+    if candidate.is_absolute() or not candidate.parts or ".." in candidate.parts:
+        return None
+    if candidate == Path("build"):
+        return candidate
+    for index, part in enumerate(candidate.parts):
+        if part in {"__pycache__", ".pytest_cache"} or part.endswith(".egg-info"):
+            return Path(*candidate.parts[: index + 1])
+    if candidate.suffix in {".pyc", ".pyo"}:
+        return candidate
+    return None
+
+
+def validate_removable_tree(path: Path) -> None:
+    for root, directories, files in os.walk(path, topdown=False, followlinks=False):
+        root_path = Path(root)
+        for name in directories:
+            child_path = root_path / name
+            child = child_path.lstat()
+            if stat.S_ISLNK(child.st_mode) or not stat.S_ISDIR(child.st_mode):
+                raise RuntimeError(
+                    f"managed disposable artifact contains unsafe directory entry: {child_path}"
+                )
+        for name in files:
+            child_path = root_path / name
+            child = child_path.lstat()
+            if stat.S_ISLNK(child.st_mode) or not stat.S_ISREG(child.st_mode):
+                raise RuntimeError(
+                    f"managed disposable artifact contains unsafe file entry: {child_path}"
+                )
+
+
+def remove_managed_disposable_artifact(path: Path, worktree: Path) -> None:
+    root = worktree.resolve()
+    logical = path.parent.resolve() / path.name
+    if root not in logical.parents:
+        raise RuntimeError(f"managed disposable artifact escapes worktree: {path}")
+    metadata = path.lstat()
+    if stat.S_ISLNK(metadata.st_mode):
+        raise RuntimeError(f"managed disposable artifact is a symlink: {path}")
+    if path.relative_to(worktree) == Path("build"):
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise RuntimeError(f"managed build residue is not a directory: {path}")
+        try:
+            next(path.iterdir())
+        except StopIteration:
+            path.rmdir()
+            return
+        raise RuntimeError(f"managed build residue is not empty; refusing cleanup: {path}")
+    if stat.S_ISREG(metadata.st_mode):
+        if path.suffix not in {".pyc", ".pyo"} and not path.name.endswith(".egg-info"):
+            raise RuntimeError(f"managed disposable artifact is not removable: {path}")
+        path.unlink()
+        return
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise RuntimeError(f"managed disposable artifact is not regular: {path}")
+    validate_removable_tree(path)
+    shutil.rmtree(path)
+
+
+def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> list[str]:
+    assert_managed_worktree_identity(path, expected_repo)
+    status = managed_worktree_status(path)
+    if not status:
+        return []
+    roots: set[Path] = set()
+    for code, relative in status:
+        artifact = managed_disposable_artifact_root(relative)
+        if code not in {"??", "!!"} or artifact is None:
+            sample = "\n".join(
+                f"{row_code} {row_path}" for row_code, row_path in status[:20]
+            )
+            raise RuntimeError(
+                f"managed worktree is not clean; refusing reset or cleanup: {path}\n{sample}"
+            )
+        roots.add(artifact)
+    assert_managed_worktree_idle(path)
+    retained: list[Path] = []
+    for candidate in sorted(roots, key=lambda item: (len(item.parts), item.as_posix())):
+        if any(parent == candidate or parent in candidate.parents for parent in retained):
+            continue
+        retained.append(candidate)
+    for relative in retained:
+        remove_managed_disposable_artifact(path / relative, path)
+    return [item.as_posix() for item in retained]
+
+
+def assert_managed_worktree_clean(path: Path, expected_repo: Path) -> None:
+    assert_managed_worktree_identity(path, expected_repo)
+    status = managed_worktree_status(path)
     if status:
-        sample = "\n".join(status.splitlines()[:20])
+        sample = "\n".join(f"{code} {relative}" for code, relative in status[:20])
         raise RuntimeError(
             f"managed worktree is not clean; refusing reset or cleanup: {path}\n{sample}"
         )
+
+
+def generation_environment(cache_root: Path) -> dict[str, str]:
+    pycache = cache_root / "pycache"
+    xdg_cache = cache_root / "xdg-cache"
+    pip_cache = cache_root / "pip-cache"
+    temporary = cache_root / "tmp"
+    for directory in (pycache, xdg_cache, pip_cache, temporary):
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPYCACHEPREFIX": str(pycache),
+            "PYTHONNOUSERSITE": "1",
+            "XDG_CACHE_HOME": str(xdg_cache),
+            "PIP_CACHE_DIR": str(pip_cache),
+            "TMPDIR": str(temporary),
+        }
+    )
+    return env
 
 
 def prepare_managed_worktree(
@@ -346,7 +509,9 @@ def prepare_managed_worktree(
     target: str,
 ) -> None:
     if path.exists() or path.is_symlink():
+        cleanup_managed_disposable_artifacts(path, expected_repo)
         assert_managed_worktree_clean(path, expected_repo)
+        assert_managed_worktree_idle(path)
         run(["git", "-C", str(path), "reset", "--hard", target])
         assert_managed_worktree_clean(path, expected_repo)
         return
@@ -639,10 +804,23 @@ def parse_cli_json(text: str) -> dict[str, object]:
     return data
 
 
-def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path:
-    source_wt = SOURCE_ROOT / (
+def source_worktree_path(entry: RepoEntry, ref_segment: str) -> Path:
+    return SOURCE_ROOT / (
         safe_segment(entry.owner) + "__" + safe_segment(entry.repo) + "__" + ref_segment
     )
+
+
+def preflight_existing_source_worktree(entry: RepoEntry, ref_segment: str) -> list[str]:
+    source_wt = source_worktree_path(entry, ref_segment)
+    if not source_wt.exists() and not source_wt.is_symlink():
+        return []
+    removed = cleanup_managed_disposable_artifacts(source_wt, entry.path)
+    assert_managed_worktree_clean(source_wt, entry.path)
+    return removed
+
+
+def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path:
+    source_wt = source_worktree_path(entry, ref_segment)
     SOURCE_ROOT.mkdir(parents=True, exist_ok=True)
     prepare_managed_worktree(
         source_wt,
@@ -1709,7 +1887,23 @@ def publish(
     if config.redact_secrets:
         command.append("--redact-secrets")
     try:
-        cp = run(command, cwd=TOOL_WT, check=False)
+        STATE_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(
+            prefix=".generation-runtime-", dir=str(STATE_ROOT)
+        ) as raw_runtime:
+            cp = run(
+                command,
+                cwd=TOOL_WT,
+                check=False,
+                env=generation_environment(Path(raw_runtime)),
+            )
+        try:
+            assert_managed_worktree_clean(source_wt, entry.path)
+            assert_managed_worktree_clean(TOOL_WT, REPOGROUND_REPO)
+        except RuntimeError as exc:
+            raise RuntimeError(
+                f"RepoGround refresh dirtied a managed worktree: {exc}"
+            ) from exc
         LOG_ROOT.mkdir(parents=True, exist_ok=True)
         raw_log = (
             LOG_ROOT / f"fleet-{safe_segment(entry.owner)}__{repository}.stdout.txt"
@@ -2004,16 +2198,20 @@ def main(argv: list[str]) -> int:
                     )
                     continue
                 changed += 1
+                source_hygiene_cleanup = preflight_existing_source_worktree(
+                    entry, ref_segment
+                )
                 if args.limit and published >= args.limit:
                     queued += 1
-                    details.append(
-                        {
-                            "repo": entry.key,
-                            "status": "queued",
-                            "source_sha": source_sha,
-                            "fingerprint": fingerprint,
-                        }
-                    )
+                    queued_detail: dict[str, object] = {
+                        "repo": entry.key,
+                        "status": "queued",
+                        "source_sha": source_sha,
+                        "fingerprint": fingerprint,
+                    }
+                    if source_hygiene_cleanup:
+                        queued_detail["source_hygiene_cleanup"] = source_hygiene_cleanup
+                    details.append(queued_detail)
                     continue
                 data, out_dir, active_lease, manifest_path, publication_created_at = (
                     publish(
@@ -2065,17 +2263,18 @@ def main(argv: list[str]) -> int:
                     rows = publication.get("published")
                     if isinstance(rows, list) and rows and isinstance(rows[0], dict):
                         generated = rows[0].get("generatedAt")
-                details.append(
-                    {
-                        "repo": entry.key,
-                        "status": "published",
-                        "source_sha": source_sha,
-                        "fingerprint": fingerprint,
-                        "generatedAt": generated,
-                        "publication_dir": str(out_dir),
-                        "prune": prune_report,
-                    }
-                )
+                published_detail: dict[str, object] = {
+                    "repo": entry.key,
+                    "status": "published",
+                    "source_sha": source_sha,
+                    "fingerprint": fingerprint,
+                    "generatedAt": generated,
+                    "publication_dir": str(out_dir),
+                    "prune": prune_report,
+                }
+                if source_hygiene_cleanup:
+                    published_detail["source_hygiene_cleanup"] = source_hygiene_cleanup
+                details.append(published_detail)
             except Exception as exc:
                 failed += 1
                 details.append(
