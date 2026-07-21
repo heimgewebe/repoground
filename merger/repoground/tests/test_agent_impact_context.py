@@ -452,6 +452,55 @@ def test_edit_context_bundles_target_support_and_entrypoint_reads() -> None:
 
 
 
+def test_impact_context_projects_coherent_call_graph_relations_without_edit_semantics() -> None:
+    result = _context(mode="impact")
+
+    call_relations = [
+        item
+        for item in result["relations"]
+        if isinstance(item.get("freshness"), dict)
+        and item["freshness"].get("source") == "python_call_graph_json"
+    ]
+
+    assert "edit_context" not in result
+    assert {item["relation_kind"] for item in call_relations} == {
+        "direct_caller",
+        "direct_callee",
+    }
+    assert all(item["freshness"]["status"] == "coherent" for item in call_relations)
+    assert all(
+        item["provenance"]["relation"]["source"] == "python_call_graph_json"
+        for item in call_relations
+    )
+
+
+def test_impact_context_does_not_project_untrusted_call_graph_relations() -> None:
+    call_graph = _fixture_call_graph()
+    call_graph["run_id"] = "other-run"
+
+    result = _context(mode="impact", python_call_graph=call_graph)
+
+    assert result["status"] == "available"
+    assert "edit_context" not in result
+    assert not any(
+        isinstance(item.get("freshness"), dict)
+        and item["freshness"].get("source") == "python_call_graph_json"
+        for item in result["relations"]
+    )
+
+
+def test_impact_context_keeps_optional_missing_call_graph_non_degrading() -> None:
+    result = _context(mode="impact", python_call_graph=None)
+
+    assert result["status"] == "available"
+    assert "edit_context" not in result
+    assert not any(
+        isinstance(item.get("freshness"), dict)
+        and item["freshness"].get("source") == "python_call_graph_json"
+        for item in result["relations"]
+    )
+
+
 def test_edit_context_separately_budgets_proven_call_graph_relations() -> None:
     result = _context(max_items=1)
     selection = result["edit_context"]["selection"]

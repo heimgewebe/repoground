@@ -1635,7 +1635,11 @@ def build_agent_impact_context(
     unresolved_risks: list[dict[str, Any]] = []
     call_graph_coverage_gaps: list[dict[str, Any]] = []
     edit_selection: dict[str, Any] = {}
-    if request.mode == "edit":
+    # Impact consumers need trusted call relations as evidence, but edit-only
+    # selection, unresolved-risk projection and coverage-gap semantics stay
+    # confined to edit mode. Missing optional call graphs therefore do not
+    # degrade ordinary impact requests.
+    if request.mode == "edit" or bool(call_graph):
         (
             direct_callers,
             direct_callees,
@@ -1650,6 +1654,14 @@ def build_agent_impact_context(
             expected_run_id=run_id,
             expected_digest=digest,
         )
+
+    if request.mode == "impact":
+        impact_call_relations = direct_callers + direct_callees
+        combined_relations = all_relations + impact_call_relations
+        relations = combined_relations[: request.max_items]
+        relations_truncated = len(combined_relations) > request.max_items
+
+    if request.mode == "edit":
         gaps.extend(call_graph_coverage_gaps)
         edit_selection = _edit_selection(
             target_symbols=all_target_symbols,
