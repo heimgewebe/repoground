@@ -634,7 +634,7 @@ def test_generation_environment_redirects_runtime_artifacts(tmp_path: Path) -> N
     env = module.generation_environment(runtime)
 
     assert env["PYTHONDONTWRITEBYTECODE"] == "1"
-    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env.get("PYTHONNOUSERSITE") == os.environ.get("PYTHONNOUSERSITE")
     assert Path(env["PYTHONPYCACHEPREFIX"]) == runtime / "pycache"
     assert Path(env["XDG_CACHE_HOME"]) == runtime / "xdg-cache"
     assert Path(env["PIP_CACHE_DIR"]) == runtime / "pip-cache"

@@ -504,7 +504,6 @@ def generation_environment(cache_root: Path) -> dict[str, str]:
         {
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPYCACHEPREFIX": str(pycache),
-            "PYTHONNOUSERSITE": "1",
             "XDG_CACHE_HOME": str(xdg_cache),
             "PIP_CACHE_DIR": str(pip_cache),
             "TMPDIR": str(temporary),
