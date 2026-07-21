@@ -1534,6 +1534,30 @@ def _result_status(
     return "available"
 
 
+def _select_impact_relations(
+    architecture_relations: list[dict[str, Any]],
+    call_relations: list[dict[str, Any]],
+    *,
+    max_items: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    combined = architecture_relations + call_relations
+    if max_items <= 0:
+        return [], bool(combined)
+    if not architecture_relations or not call_relations or max_items == 1:
+        selected = combined[:max_items]
+        return selected, len(combined) > len(selected)
+
+    selected = [architecture_relations[0], call_relations[0]]
+    remaining = max_items - len(selected)
+    if remaining > 0:
+        selected.extend(architecture_relations[1 : 1 + remaining])
+        remaining = max_items - len(selected)
+    if remaining > 0:
+        selected.extend(call_relations[1 : 1 + remaining])
+    return selected, len(combined) > len(selected)
+
+
+
 def build_agent_impact_context(
     *,
     target_path: Any = None,
@@ -1657,9 +1681,11 @@ def build_agent_impact_context(
 
     if request.mode == "impact":
         impact_call_relations = direct_callers + direct_callees
-        combined_relations = all_relations + impact_call_relations
-        relations = combined_relations[: request.max_items]
-        relations_truncated = len(combined_relations) > request.max_items
+        relations, relations_truncated = _select_impact_relations(
+            all_relations,
+            impact_call_relations,
+            max_items=request.max_items,
+        )
 
     if request.mode == "edit":
         gaps.extend(call_graph_coverage_gaps)

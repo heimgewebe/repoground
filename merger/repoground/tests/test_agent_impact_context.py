@@ -474,6 +474,39 @@ def test_impact_context_projects_coherent_call_graph_relations_without_edit_sema
     )
 
 
+def test_impact_context_preserves_source_diversity_when_relations_are_bounded() -> None:
+    result = _context(mode="impact", max_items=2)
+
+    call_relations = [
+        item
+        for item in result["relations"]
+        if isinstance(item.get("freshness"), dict)
+        and item["freshness"].get("source") == "python_call_graph_json"
+    ]
+    architecture_relations = [
+        item for item in result["relations"] if item not in call_relations
+    ]
+
+    assert len(result["relations"]) == 2
+    assert len(architecture_relations) == 1
+    assert len(call_relations) == 1
+    assert call_relations[0]["freshness"]["status"] == "coherent"
+    assert result["truncation"]["relations"] is True
+
+
+def test_impact_context_keeps_single_relation_budget_backward_compatible() -> None:
+    result = _context(mode="impact", max_items=1)
+
+    assert len(result["relations"]) == 1
+    assert not (
+        isinstance(result["relations"][0].get("freshness"), dict)
+        and result["relations"][0]["freshness"].get("source")
+        == "python_call_graph_json"
+    )
+    assert result["truncation"]["relations"] is True
+
+
+
 def test_impact_context_does_not_project_untrusted_call_graph_relations() -> None:
     call_graph = _fixture_call_graph()
     call_graph["run_id"] = "other-run"
