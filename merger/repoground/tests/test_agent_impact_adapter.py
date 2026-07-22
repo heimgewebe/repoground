@@ -394,7 +394,7 @@ def test_agent_impact_adapter_projects_coherent_call_graph_relations_in_impact_m
     assert all(item["freshness"]["status"] == "coherent" for item in call_relations)
 
 
-def test_agent_impact_adapter_keeps_later_changed_path_reachable_for_call_graph(
+def test_agent_impact_adapter_keeps_exact_later_path_reachable_for_call_graph(
     tmp_path: Path,
 ) -> None:
     adapter, bundle, _config = _impact_adapter(tmp_path)
@@ -403,10 +403,10 @@ def test_agent_impact_adapter_keeps_later_changed_path_reachable_for_call_graph(
     symbol_document = json.loads(symbol_path.read_text(encoding="utf-8"))
     symbol_document["symbols"] = [
         {
-            "id": "sym-early-1",
+            "id": "sym-early-exact",
             "kind": "function",
-            "name": "early_one",
-            "qualified_name": "a_many.early_one",
+            "name": "needle",
+            "qualified_name": "a_many.needle",
             "module": "a_many",
             "path": "src/a_many.py",
             "start_line": 1,
@@ -439,15 +439,27 @@ def test_agent_impact_adapter_keeps_later_changed_path_reachable_for_call_graph(
             "decorators": [],
         },
         {
-            "id": "sym-late",
+            "id": "sym-late-non-target",
             "kind": "function",
-            "name": "late_target",
-            "qualified_name": "z_late.late_target",
+            "name": "alpha",
+            "qualified_name": "z_late.alpha",
             "module": "z_late",
             "path": "src/z_late.py",
             "start_line": 1,
+            "end_line": 1,
+            "range_ref": "file:src/z_late.py#L1-L1",
+            "decorators": [],
+        },
+        {
+            "id": "sym-late",
+            "kind": "function",
+            "name": "needle",
+            "qualified_name": "z_late.needle",
+            "module": "z_late",
+            "path": "src/z_late.py",
+            "start_line": 2,
             "end_line": 3,
-            "range_ref": "file:src/z_late.py#L1-L3",
+            "range_ref": "file:src/z_late.py#L2-L3",
             "decorators": [],
         },
     ]
@@ -469,25 +481,25 @@ def test_agent_impact_adapter_keeps_later_changed_path_reachable_for_call_graph(
             "relation_counts": {"calls": 1, "constructs": 0},
             "calls": [
                 {
-                    "path": "src/peer.py",
-                    "start_line": 4,
+                    "path": "src/z_late.py",
+                    "start_line": 3,
                     "start_col": 4,
-                    "end_line": 4,
-                    "end_col": 20,
-                    "range_ref": "file:src/peer.py#L4-L4",
-                    "callee_expression": "late_target",
-                    "simple_name": "late_target",
+                    "end_line": 3,
+                    "end_col": 10,
+                    "range_ref": "file:src/z_late.py#L3-L3",
+                    "callee_expression": "peer",
+                    "simple_name": "peer",
                     "caller_scope": "symbol",
-                    "caller_symbol_id": "sym-peer",
-                    "caller_qualified_name": "peer.peer",
+                    "caller_symbol_id": "sym-late",
+                    "caller_qualified_name": "z_late.needle",
                     "caller_kind": "function",
-                    "caller_start_line": 3,
-                    "caller_end_line": 5,
+                    "caller_start_line": 2,
+                    "caller_end_line": 3,
                     "relation_type": "calls",
                     "evidence_level": "S1",
                     "resolution_status": "resolved",
                     "resolution_reason": "unique_symbol_resolution",
-                    "resolved_target_ids": ["sym-late"],
+                    "resolved_target_ids": ["sym-peer"],
                     "candidate_target_ids": [],
                 }
             ],
@@ -498,6 +510,7 @@ def test_agent_impact_adapter_keeps_later_changed_path_reachable_for_call_graph(
 
     result = adapter.agent_impact_context(
         "demo",
+        target_symbol="needle",
         changed_paths=["src/a_many.py", "src/z_late.py"],
         mode="impact",
         max_items=2,
@@ -505,7 +518,7 @@ def test_agent_impact_adapter_keeps_later_changed_path_reachable_for_call_graph(
     )
 
     assert [item["id"] for item in result["target_symbols"]] == [
-        "sym-early-1",
+        "sym-early-exact",
         "sym-late",
     ]
     assert result["call_graph_projection"]["selected_call_count"] == 1
@@ -517,7 +530,7 @@ def test_agent_impact_adapter_keeps_later_changed_path_reachable_for_call_graph(
     ]
     assert len(call_relations) == 1
     relation = call_relations[0]
-    assert relation["relation_kind"] == "direct_caller"
+    assert relation["relation_kind"] == "direct_callee"
     assert relation["symbol_id"] == "sym-peer"
     assert relation["target_symbol_ids"] == ["sym-late"]
     assert relation["evidence_level"] == "S1"
