@@ -2,8 +2,12 @@
 
 Kurzüberblick über Ordner:
 - `scripts/` – wiederverwendbare Helfer
-- `merger/repoground/` – **RepoGround** (Primary Tool) – erzeugt strukturierte Merge-Berichte für KIs.
-- `merger/repomerger/` – Legacy-Merger (Standalone).
+- `merger/repoground/` – **RepoGround** – Repository-Aufbereitung, Retrieval und read-only Evidence-Surfaces.
+
+Der frühere Standalone-Repomerger und OmniWandler gehören nicht mehr zur aktiven
+RepoGround-Produktoberfläche. Ihre historischen Implementierungen bleiben über die
+Git-Historie nachvollziehbar; die verbindliche Grenzentscheidung steht in
+[`docs/architecture/product-boundaries.md`](docs/architecture/product-boundaries.md).
 
 ## Einstieg & Dokumentation
 
@@ -96,9 +100,15 @@ weiterhin an `--repo-root` und `--bundle-root` des Serverstarts gebunden.
 Konfiguration, Zustände und Sicherheitsgrenzen:
 [RepoGround MCP stdio](docs/usage/repoground-mcp-stdio.md).
 
-### ATLAS MODE
+### Atlas – optionales Observation-Subsystem
 
-Atlas is a filesystem exploration tool capable of scanning entire systems, distinct from the repository inspection pipeline.
+Atlas ist eine optionale Dateisystem-Beobachtungsfläche innerhalb von RepoGround.
+Es ist **nicht** Teil der kanonischen Repository-Publikations- und Retrieval-Pipeline:
+Ein normaler RepoGround-Dump, eine Query oder eine Bundle-Publikation startet keinen
+Atlas-Scan. Atlas wird nur über die explizite `repoground atlas`-CLI oder die
+authentifizierten `/api/atlas`-Endpunkte aktiviert.
+
+Atlas can scan filesystem roots and produce bounded observation artifacts while remaining distinct from the repository inspection pipeline.
 
 Pseudo-filesystems and volatile paths (`/proc`, `/sys`, `/dev`, `/run`, etc.) are excluded by default to avoid recursion loops, device streams, and meaningless inventory entries. The merge pipeline remains completely unchanged by this feature.
 
