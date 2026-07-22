@@ -210,6 +210,59 @@ def test_graph_includes_bounded_cross_language_file_inventory(tmp_path):
     )
 
 
+def test_graph_source_limits_are_deterministic_and_report_truncation(tmp_path):
+    for relative, content in {
+        "a.py": "value = 1\n",
+        "b.rs": "pub fn b() {}\n",
+        "c.ts": "export const c = 1\n",
+    }.items():
+        target = tmp_path / relative
+        target.write_text(content, encoding="utf-8")
+
+    file_limited = generate_import_graph_document(
+        tmp_path,
+        "run",
+        "0" * 64,
+        max_graph_files=2,
+        max_graph_source_bytes=10_000,
+    )
+    file_nodes = [
+        node for node in file_limited["nodes"] if node["kind"] == "file"
+    ]
+    assert [node["path"] for node in file_nodes] == ["a.py", "b.rs"]
+    assert file_limited["coverage"]["repository_files_seen"] == 3
+    assert file_limited["coverage"]["repository_files_included"] == 2
+    assert file_limited["coverage"]["repository_truncated"] is True
+
+    byte_limited = generate_import_graph_document(
+        tmp_path,
+        "run",
+        "0" * 64,
+        max_graph_files=10,
+        max_graph_source_bytes=1,
+    )
+    assert not any(node["kind"] == "file" for node in byte_limited["nodes"])
+    assert byte_limited["coverage"]["repository_files_included"] == 0
+    assert byte_limited["coverage"]["repository_truncated"] is True
+
+
+def test_graph_source_limits_cannot_exceed_hard_bounds(tmp_path):
+    with pytest.raises(ValueError, match="max_graph_files"):
+        generate_import_graph_document(
+            tmp_path,
+            "run",
+            "0" * 64,
+            max_graph_files=50_001,
+        )
+    with pytest.raises(ValueError, match="max_graph_source_bytes"):
+        generate_import_graph_document(
+            tmp_path,
+            "run",
+            "0" * 64,
+            max_graph_source_bytes=(512 * 1024 * 1024) + 1,
+        )
+
+
 def test_test_directory_layer_precedes_nested_core_segment(tmp_path):
     target = tmp_path / "tests" / "core" / "service.py"
     target.parent.mkdir(parents=True)

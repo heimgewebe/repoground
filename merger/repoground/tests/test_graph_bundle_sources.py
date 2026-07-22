@@ -73,6 +73,68 @@ def test_produces_sources_from_full_contact_retrieval_paths(tmp_path):
     assert [item["path"] for item in entrypoints["entrypoints"]] == ["main.py"]
 
 
+def test_produces_cross_language_inventory_from_full_contact_retrieval_paths(tmp_path):
+    repo = _repo(tmp_path)
+    root = repo["root"]
+    sources = {
+        "apps/web/Component.svelte": "<div />\n",
+        "apps/web/Component.test.ts": "test('x', () => {})\n",
+        "apps/api/migrations/001.sql": "select 1;\n",
+        ".github/workflows/ci.yml": "name: ci\n",
+        "derived.graph.json": "{}\n",
+    }
+    for relative, content in sources.items():
+        target = root / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    records = [
+        {
+            "repo": "repo1",
+            "path": path,
+            "source_status": "full",
+            "truncated": False,
+            "source_range": {"status": "declared"},
+        }
+        for path in ["main.py", *sources]
+    ]
+    result = _ensure(
+        tmp_path,
+        summaries=[repo],
+        chunk_index=_chunk_index(tmp_path, records=records),
+    )
+
+    graph = json.loads(result.graph_path.read_text(encoding="utf-8"))
+    entrypoints = json.loads(result.entrypoints_path.read_text(encoding="utf-8"))
+    file_nodes = {
+        node["path"]: node
+        for node in graph["nodes"]
+        if node["kind"] == "file"
+    }
+
+    assert set(file_nodes) == {
+        ".github/workflows/ci.yml",
+        "apps/api/migrations/001.sql",
+        "apps/web/Component.svelte",
+        "apps/web/Component.test.ts",
+        "main.py",
+    }
+    assert file_nodes["apps/web/Component.test.ts"]["is_test"] is True
+    assert file_nodes["apps/web/Component.svelte"]["language"] == "svelte"
+    assert file_nodes["apps/api/migrations/001.sql"]["language"] == "sql"
+    assert file_nodes[".github/workflows/ci.yml"]["language"] == "yaml"
+    non_python_ids = {
+        node["node_id"]
+        for node in file_nodes.values()
+        if node["language"] != "python"
+    }
+    assert not any(
+        edge["src"] in non_python_ids or edge["dst"] in non_python_ids
+        for edge in graph["edges"]
+    )
+    assert [item["path"] for item in entrypoints["entrypoints"]] == ["main.py"]
+
+
 def test_excludes_truncated_or_unverifiable_chunk_sources(tmp_path):
     repo = _repo(tmp_path)
     chunk_index = _chunk_index(
@@ -96,11 +158,39 @@ def test_excludes_truncated_or_unverifiable_chunk_sources(tmp_path):
 
     result = _ensure(tmp_path, summaries=[repo], chunk_index=chunk_index)
 
-    assert result.reason == "no eligible full-contact Python sources"
+    assert result.reason == "no eligible full-contact graph sources"
     graph = json.loads(result.graph_path.read_text(encoding="utf-8"))
     entrypoints = json.loads(result.entrypoints_path.read_text(encoding="utf-8"))
     assert graph["nodes"] == []
     assert entrypoints["entrypoints"] == []
+
+
+def test_redacted_cross_language_sources_do_not_bypass_source_range_boundary(tmp_path):
+    repo = _repo(tmp_path)
+    workflow = repo["root"] / ".github/workflows/ci.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text("name: ci\n", encoding="utf-8")
+    chunk_index = _chunk_index(
+        tmp_path,
+        records=[
+            {
+                "repo": "repo1",
+                "path": ".github/workflows/ci.yml",
+                "source_status": "full",
+                "truncated": False,
+                "source_range": {"status": "unavailable"},
+            }
+        ],
+    )
+
+    result = _ensure(tmp_path, summaries=[repo], chunk_index=chunk_index)
+
+    graph = json.loads(result.graph_path.read_text(encoding="utf-8"))
+    assert result.reason == "no eligible full-contact graph sources"
+    assert not any(
+        node.get("path") == ".github/workflows/ci.yml"
+        for node in graph["nodes"]
+    )
 
 
 def test_skips_automatic_production_for_multi_repo(tmp_path):

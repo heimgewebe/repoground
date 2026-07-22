@@ -606,6 +606,64 @@ def test_changed_cross_language_test_paths_are_related_test_evidence() -> None:
         item["path"].endswith("searchIndex.ts")
         for item in result["related_tests"]
     )
+    changed = [
+        item
+        for item in result["related_tests"]
+        if item["evidence_type"] == "changed_test_path"
+    ]
+    assert all(item["provenance_strength"] == "direct_diff" for item in changed)
+    assert all(item["relationship_strength"] == "co_changed" for item in changed)
+    assert all(item["current_read_evidence"] == "unverified" for item in changed)
+
+
+def test_related_test_budget_preserves_graph_and_co_changed_evidence() -> None:
+    result = _context(
+        target_symbol=None,
+        changed_paths=["src/app.py", "tests/changed_only.test.ts"],
+        max_items=2,
+    )
+
+    assert [item["evidence_type"] for item in result["related_tests"]] == [
+        "graph_edge",
+        "changed_test_path",
+    ]
+    assert result["truncation"]["related_tests"] is True
+
+
+def test_related_test_budget_prefers_distinct_paths_over_duplicate_evidence() -> None:
+    result = _context(
+        target_symbol=None,
+        changed_paths=[
+            "src/app.py",
+            "tests/test_app.py",
+            "tests/z_changed_only.test.ts",
+        ],
+        max_items=2,
+    )
+
+    assert [(item["path"], item["evidence_type"]) for item in result["related_tests"]] == [
+        ("tests/test_app.py", "graph_edge"),
+        ("tests/z_changed_only.test.ts", "changed_test_path"),
+    ]
+
+
+def test_unverified_changed_test_is_not_recommended_as_current_first_read() -> None:
+    result = _context(
+        target_symbol=None,
+        changed_paths=["src/app.py", "tests/deleted.test.ts"],
+        max_items=10,
+    )
+
+    unverified = next(
+        item
+        for item in result["related_tests"]
+        if item["path"] == "tests/deleted.test.ts"
+    )
+    assert unverified["current_read_evidence"] == "unverified"
+    assert not any(
+        item["path"] == "tests/deleted.test.ts"
+        for item in result["edit_context"]["recommended_first_reads"]
+    )
 
 
 def test_edit_context_bundles_target_support_and_entrypoint_reads() -> None:
@@ -629,6 +687,10 @@ def test_edit_context_bundles_target_support_and_entrypoint_reads() -> None:
     assert ("src/app.py", "target_symbol") in reads
     assert ("tests/test_app.py", "incoming_graph_relation") in reads
     assert result["composition"]["does_not_parse_or_apply_diff"] is True
+    assert result["composition"]["changed_test_paths_are_cochange_only"] is True
+    assert result["composition"]["changed_test_paths_establish_relationship"] is False
+    assert result["composition"]["changed_test_paths_establish_coverage"] is False
+    assert result["composition"]["current_read_evidence_from_graph_or_symbols_only"] is True
 
 
 

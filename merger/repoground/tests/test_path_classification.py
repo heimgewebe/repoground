@@ -34,6 +34,9 @@ def test_generic_unmatched_product_path_remains_unknown() -> None:
 def test_cross_language_test_filenames_are_recognized() -> None:
     assert is_test_path("apps/web/src/lib/map/nodes.test.ts")
     assert is_test_path("apps/web/src/lib/map/nodes.spec.ts")
+    assert is_test_path("apps/web/src/lib/map/__tests__/nodes.ts")
     assert is_test_path("apps/api/src/store_test.rs")
     assert is_test_path("apps/api/tests/store.rs")
     assert not is_test_path("apps/web/src/lib/map/nodes.ts")
+    assert not is_test_path("config/test_config.json")
+    assert not is_test_path("docs/test_report.md")

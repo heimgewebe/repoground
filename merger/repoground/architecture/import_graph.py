@@ -33,6 +33,11 @@ logger = logging.getLogger(__name__)
 
 _SKIP_DIRECTORIES = {"__pycache__", "env", "node_modules", "venv"}
 _GRAPH_SKIP_DIRECTORIES = _SKIP_DIRECTORIES | {"build", "dist", "target"}
+_HARD_MAX_GRAPH_FILES = 50_000
+_HARD_MAX_GRAPH_SOURCE_BYTES = 512 * 1024 * 1024
+_DEFAULT_MAX_GRAPH_FILES = _HARD_MAX_GRAPH_FILES
+_DEFAULT_MAX_GRAPH_SOURCE_BYTES = _HARD_MAX_GRAPH_SOURCE_BYTES
+
 _GRAPH_FILE_LANGUAGES = {
     ".js": "javascript",
     ".json": "json",
@@ -85,6 +90,14 @@ class Coverage(TypedDict):
     files_parsed: int
     edge_counts_by_type: dict[str, int]
     unknown_layer_share: float
+    repository_file_unknown_layer_share: float
+    repository_files_seen: int
+    repository_files_included: int
+    repository_bytes_seen: int
+    repository_bytes_included: int
+    repository_truncated: bool
+    max_repository_files: int
+    max_repository_source_bytes: int
 
 
 class GraphDocument(TypedDict, total=False):
@@ -107,31 +120,94 @@ def _infer_layer(path: str) -> str:
     return infer_architecture_layer(path)
 
 
-def _iter_graph_files(repo_root: Path) -> list[Path]:
-    paths: list[Path] = []
+def _scan_graph_source_files(repo_root: Path) -> tuple[list[Path], list[Path]]:
+    """Scan once while preserving legacy Python and bounded inventory scope."""
+
+    python_files: list[Path] = []
+    inventory_files: list[Path] = []
     for root, dirs, files in os.walk(repo_root):
         dirs[:] = sorted(
             directory
             for directory in dirs
             if (not directory.startswith(".") or directory == ".github")
-            and directory not in _GRAPH_SKIP_DIRECTORIES
+            and directory not in _SKIP_DIRECTORIES
         )
+        root_path = Path(root)
+        relative_root = root_path.relative_to(repo_root)
+        root_parts = set(relative_root.parts)
         for filename in sorted(files):
-            file_path = Path(root) / filename
-            if file_path.suffix.lower() not in _GRAPH_FILE_LANGUAGES:
+            file_path = root_path / filename
+            suffix = file_path.suffix.lower()
+            if suffix == ".py":
+                if ".github" not in root_parts:
+                    python_files.append(file_path)
                 continue
-            if filename.endswith(".graph.json"):
+            if suffix not in _GRAPH_FILE_LANGUAGES:
                 continue
-            paths.append(file_path)
-    return paths
+            if filename.lower().endswith(".graph.json"):
+                continue
+            if root_parts.intersection(_GRAPH_SKIP_DIRECTORIES - _SKIP_DIRECTORIES):
+                continue
+            inventory_files.append(file_path)
+    return python_files, inventory_files
 
 
-def _iter_inventory_files(repo_root: Path) -> list[Path]:
-    return [
-        path
-        for path in _iter_graph_files(repo_root)
-        if path.suffix.lower() != ".py"
-    ]
+def _bounded_graph_source_files(
+    repo_root: Path,
+    python_files: list[Path],
+    inventory_files: list[Path],
+    *,
+    max_files: int,
+    max_source_bytes: int,
+) -> tuple[list[Path], list[Path], dict[str, int | bool]]:
+    if not 0 < max_files <= _HARD_MAX_GRAPH_FILES:
+        raise ValueError(
+            f"max_graph_files must be between 1 and {_HARD_MAX_GRAPH_FILES}"
+        )
+    if not 0 < max_source_bytes <= _HARD_MAX_GRAPH_SOURCE_BYTES:
+        raise ValueError(
+            "max_graph_source_bytes must be between 1 and "
+            f"{_HARD_MAX_GRAPH_SOURCE_BYTES}"
+        )
+
+    python_set = set(python_files)
+    candidates = sorted(
+        [*python_files, *inventory_files],
+        key=lambda path: path.relative_to(repo_root).as_posix(),
+    )
+    sized: list[tuple[Path, int]] = []
+    total_bytes = 0
+    for file_path in candidates:
+        relative_path = file_path.relative_to(repo_root).as_posix()
+        try:
+            size_bytes = file_path.stat().st_size
+        except OSError as exc:
+            logger.warning("Could not stat graph source %s: %s", relative_path, exc)
+            continue
+        sized.append((file_path, size_bytes))
+        total_bytes += size_bytes
+
+    selected: list[Path] = []
+    selected_bytes = 0
+    truncated = False
+    for file_path, size_bytes in sized:
+        if len(selected) >= max_files or selected_bytes + size_bytes > max_source_bytes:
+            truncated = True
+            continue
+        selected.append(file_path)
+        selected_bytes += size_bytes
+
+    selected_python = [path for path in selected if path in python_set]
+    selected_inventory = [path for path in selected if path not in python_set]
+    return selected_python, selected_inventory, {
+        "repository_files_seen": len(sized),
+        "repository_files_included": len(selected),
+        "repository_bytes_seen": total_bytes,
+        "repository_bytes_included": selected_bytes,
+        "repository_truncated": truncated,
+        "max_repository_files": max_files,
+        "max_repository_source_bytes": max_source_bytes,
+    }
 
 
 def _iter_parsed_python_files(
@@ -178,20 +254,6 @@ def _add_inventory_file_nodes(
         node = _inventory_file_node(repo_root, file_path)
         if node is not None:
             nodes[node["node_id"]] = node
-
-
-def _iter_python_files(repo_root: Path) -> list[Path]:
-    paths: list[Path] = []
-    for root, dirs, files in os.walk(repo_root):
-        dirs[:] = sorted(
-            directory
-            for directory in dirs
-            if not directory.startswith(".") and directory not in _SKIP_DIRECTORIES
-        )
-        for filename in sorted(files):
-            if filename.endswith(".py"):
-                paths.append(Path(root) / filename)
-    return paths
 
 
 def _normalize_source_roots(
@@ -404,6 +466,8 @@ def generate_import_graph_document(
     canonical_dump_index_sha256: str,
     *,
     source_roots: Sequence[str] = (),
+    max_graph_files: int = _DEFAULT_MAX_GRAPH_FILES,
+    max_graph_source_bytes: int = _DEFAULT_MAX_GRAPH_SOURCE_BYTES,
 ) -> GraphDocument:
     """Build a deterministic repository file graph with static Python import edges."""
 
@@ -411,8 +475,14 @@ def generate_import_graph_document(
     edges: list[Edge] = []
     files_parsed = 0
     normalized_source_roots = _normalize_source_roots(repo_root, source_roots)
-    python_files = _iter_python_files(repo_root)
-    inventory_files = _iter_inventory_files(repo_root)
+    scanned_python_files, scanned_inventory_files = _scan_graph_source_files(repo_root)
+    python_files, inventory_files, source_coverage = _bounded_graph_source_files(
+        repo_root,
+        scanned_python_files,
+        scanned_inventory_files,
+        max_files=max_graph_files,
+        max_source_bytes=max_graph_source_bytes,
+    )
     module_index = _build_local_module_index(
         repo_root,
         python_files,
@@ -487,6 +557,17 @@ def generate_import_graph_document(
     unknown_layer_share = (
         unknown_layer_count / len(sorted_nodes) if sorted_nodes else 0.0
     )
+    repository_file_nodes = [
+        node for node in sorted_nodes if node.get("kind") == "file"
+    ]
+    repository_file_unknown_layer_count = sum(
+        1 for node in repository_file_nodes if node.get("layer") == "unknown"
+    )
+    repository_file_unknown_layer_share = (
+        repository_file_unknown_layer_count / len(repository_file_nodes)
+        if repository_file_nodes
+        else 0.0
+    )
     edge_counts_by_type: dict[str, int] = {}
     for edge in sorted_edges:
         edge_type = edge["edge_type"]
@@ -518,5 +599,7 @@ def generate_import_graph_document(
             "files_parsed": files_parsed,
             "edge_counts_by_type": edge_counts_by_type,
             "unknown_layer_share": unknown_layer_share,
+            "repository_file_unknown_layer_share": repository_file_unknown_layer_share,
+            **source_coverage,
         },
     }

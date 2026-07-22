@@ -1123,14 +1123,126 @@ def _unique_ranked(
     return ordered[:max_items], len(ordered) > max_items
 
 
+def _related_test_key(item: Mapping[str, Any]) -> tuple[str, str]:
+    return str(item.get("path")), str(item.get("evidence_type"))
+
+
+def _seed_related_test_diversity(
+    ordered: list[dict[str, Any]],
+    *,
+    max_items: int,
+) -> tuple[list[dict[str, Any]], set[tuple[str, str]], set[str]]:
+    selected: list[dict[str, Any]] = []
+    selected_keys: set[tuple[str, str]] = set()
+    selected_paths: set[str] = set()
+    for evidence_type in (
+        "graph_edge",
+        "changed_test_path",
+        "symbol_index_path_match",
+    ):
+        candidate = next(
+            (
+                item
+                for item in ordered
+                if item.get("evidence_type") == evidence_type
+                and str(item.get("path")) not in selected_paths
+            ),
+            None,
+        )
+        if candidate is None:
+            continue
+        path, _ = _related_test_key(candidate)
+        selected.append(candidate)
+        selected_keys.add((path, evidence_type))
+        selected_paths.add(path)
+        if len(selected) >= max_items:
+            break
+    return selected, selected_keys, selected_paths
+
+
+def _fill_related_test_budget(
+    ordered: list[dict[str, Any]],
+    selected: list[dict[str, Any]],
+    selected_keys: set[tuple[str, str]],
+    selected_paths: set[str],
+    *,
+    max_items: int,
+    prefer_distinct_path: bool,
+) -> None:
+    for item in ordered:
+        if len(selected) >= max_items:
+            return
+        key = _related_test_key(item)
+        path = key[0]
+        if key in selected_keys or (path in selected_paths) == prefer_distinct_path:
+            continue
+        selected.append(item)
+        selected_keys.add(key)
+        selected_paths.add(path)
+
+
+def _select_related_tests(
+    candidates: list[dict[str, Any]],
+    *,
+    max_items: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Bound related-test evidence without letting one evidence class starve others."""
+
+    rank = {
+        "graph_edge": 0,
+        "symbol_index_path_match": 1,
+        "changed_test_path": 2,
+    }
+    unique: dict[tuple[str, str], dict[str, Any]] = {}
+    for item in candidates:
+        path = item.get("path")
+        evidence_type = item.get("evidence_type")
+        if isinstance(path, str) and isinstance(evidence_type, str):
+            unique.setdefault((path, evidence_type), item)
+    ordered = sorted(
+        unique.values(),
+        key=lambda item: (
+            rank.get(str(item.get("evidence_type")), 99),
+            str(item.get("path", "")),
+        ),
+    )
+    selected, selected_keys, selected_paths = _seed_related_test_diversity(
+        ordered,
+        max_items=max_items,
+    )
+    _fill_related_test_budget(
+        ordered,
+        selected,
+        selected_keys,
+        selected_paths,
+        max_items=max_items,
+        prefer_distinct_path=True,
+    )
+    _fill_related_test_budget(
+        ordered,
+        selected,
+        selected_keys,
+        selected_paths,
+        max_items=max_items,
+        prefer_distinct_path=False,
+    )
+    return selected, len(ordered) > len(selected)
+
+
 def _changed_test_candidates(
     target_paths: set[str],
+    current_paths: set[str],
 ) -> list[dict[str, Any]]:
     return [
         {
             "path": path,
             "evidence_type": "changed_test_path",
             "reason": "changed_path_is_test",
+            "provenance_strength": "direct_diff",
+            "relationship_strength": "co_changed",
+            "current_read_evidence": (
+                "available" if path in current_paths else "unverified"
+            ),
         }
         for path in sorted(target_paths)
         if _is_test_path(path)
@@ -1140,6 +1252,7 @@ def _changed_test_candidates(
 def _related_tests(
     *,
     target_paths: set[str],
+    current_paths: set[str],
     all_relations: list[dict[str, Any]],
     symbol_index: Mapping[str, Any],
     max_items: int,
@@ -1149,18 +1262,10 @@ def _related_tests(
         for item in _items(symbol_index.get("symbols"))
         if isinstance(item, Mapping) and isinstance(item.get("path"), str)
     }
-    candidates = _changed_test_candidates(target_paths)
-    candidates.extend(_graph_test_candidates(all_relations))
+    candidates = _graph_test_candidates(all_relations)
+    candidates.extend(_changed_test_candidates(target_paths, current_paths))
     candidates.extend(_conventional_test_candidates(target_paths, known_paths))
-    return _unique_ranked(
-        candidates,
-        rank={
-            "changed_test_path": 0,
-            "graph_edge": 1,
-            "symbol_index_path_match": 2,
-        },
-        max_items=max_items,
-    )
+    return _select_related_tests(candidates, max_items=max_items)
 
 
 def _query_items(query_context: Any) -> list[dict[str, Any]]:
@@ -1715,6 +1820,13 @@ def build_agent_impact_context(
         max_items=request.max_items,
     )
     paths.update(derived_paths)
+    _nodes_by_id, id_by_path = _node_index(graph)
+    current_paths = set(id_by_path)
+    current_paths.update(
+        str(item["path"])
+        for item in _items(symbols.get("symbols"))
+        if isinstance(item, Mapping) and isinstance(item.get("path"), str)
+    )
     relations, all_relations, peers, relations_truncated = _relations(
         graph,
         target_paths=paths,
@@ -1722,6 +1834,7 @@ def build_agent_impact_context(
     )
     related_tests, tests_truncated = _related_tests(
         target_paths=paths,
+        current_paths=current_paths,
         all_relations=all_relations,
         symbol_index=symbols,
         max_items=request.max_items,
@@ -1787,7 +1900,6 @@ def build_agent_impact_context(
             max_items=request.max_items,
         )
 
-    _nodes_by_id, id_by_path = _node_index(graph)
     gaps.extend(
         _target_gaps(
             paths=paths,
@@ -1841,6 +1953,10 @@ def build_agent_impact_context(
             "composition": {
                 "delta_context_input": "changed_paths_only",
                 "does_not_parse_or_apply_diff": True,
+                "changed_test_paths_are_cochange_only": True,
+                "changed_test_paths_establish_relationship": False,
+                "changed_test_paths_establish_coverage": False,
+                "current_read_evidence_from_graph_or_symbols_only": True,
                 "query_context_used": bool(_query_items(query_context)),
             },
         }
@@ -1852,11 +1968,15 @@ def build_agent_impact_context(
         )
         result["edit_context"] = {
             "recommended_first_reads": _first_reads(
-                target_paths=paths,
+                target_paths=paths & current_paths,
                 target_symbols=target_symbols,
                 call_relations=selected_call_relations,
                 relations=relations,
-                related_tests=related_tests,
+                related_tests=[
+                    item
+                    for item in related_tests
+                    if item.get("current_read_evidence") != "unverified"
+                ],
                 supporting=supporting,
                 max_items=request.max_items,
             ),

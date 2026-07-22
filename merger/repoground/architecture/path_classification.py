@@ -19,7 +19,7 @@ _PRODUCT_LAYER_BY_SEGMENT = {
     "service": "service",
 }
 _SCRIPT_SEGMENTS = {"scripts", "tools"}
-_TEST_SEGMENTS = {"test", "tests"}
+_TEST_SEGMENTS = {"__tests__", "test", "tests"}
 _TEST_NAME_SUFFIXES = {".js", ".jsx", ".py", ".rs", ".svelte", ".ts", ".tsx"}
 
 
@@ -35,7 +35,7 @@ def is_test_path(path: str) -> bool:
         ".test." in name or ".spec." in name or "_test." in name
     )
     return (
-        name.startswith("test_")
+        (suffix in _TEST_NAME_SUFFIXES and name.startswith("test_"))
         or marked_test_name
         or bool(set(parsed.parts).intersection(_TEST_SEGMENTS))
     )

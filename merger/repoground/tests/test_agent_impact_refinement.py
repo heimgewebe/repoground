@@ -75,7 +75,7 @@ def test_resolved_query_candidates_recognize_cross_language_test_names() -> None
     ]
 
 
-def test_refinement_prioritizes_changed_test_path_evidence() -> None:
+def test_refinement_prioritizes_relationship_evidence_over_co_changed_tests() -> None:
     base = {
         "status": "available",
         "related_tests": [
@@ -105,6 +105,12 @@ def test_refinement_prioritizes_changed_test_path_evidence() -> None:
                     "qualified_name": None,
                     "reason": "related_test:changed_test_path",
                 },
+                {
+                    "path": "tests/test_graph.py",
+                    "range_ref": None,
+                    "qualified_name": None,
+                    "reason": "related_test:graph_edge",
+                },
             ],
             "related_test_count": 2,
         },
@@ -113,14 +119,15 @@ def test_refinement_prioritizes_changed_test_path_evidence() -> None:
     refined = refine_agent_impact_context(base, _query_context(), max_items=20)
 
     assert [item["evidence_type"] for item in refined["related_tests"]] == [
-        "changed_test_path",
         "graph_edge",
+        "changed_test_path",
     ]
     assert [
         item["reason"]
         for item in refined["edit_context"]["recommended_first_reads"]
     ] == [
         "target_path",
+        "related_test:graph_edge",
         "related_test:changed_test_path",
     ]
 

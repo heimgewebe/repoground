@@ -63,7 +63,15 @@
         "files_seen": { "type": "integer", "minimum": 0 },
         "files_parsed": { "type": "integer", "minimum": 0 },
         "edge_counts_by_type": { "type": "object" },
-        "unknown_layer_share": { "type": "number", "minimum": 0, "maximum": 1 }
+        "unknown_layer_share": { "type": "number", "minimum": 0, "maximum": 1 },
+        "repository_file_unknown_layer_share": { "type": "number", "minimum": 0, "maximum": 1 },
+        "repository_files_seen": { "type": "integer", "minimum": 0 },
+        "repository_files_included": { "type": "integer", "minimum": 0 },
+        "repository_bytes_seen": { "type": "integer", "minimum": 0 },
+        "repository_bytes_included": { "type": "integer", "minimum": 0 },
+        "repository_truncated": { "type": "boolean" },
+        "max_repository_files": { "type": "integer", "minimum": 1 },
+        "max_repository_source_bytes": { "type": "integer", "minimum": 1 }
       }
     }
   }

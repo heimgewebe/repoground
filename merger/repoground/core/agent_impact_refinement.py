@@ -14,9 +14,9 @@ from typing import Any
 from merger.repoground.architecture.path_classification import is_test_path as _is_test_path
 
 _EVIDENCE_RANK = {
-    "changed_test_path": 0,
-    "graph_edge": 1,
-    "symbol_index_path_match": 2,
+    "graph_edge": 0,
+    "symbol_index_path_match": 1,
+    "changed_test_path": 2,
     "resolved_query": 3,
     "heuristic": 4,
 }
@@ -152,11 +152,11 @@ def _read_priority(reason: Any) -> int:
         return 1
     if text.endswith("_graph_relation"):
         return 2
-    if text == "related_test:changed_test_path":
-        return 3
     if text == "related_test:graph_edge":
-        return 4
+        return 3
     if text == "related_test:symbol_index_path_match":
+        return 4
+    if text == "related_test:changed_test_path":
         return 5
     if text == "related_test:resolved_query":
         return 6
