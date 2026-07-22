@@ -306,6 +306,34 @@ def git_common_dir(repo: Path) -> Path:
     return (raw if raw.is_absolute() else repo / raw).resolve()
 
 
+def generator_repository_key() -> str | None:
+    remote = run(
+        ["git", "-C", str(REPOGROUND_REPO), "remote", "get-url", "origin"],
+        check=False,
+    ).stdout.strip()
+    parsed = parse_github_remote(remote)
+    if not parsed:
+        return None
+    owner, repo = parsed
+    return f"{owner}/{repo}"
+
+
+def prioritize_generator_repository(entries: list[RepoEntry]) -> list[RepoEntry]:
+    """Keep the generator repository ahead of the bounded publication backlog.
+
+    A generator-input change can invalidate every fleet fingerprint at once. The
+    per-run publication limit remains intact, but the repository supplying the
+    generator must converge in the first bounded batch so RepoGround does not
+    keep serving a stale bundle of itself while unrelated repositories drain.
+    Python's sort is stable, so discovery order for every other repository is
+    preserved.
+    """
+    generator_key = generator_repository_key()
+    if generator_key is None:
+        return list(entries)
+    return sorted(entries, key=lambda entry: entry.key != generator_key)
+
+
 def assert_managed_worktree_identity(path: Path, expected_repo: Path) -> None:
     if path.is_symlink() or not path.is_dir():
         raise RuntimeError(f"managed worktree path is not a real directory: {path}")
@@ -2128,6 +2156,8 @@ def main(argv: list[str]) -> int:
             )
         )
         return 0
+
+    entries = prioritize_generator_repository(entries)
 
     lock = acquire_lock()
     if lock is None:
