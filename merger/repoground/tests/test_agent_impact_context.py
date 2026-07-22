@@ -618,6 +618,7 @@ def test_impact_context_preserves_source_diversity_when_relations_are_bounded() 
     assert len(result["relations"]) == 2
     assert len(architecture_relations) == 1
     assert len(call_relations) == 1
+    assert result["relations"][0] == call_relations[0]
     assert call_relations[0]["freshness"]["status"] == "coherent"
     assert result["truncation"]["relations"] is True
 

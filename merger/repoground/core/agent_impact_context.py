@@ -1596,7 +1596,10 @@ def _select_impact_relations(
         selected = combined[:max_items]
         return selected, len(combined) > len(selected)
 
-    selected = [architecture_relations[0], call_relations[0]]
+    # Put coherent call evidence first so downstream byte-bounded consumers
+    # retain the more specific causal relation when only one relation fits.
+    # The max_items == 1 branch above intentionally preserves legacy behavior.
+    selected = [call_relations[0], architecture_relations[0]]
     remaining = max_items - len(selected)
     if remaining > 0:
         selected.extend(architecture_relations[1 : 1 + remaining])
