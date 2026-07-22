@@ -7,7 +7,7 @@
         "src/db.py"
       ],
       "baseline_recall": 0.25,
-      "context_path_reduction_ratio": -6.0,
+      "context_path_reduction_ratio": -4.0,
       "expected_paths": [
         "src/db.py",
         "tests/test_app.py",
@@ -15,12 +15,10 @@
         "contracts/app.schema.json"
       ],
       "id": "app-structural-impact",
-      "impact_context_path_count": 7,
+      "impact_context_path_count": 5,
       "impact_paths": [
         "src/app.py",
         "tests/test_app.py",
-        "merger/lenskit/tests/test_app.py",
-        "src/tests/test_app.py",
         "contracts/app.schema.json",
         "docs/app.md",
         "src/db.py"
@@ -35,19 +33,17 @@
         "src/app.py"
       ],
       "baseline_recall": 0.3333333333333333,
-      "context_path_reduction_ratio": -6.0,
+      "context_path_reduction_ratio": -4.0,
       "expected_paths": [
         "src/app.py",
         "tests/test_app.py",
         "docs/app.md"
       ],
       "id": "app-edit-reading-set",
-      "impact_context_path_count": 7,
+      "impact_context_path_count": 5,
       "impact_paths": [
         "src/app.py",
         "tests/test_app.py",
-        "merger/lenskit/tests/test_app.py",
-        "src/tests/test_app.py",
         "contracts/app.schema.json",
         "docs/app.md",
         "src/db.py"
@@ -80,8 +76,8 @@
   "metrics": {
     "baseline_mean_context_path_count": 1.0,
     "baseline_target_recall": 0.29166666666666663,
-    "context_path_reduction_ratio": -6.0,
-    "impact_mean_context_path_count": 7.0,
+    "context_path_reduction_ratio": -4.0,
+    "impact_mean_context_path_count": 5.0,
     "impact_target_recall": 1.0,
     "minimum_context_path_reduction_at_equal_or_better_recall": 0.2,
     "minimum_target_recall_advantage": 0.2,

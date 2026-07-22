@@ -17,11 +17,13 @@ Der RepoGround-Architekturgraph (`graph_index.json`) dient nicht nur der Visuali
 * **Bedeutung:** Ein Knoten repräsentiert eine strukturelle Code-Einheit. Im Standardfall entspricht dies einer Datei (File-Node). Die Granularität kann später auf Module oder Klassen erweitert werden.
 * **Identität (`node_id`):** Eindeutiger Identifier. Für Dateien wird üblicherweise `file:<path>` oder der reine `<path>` verwendet.
 * **Erreichbarkeit:** Ein Knoten gilt als erreichbar, wenn ein Pfad von mindestens einem Entrypoint zu ihm existiert.
+* **Inventarknoten:** Datei-Knoten für nicht-Pythonische Quellen können reine Inventar- und Navigationsknoten sein. Ihre Existenz belegt die Datei im gebundenen Retrieval-Snapshot, aber keine Abhängigkeit, Laufzeitkausalität oder Erreichbarkeit.
 
 ### 2.2 Edge (Kante)
 * **Bedeutung:** Eine gerichtete Kante (`src` → `dst`) repräsentiert eine Abhängigkeit.
 * **Beispiel:** `src` importiert oder ruft `dst` auf. Wenn `A` von `B` abhängt (z.B. `A` importiert `B`), zeigt die Kante von `A` nach `B`.
 * **Traversierung:** Die Traversierung für die Distanzberechnung erfolgt entlang dieser gerichteten Kanten (von den Entrypoints in die Tiefe der Abhängigkeiten).
+* **Producer-Grenze:** Der aktuelle `architecture.graph.v1`-Producer erzeugt statische Importkanten ausschließlich aus geparstem Python-AST. Cross-Language-Dateiknoten werden nicht still zu Kanten hochgestuft. Das Fehlen einer Kante für Rust, TypeScript, Svelte, SQL, YAML oder andere Inventarsprachen ist daher kein Beleg für das Fehlen einer fachlichen Abhängigkeit.
 
 ### 2.3 Entrypoint
 * **Bedeutung:** Entrypoints sind definierte Einstiegspunkte in das System (z.B. `main.py`, API-Routen, CLI-Befehle).
@@ -68,6 +70,7 @@ final_score = score_pre * current_penalty
   * `entrypoint_boost = 0.0`
 
 ### 3.3 Caps und Begrenzungen
+* Der Producer begrenzt den verarbeiteten Repository-Snapshot deterministisch auf maximal 50.000 Quelldateien und 512 MiB Quellmaterial. `coverage.repository_truncated` zeigt eine gekappte Auswahl explizit an; `repository_files_*` und `repository_bytes_*` machen Umfang und Grenze sichtbar.
 * Der Graph-Bonus ist durch die Gewichtungsfaktoren (`w_graph`, `w_entry`) strikt nach oben begrenzt.
 * Ein lexikalischer "perfect match" ohne Graph-Verbindung wird typischerweise immer noch höher gerankt als ein schwacher lexikalischer Treffer mit perfekter Graph-Verbindung, abhängig von der exakten Parameterisierung der Gewichte.
 

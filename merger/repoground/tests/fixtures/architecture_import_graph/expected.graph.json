@@ -383,6 +383,14 @@
     "edge_counts_by_type": {
       "import": 18
     },
-    "unknown_layer_share": 0.9411764705882353
+    "unknown_layer_share": 0.9411764705882353,
+    "repository_file_unknown_layer_share": 0.9,
+    "repository_files_seen": 10,
+    "repository_files_included": 10,
+    "repository_bytes_seen": 362,
+    "repository_bytes_included": 362,
+    "repository_truncated": false,
+    "max_repository_files": 50000,
+    "max_repository_source_bytes": 536870912
   }
 }

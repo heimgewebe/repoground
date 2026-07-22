@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 from fastapi.testclient import TestClient
 
+import merger.repoground.service.app as service_app_module
 from merger.repoground.service.app import app, init_service, verify_token
 
 @pytest.fixture
@@ -80,6 +81,45 @@ def test_list_all_artifacts(lifecycle_client: TestClient):
     assert data[2]["id"] == "atlas-1000"
     assert data[2]["status"] == "failed"
     assert data[2]["error"] == "Failed early"
+
+def test_list_and_latest_ignore_non_primary_atlas_json_sidecars(
+    lifecycle_client: TestClient,
+):
+    """Atlas receipts/sidecars sharing the prefix are not API artifacts."""
+
+    merges = service_app_module.state.merges_dir
+    assert merges is not None
+    (merges / "atlas-repos-terminal-20260710T221457Z.receipt.json").write_text(
+        json.dumps({"status": "pass", "allocated_bytes": 123}),
+        encoding="utf-8",
+    )
+    (merges / "atlas-2000.topology.json").write_text(
+        json.dumps({"nodes": [], "root_path": "/test"}),
+        encoding="utf-8",
+    )
+    (merges / "atlas-repos-terminal-20260710T221457Z.json").write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "kind": "repoground.atlas.terminal_snapshot",
+                "root": "/external-observation",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    listed = lifecycle_client.get("/api/atlas")
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [
+        "atlas-3000",
+        "atlas-2000",
+        "atlas-1000",
+    ]
+
+    latest = lifecycle_client.get("/api/atlas/latest")
+    assert latest.status_code == 200
+    assert latest.json()["id"] == "atlas-2000"
+
 
 def test_get_latest_artifact_ignores_running_and_failed(lifecycle_client: TestClient):
     response = lifecycle_client.get("/api/atlas/latest")

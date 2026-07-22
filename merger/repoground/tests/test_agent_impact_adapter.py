@@ -91,6 +91,26 @@ def _impact_adapter(
                 "run_id": "run-1",
                 "canonical_dump_index_sha256": DIGEST,
                 "language": "python",
+                "evidence_model": {
+                    "S0": "unresolved or ambiguous static candidate",
+                    "S1": "one uniquely resolved local target",
+                },
+                "resolution_statuses": [
+                    "resolved",
+                    "candidate",
+                    "ambiguous",
+                    "unresolved",
+                ],
+                "relation_types": ["calls", "constructs"],
+                "call_count": 2,
+                "resolution_counts": {
+                    "resolved": 2,
+                    "candidate": 0,
+                    "ambiguous": 0,
+                    "unresolved": 0,
+                },
+                "evidence_counts": {"S0": 0, "S1": 2},
+                "relation_counts": {"calls": 2, "constructs": 0},
                 "calls": [
                     {
                         "path": "tests/test_demo.py",
@@ -142,6 +162,16 @@ def _impact_adapter(
                 "skipped_files_count": 0,
                 "skipped_errors": [],
                 "skipped_errors_total_count": 0,
+                "does_not_establish": [
+                    "complete_call_graph",
+                    "runtime_reachability",
+                    "dynamic_dispatch_resolution",
+                    "dependency_completeness",
+                    "import_success",
+                    "test_sufficiency",
+                    "review_completeness",
+                    "merge_readiness",
+                ],
             }
         )
         + "\n",
@@ -308,6 +338,206 @@ def test_agent_impact_adapter_composes_integrity_checked_reads_without_writes(
     )
 
 
+def test_agent_impact_adapter_skips_large_call_graph_without_target_symbols(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    adapter, _bundle, _config = _impact_adapter(tmp_path)
+
+    def unexpected_projection(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("call graph projection should not run without target symbols")
+
+    monkeypatch.setattr(
+        "merger.repoground.core.agent_impact_adapter.project_call_graph_for_impact",
+        unexpected_projection,
+    )
+    result = adapter.agent_impact_context(
+        "demo",
+        target_path="docs/not-a-python-symbol.md",
+        mode="impact",
+        include_query_context=False,
+    )
+
+    assert result["call_graph_projection"]["status"] == "skipped"
+    assert result["call_graph_projection"]["reason"] == "no_target_symbols"
+    assert not any(
+        item.get("source") == "python_call_graph_json"
+        for item in result.get("source_statuses", [])
+    )
+
+
+def test_agent_impact_adapter_projects_coherent_call_graph_relations_in_impact_mode(
+    tmp_path: Path,
+) -> None:
+    adapter, _bundle, _config = _impact_adapter(tmp_path)
+
+    result = adapter.agent_impact_context(
+        "demo",
+        target_symbol="hello_adapter",
+        mode="impact",
+        include_query_context=False,
+    )
+
+    call_relations = [
+        item
+        for item in result["relations"]
+        if isinstance(item.get("freshness"), dict)
+        and item["freshness"].get("source") == "python_call_graph_json"
+    ]
+    assert result["status"] == "available"
+    assert "edit_context" not in result
+    assert call_relations
+    assert {item["relation_kind"] for item in call_relations} == {
+        "direct_caller",
+        "direct_callee",
+    }
+    assert all(item["freshness"]["status"] == "coherent" for item in call_relations)
+
+
+def test_agent_impact_adapter_keeps_exact_later_path_reachable_for_call_graph(
+    tmp_path: Path,
+) -> None:
+    adapter, bundle, _config = _impact_adapter(tmp_path)
+    root = bundle["manifest"].parent
+    symbol_path = root / "demo.python_symbol_index.json"
+    symbol_document = json.loads(symbol_path.read_text(encoding="utf-8"))
+    symbol_document["symbols"] = [
+        {
+            "id": "sym-early-exact",
+            "kind": "function",
+            "name": "needle",
+            "qualified_name": "a_many.needle",
+            "module": "a_many",
+            "path": "src/a_many.py",
+            "start_line": 1,
+            "end_line": 2,
+            "range_ref": "file:src/a_many.py#L1-L2",
+            "decorators": [],
+        },
+        {
+            "id": "sym-early-2",
+            "kind": "function",
+            "name": "early_two",
+            "qualified_name": "a_many.early_two",
+            "module": "a_many",
+            "path": "src/a_many.py",
+            "start_line": 10,
+            "end_line": 11,
+            "range_ref": "file:src/a_many.py#L10-L11",
+            "decorators": [],
+        },
+        {
+            "id": "sym-peer",
+            "kind": "function",
+            "name": "peer",
+            "qualified_name": "peer.peer",
+            "module": "peer",
+            "path": "src/peer.py",
+            "start_line": 3,
+            "end_line": 5,
+            "range_ref": "file:src/peer.py#L3-L5",
+            "decorators": [],
+        },
+        {
+            "id": "sym-late-non-target",
+            "kind": "function",
+            "name": "alpha",
+            "qualified_name": "z_late.alpha",
+            "module": "z_late",
+            "path": "src/z_late.py",
+            "start_line": 1,
+            "end_line": 1,
+            "range_ref": "file:src/z_late.py#L1-L1",
+            "decorators": [],
+        },
+        {
+            "id": "sym-late",
+            "kind": "function",
+            "name": "needle",
+            "qualified_name": "z_late.needle",
+            "module": "z_late",
+            "path": "src/z_late.py",
+            "start_line": 2,
+            "end_line": 3,
+            "range_ref": "file:src/z_late.py#L2-L3",
+            "decorators": [],
+        },
+    ]
+    symbol_path.write_text(json.dumps(symbol_document) + "\n", encoding="utf-8")
+    _seal_existing_artifact(bundle, "python_symbol_index_json")
+
+    call_graph_path = root / "demo.python_call_graph.json"
+    call_graph = json.loads(call_graph_path.read_text(encoding="utf-8"))
+    call_graph.update(
+        {
+            "call_count": 1,
+            "resolution_counts": {
+                "resolved": 1,
+                "candidate": 0,
+                "ambiguous": 0,
+                "unresolved": 0,
+            },
+            "evidence_counts": {"S0": 0, "S1": 1},
+            "relation_counts": {"calls": 1, "constructs": 0},
+            "calls": [
+                {
+                    "path": "src/z_late.py",
+                    "start_line": 3,
+                    "start_col": 4,
+                    "end_line": 3,
+                    "end_col": 10,
+                    "range_ref": "file:src/z_late.py#L3-L3",
+                    "callee_expression": "peer",
+                    "simple_name": "peer",
+                    "caller_scope": "symbol",
+                    "caller_symbol_id": "sym-late",
+                    "caller_qualified_name": "z_late.needle",
+                    "caller_kind": "function",
+                    "caller_start_line": 2,
+                    "caller_end_line": 3,
+                    "relation_type": "calls",
+                    "evidence_level": "S1",
+                    "resolution_status": "resolved",
+                    "resolution_reason": "unique_symbol_resolution",
+                    "resolved_target_ids": ["sym-peer"],
+                    "candidate_target_ids": [],
+                }
+            ],
+        }
+    )
+    call_graph_path.write_text(json.dumps(call_graph) + "\n", encoding="utf-8")
+    _seal_existing_artifact(bundle, "python_call_graph_json")
+
+    result = adapter.agent_impact_context(
+        "demo",
+        target_symbol="needle",
+        changed_paths=["src/a_many.py", "src/z_late.py"],
+        mode="impact",
+        max_items=2,
+        include_query_context=False,
+    )
+
+    assert [item["id"] for item in result["target_symbols"]] == [
+        "sym-early-exact",
+        "sym-late",
+    ]
+    assert result["call_graph_projection"]["selected_call_count"] == 1
+    call_relations = [
+        item
+        for item in result["relations"]
+        if isinstance(item.get("freshness"), dict)
+        and item["freshness"].get("source") == "python_call_graph_json"
+    ]
+    assert len(call_relations) == 1
+    relation = call_relations[0]
+    assert relation["relation_kind"] == "direct_callee"
+    assert relation["symbol_id"] == "sym-peer"
+    assert relation["target_symbol_ids"] == ["sym-late"]
+    assert relation["evidence_level"] == "S1"
+    assert relation["resolution_status"] == "resolved"
+    assert relation["freshness"]["status"] == "coherent"
+
+
 def test_agent_impact_adapter_dispatches_and_validates_arguments(
     tmp_path: Path,
 ) -> None:
@@ -348,6 +578,32 @@ def test_agent_impact_adapter_blocks_tampered_required_artifact(
         gap.get("reason") == "required_source_untrusted"
         for gap in result["gaps"]
     )
+
+
+
+def test_agent_impact_adapter_degrades_tampered_optional_call_graph(
+    tmp_path: Path,
+) -> None:
+    adapter, bundle, _config = _impact_adapter(tmp_path)
+    call_graph_path = (
+        bundle["manifest"].parent / "demo.python_call_graph.json"
+    )
+    call_graph_path.write_text("{}\n", encoding="utf-8")
+
+    result = adapter.agent_impact_context(
+        "demo",
+        target_symbol="hello_adapter",
+        mode="edit",
+        include_query_context=False,
+    )
+
+    assert result["status"] == "partial"
+    assert result["edit_context"]["direct_caller_count"] == 0
+    assert result["edit_context"]["direct_callee_count"] == 0
+    gap = result["edit_context"]["call_graph_coverage_gaps"][0]
+    assert gap["kind"] == "call_graph_source_untrusted"
+    assert gap["freshness"]["source"] == "python_call_graph_json"
+    assert gap["freshness"]["status"] == "blocked"
 
 
 def test_agent_impact_cli_uses_registered_snapshot(

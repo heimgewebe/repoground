@@ -11,11 +11,14 @@ from copy import deepcopy
 from pathlib import PurePosixPath
 from typing import Any
 
+from merger.repoground.architecture.path_classification import is_test_path as _is_test_path
+
 _EVIDENCE_RANK = {
     "graph_edge": 0,
     "symbol_index_path_match": 1,
-    "resolved_query": 2,
-    "heuristic": 3,
+    "changed_test_path": 2,
+    "resolved_query": 3,
+    "heuristic": 4,
 }
 
 
@@ -46,16 +49,6 @@ def is_repository_relative_path(value: Any) -> bool:
         return False
     path = PurePosixPath(text)
     return bool(path.parts)
-
-
-def _is_test_path(path: str) -> bool:
-    name = PurePosixPath(path).name
-    return (
-        "/tests/" in f"/{path}"
-        or path.startswith("tests/")
-        or name.startswith("test_")
-        or name.endswith("_test.py")
-    )
 
 
 def _query_items(query_context: Any) -> list[dict[str, Any]]:
@@ -120,11 +113,7 @@ def _valid_test_candidates(current: Any) -> list[dict[str, Any]]:
 
 def _suppress_heuristics(
     candidates: list[dict[str, Any]],
-    *,
-    resolved_available: bool,
 ) -> tuple[list[dict[str, Any]], int]:
-    if not resolved_available:
-        return candidates, 0
     retained = [
         item
         for item in candidates
@@ -139,10 +128,7 @@ def _ordered_related_tests(
     *,
     max_items: int,
 ) -> tuple[list[dict[str, Any]], bool, int]:
-    candidates, suppressed = _suppress_heuristics(
-        _valid_test_candidates(current),
-        resolved_available=bool(resolved),
-    )
+    candidates, suppressed = _suppress_heuristics(_valid_test_candidates(current))
     candidates.extend(resolved)
     unique: dict[tuple[str, str], dict[str, Any]] = {}
     for item in candidates:
@@ -170,29 +156,26 @@ def _read_priority(reason: Any) -> int:
         return 3
     if text == "related_test:symbol_index_path_match":
         return 4
-    if text == "related_test:resolved_query":
+    if text == "related_test:changed_test_path":
         return 5
-    if text == "related_test:heuristic":
+    if text == "related_test:resolved_query":
         return 6
-    if text.startswith("supporting_"):
+    if text == "related_test:heuristic":
         return 7
-    return 8
+    if text.startswith("supporting_"):
+        return 8
+    return 9
 
 
 def _valid_first_reads(
     edit_context: Mapping[str, Any],
-    *,
-    resolved_available: bool,
 ) -> list[dict[str, Any]]:
     return [
         dict(item)
         for item in _items(edit_context.get("recommended_first_reads"))
         if isinstance(item, Mapping)
         and is_repository_relative_path(item.get("path"))
-        and not (
-            resolved_available
-            and item.get("reason") == "related_test:heuristic"
-        )
+        and item.get("reason") != "related_test:heuristic"
     ]
 
 
@@ -205,10 +188,7 @@ def _refine_first_reads(
     if not isinstance(edit_context, Mapping):
         return None
     refined = dict(edit_context)
-    reads = _valid_first_reads(
-        edit_context,
-        resolved_available=bool(resolved),
-    )
+    reads = _valid_first_reads(edit_context)
     reads.extend(
         {
             "path": item["path"],
@@ -274,7 +254,8 @@ def refine_agent_impact_context(
         {
             "resolved_query_test_candidates_added": len(resolved),
             "heuristic_test_candidates_suppressed": suppressed,
-            "heuristics_suppressed_only_with_resolved_query_tests": True,
+            "heuristics_suppressed_only_with_resolved_query_tests": False,
+            "heuristic_test_candidates_always_suppressed": True,
             "resolved_query_tests_are_graph_edges": False,
             "resolved_query_tests_establish_coverage": False,
         }

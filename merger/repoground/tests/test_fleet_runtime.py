@@ -634,13 +634,56 @@ def test_generation_environment_redirects_runtime_artifacts(tmp_path: Path) -> N
     env = module.generation_environment(runtime)
 
     assert env["PYTHONDONTWRITEBYTECODE"] == "1"
-    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env.get("PYTHONNOUSERSITE") == os.environ.get("PYTHONNOUSERSITE")
     assert Path(env["PYTHONPYCACHEPREFIX"]) == runtime / "pycache"
     assert Path(env["XDG_CACHE_HOME"]) == runtime / "xdg-cache"
     assert Path(env["PIP_CACHE_DIR"]) == runtime / "pip-cache"
     assert Path(env["TMPDIR"]) == runtime / "tmp"
     for key in ("PYTHONPYCACHEPREFIX", "XDG_CACHE_HOME", "PIP_CACHE_DIR", "TMPDIR"):
         assert Path(env[key]).is_dir()
+
+
+def test_generator_repository_is_prioritized_without_reordering_other_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = load_publisher()
+    entries = [
+        module.RepoEntry(
+            key=key,
+            owner=key.split("/", 1)[0],
+            repo=key.split("/", 1)[1],
+            path=Path("/tmp") / key.split("/", 1)[1],
+            remote=f"git@github.com:{key}.git",
+        )
+        for key in (
+            "heimgewebe/alpha",
+            "heimgewebe/beta",
+            "heimgewebe/repoground",
+            "heimgewebe/zeta",
+        )
+    ]
+    monkeypatch.setattr(
+        module, "generator_repository_key", lambda: "heimgewebe/repoground"
+    )
+
+    prioritized = module.prioritize_generator_repository(entries)
+
+    assert [entry.key for entry in prioritized] == [
+        "heimgewebe/repoground",
+        "heimgewebe/alpha",
+        "heimgewebe/beta",
+        "heimgewebe/zeta",
+    ]
+
+
+def test_generator_repository_priority_is_applied_before_publication_loop() -> None:
+    source = PUBLISHER.read_text(encoding="utf-8")
+    inventory_return = source.index("if args.inventory:")
+    priority = source.index("entries = prioritize_generator_repository(entries)")
+    lock = source.index("lock = acquire_lock()", priority)
+    loop = source.index("for entry in entries:", lock)
+
+    assert inventory_return < priority < lock < loop
 
 
 def test_changed_source_hygiene_preflight_runs_before_publication_limit() -> None:

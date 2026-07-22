@@ -1,47 +1,12 @@
 {
   "kind": "repoground.c901_baseline",
   "version": "1.0",
-  "observed_on": "2026-07-18",
+  "observed_on": "2026-07-22",
   "ruff_config": "ruff-ci.toml",
   "threshold": 10,
-  "finding_count": 212,
+  "finding_count": 203,
   "max_complexity": 170,
   "findings": [
-    {
-      "path": "merger/omniwandler/omniwandler.py",
-      "qualified_name": "OmniWandlerConfig._parse_toml_fallback",
-      "max_complexity": 13
-    },
-    {
-      "path": "merger/omniwandler/omniwandler.py",
-      "qualified_name": "OmniWandlerConfig.load",
-      "max_complexity": 15
-    },
-    {
-      "path": "merger/omniwandler/omniwandler.py",
-      "qualified_name": "OmniWandlerCore.run",
-      "max_complexity": 16
-    },
-    {
-      "path": "merger/omniwandler/omniwandler.py",
-      "qualified_name": "OmniWandlerUI._build_view",
-      "max_complexity": 16
-    },
-    {
-      "path": "merger/omniwandler/omniwandler.py",
-      "qualified_name": "OmniWandlerUI._convert_selected",
-      "max_complexity": 17
-    },
-    {
-      "path": "merger/omniwandler/omniwandler.py",
-      "qualified_name": "detect_wandler_hub",
-      "max_complexity": 22
-    },
-    {
-      "path": "merger/omniwandler/omniwandler.py",
-      "qualified_name": "main",
-      "max_complexity": 12
-    },
     {
       "path": "merger/repoground/adapters/atlas.py",
       "qualified_name": "AtlasScanner.merge_folder",
@@ -926,16 +891,6 @@
       "path": "merger/repoground/tests/test_source_acquisition.py",
       "qualified_name": "test_remote_snapshot_does_not_persist_remote_url_credentials_in_cache",
       "max_complexity": 11
-    },
-    {
-      "path": "merger/repomerger/repomerger.py",
-      "qualified_name": "build_tree",
-      "max_complexity": 11
-    },
-    {
-      "path": "merger/repomerger/repomerger.py",
-      "qualified_name": "write_report",
-      "max_complexity": 30
     },
     {
       "path": "scripts/ci/check_browser_gate_environment.py",

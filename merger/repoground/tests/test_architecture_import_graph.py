@@ -167,6 +167,102 @@ def test_ambiguous_local_module_name_remains_external(tmp_path):
     assert ("file:consumer.py", "file:foo/__init__.py") not in edges
 
 
+def test_graph_includes_bounded_cross_language_file_inventory(tmp_path):
+    files = {
+        ".github/workflows/ci.yml": "name: ci\n",
+        "apps/api/migrations/001.sql": "select 1;\n",
+        "apps/api/src/lib.rs": "pub fn run() {}\n",
+        "apps/web/src/Component.svelte": "<div />\n",
+        "apps/web/src/Component.test.ts": "test('x', () => {})\n",
+        "docs/guide.md": "# Guide\n",
+        "config/settings.toml": "enabled = true\n",
+        "build/legacy.py": "import os\n",
+        ".cache/ignored.ts": "export const ignored = true\n",
+        "vendor.bin": "ignored\n",
+    }
+    for relative, content in files.items():
+        target = tmp_path / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    doc = generate_import_graph_document(tmp_path, "run", "0" * 64)
+    nodes = {item["path"]: item for item in doc["nodes"] if item["kind"] == "file"}
+
+    assert nodes[".github/workflows/ci.yml"]["language"] == "yaml"
+    assert nodes["apps/api/migrations/001.sql"]["language"] == "sql"
+    assert nodes["apps/api/src/lib.rs"]["language"] == "rust"
+    assert nodes["apps/web/src/Component.svelte"]["language"] == "svelte"
+    assert nodes["apps/web/src/Component.test.ts"]["language"] == "typescript"
+    assert nodes["apps/web/src/Component.test.ts"]["is_test"] is True
+    assert nodes["docs/guide.md"]["language"] == "markdown"
+    assert nodes["config/settings.toml"]["language"] == "toml"
+    assert nodes["build/legacy.py"]["language"] == "python"
+    assert ".cache/ignored.ts" not in nodes
+    assert "vendor.bin" not in nodes
+    non_python_ids = {
+        f"file:{path}"
+        for path, node in nodes.items()
+        if node.get("language") != "python"
+    }
+    assert not any(
+        edge["src"] in non_python_ids or edge["dst"] in non_python_ids
+        for edge in doc["edges"]
+    )
+
+
+def test_graph_source_limits_are_deterministic_and_report_truncation(tmp_path):
+    for relative, content in {
+        "a.py": "value = 1\n",
+        "b.rs": "pub fn b() {}\n",
+        "c.ts": "export const c = 1\n",
+    }.items():
+        target = tmp_path / relative
+        target.write_text(content, encoding="utf-8")
+
+    file_limited = generate_import_graph_document(
+        tmp_path,
+        "run",
+        "0" * 64,
+        max_graph_files=2,
+        max_graph_source_bytes=10_000,
+    )
+    file_nodes = [
+        node for node in file_limited["nodes"] if node["kind"] == "file"
+    ]
+    assert [node["path"] for node in file_nodes] == ["a.py", "b.rs"]
+    assert file_limited["coverage"]["repository_files_seen"] == 3
+    assert file_limited["coverage"]["repository_files_included"] == 2
+    assert file_limited["coverage"]["repository_truncated"] is True
+
+    byte_limited = generate_import_graph_document(
+        tmp_path,
+        "run",
+        "0" * 64,
+        max_graph_files=10,
+        max_graph_source_bytes=1,
+    )
+    assert not any(node["kind"] == "file" for node in byte_limited["nodes"])
+    assert byte_limited["coverage"]["repository_files_included"] == 0
+    assert byte_limited["coverage"]["repository_truncated"] is True
+
+
+def test_graph_source_limits_cannot_exceed_hard_bounds(tmp_path):
+    with pytest.raises(ValueError, match="max_graph_files"):
+        generate_import_graph_document(
+            tmp_path,
+            "run",
+            "0" * 64,
+            max_graph_files=50_001,
+        )
+    with pytest.raises(ValueError, match="max_graph_source_bytes"):
+        generate_import_graph_document(
+            tmp_path,
+            "run",
+            "0" * 64,
+            max_graph_source_bytes=(512 * 1024 * 1024) + 1,
+        )
+
+
 def test_test_directory_layer_precedes_nested_core_segment(tmp_path):
     target = tmp_path / "tests" / "core" / "service.py"
     target.parent.mkdir(parents=True)

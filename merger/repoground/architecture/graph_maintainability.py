@@ -26,7 +26,11 @@ def measure_graph_maintainability(repo_root: Path) -> dict[str, Any]:
         "maintainability",
         "0" * 64,
     )
-    file_nodes = [node for node in graph["nodes"] if node["kind"] == "file"]
+    file_nodes = [
+        node
+        for node in graph["nodes"]
+        if node["kind"] == "file" and node.get("language") == "python"
+    ]
     external_nodes = [node for node in graph["nodes"] if node["kind"] == "external"]
     projected: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for node in file_nodes:

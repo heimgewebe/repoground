@@ -12,6 +12,14 @@ from .entrypoints import generate_entrypoints_document
 from .import_graph import generate_import_graph_document
 
 
+_GRAPH_SOURCE_SUFFIXES = frozenset(
+    {
+        ".js", ".json", ".jsx", ".md", ".py", ".rs", ".sql",
+        ".svelte", ".toml", ".ts", ".tsx", ".yaml", ".yml",
+    }
+)
+
+
 class BundleGraphSourceError(RuntimeError):
     """Graph source production failed before a coherent pair was published."""
 
@@ -51,8 +59,13 @@ def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
             tmp_path.unlink(missing_ok=True)
 
 
-def _eligible_python_paths(chunk_index_path: Path, repo_name: str) -> tuple[str, ...]:
-    """Return full-contact Python paths from the retrieval source surface."""
+def _eligible_source_paths(
+    chunk_index_path: Path,
+    repo_name: str,
+    *,
+    suffixes: frozenset[str],
+) -> tuple[str, ...]:
+    """Return full-contact source paths for the requested bounded suffix set."""
 
     eligibility: dict[str, bool] = {}
     try:
@@ -75,10 +88,15 @@ def _eligible_python_paths(chunk_index_path: Path, repo_name: str) -> tuple[str,
                 if item_repo != repo_name:
                     continue
                 raw_path = item.get("path") or item.get("source_file")
-                if not isinstance(raw_path, str) or not raw_path.endswith(".py"):
+                if not isinstance(raw_path, str):
                     continue
 
                 rel_path = Path(raw_path)
+                if (
+                    rel_path.suffix.lower() not in suffixes
+                    or rel_path.name.lower().endswith(".graph.json")
+                ):
+                    continue
                 if rel_path.is_absolute() or ".." in rel_path.parts:
                     raise BundleGraphSourceError(
                         f"unsafe chunk source path: {raw_path!r}"
@@ -103,7 +121,27 @@ def _eligible_python_paths(chunk_index_path: Path, repo_name: str) -> tuple[str,
     return tuple(sorted(path for path, allowed in eligibility.items() if allowed))
 
 
-def _materialize_selected_python_tree(
+def _eligible_python_paths(chunk_index_path: Path, repo_name: str) -> tuple[str, ...]:
+    """Return full-contact Python paths from the retrieval source surface."""
+
+    return _eligible_source_paths(
+        chunk_index_path,
+        repo_name,
+        suffixes=frozenset({".py"}),
+    )
+
+
+def _eligible_graph_paths(chunk_index_path: Path, repo_name: str) -> tuple[str, ...]:
+    """Return full-contact paths supported by the architecture inventory."""
+
+    return _eligible_source_paths(
+        chunk_index_path,
+        repo_name,
+        suffixes=_GRAPH_SOURCE_SUFFIXES,
+    )
+
+
+def _materialize_selected_source_tree(
     repo_root: Path,
     selected_paths: Sequence[str],
     destination_root: Path,
@@ -185,10 +223,10 @@ def ensure_bundle_graph_sources(
             if source_roots is not None
             else summary.get("source_roots", ())
         )
-        selected_paths = _eligible_python_paths(chunk_index_path, repo_name)
+        selected_paths = _eligible_graph_paths(chunk_index_path, repo_name)
         with tempfile.TemporaryDirectory(prefix="lenskit-graph-sources-") as tmp:
             selected_root = Path(tmp)
-            _materialize_selected_python_tree(
+            _materialize_selected_source_tree(
                 repo_root,
                 selected_paths,
                 selected_root,
@@ -223,5 +261,5 @@ def ensure_bundle_graph_sources(
             f"failed to produce bundle-bound graph sources: {exc}"
         ) from exc
 
-    reason = None if selected_paths else "no eligible full-contact Python sources"
+    reason = None if selected_paths else "no eligible full-contact graph sources"
     return BundleGraphSources(graph_path, entrypoints_path, "produced", reason)

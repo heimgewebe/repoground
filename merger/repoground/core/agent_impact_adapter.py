@@ -15,6 +15,9 @@ from merger.repoground.core.agent_impact_context import build_agent_impact_conte
 from merger.repoground.core.agent_impact_refinement import (
     refine_agent_impact_context,
 )
+from merger.repoground.core.call_graph_impact_index import (
+    project_call_graph_for_impact,
+)
 from merger.repoground.core.readonly_adapter import (
     RepoGroundReadonlyAdapter,
     RepoGroundReadonlyAdapterError,
@@ -33,7 +36,6 @@ _CORE_JSON_CONTRACTS = {
 class _SourceResponses:
     graph: dict[str, Any]
     symbols: dict[str, Any]
-    call_graph: dict[str, Any]
     entrypoints: dict[str, Any]
     cards: dict[str, Any]
 
@@ -143,6 +145,13 @@ def _query_limit(max_items: Any) -> int:
     return int(max_items) if valid else 25
 
 
+def _target_symbols(result: dict[str, Any]) -> list[dict[str, Any]]:
+    value = result.get("target_symbols")
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
 class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
     """Expose a bounded impact/edit context over registered snapshots."""
 
@@ -150,7 +159,6 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
         return _SourceResponses(
             graph=self.artifact_get(snapshot_id, "architecture_graph_json"),
             symbols=self.artifact_get(snapshot_id, "python_symbol_index_json"),
-            call_graph=self.artifact_get(snapshot_id, "python_call_graph_json"),
             entrypoints=self.artifact_get(snapshot_id, "entrypoints_json"),
             cards=self.artifact_get(snapshot_id, "relation_cards_jsonl"),
         )
@@ -177,6 +185,7 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
     def _source_statuses(
         sources: _SourceResponses,
         query_response: dict[str, Any],
+        call_graph_response: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         statuses = [
             _core_json_status("architecture_graph_json", sources.graph),
@@ -184,12 +193,13 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
             _core_json_status("entrypoints_json", sources.entrypoints),
             _artifact_status("relation_cards_jsonl", sources.cards),
         ]
-        call_graph_status = _core_json_status(
-            "python_call_graph_json",
-            sources.call_graph,
-        )
-        if call_graph_status.get("status") != "missing":
-            statuses.append(call_graph_status)
+        if call_graph_response is not None:
+            call_graph_status = _core_json_status(
+                "python_call_graph_json",
+                call_graph_response,
+            )
+            if call_graph_status.get("status") != "missing":
+                statuses.append(call_graph_status)
         if query_response:
             statuses.append(
                 {
@@ -229,6 +239,53 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
             max_items=item_limit,
             include_query_context=include_query_context,
         )
+
+        # Target symbols depend on the small architecture/symbol/query surfaces,
+        # not on the large call graph.  Build once without call relations, then
+        # project only call records that can be relevant to those targets.
+        preliminary = build_agent_impact_context(
+            target_path=target_path,
+            target_symbol=target_symbol,
+            changed_paths=changed_paths,
+            mode=mode,
+            max_items=max_items,
+            architecture_graph=_json_document(sources.graph),
+            symbol_index=_json_document(sources.symbols),
+            python_call_graph={},
+            entrypoints=_json_document(sources.entrypoints),
+            relation_cards=cards,
+            query_context=query_response,
+            source_statuses=self._source_statuses(sources, query_response),
+        )
+        target_symbols = _target_symbols(preliminary)
+        call_graph_response: dict[str, Any] | None = None
+        call_graph_document: dict[str, Any] = {}
+        call_graph_projection: dict[str, Any] = {
+            "status": "skipped",
+            "reason": "no_target_symbols",
+            "selected_call_count": 0,
+            "does_not_establish": [
+                "complete_call_graph",
+                "runtime_reachability",
+                "dynamic_dispatch_resolution",
+                "test_sufficiency",
+            ],
+        }
+        if target_symbols:
+            call_graph_response = project_call_graph_for_impact(
+                registration.manifest,
+                target_symbols,
+            )
+            call_graph_document = _json_document(call_graph_response)
+            projection = call_graph_response.get("projection")
+            call_graph_projection = (
+                dict(projection)
+                if isinstance(projection, dict)
+                else {
+                    "status": call_graph_response.get("status", "unknown"),
+                    "error_code": call_graph_response.get("error_code"),
+                }
+            )
         result = build_agent_impact_context(
             target_path=target_path,
             target_symbol=target_symbol,
@@ -237,11 +294,15 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
             max_items=max_items,
             architecture_graph=_json_document(sources.graph),
             symbol_index=_json_document(sources.symbols),
-            python_call_graph=_json_document(sources.call_graph),
+            python_call_graph=call_graph_document,
             entrypoints=_json_document(sources.entrypoints),
             relation_cards=cards,
             query_context=query_response,
-            source_statuses=self._source_statuses(sources, query_response),
+            source_statuses=self._source_statuses(
+                sources,
+                query_response,
+                call_graph_response,
+            ),
         )
         result = refine_agent_impact_context(
             result,
@@ -258,6 +319,7 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
                 ).get("snapshot"),
                 "query": query,
                 "relation_card_parse_errors": card_errors,
+                "call_graph_projection": call_graph_projection,
             }
         )
         return result

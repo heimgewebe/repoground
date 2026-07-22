@@ -55,6 +55,83 @@ def test_resolved_query_candidates_keep_navigation_authority() -> None:
     ]
 
 
+def test_resolved_query_candidates_recognize_cross_language_test_names() -> None:
+    candidates = resolved_query_test_candidates(
+        _query_context(
+            {
+                "path": "apps/web/src/lib/map/nodes.test.ts",
+                "citation_id": "citation-ts-test",
+                "range_status": "resolved",
+            },
+            {
+                "path": "apps/web/src/lib/map/nodes.ts",
+                "citation_id": "citation-ts-source",
+            },
+        )
+    )
+
+    assert [item["path"] for item in candidates] == [
+        "apps/web/src/lib/map/nodes.test.ts"
+    ]
+
+
+def test_refinement_prioritizes_relationship_evidence_over_co_changed_tests() -> None:
+    base = {
+        "status": "available",
+        "related_tests": [
+            {
+                "path": "apps/web/src/lib/map/nodes.test.ts",
+                "evidence_type": "changed_test_path",
+                "reason": "changed_path_is_test",
+            },
+            {
+                "path": "tests/test_graph.py",
+                "evidence_type": "graph_edge",
+            },
+        ],
+        "truncation": {"related_tests": False},
+        "composition": {},
+        "edit_context": {
+            "recommended_first_reads": [
+                {
+                    "path": "src/target.py",
+                    "range_ref": None,
+                    "qualified_name": None,
+                    "reason": "target_path",
+                },
+                {
+                    "path": "apps/web/src/lib/map/nodes.test.ts",
+                    "range_ref": None,
+                    "qualified_name": None,
+                    "reason": "related_test:changed_test_path",
+                },
+                {
+                    "path": "tests/test_graph.py",
+                    "range_ref": None,
+                    "qualified_name": None,
+                    "reason": "related_test:graph_edge",
+                },
+            ],
+            "related_test_count": 2,
+        },
+    }
+
+    refined = refine_agent_impact_context(base, _query_context(), max_items=20)
+
+    assert [item["evidence_type"] for item in refined["related_tests"]] == [
+        "graph_edge",
+        "changed_test_path",
+    ]
+    assert [
+        item["reason"]
+        for item in refined["edit_context"]["recommended_first_reads"]
+    ] == [
+        "target_path",
+        "related_test:graph_edge",
+        "related_test:changed_test_path",
+    ]
+
+
 def test_refinement_keeps_strong_evidence_and_suppresses_guesses() -> None:
     base = {
         "status": "available",
@@ -120,8 +197,9 @@ def test_refinement_keeps_strong_evidence_and_suppresses_guesses() -> None:
         refined["composition"][
             "heuristics_suppressed_only_with_resolved_query_tests"
         ]
-        is True
+        is False
     )
+    assert refined["composition"]["heuristic_test_candidates_always_suppressed"] is True
     assert refined["composition"]["resolved_query_tests_are_graph_edges"] is False
     assert refined["composition"]["resolved_query_tests_establish_coverage"] is False
     reads = refined["edit_context"]["recommended_first_reads"]
@@ -131,7 +209,7 @@ def test_refinement_keeps_strong_evidence_and_suppresses_guesses() -> None:
     ]
 
 
-def test_refinement_keeps_heuristics_without_resolved_test() -> None:
+def test_refinement_suppresses_heuristics_without_resolved_test() -> None:
     base = {
         "status": "available",
         "related_tests": [
@@ -160,11 +238,10 @@ def test_refinement_keeps_heuristics_without_resolved_test() -> None:
         max_items=20,
     )
 
-    assert refined["related_tests"] == base["related_tests"]
-    assert refined["composition"]["heuristic_test_candidates_suppressed"] == 0
-    assert refined["edit_context"]["recommended_first_reads"] == base[
-        "edit_context"
-    ]["recommended_first_reads"]
+    assert refined["related_tests"] == []
+    assert refined["composition"]["heuristic_test_candidates_suppressed"] == 1
+    assert refined["composition"]["heuristic_test_candidates_always_suppressed"] is True
+    assert refined["edit_context"]["recommended_first_reads"] == []
 
 
 def test_adapter_emits_resolved_query_test_candidate(
@@ -213,7 +290,8 @@ def test_adapter_emits_resolved_query_test_candidate(
         item for item in matches if item["evidence_type"] == "resolved_query"
     )
     assert resolved["citation_id"] == "resolved-test"
-    assert result["composition"]["heuristic_test_candidates_suppressed"] >= 1
+    assert result["composition"]["heuristic_test_candidates_suppressed"] == 0
+    assert result["composition"]["heuristic_test_candidates_always_suppressed"] is True
     assert result["mutation_boundary"]["writes"] == []
 
 
