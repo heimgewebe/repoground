@@ -371,6 +371,49 @@ def _context(**overrides):
     return build_agent_impact_context(**values)
 
 
+def _selection_symbol(
+    symbol_id: str,
+    *,
+    path: str,
+    name: str,
+    line: int,
+) -> dict:
+    return {
+        "id": symbol_id,
+        "kind": "function",
+        "name": name,
+        "qualified_name": f"selection.{name}",
+        "module": "selection",
+        "path": path,
+        "start_line": line,
+        "end_line": line + 1,
+        "range_ref": f"file:{path}#L{line}-L{line + 1}",
+        "decorators": [],
+    }
+
+
+def _selection_context(
+    symbol_records: list[dict],
+    *,
+    changed_paths: list[str],
+    max_items: int,
+    target_symbol: str | None = None,
+) -> dict:
+    graph, symbols, entrypoints, cards, query = _fixture_documents()
+    symbols["symbols"] = symbol_records
+    return build_agent_impact_context(
+        target_symbol=target_symbol,
+        changed_paths=changed_paths,
+        mode="impact",
+        max_items=max_items,
+        architecture_graph=graph,
+        symbol_index=symbols,
+        entrypoints=entrypoints,
+        relation_cards=cards,
+        query_context=query,
+    )
+
+
 def test_agent_impact_context_is_schema_valid_and_deterministic() -> None:
     first = _context()
     second = _context()
@@ -383,6 +426,90 @@ def test_agent_impact_context_is_schema_valid_and_deterministic() -> None:
     assert first["status"] == "available"
     assert first["mutation_boundary"]["writes"] == []
     assert set(DOES_NOT_ESTABLISH) <= set(first["does_not_establish"])
+
+
+def test_target_symbols_preserve_requested_path_diversity_before_filling() -> None:
+    test_path = "scripts/ci/tests/test_kubernetes_platform_contract.py"
+    source_path = "scripts/platform/kind_reference.py"
+    symbols = [
+        _selection_symbol("test-1", path=test_path, name="test_first", line=1),
+        _selection_symbol("test-2", path=test_path, name="test_second", line=10),
+        _selection_symbol("test-3", path=test_path, name="test_third", line=20),
+        _selection_symbol("source-1", path=source_path, name="ProofError", line=1),
+        _selection_symbol("source-2", path=source_path, name="run_kind", line=10),
+    ]
+
+    result = _selection_context(
+        symbols,
+        changed_paths=[test_path, source_path],
+        max_items=2,
+    )
+
+    assert [item["id"] for item in result["target_symbols"]] == [
+        "test-1",
+        "source-1",
+    ]
+    assert result["truncation"]["target_symbols"] is True
+
+
+def test_target_symbols_prioritize_an_exact_symbol_before_path_diversity() -> None:
+    test_path = "scripts/ci/tests/test_kubernetes_platform_contract.py"
+    source_path = "scripts/platform/kind_reference.py"
+    symbols = [
+        _selection_symbol("test-1", path=test_path, name="test_first", line=1),
+        _selection_symbol("test-2", path=test_path, name="test_second", line=10),
+        _selection_symbol("proof-error", path=source_path, name="ProofError", line=1),
+    ]
+
+    result = _selection_context(
+        symbols,
+        changed_paths=[test_path, source_path],
+        target_symbol="ProofError",
+        max_items=1,
+    )
+
+    assert [item["id"] for item in result["target_symbols"]] == ["proof-error"]
+    assert result["target"]["paths"] == [test_path, source_path]
+
+
+def test_target_symbol_path_diversity_is_deterministic_when_paths_exceed_budget() -> None:
+    paths = ["src/c.py", "src/a.py", "src/b.py"]
+    symbols = [
+        _selection_symbol("c", path=paths[0], name="c", line=1),
+        _selection_symbol("a", path=paths[1], name="a", line=1),
+        _selection_symbol("b", path=paths[2], name="b", line=1),
+    ]
+
+    first = _selection_context(
+        symbols,
+        changed_paths=paths,
+        max_items=2,
+    )
+    second = _selection_context(
+        list(reversed(symbols)),
+        changed_paths=list(reversed(paths)),
+        max_items=2,
+    )
+
+    assert [item["id"] for item in first["target_symbols"]] == ["a", "b"]
+    assert first == second
+
+
+def test_target_path_without_symbols_does_not_consume_diversity_budget() -> None:
+    paths = ["src/a.py", "src/empty.py", "src/z.py"]
+    symbols = [
+        _selection_symbol("a-1", path=paths[0], name="a_first", line=1),
+        _selection_symbol("a-2", path=paths[0], name="a_second", line=10),
+        _selection_symbol("z-1", path=paths[2], name="z_first", line=1),
+    ]
+
+    result = _selection_context(
+        symbols,
+        changed_paths=paths,
+        max_items=2,
+    )
+
+    assert [item["id"] for item in result["target_symbols"]] == ["a-1", "z-1"]
 
 
 def test_agent_impact_context_preserves_relation_direction_and_evidence() -> None:

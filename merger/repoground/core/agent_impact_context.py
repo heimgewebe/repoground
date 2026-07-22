@@ -373,6 +373,54 @@ def _symbol_key(symbol: Mapping[str, Any]) -> str:
     )
 
 
+def _select_symbols(
+    ordered: list[dict[str, Any]],
+    *,
+    target_symbol: str | None,
+    target_paths: set[str],
+    max_items: int,
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    selected_keys: set[str] = set()
+    represented_paths: set[str] = set()
+
+    def add(symbol: dict[str, Any]) -> None:
+        key = _symbol_key(symbol)
+        if key in selected_keys or len(selected) >= max_items:
+            return
+        selected.append(symbol)
+        selected_keys.add(key)
+        path = symbol.get("path")
+        if isinstance(path, str) and path in target_paths:
+            represented_paths.add(path)
+
+    folded = target_symbol.casefold() if target_symbol else None
+    if folded:
+        for symbol in ordered:
+            exact, _path_match = _symbol_matches(
+                symbol,
+                folded_symbol=folded,
+                target_paths=target_paths,
+            )
+            if exact:
+                add(symbol)
+                break
+
+    for symbol in ordered:
+        path = symbol.get("path")
+        if (
+            isinstance(path, str)
+            and path in target_paths
+            and path not in represented_paths
+        ):
+            add(symbol)
+
+    for symbol in ordered:
+        add(symbol)
+
+    return selected
+
+
 def _matching_symbols(
     symbol_index: Mapping[str, Any],
     *,
@@ -408,7 +456,13 @@ def _matching_symbols(
     for symbol in matches:
         unique.setdefault(_symbol_key(symbol), symbol)
     ordered = list(unique.values())
-    return ordered[:max_items], ordered, derived_paths, len(ordered) > max_items
+    selected = _select_symbols(
+        ordered,
+        target_symbol=target_symbol,
+        target_paths=target_paths,
+        max_items=max_items,
+    )
+    return selected, ordered, derived_paths, len(ordered) > max_items
 
 
 def _symbols_by_id(symbol_index: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
