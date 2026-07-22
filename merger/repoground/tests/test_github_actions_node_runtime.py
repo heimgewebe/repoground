@@ -8,7 +8,7 @@ WORKFLOW_ROOT = Path(".github/workflows")
 ALLOWED_NODE24_MAJORS = {
     "actions/checkout": {5, 6, 7},
     "actions/setup-node": {5, 6, 7},
-    "actions/setup-python": {6},
+    "actions/setup-python": {6, 7},
     "actions/upload-artifact": {6, 7},
     "github/codeql-action/analyze": {4},
     "github/codeql-action/autobuild": {4},
