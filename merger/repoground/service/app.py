@@ -1921,6 +1921,30 @@ def _normalize_atlas_status(raw: str) -> str:
     return raw
 
 
+_ATLAS_PRIMARY_ARTIFACT_RE = re.compile(r"^atlas-[0-9]+[.]json$")
+
+
+def _atlas_primary_artifact_files(merges_dir: Path) -> list[Path]:
+    """Return only API-managed Atlas primary artifact JSON files.
+
+    Atlas sidecars and external observation receipts deliberately share the
+    ``atlas-`` prefix, but they are not valid ``AtlasArtifact`` records.  The
+    service creates primary artifacts as ``atlas-<unix_ts>.json`` and the
+    download endpoint accepts the same ID vocabulary, so list/latest must use
+    that exact boundary instead of a broad ``atlas-*.json`` glob.
+    """
+
+    return sorted(
+        (
+            path
+            for path in merges_dir.glob("atlas-*.json")
+            if _ATLAS_PRIMARY_ARTIFACT_RE.fullmatch(path.name)
+        ),
+        key=lambda path: path.name,
+        reverse=True,
+    )
+
+
 def _read_atlas_artifact_json(path: Path) -> dict:
     """Read an atlas artifact JSON file and normalize its status field.
 
@@ -1971,12 +1995,7 @@ def list_atlas():
     if not merges_dir or not merges_dir.exists():
         return []
 
-    # Find atlas files
-    # Pattern: atlas-{timestamp}.json
-    files = list(merges_dir.glob("atlas-*.json"))
-
-    # Sort by name (timestamp) desc
-    files = sorted(files, key=lambda f: f.name, reverse=True)
+    files = _atlas_primary_artifact_files(merges_dir)
 
     artifacts = []
     for file in files:
@@ -2068,14 +2087,9 @@ def get_latest_atlas():
     if not merges_dir or not merges_dir.exists():
         raise HTTPException(status_code=404, detail="No atlas artifacts found (no merges dir)")
 
-    # Find atlas files
-    # Pattern: atlas-{timestamp}.json
-    files = list(merges_dir.glob("atlas-*.json"))
+    files = _atlas_primary_artifact_files(merges_dir)
     if not files:
-         raise HTTPException(status_code=404, detail="No atlas artifacts found")
-
-    # Sort by name (timestamp) desc
-    files = sorted(files, key=lambda f: f.name, reverse=True)
+        raise HTTPException(status_code=404, detail="No atlas artifacts found")
 
     latest_file = None
     data = {}
