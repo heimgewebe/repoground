@@ -472,6 +472,27 @@ def test_target_symbols_prioritize_an_exact_symbol_before_path_diversity() -> No
     assert result["target"]["paths"] == [test_path, source_path]
 
 
+def test_target_symbol_path_diversity_prefers_exact_match_on_each_path() -> None:
+    paths = ["src/a.py", "src/b.py"]
+    symbols = [
+        _selection_symbol("exact-a", path=paths[0], name="needle", line=1),
+        _selection_symbol("non-target-b", path=paths[1], name="alpha", line=1),
+        _selection_symbol("exact-b", path=paths[1], name="needle", line=2),
+    ]
+
+    result = _selection_context(
+        symbols,
+        changed_paths=paths,
+        target_symbol="needle",
+        max_items=2,
+    )
+
+    assert [item["id"] for item in result["target_symbols"]] == [
+        "exact-a",
+        "exact-b",
+    ]
+
+
 def test_target_symbol_path_diversity_is_deterministic_when_paths_exceed_budget() -> None:
     paths = ["src/c.py", "src/a.py", "src/b.py"]
     symbols = [

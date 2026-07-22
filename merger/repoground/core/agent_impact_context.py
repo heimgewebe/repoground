@@ -373,6 +373,34 @@ def _symbol_key(symbol: Mapping[str, Any]) -> str:
     )
 
 
+def _exact_symbol_preferences(
+    ordered: list[dict[str, Any]],
+    *,
+    target_symbol: str | None,
+    target_paths: set[str],
+) -> tuple[dict[str, Any] | None, dict[str, dict[str, Any]]]:
+    folded = target_symbol.casefold() if target_symbol else None
+    if folded is None:
+        return None, {}
+
+    first_exact: dict[str, Any] | None = None
+    exact_by_path: dict[str, dict[str, Any]] = {}
+    for symbol in ordered:
+        exact, _path_match = _symbol_matches(
+            symbol,
+            folded_symbol=folded,
+            target_paths=target_paths,
+        )
+        if not exact:
+            continue
+        if first_exact is None:
+            first_exact = symbol
+        path = symbol.get("path")
+        if isinstance(path, str) and path in target_paths:
+            exact_by_path.setdefault(path, symbol)
+    return first_exact, exact_by_path
+
+
 def _select_symbols(
     ordered: list[dict[str, Any]],
     *,
@@ -394,17 +422,13 @@ def _select_symbols(
         if isinstance(path, str) and path in target_paths:
             represented_paths.add(path)
 
-    folded = target_symbol.casefold() if target_symbol else None
-    if folded:
-        for symbol in ordered:
-            exact, _path_match = _symbol_matches(
-                symbol,
-                folded_symbol=folded,
-                target_paths=target_paths,
-            )
-            if exact:
-                add(symbol)
-                break
+    first_exact, exact_by_path = _exact_symbol_preferences(
+        ordered,
+        target_symbol=target_symbol,
+        target_paths=target_paths,
+    )
+    if first_exact is not None:
+        add(first_exact)
 
     for symbol in ordered:
         path = symbol.get("path")
@@ -413,7 +437,7 @@ def _select_symbols(
             and path in target_paths
             and path not in represented_paths
         ):
-            add(symbol)
+            add(exact_by_path.get(path, symbol))
 
     for symbol in ordered:
         add(symbol)

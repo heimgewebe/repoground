@@ -394,6 +394,149 @@ def test_agent_impact_adapter_projects_coherent_call_graph_relations_in_impact_m
     assert all(item["freshness"]["status"] == "coherent" for item in call_relations)
 
 
+def test_agent_impact_adapter_keeps_exact_later_path_reachable_for_call_graph(
+    tmp_path: Path,
+) -> None:
+    adapter, bundle, _config = _impact_adapter(tmp_path)
+    root = bundle["manifest"].parent
+    symbol_path = root / "demo.python_symbol_index.json"
+    symbol_document = json.loads(symbol_path.read_text(encoding="utf-8"))
+    symbol_document["symbols"] = [
+        {
+            "id": "sym-early-exact",
+            "kind": "function",
+            "name": "needle",
+            "qualified_name": "a_many.needle",
+            "module": "a_many",
+            "path": "src/a_many.py",
+            "start_line": 1,
+            "end_line": 2,
+            "range_ref": "file:src/a_many.py#L1-L2",
+            "decorators": [],
+        },
+        {
+            "id": "sym-early-2",
+            "kind": "function",
+            "name": "early_two",
+            "qualified_name": "a_many.early_two",
+            "module": "a_many",
+            "path": "src/a_many.py",
+            "start_line": 10,
+            "end_line": 11,
+            "range_ref": "file:src/a_many.py#L10-L11",
+            "decorators": [],
+        },
+        {
+            "id": "sym-peer",
+            "kind": "function",
+            "name": "peer",
+            "qualified_name": "peer.peer",
+            "module": "peer",
+            "path": "src/peer.py",
+            "start_line": 3,
+            "end_line": 5,
+            "range_ref": "file:src/peer.py#L3-L5",
+            "decorators": [],
+        },
+        {
+            "id": "sym-late-non-target",
+            "kind": "function",
+            "name": "alpha",
+            "qualified_name": "z_late.alpha",
+            "module": "z_late",
+            "path": "src/z_late.py",
+            "start_line": 1,
+            "end_line": 1,
+            "range_ref": "file:src/z_late.py#L1-L1",
+            "decorators": [],
+        },
+        {
+            "id": "sym-late",
+            "kind": "function",
+            "name": "needle",
+            "qualified_name": "z_late.needle",
+            "module": "z_late",
+            "path": "src/z_late.py",
+            "start_line": 2,
+            "end_line": 3,
+            "range_ref": "file:src/z_late.py#L2-L3",
+            "decorators": [],
+        },
+    ]
+    symbol_path.write_text(json.dumps(symbol_document) + "\n", encoding="utf-8")
+    _seal_existing_artifact(bundle, "python_symbol_index_json")
+
+    call_graph_path = root / "demo.python_call_graph.json"
+    call_graph = json.loads(call_graph_path.read_text(encoding="utf-8"))
+    call_graph.update(
+        {
+            "call_count": 1,
+            "resolution_counts": {
+                "resolved": 1,
+                "candidate": 0,
+                "ambiguous": 0,
+                "unresolved": 0,
+            },
+            "evidence_counts": {"S0": 0, "S1": 1},
+            "relation_counts": {"calls": 1, "constructs": 0},
+            "calls": [
+                {
+                    "path": "src/z_late.py",
+                    "start_line": 3,
+                    "start_col": 4,
+                    "end_line": 3,
+                    "end_col": 10,
+                    "range_ref": "file:src/z_late.py#L3-L3",
+                    "callee_expression": "peer",
+                    "simple_name": "peer",
+                    "caller_scope": "symbol",
+                    "caller_symbol_id": "sym-late",
+                    "caller_qualified_name": "z_late.needle",
+                    "caller_kind": "function",
+                    "caller_start_line": 2,
+                    "caller_end_line": 3,
+                    "relation_type": "calls",
+                    "evidence_level": "S1",
+                    "resolution_status": "resolved",
+                    "resolution_reason": "unique_symbol_resolution",
+                    "resolved_target_ids": ["sym-peer"],
+                    "candidate_target_ids": [],
+                }
+            ],
+        }
+    )
+    call_graph_path.write_text(json.dumps(call_graph) + "\n", encoding="utf-8")
+    _seal_existing_artifact(bundle, "python_call_graph_json")
+
+    result = adapter.agent_impact_context(
+        "demo",
+        target_symbol="needle",
+        changed_paths=["src/a_many.py", "src/z_late.py"],
+        mode="impact",
+        max_items=2,
+        include_query_context=False,
+    )
+
+    assert [item["id"] for item in result["target_symbols"]] == [
+        "sym-early-exact",
+        "sym-late",
+    ]
+    assert result["call_graph_projection"]["selected_call_count"] == 1
+    call_relations = [
+        item
+        for item in result["relations"]
+        if isinstance(item.get("freshness"), dict)
+        and item["freshness"].get("source") == "python_call_graph_json"
+    ]
+    assert len(call_relations) == 1
+    relation = call_relations[0]
+    assert relation["relation_kind"] == "direct_callee"
+    assert relation["symbol_id"] == "sym-peer"
+    assert relation["target_symbol_ids"] == ["sym-late"]
+    assert relation["evidence_level"] == "S1"
+    assert relation["resolution_status"] == "resolved"
+    assert relation["freshness"]["status"] == "coherent"
+
 
 def test_agent_impact_adapter_dispatches_and_validates_arguments(
     tmp_path: Path,
