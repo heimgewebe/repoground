@@ -577,6 +577,37 @@ def test_related_tests_require_graph_or_symbol_index_evidence() -> None:
     assert "test_coverage" in result["does_not_establish"]
 
 
+def test_changed_cross_language_test_paths_are_related_test_evidence() -> None:
+    result = _selection_context(
+        [],
+        changed_paths=[
+            "apps/web/src/lib/map/searchIndex.ts",
+            "apps/web/src/lib/map/searchIndex.test.ts",
+            "apps/api/tests/db_passkey_store_persistence.rs",
+        ],
+        max_items=10,
+    )
+
+    observed = {
+        (item["path"], item["evidence_type"], item.get("reason"))
+        for item in result["related_tests"]
+    }
+    assert (
+        "apps/web/src/lib/map/searchIndex.test.ts",
+        "changed_test_path",
+        "changed_path_is_test",
+    ) in observed
+    assert (
+        "apps/api/tests/db_passkey_store_persistence.rs",
+        "changed_test_path",
+        "changed_path_is_test",
+    ) in observed
+    assert not any(
+        item["path"].endswith("searchIndex.ts")
+        for item in result["related_tests"]
+    )
+
+
 def test_edit_context_bundles_target_support_and_entrypoint_reads() -> None:
     result = _context()
     support = {

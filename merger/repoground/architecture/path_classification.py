@@ -20,6 +20,7 @@ _PRODUCT_LAYER_BY_SEGMENT = {
 }
 _SCRIPT_SEGMENTS = {"scripts", "tools"}
 _TEST_SEGMENTS = {"test", "tests"}
+_TEST_NAME_SUFFIXES = {".js", ".jsx", ".py", ".rs", ".svelte", ".ts", ".tsx"}
 
 
 def _path(path: str) -> PurePosixPath:
@@ -28,9 +29,14 @@ def _path(path: str) -> PurePosixPath:
 
 def is_test_path(path: str) -> bool:
     parsed = _path(path)
+    name = parsed.name.lower()
+    suffix = parsed.suffix.lower()
+    marked_test_name = suffix in _TEST_NAME_SUFFIXES and (
+        ".test." in name or ".spec." in name or "_test." in name
+    )
     return (
-        parsed.name.startswith("test_")
-        or parsed.name.endswith("_test.py")
+        name.startswith("test_")
+        or marked_test_name
         or bool(set(parsed.parts).intersection(_TEST_SEGMENTS))
     )
 

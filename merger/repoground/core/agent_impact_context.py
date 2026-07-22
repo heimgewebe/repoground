@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
+from merger.repoground.architecture.path_classification import is_test_path as _is_test_path
+
 KIND = "repobrief.agent_impact_context"
 VERSION = "1.0"
 MODES = ("impact", "edit")
@@ -297,16 +299,6 @@ def _coherence(
         }
     )
     return "unknown", None, None, gaps
-
-
-def _is_test_path(path: str) -> bool:
-    name = PurePosixPath(path).name
-    return (
-        "/tests/" in f"/{path}"
-        or path.startswith("tests/")
-        or name.startswith("test_")
-        or name.endswith("_test.py")
-    )
 
 
 def _path_class(path: str) -> str:
@@ -1131,6 +1123,20 @@ def _unique_ranked(
     return ordered[:max_items], len(ordered) > max_items
 
 
+def _changed_test_candidates(
+    target_paths: set[str],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": path,
+            "evidence_type": "changed_test_path",
+            "reason": "changed_path_is_test",
+        }
+        for path in sorted(target_paths)
+        if _is_test_path(path)
+    ]
+
+
 def _related_tests(
     *,
     target_paths: set[str],
@@ -1143,11 +1149,16 @@ def _related_tests(
         for item in _items(symbol_index.get("symbols"))
         if isinstance(item, Mapping) and isinstance(item.get("path"), str)
     }
-    candidates = _graph_test_candidates(all_relations)
+    candidates = _changed_test_candidates(target_paths)
+    candidates.extend(_graph_test_candidates(all_relations))
     candidates.extend(_conventional_test_candidates(target_paths, known_paths))
     return _unique_ranked(
         candidates,
-        rank={"graph_edge": 0, "symbol_index_path_match": 1},
+        rank={
+            "changed_test_path": 0,
+            "graph_edge": 1,
+            "symbol_index_path_match": 2,
+        },
         max_items=max_items,
     )
 

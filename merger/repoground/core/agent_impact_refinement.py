@@ -11,11 +11,14 @@ from copy import deepcopy
 from pathlib import PurePosixPath
 from typing import Any
 
+from merger.repoground.architecture.path_classification import is_test_path as _is_test_path
+
 _EVIDENCE_RANK = {
-    "graph_edge": 0,
-    "symbol_index_path_match": 1,
-    "resolved_query": 2,
-    "heuristic": 3,
+    "changed_test_path": 0,
+    "graph_edge": 1,
+    "symbol_index_path_match": 2,
+    "resolved_query": 3,
+    "heuristic": 4,
 }
 
 
@@ -46,16 +49,6 @@ def is_repository_relative_path(value: Any) -> bool:
         return False
     path = PurePosixPath(text)
     return bool(path.parts)
-
-
-def _is_test_path(path: str) -> bool:
-    name = PurePosixPath(path).name
-    return (
-        "/tests/" in f"/{path}"
-        or path.startswith("tests/")
-        or name.startswith("test_")
-        or name.endswith("_test.py")
-    )
 
 
 def _query_items(query_context: Any) -> list[dict[str, Any]]:
@@ -159,17 +152,19 @@ def _read_priority(reason: Any) -> int:
         return 1
     if text.endswith("_graph_relation"):
         return 2
-    if text == "related_test:graph_edge":
+    if text == "related_test:changed_test_path":
         return 3
-    if text == "related_test:symbol_index_path_match":
+    if text == "related_test:graph_edge":
         return 4
-    if text == "related_test:resolved_query":
+    if text == "related_test:symbol_index_path_match":
         return 5
-    if text == "related_test:heuristic":
+    if text == "related_test:resolved_query":
         return 6
-    if text.startswith("supporting_"):
+    if text == "related_test:heuristic":
         return 7
-    return 8
+    if text.startswith("supporting_"):
+        return 8
+    return 9
 
 
 def _valid_first_reads(

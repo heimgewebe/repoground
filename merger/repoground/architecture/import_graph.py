@@ -1,5 +1,6 @@
 """
-Extracts a Python import graph via static AST analysis.
+Extracts a bounded repository file graph with Python import edges via static
+AST analysis.
 
 Resolver boundaries (S1 heuristic):
 - This artifact is static evidence and does not represent runtime causality.
@@ -18,7 +19,7 @@ from __future__ import annotations
 import ast
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -31,6 +32,22 @@ from merger.repoground.architecture.path_classification import (
 logger = logging.getLogger(__name__)
 
 _SKIP_DIRECTORIES = {"__pycache__", "env", "node_modules", "venv"}
+_GRAPH_SKIP_DIRECTORIES = _SKIP_DIRECTORIES | {"build", "dist", "target"}
+_GRAPH_FILE_LANGUAGES = {
+    ".js": "javascript",
+    ".json": "json",
+    ".jsx": "javascript",
+    ".md": "markdown",
+    ".py": "python",
+    ".rs": "rust",
+    ".sql": "sql",
+    ".svelte": "svelte",
+    ".toml": "toml",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+}
 
 
 class SourceRootError(ValueError):
@@ -88,6 +105,79 @@ def _is_test_file(path: str) -> bool:
 
 def _infer_layer(path: str) -> str:
     return infer_architecture_layer(path)
+
+
+def _iter_graph_files(repo_root: Path) -> list[Path]:
+    paths: list[Path] = []
+    for root, dirs, files in os.walk(repo_root):
+        dirs[:] = sorted(
+            directory
+            for directory in dirs
+            if (not directory.startswith(".") or directory == ".github")
+            and directory not in _GRAPH_SKIP_DIRECTORIES
+        )
+        for filename in sorted(files):
+            file_path = Path(root) / filename
+            if file_path.suffix.lower() not in _GRAPH_FILE_LANGUAGES:
+                continue
+            if filename.endswith(".graph.json"):
+                continue
+            paths.append(file_path)
+    return paths
+
+
+def _iter_inventory_files(repo_root: Path) -> list[Path]:
+    return [
+        path
+        for path in _iter_graph_files(repo_root)
+        if path.suffix.lower() != ".py"
+    ]
+
+
+def _iter_parsed_python_files(
+    repo_root: Path,
+    python_files: list[Path],
+) -> Iterator[tuple[Path, str, ast.AST]]:
+    for file_path in python_files:
+        relative_path = file_path.relative_to(repo_root).as_posix()
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(content, filename=relative_path)
+        except Exception as exc:
+            logger.warning("Could not parse AST for %s: %s", relative_path, exc)
+            continue
+        yield file_path, relative_path, tree
+
+
+def _inventory_file_node(repo_root: Path, file_path: Path) -> Node | None:
+    relative_path = file_path.relative_to(repo_root).as_posix()
+    try:
+        size_bytes = file_path.stat().st_size
+    except OSError as exc:
+        logger.warning("Could not stat graph file %s: %s", relative_path, exc)
+        return None
+    node_id = f"file:{relative_path}"
+    return {
+        "node_id": node_id,
+        "kind": "file",
+        "path": relative_path,
+        "repo": "",
+        "language": _GRAPH_FILE_LANGUAGES[file_path.suffix.lower()],
+        "layer": _infer_layer(relative_path),
+        "is_test": _is_test_file(relative_path),
+        "size_bytes": size_bytes,
+    }
+
+
+def _add_inventory_file_nodes(
+    nodes: dict[str, Node],
+    repo_root: Path,
+    inventory_files: list[Path],
+) -> None:
+    for file_path in inventory_files:
+        node = _inventory_file_node(repo_root, file_path)
+        if node is not None:
+            nodes[node["node_id"]] = node
 
 
 def _iter_python_files(repo_root: Path) -> list[Path]:
@@ -315,31 +405,29 @@ def generate_import_graph_document(
     *,
     source_roots: Sequence[str] = (),
 ) -> GraphDocument:
-    """Build a deterministic static Python import graph for ``repo_root``."""
+    """Build a deterministic repository file graph with static Python import edges."""
 
     nodes: dict[str, Node] = {}
     edges: list[Edge] = []
     files_parsed = 0
     normalized_source_roots = _normalize_source_roots(repo_root, source_roots)
     python_files = _iter_python_files(repo_root)
+    inventory_files = _iter_inventory_files(repo_root)
     module_index = _build_local_module_index(
         repo_root,
         python_files,
         normalized_source_roots,
     )
 
-    for file_path in python_files:
-        relative_path = file_path.relative_to(repo_root).as_posix()
-        try:
-            content = file_path.read_text(encoding="utf-8")
-            tree = ast.parse(content, filename=relative_path)
-            files_parsed += 1
-        except Exception as exc:
-            logger.warning("Could not parse AST for %s: %s", relative_path, exc)
-            continue
+    _add_inventory_file_nodes(nodes, repo_root, inventory_files)
 
+    for file_path, relative_path, tree in _iter_parsed_python_files(
+        repo_root,
+        python_files,
+    ):
+        files_parsed += 1
         node_id = f"file:{relative_path}"
-        file_node: Node = {
+        nodes[node_id] = {
             "node_id": node_id,
             "kind": "file",
             "path": relative_path,
@@ -349,7 +437,6 @@ def generate_import_graph_document(
             "is_test": _is_test_file(relative_path),
             "size_bytes": file_path.stat().st_size,
         }
-        nodes[node_id] = file_node
 
         for syntax_node in ast.walk(tree):
             if isinstance(syntax_node, ast.Import):

@@ -55,6 +55,76 @@ def test_resolved_query_candidates_keep_navigation_authority() -> None:
     ]
 
 
+def test_resolved_query_candidates_recognize_cross_language_test_names() -> None:
+    candidates = resolved_query_test_candidates(
+        _query_context(
+            {
+                "path": "apps/web/src/lib/map/nodes.test.ts",
+                "citation_id": "citation-ts-test",
+                "range_status": "resolved",
+            },
+            {
+                "path": "apps/web/src/lib/map/nodes.ts",
+                "citation_id": "citation-ts-source",
+            },
+        )
+    )
+
+    assert [item["path"] for item in candidates] == [
+        "apps/web/src/lib/map/nodes.test.ts"
+    ]
+
+
+def test_refinement_prioritizes_changed_test_path_evidence() -> None:
+    base = {
+        "status": "available",
+        "related_tests": [
+            {
+                "path": "apps/web/src/lib/map/nodes.test.ts",
+                "evidence_type": "changed_test_path",
+                "reason": "changed_path_is_test",
+            },
+            {
+                "path": "tests/test_graph.py",
+                "evidence_type": "graph_edge",
+            },
+        ],
+        "truncation": {"related_tests": False},
+        "composition": {},
+        "edit_context": {
+            "recommended_first_reads": [
+                {
+                    "path": "src/target.py",
+                    "range_ref": None,
+                    "qualified_name": None,
+                    "reason": "target_path",
+                },
+                {
+                    "path": "apps/web/src/lib/map/nodes.test.ts",
+                    "range_ref": None,
+                    "qualified_name": None,
+                    "reason": "related_test:changed_test_path",
+                },
+            ],
+            "related_test_count": 2,
+        },
+    }
+
+    refined = refine_agent_impact_context(base, _query_context(), max_items=20)
+
+    assert [item["evidence_type"] for item in refined["related_tests"]] == [
+        "changed_test_path",
+        "graph_edge",
+    ]
+    assert [
+        item["reason"]
+        for item in refined["edit_context"]["recommended_first_reads"]
+    ] == [
+        "target_path",
+        "related_test:changed_test_path",
+    ]
+
+
 def test_refinement_keeps_strong_evidence_and_suppresses_guesses() -> None:
     base = {
         "status": "available",
