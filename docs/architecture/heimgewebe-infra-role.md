@@ -70,14 +70,14 @@ RepoGround bleibt Quelle innerhalb kontrollierter Heimgewebe-Pfade. Direkte exte
 
 ## 5. Deployment-Grenze
 
-Der Zielzustand ist nicht mehr `heimserver = lenskit-mirror only` und auch nicht mehr `RepoGround Core läuft ausschließlich oder bevorzugt nur auf heim-pc`. Stattdessen beschreibt RepoGround zwei lokale rLens-Rollen, die jeweils nah an ihren eigenen Quellartefakten laufen:
+Der Zielzustand ist nicht mehr `heimserver = lenskit-mirror only` und auch nicht mehr `RepoGround Core läuft ausschließlich oder bevorzugt nur auf heim-pc`. Stattdessen beschreibt RepoGround zwei lokale RepoGround-Rollen, die jeweils nah an ihren eigenen Quellartefakten laufen:
 
 - `rlens-local` auf `heim-pc`: lokale Arbeits- und Interaktionswahrheit für lokale Repos, Dumps, Atlas-Zielpfade sowie dirty/untracked Zustände.
-- `rlens-peer-heimserver` auf `heimserver`: vollständiger Service- und Analyse-Peer für den Heimserver-Dateibaum, lokale Repos, Atlas-Snapshots, Merger-Artefakte und die lokale rLens-WebUI.
+- `rlens-peer-heimserver` auf `heimserver`: vollständiger Service- und Analyse-Peer für den Heimserver-Dateibaum, lokale Repos, Atlas-Snapshots, Merger-Artefakte und die lokale RepoGround-WebUI.
 
-`rlens-peer-heimserver` ist trotzdem keine öffentliche Control-Plane. Der Full-Peer-Status bedeutet nicht, dass externe Agents direkt auf RepoGround zugreifen dürfen, dass RepoGround eine öffentliche Runtime wird oder dass rLens Command-Ausführung übernimmt.
+`rlens-peer-heimserver` ist trotzdem keine öffentliche Control-Plane. Der Full-Peer-Status bedeutet nicht, dass externe Agents direkt auf RepoGround zugreifen dürfen, dass RepoGround eine öffentliche Runtime wird oder dass RepoGround Command-Ausführung übernimmt.
 
-`rLens` ist ein lokaler Service und bleibt loopback-first. Tailscale Serve darf internen Tailnet-Zugriff auf autorisierten Pfaden ermöglichen. Tailscale Funnel ist kein RepoGround-Core-Dauerpfad.
+RepoGround ist ein lokaler Service und bleibt loopback-first. Tailscale Serve darf internen Tailnet-Zugriff auf autorisierten Pfaden ermöglichen. Tailscale Funnel ist kein RepoGround-Core-Dauerpfad.
 
 Öffentlicher Zugriff darf später nur über ein getrenntes `hausmaister-agent-gateway` laufen. Dieses Gateway ist nicht Teil des RepoGround-Core und darf keine RepoGround-Runtime in eine öffentliche Control-Plane verwandeln.
 

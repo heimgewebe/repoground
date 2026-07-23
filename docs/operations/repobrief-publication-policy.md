@@ -1,6 +1,6 @@
 # RepoGround publication policy
 
-`rb-publication-policy` manages the durable identity and retention contract for RepoBrief publications. It does not generate RepoBrief bundles itself. The publisher reserves a generation before writing payload data, completes the durable record after validating the bundle manifest, and runs retention through an explicit dry-run/apply cycle.
+`rb-publication-policy` manages the durable identity and retention contract for RepoGround publications. It does not generate RepoGround bundles itself. The publisher reserves a generation before writing payload data, completes the durable record after validating the bundle manifest, and runs retention through an explicit dry-run/apply cycle.
 
 ## Storage separation
 

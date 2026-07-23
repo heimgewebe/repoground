@@ -26,6 +26,18 @@ FORMER_SERVICE_UNIT = "r" + "lens" + ".service"
 SOURCE_ROOTS = ("merger/repoground", "repoground", "scripts", "tests")
 SOURCE_SUFFIXES = {".py", ".sh", ".js", ".html"}
 
+# These files describe the current operating/product surface. Historical decisions,
+# proofs, archived documents, versioned contract docs and benchmark fixtures are
+# intentionally not scanned here: retired names remain valid evidence there.
+ACTIVE_GUIDANCE_PATHS: tuple[str, ...] = (
+    "docs/operations/repobrief-fleet-retention.md",
+    "docs/operations/repobrief-publication-policy.md",
+    "docs/sync/metarepo-sync.md",
+    "docs/architecture/heimgewebe-infra-role.md",
+    "docs/adr/001-secure-fs-navigation.md",
+    "docs/testing/test-matrix.md",
+)
+
 PROMPT_EXECUTABLES = frozenset({"agy", "chatgpt", "claude", "cline", "codex"})
 PROMPT_ARGUMENT_FLAGS = frozenset(
     {
@@ -399,6 +411,61 @@ def _executable_path_aliases(path: Path, relative: str) -> list[str]:
     return ["former-executable-path"] if any(term in lowered for term in terms) else []
 
 
+def _markdown_prose_lines(text: str):
+    """Yield line-numbered prose while ignoring fenced code, inline code and link targets."""
+    in_fence = False
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        if raw_line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        parts = raw_line.split("`")
+        prose_parts = list(parts[::2])
+        # A standalone retired product name in backticks is still current naming
+        # prose, not a versioned identifier. Complex inline-code tokens remain
+        # excluded so exact schema kinds, commands, env vars and paths are not
+        # rewritten or rejected by this documentation-only guard.
+        for inline_code in parts[1::2]:
+            if inline_code.strip().casefold() in FORMER_PRODUCT_TERMS:
+                prose_parts.append(inline_code)
+        prose = "".join(prose_parts)
+        # Link destinations can legitimately point at legacy-named historical files.
+        while "](" in prose:
+            start = prose.find("](")
+            end = prose.find(")", start + 2)
+            if end < 0:
+                break
+            prose = prose[: start + 1] + prose[end + 1 :]
+        yield line_number, prose
+
+
+def scan_active_guidance(repo_root: str | Path) -> list[dict[str, Any]]:
+    """Report retired product names only in explicitly current guidance prose."""
+    root = Path(repo_root).resolve()
+    findings: list[dict[str, Any]] = []
+    for relative in ACTIVE_GUIDANCE_PATHS:
+        path = root / relative
+        source = _read_source(path) if path.is_file() else None
+        if source is None:
+            continue
+        for line_number, prose in _markdown_prose_lines(source):
+            matched_names = _matched_external_names(prose)
+            if not matched_names:
+                continue
+            findings.append(
+                {
+                    "path": relative,
+                    "line": line_number,
+                    "matched_names": matched_names,
+                    "matched_aliases": ["former-product-name-in-active-guidance"],
+                }
+            )
+            if len(findings) >= MAX_FINDINGS:
+                return findings
+    return findings
+
+
 def scan_repository(repo_root: str | Path) -> list[dict[str, Any]]:
     """Find executable alias mechanisms while ignoring versioned data IDs."""
     root = Path(repo_root).resolve()
@@ -454,8 +521,11 @@ def build_audit(
     processes = scan_processes(proc_root)
     configs = scan_configs(config_paths)
     repository = scan_repository(repo_root) if repo_root is not None else []
+    active_guidance = scan_active_guidance(repo_root) if repo_root is not None else []
     config_matches = [item for item in configs if item.get("matched_aliases")]
-    active_aliases_zero = not processes and not config_matches and not repository
+    active_aliases_zero = (
+        not processes and not config_matches and not repository and not active_guidance
+    )
     services = (
         [service_state("repoground.service"), service_state(FORMER_SERVICE_UNIT)]
         if include_services else []
@@ -470,6 +540,7 @@ def build_audit(
         "raw_config_contents_included": False,
         "active_aliases_zero": active_aliases_zero,
         "repository_alias_findings": repository,
+        "active_guidance_findings": active_guidance,
         "process_findings": processes,
         "config_findings": configs,
         "service_states": services,

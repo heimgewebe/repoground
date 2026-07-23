@@ -7,6 +7,7 @@ from pathlib import Path
 from merger.repoground.core.naming_audit import (
     build_audit,
     dumps_audit,
+    scan_active_guidance,
     scan_configs,
     scan_processes,
     scan_repository,
@@ -254,6 +255,53 @@ def test_repository_audit_detects_runtime_alias_but_not_versioned_kind(tmp_path:
             "matched_aliases": ["former-cache-environment"],
         }
     ]
+
+
+def test_active_guidance_detects_retired_name_in_current_prose(tmp_path: Path) -> None:
+    path = tmp_path / "docs/testing/test-matrix.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("# Current matrix\n\nRepoBrief is the current product.\n", encoding="utf-8")
+
+    assert scan_active_guidance(tmp_path) == [
+        {
+            "path": "docs/testing/test-matrix.md",
+            "line": 3,
+            "matched_names": ["repobrief"],
+            "matched_aliases": ["former-product-name-in-active-guidance"],
+        }
+    ]
+
+
+def test_active_guidance_ignores_code_and_link_targets(tmp_path: Path) -> None:
+    path = tmp_path / "docs/testing/test-matrix.md"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        "# Current matrix\n\n"
+        "Exact legacy kind: `repobrief.snapshot_status`.\n"
+        "Historical file: [decision](../decisions/repobrief-old.md).\n"
+        "```text\nRepoBrief fixture payload\n```\n",
+        encoding="utf-8",
+    )
+
+    assert scan_active_guidance(tmp_path) == []
+
+
+def test_active_guidance_detects_standalone_retired_name_in_inline_code(tmp_path: Path) -> None:
+    path = tmp_path / "docs/testing/test-matrix.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("Current service name: `rLens`.\n", encoding="utf-8")
+
+    findings = scan_active_guidance(tmp_path)
+
+    assert findings[0]["matched_names"] == ["rlens"]
+
+
+def test_unlisted_historical_document_is_not_active_guidance(tmp_path: Path) -> None:
+    path = tmp_path / "docs/decisions/old.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("RepoBrief was the former product.\n", encoding="utf-8")
+
+    assert scan_active_guidance(tmp_path) == []
 
 
 def test_audit_can_skip_services(tmp_path: Path) -> None:
