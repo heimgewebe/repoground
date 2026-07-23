@@ -13,6 +13,7 @@ inventory remains available behind ``verbose``.
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,51 @@ def _read_manifest(manifest_path: str | Path) -> dict[str, Any] | None:
     return data if isinstance(data, dict) else None
 
 
+def _commit_entries_from_manifest(manifest: dict[str, Any] | None) -> tuple[tuple[str, str | None], ...]:
+    if manifest is None:
+        return ()
+    provenance = manifest.get("snapshot_provenance")
+    repos = provenance.get("repositories") if isinstance(provenance, dict) else None
+    if not isinstance(repos, list):
+        return ()
+    identities: list[tuple[str, str | None]] = []
+    for repo in repos:
+        if not (
+            isinstance(repo, dict)
+            and repo.get("provenance_status") == "present"
+            and isinstance(repo.get("git_commit"), str)
+            and repo.get("git_commit")
+        ):
+            continue
+        name = repo.get("repo") or repo.get("name") or repo.get("path")
+        identities.append(
+            (
+                repo["git_commit"],
+                name if isinstance(name, str) and name else None,
+            )
+        )
+    return tuple(identities)
+
+
+@lru_cache(maxsize=128)
+def _cached_commit_entries(
+    path_text: str,
+    device: int,
+    inode: int,
+    size: int,
+    mtime_ns: int,
+) -> tuple[tuple[str, str | None], ...]:
+    """Read commit provenance once for one concrete on-disk manifest revision.
+
+    The stat fields are intentionally part of the key: replacing or modifying
+    the manifest produces a different cache entry without requiring a global
+    manual invalidation protocol. The unused stat arguments encode file
+    identity/revision in the cache key; only ``path_text`` is needed to read.
+    """
+    del device, inode, size, mtime_ns
+    return _commit_entries_from_manifest(_read_manifest(Path(path_text)))
+
+
 def _normalize_commit_identity(value: Any) -> dict[str, Any] | None:
     """Normalize legacy/synthetic commit values to one stable object shape."""
     if isinstance(value, str) and value:
@@ -65,29 +111,30 @@ def commit_identity(manifest_path: str | Path) -> dict[str, Any] | None:
 
     The shape is stable for single- and multi-repository snapshots. ``None`` is
     returned rather than fabricating an identity when provenance is absent.
+    Repeated reads of an unchanged manifest reuse stat-keyed provenance data
+    instead of reparsing the full JSON file on every compact frontdoor call.
     """
-    manifest = _read_manifest(manifest_path)
-    if manifest is None:
+    path = _coerce_manifest_path(manifest_path)
+    try:
+        stat = path.stat()
+    except OSError:
         return None
-    provenance = manifest.get("snapshot_provenance")
-    repos = provenance.get("repositories") if isinstance(provenance, dict) else None
-    if not isinstance(repos, list):
+    entries = _cached_commit_entries(
+        str(path),
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_size,
+        stat.st_mtime_ns,
+    )
+    if not entries:
         return None
-    identities: list[dict[str, Any]] = []
-    for repo in repos:
-        if not (
-            isinstance(repo, dict)
-            and repo.get("provenance_status") == "present"
-            and isinstance(repo.get("git_commit"), str)
-            and repo.get("git_commit")
-        ):
-            continue
-        identity: dict[str, Any] = {"git_commit": repo["git_commit"]}
-        name = repo.get("repo") or repo.get("name") or repo.get("path")
-        if isinstance(name, str) and name:
-            identity["repo"] = name
-        identities.append(identity)
-    return {"repositories": identities} if identities else None
+    repositories = []
+    for git_commit, repo in entries:
+        identity: dict[str, Any] = {"git_commit": git_commit}
+        if repo is not None:
+            identity["repo"] = repo
+        repositories.append(identity)
+    return {"repositories": repositories}
 
 
 def compact_freshness(freshness: Any, manifest_path: str | Path) -> dict[str, Any]:
