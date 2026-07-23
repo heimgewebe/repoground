@@ -43,6 +43,7 @@ from ..adapters import diagnostics as diagnostics_rebuild
 
 from merger.repoground.core.merge import get_merges_dir, SPEC_VERSION, prescan_repo
 from merger.repoground.core.path_security import resolve_secure_path
+from merger.repoground import __version__ as PRODUCT_VERSION
 
 # Global Version Info
 SERVER_START_TIME = datetime.now(timezone.utc).isoformat()
@@ -81,6 +82,18 @@ def _get_server_version():
     return "dev"
 
 SERVER_VERSION = _get_server_version()
+
+# Unambiguous aliases for the version identities exposed over the API.
+#
+# - PRODUCT_VERSION: the RepoGround release/product version (semver, e.g. "3.0.0"),
+#   sourced from merger.repoground.__version__ / RELEASE_VERSION.
+# - CONTRACT_VERSION: the report/merge contract (spec) version (e.g. "2.4"), sourced
+#   from merger.repoground.core.merge.SPEC_VERSION. This is unrelated to the product
+#   release version and only changes when the report/contract shape changes.
+# - BUILD_COMMIT: the build/server identity (env override or short git commit hash,
+#   "dev" otherwise), sourced from SERVER_VERSION above.
+CONTRACT_VERSION = SPEC_VERSION
+BUILD_COMMIT = SERVER_VERSION
 
 # Build ID for cache busting
 # If REPOGROUND_BUILD_ID is set, use it (stable per build).
@@ -601,17 +614,33 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
 @app.get("/api/version")
 def api_version():
     return {
-        "version": SERVER_VERSION,
+        "product_version": PRODUCT_VERSION,
+        "build_commit": BUILD_COMMIT,
         "build_id": BUILD_ID,
-        "started_at": SERVER_START_TIME
+        "started_at": SERVER_START_TIME,
+        # Deprecated: historically aliased the build commit identity, not the
+        # product release version. Kept for backward compatibility; new clients
+        # should read "build_commit" instead. Do not repurpose this key to mean
+        # the product version — that is "product_version" above.
+        "version": BUILD_COMMIT,
     }
 
 @app.get("/api/health")
 def health():
     return {
         "status": "ok",
-        "version": SPEC_VERSION,
-        "server_version": SERVER_VERSION,
+        # Unambiguous version identities — see the module-level comment above
+        # CONTRACT_VERSION/BUILD_COMMIT for what each one is authoritative for.
+        "product_version": PRODUCT_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "build_commit": BUILD_COMMIT,
+        # Deprecated legacy fields, kept for backward compatibility with older
+        # clients. Do not use these for new integrations:
+        #   "version" historically held the report/spec CONTRACT_VERSION, not the
+        #   product release version.
+        #   "server_version" historically held the BUILD_COMMIT identity.
+        "version": CONTRACT_VERSION,
+        "server_version": BUILD_COMMIT,
         "hub": str(state.hub),
         "merges_dir": str(state.merges_dir) if state.merges_dir else None,
         "auth_enabled": bool(get_security_config().token),

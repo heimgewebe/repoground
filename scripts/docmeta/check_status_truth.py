@@ -6,10 +6,20 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import Counter
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from scripts.release.build_release_candidate import (
+    DISTRIBUTION_STATUS,
+    LICENSE_EXPRESSION,
+    VERSION_RE,
+)
 
 KIND = "lenskit.status_truth_check"
 VERSION = "1.0"
@@ -18,6 +28,14 @@ DEFAULT_STATUS_PATH = Path("docs/status/repobrief-status-truth.v1.json")
 TASK_INDEX_PATH = Path("docs/tasks/index.json")
 TASK_BOARD_PATH = Path("docs/tasks/board.md")
 DOC_FRESHNESS_PATH = Path("docs/doc-freshness-registry.yml")
+LICENSE_PATH = Path("LICENSE")
+RELEASE_VERSION_PATH = Path("RELEASE_VERSION")
+MIGRATION_INVENTORY_PATH = Path("docs/architecture/repoground-3-migration-inventory.v1.json")
+PUBLIC_LICENSE_DECISION_PATH = Path("docs/decisions/repoground-public-license-decision.v1.json")
+STALE_CURRENT_DISTRIBUTION_RE = re.compile(
+    r"public distribution\s+(?:remains\s+|is\s+)?blocked[^.]*LicenseRef-[A-Za-z0-9_.-]+",
+    re.IGNORECASE,
+)
 BOARD_DONE_MARKER = (
     "`done` – der deklarierte Task-Scope ist abgeschlossen und belegt; "
     "separate Folgetasks oder Grenzen dürfen offen bleiben"
@@ -116,6 +134,113 @@ def _registry_summary(root: Path) -> tuple[dict[str, Any], list[Finding]]:
     }, findings
 
 
+def _release_identity_facts(root: Path) -> tuple[dict[str, Any] | None, list[Finding]]:
+    """Derive stable release-identity facts directly from repository files.
+
+    Deliberately local and network-free: every fact comes from a file already
+    tracked in the repository (LICENSE, RELEASE_VERSION, the migration
+    inventory and the public license decision record).
+    """
+
+    try:
+        license_text = (root / LICENSE_PATH).read_text(encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001 - control-file boundary
+        return None, [Finding("RELEASE_IDENTITY_LICENSE_UNREADABLE", LICENSE_PATH.as_posix(), str(exc))]
+    if "Apache License" not in license_text or "Version 2.0" not in license_text:
+        return None, [
+            Finding(
+                "RELEASE_IDENTITY_LICENSE_UNRECOGNIZED",
+                LICENSE_PATH.as_posix(),
+                f"LICENSE text no longer matches the declared {LICENSE_EXPRESSION} expression",
+            )
+        ]
+
+    try:
+        release_version = (root / RELEASE_VERSION_PATH).read_text(encoding="utf-8").strip()
+    except Exception as exc:  # noqa: BLE001 - control-file boundary
+        return None, [Finding("RELEASE_IDENTITY_VERSION_UNREADABLE", RELEASE_VERSION_PATH.as_posix(), str(exc))]
+    if not VERSION_RE.fullmatch(release_version):
+        return None, [Finding("RELEASE_IDENTITY_VERSION_INVALID", RELEASE_VERSION_PATH.as_posix(), release_version)]
+
+    try:
+        inventory = _load_json(root / MIGRATION_INVENTORY_PATH)
+    except Exception as exc:  # noqa: BLE001 - control-file boundary
+        return None, [Finding("RELEASE_IDENTITY_NAMING_UNREADABLE", MIGRATION_INVENTORY_PATH.as_posix(), str(exc))]
+    canonical = inventory.get("canonical") if isinstance(inventory, dict) else None
+    required_naming = {"product", "repository_target", "python_namespace", "command"}
+    if not isinstance(canonical, dict) or not required_naming.issubset(canonical):
+        return None, [
+            Finding(
+                "RELEASE_IDENTITY_NAMING_INVALID",
+                MIGRATION_INVENTORY_PATH.as_posix(),
+                "missing or incomplete canonical naming block",
+            )
+        ]
+
+    try:
+        decision = _load_json(root / PUBLIC_LICENSE_DECISION_PATH)
+    except Exception as exc:  # noqa: BLE001 - control-file boundary
+        return None, [Finding("RELEASE_IDENTITY_DECISION_UNREADABLE", PUBLIC_LICENSE_DECISION_PATH.as_posix(), str(exc))]
+    if (
+        not isinstance(decision, dict)
+        or decision.get("current_license_expression") != LICENSE_EXPRESSION
+        or decision.get("distribution_status") != DISTRIBUTION_STATUS
+    ):
+        return None, [
+            Finding(
+                "RELEASE_IDENTITY_DECISION_DRIFT",
+                PUBLIC_LICENSE_DECISION_PATH.as_posix(),
+                "recorded public license decision no longer matches the current license/distribution facts",
+            )
+        ]
+
+    facts = {
+        "product_name": canonical["product"],
+        "repository_target": canonical["repository_target"],
+        "python_namespace": canonical["python_namespace"],
+        "license_expression": LICENSE_EXPRESSION,
+        "license_file": LICENSE_PATH.as_posix(),
+        "release_version": release_version,
+        "public_distribution_status": DISTRIBUTION_STATUS,
+    }
+    return facts, []
+
+
+def _validate_release_truth(
+    root: Path, truth: dict[str, Any], status_path: Path
+) -> list[Finding]:
+    findings: list[Finding] = []
+    release_facts, release_identity_findings = _release_identity_facts(root)
+    findings.extend(release_identity_findings)
+    if release_facts is None:
+        return findings
+
+    declared = truth.get("release_identity")
+    declared_identity = declared if isinstance(declared, dict) else None
+    if declared_identity != release_facts:
+        findings.append(
+            Finding(
+                "STATUS_TRUTH_RELEASE_IDENTITY_MISMATCH",
+                status_path.as_posix(),
+                f"expected {release_facts!r}, found {declared_identity!r}",
+            )
+        )
+
+    # Historical/versioned evidence may legitimately name a superseded LicenseRef.
+    # Reject only prose that presents the old restrictive license as the current
+    # public-distribution state.
+    serialized_truth = json.dumps(truth, sort_keys=True)
+    if STALE_CURRENT_DISTRIBUTION_RE.findall(serialized_truth):
+        findings.append(
+            Finding(
+                "STATUS_TRUTH_STALE_LICENSE_REFERENCE",
+                status_path.as_posix(),
+                "current public-distribution prose still claims a superseded restrictive LicenseRef",
+            )
+        )
+    return findings
+
+
 def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
     root = root.resolve()
     findings: list[Finding] = []
@@ -154,6 +279,8 @@ def scan(root: Path, status_path: Path = DEFAULT_STATUS_PATH) -> dict[str, Any]:
         findings.append(Finding("STATUS_TRUTH_KIND", status_path.as_posix(), "unexpected kind/version"))
     if truth.get("authority") != "governance_projection":
         findings.append(Finding("STATUS_TRUTH_AUTHORITY", status_path.as_posix(), "must remain a projection"))
+
+    findings.extend(_validate_release_truth(root, truth, status_path))
 
     counts = Counter(
         item.get("status") for item in tasks if isinstance(item, dict)

@@ -164,6 +164,44 @@
       "type": "array",
       "uniqueItems": true
     },
+    "release_identity": {
+      "additionalProperties": false,
+      "description": "Stable release facts, cross-checked deterministically against LICENSE, RELEASE_VERSION and the migration/license decision records by scripts/docmeta/check_status_truth.py.",
+      "properties": {
+        "license_expression": {
+          "const": "Apache-2.0"
+        },
+        "license_file": {
+          "const": "LICENSE"
+        },
+        "product_name": {
+          "const": "RepoGround"
+        },
+        "public_distribution_status": {
+          "const": "permitted_under_project_license"
+        },
+        "python_namespace": {
+          "const": "merger.repoground"
+        },
+        "release_version": {
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+          "type": "string"
+        },
+        "repository_target": {
+          "const": "heimgewebe/repoground"
+        }
+      },
+      "required": [
+        "product_name",
+        "repository_target",
+        "python_namespace",
+        "license_expression",
+        "license_file",
+        "release_version",
+        "public_distribution_status"
+      ],
+      "type": "object"
+    },
     "roadmap_surfaces": {
       "items": {
         "additionalProperties": false,
@@ -396,6 +434,7 @@
     "audit_package_coverage",
     "audit_packages",
     "open_followups",
+    "release_identity",
     "health_semantics",
     "does_not_establish"
   ],
