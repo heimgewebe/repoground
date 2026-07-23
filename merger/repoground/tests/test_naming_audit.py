@@ -289,7 +289,7 @@ def test_active_guidance_ignores_code_and_link_targets(tmp_path: Path) -> None:
 def test_active_guidance_detects_standalone_retired_name_in_inline_code(tmp_path: Path) -> None:
     path = tmp_path / "docs/testing/test-matrix.md"
     path.parent.mkdir(parents=True)
-    path.write_text("Current service name: `rLens`.\n", encoding="utf-8")
+    path.write_text("Current `rLens` service\n", encoding="utf-8")
 
     findings = scan_active_guidance(tmp_path)
 

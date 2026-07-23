@@ -412,7 +412,7 @@ def _executable_path_aliases(path: Path, relative: str) -> list[str]:
 
 
 def _markdown_prose_lines(text: str):
-    """Yield line-numbered prose while ignoring fenced code, inline code and link targets."""
+    """Yield line-numbered prose while ignoring fenced code, complex inline code and link targets."""
     in_fence = False
     for line_number, raw_line in enumerate(text.splitlines(), start=1):
         if raw_line.lstrip().startswith("```"):
@@ -421,14 +421,18 @@ def _markdown_prose_lines(text: str):
         if in_fence:
             continue
         parts = raw_line.split("`")
-        prose_parts = list(parts[::2])
+        prose_parts: list[str] = []
         # A standalone retired product name in backticks is still current naming
         # prose, not a versioned identifier. Complex inline-code tokens remain
         # excluded so exact schema kinds, commands, env vars and paths are not
         # rewritten or rejected by this documentation-only guard.
-        for inline_code in parts[1::2]:
-            if inline_code.strip().casefold() in FORMER_PRODUCT_TERMS:
-                prose_parts.append(inline_code)
+        for index, part in enumerate(parts):
+            if index % 2 == 0:
+                prose_parts.append(part)
+            elif part.strip().casefold() in FORMER_PRODUCT_TERMS:
+                # Preserve the inline token at its original position and force
+                # word boundaries even when neighbouring prose is alphanumeric.
+                prose_parts.append(f" {part} ")
         prose = "".join(prose_parts)
         # Link destinations can legitimately point at legacy-named historical files.
         while "](" in prose:
