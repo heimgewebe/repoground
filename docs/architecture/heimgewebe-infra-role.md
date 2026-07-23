@@ -70,14 +70,11 @@ RepoGround bleibt Quelle innerhalb kontrollierter Heimgewebe-Pfade. Direkte exte
 
 ## 5. Deployment-Grenze
 
-Der Zielzustand ist nicht mehr `heimserver = lenskit-mirror only` und auch nicht mehr `RepoGround Core läuft ausschließlich oder bevorzugt nur auf heim-pc`. Stattdessen beschreibt RepoGround zwei lokale RepoGround-Rollen, die jeweils nah an ihren eigenen Quellartefakten laufen:
+Der aktive Zielzustand setzt RepoGround lokal auf `heim-pc` ein, nah an den dortigen Repositories, Dumps und Atlas-Zielpfaden. Dirty- und untracked-Zustände bleiben lokale Evidenz und werden nicht durch einen entfernten Peer ersetzt.
 
-- `rlens-local` auf `heim-pc`: lokale Arbeits- und Interaktionswahrheit für lokale Repos, Dumps, Atlas-Zielpfade sowie dirty/untracked Zustände.
-- `rlens-peer-heimserver` auf `heimserver`: vollständiger Service- und Analyse-Peer für den Heimserver-Dateibaum, lokale Repos, Atlas-Snapshots, Merger-Artefakte und die lokale RepoGround-WebUI.
+Das frühere Zielmodell `rlens-peer-heimserver` ist superseded. `heimserver` ist außer Betrieb und darf nicht als aktiver RepoGround-Peer, Service-Ziel, Proxy oder Recovery-Abhängigkeit vorausgesetzt werden. Historische Heimserver-Snapshots und Runtime-Dokumente bleiben als historische Evidenz lesbar, begründen aber keine aktuelle RepoGround-Rolle.
 
-`rlens-peer-heimserver` ist trotzdem keine öffentliche Control-Plane. Der Full-Peer-Status bedeutet nicht, dass externe Agents direkt auf RepoGround zugreifen dürfen, dass RepoGround eine öffentliche Runtime wird oder dass RepoGround Command-Ausführung übernimmt.
-
-RepoGround ist ein lokaler Service und bleibt loopback-first. Tailscale Serve darf internen Tailnet-Zugriff auf autorisierten Pfaden ermöglichen. Tailscale Funnel ist kein RepoGround-Core-Dauerpfad.
+RepoGround auf `heim-pc` bleibt loopback-first. Tailscale Serve darf internen Tailnet-Zugriff auf ausdrücklich autorisierten Pfaden ermöglichen. Tailscale Funnel ist kein RepoGround-Core-Dauerpfad.
 
 Öffentlicher Zugriff darf später nur über ein getrenntes `hausmaister-agent-gateway` laufen. Dieses Gateway ist nicht Teil des RepoGround-Core und darf keine RepoGround-Runtime in eine öffentliche Control-Plane verwandeln.
 
