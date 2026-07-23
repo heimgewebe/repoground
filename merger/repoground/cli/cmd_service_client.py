@@ -442,6 +442,23 @@ def register_service_client_commands(subparsers: argparse._SubParsersAction) -> 
     _add_common_options(profiles_parser, suppress_defaults=True, dest_prefix="leaf_")
 
 
+def _health_text_rows(data: dict[str, Any]) -> list[tuple[str, Any]]:
+    rows: list[tuple[str, Any]] = [("status", data.get("status", "?"))]
+    for field in ("product_version", "contract_version", "build_commit"):
+        if field in data:
+            rows.append((field, data[field]))
+    # Legacy/deprecated fields are displayed only when the corresponding
+    # unambiguous field is absent, preserving readable output from old servers.
+    if "version" in data and "contract_version" not in data:
+        rows.append(("version", data["version"]))
+    if "server_version" in data and "build_commit" not in data:
+        rows.append(("server_version", data["server_version"]))
+    for field in ("hub", "running_jobs", "auth_enabled"):
+        if field in data:
+            rows.append((field, data[field]))
+    return rows
+
+
 def _cmd_health(args: argparse.Namespace) -> int:
     try:
         _ensure_profile_config_valid_if_present(args)
@@ -458,25 +475,8 @@ def _cmd_health(args: argparse.Namespace) -> int:
         print(json.dumps(data, indent=2))
         return 0
 
-    print(f"status: {data.get('status', '?')}")
-    if "product_version" in data:
-        print(f"product_version: {data['product_version']}")
-    if "contract_version" in data:
-        print(f"contract_version: {data['contract_version']}")
-    if "build_commit" in data:
-        print(f"build_commit: {data['build_commit']}")
-    # Legacy/deprecated fields — kept for older services that predate the
-    # unambiguous product_version/contract_version/build_commit fields above.
-    if "version" in data and "contract_version" not in data:
-        print(f"version: {data['version']}")
-    if "server_version" in data and "build_commit" not in data:
-        print(f"server_version: {data['server_version']}")
-    if "hub" in data:
-        print(f"hub: {data['hub']}")
-    if "running_jobs" in data:
-        print(f"running_jobs: {data['running_jobs']}")
-    if "auth_enabled" in data:
-        print(f"auth_enabled: {data['auth_enabled']}")
+    for field, value in _health_text_rows(data):
+        print(f"{field}: {value}")
     return 0
 
 
