@@ -75,8 +75,21 @@ any absent, non-numeric or empty required input under
 vacuous `all([])` pass. Missing scored cases, missing agent-task outcomes, a
 missing navigation signal, or any missing quality metric therefore block
 promotion rather than self-attesting one. This hardening changes no measured
-value: the goldset, fixture and call-record digests above are unchanged and the
+value: the goldset, fixture and call-record digests below are unchanged and the
 happy-path decision simply reports `insufficient_evidence: []`.
+
+The gate additionally fails closed on inputs that are present but not usable as
+measured evidence. A non-finite metric or navigation ratio (`NaN`, `+inf` or
+`-inf`) is classified as `insufficient_evidence` rather than being allowed to
+pass or fail a threshold by chance. A missing or non-numeric promotion
+threshold is surfaced under `insufficient_evidence` (as `thresholds.<field>`)
+instead of raising, so a malformed `decide_promotion` call fails closed rather
+than crashing. Threshold comparisons are inclusive at the exact boundary and a
+malformed, non-empty case or navigation-outcome record can never self-attest a
+`no_case_regression` pass. This robustness is exercised by focused tests for
+non-finite metrics, non-finite navigation ratios, absent and invalid
+thresholds, malformed case records, and the inclusive/just-below boundary of
+each numeric premise.
 
 ## Commit-bound CI evidence
 
@@ -107,6 +120,16 @@ Observed report values on the GitHub-hosted Python 3.12 runner:
 
 The timing value is evidence for this exact runner and commit, not a portable
 performance guarantee.
+
+The bound run above predates the non-finite, threshold-validation and
+malformed-record hardening. Its digests and observed values remain valid
+evidence for the unchanged happy-path fixture — the goldset, fixture and
+call-record digests and the serialized byte count are byte-identical after the
+hardening, and the happy-path decision is unchanged. It does not, however,
+exercise the fail-closed paths added here; those are covered by the focused
+tests listed above and must be re-confirmed by this pull request's CI run,
+whose head SHA, workflow run and artifact digest are not yet minted. This proof
+deliberately does not restate the bound run as covering the new code.
 
 ## Reproduction
 

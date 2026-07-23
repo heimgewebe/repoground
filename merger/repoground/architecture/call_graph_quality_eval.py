@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import time
 from collections import Counter
 from pathlib import Path
@@ -589,45 +590,65 @@ REQUIRED_METRIC_FIELDS = (
     "baseline_tool_calls",
     "graph_tool_calls",
 )
-REQUIRED_NAVIGATION_FIELDS = (
-    "context_path_reduction_ratio",
-    "no_case_regression",
+REQUIRED_THRESHOLD_FIELDS = (
+    "minimum_s1_precision",
+    "minimum_target_recall",
+    "minimum_context_path_reduction",
 )
 
 
-def _is_number(value: Any) -> bool:
-    return not isinstance(value, bool) and isinstance(value, (int, float))
+def _is_finite_number(value: Any) -> bool:
+    """True only for a real, finite measured number (never bool, NaN or inf)."""
+
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+    )
 
 
-def _meets(value: Any, threshold: float) -> bool:
-    """Fail closed: a missing or non-numeric metric never satisfies a gate."""
+def _meets(value: Any, threshold: Any) -> bool:
+    """Fail closed: a missing, non-finite or non-numeric side never satisfies a gate."""
 
-    return _is_number(value) and float(value) >= float(threshold)
+    return (
+        _is_finite_number(value)
+        and _is_finite_number(threshold)
+        and float(value) >= float(threshold)
+    )
 
 
 def _missing_promotion_inputs(
     metrics: Mapping[str, Any],
+    thresholds: Mapping[str, Any],
     case_results: Sequence[Mapping[str, Any]],
     agent_outcomes: Sequence[Mapping[str, Any]],
 ) -> list[str]:
-    """List required promotion inputs that are absent, non-numeric or empty.
+    """List required promotion inputs that are absent, non-finite or empty.
 
-    Promotion must be computed from measured inputs. Any missing metric,
-    missing navigation signal, or absent scored evidence blocks promotion
-    rather than letting an empty ``all(...)`` silently attest a pass.
+    Promotion must be computed from measured inputs. Any missing or non-finite
+    metric or threshold, missing navigation signal, or absent scored evidence
+    blocks promotion rather than letting an empty ``all(...)`` silently attest a
+    pass. A non-finite value (``NaN``/``inf``) is treated as absent evidence,
+    not as a value that happens to miss a threshold.
     """
 
     missing: list[str] = []
     for field in REQUIRED_METRIC_FIELDS:
-        if not _is_number(metrics.get(field)):
+        if not _is_finite_number(metrics.get(field)):
             missing.append(field)
     navigation = metrics.get("navigation_utility")
     if not isinstance(navigation, Mapping):
         missing.append("navigation_utility")
     else:
-        for field in REQUIRED_NAVIGATION_FIELDS:
-            if field not in navigation:
-                missing.append(f"navigation_utility.{field}")
+        if not _is_finite_number(navigation.get("context_path_reduction_ratio")):
+            missing.append("navigation_utility.context_path_reduction_ratio")
+        # ``no_case_regression`` is a measured boolean; a present ``False`` is a
+        # real regression signal, not missing evidence, so only absence blocks.
+        if "no_case_regression" not in navigation:
+            missing.append("navigation_utility.no_case_regression")
+    for field in REQUIRED_THRESHOLD_FIELDS:
+        if not _is_finite_number(thresholds.get(field)):
+            missing.append(f"thresholds.{field}")
     if not case_results:
         missing.append("scored_cases")
     if not agent_outcomes:
@@ -646,21 +667,21 @@ def _threshold_checks(
     return {
         "minimum_s1_precision": _meets(
             metrics.get("s1_precision"),
-            thresholds["minimum_s1_precision"],
+            thresholds.get("minimum_s1_precision"),
         ),
         "minimum_target_recall": _meets(
             metrics.get("target_recall"),
-            thresholds["minimum_target_recall"],
+            thresholds.get("minimum_target_recall"),
         ),
         "minimum_context_path_reduction": _meets(
             navigation.get("context_path_reduction_ratio"),
-            thresholds["minimum_context_path_reduction"],
+            thresholds.get("minimum_context_path_reduction"),
         ),
         "no_case_regression": (
             bool(case_results)
             and bool(agent_outcomes)
-            and all(case["passed"] for case in case_results)
-            and all(item["outcome"] == "pass" for item in agent_outcomes)
+            and all(case.get("passed") is True for case in case_results)
+            and all(item.get("outcome") == "pass" for item in agent_outcomes)
             and navigation.get("no_case_regression") is True
         ),
     }
@@ -708,9 +729,19 @@ def decide_promotion(
     case_results: Sequence[Mapping[str, Any]],
     agent_outcomes: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Compute the fail-closed promotion decision from measured inputs."""
+    """Compute the fail-closed promotion decision from measured inputs.
 
-    missing = _missing_promotion_inputs(metrics, case_results, agent_outcomes)
+    Missing or non-finite thresholds, metrics or evidence are surfaced under
+    ``insufficient_evidence`` instead of raising, so a malformed call fails
+    closed rather than crashing or producing a vacuous pass.
+    """
+
+    missing = _missing_promotion_inputs(
+        metrics,
+        thresholds,
+        case_results,
+        agent_outcomes,
+    )
     checks = _threshold_checks(metrics, thresholds, case_results, agent_outcomes)
     return _decision(checks, missing)
 
