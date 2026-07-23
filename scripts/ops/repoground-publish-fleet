@@ -23,6 +23,7 @@ import tempfile
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -65,6 +66,7 @@ DEFAULT_RETENTION = 3
 MAX_RETENTION = 10
 FINGERPRINT_SCHEMA = "repobrief.fleet-publication-fingerprint.v3"
 STATE_SCHEMA = "repobrief.fleet-publication-state.v1"
+SCHEDULING_POLICY = "oldest-successful-publication-first.v1"
 ACTIVE_LEASE_SCHEMA = "repobrief.active-publication-lease.v1"
 PRUNE_TRANSACTION_SCHEMA = "repobrief.retention-transaction.v1"
 QUARANTINE_DIR_NAME = ".repoground-prune-quarantine"
@@ -332,6 +334,96 @@ def prioritize_generator_repository(entries: list[RepoEntry]) -> list[RepoEntry]
     if generator_key is None:
         return list(entries)
     return sorted(entries, key=lambda entry: entry.key != generator_key)
+
+
+def _publication_timestamp_epoch(value: object) -> float | None:
+    if not isinstance(value, str) or not value:
+        return None
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc).timestamp()
+
+
+def latest_successful_publication(entry: RepoEntry) -> tuple[str | None, float | None]:
+    """Return repository-level publication age from the existing fleet state.
+
+    Scheduling derives only from the durable publication state that already
+    exists. It does not persist a second queue or cursor authority. If historical
+    state contains multiple refs, the most recent successful publication for the
+    repository defines its current service debt.
+    """
+    repository = publication_repository(entry)
+    latest_value: str | None = None
+    latest_epoch: float | None = None
+    prefix = f"{repository}__"
+    for path in sorted(STATE_ROOT.glob(f"{prefix}*.state.json")):
+        state = load_state(path)
+        if state is None or state.get("repo_id") != repository:
+            continue
+        value = state.get("created_at")
+        epoch = _publication_timestamp_epoch(value)
+        if epoch is None:
+            continue
+        if latest_epoch is None or epoch > latest_epoch:
+            latest_value = value
+            latest_epoch = epoch
+    return latest_value, latest_epoch
+
+
+def prioritize_fleet_publication(
+    entries: list[RepoEntry], *, now_epoch: float | None = None
+) -> tuple[list[RepoEntry], dict[str, object]]:
+    """Order bounded fleet work by self-priority, then oldest publication debt.
+
+    A successful publication moves a repository to the back of the debt order.
+    Repositories without usable publication history sort ahead of already-served
+    peers. This makes repeated limited runs converge without another durable queue.
+    """
+    now = time.time() if now_epoch is None else now_epoch
+    generator_key = generator_repository_key()
+    prioritized = prioritize_generator_repository(entries)
+    rows: list[tuple[RepoEntry, str | None, float | None, int]] = []
+    for discovery_rank, entry in enumerate(prioritized):
+        created_at, created_epoch = latest_successful_publication(entry)
+        rows.append((entry, created_at, created_epoch, discovery_rank))
+    rows.sort(
+        key=lambda row: (
+            row[0].key != generator_key,
+            row[2] is not None,
+            row[2] if row[2] is not None else float("-inf"),
+            row[3],
+        )
+    )
+    ordered = [row[0] for row in rows]
+    evidence: dict[str, dict[str, object]] = {}
+    for rank, (entry, created_at, created_epoch, _discovery_rank) in enumerate(
+        rows, start=1
+    ):
+        debt_seconds = (
+            max(0, int(now - created_epoch)) if created_epoch is not None else None
+        )
+        evidence[entry.key] = {
+            "rank": rank,
+            "generator_priority": entry.key == generator_key,
+            "last_successful_publication_at": created_at,
+            "publication_debt_seconds": debt_seconds,
+            "debt_basis": (
+                "publication_history_unavailable"
+                if created_epoch is None
+                else "age_since_last_successful_publication"
+            ),
+        }
+    return ordered, {
+        "policy": SCHEDULING_POLICY,
+        "generator_repository": generator_key,
+        "ordered_repositories": [entry.key for entry in ordered],
+        "entries": evidence,
+    }
 
 
 def assert_managed_worktree_identity(path: Path, expected_repo: Path) -> None:
@@ -2157,8 +2249,6 @@ def main(argv: list[str]) -> int:
         )
         return 0
 
-    entries = prioritize_generator_repository(entries)
-
     lock = acquire_lock()
     if lock is None:
         print(
@@ -2168,6 +2258,7 @@ def main(argv: list[str]) -> int:
     try:
         STATE_ROOT.mkdir(parents=True, exist_ok=True)
         LOG_ROOT.mkdir(parents=True, exist_ok=True)
+        entries, scheduling = prioritize_fleet_publication(entries)
         mode = "targeted-force" if args.force_republish else "if-changed"
         log(
             f"== fleet {mode} {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
@@ -2182,6 +2273,7 @@ def main(argv: list[str]) -> int:
                 "count": len(entries),
                 "failed": len(entries),
                 "error": str(exc)[:4000],
+                "scheduling": scheduling,
                 "details": [],
             }
             atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
@@ -2336,6 +2428,7 @@ def main(argv: list[str]) -> int:
             "generator_inputs_sha": generator_sha,
             "force_reason": args.reason if args.force_republish else None,
             "retention_reconciliation": reconciliation,
+            "scheduling": scheduling,
             "details": details,
         }
         atomic_write_json(LOG_ROOT / "fleet-last.json", summary)
