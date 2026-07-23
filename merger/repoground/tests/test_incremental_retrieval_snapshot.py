@@ -1,7 +1,12 @@
 import fcntl
 import json
 import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
+from typing import Any, Callable, Mapping, Optional
 import threading
 
 import pytest
@@ -184,15 +189,87 @@ def test_watcher_debounce_queue_backoff_and_last_successful_generation(tmp_path:
     assert watcher.tick(now=24) is None
 
 
+def _wait_for_watcher_status(
+    status_path: Path,
+    process: "subprocess.Popen[str]",
+    predicate: Callable[[Mapping[str, Any]], bool],
+    *,
+    timeout: float,
+    what: str,
+) -> Mapping[str, Any]:
+    """Poll ``status_path`` for a concrete, observable watcher state.
+
+    This never sleeps a fixed duration: it repeatedly reads the atomically
+    published status file until ``predicate`` matches or the watcher process
+    exits early, and only then raises with the last observed state attached
+    so failures are diagnosable instead of silently timing-dependent.
+    """
+    deadline = time.monotonic() + timeout
+    last_seen: Optional[Mapping[str, Any]] = None
+    while time.monotonic() < deadline:
+        if status_path.exists():
+            last_seen = json.loads(status_path.read_text(encoding="utf-8"))
+            if predicate(last_seen):
+                return last_seen
+        returncode = process.poll()
+        if returncode is not None:
+            stdout, stderr = process.communicate()
+            raise AssertionError(
+                f"watcher process exited early (returncode={returncode}) while waiting for "
+                f"{what}; last_status={last_seen!r} stdout={stdout!r} stderr={stderr!r}"
+            )
+        time.sleep(0.005)
+    raise AssertionError(f"timed out after {timeout}s waiting for {what}; last_status={last_seen!r}")
+
+
 def test_cli_status_is_read_only_and_watcher_writes_visible_atomic_status(tmp_path: Path, capsys) -> None:
     source, snapshot = _snapshot(tmp_path)
     assert main(["retrieval-snapshot", "status", "--storage", str(snapshot.storage_root)]) == 0
     assert json.loads(capsys.readouterr().out) == {"pointer": None, "snapshot": None, "watcher": None}
     assert not snapshot.current_pointer_path.exists()
-    assert main([
-        "retrieval-snapshot", "watch", "--source", str(source), "--storage", str(snapshot.storage_root),
-        "--repo-id", "test", "--poll-seconds", "0.01", "--debounce-seconds", "0", "--run-seconds", "0.05",
-    ]) == 0
+
+    # Run the real, long-lived watcher (no --run-seconds deadline) as a subprocess so it can be
+    # stopped with a real SIGINT like a deployed watcher, and so the test process can concurrently
+    # poll the atomically-published watcher-status.json for concrete observable milestones instead
+    # of guessing a sleep duration long enough for "build finished".
+    repo_root = Path(__file__).resolve().parents[3]
+    env = dict(os.environ, PYTHONPATH=str(repo_root))
+    process = subprocess.Popen(
+        [
+            sys.executable, "-m", "merger.repoground", "retrieval-snapshot", "watch",
+            "--source", str(source), "--storage", str(snapshot.storage_root),
+            "--repo-id", "test", "--poll-seconds", "0.01", "--debounce-seconds", "0",
+        ],
+        cwd=repo_root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        first = _wait_for_watcher_status(
+            snapshot.watcher_status_path, process,
+            lambda status: status.get("last_successful_generation") is not None,
+            timeout=15.0, what="the watcher's first successful generation",
+        )
+        assert first["last_successful_generation"] == snapshot.status()["generation_id"]
+
+        # Stress the debounce/tick path under a follow-up change: the watcher must observe and
+        # publish a distinct generation, again synchronized on the published status rather than
+        # a fixed sleep, without slowing the suite down with an unbounded wait.
+        (source / "alpha.py").write_text("def alpha():\n    return 'needle changed'\n", encoding="utf-8")
+        second = _wait_for_watcher_status(
+            snapshot.watcher_status_path, process,
+            lambda status: status.get("last_successful_generation") not in (None, first["last_successful_generation"]),
+            timeout=15.0, what="a second, distinct watcher generation after a source change",
+        )
+        assert second["last_successful_generation"] == snapshot.status()["generation_id"]
+        assert second["last_successful_generation"] != first["last_successful_generation"]
+
+        process.send_signal(signal.SIGINT)
+        stdout, stderr = process.communicate(timeout=15)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
+
+    assert process.returncode == 0, f"watcher did not exit cleanly: stdout={stdout!r} stderr={stderr!r}"
     watcher_status = json.loads(snapshot.watcher_status_path.read_text(encoding="utf-8"))
     assert watcher_status["state"] == "stopped"
     assert watcher_status["last_successful_generation"] == snapshot.status()["generation_id"]
