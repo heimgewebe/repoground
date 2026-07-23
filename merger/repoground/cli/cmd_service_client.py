@@ -459,9 +459,17 @@ def _cmd_health(args: argparse.Namespace) -> int:
         return 0
 
     print(f"status: {data.get('status', '?')}")
-    if "version" in data:
+    if "product_version" in data:
+        print(f"product_version: {data['product_version']}")
+    if "contract_version" in data:
+        print(f"contract_version: {data['contract_version']}")
+    if "build_commit" in data:
+        print(f"build_commit: {data['build_commit']}")
+    # Legacy/deprecated fields — kept for older services that predate the
+    # unambiguous product_version/contract_version/build_commit fields above.
+    if "version" in data and "contract_version" not in data:
         print(f"version: {data['version']}")
-    if "server_version" in data:
+    if "server_version" in data and "build_commit" not in data:
         print(f"server_version: {data['server_version']}")
     if "hub" in data:
         print(f"hub: {data['hub']}")

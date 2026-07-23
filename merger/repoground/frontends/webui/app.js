@@ -375,7 +375,10 @@ async function fetchHealth() {
         const res = await apiFetch(`${API_BASE}/health`);
         const data = await res.json();
         const authStatus = data.auth_enabled ? '🔒 Auth' : '🔓 Open';
-        document.getElementById('status').innerText = `v${data.version} (UI: ${REPOGROUND_UI_VERSION}) • ${authStatus} • Hub: ${data.hub}`;
+        // Prefer the unambiguous product_version; fall back to the deprecated
+        // "version" field (report/contract version) for older services.
+        const productVersion = data.product_version ?? data.version;
+        document.getElementById('status').innerText = `v${productVersion} (UI: ${REPOGROUND_UI_VERSION}) • ${authStatus} • Hub: ${data.hub}`;
 
         // Only set values if empty (respect user changes or saved config)
         if (!document.getElementById('hubPath').value) {
@@ -2713,10 +2716,13 @@ async function fetchVersion() {
 
         lastServerStartedAt = data.started_at || null;
 
-        if (verEl) verEl.textContent = `S: ${data.version} | B: ${buildTs}`;
+        // Prefer the unambiguous build_commit; fall back to the deprecated
+        // "version" field (which historically aliased the same build identity).
+        const buildCommit = data.build_commit ?? data.version;
+        if (verEl) verEl.textContent = `S: ${buildCommit} | B: ${buildTs}`;
         if (originEl) originEl.textContent = `Origin: ${window.location.host}`; // user requested origin
 
-        console.info(`[RepoGround] Server Version: ${data.version}, Build: ${data.build_id}`);
+        console.info(`[RepoGround] Server Build: ${buildCommit}, Build: ${data.build_id}`);
         return data;
     } catch (e) {
         console.error("Version check failed", e);

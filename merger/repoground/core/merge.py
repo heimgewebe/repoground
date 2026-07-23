@@ -202,6 +202,11 @@ def _heading_block(level: int, token: str, title: Optional[str] = None, nav: Opt
 
 # --- Configuration & Heuristics ---
 
+# Report/merge contract (spec) version — unrelated to the RepoGround product
+# release version (see merger.repoground.__version__ / RELEASE_VERSION).
+# Exposed over the API as "contract_version" (see service/app.py); the legacy
+# "version" key on /api/health is a deprecated alias for this value, not the
+# product version.
 SPEC_VERSION = "2.4"
 CANONICAL_REPORT_HEADING = "# RepoGround Report"
 LEGACY_REPORT_HEADING = "# repoLens Report"
