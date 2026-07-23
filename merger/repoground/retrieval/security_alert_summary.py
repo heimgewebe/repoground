@@ -52,131 +52,126 @@ class SecurityAlertSummaryError(ValueError):
     """Raised when readback evidence cannot be classified safely."""
 
 
+def _require_evidence_mapping(
+    value: Any, *, name: str, allowed_fields: set[str]
+) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise SecurityAlertSummaryError(f"{name} must be an object")
+    extra = set(value) - allowed_fields
+    if extra:
+        raise SecurityAlertSummaryError(
+            f"{name} has unsupported fields: {sorted(extra)}"
+        )
+    if value.get("stale") is True:
+        raise SecurityAlertSummaryError(f"{name} is marked stale")
+    return value
+
+
+def _optional_string(value: Any, *, field: str, name: str) -> str | None:
+    if value is not None and not isinstance(value, str):
+        raise SecurityAlertSummaryError(f"{name}.{field} must be a string")
+    return value
+
+
+def _optional_bool(value: Any, *, field: str, name: str) -> bool | None:
+    if value is not None and not isinstance(value, bool):
+        raise SecurityAlertSummaryError(f"{name}.{field} must be a boolean")
+    return value
+
+
+def _non_negative_int(value: Any, *, field: str, name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SecurityAlertSummaryError(
+            f"{name}.{field} must be a non-negative integer"
+        )
+    return value
+
+
+def _evidence_identity(
+    value: Mapping[str, Any], *, name: str
+) -> tuple[str | None, str | None]:
+    return (
+        _optional_string(value.get("repository"), field="repository", name=name),
+        _optional_string(value.get("commit_sha"), field="commit_sha", name=name),
+    )
+
+
 def _parse_sarif_evidence(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
-    if not isinstance(value, Mapping):
-        raise SecurityAlertSummaryError("sarif_evidence must be an object")
-    extra = set(value) - {"available", "alert_count", "repository", "commit_sha", "stale"}
-    if extra:
-        raise SecurityAlertSummaryError(
-            f"sarif_evidence has unsupported fields: {sorted(extra)}"
-        )
-    if value.get("stale") is True:
-        raise SecurityAlertSummaryError("sarif_evidence is marked stale")
-    available = value.get("available")
+    evidence = _require_evidence_mapping(
+        value,
+        name="sarif_evidence",
+        allowed_fields={"available", "alert_count", "repository", "commit_sha", "stale"},
+    )
+    available = evidence.get("available")
     if not isinstance(available, bool):
         raise SecurityAlertSummaryError("sarif_evidence.available must be a boolean")
-
-    repo = value.get("repository")
-    if repo is not None and not isinstance(repo, str):
-        raise SecurityAlertSummaryError("sarif_evidence.repository must be a string")
-
-    sha = value.get("commit_sha")
-    if sha is not None and not isinstance(sha, str):
-        raise SecurityAlertSummaryError("sarif_evidence.commit_sha must be a string")
-
+    repo, sha = _evidence_identity(evidence, name="sarif_evidence")
+    count = evidence.get("alert_count")
     if available:
-        count = value.get("alert_count")
-        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-            raise SecurityAlertSummaryError(
-                "sarif_evidence.alert_count must be a non-negative integer when available"
-            )
-        return {
-            "available": True,
-            "alert_count": count,
-            "repository": repo,
-            "commit_sha": sha,
-            "stale": value.get("stale"),
-        }
-    if value.get("alert_count") is not None:
+        count = _non_negative_int(
+            count, field="alert_count", name="sarif_evidence"
+        )
+    elif count is not None:
         raise SecurityAlertSummaryError(
             "sarif_evidence.alert_count must be omitted or null when unavailable"
         )
     return {
-        "available": False,
-        "alert_count": None,
+        "available": available,
+        "alert_count": count,
         "repository": repo,
         "commit_sha": sha,
-        "stale": value.get("stale"),
+        "stale": evidence.get("stale"),
     }
+
+
+def _valid_http_status(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 100 <= value <= 599:
+        raise SecurityAlertSummaryError(
+            "api_evidence.status_code must be a valid HTTP status integer"
+        )
+    return value
 
 
 def _parse_api_evidence(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
-    if not isinstance(value, Mapping):
-        raise SecurityAlertSummaryError("api_evidence must be an object")
-    extra = set(value) - {
-        "status_code",
-        "open_alert_count",
-        "repository",
-        "commit_sha",
-        "paginated",
-        "page_count",
-        "stale",
-    }
-    if extra:
-        raise SecurityAlertSummaryError(
-            f"api_evidence has unsupported fields: {sorted(extra)}"
+    evidence = _require_evidence_mapping(
+        value,
+        name="api_evidence",
+        allowed_fields={
+            "status_code", "open_alert_count", "repository", "commit_sha",
+            "paginated", "page_count", "stale",
+        },
+    )
+    status = _valid_http_status(evidence.get("status_code"))
+    repo, sha = _evidence_identity(evidence, name="api_evidence")
+    paginated = _optional_bool(
+        evidence.get("paginated"), field="paginated", name="api_evidence"
+    )
+    page_count = evidence.get("page_count")
+    if page_count is not None:
+        page_count = _non_negative_int(
+            page_count, field="page_count", name="api_evidence"
         )
-    if value.get("stale") is True:
-        raise SecurityAlertSummaryError("api_evidence is marked stale")
-
-    status = value.get("status_code")
-    if isinstance(status, bool) or not isinstance(status, int) or not 100 <= status <= 599:
-        raise SecurityAlertSummaryError(
-            "api_evidence.status_code must be a valid HTTP status integer"
-        )
-
-    repo = value.get("repository")
-    if repo is not None and not isinstance(repo, str):
-        raise SecurityAlertSummaryError("api_evidence.repository must be a string")
-
-    sha = value.get("commit_sha")
-    if sha is not None and not isinstance(sha, str):
-        raise SecurityAlertSummaryError("api_evidence.commit_sha must be a string")
-
-    paginated = value.get("paginated")
-    if paginated is not None and not isinstance(paginated, bool):
-        raise SecurityAlertSummaryError("api_evidence.paginated must be a boolean")
-
-    page_count = value.get("page_count")
-    if page_count is not None and (
-        isinstance(page_count, bool) or not isinstance(page_count, int) or page_count < 0
-    ):
-        raise SecurityAlertSummaryError(
-            "api_evidence.page_count must be a non-negative integer"
-        )
-
+    count = evidence.get("open_alert_count")
     if status == _OK_STATUS_CODE:
-        count = value.get("open_alert_count")
-        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-            raise SecurityAlertSummaryError(
-                "api_evidence.open_alert_count must be a non-negative integer "
-                "when status_code is 200"
-            )
-        return {
-            "status_code": status,
-            "open_alert_count": count,
-            "repository": repo,
-            "commit_sha": sha,
-            "paginated": paginated,
-            "page_count": page_count,
-            "stale": value.get("stale"),
-        }
-    if value.get("open_alert_count") is not None:
+        count = _non_negative_int(
+            count, field="open_alert_count", name="api_evidence"
+        )
+    elif count is not None:
         raise SecurityAlertSummaryError(
             "api_evidence.open_alert_count must be omitted or null unless status_code is 200"
         )
     return {
         "status_code": status,
-        "open_alert_count": None,
+        "open_alert_count": count,
         "repository": repo,
         "commit_sha": sha,
         "paginated": paginated,
         "page_count": page_count,
-        "stale": value.get("stale"),
+        "stale": evidence.get("stale"),
     }
 
 
@@ -242,6 +237,73 @@ def _assemble(
     }
 
 
+def _validate_cross_source_binding(
+    sarif: dict[str, Any] | None, api: dict[str, Any] | None
+) -> None:
+    if sarif is None or api is None:
+        return
+    for field in ("repository", "commit_sha"):
+        left = sarif.get(field)
+        right = api.get(field)
+        if left is not None and right is not None and left != right:
+            raise SecurityAlertSummaryError(
+                f"Evidence {field} mismatch: sarif {field} '{left}' does not match "
+                f"api {field} '{right}'"
+            )
+
+
+def _validate_requested_binding(
+    evidence: dict[str, Any] | None,
+    *,
+    source: str,
+    repository: str | None,
+    commit_sha: str | None,
+) -> None:
+    if evidence is None:
+        return
+    for field, expected in (("repository", repository), ("commit_sha", commit_sha)):
+        actual = evidence.get(field)
+        if expected is not None and actual is not None and actual != expected:
+            raise SecurityAlertSummaryError(
+                f"{source}_evidence {field} '{actual}' does not match requested "
+                f"{field} '{expected}'"
+            )
+
+
+def _effective_binding(
+    requested: str | None,
+    sarif: dict[str, Any] | None,
+    api: dict[str, Any] | None,
+    field: str,
+) -> str | None:
+    return requested or (sarif.get(field) if sarif else None) or (api.get(field) if api else None)
+
+
+def _resolve_verdict(
+    sarif_verdict: tuple[str, str, int | None] | None,
+    api_verdict: tuple[str, str, int | None] | None,
+) -> tuple[str, str, int | None, str]:
+    if sarif_verdict is not None and sarif_verdict[0] in _DEFINITIVE_STATES:
+        disagreement = (
+            api_verdict is not None
+            and api_verdict[0] in _DEFINITIVE_STATES
+            and api_verdict[0] != sarif_verdict[0]
+        )
+        state, reason, count = (
+            ("unknown", "sarif_api_state_disagreement", None)
+            if disagreement
+            else sarif_verdict
+        )
+        return state, reason, count, "sarif+api" if api_verdict is not None else "sarif"
+    if api_verdict is not None:
+        state, reason, count = api_verdict
+        return state, reason, count, "sarif+api" if sarif_verdict is not None else "api"
+    if sarif_verdict is not None:
+        state, reason, count = sarif_verdict
+        return state, reason, count, "sarif"
+    return "unknown", "no_evidence_supplied", None, "none"
+
+
 def classify_security_alert_state(
     *,
     sarif_evidence: Mapping[str, Any] | None = None,
@@ -261,76 +323,25 @@ def classify_security_alert_state(
     than "clean".
     """
 
-    if repository is not None and not isinstance(repository, str):
-        raise SecurityAlertSummaryError("repository must be a string")
-    if commit_sha is not None and not isinstance(commit_sha, str):
-        raise SecurityAlertSummaryError("commit_sha must be a string")
-
+    repository = _optional_string(repository, field="repository", name="request")
+    commit_sha = _optional_string(commit_sha, field="commit_sha", name="request")
     sarif = _parse_sarif_evidence(sarif_evidence)
     api = _parse_api_evidence(api_evidence)
-
-    # Validate binding consistency across evidence sources
-    sarif_repo = sarif.get("repository") if sarif else None
-    api_repo = api.get("repository") if api else None
-    if sarif_repo is not None and api_repo is not None and sarif_repo != api_repo:
-        raise SecurityAlertSummaryError(
-            f"Evidence repository mismatch: sarif repository '{sarif_repo}' does not match api repository '{api_repo}'"
-        )
-
-    sarif_sha = sarif.get("commit_sha") if sarif else None
-    api_sha = api.get("commit_sha") if api else None
-    if sarif_sha is not None and api_sha is not None and sarif_sha != api_sha:
-        raise SecurityAlertSummaryError(
-            f"Evidence commit_sha mismatch: sarif commit_sha '{sarif_sha}' does not match api commit_sha '{api_sha}'"
-        )
-
-    effective_repo = repository or sarif_repo or api_repo
-    if repository is not None:
-        if sarif_repo is not None and sarif_repo != repository:
-            raise SecurityAlertSummaryError(
-                f"sarif_evidence repository '{sarif_repo}' does not match requested repository '{repository}'"
-            )
-        if api_repo is not None and api_repo != repository:
-            raise SecurityAlertSummaryError(
-                f"api_evidence repository '{api_repo}' does not match requested repository '{repository}'"
-            )
-
-    effective_sha = commit_sha or sarif_sha or api_sha
-    if commit_sha is not None:
-        if sarif_sha is not None and sarif_sha != commit_sha:
-            raise SecurityAlertSummaryError(
-                f"sarif_evidence commit_sha '{sarif_sha}' does not match requested commit_sha '{commit_sha}'"
-            )
-        if api_sha is not None and api_sha != commit_sha:
-            raise SecurityAlertSummaryError(
-                f"api_evidence commit_sha '{api_sha}' does not match requested commit_sha '{commit_sha}'"
-            )
-
-    sarif_verdict = _sarif_verdict(sarif)
-    api_verdict = _api_verdict(api)
-
-    if sarif_verdict is not None and sarif_verdict[0] in _DEFINITIVE_STATES:
-        if (
-            api_verdict is not None
-            and api_verdict[0] in _DEFINITIVE_STATES
-            and api_verdict[0] != sarif_verdict[0]
-        ):
-            state, reason, count = "unknown", "sarif_api_state_disagreement", None
-        else:
-            state, reason, count = sarif_verdict
-        source = "sarif+api" if api_verdict is not None else "sarif"
-        return _assemble(state, reason, source, count, sarif, api, effective_repo, effective_sha)
-
-    if api_verdict is not None:
-        state, reason, count = api_verdict
-        source = "sarif+api" if sarif_verdict is not None else "api"
-        return _assemble(state, reason, source, count, sarif, api, effective_repo, effective_sha)
-
-    if sarif_verdict is not None:
-        state, reason, count = sarif_verdict
-        return _assemble(state, reason, "sarif", count, sarif, api, effective_repo, effective_sha)
-
-    return _assemble("unknown", "no_evidence_supplied", "none", None, sarif, api, effective_repo, effective_sha)
+    _validate_cross_source_binding(sarif, api)
+    _validate_requested_binding(
+        sarif, source="sarif", repository=repository, commit_sha=commit_sha
+    )
+    _validate_requested_binding(
+        api, source="api", repository=repository, commit_sha=commit_sha
+    )
+    effective_repo = _effective_binding(repository, sarif, api, "repository")
+    effective_sha = _effective_binding(commit_sha, sarif, api, "commit_sha")
+    state, reason, count, source = _resolve_verdict(
+        _sarif_verdict(sarif), _api_verdict(api)
+    )
+    return _assemble(
+        state, reason, source, count, sarif, api, effective_repo, effective_sha
+    )
 
 
 def known_states() -> tuple[str, ...]:
