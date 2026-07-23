@@ -641,7 +641,11 @@ def test_invalid_navigation_payloads_preserve_filters_and_full_shape(tmp_path):
     assert access_result["hits"] == []
     assert access_result["call_graph"] is None
     assert wrapped["status"] == "invalid"
-    assert wrapped["result"] == access_result
+    assert wrapped["result"]["status"] == access_result["status"]
+    assert wrapped["result"]["filters"] == access_result["filters"]
+    assert wrapped["result"]["hits"] == access_result["hits"]
+    assert wrapped["result"]["mutation_boundary"]["ref"] == "repobrief.mutation_boundary.read_only_frontdoor.v1"
+    assert access_result["mutation_boundary"]["read_paths_do_not_refresh"] is True
 
 
 @pytest.mark.parametrize("reader", [find_references, get_callers, get_callees])

@@ -26,9 +26,21 @@ def test_mcp_ask_context_exposes_same_context_pack_semantics(tmp_path):
     assert result["context_pack"]["required_reading"]["status"] == "pass"
     assert result["context_pack"]["resolved_ranges"][0]["status"] == "resolved"
     assert result["mutation_boundary"]["writes"] == []
-    assert result["mutation_boundary"]["read_paths_do_not_refresh"] is True
-    assert "snapshot_create_side_effect" in result["mutation_boundary"]["forbidden_operations"]
-    assert "secret_read" in result["mutation_boundary"]["forbidden_operations"]
+    assert result["mutation_boundary"]["ref"] == "repobrief.mutation_boundary.read_only_frontdoor.v1"
+    assert result["does_not_establish"]["ref"] == "repobrief.does_not_establish.default.v1"
+
+    verbose_result = mcp_tools.ask_context(
+        bundle_manifest=bundle["manifest"],
+        query="hello",
+        task_profile="basic_repo_question",
+        max_context_tokens=8000,
+        max_answer_tokens=1200,
+        k=5,
+        verbose=True,
+    )
+    assert verbose_result["mutation_boundary"]["read_paths_do_not_refresh"] is True
+    assert "snapshot_create_side_effect" in verbose_result["mutation_boundary"]["forbidden_operations"]
+    assert "secret_read" in verbose_result["mutation_boundary"]["forbidden_operations"]
 
 
 def test_mcp_grounding_verify_exposes_same_verdict_semantics(tmp_path):
@@ -56,8 +68,18 @@ def test_mcp_grounding_verify_exposes_same_verdict_semantics(tmp_path):
     assert result["verdict"]["kind"] == "repobrief.answer_grounding_verdict"
     assert result["verdict"]["status"] == "pass"
     assert result["mutation_boundary"]["writes"] == []
-    assert "git_push" in result["mutation_boundary"]["forbidden_operations"]
-    assert "auto_merge" in result["mutation_boundary"]["forbidden_operations"]
+    assert result["mutation_boundary"]["ref"] == "repobrief.mutation_boundary.read_only_frontdoor.v1"
+    assert result["does_not_establish"]["ref"] == "repobrief.does_not_establish.default.v1"
+
+    verbose_result = mcp_tools.grounding_verify(
+        declaration=declaration,
+        bundle_manifest=manifest,
+        citation_map=citation_map,
+        task_profile="basic_repo_question",
+        verbose=True,
+    )
+    assert "git_push" in verbose_result["mutation_boundary"]["forbidden_operations"]
+    assert "auto_merge" in verbose_result["mutation_boundary"]["forbidden_operations"]
 
 
 def test_mcp_read_only_frontdoor_does_not_call_snapshot_create(monkeypatch, tmp_path):

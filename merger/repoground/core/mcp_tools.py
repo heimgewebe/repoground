@@ -15,6 +15,10 @@ from typing import Any, Iterator
 
 from merger.repoground.cli.cmd_ground import build_snapshot_create_result
 from merger.repoground.core.merge import parse_human_size
+from merger.repoground.core.response_projection import (
+    compact_does_not_establish,
+    compact_mutation_boundary,
+)
 from merger.repoground.core.snapshot_profiles import profile_names
 
 KIND = "repobrief.mcp.snapshot_create"
@@ -265,8 +269,8 @@ READ_ONLY_FORBIDDEN_OPERATIONS = (
 )
 
 
-def _read_only_boundary() -> dict[str, Any]:
-    return {
+def _read_only_boundary(*, verbose: bool = False) -> dict[str, Any]:
+    full = {
         "writes": [],
         "does_not_mutate": [
             "git",
@@ -281,6 +285,12 @@ def _read_only_boundary() -> dict[str, Any]:
         "not_reachable_from_snapshot_create": True,
         "forbidden_operations": list(READ_ONLY_FORBIDDEN_OPERATIONS),
     }
+    return full if verbose else compact_mutation_boundary(full)
+
+
+def _read_only_does_not_establish(*, verbose: bool = False) -> Any:
+    full = list(DOES_NOT_ESTABLISH)
+    return full if verbose else compact_does_not_establish(full)
 
 
 def ask_context(
@@ -291,8 +301,17 @@ def ask_context(
     max_context_tokens: int = 8000,
     max_answer_tokens: int = 1200,
     k: int = 5,
+    verbose: bool = False,
 ) -> dict[str, Any]:
-    """MCP-shaped read-only frontdoor for RepoGround ask context packs."""
+    """MCP-shaped read-only frontdoor for RepoGround ask context packs.
+
+    The ``context_pack`` itself keeps its full, schema-pinned shape
+    regardless of ``verbose`` (its freshness/availability/non-claim fields
+    are already the compact form defined by that contract). ``verbose``
+    controls only this wrapper's own repeated mutation-boundary and
+    non-claim envelope, which is otherwise projected to a compact reference
+    by default.
+    """
     from merger.repoground.core.ask_context import build_ask_context_pack
 
     context_pack = build_ask_context_pack(
@@ -311,8 +330,8 @@ def ask_context(
         "context_pack": context_pack,
         "request_semantics": "repobrief.ask_request.v1",
         "context_pack_semantics": "repobrief.ask_context_pack.v1",
-        "mutation_boundary": _read_only_boundary(),
-        "does_not_establish": list(DOES_NOT_ESTABLISH),
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
     }
 
 
@@ -322,8 +341,14 @@ def grounding_verify(
     bundle_manifest: str | Path,
     citation_map: str | Path | None = None,
     task_profile: str | None = None,
+    verbose: bool = False,
 ) -> dict[str, Any]:
-    """MCP-shaped read-only frontdoor for Answer Grounding verification."""
+    """MCP-shaped read-only frontdoor for Answer Grounding verification.
+
+    The verdict itself is untouched by ``verbose``; only this wrapper's own
+    repeated mutation-boundary and non-claim envelope is projected to a
+    compact reference by default.
+    """
     from merger.repoground.core.answer_grounding import verify_answer_grounding_for_task_profile
 
     verdict = verify_answer_grounding_for_task_profile(
@@ -340,15 +365,15 @@ def grounding_verify(
         "verdict": verdict,
         "declaration_semantics": "repobrief.answer_grounding_declaration.v1",
         "verdict_semantics": "repobrief.answer_grounding_verdict.v1",
-        "mutation_boundary": _read_only_boundary(),
-        "does_not_establish": list(DOES_NOT_ESTABLISH),
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
     }
 
 
 FIND_SYMBOL_KINDS = ("class", "function", "async_function")
 
 
-def _find_symbol_result(status: str, result: dict[str, Any]) -> dict[str, Any]:
+def _find_symbol_result(status: str, result: dict[str, Any], *, verbose: bool = False) -> dict[str, Any]:
     return {
         "kind": READ_ONLY_KIND,
         "version": READ_ONLY_VERSION,
@@ -356,8 +381,8 @@ def _find_symbol_result(status: str, result: dict[str, Any]) -> dict[str, Any]:
         "status": status,
         "result": result,
         "result_semantics": "repobrief.symbol_search.v1",
-        "mutation_boundary": _read_only_boundary(),
-        "does_not_establish": list(DOES_NOT_ESTABLISH),
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
     }
 
 
@@ -368,6 +393,7 @@ def find_symbol(
     kind: str | None = None,
     path: str | None = None,
     k: int = 25,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """MCP-shaped read-only frontdoor for symbol-definition lookup.
 
@@ -379,6 +405,11 @@ def find_symbol(
 
     Fails closed: an empty name or an unknown kind is rejected rather than
     silently listing the first ``k`` symbols.
+
+    By default (``verbose=False``) the response is the compact projection:
+    hits, status, truncation and any explicit availability/freshness gap, but
+    not the full per-role availability/graph inventory. Pass ``verbose=True``
+    for the complete diagnostic inventory (not deleted, just not the default).
     """
     from merger.repoground.core.bundle_access import search_symbol_index
 
@@ -394,6 +425,7 @@ def find_symbol(
                 "hits": [],
                 "hit_count": 0,
             },
+            verbose=verbose,
         )
 
     if not isinstance(name, str) or not name.strip():
@@ -403,8 +435,10 @@ def find_symbol(
             f"kind must be one of {list(FIND_SYMBOL_KINDS)} or null", "kind_invalid"
         )
 
-    result = search_symbol_index(bundle_manifest, name, k=k, kind=kind, path=path)
-    return _find_symbol_result(result.get("status", "invalid"), result)
+    result = search_symbol_index(
+        bundle_manifest, name, k=k, kind=kind, path=path, verbose=verbose
+    )
+    return _find_symbol_result(result.get("status", "invalid"), result, verbose=verbose)
 
 
 MAX_CALL_NAVIGATION_K = 200
@@ -415,6 +449,8 @@ def _call_navigation_result(
     status: str,
     result: dict[str, Any],
     result_semantics: str,
+    *,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     return {
         "kind": READ_ONLY_KIND,
@@ -423,10 +459,9 @@ def _call_navigation_result(
         "status": status,
         "result": result,
         "result_semantics": result_semantics,
-        "mutation_boundary": _read_only_boundary(),
-        "does_not_establish": list(DOES_NOT_ESTABLISH),
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
     }
-
 
 
 def find_references(
@@ -435,6 +470,7 @@ def find_references(
     name: str,
     path: str | None = None,
     k: int = 25,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """MCP-shaped read-only frontdoor for static call-site reference lookup.
 
@@ -444,17 +480,23 @@ def find_references(
 
     Fails closed: an empty name is rejected; a missing or invalid call graph
     artifact yields a missing/invalid result and never triggers a refresh.
+
+    By default (``verbose=False``) the response is the compact projection
+    (see ``find_symbol``); pass ``verbose=True`` for the full inventory.
     """
     from merger.repoground.core.bundle_access import (
         find_references as access_find_references,
     )
 
-    result = access_find_references(bundle_manifest, name, path=path, k=k)
+    result = access_find_references(
+        bundle_manifest, name, path=path, k=k, verbose=verbose
+    )
     return _call_navigation_result(
         "find_references",
         result.get("status", "invalid"),
         result,
         "repobrief.call_reference_search.v1",
+        verbose=verbose,
     )
 
 
@@ -464,6 +506,7 @@ def get_callers(
     name: str,
     path: str | None = None,
     k: int = 25,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """MCP-shaped read-only frontdoor for grouped caller lookup.
 
@@ -472,19 +515,23 @@ def get_callers(
     textual similarities stay separately visible.
 
     Fails closed like ``find_references``; reads never refresh the snapshot.
+    By default (``verbose=False``) the response is the compact projection;
+    pass ``verbose=True`` for the full inventory.
     """
     from merger.repoground.core.bundle_access import (
         get_callers as access_get_callers,
     )
 
-    result = access_get_callers(bundle_manifest, name, path=path, k=k)
+    result = access_get_callers(
+        bundle_manifest, name, path=path, k=k, verbose=verbose
+    )
     return _call_navigation_result(
         "get_callers",
         result.get("status", "invalid"),
         result,
         "repobrief.call_callers.v1",
+        verbose=verbose,
     )
-
 
 
 def get_callees(
@@ -493,21 +540,27 @@ def get_callees(
     name: str,
     path: str | None = None,
     k: int = 25,
+    verbose: bool = False,
 ) -> dict[str, Any]:
     """MCP-shaped read-only frontdoor for one symbol's outgoing calls.
 
     The caller symbol must resolve exactly in the coherent symbol index. Unique
     S1 targets are grouped as callees; S0 call sites remain separately visible.
     Reads never refresh the snapshot and do not establish runtime reachability.
+    By default (``verbose=False``) the response is the compact projection;
+    pass ``verbose=True`` for the full inventory.
     """
     from merger.repoground.core.bundle_access import (
         get_callees as access_get_callees,
     )
 
-    result = access_get_callees(bundle_manifest, name, path=path, k=k)
+    result = access_get_callees(
+        bundle_manifest, name, path=path, k=k, verbose=verbose
+    )
     return _call_navigation_result(
         "get_callees",
         result.get("status", "invalid"),
         result,
         "repobrief.call_callees.v1",
+        verbose=verbose,
     )

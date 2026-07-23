@@ -204,6 +204,23 @@ def graph_availability_model(manifest_path: str | Path, manifest: Mapping[str, A
         _complete_graph_availability(base, status="invalid", reason=f"graph index load status is {graph_status}", load_status=graph_status)
     return base
 
+
+def _commit_identity_from_present_repos(
+    present_repos: list[Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    repositories: list[dict[str, str]] = []
+    for repo in present_repos:
+        git_commit = repo.get("git_commit")
+        if not isinstance(git_commit, str) or not git_commit:
+            continue
+        identity = {"git_commit": git_commit}
+        name = repo.get("repo") or repo.get("name") or repo.get("path")
+        if isinstance(name, str) and name:
+            identity["repo"] = name
+        repositories.append(identity)
+    return {"repositories": repositories} if repositories else None
+
+
 def snapshot_freshness_model(manifest: Mapping[str, Any], *, max_age_seconds: int | None = None, as_of: datetime.datetime | None = None) -> dict[str, Any]:
     created_at_raw = manifest.get("created_at")
     created_at = _parse_created_at(created_at_raw)
@@ -211,7 +228,8 @@ def snapshot_freshness_model(manifest: Mapping[str, Any], *, max_age_seconds: in
     repos = snapshot_provenance.get("repositories") if isinstance(snapshot_provenance, dict) else None
     repos = repos if isinstance(repos, list) else []
     present_repos = [repo for repo in repos if isinstance(repo, dict) and repo.get("provenance_status") == "present" and isinstance(repo.get("git_commit"), str) and repo.get("git_commit")]
-    result: dict[str, Any] = {"status": "unknown", "created_at": created_at_raw if isinstance(created_at_raw, str) else None, "age_seconds": None, "max_age_seconds": max_age_seconds, "as_of": None, "basis": "unknown", "snapshot_provenance_recorded": isinstance(snapshot_provenance, dict), "repository_count": len(repos), "present_repository_count": len(present_repos), "reason": None}
+    commit_identity = _commit_identity_from_present_repos(present_repos)
+    result: dict[str, Any] = {"status": "unknown", "created_at": created_at_raw if isinstance(created_at_raw, str) else None, "age_seconds": None, "max_age_seconds": max_age_seconds, "as_of": None, "basis": "unknown", "snapshot_provenance_recorded": isinstance(snapshot_provenance, dict), "repository_count": len(repos), "present_repository_count": len(present_repos), "commit_identity": commit_identity, "reason": None}
     if created_at is None:
         result["reason"] = "missing_or_invalid_created_at"
         return result

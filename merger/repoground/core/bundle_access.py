@@ -20,6 +20,7 @@ from merger.repoground.core.call_navigation_index import (
     CallNavigationIndex,
     SymbolNavigationIndex,
 )
+from merger.repoground.core.response_projection import project_read_result
 
 _DOES_NOT_ESTABLISH = (
     "truth",
@@ -258,6 +259,7 @@ def _invalid_read_result(
     error: str,
     error_code: str,
     extra: dict[str, Any] | None = None,
+    verbose: bool = True,
 ) -> dict[str, Any]:
     result = {
         "kind": kind,
@@ -271,7 +273,7 @@ def _invalid_read_result(
     }
     if extra:
         result.update(extra)
-    return result
+    return project_read_result(result, bundle_manifest, verbose=verbose)
 
 
 def _range_error_code(exc: Exception) -> tuple[str, str]:
@@ -287,7 +289,15 @@ def _range_error_code(exc: Exception) -> tuple[str, str]:
     return "invalid", "range_resolution_failed"
 
 
-def range_get(bundle_manifest: str | Path, range_ref: dict[str, Any]) -> dict[str, Any]:
+def range_get(
+    bundle_manifest: str | Path,
+    range_ref: dict[str, Any],
+    *,
+    verbose: bool = True,
+    compact: bool | None = None,
+) -> dict[str, Any]:
+    if compact is not None:
+        verbose = not compact
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     if not isinstance(range_ref, dict):
         return _invalid_read_result(
@@ -297,6 +307,7 @@ def range_get(bundle_manifest: str | Path, range_ref: dict[str, Any]) -> dict[st
             error="range_ref must be a JSON object",
             error_code="range_ref_invalid",
             extra={"range_ref": range_ref, "range": None},
+            verbose=verbose,
         )
 
     if range_ref.get("artifact_role") == "source_file":
@@ -310,6 +321,7 @@ def range_get(bundle_manifest: str | Path, range_ref: dict[str, Any]) -> dict[st
             ),
             error_code="source_file_outside_bundle_boundary",
             extra={"range_ref": range_ref, "range": None},
+            verbose=verbose,
         )
 
     from merger.repoground.core.range_resolver import resolve_range_ref
@@ -325,18 +337,23 @@ def range_get(bundle_manifest: str | Path, range_ref: dict[str, Any]) -> dict[st
             error=str(exc),
             error_code=error_code,
             extra={"range_ref": range_ref, "range": None},
+            verbose=verbose,
         )
 
-    return {
-        "kind": "repobrief.range_get",
-        "version": "v1",
-        "status": "available",
-        "bundle_manifest": str(manifest_path),
-        "range_ref": range_ref,
-        "range": resolved,
-        "mutation_boundary": _read_only_mutation_boundary(),
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
-    }
+    return project_read_result(
+        {
+            "kind": "repobrief.range_get",
+            "version": "v1",
+            "status": "available",
+            "bundle_manifest": str(manifest_path),
+            "range_ref": range_ref,
+            "range": resolved,
+            "mutation_boundary": _read_only_mutation_boundary(),
+            "does_not_establish": list(_DOES_NOT_ESTABLISH),
+        },
+        manifest_path,
+        verbose=verbose,
+    )
 
 
 def _empty_citation_map_status(
@@ -1049,7 +1066,12 @@ def query_existing_index(
     resolve_evidence: bool = False,
     project_sources: bool = False,
     prepared_fts_query: str | None = None,
+    *,
+    verbose: bool = True,
+    compact: bool | None = None,
 ) -> dict[str, Any]:
+    if compact is not None:
+        verbose = not compact
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     if not isinstance(query, str):
         return _invalid_read_result(
@@ -1059,6 +1081,7 @@ def query_existing_index(
             error="query must be a string",
             error_code="query_invalid",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
+            verbose=verbose,
         )
     if not isinstance(k, int) or isinstance(k, bool) or k < 1 or k > MAX_QUERY_EXISTING_INDEX_K:
         return _invalid_read_result(
@@ -1068,6 +1091,7 @@ def query_existing_index(
             error=f"k must be an integer between 1 and {MAX_QUERY_EXISTING_INDEX_K}",
             error_code="k_out_of_bounds",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
+            verbose=verbose,
         )
     if not isinstance(resolve_evidence, bool):
         return _invalid_read_result(
@@ -1077,6 +1101,7 @@ def query_existing_index(
             error="resolve_evidence must be a boolean",
             error_code="resolve_evidence_invalid",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
+            verbose=verbose,
         )
 
     if not isinstance(project_sources, bool):
@@ -1087,6 +1112,7 @@ def query_existing_index(
             error="project_sources must be a boolean",
             error_code="project_sources_invalid",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": None},
+            verbose=verbose,
         )
 
     artifact_result = get_artifact(manifest_path, "sqlite_index")
@@ -1099,6 +1125,7 @@ def query_existing_index(
             error="sqlite_index artifact is not present in the bundle manifest",
             error_code="sqlite_index_missing",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
+            verbose=verbose,
         )
 
     index_path = Path(str(artifact["absolute_path"]))
@@ -1110,6 +1137,7 @@ def query_existing_index(
             error="sqlite_index artifact file does not exist",
             error_code="sqlite_index_file_missing",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
+            verbose=verbose,
         )
 
     from merger.repoground.retrieval.query_core import execute_query
@@ -1133,6 +1161,7 @@ def query_existing_index(
             error=str(exc),
             error_code="query_execution_failed",
             extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
+            verbose=verbose,
         )
 
     availability_model = _availability_model_for_manifest(manifest_path)
@@ -1150,26 +1179,30 @@ def query_existing_index(
         _project_source_citations(resolved_evidence) if project_sources else None
     )
 
-    return {
-        "kind": "repobrief.query_existing_index",
-        "version": "v1",
-        "status": "available",
-        "bundle_manifest": str(manifest_path),
-        "query": query,
-        "k": k,
-        "filters": filters or {},
-        "resolve_evidence": resolve_evidence,
-        "project_sources": project_sources,
-        "index_artifact": artifact,
-        "availability": availability_model,
-        "freshness": freshness,
-        "query_result": query_result,
-        "evidence_resolution_used": resolve_evidence or project_sources,
-        "resolved_evidence": resolved_evidence if resolve_evidence else None,
-        "source_citation_projection": source_citation_projection,
-        "mutation_boundary": _read_only_mutation_boundary(),
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
-    }
+    return project_read_result(
+        {
+            "kind": "repobrief.query_existing_index",
+            "version": "v1",
+            "status": "available",
+            "bundle_manifest": str(manifest_path),
+            "query": query,
+            "k": k,
+            "filters": filters or {},
+            "resolve_evidence": resolve_evidence,
+            "project_sources": project_sources,
+            "index_artifact": artifact,
+            "availability": availability_model,
+            "freshness": freshness,
+            "query_result": query_result,
+            "evidence_resolution_used": resolve_evidence or project_sources,
+            "resolved_evidence": resolved_evidence if resolve_evidence else None,
+            "source_citation_projection": source_citation_projection,
+            "mutation_boundary": _read_only_mutation_boundary(),
+            "does_not_establish": list(_DOES_NOT_ESTABLISH),
+        },
+        manifest_path,
+        verbose=verbose,
+    )
 
 
 SYMBOL_INDEX_ROLE = "python_symbol_index_json"
@@ -1289,8 +1322,31 @@ def search_symbol_index(
     k: int = 25,
     kind: str | None = None,
     path: str | None = None,
+    verbose: bool = True,
+    compact: bool | None = None,
 ) -> dict[str, Any]:
+    """Symbol lookup with the historical full contract by default.
+
+    Pass ``compact=True`` (or ``verbose=False``) for the bounded agent projection.
+    """
+    if compact is not None:
+        verbose = not compact
     manifest_path = Path(bundle_manifest).expanduser().resolve()
+    return project_read_result(
+        _search_symbol_index_full(manifest_path, query, k=k, kind=kind, path=path),
+        manifest_path,
+        verbose=verbose,
+    )
+
+
+def _search_symbol_index_full(
+    manifest_path: Path,
+    query: str = "",
+    *,
+    k: int = 25,
+    kind: str | None = None,
+    path: str | None = None,
+) -> dict[str, Any]:
     if not isinstance(query, str):
         return _invalid_read_result(
             kind=SYMBOL_SEARCH_KIND,
@@ -2729,9 +2785,33 @@ def find_references(
     name: str,
     path: str | None = None,
     k: int = 25,
+    *,
+    verbose: bool = True,
+    compact: bool | None = None,
+) -> dict[str, Any]:
+    """Search call-site text while keeping S0 and S1 evidence explicit.
+
+    Returns the historical full contract by default. Pass ``compact=True`` (or
+    ``verbose=False``) for the bounded agent projection.
+    """
+    if compact is not None:
+        verbose = not compact
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    return project_read_result(
+        _find_references_full(manifest_path, name, path=path, k=k),
+        manifest_path,
+        verbose=verbose,
+    )
+
+
+def _find_references_full(
+    manifest_path: Path,
+    name: str,
+    *,
+    path: str | None = None,
+    k: int = 25,
 ) -> dict[str, Any]:
     """Search call-site text while keeping S0 and S1 evidence explicit."""
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
     validated = _validated_call_query(
         kind=CALL_REFERENCES_KIND,
         manifest_path=manifest_path,
@@ -2787,9 +2867,33 @@ def get_callers(
     name: str,
     path: str | None = None,
     k: int = 25,
+    *,
+    verbose: bool = True,
+    compact: bool | None = None,
+) -> dict[str, Any]:
+    """Return only S1 callers of one uniquely selected target symbol.
+
+    Returns the historical full contract by default. Pass ``compact=True`` (or
+    ``verbose=False``) for the bounded agent projection.
+    """
+    if compact is not None:
+        verbose = not compact
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    return project_read_result(
+        _get_callers_full(manifest_path, name, path=path, k=k),
+        manifest_path,
+        verbose=verbose,
+    )
+
+
+def _get_callers_full(
+    manifest_path: Path,
+    name: str,
+    *,
+    path: str | None = None,
+    k: int = 25,
 ) -> dict[str, Any]:
     """Return only S1 callers of one uniquely selected target symbol."""
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
     validated = _validated_call_query(
         kind=CALL_CALLERS_KIND,
         manifest_path=manifest_path,
@@ -2914,9 +3018,33 @@ def get_callees(
     name: str,
     path: str | None = None,
     k: int = 25,
+    *,
+    verbose: bool = True,
+    compact: bool | None = None,
+) -> dict[str, Any]:
+    """Return S1 callees and separate unresolved sites for one caller symbol.
+
+    Returns the historical full contract by default. Pass ``compact=True`` (or
+    ``verbose=False``) for the bounded agent projection.
+    """
+    if compact is not None:
+        verbose = not compact
+    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    return project_read_result(
+        _get_callees_full(manifest_path, name, path=path, k=k),
+        manifest_path,
+        verbose=verbose,
+    )
+
+
+def _get_callees_full(
+    manifest_path: Path,
+    name: str,
+    *,
+    path: str | None = None,
+    k: int = 25,
 ) -> dict[str, Any]:
     """Return S1 callees and separate unresolved sites for one caller symbol."""
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
     validated = _validated_call_query(
         kind=CALL_CALLEES_KIND,
         manifest_path=manifest_path,
