@@ -126,10 +126,17 @@ malformed-record hardening. Its digests and observed values remain valid
 evidence for the unchanged happy-path fixture — the goldset, fixture and
 call-record digests and the serialized byte count are byte-identical after the
 hardening, and the happy-path decision is unchanged. It does not, however,
-exercise the fail-closed paths added here; those are covered by the focused
-tests listed above and must be re-confirmed by this pull request's CI run,
-whose head SHA, workflow run and artifact digest are not yet minted. This proof
-deliberately does not restate the bound run as covering the new code.
+exercise the fail-closed paths added here. Those paths are covered by the
+focused tests listed above and were re-confirmed by the hardening pull request's
+successful `Python Call Graph Goldset` run:
+
+- hardening head SHA: `bc6eb0b65f9069a5caa7c54448783deebec166a3`;
+- workflow run: `30039206495`;
+- Actions artifact: `8576522234`;
+- artifact digest: `sha256:c70e5dccba0bf89b38c8774799d13b31819ebdf20c19f975c17318f1ed100785`.
+
+The historical bound run is therefore not restated as covering the newer code;
+the newer hardening has its own commit-bound CI evidence.
 
 ## Reproduction
 
