@@ -1,6 +1,6 @@
 # Retrieval Gold Queries
 
-Die folgenden 15 "Gold Queries" definieren die Zielwerte (Benchmarks) für das lenskit Retrieval-System.
+Die folgenden 15 "Gold Queries" definieren die Zielwerte (Benchmarks) für das RepoGround Retrieval-System.
 
 ## Benchmark-Zielwerte
 - **TTR (Time-to-Relevant):** < 2 Sekunden für CLI-Output.
