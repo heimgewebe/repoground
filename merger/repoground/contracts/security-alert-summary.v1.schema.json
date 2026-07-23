@@ -1,0 +1,350 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://lenskit.merger/schemas/security-alert-summary.v1.json",
+  "title": "Lenskit Security Alert Summary v1",
+  "description": "Fail-closed classification of GitHub code-scanning security-alert readback evidence. Distinguishes zero alerts from an unavailable, unauthorized, or unknown readback instead of treating missing evidence as clean.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "authority",
+    "risk_class",
+    "state",
+    "state_reason",
+    "evidence_source",
+    "alert_count",
+    "fail_closed",
+    "repository",
+    "commit_sha",
+    "sarif_evidence",
+    "api_evidence",
+    "required_permissions",
+    "does_not_prove"
+  ],
+  "properties": {
+    "version": {
+      "const": "security_alert_summary.v1"
+    },
+    "authority": {
+      "const": "diagnostic_signal"
+    },
+    "risk_class": {
+      "const": "diagnostic"
+    },
+    "state": {
+      "type": "string",
+      "enum": [
+        "clean",
+        "alerts_present",
+        "unavailable",
+        "unauthorized",
+        "unknown"
+      ]
+    },
+    "state_reason": {
+      "type": "string",
+      "enum": [
+        "sarif_result_count",
+        "sarif_unavailable",
+        "api_result_count",
+        "api_unauthorized",
+        "api_unavailable",
+        "sarif_api_state_disagreement",
+        "no_evidence_supplied",
+        "api_zero_count_pagination_unproven"
+      ]
+    },
+    "evidence_source": {
+      "type": "string",
+      "enum": [
+        "sarif",
+        "api",
+        "sarif+api",
+        "none"
+      ]
+    },
+    "alert_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "fail_closed": {
+      "type": "boolean"
+    },
+    "repository": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "commit_sha": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sarif_evidence": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "alert_count"
+          ],
+          "properties": {
+            "available": {
+              "type": "boolean"
+            },
+            "alert_count": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commit_sha": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stale": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "available": {
+                    "const": true
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "alert_count": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "available": {
+                    "const": false
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "alert_count": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "api_evidence": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status_code",
+            "open_alert_count"
+          ],
+          "properties": {
+            "status_code": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "open_alert_count": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "repository": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "commit_sha": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "paginated": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "page_count": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "stale": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status_code": {
+                    "const": 200
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "open_alert_count": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "not": {
+                  "properties": {
+                    "status_code": {
+                      "const": 200
+                    }
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "open_alert_count": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "required_permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sarif",
+        "api"
+      ],
+      "properties": {
+        "sarif": {
+          "type": "string",
+          "minLength": 1
+        },
+        "api": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "does_not_prove": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "the absence of code-scanning coverage gaps outside analyzed languages or paths",
+          "severity, exploitability, or business impact of any reported alert",
+          "that no alert existed before or appears after the evidence was captured",
+          "runtime correctness or merge readiness",
+          "permission to create issues, patches, commits, pushes, or merges"
+        ]
+      },
+      "allOf": [
+        {
+          "contains": {
+            "const": "the absence of code-scanning coverage gaps outside analyzed languages or paths"
+          }
+        },
+        {
+          "contains": {
+            "const": "severity, exploitability, or business impact of any reported alert"
+          }
+        },
+        {
+          "contains": {
+            "const": "that no alert existed before or appears after the evidence was captured"
+          }
+        },
+        {
+          "contains": {
+            "const": "runtime correctness or merge readiness"
+          }
+        },
+        {
+          "contains": {
+            "const": "permission to create issues, patches, commits, pushes, or merges"
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "clean"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "fail_closed": {
+            "const": false
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "fail_closed": {
+            "const": true
+          }
+        }
+      }
+    }
+  ]
+}
