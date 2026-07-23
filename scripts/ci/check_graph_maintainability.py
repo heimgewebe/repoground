@@ -217,11 +217,16 @@ def _complexity_regressions(
 
 
 _BUDGET_DIMENSIONS = (
-    # (budget key, historical reference key, human label)
-    ("finding_count_max", "finding_count", "finding_count"),
-    ("max_complexity_max", "max_complexity", "max_complexity"),
-    ("excess_total_max", None, "excess_total"),
+    # (budget key, dimension label shared with the recorded references)
+    ("finding_count_max", "finding_count"),
+    ("max_complexity_max", "max_complexity"),
+    ("excess_total_max", "excess_total"),
 )
+
+#: Recorded scans a ceiling may never exceed. Every budgeted dimension must be
+#: bounded by at least one of them, otherwise a ceiling could be raised without
+#: limit and the ratchet would only appear to hold.
+_REFERENCE_KEYS = ("historical_reference", "slice_start_reference")
 
 
 def measure_complexity_budget(current: list[ComplexityFinding]) -> dict[str, int]:
@@ -236,57 +241,86 @@ def measure_complexity_budget(current: list[ComplexityFinding]) -> dict[str, int
     }
 
 
-def evaluate_complexity_budget(
-    current: list[ComplexityFinding],
-    budget: Any,
+def _recorded_references(budget: dict[str, Any], label: str) -> list[tuple[str, Any]]:
+    """Return every recorded scan that bounds one budgeted dimension."""
+
+    recorded: list[tuple[str, Any]] = []
+    for key in _REFERENCE_KEYS:
+        reference = budget.get(key)
+        if isinstance(reference, dict) and label in reference:
+            recorded.append((key, reference[label]))
+    return recorded
+
+
+def _budget_dimension_findings(
+    budget: dict[str, Any],
+    observed: dict[str, int],
+    budget_key: str,
+    label: str,
 ) -> list[dict[str, Any]]:
-    """Reject scans above the recorded budget, and budgets above the reference.
-
-    Fail-closed: a missing or malformed budget is itself a finding, so removing
-    the budget cannot silently disable the ratchet.
-    """
-
-    if not isinstance(budget, dict):
-        return [{"code": "complexity_budget_missing"}]
-
-    reference = budget.get("historical_reference")
-    if not isinstance(reference, dict):
-        return [{"code": "complexity_budget_reference_missing"}]
+    ceiling = budget.get(budget_key)
+    if not isinstance(ceiling, int) or isinstance(ceiling, bool):
+        return [{"code": "complexity_budget_invalid", "dimension": budget_key}]
 
     findings: list[dict[str, Any]] = []
-    observed = measure_complexity_budget(current)
-    for budget_key, reference_key, label in _BUDGET_DIMENSIONS:
-        ceiling = budget.get(budget_key)
-        if not isinstance(ceiling, int) or isinstance(ceiling, bool):
-            findings.append(
-                {"code": "complexity_budget_invalid", "dimension": budget_key}
-            )
-            continue
-        if observed[label] > ceiling:
+    if observed[label] > ceiling:
+        findings.append(
+            {
+                "code": "complexity_budget_exceeded",
+                "dimension": label,
+                "observed": observed[label],
+                "budget": ceiling,
+            }
+        )
+
+    recorded = _recorded_references(budget, label)
+    if not recorded:
+        # An unbounded ceiling could be raised at will, so it is a finding.
+        findings.append(
+            {"code": "complexity_budget_reference_missing", "dimension": label}
+        )
+    for reference_key, value in recorded:
+        if not isinstance(value, int) or isinstance(value, bool):
             findings.append(
                 {
-                    "code": "complexity_budget_exceeded",
+                    "code": "complexity_budget_reference_invalid",
                     "dimension": label,
-                    "observed": observed[label],
-                    "budget": ceiling,
+                    "reference": reference_key,
                 }
             )
-        if reference_key is None:
-            continue
-        historical = reference.get(reference_key)
-        if not isinstance(historical, int) or isinstance(historical, bool):
-            findings.append(
-                {"code": "complexity_budget_reference_invalid", "dimension": label}
-            )
-        elif ceiling > historical:
+        elif ceiling > value:
             findings.append(
                 {
                     "code": "complexity_budget_raised_above_reference",
                     "dimension": label,
                     "budget": ceiling,
-                    "historical_reference": historical,
+                    "reference": reference_key,
+                    "recorded": value,
                 }
             )
+    return findings
+
+
+def evaluate_complexity_budget(
+    current: list[ComplexityFinding],
+    budget: Any,
+) -> list[dict[str, Any]]:
+    """Reject scans above the recorded budget, and budgets above the references.
+
+    Fail-closed: a missing or malformed budget is itself a finding, so removing
+    the budget cannot silently disable the ratchet, and every ceiling must be
+    bounded by at least one recorded scan.
+    """
+
+    if not isinstance(budget, dict):
+        return [{"code": "complexity_budget_missing"}]
+    if not any(isinstance(budget.get(key), dict) for key in _REFERENCE_KEYS):
+        return [{"code": "complexity_budget_reference_missing"}]
+
+    observed = measure_complexity_budget(current)
+    findings: list[dict[str, Any]] = []
+    for budget_key, label in _BUDGET_DIMENSIONS:
+        findings += _budget_dimension_findings(budget, observed, budget_key, label)
     return findings
 
 

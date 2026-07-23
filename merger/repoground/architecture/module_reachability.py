@@ -61,10 +61,9 @@ _RUNTIME_DIRECTORIES = (
     "tools/",
 )
 
-#: Evidence kinds that show use by code or by an operational surface.
-NON_DOCUMENTATION_EVIDENCE = (
+#: Evidence kinds that show use by a production or operational surface.
+PRODUCTION_EVIDENCE = (
     "static_import_product",
-    "static_import_test",
     "static_import_script",
     "package_of_referenced_module",
     "package_data_reference",
@@ -72,6 +71,19 @@ NON_DOCUMENTATION_EVIDENCE = (
     "dynamic_string_reference",
     "runtime_surface_reference",
 )
+
+#: Evidence kinds that show use by the test suite alone. A test proves the
+#: module is exercised, not that any production surface reaches it, so the two
+#: classes are kept apart: a production module that only its own tests reach is
+#: a distinct — and weaker — situation than one a shipped path reaches.
+TEST_EVIDENCE = (
+    "static_import_test",
+    "package_of_test_referenced_module",
+    "dynamic_string_reference_test",
+)
+
+#: Evidence kinds that show use by code rather than by prose.
+NON_DOCUMENTATION_EVIDENCE = PRODUCTION_EVIDENCE + TEST_EVIDENCE
 
 
 def _iter_files(repo_root: Path) -> list[Path]:
@@ -225,7 +237,7 @@ def measure_module_reachability(
         "script": set(),
         "fixture": set(),
     }
-    dynamic_strings: set[str] = set()
+    strings_by_projection: dict[str, set[str]] = {}
     data_files: list[str] = []
     runtime_corpus = _Corpus()
     documentation_corpus = _Corpus()
@@ -252,7 +264,9 @@ def measure_module_reachability(
             imports_by_projection.setdefault(projection, set()).update(
                 _imported_names(tree, module_name, is_package)
             )
-            dynamic_strings.update(_string_literals(tree))
+            strings_by_projection.setdefault(projection, set()).update(
+                _string_literals(tree)
+            )
             if projection == "product" and relative.startswith(
                 tuple(f"{root}/" for root in roots)
             ):
@@ -274,14 +288,26 @@ def measure_module_reachability(
             if text is not None:
                 documentation_corpus.add(text)
 
-    all_imports = set().union(*imports_by_projection.values())
+    # Production evidence may only be drawn from production and script sources.
+    # Test sources form their own, weaker class so that a module the tests alone
+    # reach cannot present itself as part of a shipped path.
+    def _union(source: dict[str, set[str]], *projections: str) -> set[str]:
+        return set().union(*(source.get(name, set()) for name in projections), set())
+
+    production_imports = _union(imports_by_projection, "product", "script")
+    all_imports = _union(imports_by_projection, *imports_by_projection)
+    production_strings = _union(strings_by_projection, "product", "script")
+    test_strings = _union(strings_by_projection, "test", "fixture")
+
     records = [
         _module_record(
             module_name,
             details,
             imports_by_projection=imports_by_projection,
+            production_imports=production_imports,
             all_imports=all_imports,
-            dynamic_strings=dynamic_strings,
+            production_strings=production_strings,
+            test_strings=test_strings,
             data_files=data_files,
             runtime_corpus=runtime_corpus,
             documentation_corpus=documentation_corpus,
@@ -295,6 +321,12 @@ def measure_module_reachability(
         for record in records
         if record["status"] == "reachable" and not record["has_non_documentation_evidence"]
     ]
+    test_only = [
+        record["module"]
+        for record in records
+        if record["has_non_documentation_evidence"]
+        and not record["has_production_evidence"]
+    ]
     return {
         "kind": "repoground.module_reachability_measurement",
         "version": "1.0",
@@ -302,12 +334,14 @@ def measure_module_reachability(
         "module_count": len(records),
         "unproven": unproven,
         "documentation_only": documentation_only,
+        "test_only": test_only,
         "unparsed_files": sorted(unparsed),
         "unparsed_non_product_files": sorted(unparsed_non_product),
         "modules": records,
         "does_not_establish": [
             "that an unproven module is dead",
             "that a reachable module is executed at runtime",
+            "that a test-only module has a production consumer",
             "completeness of dynamic loader discovery",
             "that evidence surfaces are themselves used",
         ],
@@ -330,53 +364,101 @@ def _referenced_data_file(
     )
 
 
+def _package_evidence(
+    module_name: str,
+    relative_path: str,
+    *,
+    production_imports: set[str],
+    all_imports: set[str],
+    production_strings: set[str],
+    data_files: list[str],
+) -> str | None:
+    """Return package-level evidence for a package with no production import."""
+
+    prefix = f"{module_name}."
+    # A package is reached whenever anything below it is imported.
+    if any(name.startswith(prefix) for name in production_imports):
+        return "package_of_referenced_module"
+    # A package directory also ships the non-Python contract and schema files
+    # that production code loads by path.
+    package_directory = relative_path[: -len("__init__.py")]
+    if any(
+        data_file.startswith(package_directory)
+        and _referenced_data_file(data_file, package_directory, production_strings)
+        for data_file in data_files
+    ):
+        return "package_data_reference"
+    if any(name.startswith(prefix) for name in all_imports):
+        return "package_of_test_referenced_module"
+    return None
+
+
+def _names_module(module_name: str, relative_path: str, values: set[str]) -> bool:
+    """Report whether any string literal names this module or its path.
+
+    A dotted prefix match is deliberate — ``pkg.mod.attr`` references ``pkg.mod``
+    — but it stops at the dot, so ``pkg.module_extra`` never credits ``pkg.module``.
+    """
+
+    prefix = f"{module_name}."
+    return any(
+        value == module_name or value == relative_path or value.startswith(prefix)
+        for value in values
+    )
+
+
+def _import_evidence(
+    module_name: str,
+    imports_by_projection: dict[str, set[str]],
+) -> list[str]:
+    return [
+        kind
+        for projection, kind in (
+            ("product", "static_import_product"),
+            ("test", "static_import_test"),
+            ("script", "static_import_script"),
+        )
+        if module_name in imports_by_projection.get(projection, set())
+    ]
+
+
 def _module_record(
     module_name: str,
     details: dict[str, Any],
     *,
     imports_by_projection: dict[str, set[str]],
+    production_imports: set[str],
     all_imports: set[str],
-    dynamic_strings: set[str],
+    production_strings: set[str],
+    test_strings: set[str],
     data_files: list[str],
     runtime_corpus: _Corpus,
     documentation_corpus: _Corpus,
 ) -> dict[str, Any]:
     relative_path = details["path"]
-    prefix = f"{module_name}."
-    evidence: list[str] = []
+    evidence = _import_evidence(module_name, imports_by_projection)
 
-    for projection, kind in (
-        ("product", "static_import_product"),
-        ("test", "static_import_test"),
-        ("script", "static_import_script"),
+    if details["is_package"] and not any(
+        kind in PRODUCTION_EVIDENCE for kind in evidence
     ):
-        if module_name in imports_by_projection.get(projection, set()):
-            evidence.append(kind)
-
-    if details["is_package"] and not evidence:
-        # A package is reached whenever anything below it is imported.
-        if any(name.startswith(prefix) for name in all_imports):
-            evidence.append("package_of_referenced_module")
-
-    if details["is_package"] and not evidence:
-        # A package directory also ships the non-Python contract and schema
-        # files that production code loads by path.
-        package_directory = relative_path[: -len("__init__.py")]
-        if any(
-            data_file.startswith(package_directory)
-            and _referenced_data_file(data_file, package_directory, dynamic_strings)
-            for data_file in data_files
-        ):
-            evidence.append("package_data_reference")
+        package_evidence = _package_evidence(
+            module_name,
+            relative_path,
+            production_imports=production_imports,
+            all_imports=all_imports,
+            production_strings=production_strings,
+            data_files=data_files,
+        )
+        if package_evidence is not None:
+            evidence.append(package_evidence)
 
     if details["module_main_block"]:
         evidence.append("module_main_block")
 
-    if any(
-        value == module_name or value == relative_path or value.startswith(prefix)
-        for value in dynamic_strings
-    ):
+    if _names_module(module_name, relative_path, production_strings):
         evidence.append("dynamic_string_reference")
+    elif _names_module(module_name, relative_path, test_strings):
+        evidence.append("dynamic_string_reference_test")
 
     if runtime_corpus.contains(module_name, relative_path):
         evidence.append("runtime_surface_reference")
@@ -392,37 +474,65 @@ def _module_record(
         "has_non_documentation_evidence": any(
             kind in NON_DOCUMENTATION_EVIDENCE for kind in evidence
         ),
+        "has_production_evidence": any(
+            kind in PRODUCTION_EVIDENCE for kind in evidence
+        ),
     }
+
+
+def _declaration_findings(
+    observed: list[str],
+    allowed: Iterable[str],
+    *,
+    code: str,
+    stale_code: str,
+) -> list[dict[str, Any]]:
+    """Require every observed module to be declared, and every declaration used."""
+
+    declared = set(allowed)
+    findings = [
+        {"code": code, "module": module}
+        for module in observed
+        if module not in declared
+    ]
+    findings.extend(
+        {"code": stale_code, "module": module}
+        for module in sorted(declared - set(observed))
+    )
+    return findings
 
 
 def evaluate_reachability_policy(
     measurement: dict[str, Any],
     policy: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    """Reject newly unproven modules and undeclared documentation-only modules."""
+    """Reject undeclared unproven, documentation-only and test-only modules."""
 
-    findings: list[dict[str, Any]] = []
-    allowed_unproven = set(policy.get("allowed_unproven") or [])
-    allowed_documentation_only = set(policy.get("allowed_documentation_only") or [])
-
-    for module in measurement["unproven"]:
-        if module not in allowed_unproven:
-            findings.append({"code": "module_reachability_unproven", "module": module})
-    for module in sorted(allowed_unproven - set(measurement["unproven"])):
-        findings.append({"code": "module_reachability_allowlist_stale", "module": module})
+    findings = _declaration_findings(
+        measurement["unproven"],
+        policy.get("allowed_unproven") or [],
+        code="module_reachability_unproven",
+        stale_code="module_reachability_allowlist_stale",
+    )
 
     if policy.get("require_non_documentation_evidence", True):
-        for module in measurement["documentation_only"]:
-            if module not in allowed_documentation_only:
-                findings.append(
-                    {"code": "module_reachability_documentation_only", "module": module}
-                )
-        for module in sorted(
-            allowed_documentation_only - set(measurement["documentation_only"])
-        ):
-            findings.append(
-                {"code": "module_reachability_documentation_allowlist_stale", "module": module}
-            )
+        findings += _declaration_findings(
+            measurement["documentation_only"],
+            policy.get("allowed_documentation_only") or [],
+            code="module_reachability_documentation_only",
+            stale_code="module_reachability_documentation_allowlist_stale",
+        )
+
+    if policy.get("require_production_evidence", True):
+        # A production module that only its own tests reach is not proven to be
+        # part of any production path. It is not dead either, so it is declared
+        # rather than removed, and the declaration must stay accurate.
+        findings += _declaration_findings(
+            measurement["test_only"],
+            policy.get("allowed_test_only") or [],
+            code="module_reachability_test_only",
+            stale_code="module_reachability_test_only_allowlist_stale",
+        )
 
     if measurement["unparsed_files"]:
         findings.append(

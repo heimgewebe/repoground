@@ -5,9 +5,11 @@ from pathlib import Path
 
 from merger.repoground.architecture.module_reachability import (
     NON_DOCUMENTATION_EVIDENCE,
+    PRODUCTION_EVIDENCE,
     evaluate_reachability_policy,
     measure_module_reachability,
 )
+from scripts.ci.check_module_reachability import validate_policy
 
 ROOT = Path(__file__).resolve().parents[3]
 POLICY = ROOT / "config/repoground-module-reachability.v1.json"
@@ -55,7 +57,27 @@ def test_policy_records_no_unreviewed_exceptions() -> None:
     assert policy["allowed_unproven"] == []
     assert policy["allowed_documentation_only"] == []
     assert policy["require_non_documentation_evidence"] is True
+    assert policy["require_production_evidence"] is True
     assert "not a dead module" in policy["removal_policy"]
+    # Test-only modules are declared, never silently counted as production use.
+    assert policy["allowed_test_only"] == sorted(policy["allowed_test_only"])
+    assert measure_module_reachability(ROOT)["test_only"] == sorted(
+        policy["allowed_test_only"]
+    )
+
+
+def test_policy_identity_and_roots_are_fail_closed() -> None:
+    assert validate_policy(_policy()) == []
+    assert [item["code"] for item in validate_policy([])] == [
+        "module_reachability_policy_invalid"
+    ]
+    assert [item["code"] for item in validate_policy({})] == [
+        "module_reachability_policy_identity_invalid",
+        "module_reachability_policy_invalid",
+    ]
+    assert [
+        item["code"] for item in validate_policy(_policy() | {"package_roots": []})
+    ] == ["module_reachability_policy_invalid"]
 
 
 def test_static_import_and_main_block_count_as_evidence(tmp_path: Path) -> None:
@@ -176,20 +198,100 @@ def test_unparsed_product_source_fails_but_broken_fixture_does_not(tmp_path: Pat
     }
 
 
+def test_a_test_import_alone_is_not_production_evidence(tmp_path: Path) -> None:
+    _project(tmp_path)
+    _write(tmp_path / "merger/repoground/exercised.py", "VALUE = 1\n")
+    _write(
+        tmp_path / "merger/repoground/tests/test_exercised.py",
+        "from merger.repoground.exercised import VALUE\n",
+    )
+
+    measurement = measure_module_reachability(tmp_path)
+    by_module = {record["module"]: record for record in measurement["modules"]}
+    record = by_module["merger.repoground.exercised"]
+
+    assert record["evidence"] == ["static_import_test"]
+    assert record["has_non_documentation_evidence"] is True
+    assert record["has_production_evidence"] is False
+    assert "static_import_test" not in PRODUCTION_EVIDENCE
+    # A package above a test-imported module inherits the test class, not the
+    # production class.
+    assert by_module["merger.repoground"]["evidence"] == [
+        "package_of_test_referenced_module"
+    ]
+    # Undeclared, it fails; it is never reported as unproven or dead.
+    assert measurement["unproven"] == []
+    assert measurement["test_only"] == [
+        "merger",
+        "merger.repoground",
+        "merger.repoground.exercised",
+    ]
+    assert [
+        item["code"]
+        for item in evaluate_reachability_policy(measurement, {"allowed_unproven": []})
+    ] == ["module_reachability_test_only"] * 3
+    assert (
+        evaluate_reachability_policy(
+            measurement, {"allowed_test_only": measurement["test_only"]}
+        )
+        == []
+    )
+
+
+def test_a_test_string_is_not_a_production_dynamic_reference(tmp_path: Path) -> None:
+    _project(tmp_path)
+    _write(tmp_path / "merger/repoground/plugin.py", "VALUE = 1\n")
+    _write(
+        tmp_path / "merger/repoground/tests/test_plugin.py",
+        "import importlib\n\n\n"
+        "def test_loads():\n"
+        "    importlib.import_module('merger.repoground.plugin')\n",
+    )
+
+    by_module = {
+        record["module"]: record
+        for record in measure_module_reachability(tmp_path)["modules"]
+    }
+
+    assert by_module["merger.repoground.plugin"]["evidence"] == [
+        "dynamic_string_reference_test"
+    ]
+    assert by_module["merger.repoground.plugin"]["has_production_evidence"] is False
+
+
+def test_a_longer_dotted_name_does_not_credit_its_prefix(tmp_path: Path) -> None:
+    """Corpus matching is token-exact, so a longer name is not a consumer."""
+
+    _project(tmp_path)
+    _write(tmp_path / "merger/repoground/lonely.py", "VALUE = 1\n")
+    _write(
+        tmp_path / "scripts/run.sh",
+        "#!/bin/sh\npython -m merger.repoground.lonely_extra\n",
+    )
+    _write(tmp_path / "docs/usage.md", "See `merger/repoground/lonely.py.bak`.\n")
+
+    assert _unproven(measure_module_reachability(tmp_path)) == [
+        "merger.repoground.lonely"
+    ]
+
+
 def test_stale_allowlist_entries_are_rejected() -> None:
     measurement = {
         "unproven": [],
         "documentation_only": [],
+        "test_only": [],
         "unparsed_files": [],
     }
     policy = {
         "allowed_unproven": ["merger.repoground.gone"],
         "allowed_documentation_only": ["merger.repoground.also_gone"],
+        "allowed_test_only": ["merger.repoground.gone_too"],
     }
 
     assert [item["code"] for item in evaluate_reachability_policy(measurement, policy)] == [
         "module_reachability_allowlist_stale",
         "module_reachability_documentation_allowlist_stale",
+        "module_reachability_test_only_allowlist_stale",
     ]
 
 

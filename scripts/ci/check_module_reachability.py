@@ -26,12 +26,42 @@ from merger.repoground.architecture.module_reachability import (  # noqa: E402
 DEFAULT_POLICY = Path("config/repoground-module-reachability.v1.json")
 
 
+POLICY_KIND = "repoground.module_reachability_policy"
+POLICY_VERSION = "1.0"
+
+
+def validate_policy(policy: Any) -> list[dict[str, Any]]:
+    """Reject a policy that cannot be trusted to describe what is measured.
+
+    Fail-closed: a policy without an identity or without package roots would
+    otherwise fall back to defaults and report a pass over the wrong tree.
+    """
+
+    if not isinstance(policy, dict):
+        return [{"code": "module_reachability_policy_invalid", "detail": "not an object"}]
+    findings: list[dict[str, Any]] = []
+    if (
+        policy.get("kind") != POLICY_KIND
+        or policy.get("version") != POLICY_VERSION
+    ):
+        findings.append({"code": "module_reachability_policy_identity_invalid"})
+    roots = policy.get("package_roots")
+    if not isinstance(roots, list) or not roots or not all(
+        isinstance(root, str) and root for root in roots
+    ):
+        findings.append(
+            {"code": "module_reachability_policy_invalid", "detail": "package_roots"}
+        )
+    return findings
+
+
 def check(repo_root: Path, policy_path: Path) -> dict[str, Any]:
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy_findings = validate_policy(policy)
     measurement = measure_module_reachability(
         repo_root, policy.get("package_roots") or ("merger",)
     )
-    findings = evaluate_reachability_policy(measurement, policy)
+    findings = policy_findings + evaluate_reachability_policy(measurement, policy)
     return {
         "kind": "repoground.module_reachability_check",
         "version": "1.0",
@@ -47,7 +77,8 @@ def _summary(report: dict[str, Any]) -> str:
     return (
         f"Module reachability: {measurement['module_count']} production modules, "
         f"{len(measurement['unproven'])} unproven, "
-        f"{len(measurement['documentation_only'])} documentation-only"
+        f"{len(measurement['documentation_only'])} documentation-only, "
+        f"{len(measurement['test_only'])} test-only"
     )
 
 

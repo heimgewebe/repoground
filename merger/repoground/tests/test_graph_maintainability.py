@@ -114,6 +114,11 @@ def _budget_scan(complexities: list[int]) -> list[ComplexityFinding]:
 def _budget(**overrides) -> dict:
     budget = {
         "historical_reference": {"finding_count": 213, "max_complexity": 170},
+        "slice_start_reference": {
+            "finding_count": 200,
+            "max_complexity": 170,
+            "excess_total": 2654,
+        },
         "finding_count_max": 10,
         "max_complexity_max": 50,
         "excess_total_max": 100,
@@ -151,16 +156,47 @@ def test_complexity_budget_rewards_splitting_a_function() -> None:
     assert after["excess_total"] < before["excess_total"]
 
 
-def test_complexity_budget_rejects_ceilings_above_the_historical_reference() -> None:
+def test_complexity_budget_rejects_ceilings_above_any_recorded_reference() -> None:
     findings = evaluate_complexity_budget(
         _budget_scan([12]),
         _budget(finding_count_max=214, max_complexity_max=171),
     )
 
-    assert [item["code"] for item in findings] == [
-        "complexity_budget_raised_above_reference",
-        "complexity_budget_raised_above_reference",
+    assert {item["code"] for item in findings} == {
+        "complexity_budget_raised_above_reference"
+    }
+    # 214 exceeds both recorded finding counts, 171 exceeds both maxima.
+    assert sorted((item["dimension"], item["reference"]) for item in findings) == [
+        ("finding_count", "historical_reference"),
+        ("finding_count", "slice_start_reference"),
+        ("max_complexity", "historical_reference"),
+        ("max_complexity", "slice_start_reference"),
     ]
+
+
+def test_complexity_budget_rejects_a_raised_excess_ceiling() -> None:
+    """Excess mass is the dimension a rewritten baseline cannot fake away."""
+
+    findings = evaluate_complexity_budget(
+        _budget_scan([12]),
+        _budget(excess_total_max=2655),
+    )
+
+    assert [(item["code"], item["dimension"]) for item in findings] == [
+        ("complexity_budget_raised_above_reference", "excess_total")
+    ]
+
+
+def test_complexity_budget_rejects_an_unbounded_dimension() -> None:
+    """A ceiling no recorded scan bounds could be raised without limit."""
+
+    budget = _budget()
+    del budget["slice_start_reference"]
+
+    assert [
+        (item["code"], item["dimension"])
+        for item in evaluate_complexity_budget(_budget_scan([12]), budget)
+    ] == [("complexity_budget_reference_missing", "excess_total")]
 
 
 def test_complexity_budget_is_fail_closed_when_absent_or_malformed() -> None:
@@ -181,6 +217,7 @@ def test_complexity_budget_is_fail_closed_when_absent_or_malformed() -> None:
 def test_repository_complexity_budget_binds_the_recorded_baseline() -> None:
     budget = _policy()["complexity"]["budget"]
     reference = budget["historical_reference"]
+    slice_start = budget["slice_start_reference"]
     baseline = json.loads(
         (ROOT / _policy()["complexity"]["baseline_path"]).read_text(encoding="utf-8")
     )
@@ -189,6 +226,10 @@ def test_repository_complexity_budget_binds_the_recorded_baseline() -> None:
     assert reference["max_complexity"] == 170
     assert budget["finding_count_max"] < reference["finding_count"]
     assert budget["max_complexity_max"] < reference["max_complexity"]
+    # The slice must beat where it started, not only the older reference.
+    assert budget["finding_count_max"] < slice_start["finding_count"]
+    assert budget["max_complexity_max"] < slice_start["max_complexity"]
+    assert budget["excess_total_max"] < slice_start["excess_total"]
     assert baseline["finding_count"] <= budget["finding_count_max"]
     assert baseline["max_complexity"] <= budget["max_complexity_max"]
     assert (

@@ -1,0 +1,2401 @@
+{
+  "does_not_establish": [
+    "that an unproven module is dead",
+    "that a reachable module is executed at runtime",
+    "that a test-only module has a production consumer",
+    "completeness of dynamic loader discovery",
+    "that evidence surfaces are themselves used"
+  ],
+  "findings": [],
+  "kind": "repoground.module_reachability_check",
+  "measurement": {
+    "documentation_only": [],
+    "does_not_establish": [
+      "that an unproven module is dead",
+      "that a reachable module is executed at runtime",
+      "that a test-only module has a production consumer",
+      "completeness of dynamic loader discovery",
+      "that evidence surfaces are themselves used"
+    ],
+    "kind": "repoground.module_reachability_measurement",
+    "module_count": 199,
+    "modules": [
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground",
+        "path": "merger/repoground/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "module_main_block",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.__main__",
+        "path": "merger/repoground/__main__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.adapters",
+        "path": "merger/repoground/adapters/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.adapters.atlas",
+        "path": "merger/repoground/adapters/atlas.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.adapters.diagnostics",
+        "path": "merger/repoground/adapters/diagnostics.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.adapters.filesystem",
+        "path": "merger/repoground/adapters/filesystem.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.adapters.metarepo",
+        "path": "merger/repoground/adapters/metarepo.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.adapters.security",
+        "path": "merger/repoground/adapters/security.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.adapters.sources",
+        "path": "merger/repoground/adapters/sources.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.bundle_sources",
+        "path": "merger/repoground/architecture/bundle_sources.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.call_graph",
+        "path": "merger/repoground/architecture/call_graph.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.call_graph_contract",
+        "path": "merger/repoground/architecture/call_graph_contract.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "module_main_block",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.call_graph_quality_eval",
+        "path": "merger/repoground/architecture/call_graph_quality_eval.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.entrypoints",
+        "path": "merger/repoground/architecture/entrypoints.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.graph_index",
+        "path": "merger/repoground/architecture/graph_index.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "static_import_script"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.graph_maintainability",
+        "path": "merger/repoground/architecture/graph_maintainability.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.graph_quality_eval",
+        "path": "merger/repoground/architecture/graph_quality_eval.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.graph_source_validation",
+        "path": "merger/repoground/architecture/graph_source_validation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.import_graph",
+        "path": "merger/repoground/architecture/import_graph.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "static_import_script"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.module_reachability",
+        "path": "merger/repoground/architecture/module_reachability.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.path_classification",
+        "path": "merger/repoground/architecture/path_classification.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.architecture.symbol_index",
+        "path": "merger/repoground/architecture/symbol_index.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "package_of_referenced_module"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas",
+        "path": "merger/repoground/atlas/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas.diff",
+        "path": "merger/repoground/atlas/diff.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas.index",
+        "path": "merger/repoground/atlas/index.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas.lifecycle",
+        "path": "merger/repoground/atlas/lifecycle.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas.paths",
+        "path": "merger/repoground/atlas/paths.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas.planner",
+        "path": "merger/repoground/atlas/planner.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas.registry",
+        "path": "merger/repoground/atlas/registry.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.atlas.search",
+        "path": "merger/repoground/atlas/search.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli",
+        "path": "merger/repoground/cli/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "module_main_block"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.__main__",
+        "path": "merger/repoground/cli/__main__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "module_main_block",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.agent_benchmark",
+        "path": "merger/repoground/cli/agent_benchmark.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "module_main_block",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.agent_impact",
+        "path": "merger/repoground/cli/agent_impact.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_agent_consumption",
+        "path": "merger/repoground/cli/cmd_agent_consumption.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_agent_entry",
+        "path": "merger/repoground/cli/cmd_agent_entry.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_agent_pack",
+        "path": "merger/repoground/cli/cmd_agent_pack.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_architecture",
+        "path": "merger/repoground/cli/cmd_architecture.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_artifact",
+        "path": "merger/repoground/cli/cmd_artifact.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_atlas",
+        "path": "merger/repoground/cli/cmd_atlas.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_bundle_health",
+        "path": "merger/repoground/cli/cmd_bundle_health.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_bundle_surface",
+        "path": "merger/repoground/cli/cmd_bundle_surface.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_citation",
+        "path": "merger/repoground/cli/cmd_citation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_context_quality",
+        "path": "merger/repoground/cli/cmd_context_quality.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_doc_freshness",
+        "path": "merger/repoground/cli/cmd_doc_freshness.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_eval",
+        "path": "merger/repoground/cli/cmd_eval.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_evidence_query",
+        "path": "merger/repoground/cli/cmd_evidence_query.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_export_safety",
+        "path": "merger/repoground/cli/cmd_export_safety.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_federation",
+        "path": "merger/repoground/cli/cmd_federation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_governance",
+        "path": "merger/repoground/cli/cmd_governance.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_ground",
+        "path": "merger/repoground/cli/cmd_ground.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_incremental_snapshot",
+        "path": "merger/repoground/cli/cmd_incremental_snapshot.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_index",
+        "path": "merger/repoground/cli/cmd_index.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_parity",
+        "path": "merger/repoground/cli/cmd_parity.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_query",
+        "path": "merger/repoground/cli/cmd_query.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_service_client",
+        "path": "merger/repoground/cli/cmd_service_client.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.cmd_token_budget",
+        "path": "merger/repoground/cli/cmd_token_budget.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "module_main_block",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.ground",
+        "path": "merger/repoground/cli/ground.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "module_main_block",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.main",
+        "path": "merger/repoground/cli/main.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "module_main_block",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.mcp_stdio",
+        "path": "merger/repoground/cli/mcp_stdio.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.policy_loader",
+        "path": "merger/repoground/cli/policy_loader.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.pr_explain",
+        "path": "merger/repoground/cli/pr_explain.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "module_main_block",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.pr_schau_verify",
+        "path": "merger/repoground/cli/pr_schau_verify.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "module_main_block",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.serve",
+        "path": "merger/repoground/cli/serve.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.cli.stale_check",
+        "path": "merger/repoground/cli/stale_check.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "package_data_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.contracts",
+        "path": "merger/repoground/contracts/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core",
+        "path": "merger/repoground/core/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_benchmark",
+        "path": "merger/repoground/core/agent_benchmark.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_benchmark_common",
+        "path": "merger/repoground/core/agent_benchmark_common.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_benchmark_evaluation",
+        "path": "merger/repoground/core/agent_benchmark_evaluation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_benchmark_integrity",
+        "path": "merger/repoground/core/agent_benchmark_integrity.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_benchmark_policy",
+        "path": "merger/repoground/core/agent_benchmark_policy.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_benchmark_receipts",
+        "path": "merger/repoground/core/agent_benchmark_receipts.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_benchmark_requests",
+        "path": "merger/repoground/core/agent_benchmark_requests.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_consumption_validate",
+        "path": "merger/repoground/core/agent_consumption_validate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_entry_manifest",
+        "path": "merger/repoground/core/agent_entry_manifest.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_export_gate",
+        "path": "merger/repoground/core/agent_export_gate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_impact_adapter",
+        "path": "merger/repoground/core/agent_impact_adapter.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_impact_context",
+        "path": "merger/repoground/core/agent_impact_context.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_impact_eval",
+        "path": "merger/repoground/core/agent_impact_eval.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_impact_refinement",
+        "path": "merger/repoground/core/agent_impact_refinement.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.agent_reading_pack",
+        "path": "merger/repoground/core/agent_reading_pack.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.answer_grounding",
+        "path": "merger/repoground/core/answer_grounding.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.core.answer_grounding_delta",
+        "path": "merger/repoground/core/answer_grounding_delta.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.anti_hallucination_ast_lint",
+        "path": "merger/repoground/core/anti_hallucination_ast_lint.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.anti_hallucination_lint",
+        "path": "merger/repoground/core/anti_hallucination_lint.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.artifact_io",
+        "path": "merger/repoground/core/artifact_io.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.ask_context",
+        "path": "merger/repoground/core/ask_context.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.ask_evaluation",
+        "path": "merger/repoground/core/ask_evaluation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.authority_upgrade_registry",
+        "path": "merger/repoground/core/authority_upgrade_registry.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.availability",
+        "path": "merger/repoground/core/availability.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.bundle_access",
+        "path": "merger/repoground/core/bundle_access.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.bundle_generation",
+        "path": "merger/repoground/core/bundle_generation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.bundle_identity",
+        "path": "merger/repoground/core/bundle_identity.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.bundle_sidecars",
+        "path": "merger/repoground/core/bundle_sidecars.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.bundle_surface_validate",
+        "path": "merger/repoground/core/bundle_surface_validate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.call_graph_impact_index",
+        "path": "merger/repoground/core/call_graph_impact_index.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.call_navigation_index",
+        "path": "merger/repoground/core/call_navigation_index.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.check_view",
+        "path": "merger/repoground/core/check_view.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.chunker",
+        "path": "merger/repoground/core/chunker.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.citation_id",
+        "path": "merger/repoground/core/citation_id.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.citation_map",
+        "path": "merger/repoground/core/citation_map.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.citation_validate",
+        "path": "merger/repoground/core/citation_validate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.claim_evidence_diagnostics",
+        "path": "merger/repoground/core/claim_evidence_diagnostics.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.claim_evidence_map",
+        "path": "merger/repoground/core/claim_evidence_map.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.clock",
+        "path": "merger/repoground/core/clock.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.compact_evidence",
+        "path": "merger/repoground/core/compact_evidence.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.concept_cards",
+        "path": "merger/repoground/core/concept_cards.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.constants",
+        "path": "merger/repoground/core/constants.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.context_compiler",
+        "path": "merger/repoground/core/context_compiler.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.context_quality",
+        "path": "merger/repoground/core/context_quality.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.delta_context",
+        "path": "merger/repoground/core/delta_context.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.dependency_diagnostics",
+        "path": "merger/repoground/core/dependency_diagnostics.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.doc_freshness",
+        "path": "merger/repoground/core/doc_freshness.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.export_safety_report",
+        "path": "merger/repoground/core/export_safety_report.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.external_manifest_generation",
+        "path": "merger/repoground/core/external_manifest_generation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.external_manifest_reference",
+        "path": "merger/repoground/core/external_manifest_reference.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "module_main_block",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.extractor",
+        "path": "merger/repoground/core/extractor.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.federation",
+        "path": "merger/repoground/core/federation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.forensic_preflight",
+        "path": "merger/repoground/core/forensic_preflight.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.graph_degradation",
+        "path": "merger/repoground/core/graph_degradation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.health_degradation",
+        "path": "merger/repoground/core/health_degradation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.core.history_lens",
+        "path": "merger/repoground/core/history_lens.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.latest_complete",
+        "path": "merger/repoground/core/latest_complete.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.lens_audit",
+        "path": "merger/repoground/core/lens_audit.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.lens_card_validate",
+        "path": "merger/repoground/core/lens_card_validate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.lens_cards",
+        "path": "merger/repoground/core/lens_cards.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.lens_facets",
+        "path": "merger/repoground/core/lens_facets.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.lenses",
+        "path": "merger/repoground/core/lenses.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.live_freshness",
+        "path": "merger/repoground/core/live_freshness.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.mcp_resources",
+        "path": "merger/repoground/core/mcp_resources.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.mcp_tools",
+        "path": "merger/repoground/core/mcp_tools.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.core.memory",
+        "path": "merger/repoground/core/memory.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.merge",
+        "path": "merger/repoground/core/merge.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "dynamic_string_reference",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.naming_audit",
+        "path": "merger/repoground/core/naming_audit.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.output_health",
+        "path": "merger/repoground/core/output_health.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.parity_gates",
+        "path": "merger/repoground/core/parity_gates.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.parity_state",
+        "path": "merger/repoground/core/parity_state.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.patch_evaluation",
+        "path": "merger/repoground/core/patch_evaluation.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.path_security",
+        "path": "merger/repoground/core/path_security.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.post_emit_health",
+        "path": "merger/repoground/core/post_emit_health.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.pr_delta_card_validate",
+        "path": "merger/repoground/core/pr_delta_card_validate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.pr_delta_cards",
+        "path": "merger/repoground/core/pr_delta_cards.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.pr_schau_bundle",
+        "path": "merger/repoground/core/pr_schau_bundle.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "runtime_surface_reference"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.publication_policy",
+        "path": "merger/repoground/core/publication_policy.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.range_resolver",
+        "path": "merger/repoground/core/range_resolver.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.readonly_adapter",
+        "path": "merger/repoground/core/readonly_adapter.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.redactor",
+        "path": "merger/repoground/core/redactor.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.relation_card_validate",
+        "path": "merger/repoground/core/relation_card_validate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.relation_cards",
+        "path": "merger/repoground/core/relation_cards.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.required_reading",
+        "path": "merger/repoground/core/required_reading.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.response_projection",
+        "path": "merger/repoground/core/response_projection.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.review_coverage",
+        "path": "merger/repoground/core/review_coverage.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.rooted_filesystem",
+        "path": "merger/repoground/core/rooted_filesystem.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.runtime_provenance",
+        "path": "merger/repoground/core/runtime_provenance.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.snapshot_preflight",
+        "path": "merger/repoground/core/snapshot_preflight.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.snapshot_profiles",
+        "path": "merger/repoground/core/snapshot_profiles.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.snapshot_provenance",
+        "path": "merger/repoground/core/snapshot_provenance.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.token_budget_report",
+        "path": "merger/repoground/core/token_budget_report.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.workbench_usefulness",
+        "path": "merger/repoground/core/workbench_usefulness.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.core.yaml_compat",
+        "path": "merger/repoground/core/yaml_compat.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "package_of_referenced_module"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.frontends",
+        "path": "merger/repoground/frontends/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "package_of_referenced_module"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.frontends.pythonista",
+        "path": "merger/repoground/frontends/pythonista/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "module_main_block",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.frontends.pythonista.build",
+        "path": "merger/repoground/frontends/pythonista/build.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.frontends.pythonista.build_helpers",
+        "path": "merger/repoground/frontends/pythonista/build_helpers.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.frontends.pythonista.build_utils",
+        "path": "merger/repoground/frontends/pythonista/build_utils.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "module_main_block"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.frontends.pythonista.ipad_fs_scan",
+        "path": "merger/repoground/frontends/pythonista/ipad_fs_scan.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "module_main_block",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.frontends.pythonista.pathfinder",
+        "path": "merger/repoground/frontends/pythonista/pathfinder.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval",
+        "path": "merger/repoground/retrieval/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.retrieval.audit_finding",
+        "path": "merger/repoground/retrieval/audit_finding.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.retrieval.audit_lane",
+        "path": "merger/repoground/retrieval/audit_lane.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.eval_core",
+        "path": "merger/repoground/retrieval/eval_core.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.eval_diagnostics",
+        "path": "merger/repoground/retrieval/eval_diagnostics.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": false,
+        "module": "merger.repoground.retrieval.eval_diagnostics_integration",
+        "path": "merger/repoground/retrieval/eval_diagnostics_integration.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.federation_query",
+        "path": "merger/repoground/retrieval/federation_query.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.incremental_snapshot",
+        "path": "merger/repoground/retrieval/incremental_snapshot.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.index_db",
+        "path": "merger/repoground/retrieval/index_db.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.output_projection",
+        "path": "merger/repoground/retrieval/output_projection.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.query_core",
+        "path": "merger/repoground/retrieval/query_core.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.query_range_coverage",
+        "path": "merger/repoground/retrieval/query_range_coverage.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "static_import_script"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.retrieval_promotion_gate",
+        "path": "merger/repoground/retrieval/retrieval_promotion_gate.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.review_eval",
+        "path": "merger/repoground/retrieval/review_eval.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "static_import_script"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.review_query",
+        "path": "merger/repoground/retrieval/review_query.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.review_router",
+        "path": "merger/repoground/retrieval/review_router.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.router",
+        "path": "merger/repoground/retrieval/router.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "static_import_script",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.security_alert_summary",
+        "path": "merger/repoground/retrieval/security_alert_summary.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.retrieval.session",
+        "path": "merger/repoground/retrieval/session.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_test",
+          "package_of_referenced_module",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service",
+        "path": "merger/repoground/service/__init__.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.access_log",
+        "path": "merger/repoground/service/access_log.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.app",
+        "path": "merger/repoground/service/app.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.auth",
+        "path": "merger/repoground/service/auth.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.jobstore",
+        "path": "merger/repoground/service/jobstore.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.logging_provider",
+        "path": "merger/repoground/service/logging_provider.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference",
+          "runtime_surface_reference",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.models",
+        "path": "merger/repoground/service/models.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.query_artifact_store",
+        "path": "merger/repoground/service/query_artifact_store.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.repo_sync",
+        "path": "merger/repoground/service/repo_sync.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.runner",
+        "path": "merger/repoground/service/runner.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.runtime_artifact_retention",
+        "path": "merger/repoground/service/runtime_artifact_retention.py",
+        "status": "reachable"
+      },
+      {
+        "evidence": [
+          "static_import_product",
+          "static_import_test",
+          "dynamic_string_reference_test",
+          "documented_invocation"
+        ],
+        "has_non_documentation_evidence": true,
+        "has_production_evidence": true,
+        "module": "merger.repoground.service.source_acquisition",
+        "path": "merger/repoground/service/source_acquisition.py",
+        "status": "reachable"
+      }
+    ],
+    "package_roots": [
+      "merger"
+    ],
+    "test_only": [
+      "merger.repoground.core.answer_grounding_delta",
+      "merger.repoground.core.history_lens",
+      "merger.repoground.core.memory",
+      "merger.repoground.frontends.pythonista.build_helpers",
+      "merger.repoground.frontends.pythonista.build_utils",
+      "merger.repoground.retrieval.audit_finding",
+      "merger.repoground.retrieval.audit_lane",
+      "merger.repoground.retrieval.eval_diagnostics_integration"
+    ],
+    "unparsed_files": [],
+    "unparsed_non_product_files": [
+      "merger/repoground/tests/fixtures/entrypoints_test_project/invalid.py",
+      "merger/repoground/tests/fixtures/graph_quality_goldset/invalid_case/broken.py"
+    ],
+    "unproven": [],
+    "version": "1.0"
+  },
+  "status": "pass",
+  "version": "1.0"
+}
