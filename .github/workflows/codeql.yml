@@ -43,3 +43,19 @@ jobs:
         run: >-
           python3 scripts/ci/assert_codeql_sarif_clean.py
           "${{ steps.analyze.outputs.sarif-output }}"
+
+      - name: Emit security-alert readback summary
+        if: always() && steps.analyze.outputs.sarif-output != ''
+        run: >-
+          python3 scripts/ci/emit_security_alert_summary.py
+          --sarif-dir "${{ steps.analyze.outputs.sarif-output }}"
+          --output "${{ runner.temp }}/security-alert-summary.json"
+
+      - name: Upload security-alert readback summary
+        if: always() && steps.analyze.outputs.sarif-output != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: security-alert-summary
+          path: ${{ runner.temp }}/security-alert-summary.json
+          if-no-files-found: error
+          retention-days: 90
