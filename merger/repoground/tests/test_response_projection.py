@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from merger.repoground.core import bundle_access, mcp_tools
+from merger.repoground.core import bundle_access, mcp_tools, response_projection
 from merger.repoground.core.response_projection import (
     compact_availability,
     compact_freshness,
@@ -116,6 +116,73 @@ def test_compact_freshness_normalizes_commit_identity_and_preserves_multi_repo(t
             {"git_commit": "b" * 40, "repo": "beta"},
         ]
     }
+
+
+def test_commit_identity_cache_reuses_unchanged_manifest_and_invalidates_on_change(
+    monkeypatch, tmp_path: Path
+):
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "snapshot_provenance": {
+                    "repositories": [
+                        {
+                            "repo": "alpha",
+                            "provenance_status": "present",
+                            "git_commit": "a" * 40,
+                        }
+                    ]
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response_projection._cached_commit_entries.cache_clear()
+    original_read_manifest = response_projection._read_manifest
+    read_count = 0
+
+    def counted_read_manifest(path):
+        nonlocal read_count
+        read_count += 1
+        return original_read_manifest(path)
+
+    monkeypatch.setattr(response_projection, "_read_manifest", counted_read_manifest)
+
+    first = compact_freshness({"status": "fresh"}, manifest)
+    second = compact_freshness({"status": "fresh"}, manifest)
+
+    assert first == second
+    assert read_count == 1
+
+    manifest.write_text(
+        json.dumps(
+            {
+                "snapshot_provenance": {
+                    "repositories": [
+                        {
+                            "repo": "alpha-renamed",
+                            "provenance_status": "present",
+                            "git_commit": "b" * 40,
+                        }
+                    ]
+                },
+                "cache_revision": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    changed = compact_freshness({"status": "fresh"}, manifest)
+
+    assert read_count == 2
+    assert changed["commit_identity"] == {
+        "repositories": [
+            {"git_commit": "b" * 40, "repo": "alpha-renamed"}
+        ]
+    }
+    response_projection._cached_commit_entries.cache_clear()
 
 
 def test_compact_projection_preserves_explicit_gaps_without_null_reason():
