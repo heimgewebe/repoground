@@ -679,11 +679,93 @@ def test_generator_repository_is_prioritized_without_reordering_other_entries(
 def test_generator_repository_priority_is_applied_before_publication_loop() -> None:
     source = PUBLISHER.read_text(encoding="utf-8")
     inventory_return = source.index("if args.inventory:")
-    priority = source.index("entries = prioritize_generator_repository(entries)")
-    lock = source.index("lock = acquire_lock()", priority)
-    loop = source.index("for entry in entries:", lock)
+    lock = source.index("lock = acquire_lock()", inventory_return)
+    priority = source.index("entries, scheduling = prioritize_fleet_publication(entries)")
+    loop = source.index("for entry in entries:", priority)
 
-    assert inventory_return < priority < lock < loop
+    assert inventory_return < lock < priority < loop
+
+
+def test_fleet_fairness_converges_42_repository_backlog_with_limit_8(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    monkeypatch.setattr(module, "STATE_ROOT", tmp_path / "state")
+    module.STATE_ROOT.mkdir(parents=True)
+    generator_key = "heimgewebe/repoground"
+    monkeypatch.setattr(module, "generator_repository_key", lambda: generator_key)
+    keys = [generator_key] + [f"heimgewebe/repo-{index:02d}" for index in range(41)]
+    entries = [
+        module.RepoEntry(
+            key=key,
+            owner=key.split("/", 1)[0],
+            repo=key.split("/", 1)[1],
+            path=tmp_path / key.split("/", 1)[1],
+            remote=f"git@github.com:{key}.git",
+        )
+        for key in keys
+    ]
+
+    def record_publication(entry: object, sequence: int) -> None:
+        repository = module.publication_repository(entry)
+        path = module.STATE_ROOT / f"{repository}__main.state.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": module.STATE_SCHEMA,
+                    "repo_id": repository,
+                    "ref": "main",
+                    "created_at": f"2026-07-22T{sequence // 3600:02d}:"
+                    f"{(sequence // 60) % 60:02d}:{sequence % 60:02d}Z",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    for index, entry in enumerate(entries):
+        record_publication(entry, index)
+
+    changed = set(keys)
+    publication_counts = {key: 0 for key in keys}
+    newly_changed_key: str | None = None
+    completed_rounds = 0
+    for round_index in range(1, 8):
+        ordered, scheduling = module.prioritize_fleet_publication(
+            entries, now_epoch=1784773200.0
+        )
+        assert scheduling["policy"] == module.SCHEDULING_POLICY
+        assert scheduling["ordered_repositories"][0] == generator_key
+        batch = [entry for entry in ordered if entry.key in changed][:8]
+        assert len(batch) <= 8
+        for entry in batch:
+            changed.remove(entry.key)
+            if entry.key == newly_changed_key and publication_counts[entry.key] == 1:
+                assert all(count >= 1 for count in publication_counts.values())
+            publication_counts[entry.key] += 1
+            record_publication(
+                entry, 3600 + round_index * 60 + publication_counts[entry.key]
+            )
+        if round_index == 1:
+            newly_changed_key = batch[1].key
+            changed.add(newly_changed_key)
+        completed_rounds = round_index
+        if not changed:
+            break
+
+    assert completed_rounds <= 6
+    assert not changed
+    assert all(count >= 1 for count in publication_counts.values())
+    assert newly_changed_key is not None
+    assert publication_counts[newly_changed_key] == 2
+
+    _ordered, final_scheduling = module.prioritize_fleet_publication(
+        entries, now_epoch=1784773200.0
+    )
+    evidence = final_scheduling["entries"][newly_changed_key]
+    assert evidence["rank"] >= 1
+    assert evidence["debt_basis"] == "age_since_last_successful_publication"
+    assert isinstance(evidence["publication_debt_seconds"], int)
 
 
 def test_changed_source_hygiene_preflight_runs_before_publication_limit() -> None:
