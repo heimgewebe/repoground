@@ -1585,7 +1585,7 @@
         ".github/grabowski-required-checks.json"
       ],
       "missing_evidence": [
-        "Public distribution remains blocked and is tracked separately by TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001.",
+        "Public source distribution is now permitted under Apache-2.0 for the reviewed source-only scope; bundled third-party artifacts remain outside that decision.",
         "The optional semantic/Torch dependency closure remains outside this candidate and is tracked separately by TASK-LENSKIT-SEMANTIC-LOCK-001.",
         "This task completion does not establish product readiness, public release readiness, runtime correctness, test completeness or absence of vulnerabilities."
       ]
@@ -1630,15 +1630,18 @@
     },
     {
       "id": "TASK-REPOBRIEF-PUBLIC-LICENSE-DECISION-001",
-      "title": "RepoBrief Public Distribution License Decision",
-      "status": "open",
-      "description": "Decide whether RepoBrief should receive a public distribution license, review third-party obligations, and replace the restrictive LicenseRef only through an explicit owner decision.",
+      "title": "RepoGround Public Distribution License Decision",
+      "status": "done",
+      "description": "Record the owner-approved RepoGround public distribution license decision, review the source-only third-party distribution boundary, and replace the restrictive project LicenseRef only through explicit owner authority.",
       "evidence": [
         "LICENSE",
-        "docs/release/licensing.md"
+        "docs/release/licensing.md",
+        "docs/decisions/repoground-public-license-decision.v1.json",
+        "docs/release/third-party-license-review.v1.json",
+        "docs/release/third-party-source-distribution-review.v1.json"
       ],
       "missing_evidence": [
-        "No owner-approved public license, third-party obligation review or publication authorization exists."
+        "Completion establishes public distribution only for the project-controlled source scope documented by the decision and source-distribution review; it does not clear bundled third-party binaries, wheels, containers, model weights or datasets."
       ]
     }
   ]

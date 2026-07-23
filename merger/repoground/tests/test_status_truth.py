@@ -18,6 +18,15 @@ ROADMAP_MARKERS = [
     "Häkchen gelten nur für den jeweiligen Arbeitspunkt",
     "Ein grüner Health- oder CI-Status beweist keine Produkt- oder Release-Reife",
 ]
+RELEASE_IDENTITY = {
+    "license_expression": "Apache-2.0",
+    "license_file": "LICENSE",
+    "product_name": "RepoGround",
+    "public_distribution_status": "permitted_under_project_license",
+    "python_namespace": "merger.repoground",
+    "release_version": "3.0.0",
+    "repository_target": "heimgewebe/repoground",
+}
 
 
 def _write(root: Path, relative: str, content: str) -> None:
@@ -26,7 +35,42 @@ def _write(root: Path, relative: str, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _write_release_identity_sources(root: Path) -> None:
+    _write(
+        root,
+        "LICENSE",
+        "Apache License\n                           Version 2.0, January 2004\n",
+    )
+    _write(root, "RELEASE_VERSION", "3.0.0\n")
+    _write(
+        root,
+        "docs/architecture/repoground-3-migration-inventory.v1.json",
+        json.dumps(
+            {
+                "kind": "repoground.migration_inventory",
+                "canonical": {
+                    "product": "RepoGround",
+                    "repository_target": "heimgewebe/repoground",
+                    "python_namespace": "merger.repoground",
+                    "command": "repoground",
+                },
+            }
+        ),
+    )
+    _write(
+        root,
+        "docs/decisions/repoground-public-license-decision.v1.json",
+        json.dumps(
+            {
+                "current_license_expression": "Apache-2.0",
+                "distribution_status": "permitted_under_project_license",
+            }
+        ),
+    )
+
+
 def _fixture(root: Path) -> None:
+    _write_release_identity_sources(root)
     task = {
         "id": "TASK-X-001",
         "title": "Synthetic task",
@@ -95,6 +139,7 @@ def _fixture(root: Path) -> None:
         }
     ]
     truth["open_followups"] = ["TASK-X-001"]
+    truth["release_identity"] = dict(RELEASE_IDENTITY)
     _write(root, "docs/status/repobrief-status-truth.v1.json", json.dumps(truth))
 
 
@@ -151,6 +196,73 @@ def test_claim_count_mismatch_is_rejected(tmp_path: Path) -> None:
     truth["claim_freshness"]["tracked_claim_count"] = 2
     path.write_text(json.dumps(truth))
     assert "STATUS_TRUTH_CLAIM_COUNT" in _codes(tmp_path)
+
+
+def test_release_identity_mismatch_is_rejected(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
+    truth = json.loads(path.read_text())
+    truth["release_identity"]["release_version"] = "2.9.0"
+    path.write_text(json.dumps(truth))
+    assert "STATUS_TRUTH_RELEASE_IDENTITY_MISMATCH" in _codes(tmp_path)
+
+
+def test_missing_release_identity_is_rejected(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
+    truth = json.loads(path.read_text())
+    del truth["release_identity"]
+    path.write_text(json.dumps(truth))
+    assert "STATUS_TRUTH_RELEASE_IDENTITY_MISMATCH" in _codes(tmp_path)
+
+
+def test_stale_license_reference_is_rejected(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
+    truth = json.loads(path.read_text())
+    truth["audit_packages"][0]["limitations"].append(
+        "Public distribution remains blocked by LicenseRef-RepoBrief-All-Rights-Reserved."
+    )
+    path.write_text(json.dumps(truth))
+    assert "STATUS_TRUTH_STALE_LICENSE_REFERENCE" in _codes(tmp_path)
+
+
+def test_historical_license_reference_is_allowed(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "docs/status/repobrief-status-truth.v1.json"
+    truth = json.loads(path.read_text())
+    truth["audit_packages"][0]["limitations"].append(
+        "Historical evidence: the project previously used LicenseRef-RepoBrief-All-Rights-Reserved before the 2026-07-18 Apache-2.0 decision."
+    )
+    path.write_text(json.dumps(truth))
+    assert "STATUS_TRUTH_STALE_LICENSE_REFERENCE" not in _codes(tmp_path)
+
+
+def test_stale_release_version_is_rejected_when_file_bumps(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    (tmp_path / "RELEASE_VERSION").write_text("3.1.0\n", encoding="utf-8")
+    assert "STATUS_TRUTH_RELEASE_IDENTITY_MISMATCH" in _codes(tmp_path)
+
+
+def test_unrecognized_license_text_blocks_the_check(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    (tmp_path / "LICENSE").write_text(
+        "LicenseRef-Some-Other-Terms\n", encoding="utf-8"
+    )
+    assert "RELEASE_IDENTITY_LICENSE_UNRECOGNIZED" in _codes(tmp_path)
+
+
+def test_repository_release_identity_matches_ground_truth() -> None:
+    status = json.loads(STATUS.read_text(encoding="utf-8"))
+    license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+    release_version = (ROOT / "RELEASE_VERSION").read_text(encoding="utf-8").strip()
+    identity = status["release_identity"]
+    assert identity["license_expression"] == "Apache-2.0"
+    assert "Apache License" in license_text
+    assert "Version 2.0" in license_text
+    assert identity["release_version"] == release_version
+    assert identity["product_name"] == "RepoGround"
+    assert identity["repository_target"] == "heimgewebe/repoground"
 
 
 def test_invalid_task_entry_is_reported_without_crashing(tmp_path: Path) -> None:
