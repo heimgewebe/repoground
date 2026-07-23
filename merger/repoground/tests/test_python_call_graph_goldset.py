@@ -1,10 +1,12 @@
 import json
+import math
 from pathlib import Path
 
 import pytest
 
 from merger.repoground.architecture.call_graph_quality_eval import (
     PythonCallGraphGoldsetError,
+    decide_promotion,
     evaluate_python_call_graph_fixture,
     evaluate_python_call_graph_goldset,
     load_python_call_graph_goldset,
@@ -152,3 +154,180 @@ def test_cli_writes_reviewable_report(tmp_path):
     assert report["kind"] == "lenskit.python_call_graph_quality_benchmark"
     assert report["decision"]["thresholds_met"] is True
     assert report["decision"]["default_promoted"] is False
+    assert report["decision"]["insufficient_evidence"] == []
+
+
+def _measured_inputs() -> tuple[dict, dict, list, list]:
+    report = evaluate_python_call_graph_goldset(GOLDSET_PATH)
+    return (
+        report["metrics"],
+        report["thresholds"],
+        report["cases"],
+        report["agent_task_outcomes"],
+    )
+
+
+def test_promotion_fails_closed_when_a_required_metric_is_missing():
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    del metrics["s1_precision"]
+
+    decision = decide_promotion(metrics, thresholds, cases, outcomes)
+
+    assert decision["thresholds_met"] is False
+    assert decision["eligible_for_review"] is False
+    assert decision["default_promoted"] is False
+    assert "s1_precision" in decision["insufficient_evidence"]
+    assert all(value is False for value in decision["threshold_checks"].values())
+
+
+def test_promotion_fails_closed_when_a_required_metric_is_non_numeric():
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    metrics["s1_precision"] = None
+
+    decision = decide_promotion(metrics, thresholds, cases, outcomes)
+
+    assert decision["thresholds_met"] is False
+    assert "s1_precision" in decision["insufficient_evidence"]
+
+
+def test_promotion_fails_closed_without_scored_cases_or_agent_outcomes():
+    metrics, thresholds, _cases, _outcomes = _measured_inputs()
+
+    decision = decide_promotion(metrics, thresholds, [], [])
+
+    assert decision["thresholds_met"] is False
+    assert decision["threshold_checks"]["no_case_regression"] is False
+    assert "scored_cases" in decision["insufficient_evidence"]
+    assert "agent_task_outcomes" in decision["insufficient_evidence"]
+
+
+def test_promotion_fails_closed_when_navigation_signal_is_absent():
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    metrics["navigation_utility"] = {}
+
+    decision = decide_promotion(metrics, thresholds, cases, outcomes)
+
+    assert decision["thresholds_met"] is False
+    assert (
+        "navigation_utility.context_path_reduction_ratio"
+        in decision["insufficient_evidence"]
+    )
+    assert decision["threshold_checks"]["no_case_regression"] is False
+
+
+def test_empty_case_set_does_not_self_attest_a_pass():
+    metrics, thresholds, _cases, _outcomes = _measured_inputs()
+
+    checks = decide_promotion(metrics, thresholds, [], [])["threshold_checks"]
+
+    # ``all([])`` is True; the gate must not inherit that for missing evidence.
+    assert checks["no_case_regression"] is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [math.nan, math.inf, -math.inf],
+    ids=["nan", "inf", "-inf"],
+)
+def test_promotion_treats_non_finite_metric_as_insufficient_evidence(value):
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    metrics["s1_precision"] = value
+
+    decision = decide_promotion(metrics, thresholds, cases, outcomes)
+
+    assert decision["thresholds_met"] is False
+    assert decision["eligible_for_review"] is False
+    assert decision["default_promoted"] is False
+    assert "s1_precision" in decision["insufficient_evidence"]
+    assert all(value is False for value in decision["threshold_checks"].values())
+
+
+@pytest.mark.parametrize(
+    "value",
+    [math.nan, math.inf, -math.inf],
+    ids=["nan", "inf", "-inf"],
+)
+def test_non_finite_navigation_ratio_is_insufficient_evidence(value):
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    metrics["navigation_utility"]["context_path_reduction_ratio"] = value
+
+    decision = decide_promotion(metrics, thresholds, cases, outcomes)
+
+    assert decision["thresholds_met"] is False
+    assert (
+        "navigation_utility.context_path_reduction_ratio"
+        in decision["insufficient_evidence"]
+    )
+    assert decision["threshold_checks"]["minimum_context_path_reduction"] is False
+
+
+def test_promotion_fails_closed_when_a_threshold_field_is_missing():
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    del thresholds["minimum_s1_precision"]
+
+    decision = decide_promotion(metrics, thresholds, cases, outcomes)
+
+    assert decision["thresholds_met"] is False
+    assert "thresholds.minimum_s1_precision" in decision["insufficient_evidence"]
+
+
+@pytest.mark.parametrize("value", [None, "0.97", math.nan])
+def test_promotion_fails_closed_when_a_threshold_field_is_invalid(value):
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    thresholds["minimum_target_recall"] = value
+
+    decision = decide_promotion(metrics, thresholds, cases, outcomes)
+
+    assert decision["thresholds_met"] is False
+    assert "thresholds.minimum_target_recall" in decision["insufficient_evidence"]
+
+
+def test_malformed_case_record_cannot_self_attest_a_pass():
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    # A non-empty but malformed record (no ``passed`` field) must not crash the
+    # gate nor be counted as a pass.
+    malformed = {k: v for k, v in cases[0].items() if k != "passed"}
+
+    decision = decide_promotion(metrics, thresholds, [malformed], outcomes)
+
+    assert decision["threshold_checks"]["no_case_regression"] is False
+    assert decision["thresholds_met"] is False
+
+
+@pytest.mark.parametrize(
+    ("threshold_key", "check_key", "metric_getter"),
+    [
+        (
+            "minimum_s1_precision",
+            "minimum_s1_precision",
+            lambda metrics: ("s1_precision", metrics),
+        ),
+        (
+            "minimum_target_recall",
+            "minimum_target_recall",
+            lambda metrics: ("target_recall", metrics),
+        ),
+        (
+            "minimum_context_path_reduction",
+            "minimum_context_path_reduction",
+            lambda metrics: (
+                "context_path_reduction_ratio",
+                metrics["navigation_utility"],
+            ),
+        ),
+    ],
+)
+def test_numeric_threshold_boundary_is_inclusive(
+    threshold_key, check_key, metric_getter
+):
+    metrics, thresholds, cases, outcomes = _measured_inputs()
+    field, container = metric_getter(metrics)
+    threshold = float(thresholds[threshold_key])
+
+    container[field] = threshold
+    at_boundary = decide_promotion(metrics, thresholds, cases, outcomes)
+    assert at_boundary["threshold_checks"][check_key] is True
+
+    container[field] = math.nextafter(threshold, -math.inf)
+    below_boundary = decide_promotion(metrics, thresholds, cases, outcomes)
+    assert below_boundary["threshold_checks"][check_key] is False
