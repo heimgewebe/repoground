@@ -54,6 +54,10 @@ SKIP_SEARCH_PARTS = {
     "_generated",
 }
 SKIP_SEARCH_SUFFIXES = {".db", ".sqlite", ".bundle", ".log", ".pyc"}
+# Retired product names. These must never describe a *current* CLI, class, or
+# file surface in an active query or expected target; only "kind"/schema-style
+# versioned data ids are exempt from this check (see repoground-naming-hard-cut.v1).
+RETIRED_PRODUCT_TERMS = ("lenskit", "repobrief", "repolens", "rlens")
 
 
 def _load_json(path: Path) -> Any:
@@ -235,6 +239,36 @@ def test_review_retrieval_goldset_symbolic_patterns_exist_in_repo_text(
         "symbolic patterns not found outside the goldset and its guard test: "
         f"{sorted(remaining_patterns)}"
     )
+
+
+def test_goldsets_do_not_describe_retired_products_as_current_surface(
+    base_queries: list[dict[str, Any]],
+    review_queries: list[dict[str, Any]],
+) -> None:
+    """Guard against a retired product name silently re-entering an active query.
+
+    ``kind``/schema-style versioned data ids (e.g. ``repolens.pr_schau.delta``)
+    are a deliberate, separate exception (see
+    ``docs/contracts/repoground-naming-hard-cut.v1.json``); neither goldset
+    file carries such a field, so every string value here is in scope.
+    """
+    offenders: list[str] = []
+    for source_name, queries in (
+        ("queries.v1.json", base_queries),
+        ("review_queries.v1.json", review_queries),
+    ):
+        for index, query_case in enumerate(queries):
+            texts = [query_case.get("query", "")]
+            texts.extend(query_case.get("expected_patterns", []))
+            for text in texts:
+                if not isinstance(text, str):
+                    continue
+                lowered = text.casefold()
+                for term in RETIRED_PRODUCT_TERMS:
+                    if term in lowered:
+                        offenders.append(f"{source_name}[{index}]: {text!r} contains {term!r}")
+
+    assert offenders == [], "retired product name found in active query surface: " + "; ".join(offenders)
 
 
 def test_review_retrieval_goldset_validates_against_contract(

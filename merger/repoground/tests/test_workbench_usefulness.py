@@ -60,6 +60,44 @@ def test_repository_goldset_matches_schema() -> None:
     )
 
 
+# Retired product names. ``kind`` (e.g. "repobrief.workbench_usefulness_goldset")
+# is a deliberate, separately-checked versioned data id exception (see
+# docs/contracts/repoground-naming-hard-cut.v1.json) and is intentionally not
+# scanned here; every other question field describes a live class/file/CLI
+# surface and must track the current name.
+RETIRED_PRODUCT_TERMS = ("lenskit", "repobrief", "repolens", "rlens")
+_NAMING_SCAN_FIELDS = (
+    "query",
+    "symbol_query",
+    "symbol_path_filter",
+    "expected_paths",
+    "expected_symbols",
+)
+
+
+def test_repository_goldset_questions_do_not_describe_retired_products_as_current() -> None:
+    goldset = json.loads(
+        (ROOT / "docs/retrieval/workbench_usefulness_goldset.v1.json").read_text(encoding="utf-8")
+    )
+
+    offenders: list[str] = []
+    for question in goldset["questions"]:
+        for field in _NAMING_SCAN_FIELDS:
+            value = question.get(field)
+            texts = value if isinstance(value, list) else [value]
+            for text in texts:
+                if not isinstance(text, str):
+                    continue
+                lowered = text.casefold()
+                for term in RETIRED_PRODUCT_TERMS:
+                    if term in lowered:
+                        offenders.append(
+                            f"question {question.get('id')!r} field {field!r}: {text!r} contains {term!r}"
+                        )
+
+    assert offenders == [], "retired product name found in active goldset question: " + "; ".join(offenders)
+
+
 def test_eval_measures_navigation_advantage_without_default_promotion(tmp_path: Path) -> None:
     _adapter_instance, _bundle, config = _adapter(tmp_path)
     result = evaluate_workbench_usefulness(

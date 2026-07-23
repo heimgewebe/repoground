@@ -129,7 +129,7 @@
     }
   },
   {
-    "query": "Find the Lenskit query CLI command and its registration",
+    "query": "Find the RepoGround query CLI command and its registration",
     "category": "cli",
     "expected_patterns": [
       "merger/repoground/cli/cmd_query.py",
@@ -142,7 +142,7 @@
     }
   },
   {
-    "query": "Find the Lenskit retrieval eval CLI command and its registration",
+    "query": "Find the RepoGround retrieval eval CLI command and its registration",
     "category": "cli",
     "expected_patterns": [
       "merger/repoground/cli/cmd_eval.py",

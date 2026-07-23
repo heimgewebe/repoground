@@ -53,7 +53,7 @@ rm -rf -- "$target"
 We employ a strict **improvement delta vs non-semantic** strategy.
 
 Semantic re-ranking must prove its worth against the established baseline:
-- `lenskit eval` will generate metrics (like `recall@10`) using the lexical-only approach.
+- `repoground eval` will generate metrics (like `recall@10`) using the lexical-only approach.
 - The same gold queries (`queries.v1.json`) are evaluated using the semantic re-ranker.
 - The measurable difference between the two strategies constitutes the "improvement delta".
 
