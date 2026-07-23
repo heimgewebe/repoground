@@ -4,7 +4,7 @@
 Accepted
 
 ## Context
-The `rLens` service requires a mechanism to browse the filesystem (via Folder Picker) and scan directory structures (via Atlas).
+The RepoGround service requires a mechanism to browse the filesystem (via Folder Picker) and scan directory structures (via Atlas).
 Users expressed a need for **maximal functional comfort**, specifically the ability to browse the entire system starting from the root (`/`), rather than being restricted to the Hub directory.
 
 However, standard implementation of absolute path browsing poses significant security risks and triggers static analysis warnings (e.g., CodeQL `py/path-injection`) because user-supplied strings are used to construct filesystem paths.

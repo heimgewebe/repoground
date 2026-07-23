@@ -5,13 +5,13 @@
 The fleet publisher uses a content identity instead of a timestamp as the generation decision. A repository is regenerated only when at least one input that can alter the result changes:
 
 - the remote default-branch commit;
-- the canonical RepoBrief generator inputs: the two RepoBrief CLI entry files plus `core`, `contracts`, and `retrieval`;
+- the canonical RepoGround generator inputs: the two RepoGround CLI entry files plus `core`, `contracts`, and `retrieval`;
 - the explicit publication configuration;
 - the collision-free publication identity (`owner__repository`).
 
 A timestamp remains in the directory name only to order retained history. It is not sufficient to trigger generation.
 
-Service, Web UI, test, and documentation-only changes are deliberately outside the generator-input digest. They cannot alter a RepoBrief bundle produced by `external-manifest refresh` and therefore must not regenerate the fleet. The digest is built from Git blob identities, modes, and paths for the allowlisted generator inputs; missing mandatory CLI entry files fail closed.
+Service, Web UI, test, and documentation-only changes are deliberately outside the generator-input digest. They cannot alter a RepoGround bundle produced by `external-manifest refresh` and therefore must not regenerate the fleet. The digest is built from Git blob identities, modes, and paths for the allowlisted generator inputs; missing mandatory CLI entry files fail closed.
 
 Stable external manifests and consumer-local bundle paths use `owner__repository` rather than the repository name alone. This prevents repositories with the same name under different GitHub owners from sharing one publication address. Only these owner-qualified stable manifests are authoritative reachability roots. Existing name-only external paths remain frozen compatibility data: the fleet publisher neither updates them nor uses their possibly stale targets to authorize or block canonical retention.
 
@@ -38,7 +38,7 @@ The publisher rebuilds the protected set before every destructive step from:
 - active publication markers under `STATE_ROOT/active-publications`;
 - explicit repeated `--protect-path` arguments.
 
-State and marker files are parsed strictly. An unsupported schema, missing `publication_dir`, missing current state target, symlink, or path outside the managed RepoBrief roots aborts cleanup. A stale active marker therefore retains data rather than guessing that a publication is dead. Removing such a marker requires separate operator inspection; retention never expires it automatically.
+State and marker files are parsed strictly. An unsupported schema, missing `publication_dir`, missing current state target, symlink, or path outside the managed RepoGround roots aborts cleanup. A stale active marker therefore retains data rather than guessing that a publication is dead. Removing such a marker requires separate operator inspection; retention never expires it automatically.
 
 ## Active publication markers
 

@@ -39,7 +39,7 @@ Der Sync erzeugt in jedem Ziel-Repo einen Report:
 
 ## API
 
-Der Sync wird über den `rLens` Service getriggert:
+Der Sync wird über den RepoGround service getriggert:
 
 `POST /api/sync/metarepo`
 
