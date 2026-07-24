@@ -8,7 +8,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TextIO
 
-from merger.repoground.core import mcp_resources, mcp_tools
 from merger.repoground.core.live_freshness import (
     DOES_NOT_ESTABLISH as FRESHNESS_DOES_NOT_ESTABLISH,
 )
@@ -340,6 +339,8 @@ class RepoGroundMcpStdioServer:
             }
 
     def _resource_list(self) -> dict[str, Any]:
+        from merger.repoground.core import mcp_resources
+
         listed = mcp_resources.list_mcp_resources(self.bundle_root)
         resources = []
         for item in listed.get("resources", []):
@@ -362,6 +363,8 @@ class RepoGroundMcpStdioServer:
         return {"resources": resources}
 
     def _resource_templates(self) -> dict[str, Any]:
+        from merger.repoground.core import mcp_resources
+
         return {
             "resourceTemplates": [
                 {
@@ -380,6 +383,8 @@ class RepoGroundMcpStdioServer:
         uri = params.get("uri")
         if not isinstance(uri, str) or not uri:
             raise McpProtocolError(-32602, "resources/read requires a non-empty uri")
+        from merger.repoground.core import mcp_resources
+
         result = mcp_resources.read_mcp_resource(uri, bundle_root=self.bundle_root)
         manifest = result.get("bundle_manifest")
         live = None
@@ -408,6 +413,8 @@ class RepoGroundMcpStdioServer:
         call_args = dict(arguments)
         manifest = self._guard_manifest(call_args.get("bundle_manifest"))
         call_args["bundle_manifest"] = str(manifest)
+        from merger.repoground.core import mcp_tools
+
         payload = mcp_tools.ask_context(**call_args)
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
@@ -421,6 +428,8 @@ class RepoGroundMcpStdioServer:
             manifest,
             label="citation_map",
         )
+        from merger.repoground.core import mcp_tools
+
         payload = mcp_tools.grounding_verify(**call_args)
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
@@ -433,6 +442,8 @@ class RepoGroundMcpStdioServer:
         name = call_args.get("name")
         if not isinstance(name, str) or not name.strip():
             raise McpProtocolError(-32602, "find_symbol requires a non-empty name")
+        from merger.repoground.core import mcp_tools
+
         kind = call_args.get("kind")
         if kind is not None and kind not in mcp_tools.FIND_SYMBOL_KINDS:
             raise McpProtocolError(
@@ -464,6 +475,8 @@ class RepoGroundMcpStdioServer:
             )
         manifest = self._guard_manifest(call_args.get("bundle_manifest"))
         call_args["bundle_manifest"] = str(manifest)
+        from merger.repoground.core import mcp_tools
+
         handlers = {
             "find_references": mcp_tools.find_references,
             "get_callers": mcp_tools.get_callers,
@@ -489,6 +502,8 @@ class RepoGroundMcpStdioServer:
         call_args = dict(arguments)
         call_args["repo"] = str(self.repo_root)
         call_args["output_root"] = str(self.snapshot_output_root)
+        from merger.repoground.core import mcp_tools
+
         return mcp_tools.snapshot_create(**call_args)
 
     def _tool_payload(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
