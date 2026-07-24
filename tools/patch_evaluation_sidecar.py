@@ -342,9 +342,48 @@ def _sandbox_binary() -> Path:
     if platform.system() != "Linux":
         raise RequestError("the prototype requires Linux bubblewrap isolation")
     try:
-        return _resolve_system_tool("bwrap")
+        binary = _resolve_system_tool("bwrap")
     except EvaluationError as exc:
         raise RequestError(str(exc)) from exc
+    try:
+        completed = subprocess.run(
+            [
+                str(binary),
+                "--die-with-parent",
+                "--new-session",
+                "--unshare-pid",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--ro-bind-try",
+                "/bin",
+                "/bin",
+                "--ro-bind-try",
+                "/lib",
+                "/lib",
+                "--ro-bind-try",
+                "/lib64",
+                "/lib64",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "/usr/bin/true",
+            ],
+            env={"PATH": _TRUSTED_SYSTEM_PATH},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RequestError(f"bubblewrap runtime probe failed: {exc}") from exc
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise RequestError(f"bubblewrap runtime is not usable: {detail}")
+    return binary
 
 
 def _display_command(spec: CommandSpec) -> str:
@@ -784,6 +823,9 @@ def _sandbox_command_argv(
         "--ro-bind-try",
         "/lib64",
         "/lib64",
+        "--ro-bind-try",
+        "/opt",
+        "/opt",
         "--dir",
         "/etc",
         "--ro-bind-try",

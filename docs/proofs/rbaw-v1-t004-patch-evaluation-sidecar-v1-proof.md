@@ -70,10 +70,10 @@ The focused suite proves regressions for:
 
 ```text
 python -m pytest -q tests/test_patch_evaluation_sidecar.py merger/repoground/tests/test_patch_evaluation.py
-# 47 passed in 5.39s
+# 47 passed in 5.60s
 
 python -m pytest -q
-# 4696 passed, 2 skipped in 125.94s
+# 4696 passed, 2 skipped
 
 python -m ruff check tools/patch_evaluation_sidecar.py tests/test_patch_evaluation_sidecar.py
 # All checks passed!
@@ -94,9 +94,9 @@ git diff --check
 The durable full-suite task is bound to argv SHA-256
 `c3f2578d3a465d10ae97391fe2a54f1c10832286381277ce1355ccfb0bbac529`,
 lifecycle receipt SHA-256
-`c7e717172364f39f8798613324d8cb4e95e3d4813f5405fa71eb69f03032648d`,
+`d26feb16ef5ba99dc5f78f98320a47d775fb0b9024f12706d8693bb40c0c759f`,
 and terminalization SHA-256
-`9847340e7630771e814e431fff464dd3f0eeac9a9e953d56b08ff3a789216fbd`.
+`31755fc3eeca8ca8de8372e75bf4eaa920e29f9c633433e84e2de83f90e26d71`.
 
 ## Does not establish
 

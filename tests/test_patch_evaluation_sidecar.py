@@ -771,10 +771,10 @@ def test_cleanup_failure_forces_error_artifact(
     patch = _patch(repo, tmp_path)
     original_rmtree = sidecar.shutil.rmtree
 
-    def selective_rmtree(path: Path) -> None:
+    def selective_rmtree(path: Path, *args: object, **kwargs: object) -> None:
         if str(path).endswith("-repository"):
             return
-        original_rmtree(path)
+        original_rmtree(path, *args, **kwargs)
 
     monkeypatch.setattr(sidecar.shutil, "rmtree", selective_rmtree)
     result, artifact = _evaluate(
