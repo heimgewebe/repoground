@@ -39,6 +39,21 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
 
+      - name: Install and verify Patch Evaluation sandbox runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes bubblewrap
+          if sysctl kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --die-with-parent --new-session --unshare-pid \
+            --ro-bind /usr /usr --ro-bind-try /bin /bin \
+            --ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
+            --proc /proc --dev /dev /usr/bin/true
+
       - name: Run full pytest suite
         run: pytest -q -m "not browser and not doc_freshness_live"
 
