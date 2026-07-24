@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from io import StringIO
 from pathlib import Path
 
@@ -46,6 +48,45 @@ def _tools(server: RepoGroundMcpStdioServer) -> list[dict]:
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
     )
     return response["result"]["tools"]
+
+
+def test_mcp_stdio_handshake_defers_handler_modules():
+    root = Path(__file__).resolve().parents[3]
+    probe = """
+import json
+import sys
+import tempfile
+
+from merger.repoground.cli.mcp_stdio import PROTOCOL_VERSION, RepoGroundMcpStdioServer
+
+with tempfile.TemporaryDirectory() as bundle_root:
+    server = RepoGroundMcpStdioServer(bundle_root=bundle_root)
+    server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": PROTOCOL_VERSION},
+        }
+    )
+    server.handle_message(
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+    )
+
+names = (
+    "merger.repoground.core.mcp_resources",
+    "merger.repoground.core.mcp_tools",
+)
+print(json.dumps([name for name in names if name in sys.modules]))
+"""
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(completed.stdout) == []
 
 
 def test_canonical_mcp_server_identity(tmp_path):
