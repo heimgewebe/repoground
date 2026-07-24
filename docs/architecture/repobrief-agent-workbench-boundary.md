@@ -283,5 +283,47 @@ The decision is not “tooling or no tooling.” The decision is “deterministi
 
 - RBAW-V1-T002: defined by [Patch Evaluation Artifact v1](../contracts/patch-evaluation-v1.md).
 - RBAW-V1-T003: implemented by the read-only Patch Evaluation consumer described in [Patch Evaluation Artifact v1](../contracts/patch-evaluation-v1.md).
-- RBAW-V1-T004: prototype an external Patch Evaluation Sidecar harness later, after provenance/freshness and agent-evidence hygiene remain stable.
+- RBAW-V1-T004: prototype an external Patch Evaluation Sidecar harness after provenance/freshness and agent-evidence hygiene stabilized.
 - RBAW-V1-T005: triaged by [RepoGround Agent Optimization Triage v1](repobrief-agent-optimization-triage.md).
+
+## RBAW-V1-T004 prototype realization
+
+The first Patch Evaluation Sidecar prototype lives at
+`tools/patch_evaluation_sidecar.py`, outside `merger/repoground/core`. This
+placement is architectural: RepoBrief remains the read-only consumer, while the
+prototype alone owns independent repository materialization, patch application,
+and argv-only command execution.
+
+The prototype accepts local repositories, local patch files, exact commits,
+relative command working directories, bounded command counts, explicit timeouts,
+and an optional `fail_fast` policy. It snapshots the patch once and materializes
+only the exact commit and its tree into a newly initialized Git repository. The
+repository has its own Git directory, configuration, refs, and object database;
+no alternates or multiply linked object files are accepted. Source-local Git
+hooks and configured clean, smudge, and process filters are neutralized for
+Sidecar-owned Git operations.
+
+Declared commands run with `shell=False` inside a Linux Bubblewrap filesystem
+and PID namespace. The source checkout is not mounted. The independent repository,
+a private home directory, and a private temporary directory are the only writable
+mounts; required system directories are read-only. The fixed system `PATH` is not
+inherited from the caller. Background descendants are contained by the PID
+namespace, while timed-out host process groups receive TERM followed by an
+unconditional KILL sweep. Bubblewrap and Linux are therefore runtime requirements
+for this prototype.
+
+Network isolation is not asserted and remains `unknown`. Secret handling also
+remains `unknown`: the environment is allowlisted, explicit argv indexes can be
+redacted from artifact command strings and bounded logs, and common secret-shaped
+options are display-redacted, but arbitrary command output cannot be proven free
+of credentials. A passing result remains evidence only and does not authorize a
+merge, create a pull request, or establish correctness.
+
+The source drift fingerprint covers HEAD, Git status, tracked worktree diff,
+staged-index diff, and the content of non-ignored untracked files. Ignored files,
+unrelated refs, repository configuration, and the object database are outside
+that fingerprint; commands cannot reach them through the Bubblewrap mount
+namespace. Fingerprinting, repository materialization, request data, patch data,
+argv, context data, changed-file counts, logs, and command execution have explicit
+limits. Stronger network and credential policies remain deployment work rather
+than implied guarantees.
