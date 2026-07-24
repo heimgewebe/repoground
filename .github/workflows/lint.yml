@@ -32,3 +32,6 @@ jobs:
 
       - name: Check graph and complexity maintainability ratchets
         run: python scripts/ci/check_graph_maintainability.py --root . --format json
+
+      - name: Check production module reachability evidence
+        run: python scripts/ci/check_module_reachability.py --root . --format json

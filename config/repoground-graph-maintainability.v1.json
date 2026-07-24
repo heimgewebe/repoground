@@ -18,7 +18,27 @@
   },
   "complexity": {
     "baseline_path": "config/repoground-c901-baseline.v1.json",
-    "policy": "existing identities may disappear; new identities and higher complexity are blocked"
+    "policy": "existing identities may disappear; new identities and higher complexity are blocked",
+    "budget": {
+      "policy": "the aggregate budget must fall over time and may never be raised above a recorded reference scan; every budgeted dimension must be bounded by at least one reference, and raising a ceiling above one is rejected",
+      "historical_reference": {
+        "task": "REPOGROUND-LEGACY-RECONCILIATION-V1-T004",
+        "observed_on": "2026-07-17",
+        "finding_count": 213,
+        "max_complexity": 170
+      },
+      "slice_start_reference": {
+        "commit": "5188d2faf335aaaefe4d27122df71d770647cb5b",
+        "observed_on": "2026-07-23",
+        "measured_with": "ruff check --config ruff-ci.toml --select C901 .",
+        "finding_count": 200,
+        "max_complexity": 170,
+        "excess_total": 2654
+      },
+      "finding_count_max": 198,
+      "max_complexity_max": 148,
+      "excess_total_max": 2533
+    }
   },
   "does_not_establish": [
     "semantic correctness of inferred layers",

@@ -13,14 +13,20 @@ import hashlib
 import datetime
 import logging
 import re
-import tempfile
 import unicodedata
 import concurrent.futures
+import functools
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Iterator, NamedTuple, Set
 from dataclasses import dataclass, asdict
 
-from . import lenses
+from . import bundle_sidecars, lenses
+from .artifact_io import (
+    append_unique_path as _append_unique_path,
+    compute_file_sha256 as _compute_file_sha256,
+    json_safe as _json_safe,
+    write_text_atomic as _write_text_atomic,
+)
 from .constants import (
     ArtifactRole,
     CLAIM_EVIDENCE_MAP_ABSENCE_REASON_LINK_KEY,
@@ -45,67 +51,6 @@ EPISTEMIC_HUMILITY_WARNING = "⚠️ **Hinweis:** Dieses Profil/Filter erlaubt k
 logger = logging.getLogger(__name__)
 
 
-def _write_text_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path: Optional[Path] = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            delete=False,
-            dir=str(path.parent),
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-        ) as tmp_file:
-            tmp_file.write(text)
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
-        os.replace(tmp_path, path)
-    finally:
-        if tmp_path is not None and tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
-
-
-def _append_unique_path(paths: List[Path], path: Optional[Path]) -> None:
-    if path is not None and path not in paths:
-        paths.append(path)
-
-
-def _write_python_call_graph_json(
-    *,
-    base_manifest_path: Path,
-    repo_summaries: List[Dict[str, Any]],
-    final_dump_index: Optional[Path],
-    run_id: str,
-) -> Optional[Path]:
-    """Emit Python Call Graph v1 for one repository as navigation only."""
-    if len(repo_summaries) != 1 or final_dump_index is None or not final_dump_index.exists():
-        return None
-    repo_root = repo_summaries[0].get("root")
-    if repo_root is None:
-        return None
-    canonical_sha = _compute_file_sha256(final_dump_index)
-    if not canonical_sha:
-        return None
-    from merger.repoground.architecture.call_graph import generate_call_graph_document
-
-    document = generate_call_graph_document(Path(repo_root), run_id, canonical_sha)
-    out_path = base_manifest_path.with_name(
-        base_manifest_path.name.replace(
-            ".bundle.manifest.json", ".python_call_graph.json"
-        )
-    )
-    _write_text_atomic(
-        out_path,
-        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-    )
-    return out_path
-
-
 def _register_optional_artifact(
     path: Optional[Path],
     *,
@@ -114,12 +59,14 @@ def _register_optional_artifact(
     out_paths: List[Path],
     other_paths: List[Path],
     add_artifact: Any,
-) -> None:
+) -> Optional[Path]:
+    """Record an optional artifact in both path lists; return it unchanged."""
     if path is None:
-        return
+        return None
     out_paths.append(path)
     _append_unique_path(other_paths, path)
     add_artifact(path, role, content_type)
+    return path
 
 
 def _slug_token(s: str) -> str:
@@ -2140,21 +2087,6 @@ def is_probably_text(path: Path, size: int) -> bool:
     if b"\x00" in chunk:
         return False
     return True
-
-
-def _compute_file_sha256(path: Path) -> str:
-    """Compute SHA256 hash of a file using chunked reading for memory efficiency."""
-    sha256 = hashlib.sha256()
-    try:
-        with path.open("rb") as f:
-            while True:
-                chunk = f.read(65536)
-                if not chunk:
-                    break
-                sha256.update(chunk)
-        return sha256.hexdigest()
-    except OSError:
-        return "ERROR"
 
 
 def _attach_inline_chunk_content(chunk, content_bytes: bytes) -> None:
@@ -5445,6 +5377,767 @@ def extract_file_offsets(md_paths: List[Path], debug: bool = False) -> Dict[str,
                 print(f"Error extracting offsets from {md_path}: {e}")
     return offsets
 
+
+_DUMP_INDEX_CONTENT_TYPES = (
+    (".json", "application/json"),
+    (".jsonl", "application/x-ndjson"),
+    (".md", "text/markdown"),
+)
+
+_DUMP_INDEX_CONTRACTS = {
+    ArtifactRole.CHUNK_INDEX_JSONL.value: ("chunk-index", "v2"),
+    ArtifactRole.ARCHITECTURE_SUMMARY.value: ("architecture-summary", "v1"),
+}
+
+
+def _dump_index_content_type(name: str) -> str:
+    for extension, content_type in _DUMP_INDEX_CONTENT_TYPES:
+        if name.endswith(extension):
+            return content_type
+    return "application/octet-stream"
+
+
+def _dump_index_contract(role: str) -> Optional[Tuple[str, str]]:
+    """Return (contract, version) for roles that carry a declared contract."""
+    if role == ArtifactRole.INDEX_SIDECAR_JSON.value:
+        return AGENT_CONTRACT_NAME, AGENT_CONTRACT_VERSION
+    if role == ArtifactRole.CANONICAL_MD.value:
+        return MERGE_CONTRACT_NAME, MERGE_CONTRACT_VERSION
+    return _DUMP_INDEX_CONTRACTS.get(role)
+
+
+def _dump_index_entry(role: str, path: Path) -> Dict[str, Any]:
+    entry = {
+        "path": path.name,
+        "role": role,
+        "content_type": _dump_index_content_type(path.name),
+        "bytes": path.stat().st_size,
+        "sha256": _compute_file_sha256(path),
+    }
+    contract = _dump_index_contract(role)
+    if contract is not None:
+        entry["contract"], entry["contract_version"] = contract
+    return entry
+
+
+def generate_dump_index(base_name_func, run_id, artifacts_map, generator_info, repo_names):
+    """Write the canonical dump index that lists every materialized artifact."""
+    out_path = base_name_func(part_suffix="").with_suffix(".dump_index.json")
+
+    artifacts_block = {
+        role: _dump_index_entry(role, path)
+        for role, path in artifacts_map.items()
+        if path and path.exists()
+    }
+
+    now_str = clock.now_utc().strftime('%Y-%m-%dT%H:%M:%SZ')
+    data = {
+        "contract": "dump-index",
+        "contract_version": "v1",
+        "run_id": run_id,
+        "created_at": now_str,
+        "generated_at": now_str,
+        "generator": generator_info,
+        "repos": repo_names,
+        # Sort artifacts by key for determinism
+        "artifacts": dict(sorted(artifacts_block.items())),
+    }
+
+    out_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+    return out_path
+
+
+@dataclass(frozen=True)
+class _ReportRunConfig:
+    """Immutable rendering configuration shared by the report writers.
+
+    ``write_reports_v2`` normalizes its arguments once and hands this object to
+    the block renderers so that they stay independently testable instead of
+    closing over the caller's locals.
+    """
+
+    detail: str
+    max_file_bytes: int
+    plan_only: bool
+    code_only: bool
+    split_size: int
+    path_filter: Optional[str]
+    ext_filter: Optional[List[str]]
+    extras: Optional["ExtrasConfig"]
+    delta_meta: Optional[Dict[str, Any]]
+    meta_density: str
+    meta_none: bool
+    output_mode: str
+    redact_secrets: bool
+    debug: bool
+
+
+def _chunk_record(
+    chunk,
+    *,
+    fi: "FileInfo",
+    lang: str,
+    status: str,
+    truncated: bool,
+    trunc_msg: Optional[str],
+    sem_meta: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build the machine-readable chunk row, including legacy field aliases."""
+    d = asdict(chunk)
+    d["path"] = fi.rel_path.as_posix()
+    d["repo"] = fi.root_label
+    d["language"] = lang
+    d["source_status"] = status
+    d["truncated"] = truncated
+    # Semantic Extension
+    d["section"] = sem_meta["section"]
+    d["layer"] = sem_meta["layer"]
+    d["artifact_type"] = sem_meta["artifact_type"]
+    d["concepts"] = sem_meta["concepts"]
+
+    if trunc_msg:
+        d["truncation_msg"] = trunc_msg
+
+    # Legacy Aliases (Backward Compatibility for v2 transition)
+    d["byte_offset_start"] = d["start_byte"]
+    d["byte_offset_end"] = d["end_byte"]
+    d["line_start"] = d["start_line"]
+    d["line_end"] = d["end_line"]
+    d["content_sha256"] = d["sha256"]
+    d["size_bytes"] = d["size"]
+
+    # Extended machine-readable fields (v2.4)
+    d["source_file"] = fi.rel_path.as_posix()
+    d["content_artifact"] = "merge_md"
+    d["content_range"] = {
+        "start_byte": d["start_byte"],
+        "end_byte": d["end_byte"],
+        "start_line": d["start_line"],
+        "end_line": d["end_line"]
+    }
+    d["search_keys"] = {
+        "repo_id": fi.root_label,
+        "path_norm": fi.rel_path.as_posix().lower(),
+        "ext": fi.ext.lower().lstrip("."),
+        "layer": sem_meta["layer"],
+        "artifact_type": sem_meta["artifact_type"]
+    }
+    return d
+
+
+def _attach_canonical_range(
+    d: Dict[str, Any],
+    *,
+    repo_label: str,
+    md_file_name: str,
+    md_start_byte: int,
+    canonical_md_bytes: Optional[bytes],
+) -> None:
+    """Point the chunk at its canonical Markdown byte range.
+
+    V2.4 Range Ref Propagation: refs address the canonical_md bytes directly.
+    The resolver only accepts the primary canonical_md artifact defined in the
+    manifest, so full bundle-backed refs stay limited to the first part.
+    """
+    abs_start = md_start_byte + d["start_byte"]
+    abs_end = md_start_byte + d["end_byte"]
+
+    if canonical_md_bytes is not None:
+        # Compute canonical-local values once; share across both fields.
+        # can_sha256 is the exact range hash for canonical_md_bytes[abs_start:abs_end].
+        can_chunk = canonical_md_bytes[abs_start:abs_end]
+        can_sha256 = hashlib.sha256(can_chunk).hexdigest()
+        can_start_line = _line_for_byte(canonical_md_bytes, abs_start)
+        can_end_line = _line_for_byte(canonical_md_bytes, max(abs_start, abs_end - 1))
+    else:
+        # Fall back to source-local values when canonical bytes unavailable.
+        can_sha256 = d["sha256"]
+        can_start_line = d["start_line"]
+        can_end_line = d["end_line"]
+
+    d["content_range_ref"] = build_explicit_range_ref(
+        artifact_role=ArtifactRole.CANONICAL_MD.value,
+        repo_id=repo_label,
+        file_path=md_file_name,
+        start_byte=abs_start,
+        end_byte=abs_end,
+        start_line=can_start_line,
+        end_line=can_end_line,
+        content_sha256=can_sha256,
+    )
+
+    if canonical_md_bytes is not None:
+        d["canonical_range"] = {
+            "artifact_role": ArtifactRole.CANONICAL_MD.value,
+            "repo_id": repo_label,
+            "file_path": md_file_name,
+            "start_byte": abs_start,
+            "end_byte": abs_end,
+            "start_line": can_start_line,
+            "end_line": can_end_line,
+            "content_sha256": can_sha256,
+        }
+
+
+def _attach_source_range(
+    d: Dict[str, Any],
+    *,
+    fi: "FileInfo",
+    was_redacted: bool,
+    truncated: bool,
+    source_git_blob_sha1: Optional[str],
+) -> None:
+    """Attach source-space coordinates.
+
+    ``source_range`` is always present. Status taxonomy: ``declared`` (source
+    coordinates claimed, not externally verified) or ``unavailable`` (redacted
+    or truncated).
+    """
+    if was_redacted or truncated:
+        d["source_range"] = {
+            "file_path": fi.rel_path.as_posix(),
+            "repo_id": fi.root_label,
+            "status": "unavailable",
+        }
+        return
+
+    d["source_range"] = {
+        "file_path": fi.rel_path.as_posix(),
+        "repo_id": fi.root_label,
+        "start_byte": d["start_byte"],
+        "end_byte": d["end_byte"],
+        "start_line": d["start_line"],
+        "end_line": d["end_line"],
+        "content_sha256": d["sha256"],
+        "status": "declared",
+    }
+    if source_git_blob_sha1:
+        d["source_range"]["git_blob_sha1"] = source_git_blob_sha1
+        d["source_range"]["git_blob_sha1_basis"] = "source_worktree_file_content"
+
+
+def _file_chunk_records(
+    fi: "FileInfo",
+    *,
+    config: "_ReportRunConfig",
+    chunker: "Chunker",
+    redactor: Optional["Redactor"],
+    status: str,
+    md_offsets: Dict[str, Tuple[str, int]],
+    canonical_md_name: Optional[str],
+    canonical_md_bytes: Optional[bytes],
+) -> List[Dict[str, Any]]:
+    """Chunk one included text file into fully annotated chunk rows."""
+    # Read content for chunking using the same limit as report to ensure coherence
+    content, truncated, trunc_msg = read_smart_content(fi, config.max_file_bytes)
+
+    was_redacted = False
+    if redactor:
+        content, _redacted_items = redactor.redact(content)
+        was_redacted = bool(_redacted_items)
+
+    content_bytes = content.encode("utf-8")
+    source_git_blob_sha1 = (
+        _compute_git_blob_sha1(fi.abs_path)
+        if not was_redacted and not truncated
+        else None
+    )
+
+    sem_meta = get_semantic_metadata(fi.rel_path.as_posix(), content)
+    fid = _stable_file_id(fi)
+    # Pass file_path for deterministic chunk ID
+    chunks = chunker.chunk_file(fid, content, file_path=fi.rel_path.as_posix())
+    lang = lang_for(fi.ext)
+
+    records: List[Dict[str, Any]] = []
+    for c in chunks:
+        d = _chunk_record(
+            c,
+            fi=fi,
+            lang=lang,
+            status=status,
+            truncated=truncated,
+            trunc_msg=trunc_msg,
+            sem_meta=sem_meta,
+        )
+        offset = md_offsets.get(fid)
+        if offset is not None and offset[0] == canonical_md_name:
+            _attach_canonical_range(
+                d,
+                repo_label=fi.root_label,
+                md_file_name=offset[0],
+                md_start_byte=offset[1],
+                canonical_md_bytes=canonical_md_bytes,
+            )
+
+        # Retrieval-only and noncanonical split chunks must carry
+        # their exact redacted text because no canonical artifact exists.
+        _attach_inline_chunk_content(d, content_bytes)
+        _attach_source_range(
+            d,
+            fi=fi,
+            was_redacted=was_redacted,
+            truncated=truncated,
+            source_git_blob_sha1=source_git_blob_sha1,
+        )
+        records.append(d)
+    return records
+
+
+def generate_chunk_artifacts(
+    config: "_ReportRunConfig",
+    target_files,
+    output_filename_base_func,
+    md_paths: Optional[List[Path]] = None,
+):
+    """Emit the chunk index for retrieval-capable output modes."""
+    if config.output_mode not in ("retrieval", "dual"):
+        return None
+
+    chunker = Chunker()
+    redactor = Redactor() if config.redact_secrets else None
+
+    # Build offset map from all generated markdown parts
+    md_offsets = extract_file_offsets(md_paths, config.debug) if md_paths else {}
+    can_md = resolve_canonical_md(md_paths) if md_paths else None
+    canonical_md_name = can_md.name if can_md else None
+    canonical_md_bytes = can_md.read_bytes() if (can_md and can_md.exists()) else None
+
+    all_chunks: List[Dict[str, Any]] = []
+
+    # Sort files same as report
+    target_files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
+
+    for fi in target_files:
+        # Only process included text files
+        status = determine_inclusion_status(fi, config.detail, config.max_file_bytes)
+        if not fi.is_text or status not in ("full", "truncated"):
+            continue
+        all_chunks.extend(
+            _file_chunk_records(
+                fi,
+                config=config,
+                chunker=chunker,
+                redactor=redactor,
+                status=status,
+                md_offsets=md_offsets,
+                canonical_md_name=canonical_md_name,
+                canonical_md_bytes=canonical_md_bytes,
+            )
+        )
+
+    if not all_chunks:
+        return None
+
+    out_path = output_filename_base_func(part_suffix="").with_suffix(".chunk_index.jsonl")
+    try:
+        with out_path.open("w", encoding="utf-8") as f:
+            for c in all_chunks:
+                f.write(json.dumps(c) + "\n")
+        return out_path
+    except Exception as e:
+        if config.debug:
+            print(f"Error writing chunk index: {e}")
+        return None
+
+
+# --- Split-Mode Contract ---
+# By architectural mandate (Phase 1, Schwerpunkt D), only the FIRST part of a split
+# bundle is considered fully `bundle-backed` and canonically referenceable.
+# Subsequent parts are transient artifacts and do NOT receive `content_range_ref` provenance.
+# The chunker and the JSON sidecar exclusively refer to `md_parts[0]` as the canonical representation.
+
+
+class _SplitReportBuffer:
+    """Accumulate report blocks and flush them into temporary part files."""
+
+    def __init__(self, output_filename_base_func) -> None:
+        self._base_name = output_filename_base_func
+        self.part_paths: List[Path] = []
+        self.parts_meta: List[Dict[str, Optional[str]]] = []
+        self._part_num = 1
+        self._size = 0
+        self._lines: List[str] = []
+        self._part_block_paths: List[str] = []
+
+    @property
+    def size(self) -> int:
+        return self._size
+
+    @property
+    def buffered_blocks(self) -> int:
+        return len(self._lines)
+
+    def append(self, block: str, block_len: int, block_path: Optional[str]) -> None:
+        self._lines.append(block)
+        self._size += block_len
+        if block_path:
+            self._part_block_paths.append(block_path)
+
+    def flush(self, is_last: bool = False) -> None:
+        if not self._lines:
+            return
+
+        # Record metadata for this part
+        first = self._part_block_paths[0] if self._part_block_paths else None
+        last = self._part_block_paths[-1] if self._part_block_paths else None
+        self.parts_meta.append({"first": first, "last": last})
+        self._part_block_paths = []
+
+        # Temporärer Name während der Generierung
+        # Wir nutzen _tmp_partX, um es später sauber umzubenennen
+        out_path = self._base_name(part_suffix=f"_tmp_part{self._part_num}")
+        out_path.write_text("".join(self._lines), encoding="utf-8")
+        self.part_paths.append(out_path)
+
+        self._part_num += 1
+        self._lines = []
+        # Add continuation header for next part
+        if not is_last:
+            header = f"{CANONICAL_REPORT_HEADING} (Part {self._part_num})\n\n"
+            # Note: we don't feed continuation headers to validator as they are technical split artifacts,
+            # not part of the logical report structure.
+            self._lines.append(header)
+            self._size = len(header.encode('utf-8'))
+        else:
+            self._size = 0
+
+
+def _part_signature_block(
+    idx: int,
+    total_parts: int,
+    parts_meta: List[Dict[str, Optional[str]]],
+    output_filename_base_func,
+) -> str:
+    meta = parts_meta[idx - 1]
+    p_start = meta["first"]
+    p_end = meta["last"]
+    range_str = f"{p_start} ... {p_end}" if p_start else "Meta/Structure/Index"
+
+    prev_name = "none"
+    if idx > 1:
+        # calculate name of part idx-1
+        prev_suffix = f"_part{idx - 1}of{total_parts}"
+        prev_name = output_filename_base_func(part_suffix=prev_suffix).name
+
+    return (
+        f"<!-- part_signature:\n"
+        f"  part_index: {idx}\n"
+        f"  part_total: {total_parts}\n"
+        f"  continuation_of: \"{prev_name}\"\n"
+        f"  range: \"{range_str}\"\n"
+        f"-->\n"
+        f"**[Part {idx}/{total_parts}]** continuation_of: `{prev_name}` · range: `{range_str}`\n\n"
+    )
+
+
+def _rewrite_part_heading(
+    text: str,
+    idx: int,
+    total_parts: int,
+    parts_meta: List[Dict[str, Optional[str]]],
+    output_filename_base_func,
+) -> str:
+    """Normalize the part heading and inject the part signature."""
+    lines = text.splitlines(True)
+    prefix_part = f"{CANONICAL_REPORT_HEADING} (Part "
+    prefix_main = CANONICAL_REPORT_HEADING
+    for i, line in enumerate(lines):
+        stripped = line.lstrip("\ufeff")
+        if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
+            lines[i] = f"{CANONICAL_REPORT_HEADING} (Part {idx}/{total_parts})\n"
+            if total_parts > 1:
+                lines.insert(
+                    i + 1,
+                    _part_signature_block(idx, total_parts, parts_meta, output_filename_base_func),
+                )
+            break
+    return "".join(lines)
+
+
+def _finalize_split_parts(
+    output_filename_base_func,
+    part_paths: List[Path],
+    parts_meta: List[Dict[str, Optional[str]]],
+) -> List[Path]:
+    """Nachlauf: Header normalisieren UND Dateien umbenennen (Part X of Y)."""
+    total_parts = len(part_paths)
+    final_paths: List[Path] = []
+
+    for idx, path in enumerate(part_paths, start=1):
+        # 1. Header Rewrite
+        try:
+            text = _rewrite_part_heading(
+                path.read_text(encoding="utf-8"),
+                idx,
+                total_parts,
+                parts_meta,
+                output_filename_base_func,
+            )
+        except Exception:
+            text = None  # Skip rewrite if read fails, but still rename
+
+        # 2. Rename File
+        # If total_parts == 1, no part suffix.
+        # If total_parts > 1, _partXofY.
+        new_suffix = "" if total_parts == 1 else f"_part{idx}of{total_parts}"
+        new_path = output_filename_base_func(part_suffix=new_suffix)
+
+        if text is not None:
+            new_path.write_text(text, encoding="utf-8")
+            # Delete old tmp file
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        else:
+            # Just replace/move if we couldn't read/edit content
+            try:
+                path.replace(new_path)
+            except OSError as e:
+                raise OSError(f"Failed to replace '{path}' with '{new_path}'") from e
+
+        final_paths.append(new_path)
+
+    return final_paths
+
+
+def _report_artifact_refs(
+    config: "_ReportRunConfig",
+    target_sources,
+    output_filename_base_func,
+) -> Dict[str, str]:
+    """Pre-calculate artifact basenames for linking in MD (Recommendation 1)."""
+    artifact_refs: Dict[str, str] = {}
+    if config.extras and config.extras.json_sidecar:
+        # We predict the JSON filename.
+        # Note: We rely on the fact that single-file mode uses part_suffix="".
+        # For split mode, JSON usually follows the base name.
+        artifact_refs["index_json_basename"] = (
+            output_filename_base_func(part_suffix="").with_suffix('.json').name
+        )
+
+    if config.extras and config.extras.augment_sidecar:
+        # Find augment file to get name
+        _aug = _find_augment_file_for_sources(target_sources)
+        if _aug:
+            artifact_refs["augment_sidecar_basename"] = _aug.name
+    return artifact_refs
+
+
+def _iter_configured_report_blocks(
+    config: "_ReportRunConfig",
+    target_files,
+    target_sources,
+    artifact_refs: Dict[str, str],
+) -> Iterator[str]:
+    return iter_report_blocks(
+        target_files,
+        config.detail,
+        config.max_file_bytes,
+        target_sources,
+        config.plan_only,
+        config.code_only,
+        config.debug,
+        config.path_filter,
+        config.ext_filter,
+        config.extras,
+        config.delta_meta,
+        artifact_refs=artifact_refs,
+        meta_density=config.meta_density,
+        meta_none=config.meta_none,
+        redact_secrets=config.redact_secrets,
+    )
+
+
+def _write_split_report(
+    config: "_ReportRunConfig",
+    target_files,
+    target_sources,
+    output_filename_base_func,
+    validator: "ReportValidator",
+    artifact_refs: Dict[str, str],
+) -> List[Path]:
+    """Stream the report into size-bounded parts and finalize their names."""
+    buffer = _SplitReportBuffer(output_filename_base_func)
+
+    for block in _iter_configured_report_blocks(
+        config, target_files, target_sources, artifact_refs
+    ):
+        # Validate the block before writing
+        validator.feed(block)
+        block_len = len(block.encode('utf-8'))
+
+        # Detect path in block using regex to track range for signatures
+        m = re.search(r"\*\*Path:\*\* `(.+?)`", block)
+        block_path = m.group(1) if m else None
+
+        if buffer.size + block_len > config.split_size and buffer.buffered_blocks > 1:
+            # After flush, the block belongs to the next part.
+            buffer.flush()
+
+        buffer.append(block, block_len, block_path)
+
+    buffer.flush(is_last=True)
+    validator.close()
+    return _finalize_split_parts(
+        output_filename_base_func, buffer.part_paths, buffer.parts_meta
+    )
+
+
+def _force_single_part_heading(block: str) -> str:
+    """Enforce the Part 1/1 header strictly on the first yielded block."""
+    lines = block.splitlines(True)
+    for line_idx, line in enumerate(lines):
+        stripped = line.lstrip("\ufeff")
+        if stripped.startswith(REPORT_HEADINGS):
+            lines[line_idx] = f"{CANONICAL_REPORT_HEADING} (Part 1/1)\n"
+            break
+    return "".join(lines)
+
+
+def _write_single_report(
+    config: "_ReportRunConfig",
+    target_files,
+    target_sources,
+    output_filename_base_func,
+    validator: "ReportValidator",
+    artifact_refs: Dict[str, str],
+) -> Path:
+    """Stream the whole report into one file."""
+    out_path = output_filename_base_func(part_suffix="")
+
+    with out_path.open("w", encoding="utf-8") as f:
+        if config.plan_only:
+            f.write("<!-- MODE:PLAN_ONLY -->\n")
+
+        iterator = _iter_configured_report_blocks(
+            config, target_files, target_sources, artifact_refs
+        )
+        for i, block in enumerate(iterator):
+            if i == 0:
+                block = _force_single_part_heading(block)
+            validator.feed(block)
+            f.write(block)
+
+    validator.close()
+    return out_path
+
+
+def process_and_write(
+    config: "_ReportRunConfig",
+    target_files,
+    target_sources,
+    output_filename_base_func,
+    out_paths: List[Path],
+) -> List[Path]:
+    """Render the canonical report, honouring the configured split size."""
+    artifact_refs = _report_artifact_refs(config, target_sources, output_filename_base_func)
+
+    # Instantiate stream validator
+    validator = ReportValidator(
+        plan_only=config.plan_only,
+        code_only=config.code_only,
+        machine_lean=(config.detail == "machine-lean"),
+    )
+
+    if config.split_size > 0:
+        generated_paths = _write_split_report(
+            config, target_files, target_sources, output_filename_base_func,
+            validator, artifact_refs,
+        )
+    else:
+        generated_paths = [
+            _write_single_report(
+                config, target_files, target_sources, output_filename_base_func,
+                validator, artifact_refs,
+            )
+        ]
+
+    out_paths.extend(generated_paths)
+    return generated_paths
+
+
+def _bundle_artifact_entry(
+    path: Path,
+    role: ArtifactRole,
+    content_type: str,
+    merges_dir: Path,
+) -> Optional[Dict[str, Any]]:
+    """Describe one materialized bundle artifact, or ``None`` if unreadable."""
+    sha = _compute_file_sha256(path)
+    if not sha:
+        return None
+    try:
+        rel_path = path.relative_to(merges_dir).as_posix()
+    except ValueError:
+        rel_path = path.name
+
+    entry: Dict[str, Any] = {
+        "role": role.value,
+        "path": rel_path,
+        "content_type": content_type,
+        "bytes": path.stat().st_size,
+        "sha256": sha,
+    }
+    if role in ARTIFACT_CONTRACT_REGISTRY:
+        entry["contract"] = ARTIFACT_CONTRACT_REGISTRY[role]
+        entry["interpretation"] = {"mode": "contract"}
+    else:
+        entry["interpretation"] = {"mode": "role_only"}
+    entry.update(ARTIFACT_AUTHORITY_REGISTRY.get(role, {}))
+    return entry
+
+
+def _collect_bundle_artifact(
+    artifacts_list: List[Dict[str, Any]],
+    merges_dir: Path,
+    path: Optional[Path],
+    role: ArtifactRole,
+    content_type: str,
+) -> None:
+    """Append the manifest entry for ``path`` when the artifact exists."""
+    if path is None or not path.exists():
+        return
+    entry = _bundle_artifact_entry(path, role, content_type, merges_dir)
+    if entry is not None:
+        artifacts_list.append(entry)
+
+
+def _write_architecture_summary(
+    files,
+    merges_dir,
+    repo_names,
+    detail,
+    path_filter,
+    ext_filter_str,
+    run_id,
+    plan_only,
+    code_only,
+    timestamp,
+    meta_none,
+    out_paths
+):
+    # Helper to generate and write the architecture summary.
+    arch_path = make_output_filename(
+        merges_dir,
+        repo_names,
+        detail,
+        "",
+        path_filter,
+        ext_filter_str,
+        run_id,
+        plan_only=plan_only,
+        code_only=code_only,
+        timestamp=timestamp,
+        meta_none=meta_none,
+        suffix="_architecture.md"
+    )
+    arch_path.write_text(generate_architecture_summary(files), encoding="utf-8")
+    out_paths.append(arch_path)
+    return arch_path
+
+
 def write_reports_v2(
     merges_dir: Path,
     hub: Path,
@@ -5505,27 +6198,6 @@ def write_reports_v2(
                 "version": os.getenv("REPOGROUND_VERSION", CORE_VERSION)
             }
 
-    def _json_safe(obj):
-        if isinstance(obj, (str, int, float, bool, type(None))):
-            return obj
-        if isinstance(obj, (list, tuple)):
-            return [_json_safe(x) for x in obj]
-        if isinstance(obj, set):
-            return sorted([_json_safe(x) for x in obj])
-        if isinstance(obj, dict):
-            return {str(k): _json_safe(v) for k, v in sorted(obj.items(), key=lambda i: str(i[0]))}
-        if isinstance(obj, Path):
-            return str(obj)
-        if hasattr(obj, "name") and hasattr(obj, "value"): # Enum-like
-            return obj.name
-
-        # Fallback: Deterministic Type Tagging
-        # Avoids unstable repr/str (memory addresses)
-        t = type(obj)
-        module = getattr(t, "__module__", "__builtin__")
-        qualname = getattr(t, "__qualname__", t.__name__)
-        return f"__type__:{module}.{qualname}"
-
     # Calculate config_sha256 for parity checks and bundle manifest provenance
     extras_dict = None
     if extras:
@@ -5564,513 +6236,23 @@ def write_reports_v2(
     if "config_sha256" not in generator_info:
         generator_info["config_sha256"] = config_sha256
 
-    # Helper for architecture summary writing (DRY)
-    def _write_architecture_summary(
-        files,
-        merges_dir,
-        repo_names,
-        detail,
-        path_filter,
-        ext_filter_str,
-        run_id,
-        plan_only,
-        code_only,
-        timestamp,
-        meta_none,
-        out_paths
-    ):
-        # Helper to generate and write the architecture summary.
-        arch_path = make_output_filename(
-            merges_dir,
-            repo_names,
-            detail,
-            "",
-            path_filter,
-            ext_filter_str,
-            run_id,
-            plan_only=plan_only,
-            code_only=code_only,
-            timestamp=timestamp,
-            meta_none=meta_none,
-            suffix="_architecture.md"
-        )
-        arch_path.write_text(generate_architecture_summary(files), encoding="utf-8")
-        out_paths.append(arch_path)
-        return arch_path
+    run_config = _ReportRunConfig(
+        detail=detail,
+        max_file_bytes=max_file_bytes,
+        plan_only=plan_only,
+        code_only=code_only,
+        split_size=split_size,
+        path_filter=path_filter,
+        ext_filter=ext_filter,
+        extras=extras,
+        delta_meta=delta_meta,
+        meta_density=meta_density,
+        meta_none=meta_none,
+        output_mode=output_mode,
+        redact_secrets=redact_secrets,
+        debug=debug,
+    )
 
-    # Helper for dump index (Canonical Entrypoint)
-    def generate_dump_index(base_name_func, run_id, artifacts_map, generator_info, repo_names):
-        out_path = base_name_func(part_suffix="").with_suffix(".dump_index.json")
-
-        artifacts_block = {}
-        for role, path in artifacts_map.items():
-            if path and path.exists():
-                # Infer content_type
-                name = path.name
-                if name.endswith(".json"):
-                    ctype = "application/json"
-                elif name.endswith(".jsonl"):
-                    ctype = "application/x-ndjson"
-                elif name.endswith(".md"):
-                    ctype = "text/markdown"
-                else:
-                    ctype = "application/octet-stream"
-
-                entry = {
-                    "path": name,
-                    "role": role,
-                    "content_type": ctype,
-                    "bytes": path.stat().st_size,
-                    "sha256": _compute_file_sha256(path)
-                }
-
-                # Contract annotations
-                if role == ArtifactRole.INDEX_SIDECAR_JSON.value:
-                    entry["contract"] = AGENT_CONTRACT_NAME
-                    entry["contract_version"] = AGENT_CONTRACT_VERSION
-                elif role == ArtifactRole.CANONICAL_MD.value:
-                    entry["contract"] = MERGE_CONTRACT_NAME
-                    entry["contract_version"] = MERGE_CONTRACT_VERSION
-                elif role == ArtifactRole.CHUNK_INDEX_JSONL.value:
-                    entry["contract"] = "chunk-index"
-                    entry["contract_version"] = "v2"
-                elif role == ArtifactRole.ARCHITECTURE_SUMMARY.value:
-                    entry["contract"] = "architecture-summary"
-                    entry["contract_version"] = "v1"
-
-                artifacts_block[role] = entry
-
-        # Sort artifacts by key for determinism
-        artifacts_sorted = dict(sorted(artifacts_block.items()))
-
-        now_str = clock.now_utc().strftime('%Y-%m-%dT%H:%M:%SZ')
-        data = {
-            "contract": "dump-index",
-            "contract_version": "v1",
-            "run_id": run_id,
-            "created_at": now_str,
-            "generated_at": now_str,
-            "generator": generator_info,
-            "repos": repo_names,
-            "artifacts": artifacts_sorted
-        }
-
-        out_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-        return out_path
-
-
-
-    # --- Split-Mode Contract ---
-    # By architectural mandate (Phase 1, Schwerpunkt D), only the FIRST part of a split
-    # bundle is considered fully `bundle-backed` and canonically referenceable.
-    # Subsequent parts are transient artifacts and do NOT receive `content_range_ref` provenance.
-    # The chunker and the JSON sidecar exclusively refer to `md_parts[0]` as the canonical representation.
-
-    # Helper for chunking (PR-Optimierung)
-    def generate_chunk_artifacts(target_files, output_filename_base_func, md_paths: Optional[List[Path]] = None):
-        if output_mode not in ("retrieval", "dual"):
-            return None
-
-        chunker = Chunker()
-        redactor = Redactor() if redact_secrets else None
-
-        # Build offset map from all generated markdown parts
-        md_offsets = extract_file_offsets(md_paths, debug) if md_paths else {}
-        can_md = resolve_canonical_md(md_paths) if md_paths else None
-        canonical_md_name = can_md.name if can_md else None
-        canonical_md_bytes = can_md.read_bytes() if (can_md and can_md.exists()) else None
-
-        all_chunks = []
-
-        # Sort files same as report
-        target_files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
-
-        for fi in target_files:
-            # Only process included text files
-            status = determine_inclusion_status(fi, detail, max_file_bytes)
-            if not fi.is_text or status not in ("full", "truncated"):
-                continue
-
-            # Read content for chunking using the same limit as report to ensure coherence
-            content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
-
-            was_redacted = False
-            if redactor:
-                content, _redacted_items = redactor.redact(content)
-                was_redacted = bool(_redacted_items)
-
-            content_bytes = content.encode("utf-8")
-            source_git_blob_sha1 = (
-                _compute_git_blob_sha1(fi.abs_path)
-                if not was_redacted and not truncated
-                else None
-            )
-
-            # Get Semantic Metadata
-            sem_meta = get_semantic_metadata(fi.rel_path.as_posix(), content)
-
-            fid = _stable_file_id(fi)
-            # Pass file_path for deterministic chunk ID
-            chunks = chunker.chunk_file(fid, content, file_path=fi.rel_path.as_posix())
-
-            lang = lang_for(fi.ext)
-
-            for c in chunks:
-                d = asdict(c)
-                d["path"] = fi.rel_path.as_posix()
-                d["repo"] = fi.root_label
-                d["language"] = lang
-                d["source_status"] = status
-                d["truncated"] = truncated
-                # Semantic Extension
-                d["section"] = sem_meta["section"]
-                d["layer"] = sem_meta["layer"]
-                d["artifact_type"] = sem_meta["artifact_type"]
-                d["concepts"] = sem_meta["concepts"]
-
-                if trunc_msg:
-                    d["truncation_msg"] = trunc_msg
-
-                # Legacy Aliases (Backward Compatibility for v2 transition)
-                d["byte_offset_start"] = d["start_byte"]
-                d["byte_offset_end"] = d["end_byte"]
-                d["line_start"] = d["start_line"]
-                d["line_end"] = d["end_line"]
-                d["content_sha256"] = d["sha256"]
-                d["size_bytes"] = d["size"]
-
-                # Extended machine-readable fields (v2.4)
-                d["source_file"] = fi.rel_path.as_posix()
-                d["content_artifact"] = "merge_md"
-                d["content_range"] = {
-                    "start_byte": d["start_byte"],
-                    "end_byte": d["end_byte"],
-                    "start_line": d["start_line"],
-                    "end_line": d["end_line"]
-                }
-
-                # V2.4 Range Ref Propagation: Point directly to the canonical_md bytes
-                # Contract Fix: The resolver only accepts the primary canonical_md artifact defined in the manifest.
-                # We strictly limit full bundle-backed refs to the first part.
-                if md_paths and fid in md_offsets:
-                    md_file_name, md_start_byte = md_offsets[fid]
-                    if md_file_name == canonical_md_name:
-                        abs_start = md_start_byte + d["start_byte"]
-                        abs_end = md_start_byte + d["end_byte"]
-
-                        if canonical_md_bytes is not None:
-                            # Compute canonical-local values once; share across both fields.
-                            # can_sha256 is the exact range hash for canonical_md_bytes[abs_start:abs_end].
-                            can_chunk = canonical_md_bytes[abs_start:abs_end]
-                            can_sha256 = hashlib.sha256(can_chunk).hexdigest()
-                            can_start_line = _line_for_byte(canonical_md_bytes, abs_start)
-                            can_end_line = _line_for_byte(canonical_md_bytes, max(abs_start, abs_end - 1))
-                        else:
-                            # Fall back to source-local values when canonical bytes unavailable.
-                            can_sha256 = d["sha256"]
-                            can_start_line = d["start_line"]
-                            can_end_line = d["end_line"]
-
-                        d["content_range_ref"] = build_explicit_range_ref(
-                            artifact_role=ArtifactRole.CANONICAL_MD.value,
-                            repo_id=fi.root_label,
-                            file_path=md_file_name,
-                            start_byte=abs_start,
-                            end_byte=abs_end,
-                            start_line=can_start_line,
-                            end_line=can_end_line,
-                            content_sha256=can_sha256,
-                        )
-
-                        if canonical_md_bytes is not None:
-                            d["canonical_range"] = {
-                                "artifact_role": ArtifactRole.CANONICAL_MD.value,
-                                "repo_id": fi.root_label,
-                                "file_path": md_file_name,
-                                "start_byte": abs_start,
-                                "end_byte": abs_end,
-                                "start_line": can_start_line,
-                                "end_line": can_end_line,
-                                "content_sha256": can_sha256,
-                            }
-
-                # Retrieval-only and noncanonical split chunks must carry
-                # their exact redacted text because no canonical artifact exists.
-                _attach_inline_chunk_content(d, content_bytes)
-
-                # source_range: always present, coordinates in source content space.
-                # Status taxonomy: "declared" (source coords claimed, not externally verified) | "unavailable" (redacted or truncated).
-                if was_redacted or truncated:
-                    d["source_range"] = {
-                        "file_path": fi.rel_path.as_posix(),
-                        "repo_id": fi.root_label,
-                        "status": "unavailable",
-                    }
-                else:
-                    d["source_range"] = {
-                        "file_path": fi.rel_path.as_posix(),
-                        "repo_id": fi.root_label,
-                        "start_byte": d["start_byte"],
-                        "end_byte": d["end_byte"],
-                        "start_line": d["start_line"],
-                        "end_line": d["end_line"],
-                        "content_sha256": d["sha256"],
-                        "status": "declared",
-                    }
-                    if source_git_blob_sha1:
-                        d["source_range"]["git_blob_sha1"] = source_git_blob_sha1
-                        d["source_range"]["git_blob_sha1_basis"] = "source_worktree_file_content"
-
-                d["search_keys"] = {
-                    "repo_id": fi.root_label,
-                    "path_norm": fi.rel_path.as_posix().lower(),
-                    "ext": fi.ext.lower().lstrip("."),
-                    "layer": sem_meta["layer"],
-                    "artifact_type": sem_meta["artifact_type"]
-                }
-
-                all_chunks.append(d)
-
-        if not all_chunks:
-            return None
-
-        out_path = output_filename_base_func(part_suffix="").with_suffix(".chunk_index.jsonl")
-        try:
-            with out_path.open("w", encoding="utf-8") as f:
-                for c in all_chunks:
-                    f.write(json.dumps(c) + "\n")
-            return out_path
-        except Exception as e:
-            if debug:
-                print(f"Error writing chunk index: {e}")
-            return None
-
-    # Helper for writing logic
-    def process_and_write(target_files, target_sources, output_filename_base_func):
-        generated_paths: List[Path] = []
-
-        # Pre-calculate artifacts basenames for linking in MD (Recommendation 1)
-        artifact_refs = {}
-        if extras and extras.json_sidecar:
-            # We predict the JSON filename
-            # Note: We rely on the fact that single-file mode uses part_suffix=""
-            # For split mode, JSON usually follows the base name.
-            # We use a dummy call to get the base path
-            _dummy_path = output_filename_base_func(part_suffix="")
-            _json_name = _dummy_path.with_suffix('.json').name
-            artifact_refs["index_json_basename"] = _json_name
-
-        if extras and extras.augment_sidecar:
-             # Find augment file to get name
-             _aug = _find_augment_file_for_sources(target_sources)
-             if _aug:
-                 artifact_refs["augment_sidecar_basename"] = _aug.name
-
-        # Instantiate stream validator
-        validator = ReportValidator(plan_only=plan_only, code_only=code_only, machine_lean=(detail=="machine-lean"))
-
-        if split_size > 0:
-            local_out_paths = []
-            part_num = 1
-            current_size = 0
-            current_lines = []
-
-            # --- Metadata tracking for parts (NEW) ---
-            parts_meta = []  # List of dicts: {first, last}
-            current_part_paths = []  # Paths in current buffer
-
-            # Helper to flush
-            def flush_part(is_last=False):
-                nonlocal part_num, current_size, current_lines, current_part_paths
-                if not current_lines:
-                    return
-
-                # Record metadata for this part
-                first = current_part_paths[0] if current_part_paths else None
-                last = current_part_paths[-1] if current_part_paths else None
-                parts_meta.append({"first": first, "last": last})
-                current_part_paths = []
-
-                # Temporärer Name während der Generierung
-                # Wir nutzen _tmp_partX, um es später sauber umzubenennen
-                out_path = output_filename_base_func(part_suffix=f"_tmp_part{part_num}")
-                out_path.write_text("".join(current_lines), encoding="utf-8")
-                local_out_paths.append(out_path)
-
-                part_num += 1
-                current_lines = []
-                # Add continuation header for next part
-                if not is_last:
-                    header = f"{CANONICAL_REPORT_HEADING} (Part {part_num})\n\n"
-                    # Note: we don't feed continuation headers to validator as they are technical split artifacts,
-                    # not part of the logical report structure.
-                    current_lines.append(header)
-                    current_size = len(header.encode('utf-8'))
-                else:
-                    current_size = 0
-
-            iterator = iter_report_blocks(
-                target_files,
-                detail,
-                max_file_bytes,
-                target_sources,
-                plan_only,
-                code_only,
-                debug,
-                path_filter,
-                ext_filter,
-                extras,
-                delta_meta,
-                artifact_refs=artifact_refs,
-                meta_density=meta_density,
-                meta_none=meta_none,
-                redact_secrets=redact_secrets,
-            )
-
-            for block in iterator:
-                # Validate the block before writing
-                validator.feed(block)
-
-                block_len = len(block.encode('utf-8'))
-
-                # --- Path detection (NEW) ---
-                # Detect path in block using regex to track range for signatures
-                m = re.search(r"\*\*Path:\*\* `(.+?)`", block)
-                block_path = m.group(1) if m else None
-
-                if current_size + block_len > split_size and len(current_lines) > 1:
-                    flush_part()
-                    # After flush, block belongs to next part.
-                    # current_part_paths was cleared in flush_part.
-
-                current_lines.append(block)
-                current_size += block_len
-                if block_path:
-                    current_part_paths.append(block_path)
-
-            flush_part(is_last=True)
-            validator.close()
-
-            # Nachlauf: Header normalisieren UND Dateien umbenennen (Part X of Y)
-            total_parts = len(local_out_paths)
-            final_paths = []
-
-            for idx, path in enumerate(local_out_paths, start=1):
-                # 1. Header Rewrite
-                try:
-                    text = path.read_text(encoding="utf-8")
-                    lines = text.splitlines(True)
-                    if lines:
-                        prefix_part = f"{CANONICAL_REPORT_HEADING} (Part "
-                        prefix_main = CANONICAL_REPORT_HEADING
-                        for i, line in enumerate(lines):
-                            stripped = line.lstrip("\ufeff")
-                            if stripped.startswith(prefix_part) or stripped.startswith(prefix_main):
-                                lines[i] = f"{CANONICAL_REPORT_HEADING} (Part {idx}/{total_parts})\n"
-
-                                # --- Inject Signature (NEW) ---
-                                if total_parts > 1:
-                                    meta = parts_meta[idx - 1]
-                                    p_start = meta["first"]
-                                    p_end = meta["last"]
-                                    range_str = f"{p_start} ... {p_end}" if p_start else "Meta/Structure/Index"
-
-                                    prev_name = "none"
-                                    if idx > 1:
-                                        # calculate name of part idx-1
-                                        prev_suffix = f"_part{idx - 1}of{total_parts}"
-                                        prev_path_obj = output_filename_base_func(part_suffix=prev_suffix)
-                                        prev_name = prev_path_obj.name
-
-                                    sig_block = (
-                                        f"<!-- part_signature:\n"
-                                        f"  part_index: {idx}\n"
-                                        f"  part_total: {total_parts}\n"
-                                        f"  continuation_of: \"{prev_name}\"\n"
-                                        f"  range: \"{range_str}\"\n"
-                                        f"-->\n"
-                                        f"**[Part {idx}/{total_parts}]** continuation_of: `{prev_name}` · range: `{range_str}`\n\n"
-                                    )
-                                    lines.insert(i + 1, sig_block)
-                                break
-                    text = "".join(lines)
-                except Exception:
-                    text = None  # Skip rewrite if read fails, but still rename
-
-                # 2. Rename File
-                # If total_parts == 1, no part suffix.
-                # If total_parts > 1, _partXofY.
-                if total_parts == 1:
-                    new_suffix = ""
-                else:
-                    new_suffix = f"_part{idx}of{total_parts}"
-
-                new_path = output_filename_base_func(part_suffix=new_suffix)
-
-                if text is not None:
-                    new_path.write_text(text, encoding="utf-8")
-                    # Delete old tmp file
-                    try:
-                        path.unlink()
-                    except OSError:
-                        pass
-                else:
-                    # Just replace/move if we couldn't read/edit content
-                    try:
-                        path.replace(new_path)
-                    except OSError as e:
-                        raise OSError(f"Failed to replace '{path}' with '{new_path}'") from e
-
-                final_paths.append(new_path)
-
-            generated_paths.extend(final_paths)
-            out_paths.extend(final_paths)
-
-        else:
-            # Standard single file (Streamed Write)
-            out_path = output_filename_base_func(part_suffix="")
-
-            with out_path.open("w", encoding="utf-8") as f:
-                if plan_only:
-                    f.write("<!-- MODE:PLAN_ONLY -->\n")
-
-                iterator = iter_report_blocks(
-                    target_files,
-                    detail,
-                    max_file_bytes,
-                    target_sources,
-                    plan_only,
-                    code_only,
-                    debug,
-                    path_filter,
-                    ext_filter,
-                    extras,
-                    delta_meta,
-                    artifact_refs=artifact_refs,
-                    meta_density=meta_density,
-                    meta_none=meta_none,
-                    redact_secrets=redact_secrets,
-                )
-
-                for i, block in enumerate(iterator):
-                    # Enforce Part 1/1 header strictly on the first yielded block (Header contract)
-                    if i == 0:
-                        lines = block.splitlines(True)
-                        for line_idx, line in enumerate(lines):
-                            stripped = line.lstrip("\ufeff")
-                            if stripped.startswith(REPORT_HEADINGS):
-                                lines[line_idx] = f"{CANONICAL_REPORT_HEADING} (Part 1/1)\n"
-                                break
-                        block = "".join(lines)
-
-                    validator.feed(block)
-                    f.write(block)
-
-            validator.close()
-            generated_paths.append(out_path)
-            out_paths.append(out_path)
-
-        return generated_paths
 
     last_chunk_index_path = None
     last_dump_index_path = None
@@ -6102,7 +6284,9 @@ def write_reports_v2(
         generated_paths = []
         arch_path = None
         if output_mode in ("archive", "dual"):
-            generated_paths = process_and_write(all_files, sources, base_name_func)
+            generated_paths = process_and_write(
+                run_config, all_files, sources, base_name_func, out_paths
+            )
 
             arch_path = _write_architecture_summary(
                 all_files,
@@ -6123,7 +6307,9 @@ def write_reports_v2(
         if output_mode in ("retrieval", "dual"):
             # Pass all generated MD parts to support split_size > 0
             md_parts = [p for p in generated_paths if p.suffix.lower() == ".md"]
-            chunk_path = generate_chunk_artifacts(all_files, base_name_func, md_paths=md_parts)
+            chunk_path = generate_chunk_artifacts(
+                run_config, all_files, base_name_func, md_paths=md_parts
+            )
             if chunk_path:
                 out_paths.append(chunk_path)
                 last_chunk_index_path = chunk_path
@@ -6228,7 +6414,9 @@ def write_reports_v2(
             generated_paths = []
             arch_path = None
             if output_mode in ("archive", "dual"):
-                generated_paths = process_and_write(s_files, [s_root], base_name_func)
+                generated_paths = process_and_write(
+                    run_config, s_files, [s_root], base_name_func, out_paths
+                )
 
                 arch_path = _write_architecture_summary(
                     s_files,
@@ -6248,7 +6436,9 @@ def write_reports_v2(
             chunk_path = None
             if output_mode in ("retrieval", "dual"):
                 md_parts = [p for p in generated_paths if p.suffix.lower() == ".md"]
-                chunk_path = generate_chunk_artifacts(s_files, base_name_func, md_paths=md_parts)
+                chunk_path = generate_chunk_artifacts(
+                    run_config, s_files, base_name_func, md_paths=md_parts
+                )
                 if chunk_path:
                     out_paths.append(chunk_path)
                     last_chunk_index_path = chunk_path
@@ -6434,38 +6624,10 @@ def write_reports_v2(
         meta_none=meta_none,
         ).with_suffix(".bundle.manifest.json")
 
-    # Aliases into module-level registries (ARTIFACT_CONTRACT_REGISTRY / ARTIFACT_AUTHORITY_REGISTRY).
-    CONTRACT_REGISTRY = ARTIFACT_CONTRACT_REGISTRY
-    AUTHORITY_REGISTRY = ARTIFACT_AUTHORITY_REGISTRY
-
-    artifacts_list = []
-    def _add_artifact(p: Optional[Path], role: ArtifactRole, content_type: str):
-        if p and p.exists():
-            sha = _compute_file_sha256(p)
-            if sha:
-                try:
-                    rel_path = p.relative_to(merges_dir).as_posix()
-                except ValueError:
-                    rel_path = p.name
-
-                entry = {
-                    "role": role.value,
-                    "path": rel_path,
-                    "content_type": content_type,
-                    "bytes": p.stat().st_size,
-                    "sha256": sha
-                }
-
-                if role in CONTRACT_REGISTRY:
-                    entry["contract"] = CONTRACT_REGISTRY[role]
-                    entry["interpretation"] = {"mode": "contract"}
-                else:
-                    entry["interpretation"] = {"mode": "role_only"}
-
-                if role in AUTHORITY_REGISTRY:
-                    entry.update(AUTHORITY_REGISTRY[role])
-
-                artifacts_list.append(entry)
+    artifacts_list: List[Dict[str, Any]] = []
+    _add_artifact = functools.partial(
+        _collect_bundle_artifact, artifacts_list, merges_dir
+    )
 
     _add_artifact(final_canonical_md, ArtifactRole.CANONICAL_MD, "text/markdown")
     if extras and extras.json_sidecar:
@@ -6493,49 +6655,27 @@ def write_reports_v2(
     if derived_manifests:
         _add_artifact(derived_manifests[-1], ArtifactRole.DERIVED_MANIFEST_JSON, "application/json")
 
-    def _write_python_symbol_index_json(base_manifest_path: Path) -> Optional[Path]:
-        """Emit Python Symbol Index v1 for single-repo bundles as navigation only."""
-        if len(repo_summaries) != 1 or not final_dump_index or not final_dump_index.exists():
-            return None
-        repo_root = repo_summaries[0].get("root")
-        if repo_root is None:
-            return None
-        from merger.repoground.architecture.symbol_index import generate_symbol_index_document
-
-        canonical_sha = _compute_file_sha256(final_dump_index)
-        if not canonical_sha:
-            return None
-        document = generate_symbol_index_document(Path(repo_root), run_id, canonical_sha)
-        out_path = base_manifest_path.with_name(
-            base_manifest_path.name.replace(
-                ".bundle.manifest.json", ".python_symbol_index.json"
-            )
-        )
-        _write_text_atomic(
-            out_path,
-            json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-        )
-        return out_path
-
-    python_symbol_index_path = _write_python_symbol_index_json(bundle_manifest_path)
-    if python_symbol_index_path is not None:
-        out_paths.append(python_symbol_index_path)
-        if python_symbol_index_path not in other_paths:
-            other_paths.append(python_symbol_index_path)
-        _add_artifact(
-            python_symbol_index_path,
-            ArtifactRole.PYTHON_SYMBOL_INDEX_JSON,
-            "application/json",
-        )
-
-    python_call_graph_path = _write_python_call_graph_json(
-        base_manifest_path=bundle_manifest_path,
-        repo_summaries=repo_summaries,
-        final_dump_index=final_dump_index,
-        run_id=run_id,
+    python_symbol_index_path = _register_optional_artifact(
+        bundle_sidecars.write_python_symbol_index_json(
+            base_manifest_path=bundle_manifest_path,
+            repo_summaries=repo_summaries,
+            final_dump_index=final_dump_index,
+            run_id=run_id,
+        ),
+        role=ArtifactRole.PYTHON_SYMBOL_INDEX_JSON,
+        content_type="application/json",
+        out_paths=out_paths,
+        other_paths=other_paths,
+        add_artifact=_add_artifact,
     )
-    _register_optional_artifact(
-        python_call_graph_path,
+
+    python_call_graph_path = _register_optional_artifact(
+        bundle_sidecars.write_python_call_graph_json(
+            base_manifest_path=bundle_manifest_path,
+            repo_summaries=repo_summaries,
+            final_dump_index=final_dump_index,
+            run_id=run_id,
+        ),
         role=ArtifactRole.PYTHON_CALL_GRAPH_JSON,
         content_type="application/json",
         out_paths=out_paths,
@@ -6543,137 +6683,40 @@ def write_reports_v2(
         add_artifact=_add_artifact,
     )
 
-
-    def _write_lens_cards_jsonl(base_manifest_path: Path) -> Optional[Path]:
-        """Emit Lens Cards v1 as deterministic JSONL navigation."""
-        from .lens_cards import produce_lens_cards
-
-        paths: List[str] = []
-        for summary in repo_summaries:
-            for fi in summary.get("files", []):
-                if getattr(fi, "is_text", False):
-                    paths.append(fi.rel_path.as_posix())
-        if not paths:
-            return None
-        cards = produce_lens_cards(paths)
-        if not cards:
-            return None
-        out_path = base_manifest_path.with_name(
-            base_manifest_path.name.replace(".bundle.manifest.json", ".lens_cards.jsonl")
-        )
-        text = "".join(json.dumps(card, sort_keys=True) + "\n" for card in cards)
-        _write_text_atomic(out_path, text)
-        return out_path
-
-    lens_cards_path = _write_lens_cards_jsonl(bundle_manifest_path)
-    if lens_cards_path is not None:
-        out_paths.append(lens_cards_path)
-        if lens_cards_path not in other_paths:
-            other_paths.append(lens_cards_path)
-        _add_artifact(
-            lens_cards_path,
-            ArtifactRole.LENS_CARDS_JSONL,
-            "application/x-ndjson",
-        )
-
-
-    def _write_concept_cards_jsonl(base_manifest_path: Path) -> Optional[Path]:
-        """Emit built-in Concept Cards v1 as deterministic JSONL navigation."""
-        from .concept_cards import produce_default_concept_cards
-
-        cards = produce_default_concept_cards()
-        if not cards:
-            return None
-        out_path = base_manifest_path.with_name(
-            base_manifest_path.name.replace(
-                ".bundle.manifest.json", ".concept_cards.jsonl"
-            )
-        )
-        text = "".join(json.dumps(card, sort_keys=True) + "\n" for card in cards)
-        _write_text_atomic(out_path, text)
-        return out_path
-
-    concept_cards_path = _write_concept_cards_jsonl(bundle_manifest_path)
-    if concept_cards_path is not None:
-        out_paths.append(concept_cards_path)
-        if concept_cards_path not in other_paths:
-            other_paths.append(concept_cards_path)
-        _add_artifact(
-            concept_cards_path,
-            ArtifactRole.CONCEPT_CARDS_JSONL,
-            "application/x-ndjson",
-        )
-
-
-
-    def _write_relation_cards_jsonl(
-        base_manifest_path: Path,
-        graph_path: Optional[Path],
-    ) -> Optional[Path]:
-        """Emit Relation Cards v1 as deterministic JSONL navigation."""
-        if graph_path is None or not graph_path.exists():
-            return None
-        from .relation_cards import produce_relation_cards
-
-        graph_data = json.loads(graph_path.read_text(encoding="utf-8"))
-        cards = produce_relation_cards(graph_data)
-        if not cards:
-            return None
-        out_path = base_manifest_path.with_name(
-            base_manifest_path.name.replace(
-                ".bundle.manifest.json", ".relation_cards.jsonl"
-            )
-        )
-        text = "".join(json.dumps(card, sort_keys=True) + "\n" for card in cards)
-        _write_text_atomic(out_path, text)
-        return out_path
-
-    relation_cards_path = _write_relation_cards_jsonl(
-        bundle_manifest_path,
-        architecture_graphs[-1] if architecture_graphs else None,
+    lens_cards_path = _register_optional_artifact(
+        bundle_sidecars.write_lens_cards_jsonl(
+            base_manifest_path=bundle_manifest_path,
+            repo_summaries=repo_summaries,
+        ),
+        role=ArtifactRole.LENS_CARDS_JSONL,
+        content_type="application/x-ndjson",
+        out_paths=out_paths,
+        other_paths=other_paths,
+        add_artifact=_add_artifact,
     )
-    if relation_cards_path is not None:
-        out_paths.append(relation_cards_path)
-        if relation_cards_path not in other_paths:
-            other_paths.append(relation_cards_path)
-        _add_artifact(
-            relation_cards_path,
-            ArtifactRole.RELATION_CARDS_JSONL,
-            "application/x-ndjson",
-        )
 
-    def _write_delta_json(
-        base_manifest_path: Path,
-        source_delta: Dict[str, Any],
-    ) -> Path:
-        """Emit the validated PR Schau delta source as bundle diagnostic JSON."""
-        out_path = base_manifest_path.with_name(
-            base_manifest_path.name.replace(".bundle.manifest.json", ".delta.json")
-        )
-        text = json.dumps(
-            source_delta,
-            indent=2,
-            sort_keys=True,
-            ensure_ascii=False,
-        ) + "\n"
-        _write_text_atomic(out_path, text)
-        return out_path
+    concept_cards_path = _register_optional_artifact(
+        bundle_sidecars.write_concept_cards_jsonl(
+            base_manifest_path=bundle_manifest_path,
+        ),
+        role=ArtifactRole.CONCEPT_CARDS_JSONL,
+        content_type="application/x-ndjson",
+        out_paths=out_paths,
+        other_paths=other_paths,
+        add_artifact=_add_artifact,
+    )
 
-    def _write_pr_delta_cards_jsonl(
-        base_manifest_path: Path,
-        cards: List[Dict[str, Any]],
-    ) -> Optional[Path]:
-        """Emit PR Delta Cards v1 after the changed-set source was validated."""
-        if not cards:
-            return None
-        out_path = base_manifest_path.with_name(
-            base_manifest_path.name.replace(
-                ".bundle.manifest.json", ".pr_delta_cards.jsonl"
-            )
-        )
-        text = "".join(json.dumps(card, sort_keys=True) + "\n" for card in cards)
-        _write_text_atomic(out_path, text)
-        return out_path
+    relation_cards_path = _register_optional_artifact(
+        bundle_sidecars.write_relation_cards_jsonl(
+            base_manifest_path=bundle_manifest_path,
+            graph_path=architecture_graphs[-1] if architecture_graphs else None,
+        ),
+        role=ArtifactRole.RELATION_CARDS_JSONL,
+        content_type="application/x-ndjson",
+        out_paths=out_paths,
+        other_paths=other_paths,
+        add_artifact=_add_artifact,
+    )
 
     delta_json_path = None
     pr_delta_cards_path = None
@@ -6681,29 +6724,31 @@ def write_reports_v2(
         from .pr_delta_cards import produce_pr_delta_cards
 
         pr_delta_cards = produce_pr_delta_cards(delta_meta)
-        delta_json_path = _write_delta_json(bundle_manifest_path, delta_meta)
-        out_paths.append(delta_json_path)
-        if delta_json_path not in other_paths:
-            other_paths.append(delta_json_path)
-        _add_artifact(
+        delta_json_path = bundle_sidecars.write_delta_json(
+            base_manifest_path=bundle_manifest_path,
+            source_delta=delta_meta,
+        )
+        _register_optional_artifact(
             delta_json_path,
-            ArtifactRole.PR_DELTA_JSON,
-            "application/json",
+            role=ArtifactRole.PR_DELTA_JSON,
+            content_type="application/json",
+            out_paths=out_paths,
+            other_paths=other_paths,
+            add_artifact=_add_artifact,
         )
 
-        pr_delta_cards_path = _write_pr_delta_cards_jsonl(
-            bundle_manifest_path,
-            pr_delta_cards,
+        pr_delta_cards_path = bundle_sidecars.write_pr_delta_cards_jsonl(
+            base_manifest_path=bundle_manifest_path,
+            cards=pr_delta_cards,
         )
-        if pr_delta_cards_path is not None:
-            out_paths.append(pr_delta_cards_path)
-            if pr_delta_cards_path not in other_paths:
-                other_paths.append(pr_delta_cards_path)
-            _add_artifact(
-                pr_delta_cards_path,
-                ArtifactRole.PR_DELTA_CARDS_JSONL,
-                "application/x-ndjson",
-            )
+        _register_optional_artifact(
+            pr_delta_cards_path,
+            role=ArtifactRole.PR_DELTA_CARDS_JSONL,
+            content_type="application/x-ndjson",
+            out_paths=out_paths,
+            other_paths=other_paths,
+            add_artifact=_add_artifact,
+        )
 
     # Write output health report BEFORE the bundle manifest is finalized.
     # In this implementation, health checks are anchored to already-materialized primary artifacts

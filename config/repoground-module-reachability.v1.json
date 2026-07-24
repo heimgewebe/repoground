@@ -1,0 +1,29 @@
+{
+  "kind": "repoground.module_reachability_policy",
+  "version": "1.0",
+  "package_roots": [
+    "merger"
+  ],
+  "require_non_documentation_evidence": true,
+  "require_production_evidence": true,
+  "allowed_unproven": [],
+  "allowed_documentation_only": [],
+  "allowed_test_only": [
+    "merger.repoground.core.answer_grounding_delta",
+    "merger.repoground.core.history_lens",
+    "merger.repoground.core.memory",
+    "merger.repoground.retrieval.audit_finding",
+    "merger.repoground.retrieval.audit_lane",
+    "merger.repoground.retrieval.eval_diagnostics_integration"
+  ],
+  "removal_policy": "An unproven module is not a dead module. Removing production code requires positive evidence of non-use (retired consumer, replaced surface, measured zero use), never the absence of a static reference.",
+  "allowlist_policy": "Entries record modules whose reachability could not be measured and that were reviewed by hand. A stale entry fails the check so the allowlist cannot silently outlive its reason.",
+  "test_only_policy": "A test import proves the module is exercised, not that a production surface reaches it. These modules are recorded so the gap is visible and so a newly test-only module fails the check; the list is not a deletion list.",
+  "does_not_establish": [
+    "that an unproven module is dead",
+    "that a reachable module is executed at runtime",
+    "that a test-only module has a production consumer",
+    "completeness of dynamic loader discovery",
+    "that evidence surfaces are themselves used"
+  ]
+}

@@ -1,0 +1,82 @@
+{
+  "binding": {
+    "benchmark_script_sha256": "89f221b81659f81427dab62539e8487579e82aa1c399641bfb7b00e77b8ded72",
+    "commit": "bf43b2edab9a723703da83bc1b34a0bd9032450f",
+    "worktree_dirty": false
+  },
+  "cases": {
+    "atlas_scan": {
+      "optional_subsystem": true,
+      "peak_traced_bytes": 80024,
+      "peak_traced_measured_separately": true,
+      "samples": 7,
+      "wall_seconds_max": 0.005492,
+      "wall_seconds_median": 0.004891,
+      "wall_seconds_min": 0.004829
+    },
+    "bundle_write_archive": {
+      "peak_traced_bytes": 1989130,
+      "peak_traced_measured_separately": true,
+      "samples": 7,
+      "wall_seconds_max": 0.139336,
+      "wall_seconds_median": 0.126368,
+      "wall_seconds_min": 0.124117
+    },
+    "bundle_write_dual": {
+      "peak_traced_bytes": 3943328,
+      "peak_traced_measured_separately": true,
+      "samples": 7,
+      "wall_seconds_max": 0.309299,
+      "wall_seconds_median": 0.305684,
+      "wall_seconds_min": 0.300833
+    },
+    "retrieval_index_build": {
+      "peak_traced_bytes": 399111,
+      "peak_traced_measured_separately": true,
+      "samples": 7,
+      "wall_seconds_max": 0.018609,
+      "wall_seconds_median": 0.018372,
+      "wall_seconds_min": 0.017941
+    },
+    "retrieval_query": {
+      "peak_traced_bytes": 57264,
+      "peak_traced_measured_separately": true,
+      "samples": 7,
+      "wall_seconds_max": 0.000709,
+      "wall_seconds_median": 0.000604,
+      "wall_seconds_min": 0.000586
+    },
+    "service_app_import": {
+      "isolation": "subprocess",
+      "peak_traced_bytes": 24228716,
+      "peak_traced_measured_separately": false,
+      "samples": 7,
+      "wall_seconds_max": 1.135862,
+      "wall_seconds_median": 1.117364,
+      "wall_seconds_min": 1.102161
+    }
+  },
+  "configuration": {
+    "fixture_functions_per_file": 12,
+    "fixture_markdown_files": 20,
+    "fixture_python_files": 60,
+    "reported_statistic": "wall_seconds_min is the comparison figure",
+    "samples": 7,
+    "timing_gate": "none"
+  },
+  "does_not_establish": [
+    "cross-host comparability of absolute timings",
+    "absence of regressions on unmeasured paths",
+    "production workload representativeness",
+    "memory use outside the Python allocator"
+  ],
+  "environment": {
+    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+    "processor": "x86_64",
+    "python": "3.10.12"
+  },
+  "failures": [],
+  "kind": "repoground.core_path_benchmark",
+  "status": "pass",
+  "version": "1.0"
+}

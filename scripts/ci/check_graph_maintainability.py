@@ -216,6 +216,114 @@ def _complexity_regressions(
     return findings
 
 
+_BUDGET_DIMENSIONS = (
+    # (budget key, dimension label shared with the recorded references)
+    ("finding_count_max", "finding_count"),
+    ("max_complexity_max", "max_complexity"),
+    ("excess_total_max", "excess_total"),
+)
+
+#: Recorded scans a ceiling may never exceed. Every budgeted dimension must be
+#: bounded by at least one of them, otherwise a ceiling could be raised without
+#: limit and the ratchet would only appear to hold.
+_REFERENCE_KEYS = ("historical_reference", "slice_start_reference")
+
+
+def measure_complexity_budget(current: list[ComplexityFinding]) -> dict[str, int]:
+    """Aggregate the three budgeted complexity dimensions of a scan."""
+
+    return {
+        "finding_count": len(current),
+        "max_complexity": max((item.complexity for item in current), default=0),
+        # Excess is the complexity mass above the configured threshold. It falls
+        # when a function is split even if the split creates further findings.
+        "excess_total": sum(max(item.complexity - item.limit, 0) for item in current),
+    }
+
+
+def _recorded_references(budget: dict[str, Any], label: str) -> list[tuple[str, Any]]:
+    """Return every recorded scan that bounds one budgeted dimension."""
+
+    recorded: list[tuple[str, Any]] = []
+    for key in _REFERENCE_KEYS:
+        reference = budget.get(key)
+        if isinstance(reference, dict) and label in reference:
+            recorded.append((key, reference[label]))
+    return recorded
+
+
+def _budget_dimension_findings(
+    budget: dict[str, Any],
+    observed: dict[str, int],
+    budget_key: str,
+    label: str,
+) -> list[dict[str, Any]]:
+    ceiling = budget.get(budget_key)
+    if not isinstance(ceiling, int) or isinstance(ceiling, bool):
+        return [{"code": "complexity_budget_invalid", "dimension": budget_key}]
+
+    findings: list[dict[str, Any]] = []
+    if observed[label] > ceiling:
+        findings.append(
+            {
+                "code": "complexity_budget_exceeded",
+                "dimension": label,
+                "observed": observed[label],
+                "budget": ceiling,
+            }
+        )
+
+    recorded = _recorded_references(budget, label)
+    if not recorded:
+        # An unbounded ceiling could be raised at will, so it is a finding.
+        findings.append(
+            {"code": "complexity_budget_reference_missing", "dimension": label}
+        )
+    for reference_key, value in recorded:
+        if not isinstance(value, int) or isinstance(value, bool):
+            findings.append(
+                {
+                    "code": "complexity_budget_reference_invalid",
+                    "dimension": label,
+                    "reference": reference_key,
+                }
+            )
+        elif ceiling > value:
+            findings.append(
+                {
+                    "code": "complexity_budget_raised_above_reference",
+                    "dimension": label,
+                    "budget": ceiling,
+                    "reference": reference_key,
+                    "recorded": value,
+                }
+            )
+    return findings
+
+
+def evaluate_complexity_budget(
+    current: list[ComplexityFinding],
+    budget: Any,
+) -> list[dict[str, Any]]:
+    """Reject scans above the recorded budget, and budgets above the references.
+
+    Fail-closed: a missing or malformed budget is itself a finding, so removing
+    the budget cannot silently disable the ratchet, and every ceiling must be
+    bounded by at least one recorded scan.
+    """
+
+    if not isinstance(budget, dict):
+        return [{"code": "complexity_budget_missing"}]
+    if not any(isinstance(budget.get(key), dict) for key in _REFERENCE_KEYS):
+        return [{"code": "complexity_budget_reference_missing"}]
+
+    observed = measure_complexity_budget(current)
+    findings: list[dict[str, Any]] = []
+    for budget_key, label in _BUDGET_DIMENSIONS:
+        findings += _budget_dimension_findings(budget, observed, budget_key, label)
+    return findings
+
+
 def compare_complexity_baseline(
     current: list[ComplexityFinding],
     baseline: dict[str, Any],
@@ -237,7 +345,10 @@ def check(repo_root: Path, policy_path: Path) -> dict[str, Any]:
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     current_complexity = collect_complexity_findings(repo_root)
     complexity_findings = compare_complexity_baseline(current_complexity, baseline)
-    findings = graph_findings + complexity_findings
+    budget_findings = evaluate_complexity_budget(
+        current_complexity, policy["complexity"].get("budget")
+    )
+    findings = graph_findings + complexity_findings + budget_findings
     baseline_identities = {
         f"{row['path']}::{row['qualified_name']}" for row in baseline["findings"]
     }
@@ -256,6 +367,8 @@ def check(repo_root: Path, policy_path: Path) -> dict[str, Any]:
                 (item.complexity for item in current_complexity),
                 default=0,
             ),
+            "budget": policy["complexity"].get("budget"),
+            "observed_budget_dimensions": measure_complexity_budget(current_complexity),
         },
         "findings": findings,
         "does_not_establish": [
