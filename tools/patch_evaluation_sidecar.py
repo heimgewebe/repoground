@@ -2,8 +2,8 @@
 """External Patch Evaluation Sidecar prototype for RBAW-V1-T004.
 
 This executable is intentionally outside ``merger/repoground/core``. It applies
-one declared patch in a disposable detached Git worktree, runs an explicit list
-of argv-only commands, and emits bounded ``repobrief.patch_evaluation`` v1
+one declared patch in an independent temporary Git repository, runs an explicit
+list of argv-only commands, and emits bounded ``repobrief.patch_evaluation`` v1
 evidence. A passing artifact is not approval and does not establish correctness.
 """
 
@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -23,6 +24,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
@@ -49,8 +51,9 @@ _REQUEST_KEYS = {
     "global_timeout_seconds",
     "max_log_bytes",
     "repobrief_context",
+    "fail_fast",
 }
-_COMMAND_KEYS = {"argv", "cwd", "timeout_seconds"}
+_COMMAND_KEYS = {"argv", "cwd", "timeout_seconds", "redact_argv_indexes"}
 _CONTEXT_KEYS = {
     "bundle_manifest",
     "snapshot_run_id",
@@ -61,6 +64,20 @@ _CONTEXT_KEYS = {
 _MAX_COMMANDS = 32
 _MAX_TIMEOUT_SECONDS = 7200
 _MAX_LOG_BYTES = 1_000_000
+_MAX_REQUEST_BYTES = 1_000_000
+_MAX_PATCH_BYTES = 100_000_000
+_MAX_REPOSITORY_PACK_BYTES = 1_000_000_000
+_MAX_REPOSITORY_OBJECTS = 1_000_000
+_MAX_FILTER_DRIVERS = 256
+_MAX_ARG_BYTES = 32_768
+_MAX_ARGV_BYTES = 131_072
+_MAX_CONTEXT_ITEMS = 256
+_MAX_CONTEXT_ITEM_BYTES = 4_096
+_MAX_CHANGED_FILES = 10_000
+_FINGERPRINT_MAX_FILES = 100_000
+_FINGERPRINT_MAX_BYTES = 512_000_000
+_FINGERPRINT_TIMEOUT_SECONDS = 120
+_TRUSTED_SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 class RequestError(ValueError):
@@ -76,6 +93,7 @@ class CommandSpec:
     argv: tuple[str, ...]
     cwd: str
     timeout_seconds: int
+    redact_argv_indexes: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -88,6 +106,7 @@ class EvaluationRequest:
     global_timeout_seconds: int
     max_log_bytes: int
     repobrief_context: dict[str, Any]
+    fail_fast: bool
 
 
 @dataclass(frozen=True)
@@ -102,6 +121,11 @@ class EvaluationSetup:
     source_fingerprint_before: str
     source_branch: str | None
     exact_base: str
+    sandbox_binary: Path
+    runtime_root: Path
+    sandbox_home: Path
+    sandbox_tmp: Path
+    git_scratch: Path
 
 
 @dataclass
@@ -127,9 +151,17 @@ def _strict_keys(value: Mapping[str, Any], allowed: set[str], label: str) -> Non
         )
 
 
-def _non_empty_string(value: Any, label: str) -> str:
+def _non_empty_string(value: Any, label: str, *, max_bytes: int | None = None) -> str:
     if not isinstance(value, str) or not value.strip() or "\x00" in value:
         raise RequestError(f"{label} must be a non-empty string without NUL bytes")
+    if max_bytes is not None and len(value.encode("utf-8")) > max_bytes:
+        raise RequestError(f"{label} exceeds the {max_bytes}-byte limit")
+    return value
+
+
+def _strict_bool(value: Any, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise RequestError(f"{label} must be a boolean")
     return value
 
 
@@ -145,7 +177,7 @@ def _validate_relative_cwd(value: Any, label: str) -> str:
     cwd = _non_empty_string(value, label)
     pure = PurePosixPath(cwd)
     if pure.is_absolute() or ".." in pure.parts:
-        raise RequestError(f"{label} must stay inside the isolated worktree")
+        raise RequestError(f"{label} must stay inside the isolated repository")
     normalized = str(pure)
     return "." if normalized in {"", "."} else normalized
 
@@ -153,8 +185,11 @@ def _validate_relative_cwd(value: Any, label: str) -> str:
 def _validate_string_list(value: Any, label: str) -> list[str]:
     if not isinstance(value, list):
         raise RequestError(f"{label} must be an array")
+    if len(value) > _MAX_CONTEXT_ITEMS:
+        raise RequestError(f"{label} may contain at most {_MAX_CONTEXT_ITEMS} entries")
     return [
-        _non_empty_string(item, f"{label}[{index}]") for index, item in enumerate(value)
+        _non_empty_string(item, f"{label}[{index}]", max_bytes=_MAX_CONTEXT_ITEM_BYTES)
+        for index, item in enumerate(value)
     ]
 
 
@@ -178,6 +213,8 @@ def _validate_context(value: Any) -> dict[str, Any]:
 def _read_request_object(path: str | Path) -> Mapping[str, Any]:
     request_path = Path(path).expanduser().resolve()
     try:
+        if request_path.stat().st_size > _MAX_REQUEST_BYTES:
+            raise RequestError(f"request exceeds the {_MAX_REQUEST_BYTES}-byte limit")
         data = json.loads(request_path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise RequestError(f"request could not be read: {exc}") from exc
@@ -219,9 +256,19 @@ def _validate_command(raw: Any, index: int) -> CommandSpec:
     if not isinstance(argv, list) or not argv:
         raise RequestError(f"{label}.argv must be a non-empty array")
     argv_items = tuple(
-        _non_empty_string(item, f"{label}.argv[{position}]")
+        _non_empty_string(item, f"{label}.argv[{position}]", max_bytes=_MAX_ARG_BYTES)
         for position, item in enumerate(argv)
     )
+    if sum(len(item.encode("utf-8")) for item in argv_items) > _MAX_ARGV_BYTES:
+        raise RequestError(f"{label}.argv exceeds the {_MAX_ARGV_BYTES}-byte limit")
+    raw_redactions = raw.get("redact_argv_indexes", [])
+    if not isinstance(raw_redactions, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in raw_redactions
+    ):
+        raise RequestError(f"{label}.redact_argv_indexes must be an integer array")
+    redactions = tuple(sorted(set(raw_redactions)))
+    if any(item < 0 or item >= len(argv_items) for item in redactions):
+        raise RequestError(f"{label}.redact_argv_indexes contains an invalid index")
     cwd = _validate_relative_cwd(raw.get("cwd", "."), f"{label}.cwd")
     timeout = _bounded_int(
         raw.get("timeout_seconds", 300),
@@ -229,7 +276,7 @@ def _validate_command(raw: Any, index: int) -> CommandSpec:
         minimum=1,
         maximum=_MAX_TIMEOUT_SECONDS,
     )
-    return CommandSpec(argv_items, cwd, timeout)
+    return CommandSpec(argv_items, cwd, timeout, redactions)
 
 
 def _validate_commands(value: Any) -> tuple[CommandSpec, ...]:
@@ -251,6 +298,8 @@ def load_request(path: str | Path) -> EvaluationRequest:
     patch_path = _validate_existing_path(
         data.get("patch_path"), "patch_path", directory=False
     )
+    if patch_path.stat().st_size > _MAX_PATCH_BYTES:
+        raise RequestError(f"patch_path exceeds the {_MAX_PATCH_BYTES}-byte limit")
     base_commit = _validate_base_commit(data.get("base_commit"))
     return EvaluationRequest(
         repository=repository,
@@ -271,7 +320,62 @@ def load_request(path: str | Path) -> EvaluationRequest:
             maximum=_MAX_LOG_BYTES,
         ),
         repobrief_context=_validate_context(data.get("repobrief_context")),
+        fail_fast=_strict_bool(data.get("fail_fast", False), "fail_fast"),
     )
+
+
+def _resolve_system_tool(name: str) -> Path:
+    resolved = shutil.which(name, path=_TRUSTED_SYSTEM_PATH)
+    if resolved is None:
+        raise EvaluationError(f"required system tool is unavailable: {name}")
+    path = Path(resolved).resolve()
+    if not path.is_absolute() or not path.is_file():
+        raise EvaluationError(f"required system tool is not a regular file: {name}")
+    return path
+
+
+def _git_binary() -> Path:
+    return _resolve_system_tool("git")
+
+
+def _sandbox_binary() -> Path:
+    if platform.system() != "Linux":
+        raise RequestError("the prototype requires Linux bubblewrap isolation")
+    try:
+        return _resolve_system_tool("bwrap")
+    except EvaluationError as exc:
+        raise RequestError(str(exc)) from exc
+
+
+def _display_command(spec: CommandSpec) -> str:
+    redacted = list(spec.argv)
+    sensitive_next = False
+    markers = (
+        "password",
+        "passwd",
+        "token",
+        "secret",
+        "api-key",
+        "api_key",
+        "credential",
+        "authorization",
+    )
+    for index, value in enumerate(redacted):
+        lowered = value.lower()
+        explicit = index in spec.redact_argv_indexes
+        assigned = "=" in value and any(
+            marker in lowered.split("=", 1)[0] for marker in markers
+        )
+        if explicit or sensitive_next:
+            redacted[index] = "<redacted>"
+        elif assigned:
+            redacted[index] = value.split("=", 1)[0] + "=<redacted>"
+        sensitive_next = (
+            value.startswith("-")
+            and any(marker in lowered for marker in markers)
+            and "=" not in value
+        )
+    return shlex.join(redacted)
 
 
 def _sanitized_environment(home: Path, tmpdir: Path) -> dict[str, str]:
@@ -283,7 +387,7 @@ def _sanitized_environment(home: Path, tmpdir: Path) -> dict[str, str]:
         "HOME": str(home),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
-        "PATH": os.environ.get("PATH") or os.defpath,
+        "PATH": _TRUSTED_SYSTEM_PATH,
         "PYTHONNOUSERSITE": "1",
         "TMPDIR": str(tmpdir),
         "TZ": "UTC",
@@ -291,6 +395,8 @@ def _sanitized_environment(home: Path, tmpdir: Path) -> dict[str, str]:
         "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_NO_REPLACE_OBJECTS": "1",
     }
 
 
@@ -320,6 +426,79 @@ def _run_bytes(
     return completed
 
 
+def _base_git_argv(repo: Path, *args: str) -> tuple[str, ...]:
+    return (
+        str(_git_binary()),
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.pager=cat",
+        "-c",
+        "diff.external=",
+        "-C",
+        str(repo),
+        *args,
+    )
+
+
+@lru_cache(maxsize=256)
+def _configured_filter_drivers(repository: str) -> tuple[str, ...]:
+    repo = Path(repository)
+    with tempfile.TemporaryDirectory(
+        prefix="repoground-patch-evaluation-filter-config-"
+    ) as temporary:
+        scratch = Path(temporary)
+        completed = _run_bytes(
+            _base_git_argv(
+                repo,
+                "config",
+                "--name-only",
+                "--get-regexp",
+                r"^filter\..*\.(clean|smudge|process|required)$",
+            ),
+            cwd=repo,
+            check=False,
+            env=_sanitized_environment(scratch / "home", scratch / "tmp"),
+        )
+    if completed.returncode not in {0, 1}:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise EvaluationError(f"Git filter configuration could not be read: {detail}")
+    drivers: set[str] = set()
+    for raw_key in completed.stdout.splitlines():
+        key = raw_key.decode("utf-8", errors="strict")
+        components = key.split(".")
+        if len(components) >= 3 and components[0].lower() == "filter":
+            drivers.add(".".join(components[1:-1]))
+    if len(drivers) > _MAX_FILTER_DRIVERS:
+        raise EvaluationError("repository exceeded the configured-filter limit")
+    return tuple(sorted(drivers))
+
+
+def _git_argv(repo: Path, *args: str) -> tuple[str, ...]:
+    prefix = list(_base_git_argv(repo))
+    # Insert overrides before -C so source-local filter commands cannot execute
+    # during status, diff, object materialization, checkout, or patch handling.
+    insertion = len(prefix) - 2
+    overrides: list[str] = []
+    for driver in _configured_filter_drivers(str(repo.resolve())):
+        overrides.extend(
+            (
+                "-c",
+                f"filter.{driver}.clean=cat",
+                "-c",
+                f"filter.{driver}.smudge=cat",
+                "-c",
+                f"filter.{driver}.process=",
+                "-c",
+                f"filter.{driver}.required=false",
+            )
+        )
+    prefix[insertion:insertion] = overrides
+    return (*prefix, *args)
+
+
 def _git(
     repo: Path,
     *args: str,
@@ -332,18 +511,7 @@ def _git(
         scratch = Path(temporary)
         env = _sanitized_environment(scratch / "home", scratch / "tmp")
         return _run_bytes(
-            (
-                "git",
-                "-c",
-                "core.hooksPath=/dev/null",
-                "-c",
-                "core.fsmonitor=false",
-                "-c",
-                "core.pager=cat",
-                "-C",
-                str(repo),
-                *args,
-            ),
+            _git_argv(repo, *args),
             cwd=repo,
             timeout=timeout,
             check=check,
@@ -432,21 +600,37 @@ def _source_snapshot(repository: Path) -> tuple[str, str, str | None]:
     untracked = _git(
         repository, "ls-files", "--others", "--exclude-standard", "-z"
     ).stdout
-    digest.update(b"\0untracked\0")
-    for encoded_path in sorted(item for item in untracked.split(b"\0") if item):
+    digest.update(b"\0nonignored-untracked\0")
+    encoded_paths = sorted(item for item in untracked.split(b"\0") if item)
+    if len(encoded_paths) > _FINGERPRINT_MAX_FILES:
+        raise EvaluationError("source fingerprint exceeded the untracked-file limit")
+    started = time.monotonic()
+    total_bytes = 0
+    for encoded_path in encoded_paths:
+        if time.monotonic() - started > _FINGERPRINT_TIMEOUT_SECONDS:
+            raise EvaluationError("source fingerprint exceeded its time budget")
         relative = encoded_path.decode("utf-8", errors="surrogateescape")
         candidate = repository / relative
         digest.update(encoded_path)
         digest.update(b"\0")
         if candidate.is_symlink():
+            payload = os.readlink(candidate).encode("utf-8", errors="surrogateescape")
+            total_bytes += len(payload)
             digest.update(b"symlink\0")
-            digest.update(
-                os.readlink(candidate).encode("utf-8", errors="surrogateescape")
-            )
+            digest.update(payload)
         elif candidate.is_file():
             digest.update(b"file\0")
             with candidate.open("rb") as handle:
                 for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    total_bytes += len(chunk)
+                    if total_bytes > _FINGERPRINT_MAX_BYTES:
+                        raise EvaluationError(
+                            "source fingerprint exceeded its content-byte limit"
+                        )
+                    if time.monotonic() - started > _FINGERPRINT_TIMEOUT_SECONDS:
+                        raise EvaluationError(
+                            "source fingerprint exceeded its time budget"
+                        )
                     digest.update(chunk)
         else:
             digest.update(b"other\0")
@@ -501,10 +685,14 @@ def _parse_changed_files(workspace: Path) -> list[dict[str, Any]]:
         code = entry[:2].decode("ascii", errors="strict")
         path = entry[3:].decode("utf-8", errors="backslashreplace")
         status = code[0] if code[0] != " " else code[1]
-        if status in {"R", "C"} and index < len(entries) and entries[index]:
-            path = entries[index].decode("utf-8", errors="backslashreplace")
+        if status in {"R", "C"}:
+            if index >= len(entries) or not entries[index]:
+                raise EvaluationError("git status rename/copy record is incomplete")
+            # Porcelain v1 -z emits destination/current path first, source path second.
             index += 1
         changed.append({"path": path, "change": mapping.get(status)})
+        if len(changed) > _MAX_CHANGED_FILES:
+            raise EvaluationError("changed_files exceeded the artifact limit")
     return sorted(changed, key=lambda item: item["path"])
 
 
@@ -515,10 +703,10 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
         return
     try:
         process.wait(timeout=2)
-        return
     except subprocess.TimeoutExpired:
         pass
     try:
+        # Always sweep the process group after TERM, even if its leader exited.
         os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
         return
@@ -526,38 +714,143 @@ def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
 
 
 def _bounded_bytes(path: Path, limit: int) -> tuple[bytes, bool]:
-    size = path.stat().st_size
     with path.open("rb") as handle:
-        return handle.read(limit), size > limit
+        content = handle.read(limit + 1)
+    return content[:limit], len(content) > limit
+
+
+def _redacted_bounded_bytes(
+    path: Path, limit: int, redactions: Sequence[bytes]
+) -> tuple[bytes, bool]:
+    extra = max((len(item) for item in redactions), default=0)
+    with path.open("rb") as handle:
+        content = handle.read(limit + extra + 1)
+    source_truncated = len(content) > limit
+    for value in sorted((item for item in redactions if item), key=len, reverse=True):
+        content = content.replace(value, b"<redacted>")
+    return content[:limit], source_truncated or len(content) > limit
 
 
 def _write_command_log(
-    output_path: Path, stdout_path: Path, stderr_path: Path, limit: int
+    output_path: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+    limit: int,
+    *,
+    redactions: Sequence[bytes] = (),
 ) -> bool:
     header_stdout = b"=== stdout ===\n"
     header_stderr = b"\n=== stderr ===\n"
     budget = max(0, limit - len(header_stdout) - len(header_stderr))
     stdout_budget = budget // 2
     stderr_budget = budget - stdout_budget
-    stdout, stdout_truncated = _bounded_bytes(stdout_path, stdout_budget)
-    stderr, stderr_truncated = _bounded_bytes(stderr_path, stderr_budget)
+    stdout, stdout_truncated = _redacted_bounded_bytes(
+        stdout_path, stdout_budget, redactions
+    )
+    stderr, stderr_truncated = _redacted_bounded_bytes(
+        stderr_path, stderr_budget, redactions
+    )
     payload = header_stdout + stdout + header_stderr + stderr
     output_path.write_bytes(payload[:limit])
     return stdout_truncated or stderr_truncated or len(payload) > limit
 
 
+def _sandbox_command_argv(
+    spec: CommandSpec,
+    *,
+    sandbox_binary: Path,
+    workspace: Path,
+    sandbox_home: Path,
+    sandbox_tmp: Path,
+) -> list[str]:
+    sandbox_cwd = PurePosixPath("/workspace") / PurePosixPath(spec.cwd)
+    argv = [
+        str(sandbox_binary),
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--unshare-cgroup-try",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--ro-bind-try",
+        "/bin",
+        "/bin",
+        "--ro-bind-try",
+        "/lib",
+        "/lib",
+        "--ro-bind-try",
+        "/lib64",
+        "/lib64",
+        "--dir",
+        "/etc",
+        "--ro-bind-try",
+        "/etc/passwd",
+        "/etc/passwd",
+        "--ro-bind-try",
+        "/etc/group",
+        "/etc/group",
+        "--ro-bind-try",
+        "/etc/nsswitch.conf",
+        "/etc/nsswitch.conf",
+        "--ro-bind-try",
+        "/etc/hosts",
+        "/etc/hosts",
+        "--ro-bind-try",
+        "/etc/resolv.conf",
+        "/etc/resolv.conf",
+        "--ro-bind-try",
+        "/etc/ssl",
+        "/etc/ssl",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--dir",
+        "/home",
+        "--bind",
+        str(sandbox_home),
+        "/home/sidecar",
+        "--bind",
+        str(sandbox_tmp),
+        "/tmp",
+        "--bind",
+        str(workspace),
+        "/workspace",
+        "--chdir",
+        str(sandbox_cwd),
+        "--clearenv",
+    ]
+    for key, value in _sanitized_environment(sandbox_home, sandbox_tmp).items():
+        argv.extend(
+            (
+                "--setenv",
+                key,
+                value.replace(str(sandbox_home), "/home/sidecar").replace(
+                    str(sandbox_tmp), "/tmp"
+                ),
+            )
+        )
+    argv.extend(spec.argv)
+    return argv
+
+
 def _run_command(
     spec: CommandSpec,
     *,
+    sandbox_binary: Path,
     workspace: Path,
+    sandbox_home: Path,
+    sandbox_tmp: Path,
     timeout_seconds: float,
-    env: Mapping[str, str],
     log_path: Path,
     max_log_bytes: int,
 ) -> dict[str, Any]:
     command_cwd = (workspace / spec.cwd).resolve()
     if command_cwd != workspace and workspace not in command_cwd.parents:
-        raise EvaluationError(f"command cwd escaped isolated worktree: {spec.cwd}")
+        raise EvaluationError(f"command cwd escaped isolated repository: {spec.cwd}")
     if not command_cwd.is_dir():
         raise EvaluationError(f"command cwd is not a directory: {spec.cwd}")
 
@@ -572,9 +865,15 @@ def _run_command(
             stderr_path.open("wb") as stderr_handle,
         ):
             process = subprocess.Popen(
-                list(spec.argv),
-                cwd=command_cwd,
-                env=dict(env),
+                _sandbox_command_argv(
+                    spec,
+                    sandbox_binary=sandbox_binary,
+                    workspace=workspace,
+                    sandbox_home=sandbox_home,
+                    sandbox_tmp=sandbox_tmp,
+                ),
+                cwd=workspace,
+                env=_sanitized_environment(sandbox_home, sandbox_tmp),
                 stdin=subprocess.DEVNULL,
                 stdout=stdout_handle,
                 stderr=stderr_handle,
@@ -589,12 +888,18 @@ def _run_command(
                 _terminate_process_group(process)
                 returncode = None
         truncated = _write_command_log(
-            log_path, stdout_path, stderr_path, max_log_bytes
+            log_path,
+            stdout_path,
+            stderr_path,
+            max_log_bytes,
+            redactions=tuple(
+                spec.argv[index].encode("utf-8") for index in spec.redact_argv_indexes
+            ),
         )
     duration_ms = max(0, round((time.monotonic() - started) * 1000))
     status = "timeout" if timed_out else ("passed" if returncode == 0 else "failed")
     return {
-        "command": shlex.join(spec.argv),
+        "command": _display_command(spec),
         "status": status,
         "exit_code": returncode,
         "started_at": started_at.isoformat().replace("+00:00", "Z"),
@@ -602,6 +907,51 @@ def _run_command(
         "log_ref": log_path.name,
         "truncated": truncated,
     }
+
+
+def _skipped_command_record(spec: CommandSpec) -> dict[str, Any]:
+    return {
+        "command": _display_command(spec),
+        "status": "skipped",
+        "exit_code": None,
+        "started_at": None,
+        "duration_ms": 0,
+        "log_ref": None,
+        "truncated": False,
+    }
+
+
+def _run_declared_commands(setup: EvaluationSetup, state: EvaluationState) -> None:
+    deadline = time.monotonic() + setup.request.global_timeout_seconds
+    commands = setup.request.commands
+    if commands:
+        setup.log_directory.parent.mkdir(parents=True, exist_ok=True)
+        setup.log_directory.mkdir()
+    for offset, spec in enumerate(commands):
+        index = offset + 1
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            state.command_records.extend(
+                _skipped_command_record(item) for item in commands[offset:]
+            )
+            break
+        record = _run_command(
+            spec,
+            sandbox_binary=setup.sandbox_binary,
+            workspace=setup.workspace,
+            sandbox_home=setup.sandbox_home,
+            sandbox_tmp=setup.sandbox_tmp,
+            timeout_seconds=min(float(spec.timeout_seconds), remaining),
+            log_path=setup.log_directory / f"command-{index:03d}.log",
+            max_log_bytes=setup.request.max_log_bytes,
+        )
+        record["log_ref"] = f"{setup.log_directory.name}/{record['log_ref']}"
+        state.command_records.append(record)
+        if setup.request.fail_fast and record["status"] != "passed":
+            state.command_records.extend(
+                _skipped_command_record(item) for item in commands[offset + 1 :]
+            )
+            break
 
 
 def _rollup_status(
@@ -644,7 +994,15 @@ def _atomic_write_json(path: Path, value: Mapping[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
             temporary = Path(handle.name)
-        os.replace(temporary, path)
+        # Hard-link publication is atomic and refuses an output path that appeared
+        # after preflight; unlike os.replace(), it never overwrites foreign data.
+        os.link(temporary, path)
+        temporary.unlink()
+        directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
@@ -656,6 +1014,8 @@ def _prepare_evaluation(
     workspace_root: str | Path | None,
 ) -> EvaluationSetup:
     request = load_request(request_path)
+    _configured_filter_drivers.cache_clear()
+    sandbox_binary = _sandbox_binary()
     canonical_repository = Path(
         _git_text(request.repository, "rev-parse", "--show-toplevel")
     ).resolve()
@@ -681,22 +1041,32 @@ def _prepare_evaluation(
     if source_head != exact_base:
         source_branch = None
     workspace_id = uuid.uuid4().hex
+    workspace = requested_workspace_root / f"{workspace_id}-repository"
+    runtime_root = requested_workspace_root / f"{workspace_id}-runtime"
     log_directory = output.parent / f"{output.stem}.logs"
-    if log_directory.exists():
-        raise RequestError(f"log directory already exists: {log_directory}")
-    requested_workspace_root.mkdir(parents=True, exist_ok=True)
-    log_directory.mkdir(parents=True)
+    for candidate, label in (
+        (workspace, "workspace"),
+        (runtime_root, "runtime directory"),
+        (log_directory, "log directory"),
+    ):
+        if candidate.exists():
+            raise RequestError(f"{label} already exists: {candidate}")
     return EvaluationSetup(
         request=request,
         output=output,
         workspace_root=requested_workspace_root,
         workspace_id=workspace_id,
-        workspace=requested_workspace_root / workspace_id,
+        workspace=workspace,
         log_directory=log_directory,
         source_head_before=source_head,
         source_fingerprint_before=source_fingerprint,
         source_branch=source_branch,
         exact_base=exact_base,
+        sandbox_binary=sandbox_binary,
+        runtime_root=runtime_root,
+        sandbox_home=runtime_root / "home",
+        sandbox_tmp=runtime_root / "tmp",
+        git_scratch=runtime_root / "git-scratch",
     )
 
 
@@ -705,30 +1075,138 @@ def _mark_infrastructure_error(state: EvaluationState, detail: str) -> None:
     state.error_detail = state.error_detail or detail
 
 
-def _create_isolated_worktree(setup: EvaluationSetup, state: EvaluationState) -> None:
-    # Mark the attempt before Git so transport failure still enters exact-path cleanup.
+def _write_pack_snapshot(setup: EvaluationSetup) -> Path:
+    pack_path = setup.runtime_root / "objects.pack"
+    env = _sanitized_environment(setup.git_scratch / "home", setup.git_scratch / "tmp")
+    tree = _git_text(
+        setup.request.repository, "rev-parse", f"{setup.exact_base}^{{tree}}"
+    )
+    object_result = _run_bytes(
+        _git_argv(
+            setup.request.repository,
+            "rev-list",
+            "--objects",
+            "--no-object-names",
+            tree,
+        ),
+        cwd=setup.request.repository,
+        timeout=120,
+        env=env,
+    )
+    object_ids = [item for item in object_result.stdout.splitlines() if item]
+    if len(object_ids) > _MAX_REPOSITORY_OBJECTS:
+        raise EvaluationError("repository snapshot exceeded the object-count limit")
+    object_ids.append(setup.exact_base.encode("ascii"))
+    with pack_path.open("wb") as output:
+        completed = subprocess.run(
+            _git_argv(setup.request.repository, "pack-objects", "--stdout"),
+            cwd=setup.request.repository,
+            env=env,
+            input=b"\n".join(object_ids) + b"\n",
+            stdout=output,
+            stderr=subprocess.PIPE,
+            timeout=120,
+            check=False,
+            shell=False,
+            start_new_session=True,
+        )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise EvaluationError(f"Git object snapshot failed: {detail}")
+    if not pack_path.is_file() or pack_path.stat().st_size == 0:
+        raise EvaluationError("Git object snapshot is empty")
+    if pack_path.stat().st_size > _MAX_REPOSITORY_PACK_BYTES:
+        raise EvaluationError("repository snapshot exceeded the pack-byte limit")
+    return pack_path
+
+
+def _import_pack_snapshot(setup: EvaluationSetup, pack_path: Path) -> None:
+    env = _sanitized_environment(setup.git_scratch / "home", setup.git_scratch / "tmp")
+    with pack_path.open("rb") as source:
+        completed = subprocess.run(
+            _git_argv(setup.workspace, "index-pack", "--stdin"),
+            cwd=setup.workspace,
+            env=env,
+            stdin=source,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=120,
+            check=False,
+            shell=False,
+            start_new_session=True,
+        )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise EvaluationError(f"Git object import failed: {detail}")
+
+
+def _verify_independent_repository(setup: EvaluationSetup) -> bool:
+    source_common = Path(
+        _git_text(
+            setup.request.repository,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        )
+    ).resolve()
+    workspace_common = Path(
+        _git_text(
+            setup.workspace,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        )
+    ).resolve()
+    workspace_git = Path(
+        _git_text(
+            setup.workspace,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-dir",
+        )
+    ).resolve()
+    alternates = workspace_common / "objects" / "info" / "alternates"
+    object_files = [
+        candidate
+        for candidate in (workspace_common / "objects").rglob("*")
+        if candidate.is_file()
+    ]
+    return (
+        workspace_common == workspace_git
+        and workspace_common == (setup.workspace / ".git").resolve()
+        and workspace_common != source_common
+        and not alternates.exists()
+        and bool(object_files)
+        and all(candidate.stat().st_nlink == 1 for candidate in object_files)
+        and _git_text(setup.workspace, "rev-parse", "HEAD") == setup.exact_base
+    )
+
+
+def _create_isolated_repository(setup: EvaluationSetup, state: EvaluationState) -> None:
     state.workspace_created = True
-    result = _git(
-        setup.request.repository,
-        "worktree",
-        "add",
+    setup.workspace.mkdir()
+    init_result = _git(setup.workspace, "init", "--quiet", check=False)
+    if init_result.returncode != 0:
+        detail = init_result.stderr.decode("utf-8", errors="replace").strip()
+        raise EvaluationError(f"independent repository initialization failed: {detail}")
+    pack_path = _write_pack_snapshot(setup)
+    _import_pack_snapshot(setup, pack_path)
+    checkout_result = _git(
+        setup.workspace,
+        "checkout",
         "--detach",
-        str(setup.workspace),
+        "--force",
+        "--quiet",
         setup.exact_base,
         timeout=120,
         check=False,
     )
-    if result.returncode != 0:
-        detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise EvaluationError(f"disposable worktree creation failed: {detail}")
-    workspace_head = _git_text(setup.workspace, "rev-parse", "HEAD")
-    state.isolated = (
-        (setup.workspace / ".git").is_file()
-        and workspace_head == setup.exact_base
-        and setup.workspace != setup.request.repository
-    )
+    if checkout_result.returncode != 0:
+        detail = checkout_result.stderr.decode("utf-8", errors="replace").strip()
+        raise EvaluationError(f"independent repository checkout failed: {detail}")
+    state.isolated = _verify_independent_repository(setup)
     if not state.isolated:
-        raise EvaluationError("disposable worktree isolation could not be proven")
+        raise EvaluationError("independent repository isolation could not be proven")
 
 
 def _apply_patch(setup: EvaluationSetup, state: EvaluationState) -> None:
@@ -758,82 +1236,53 @@ def _apply_patch(setup: EvaluationSetup, state: EvaluationState) -> None:
     state.changed_files = _parse_changed_files(setup.workspace)
 
 
-def _skipped_command_record(spec: CommandSpec) -> dict[str, Any]:
-    return {
-        "command": shlex.join(spec.argv),
-        "status": "skipped",
-        "exit_code": None,
-        "started_at": None,
-        "duration_ms": 0,
-        "log_ref": None,
-        "truncated": False,
-    }
-
-
-def _run_declared_commands(setup: EvaluationSetup, state: EvaluationState) -> None:
-    env = _sanitized_environment(
-        setup.workspace / ".sidecar-home", setup.workspace / ".sidecar-tmp"
-    )
-    deadline = time.monotonic() + setup.request.global_timeout_seconds
-    for index, spec in enumerate(setup.request.commands, start=1):
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            state.command_records.append(_skipped_command_record(spec))
-            continue
-        record = _run_command(
-            spec,
-            workspace=setup.workspace,
-            timeout_seconds=min(float(spec.timeout_seconds), remaining),
-            env=env,
-            log_path=setup.log_directory / f"command-{index:03d}.log",
-            max_log_bytes=setup.request.max_log_bytes,
-        )
-        record["log_ref"] = f"{setup.log_directory.name}/{record['log_ref']}"
-        state.command_records.append(record)
-
-
 def _perform_evaluation(setup: EvaluationSetup, state: EvaluationState) -> None:
+    setup.workspace_root.mkdir(parents=True, exist_ok=True)
+    setup.runtime_root.mkdir()
+    setup.sandbox_home.mkdir()
+    setup.sandbox_tmp.mkdir()
+    setup.git_scratch.mkdir()
     state.patch_snapshot, state.patch_sha256 = _snapshot_patch(
-        setup.request.patch_path, setup.workspace_root
+        setup.request.patch_path, setup.runtime_root
     )
-    _create_isolated_worktree(setup, state)
+    _create_isolated_repository(setup, state)
     _apply_patch(setup, state)
     _run_declared_commands(setup, state)
 
 
 def _cleanup_workspace(setup: EvaluationSetup, state: EvaluationState) -> None:
-    if not state.workspace_created:
-        state.workspace_cleaned = not setup.workspace.exists()
-        return
     try:
-        _git(
-            setup.request.repository,
-            "worktree",
-            "remove",
-            "--force",
-            str(setup.workspace),
-            timeout=120,
-            check=False,
-        )
-        # Never prune globally: cleanup and readback are restricted to this workspace.
-        listed_result = _git(
-            setup.request.repository, "worktree", "list", "--porcelain", check=False
-        )
-        listed = listed_result.stdout.decode("utf-8", errors="replace")
-        state.workspace_cleaned = (
-            listed_result.returncode == 0
-            and not setup.workspace.exists()
-            and str(setup.workspace) not in listed
-        )
-    except (EvaluationError, OSError, subprocess.SubprocessError) as exc:
+        if setup.workspace.exists():
+            shutil.rmtree(setup.workspace)
+        state.workspace_cleaned = not setup.workspace.exists()
+    except OSError as exc:
         state.workspace_cleaned = False
         state.error_detail = state.error_detail or (
-            f"disposable worktree cleanup readback failed: {exc}"
+            f"independent repository cleanup readback failed: {exc}"
         )
     if not state.workspace_cleaned:
         _mark_infrastructure_error(
-            state, "disposable worktree cleanup could not be proven"
+            state, "independent repository cleanup could not be proven"
         )
+
+
+def _cleanup_runtime(setup: EvaluationSetup, state: EvaluationState) -> None:
+    try:
+        if setup.runtime_root.exists():
+            shutil.rmtree(setup.runtime_root)
+    except OSError as exc:
+        state.error_detail = state.error_detail or f"runtime cleanup failed: {exc}"
+    if setup.runtime_root.exists():
+        _mark_infrastructure_error(state, "runtime cleanup could not be proven")
+
+
+def _cleanup_empty_logs(setup: EvaluationSetup) -> None:
+    try:
+        if setup.log_directory.is_dir() and not any(setup.log_directory.iterdir()):
+            setup.log_directory.rmdir()
+    except OSError:
+        # Non-empty or unreadable diagnostic logs are retained rather than hidden.
+        return
 
 
 def _cleanup_patch_snapshot(state: EvaluationState) -> None:
@@ -851,6 +1300,7 @@ def _cleanup_patch_snapshot(state: EvaluationState) -> None:
 
 def _verify_source_unchanged(setup: EvaluationSetup, state: EvaluationState) -> None:
     try:
+        _configured_filter_drivers.cache_clear()
         source_head, source_fingerprint, _ = _source_snapshot(setup.request.repository)
         state.source_unchanged = (
             source_head == setup.source_head_before
@@ -868,18 +1318,31 @@ def _verify_source_unchanged(setup: EvaluationSetup, state: EvaluationState) -> 
 def _cleanup_evaluation(setup: EvaluationSetup, state: EvaluationState) -> None:
     _cleanup_workspace(setup, state)
     _cleanup_patch_snapshot(state)
+    _cleanup_runtime(setup, state)
+    _cleanup_empty_logs(setup)
     _verify_source_unchanged(setup, state)
 
 
 def _git_version(repository: Path) -> str:
     try:
-        return (
-            _run_bytes(("git", "--version"), cwd=repository, check=False)
-            .stdout.decode("utf-8", errors="replace")
-            .strip()
-        )
+        with tempfile.TemporaryDirectory(
+            prefix="repoground-patch-evaluation-version-"
+        ) as temporary:
+            scratch = Path(temporary)
+            completed = _run_bytes(
+                (str(_git_binary()), "--version"),
+                cwd=repository,
+                check=False,
+                env=_sanitized_environment(scratch / "home", scratch / "tmp"),
+            )
+        version = completed.stdout.decode("utf-8", errors="replace").strip()
+        return f"{version} ({_git_binary()})"
     except OSError:
         return "unknown"
+
+
+def _producer_digest() -> str:
+    return "sha256:" + hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
 def _build_artifact(setup: EvaluationSetup, state: EvaluationState) -> dict[str, Any]:
@@ -895,7 +1358,7 @@ def _build_artifact(setup: EvaluationSetup, state: EvaluationState) -> dict[str,
         "producer": {
             "name": PRODUCER_NAME,
             "version": PRODUCER_VERSION,
-            "commit": None,
+            "commit": _producer_digest(),
             "url": None,
         },
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -922,7 +1385,7 @@ def _build_artifact(setup: EvaluationSetup, state: EvaluationState) -> dict[str,
         },
         "command_policy": {
             "allowed_commands": [
-                shlex.join(command.argv) for command in setup.request.commands
+                _display_command(command) for command in setup.request.commands
             ],
             "network": "unknown",
             "secrets_policy": "unknown",
@@ -931,8 +1394,8 @@ def _build_artifact(setup: EvaluationSetup, state: EvaluationState) -> dict[str,
         "commands_run": state.command_records,
         "environment": {
             "os": platform.platform(),
-            "runner": "local-disposable-git-worktree",
-            "container": None,
+            "runner": "local-independent-git-repository",
+            "container": "bubblewrap-fs-pid-sandbox",
             "tool_versions": {
                 "python": platform.python_version(),
                 "git": _git_version(setup.request.repository),
@@ -980,7 +1443,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--workspace-root",
-        help="Optional disposable-worktree parent outside the source repository",
+        help="Optional independent-repository parent outside the source repository",
     )
     return parser
 

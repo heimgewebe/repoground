@@ -5,6 +5,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -166,7 +167,7 @@ def test_path_traversal_and_unknown_request_fields_fail_closed(tmp_path: Path) -
     )
     request_path = tmp_path / "traversal.json"
     request_path.write_text(json.dumps(traversal), encoding="utf-8")
-    with pytest.raises(sidecar.RequestError, match="inside the isolated worktree"):
+    with pytest.raises(sidecar.RequestError, match="inside the isolated repository"):
         sidecar.load_request(request_path)
     unknown = _request(repo, patch, [])
     unknown["approve"] = True
@@ -242,7 +243,7 @@ def test_logs_are_bounded_and_marked_truncated(tmp_path: Path) -> None:
     assert log_path.stat().st_size <= 512
 
 
-def test_timeout_is_bounded_and_reported_without_leaving_worktree(
+def test_timeout_is_bounded_and_reported_without_leaving_repository(
     tmp_path: Path,
 ) -> None:
     repo = _repo(tmp_path)
@@ -350,17 +351,16 @@ def test_patch_snapshot_binds_hash_and_applied_bytes(
     original_bytes = patch.read_bytes()
     replacement = _patch(repo, tmp_path, "replacement\n").read_bytes()
     patch.write_bytes(original_bytes)
-    original_git = sidecar._git
+    original_create = sidecar._create_isolated_repository
     mutated = False
 
-    def mutating_git(repository: Path, *args: str, **kwargs: object):
+    def mutating_create(setup: object, state: object) -> None:
         nonlocal mutated
-        if not mutated and args[:2] == ("worktree", "add"):
-            patch.write_bytes(replacement)
-            mutated = True
-        return original_git(repository, *args, **kwargs)
+        patch.write_bytes(replacement)
+        mutated = True
+        original_create(setup, state)
 
-    monkeypatch.setattr(sidecar, "_git", mutating_git)
+    monkeypatch.setattr(sidecar, "_create_isolated_repository", mutating_create)
     _, artifact = _evaluate(
         tmp_path,
         _request(
@@ -429,10 +429,14 @@ def test_allowlisted_environment_does_not_inherit_secret_variables(
     assert artifact["command_policy"]["secrets_policy"] == "unknown"
 
 
-def test_dirty_source_content_change_is_detected_fail_closed(tmp_path: Path) -> None:
+def test_source_checkout_is_not_visible_to_declared_commands(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
+    (repo / ".gitignore").write_text("source-only.txt\n", encoding="utf-8")
+    _run("git", "add", ".gitignore", cwd=repo)
+    _run("git", "commit", "-qm", "ignore source-only file", cwd=repo)
     patch = _patch(repo, tmp_path)
-    (repo / "source-only.txt").write_text("before command\n", encoding="utf-8")
+    source_only = repo / "source-only.txt"
+    source_only.write_text("before command\n", encoding="utf-8")
     request = _request(
         repo,
         patch,
@@ -441,7 +445,7 @@ def test_dirty_source_content_change_is_detected_fail_closed(tmp_path: Path) -> 
                 "argv": [
                     sys.executable,
                     "-c",
-                    f"from pathlib import Path; Path({str(repo / 'source-only.txt')!r}).write_text('tampered\\n')",
+                    f"from pathlib import Path; Path({str(source_only)!r}).write_text('tampered\\n')",
                 ],
                 "cwd": ".",
                 "timeout_seconds": 10,
@@ -449,8 +453,9 @@ def test_dirty_source_content_change_is_detected_fail_closed(tmp_path: Path) -> 
         ],
     )
     result, artifact = _evaluate(tmp_path, request)
-    assert result["source_unchanged"] is False
-    assert artifact["status"] == "error"
+    assert result["source_unchanged"] is True
+    assert source_only.read_text(encoding="utf-8") == "before command\n"
+    assert artifact["status"] == "failed"
     assert validate_patch_evaluation(artifact)["status"] == "pass"
 
 
@@ -501,3 +506,417 @@ def test_all_mandatory_non_claims_are_always_emitted(tmp_path: Path) -> None:
     assert set(sidecar.MANDATORY_NON_CLAIMS).issubset(artifact["does_not_establish"])
     assert artifact["status"] == "incomplete"
     assert validate_patch_evaluation(artifact)["status"] == "pass"
+
+
+def test_declared_git_config_mutates_only_independent_repository(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    _, artifact = _evaluate(
+        tmp_path,
+        _request(
+            repo,
+            patch,
+            [
+                {
+                    "argv": ["git", "config", "sidecar.pwned", "yes"],
+                    "cwd": ".",
+                    "timeout_seconds": 10,
+                }
+            ],
+        ),
+    )
+    source_value = subprocess.run(
+        ["git", "config", "--get", "sidecar.pwned"],
+        cwd=repo,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert artifact["status"] == "passed"
+    assert artifact["workspace"]["isolated"] is True
+    assert source_value.returncode == 1
+
+
+def test_declared_git_ref_mutation_does_not_reach_source(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    _, artifact = _evaluate(
+        tmp_path,
+        _request(
+            repo,
+            patch,
+            [
+                {
+                    "argv": ["git", "tag", "sidecar-only"],
+                    "cwd": ".",
+                    "timeout_seconds": 10,
+                }
+            ],
+        ),
+    )
+    tags = _run("git", "tag", "--list", "sidecar-only", cwd=repo).stdout
+    assert artifact["status"] == "passed"
+    assert tags == ""
+
+
+def test_repository_smudge_filter_is_not_executed_by_sidecar(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    marker = tmp_path / "filter-ran"
+    filter_script = tmp_path / "filter.py"
+    filter_script.write_text(
+        "import pathlib, sys\n"
+        f"pathlib.Path({str(marker)!r}).touch()\n"
+        "sys.stdout.buffer.write(sys.stdin.buffer.read())\n",
+        encoding="utf-8",
+    )
+    _run(
+        "git",
+        "config",
+        "filter.sidecar-test.smudge",
+        f"{sys.executable} {filter_script}",
+        cwd=repo,
+    )
+    _run("git", "config", "filter.sidecar-test.clean", "cat", cwd=repo)
+    (repo / ".gitattributes").write_text(
+        "message.txt filter=sidecar-test\n", encoding="utf-8"
+    )
+    _run("git", "add", ".gitattributes", cwd=repo)
+    _run("git", "commit", "-qm", "attributes", cwd=repo)
+    patch = _patch(repo, tmp_path)
+    marker.unlink(missing_ok=True)
+
+    _, artifact = _evaluate(tmp_path, _request(repo, patch, []))
+
+    assert artifact["status"] == "incomplete"
+    assert not marker.exists()
+
+
+def test_successful_command_cannot_leave_background_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    observed_after_delay = False
+    original_cleanup = sidecar._cleanup_workspace
+
+    def delayed_cleanup(setup: object, state: object) -> None:
+        nonlocal observed_after_delay
+        time.sleep(1.3)
+        observed_after_delay = (setup.workspace / "late-marker").exists()
+        original_cleanup(setup, state)
+
+    monkeypatch.setattr(sidecar, "_cleanup_workspace", delayed_cleanup)
+    child = (
+        "import time; from pathlib import Path; "
+        "time.sleep(0.7); Path('late-marker').write_text('survived')"
+    )
+    parent = (
+        "import subprocess, sys; "
+        f"subprocess.Popen([sys.executable, '-c', {child!r}], "
+        "stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, "
+        "stderr=subprocess.DEVNULL, start_new_session=True)"
+    )
+    _, artifact = _evaluate(
+        tmp_path,
+        _request(
+            repo,
+            patch,
+            [
+                {
+                    "argv": [sys.executable, "-c", parent],
+                    "cwd": ".",
+                    "timeout_seconds": 10,
+                }
+            ],
+        ),
+    )
+    assert artifact["status"] == "passed"
+    assert observed_after_delay is False
+
+
+def test_rename_reports_destination_path(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _run("git", "mv", "message.txt", "renamed.txt", cwd=repo)
+    assert sidecar._parse_changed_files(repo) == [
+        {"path": "renamed.txt", "change": "renamed"}
+    ]
+
+
+def test_fail_fast_marks_remaining_commands_skipped(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    request = _request(
+        repo,
+        patch,
+        [
+            {
+                "argv": [sys.executable, "-c", "raise SystemExit(3)"],
+                "cwd": ".",
+                "timeout_seconds": 10,
+            },
+            {
+                "argv": [sys.executable, "-c", "raise SystemExit(0)"],
+                "cwd": ".",
+                "timeout_seconds": 10,
+            },
+        ],
+    )
+    request["fail_fast"] = True
+    _, artifact = _evaluate(tmp_path, request)
+    assert [item["status"] for item in artifact["commands_run"]] == [
+        "failed",
+        "skipped",
+    ]
+    assert artifact["status"] == "incomplete"
+
+
+def test_sensitive_argv_is_redacted_from_artifact(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    secret = "artifact-must-not-contain-this"
+    command = {
+        "argv": [sys.executable, "-c", "import sys; print(sys.argv[1])", secret],
+        "cwd": ".",
+        "timeout_seconds": 10,
+        "redact_argv_indexes": [3],
+    }
+    _, artifact = _evaluate(tmp_path, _request(repo, patch, [command]))
+    serialized = json.dumps(artifact)
+    assert artifact["status"] == "passed"
+    assert secret not in serialized
+    assert "<redacted>" in artifact["commands_run"][0]["command"]
+    log_path = tmp_path / "out" / artifact["commands_run"][0]["log_ref"]
+    assert secret not in log_path.read_text(encoding="utf-8")
+    assert "<redacted>" in log_path.read_text(encoding="utf-8")
+
+
+def test_empty_command_set_leaves_no_log_directory(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    _, artifact = _evaluate(tmp_path, _request(repo, patch, []))
+    assert artifact["status"] == "incomplete"
+    assert not (tmp_path / "out" / "evaluation.logs").exists()
+
+
+def test_repository_clean_filter_is_not_executed_by_source_preflight(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    (repo / ".gitattributes").write_text(
+        "message.txt filter=sidecar-clean\n", encoding="utf-8"
+    )
+    _run("git", "add", ".gitattributes", cwd=repo)
+    _run("git", "commit", "-qm", "attributes", cwd=repo)
+    patch = _patch(repo, tmp_path)
+    marker = tmp_path / "clean-filter-ran"
+    script = tmp_path / "clean-filter.py"
+    script.write_text(
+        "import pathlib, sys\n"
+        f"pathlib.Path({str(marker)!r}).touch()\n"
+        "sys.stdout.buffer.write(sys.stdin.buffer.read())\n",
+        encoding="utf-8",
+    )
+    _run(
+        "git",
+        "config",
+        "filter.sidecar-clean.clean",
+        f"{sys.executable} {script}",
+        cwd=repo,
+    )
+    _run("git", "config", "filter.sidecar-clean.smudge", "cat", cwd=repo)
+
+    _, artifact = _evaluate(tmp_path, _request(repo, patch, []))
+
+    assert artifact["status"] == "incomplete"
+    assert not marker.exists()
+
+
+def test_repository_process_filter_is_not_executed_by_source_preflight(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    (repo / ".gitattributes").write_text(
+        "message.txt filter=sidecar-process\n", encoding="utf-8"
+    )
+    _run("git", "add", ".gitattributes", cwd=repo)
+    _run("git", "commit", "-qm", "attributes", cwd=repo)
+    patch = _patch(repo, tmp_path)
+    marker = tmp_path / "process-filter-ran"
+    script = tmp_path / "process-filter.py"
+    script.write_text(
+        f"import pathlib\npathlib.Path({str(marker)!r}).touch()\nraise SystemExit(1)\n",
+        encoding="utf-8",
+    )
+    _run(
+        "git",
+        "config",
+        "filter.sidecar-process.process",
+        f"{sys.executable} {script}",
+        cwd=repo,
+    )
+    _run("git", "config", "filter.sidecar-process.required", "true", cwd=repo)
+
+    _, artifact = _evaluate(tmp_path, _request(repo, patch, []))
+
+    assert artifact["status"] == "incomplete"
+    assert not marker.exists()
+
+
+def test_cleanup_failure_forces_error_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    original_rmtree = sidecar.shutil.rmtree
+
+    def selective_rmtree(path: Path) -> None:
+        if str(path).endswith("-repository"):
+            return
+        original_rmtree(path)
+
+    monkeypatch.setattr(sidecar.shutil, "rmtree", selective_rmtree)
+    result, artifact = _evaluate(
+        tmp_path,
+        _request(
+            repo,
+            patch,
+            [
+                {
+                    "argv": [sys.executable, "-c", "raise SystemExit(0)"],
+                    "cwd": ".",
+                    "timeout_seconds": 10,
+                }
+            ],
+        ),
+    )
+    assert result["workspace_cleaned"] is False
+    assert artifact["status"] == "error"
+    for candidate in (tmp_path / "workspaces").glob("*-repository"):
+        original_rmtree(candidate)
+
+
+def test_partial_repository_creation_is_cleaned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+
+    def fail_import(setup: object, pack_path: Path) -> None:
+        raise sidecar.EvaluationError("forced object import failure")
+
+    monkeypatch.setattr(sidecar, "_import_pack_snapshot", fail_import)
+    result, artifact = _evaluate(tmp_path, _request(repo, patch, []))
+    assert artifact["status"] == "error"
+    assert result["workspace_cleaned"] is True
+    assert not any((tmp_path / "workspaces").iterdir())
+
+
+def test_parent_path_cannot_replace_internal_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    marker = tmp_path / "fake-git-ran"
+    fake_git = fake_bin / "git"
+    fake_git.write_text(
+        f"#!/bin/sh\n/usr/bin/touch {marker}\nexit 91\n", encoding="utf-8"
+    )
+    fake_git.chmod(0o755)
+    request = _request(repo, patch, [])
+    monkeypatch.setenv("PATH", f"{fake_bin}:")
+
+    _, artifact = _evaluate(tmp_path, request)
+
+    assert artifact["status"] == "incomplete"
+    assert not marker.exists()
+    assert "/usr/bin/git" in artifact["environment"]["tool_versions"]["git"]
+
+
+def test_request_and_patch_size_limits_fail_before_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(_request(repo, patch, [])), encoding="utf-8")
+    monkeypatch.setattr(sidecar, "_MAX_REQUEST_BYTES", 8)
+    with pytest.raises(sidecar.RequestError, match="request exceeds"):
+        sidecar.load_request(request_path)
+
+    monkeypatch.setattr(sidecar, "_MAX_REQUEST_BYTES", 1_000_000)
+    monkeypatch.setattr(sidecar, "_MAX_PATCH_BYTES", 1)
+    with pytest.raises(sidecar.RequestError, match="patch_path exceeds"):
+        sidecar.load_request(request_path)
+
+
+def test_atomic_artifact_publication_never_overwrites_existing_path(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "artifact.json"
+    output.write_text("foreign\n", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        sidecar._atomic_write_json(output, {"status": "passed"})
+    assert output.read_text(encoding="utf-8") == "foreign\n"
+    assert not list(tmp_path.glob(".artifact.json.*.tmp"))
+
+
+def test_log_directory_collision_fails_without_using_foreign_path(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    request_path = tmp_path / "request.json"
+    output = tmp_path / "out" / "evaluation.json"
+    workspace_root = tmp_path / "workspaces"
+    request_path.write_text(
+        json.dumps(
+            _request(
+                repo,
+                patch,
+                [
+                    {
+                        "argv": [sys.executable, "-c", "raise SystemExit(0)"],
+                        "cwd": ".",
+                        "timeout_seconds": 10,
+                    }
+                ],
+            )
+        ),
+        encoding="utf-8",
+    )
+    foreign = output.parent / "evaluation.logs"
+    foreign.mkdir(parents=True)
+    marker = foreign / "foreign"
+    marker.write_text("retain\n", encoding="utf-8")
+    with pytest.raises(sidecar.RequestError, match="log directory already exists"):
+        sidecar.evaluate(request_path, output, workspace_root=workspace_root)
+    assert marker.read_text(encoding="utf-8") == "retain\n"
+    assert not output.exists()
+
+
+def test_command_sandbox_does_not_expose_unallowlisted_host_etc(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    patch = _patch(repo, tmp_path)
+    _, artifact = _evaluate(
+        tmp_path,
+        _request(
+            repo,
+            patch,
+            [
+                {
+                    "argv": [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; assert not Path('/etc/machine-id').exists()",
+                    ],
+                    "cwd": ".",
+                    "timeout_seconds": 10,
+                }
+            ],
+        ),
+    )
+    assert artifact["status"] == "passed"

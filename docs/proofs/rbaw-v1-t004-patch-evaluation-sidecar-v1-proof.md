@@ -3,41 +3,77 @@
 ## Scope
 
 This slice prototypes the mutable evaluation layer outside RepoBrief core. The
-producer is `tools/patch_evaluation_sidecar.py`; the existing schema and
-read-only consumer remain unchanged.
+producer is `tools/patch_evaluation_sidecar.py`; the existing Patch Evaluation
+Artifact schema and read-only RepoBrief consumer remain unchanged.
 
 ## Boundary checks
 
-- Source checkout worktree, staged-index, and untracked content is fingerprinted
-  before evaluation and compared after cleanup; unrelated refs and Git
-  configuration are outside this fingerprint.
-- Evaluation runs in a detached disposable Git worktree at an exact commit.
+- The exact base commit and its tree are copied through a newly generated Git
+  pack into a newly initialized repository. The evaluation repository has its
+  own Git directory, configuration, refs, and object database; shared common
+  directories, alternates, or multiply linked object files fail isolation
+  verification.
+- Source-local Git hooks and configured clean, smudge, and process filters are
+  neutralized for every Sidecar-owned Git operation. Internal Git and Bubblewrap
+  binaries are resolved from a fixed system path rather than the caller's
+  `PATH`.
+- The source checkout is not mounted into declared command execution. Commands
+  run with `shell=False` inside Linux Bubblewrap filesystem and PID namespaces;
+  the independent repository, private home, and private temporary directory are
+  the only writable mounts, while required system directories are read-only and only an explicit `/etc` subset is exposed.
+- Background descendants are contained by the PID namespace. Timed-out host
+  process groups receive SIGTERM followed by an unconditional SIGKILL sweep.
 - The patch is copied once into a private snapshot; its digest and applied bytes
-  are therefore identical. Patch application fails before any configured command
+  are therefore identical. Patch application fails before any declared command
   may run.
-- Commands are argv arrays executed with `shell=False` and a confined relative
-  working directory.
-- Environment variables are allowlisted except for inherited `PATH`; Git
-  global/system configuration and hooks are suppressed. Filesystem, credential,
-  and network isolation remain unknown.
-- Per-command timeouts and a global declared-command budget are enforced; timed-out
-  process groups are terminated. The command budget begins immediately before the
-  command loop. Validation, Git setup, cleanup, and source fingerprinting are not
-  covered by it; large Python-side file hashing is not separately time-bounded.
-- Logs are bounded, stored outside the source repository, and carry truncation
-  metadata.
-- The artifact is written atomically and declares all nine mandatory non-claims.
-- Cleanup is fail-closed: an unremoved worktree or source drift forces artifact
-  status `error`.
+- The source drift fingerprint covers HEAD, Git status, tracked worktree diff,
+  staged-index diff, and content of non-ignored untracked files. Ignored files,
+  unrelated refs, repository configuration, and the source object database are
+  outside the fingerprint; declared commands cannot reach the source checkout
+  through the mount namespace.
+- Request, patch, repository pack, object count, argv, context, changed-file,
+  fingerprint, command-time, and log sizes are bounded. The source fingerprint
+  also has a fixed time budget.
+- `fail_fast` is optional and defaults to `false`; when enabled, later commands
+  are recorded as `skipped`, so the artifact is `incomplete`.
+- Explicit `redact_argv_indexes` are redacted from command displays and bounded
+  logs. Arbitrary command output is not proven secret-free, so
+  `secrets_policy` remains `unknown`.
+- Network isolation is not asserted and `network` remains `unknown`.
+- Empty log directories are removed. Independent-repository, patch-snapshot,
+  and runtime cleanup are read back fail-closed; unproven cleanup or source drift
+  forces artifact status `error`.
+- The artifact is written atomically, records a SHA-256 digest of the producer
+  source, and declares all nine mandatory non-claims.
+
+## Adversarial coverage
+
+The focused suite proves regressions for:
+
+- source Git configuration and ref mutations remaining confined to the
+  independent repository;
+- clean, smudge, and process filters not executing during Sidecar-owned Git
+  operations;
+- the source checkout, including ignored files, being unavailable to declared
+  commands;
+- successful commands being unable to leave background descendants;
+- timeout process-group cleanup;
+- rename destination-path reporting;
+- patch snapshot time-of-check/time-of-use binding;
+- fake parent-`PATH` Git replacement being ignored;
+- fail-fast command skipping;
+- argv and log redaction;
+- partial repository creation and forced cleanup failure;
+- input and artifact-boundary size limits.
 
 ## Verification commands
 
 ```text
 python -m pytest -q tests/test_patch_evaluation_sidecar.py merger/repoground/tests/test_patch_evaluation.py
-# 30 passed in 2.19s
+# 47 passed in 5.39s
 
 python -m pytest -q
-# 4679 passed, 2 skipped in 118.64s
+# 4696 passed, 2 skipped in 125.94s
 
 python -m ruff check tools/patch_evaluation_sidecar.py tests/test_patch_evaluation_sidecar.py
 # All checks passed!
@@ -46,7 +82,7 @@ python -m ruff format --check tools/patch_evaluation_sidecar.py tests/test_patch
 # 2 files already formatted
 
 python scripts/ci/check_graph_maintainability.py --root . --format json
-# status pass; new_count 0; resolved_count 3
+# status pass; current_count 200; baseline_count 203; new_count 0; resolved_count 3
 
 python -m py_compile tools/patch_evaluation_sidecar.py tests/test_patch_evaluation_sidecar.py
 # exit 0
@@ -55,21 +91,23 @@ git diff --check
 # exit 0
 ```
 
-The durable full-suite receipt is bound to argv SHA-256
-`c3f2578d3a465d10ae97391fe2a54f1c10832286381277ce1355ccfb0bbac529`
-and receipt SHA-256
-`d497d295bceec49f5008b546630333da7b62f1410bdef263cfe33c71640cb57c`.
+The durable full-suite task is bound to argv SHA-256
+`c3f2578d3a465d10ae97391fe2a54f1c10832286381277ce1355ccfb0bbac529`,
+lifecycle receipt SHA-256
+`c7e717172364f39f8798613324d8cb4e95e3d4813f5405fa71eb69f03032648d`,
+and terminalization SHA-256
+`9847340e7630771e814e431fff464dd3f0eeac9a9e953d56b08ff3a789216fbd`.
 
 ## Does not establish
 
 This proof and a passing prototype run do not establish correctness, test
 sufficiency, security correctness, runtime behavior outside evaluated commands,
 merge authorization, merge readiness, regression absence, repository
-understanding, or truth of producer claims. Filesystem, credential, network, and
-container sandboxing are not implemented by this prototype; configured
-commands must be trusted.
+understanding, or truth of producer claims. Network isolation and complete
+credential safety are not established. Linux and Bubblewrap are runtime
+requirements for declared command execution.
 
 Invalid requests and read-only provenance-preflight failures can terminate
-without an artifact; they do not create a worktree or run declared commands.
-Operational failures after mutable evaluation begins emit `status: error` when
-the artifact destination remains writable.
+without an artifact; they do not create an evaluation repository or run declared
+commands. Operational failures after mutable evaluation begins emit
+`status: error` when the artifact destination remains writable.
