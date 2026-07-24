@@ -8,6 +8,26 @@ from merger.repoground.core import bundle_sidecars
 from merger.repoground.core.artifact_io import is_sha256_digest
 
 
+def test_sidecar_path_requires_canonical_manifest_suffix(tmp_path: Path) -> None:
+    manifest = tmp_path / "demo.bundle.manifest.json"
+
+    assert bundle_sidecars.sidecar_path(
+        manifest, ".python_symbol_index.json"
+    ) == tmp_path / "demo.python_symbol_index.json"
+
+
+def test_sidecar_path_rejects_non_manifest_base_without_overwrite(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "demo.json"
+    source.write_text("original\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="sidecar base must end"):
+        bundle_sidecars.sidecar_path(source, ".delta.json")
+
+    assert source.read_text(encoding="utf-8") == "original\n"
+
+
 @pytest.mark.parametrize(
     "writer",
     [

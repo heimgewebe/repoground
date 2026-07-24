@@ -27,11 +27,19 @@ _MANIFEST_SUFFIX = ".bundle.manifest.json"
 
 
 def sidecar_path(base_manifest_path: Path, suffix: str) -> Path:
-    """Return the sidecar path derived from the bundle manifest name."""
+    """Return a sidecar path derived from one canonical bundle manifest name.
 
-    return base_manifest_path.with_name(
-        base_manifest_path.name.replace(_MANIFEST_SUFFIX, suffix)
-    )
+    Refuse malformed bases instead of letting ``str.replace`` return the
+    original path and allowing a secondary artifact to overwrite its manifest.
+    """
+
+    if not base_manifest_path.name.endswith(_MANIFEST_SUFFIX):
+        raise ValueError(
+            "sidecar base must end with "
+            f"{_MANIFEST_SUFFIX!r}: {base_manifest_path.name!r}"
+        )
+    stem = base_manifest_path.name[: -len(_MANIFEST_SUFFIX)]
+    return base_manifest_path.with_name(f"{stem}{suffix}")
 
 
 def _single_repo_root(
