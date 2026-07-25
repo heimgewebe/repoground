@@ -103,6 +103,48 @@ def initialize_repository(tmp_path: Path, name: str = "repo") -> tuple[Path, str
     return repo, git(repo, "rev-parse", "HEAD")
 
 
+def write_managed_recovery_manifest(
+    repo: Path, worktree: Path, head: str, path: Path
+) -> Path:
+    recovery_ref = (
+        "refs/grabowski/checkouts/0123456789abcdef/"
+        f"{path.parent.name}/head"
+    )
+    git(repo, "update-ref", recovery_ref, head)
+    common_dir = Path(git(repo, "rev-parse", "--git-common-dir"))
+    if not common_dir.is_absolute():
+        common_dir = (repo / common_dir).resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "archive_id": "test-archive",
+                "checkout_path": str(worktree.resolve()),
+                "git_common_dir": str(common_dir),
+                "head": head,
+                "repo": str(repo.resolve()),
+                "cleanup": {
+                    "requires_dry_run": True,
+                    "tool": "grabowski_checkout_cleanup",
+                },
+                "recovery_refs": [
+                    {
+                        "ref": recovery_ref,
+                        "role": "head",
+                        "target": head,
+                    }
+                ],
+                "rollback": {"available": True},
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def write_version(
     group: Path, name: str, payload: bytes, mtime: int
 ) -> tuple[Path, str]:
@@ -587,6 +629,177 @@ def test_managed_worktree_cleanup_rejects_unrelated_and_nonempty_build(
     assert blocker["automatic_mutation_authorized"] is False
     assert payload.read_bytes() == b"preserve"
     assert (ruff_cache / "CACHEDIR.TAG").read_text(encoding="utf-8") == "preserve"
+
+
+def test_atomic_create_json_preserves_concurrent_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    path = tmp_path / "private" / "receipt.json"
+    original_fsync = module.os.fsync
+    calls = 0
+
+    def fsync_with_replacement(descriptor: int) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            original_fsync(descriptor)
+            return
+        path.unlink()
+        path.write_bytes(b"attacker-replacement")
+        raise OSError("directory fsync failed after concurrent replacement")
+
+    monkeypatch.setattr(module.os, "fsync", fsync_with_replacement)
+    with pytest.raises(OSError, match="directory fsync failed"):
+        module.atomic_create_json(path, {"kind": "test"})
+    assert path.read_bytes() == b"attacker-replacement"
+
+
+def test_managed_build_durable_retain_is_exact_bounded_and_non_mutating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "repo")
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    worktree = source_root / "heimgewebe__demo__main"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+    state_root = tmp_path / "state"
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    monkeypatch.setattr(module, "STATE_ROOT", state_root)
+    archive_root = tmp_path / "archives"
+    archive_root.mkdir()
+    monkeypatch.setattr(module, "GRABOWSKI_CHECKOUT_ARCHIVE_ROOT", archive_root)
+    monkeypatch.setattr(
+        module, "repository_key_for_path", lambda _repo: "heimgewebe/demo"
+    )
+    allow_no_active_managed_build_leases(module, monkeypatch)
+    build = worktree / "build"
+    build.mkdir()
+    payload = build / "artifact.bin"
+    payload.write_bytes(b"historical-unknown")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    review_after = int(time.time()) + 7200
+    recovery_manifest = write_managed_recovery_manifest(
+        repo,
+        worktree,
+        sha,
+        archive_root / "test-archive" / "manifest.json",
+    )
+
+    result = module.record_managed_build_durable_retain(
+        entry,
+        "main",
+        task_id="OPERATOR-ECOSYSTEM-REDUNDANCY-V1-T053",
+        reason="Historical bytes lack publisher provenance; retain for bounded review.",
+        review_after_unix=review_after,
+        recovery_manifest=recovery_manifest,
+    )
+    replay = module.record_managed_build_durable_retain(
+        entry,
+        "main",
+        task_id="OPERATOR-ECOSYSTEM-REDUNDANCY-V1-T053",
+        reason="Historical bytes lack publisher provenance; retain for bounded review.",
+        review_after_unix=review_after,
+        recovery_manifest=recovery_manifest,
+    )
+
+    assert result["idempotent_replay"] is False
+    assert replay["idempotent_replay"] is True
+    decision_path = module.managed_build_retain_decision_path(worktree)
+    assert decision_path.stat().st_mode & 0o777 == 0o600
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    assert decision["decision"] == "durable-retain"
+    assert decision["automatic_mutation_authorized"] is False
+    assert decision["task_id"] == "OPERATOR-ECOSYSTEM-REDUNDANCY-V1-T053"
+
+    with pytest.raises(RuntimeError, match="managed build residue blocked") as excinfo:
+        module.cleanup_managed_disposable_artifacts(worktree, repo)
+    blocker = module.parse_managed_build_blocker(excinfo.value)
+    assert blocker is not None
+    assert blocker["classification"] == "durable-retain"
+    assert blocker["retain_decision"]["sha256"] == module.canonical_sha256(decision)
+    assert payload.read_bytes() == b"historical-unknown"
+
+    payload.write_bytes(b"changed-after-decision")
+    with pytest.raises(RuntimeError, match="managed build residue blocked") as excinfo:
+        module.cleanup_managed_disposable_artifacts(worktree, repo)
+    changed = module.parse_managed_build_blocker(excinfo.value)
+    assert changed is not None
+    assert changed["classification"] == "unknown"
+    assert changed["reason"] == (
+        "managed build retain decision no longer matches build snapshot"
+    )
+    assert payload.read_bytes() == b"changed-after-decision"
+
+
+def test_managed_build_durable_retain_review_due_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path, "repo")
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    worktree = source_root / "heimgewebe__demo__main"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    monkeypatch.setattr(module, "STATE_ROOT", tmp_path / "state")
+    archive_root = tmp_path / "archives"
+    archive_root.mkdir()
+    monkeypatch.setattr(module, "GRABOWSKI_CHECKOUT_ARCHIVE_ROOT", archive_root)
+    monkeypatch.setattr(
+        module, "repository_key_for_path", lambda _repo: "heimgewebe/demo"
+    )
+    allow_no_active_managed_build_leases(module, monkeypatch)
+    build = worktree / "build"
+    build.mkdir()
+    (build / "artifact.bin").write_bytes(b"retain")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    review_after = int(time.time()) + 3700
+    recovery_manifest = write_managed_recovery_manifest(
+        repo,
+        worktree,
+        sha,
+        archive_root / "test-archive" / "manifest.json",
+    )
+    module.record_managed_build_durable_retain(
+        entry,
+        "main",
+        task_id="OPERATOR-ECOSYSTEM-REDUNDANCY-V1-T053",
+        reason="Bounded retain decision.",
+        review_after_unix=review_after,
+        recovery_manifest=recovery_manifest,
+    )
+    monkeypatch.setattr(module.time, "time", lambda: review_after)
+
+    with pytest.raises(RuntimeError, match="review is due"):
+        module.record_managed_build_durable_retain(
+            entry,
+            "main",
+            task_id="OPERATOR-ECOSYSTEM-REDUNDANCY-V1-T053",
+            reason="Bounded retain decision.",
+            review_after_unix=review_after,
+            recovery_manifest=recovery_manifest,
+        )
+
+    with pytest.raises(RuntimeError, match="managed build residue blocked") as excinfo:
+        module.cleanup_managed_disposable_artifacts(worktree, repo)
+    blocker = module.parse_managed_build_blocker(excinfo.value)
+    assert blocker is not None
+    assert blocker["classification"] == "unknown"
+    assert blocker["reason"] == "managed build retain decision review is due"
 
 
 def test_managed_build_residue_with_exact_stale_provenance_is_quarantined(
@@ -2418,6 +2631,65 @@ def test_managed_build_blocker_is_structured_in_fleet_receipt(
         "reason": "no exact publisher provenance",
         "automatic_mutation_authorized": False,
     }
+
+
+def test_durable_retain_blocker_is_nonfatal_but_visible_in_fleet_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=tmp_path / "demo",
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+    monkeypatch.setattr(
+        module,
+        "prioritize_fleet_publication",
+        lambda entries: (entries, {"policy": "test"}),
+    )
+    monkeypatch.setattr(
+        module,
+        "reconcile_prune_transactions",
+        lambda *, protected, apply: {"status": "ok"},
+    )
+    monkeypatch.setattr(module, "ensure_tool_worktree", lambda: ("b" * 40, "c" * 64))
+    monkeypatch.setattr(
+        module, "remote_head", lambda path: ("origin/main", "main", "a" * 40)
+    )
+    monkeypatch.setattr(
+        module,
+        "publication_config",
+        lambda entry: module.PublicationConfig(profile="full-max"),
+    )
+
+    def retain(entry: object, ref_segment: str) -> list[str]:
+        raise module.managed_build_blocker(
+            tmp_path / "sources" / "demo" / "build",
+            classification="durable-retain",
+            reason="exact manager retain decision is active",
+            retain_decision={
+                "task_id": "OPERATOR-ECOSYSTEM-REDUNDANCY-V1-T053",
+                "review_after_unix": 9999999999,
+                "automatic_mutation_authorized": False,
+            },
+        )
+
+    monkeypatch.setattr(module, "preflight_existing_source_worktree", retain)
+
+    assert module.main(["--repo", "heimgewebe/demo"]) == 0
+    receipt = json.loads((roots["log"] / "fleet-last.json").read_text(encoding="utf-8"))
+    detail = receipt["details"][0]
+    assert receipt["status"] == "warn"
+    assert receipt["retained"] == 1
+    assert receipt["failed"] == 0
+    assert detail["status"] == "retained"
+    assert detail["managed_build_residue"]["classification"] == "durable-retain"
 
 
 def test_missing_generator_inputs_fail_before_publication_and_write_receipt(
