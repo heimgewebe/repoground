@@ -1,19 +1,20 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "kind": "repoground.legacy_t010_pythonista_measurement",
-  "observed_at": "2026-07-25T08:42:54.175606+00:00",
+  "observed_at": "2026-07-25T20:07:02+00:00",
   "task_id": "REPOGROUND-LEGACY-RECONCILIATION-V1-T010",
   "repository": "heimgewebe/repoground",
   "base_sha": "c91d640bce2b14c4a78a64e83169d56c818fa662",
+  "implementation_head_sha": "ceac34b51566e264b3ba7794a0fdb4d60101e7f2",
   "architecture": {
     "build_lines_before": 4029,
     "build_lines_after": 3630,
     "new_module_lines": {
       "import_contract.py": 89,
-      "source_mode.py": 154,
+      "source_mode.py": 210,
       "cli_args.py": 149,
       "cli_output.py": 114,
-      "cli_runner.py": 267
+      "cli_runner.py": 301
     },
     "main_cli_before": {
       "name": "main_cli",
@@ -27,70 +28,26 @@
       "complexity": 1,
       "module": "build.py"
     },
-    "new_orchestration_top_complexity": [
-      {
-        "name": "_validate_cli_request",
-        "lines": 56,
-        "complexity": 17,
-        "module": "cli_runner.py"
-      },
-      {
-        "name": "run_pre_pull_two_phase",
-        "lines": 69,
-        "complexity": 16,
-        "module": "source_mode.py"
-      },
-      {
-        "name": "_materialize_remote_sources",
-        "lines": 75,
-        "complexity": 13,
-        "module": "cli_runner.py"
-      },
-      {
-        "name": "extract_delta_meta",
-        "lines": 32,
-        "complexity": 12,
-        "module": "cli_output.py"
-      },
-      {
-        "name": "run_main_cli",
-        "lines": 96,
-        "complexity": 11,
-        "module": "cli_runner.py"
-      },
-      {
-        "name": "_resolve_sources",
-        "lines": 20,
-        "complexity": 8,
-        "module": "cli_runner.py"
-      },
-      {
-        "name": "resolve_headless_source_mode",
-        "lines": 14,
-        "complexity": 8,
-        "module": "source_mode.py"
-      },
-      {
-        "name": "resolve_effective_pre_pull",
-        "lines": 20,
-        "complexity": 6,
-        "module": "source_mode.py"
-      },
-      {
-        "name": "resolve_output_options",
-        "lines": 18,
-        "complexity": 4,
-        "module": "cli_output.py"
-      },
-      {
-        "name": "resolve_effective_headless_source_mode",
-        "lines": 15,
-        "complexity": 4,
-        "module": "source_mode.py"
+    "maintainability_repair": {
+      "previous_failed_head_sha": "bd90535b1e4d2a850c2b9491de9296bc655f8c75",
+      "previous_new_violations": [
+        "merger/repoground/frontends/pythonista/cli_runner.py::_validate_cli_request",
+        "merger/repoground/frontends/pythonista/source_mode.py::run_pre_pull_two_phase"
+      ],
+      "strategy": [
+        "split iOS capability checks from flag-conflict and control-plane validation",
+        "split pre-pull result logging, plan-failure aggregation, apply checks, and self-repo warnings"
+      ],
+      "current_gate": {
+        "workflow": "lint",
+        "run_id": 30172906567,
+        "conclusion": "success",
+        "new_complexity_violations": 0
       }
-    ]
+    }
   },
-  "performance": {
+  "initial_performance_measurement": {
+    "measured_head_sha": "bd90535b1e4d2a850c2b9491de9296bc655f8c75",
     "package_import_before": {
       "median_seconds": 0.08,
       "median_rss_kib": 24792
@@ -107,56 +64,97 @@
       "median_seconds": 0.09,
       "median_rss_kib": 30964
     },
-    "method": "nine local /usr/bin/time runs per mode; medians"
+    "method": "nine local /usr/bin/time runs per mode; medians",
+    "current_head_claim": "not remeasured after maintainability-only helper split"
   },
   "parity": {
-    "help_output_equal": true,
+    "help_output_equal_on_initial_head": true,
     "help_sha256": "e18411e4dbd2a40ca15408cd00017ad375c8462b5a0396718bbc03fbc10d978a",
-    "mocked_scan_and_writer_call_serialization_equal": true,
-    "parity_guard": "passed"
-  },
-  "validation": {
-    "targeted_pythonista_and_parity_tests": {
-      "passed": 69,
-      "failed": 0,
-      "receipt": "4f681cafdc88d58c72bde033ce0245a1b017103b08fa86f4655b44376ff92842"
-    },
-    "ruff_check": "passed",
-    "ruff_format_check": "passed",
-    "py_compile_changed_files": "passed",
-    "git_diff_check": "passed",
-    "full_pytest": {
-      "passed": 4801,
-      "skipped": 2,
-      "failed": 33,
-      "classification": "host_infrastructure_blocker",
-      "common_error": "bwrap: Creating new namespace failed: Resource temporarily unavailable",
-      "changed_pythonista_failures": 0
-    },
-    "isolated_sidecar_rerun": {
-      "passed": 10,
-      "failed": 33,
-      "same_common_error": true
+    "mocked_scan_and_writer_call_serialization_equal_on_initial_head": true,
+    "current_head_frontend_parity_guard": {
+      "run_id": 30172906565,
+      "conclusion": "success"
     }
   },
-  "host_observation": {
-    "user_processes": 436,
-    "bwrap_processes": 15,
-    "user_namespaces": 20,
-    "max_user_namespaces": 234504,
-    "user_service_cgroup_tasks": 3189,
-    "tasks_max": "max",
-    "zombie_processes": 3,
-    "mutation_performed": false
+  "validation": {
+    "implementation_head_ci": {
+      "contracts_validate": {
+        "run_id": 30172906849,
+        "conclusion": "success"
+      },
+      "task_index": {
+        "run_id": 30172906555,
+        "conclusion": "success"
+      },
+      "ai_context_guard": {
+        "run_id": 30172906589,
+        "conclusion": "success"
+      },
+      "frontend_parity_guard": {
+        "run_id": 30172906565,
+        "conclusion": "success"
+      },
+      "doc_freshness": {
+        "run_id": 30172906605,
+        "conclusion": "success"
+      },
+      "lint": {
+        "run_id": 30172906567,
+        "conclusion": "success"
+      },
+      "codeql": {
+        "run_id": 30172906572,
+        "conclusion": "success"
+      },
+      "test_suite": {
+        "run_id": 30172906599,
+        "conclusion": "success",
+        "jobs": {
+          "webui_js_tests": "success",
+          "browser_tests": "success",
+          "release_candidate": "success",
+          "pytest_full": "success"
+        }
+      }
+    },
+    "initial_local_validation": {
+      "measured_head_sha": "bd90535b1e4d2a850c2b9491de9296bc655f8c75",
+      "targeted_pythonista_and_parity_tests": {
+        "passed": 69,
+        "failed": 0,
+        "receipt": "4f681cafdc88d58c72bde033ce0245a1b017103b08fa86f4655b44376ff92842"
+      },
+      "ruff_check": "passed",
+      "ruff_format_check": "passed",
+      "py_compile_changed_files": "passed",
+      "git_diff_check": "passed",
+      "full_pytest": {
+        "passed": 4801,
+        "skipped": 2,
+        "failed": 33,
+        "classification": "host_infrastructure_blocker",
+        "common_error": "bwrap: Creating new namespace failed: Resource temporarily unavailable",
+        "changed_pythonista_failures": 0
+      }
+    }
   },
   "followup_bindings": [
-    "RBAW-V1-T006",
-    "REPOGROUND-LEGACY-RECONCILIATION-V1-T014"
+    {
+      "task_id": "RBAW-V1-T006",
+      "owns": "production sandbox resource budgets and infrastructure-error semantics"
+    },
+    {
+      "task_id": "REPOGROUND-LEGACY-RECONCILIATION-V1-T014",
+      "owns": [
+        "final Pythonista size and performance convergence",
+        "native Pythonista loader smoke beyond the CPython direct-script contract",
+        "possible replacement of the dynamic module API object with a typed runtime facade"
+      ]
+    }
   ],
   "does_not_establish": [
-    "GitHub CI success",
-    "merge readiness before current-head review",
-    "cause or ownership of foreign bwrap processes",
-    "full T004 completion"
+    "native Pythonista loader behaviour beyond the tested direct-script contract",
+    "current-head performance equality after the maintainability-only helper split",
+    "completion of parent task T004"
   ]
 }
