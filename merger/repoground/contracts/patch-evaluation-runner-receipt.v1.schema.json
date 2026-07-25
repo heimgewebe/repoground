@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://heimgewebe.github.io/repoground/contracts/patch-evaluation-runner-receipt.v1.schema.json",
   "title": "RepoGround Patch Evaluation Runner Receipt v1",
-  "description": "External runtime evidence from the systemd cgroup-v2 adapter. This receipt binds one runner policy and terminal unit observation to one existing repobrief.patch_evaluation artifact. It is not a correctness, security, review, or merge verdict.",
+  "description": "External runtime evidence from the systemd cgroup-v2 adapter. It is not a correctness, security, review, or merge verdict.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -31,537 +31,32 @@
       "const": "external_runtime_evidence"
     },
     "producer": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "version",
-        "commit"
-      ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "minLength": 1
-        },
-        "version": {
-          "type": "string",
-          "minLength": 1
-        },
-        "commit": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
-        }
-      }
+      "$ref": "#/definitions/producer"
     },
     "created_at": {
       "type": "string",
       "minLength": 1
     },
     "input": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "source_request_sha256",
-        "effective_request_sha256",
-        "patch_sha256"
-      ],
-      "properties": {
-        "patch_sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "source_request_sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "effective_request_sha256": {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        }
-      }
+      "$ref": "#/definitions/input"
     },
     "runner": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "mode",
-        "unit",
-        "invocation_id",
-        "control_group",
-        "systemd_result",
-        "exec_main_code",
-        "exec_main_status",
-        "launcher_returncode",
-        "cleanup_proven",
-        "policy_verified",
-        "policy_readback_sha256",
-        "policy_readback"
-      ],
-      "properties": {
-        "mode": {
-          "const": "systemd-user-transient-service"
-        },
-        "unit": {
-          "type": "string",
-          "pattern": "^repoground-patch-evaluation-[0-9a-f]{32}\\.service$"
-        },
-        "invocation_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "control_group": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "systemd_result": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "exec_main_code": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "exec_main_status": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "cleanup_proven": {
-          "type": "boolean"
-        },
-        "launcher_returncode": {
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "policy_verified": {
-          "type": "boolean"
-        },
-        "policy_readback_sha256": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "policy_readback": {
-          "oneOf": [
-            {
-              "type": "null"
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "systemd",
-                "cgroup"
-              ],
-              "properties": {
-                "systemd": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "MemoryMax",
-                    "MemorySwapMax",
-                    "TasksMax",
-                    "PrivateNetwork",
-                    "ProtectSystem",
-                    "NoNewPrivileges",
-                    "KillMode",
-                    "OOMPolicy",
-                    "RemainAfterExit",
-                    "CPUQuotaPerSecUSec",
-                    "RuntimeMaxUSec",
-                    "TemporaryFileSystem",
-                    "ReadOnlyPaths",
-                    "BindPaths",
-                    "IOReadBandwidthMax",
-                    "IOWriteBandwidthMax"
-                  ],
-                  "properties": {
-                    "MemoryMax": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "MemorySwapMax": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "TasksMax": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "PrivateNetwork": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "ProtectSystem": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "NoNewPrivileges": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "KillMode": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "OOMPolicy": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "RemainAfterExit": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "CPUQuotaPerSecUSec": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "RuntimeMaxUSec": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "TemporaryFileSystem": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "ReadOnlyPaths": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "BindPaths": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "IOReadBandwidthMax": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "IOWriteBandwidthMax": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  }
-                },
-                "cgroup": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "path",
-                    "memory_max_bytes",
-                    "memory_swap_max_bytes",
-                    "tasks_max",
-                    "cpu_quota_usec",
-                    "cpu_period_usec",
-                    "io"
-                  ],
-                  "properties": {
-                    "path": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "memory_max_bytes": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "memory_swap_max_bytes": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "tasks_max": {
-                      "type": "integer",
-                      "minimum": 0
-                    },
-                    "cpu_quota_usec": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "cpu_period_usec": {
-                      "type": "integer",
-                      "minimum": 1
-                    },
-                    "io": {
-                      "type": "array",
-                      "minItems": 1,
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "device",
-                          "major_minor",
-                          "read_bandwidth_bps",
-                          "write_bandwidth_bps"
-                        ],
-                        "properties": {
-                          "device": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "major_minor": {
-                            "type": "string",
-                            "pattern": "^[0-9]+:[0-9]+$"
-                          },
-                          "read_bandwidth_bps": {
-                            "type": "integer",
-                            "minimum": 1
-                          },
-                          "write_bandwidth_bps": {
-                            "type": "integer",
-                            "minimum": 1
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          ]
-        }
-      }
+      "$ref": "#/definitions/runner"
     },
     "policy": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "workspace_max_bytes",
-        "memory_max_bytes",
-        "memory_swap_max_bytes",
-        "cpu_quota_percent",
-        "cpu_time_max_usec",
-        "tasks_max",
-        "runtime_max_seconds",
-        "io_device_count",
-        "io_read_bandwidth_per_device_bps",
-        "io_write_bandwidth_per_device_bps",
-        "io_read_total_max_bytes",
-        "io_write_total_max_bytes",
-        "network",
-        "input_snapshot",
-        "persistent_write_root",
-        "io_devices"
-      ],
-      "properties": {
-        "workspace_max_bytes": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "memory_max_bytes": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "memory_swap_max_bytes": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "cpu_quota_percent": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "cpu_time_max_usec": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "tasks_max": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "runtime_max_seconds": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "network": {
-          "const": "deny"
-        },
-        "input_snapshot": {
-          "const": "read-only"
-        },
-        "io_devices": {
-          "type": "array",
-          "minItems": 1,
-          "uniqueItems": true,
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "io_device_count": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "io_read_bandwidth_per_device_bps": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "io_write_bandwidth_per_device_bps": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "io_read_total_max_bytes": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "io_write_total_max_bytes": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "persistent_write_root": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
+      "$ref": "#/definitions/policy"
     },
     "accounting": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "cpu_usage_nsec",
-        "memory_peak_bytes",
-        "memory_current_bytes",
-        "tasks_current",
-        "io_read_bytes",
-        "io_write_bytes"
-      ],
-      "properties": {
-        "cpu_usage_nsec": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "memory_peak_bytes": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "memory_current_bytes": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "tasks_current": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "io_read_bytes": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        },
-        "io_write_bytes": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "minimum": 0
-        }
-      }
+      "$ref": "#/definitions/accounting"
     },
     "artifact": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "path",
-        "sha256",
-        "status"
-      ],
-      "properties": {
-        "path": {
-          "type": "string",
-          "minLength": 1
-        },
-        "sha256": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        "status": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "enum": [
-            "passed",
-            "failed",
-            "mixed",
-            "error",
-            "incomplete",
-            null
-          ]
-        }
-      }
+      "$ref": "#/definitions/artifact"
     },
     "status": {
-      "type": "string",
-      "enum": [
-        "passed",
-        "failed",
-        "mixed",
-        "error",
-        "incomplete"
-      ]
+      "$ref": "#/definitions/status"
     },
     "error": {
-      "type": [
-        "string",
-        "null"
-      ]
+      "$ref": "#/definitions/nullableString"
     },
     "does_not_establish": {
       "type": "array",
@@ -609,6 +104,480 @@
           }
         }
       ]
+    }
+  },
+  "definitions": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nullableString": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nullableNonnegativeInteger": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "passed",
+        "failed",
+        "mixed",
+        "error",
+        "incomplete"
+      ]
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "commit"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_request_sha256",
+        "effective_request_sha256",
+        "patch_sha256"
+      ],
+      "properties": {
+        "source_request_sha256": {
+          "$ref": "#/definitions/sha256"
+        },
+        "effective_request_sha256": {
+          "$ref": "#/definitions/sha256"
+        },
+        "patch_sha256": {
+          "$ref": "#/definitions/sha256"
+        }
+      }
+    },
+    "systemdReadback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "MemoryMax",
+        "MemorySwapMax",
+        "TasksMax",
+        "PrivateNetwork",
+        "ProtectSystem",
+        "NoNewPrivileges",
+        "KillMode",
+        "OOMPolicy",
+        "RemainAfterExit",
+        "CPUQuotaPerSecUSec",
+        "RuntimeMaxUSec",
+        "TemporaryFileSystem",
+        "ReadOnlyPaths",
+        "BindPaths",
+        "IOReadBandwidthMax",
+        "IOWriteBandwidthMax",
+        "StandardOutput",
+        "StandardError"
+      ],
+      "properties": {
+        "MemoryMax": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "MemorySwapMax": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "TasksMax": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "PrivateNetwork": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "ProtectSystem": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "NoNewPrivileges": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "KillMode": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "OOMPolicy": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "RemainAfterExit": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "CPUQuotaPerSecUSec": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "RuntimeMaxUSec": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "TemporaryFileSystem": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "ReadOnlyPaths": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "BindPaths": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "IOReadBandwidthMax": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "IOWriteBandwidthMax": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "StandardOutput": {
+          "const": "null"
+        },
+        "StandardError": {
+          "const": "null"
+        }
+      }
+    },
+    "ioReadback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device",
+        "major_minor",
+        "read_bandwidth_bps",
+        "write_bandwidth_bps"
+      ],
+      "properties": {
+        "device": {
+          "type": "string",
+          "minLength": 1
+        },
+        "major_minor": {
+          "type": "string",
+          "pattern": "^[0-9]+:[0-9]+$"
+        },
+        "read_bandwidth_bps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "write_bandwidth_bps": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "cgroupReadback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "memory_max_bytes",
+        "memory_swap_max_bytes",
+        "tasks_max",
+        "cpu_quota_usec",
+        "cpu_period_usec",
+        "io"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "memory_max_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "memory_swap_max_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tasks_max": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cpu_quota_usec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cpu_period_usec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "io": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/ioReadback"
+          }
+        }
+      }
+    },
+    "policyReadback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "systemd",
+        "cgroup"
+      ],
+      "properties": {
+        "systemd": {
+          "$ref": "#/definitions/systemdReadback"
+        },
+        "cgroup": {
+          "$ref": "#/definitions/cgroupReadback"
+        }
+      }
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "unit",
+        "invocation_id",
+        "control_group",
+        "systemd_result",
+        "exec_main_code",
+        "exec_main_status",
+        "launcher_returncode",
+        "cleanup_proven",
+        "policy_verified",
+        "policy_readback_sha256",
+        "policy_readback"
+      ],
+      "properties": {
+        "mode": {
+          "const": "systemd-user-transient-service"
+        },
+        "unit": {
+          "type": "string",
+          "pattern": "^repoground-patch-evaluation-[0-9a-f]{32}\\.service$"
+        },
+        "invocation_id": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "control_group": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "systemd_result": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "exec_main_code": {
+          "$ref": "#/definitions/nullableString"
+        },
+        "exec_main_status": {
+          "$ref": "#/definitions/nullableNonnegativeInteger"
+        },
+        "launcher_returncode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cleanup_proven": {
+          "type": "boolean"
+        },
+        "policy_verified": {
+          "type": "boolean"
+        },
+        "policy_readback_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "policy_readback": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/policyReadback"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_max_bytes",
+        "memory_max_bytes",
+        "cpu_quota_percent",
+        "cpu_time_max_usec",
+        "tasks_max",
+        "runtime_max_seconds",
+        "io_device_count",
+        "io_read_bandwidth_per_device_bps",
+        "io_write_bandwidth_per_device_bps",
+        "io_read_total_max_bytes",
+        "io_write_total_max_bytes",
+        "memory_swap_max_bytes",
+        "network",
+        "input_snapshot",
+        "persistent_write_root",
+        "io_devices"
+      ],
+      "properties": {
+        "workspace_max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memory_max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cpu_quota_percent": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "cpu_time_max_usec": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tasks_max": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "runtime_max_seconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "io_device_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "io_read_bandwidth_per_device_bps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "io_write_bandwidth_per_device_bps": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "io_read_total_max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "io_write_total_max_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memory_swap_max_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "network": {
+          "const": "deny"
+        },
+        "input_snapshot": {
+          "const": "read-only"
+        },
+        "persistent_write_root": {
+          "type": "string",
+          "minLength": 1
+        },
+        "io_devices": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "accounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu_usage_nsec",
+        "memory_peak_bytes",
+        "memory_current_bytes",
+        "tasks_current",
+        "io_read_bytes",
+        "io_write_bytes"
+      ],
+      "properties": {
+        "cpu_usage_nsec": {
+          "$ref": "#/definitions/nullableNonnegativeInteger"
+        },
+        "memory_peak_bytes": {
+          "$ref": "#/definitions/nullableNonnegativeInteger"
+        },
+        "memory_current_bytes": {
+          "$ref": "#/definitions/nullableNonnegativeInteger"
+        },
+        "tasks_current": {
+          "$ref": "#/definitions/nullableNonnegativeInteger"
+        },
+        "io_read_bytes": {
+          "$ref": "#/definitions/nullableNonnegativeInteger"
+        },
+        "io_write_bytes": {
+          "$ref": "#/definitions/nullableNonnegativeInteger"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "status"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "oneOf": [
+            {
+              "$ref": "#/definitions/status"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
     }
   }
 }
