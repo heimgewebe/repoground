@@ -83,6 +83,86 @@ def resolve_effective_headless_source_mode(
     return mode
 
 
+def _stderr_warn(message: str) -> None:
+    print(message, file=sys.stderr)
+
+
+def _log_pre_pull_result(prefix: str, result: Any, log: Callable[[str], None]) -> None:
+    log(f"Pre-pull {prefix} {result.repo}: {result.status} - {result.message}")
+    if result.stderr:
+        log(f"Pre-pull {prefix} {result.repo} detail: {result.stderr.strip()}")
+
+
+def _collect_plan_failures(
+    plans: Any,
+    *,
+    hard_fail_statuses: Any,
+    warn_statuses: Any,
+    log: Callable[[str], None],
+    warn: Callable[[str], None],
+) -> list:
+    hard_failures = []
+    for plan in plans:
+        _log_pre_pull_result("plan", plan, log)
+        if plan.status in warn_statuses:
+            warn(f"Warning: {plan.repo}: {plan.status} - {plan.message}")
+        if plan.status in hard_fail_statuses:
+            hard_failures.append(plan)
+    return hard_failures
+
+
+def _raise_plan_failures(hard_failures: list) -> None:
+    if not hard_failures:
+        return
+    detail = "; ".join(
+        f"{plan.repo}: {plan.status} - {plan.message}" for plan in hard_failures
+    )
+    raise ValueError(
+        "Pre-pull plan failed (no repo HEADs or working trees were fast-forwarded): "
+        + detail
+    )
+
+
+def _is_self_fast_forward(
+    result: Any,
+    *,
+    pre_pull_status: Any,
+    is_self_repo: Any,
+) -> bool:
+    return bool(
+        pre_pull_status is not None
+        and result.status == pre_pull_status.FAST_FORWARDED
+        and is_self_repo(Path(result.path))
+    )
+
+
+def _review_apply_results(
+    results: Any,
+    *,
+    hard_fail_statuses: Any,
+    pre_pull_status: Any,
+    is_self_repo: Any,
+    log: Callable[[str], None],
+    warn: Callable[[str], None],
+) -> None:
+    for result in results:
+        _log_pre_pull_result("apply", result, log)
+        if result.status in hard_fail_statuses:
+            raise ValueError(
+                f"Pre-pull apply failed for {result.repo}: "
+                f"{result.status} - {result.message}"
+            )
+        if _is_self_fast_forward(
+            result,
+            pre_pull_status=pre_pull_status,
+            is_self_repo=is_self_repo,
+        ):
+            warn(
+                f"Warning: pre_pull fast-forwarded the running code repository '{result.repo}'. "
+                "Please restart any active service after completion."
+            )
+
+
 def run_pre_pull_two_phase(
     sources: Iterable[Path],
     *,
@@ -100,11 +180,7 @@ def run_pre_pull_two_phase(
     Runtime integrations are injected explicitly. This keeps the module portable
     and makes the mutation boundary visible to callers and tests.
     """
-    if warn is None:
-
-        def warn(message: str) -> None:
-            print(message, file=sys.stderr)
-
+    effective_warn = warn or _stderr_warn
     if plan_pre_pull_repos is None or apply_pre_pull_plans is None:
         raise RuntimeError("Pre-pull requested but repo_sync module is unavailable.")
 
@@ -112,43 +188,23 @@ def run_pre_pull_two_phase(
         "Pre-pull enabled: planning updates for all repositories (fast-forward only)..."
     )
     plans = plan_pre_pull_repos(sources)
-
-    hard_failures = []
-    for plan in plans:
-        log(f"Pre-pull plan {plan.repo}: {plan.status} - {plan.message}")
-        if plan.stderr:
-            log(f"Pre-pull plan {plan.repo} detail: {plan.stderr.strip()}")
-        if plan.status in warn_statuses:
-            warn(f"Warning: {plan.repo}: {plan.status} - {plan.message}")
-        if plan.status in hard_fail_statuses:
-            hard_failures.append(plan)
-
-    if hard_failures:
-        detail = "; ".join(
-            f"{plan.repo}: {plan.status} - {plan.message}" for plan in hard_failures
-        )
-        raise ValueError(
-            "Pre-pull plan failed (no repo HEADs or working trees were fast-forwarded): "
-            + detail
-        )
+    hard_failures = _collect_plan_failures(
+        plans,
+        hard_fail_statuses=hard_fail_statuses,
+        warn_statuses=warn_statuses,
+        log=log,
+        warn=effective_warn,
+    )
+    _raise_plan_failures(hard_failures)
 
     log("Pre-pull plan OK: applying fast-forwards...")
     results = apply_pre_pull_plans(plans)
-    for result in results:
-        log(f"Pre-pull apply {result.repo}: {result.status} - {result.message}")
-        if result.stderr:
-            log(f"Pre-pull apply {result.repo} detail: {result.stderr.strip()}")
-        if result.status in hard_fail_statuses:
-            raise ValueError(
-                f"Pre-pull apply failed for {result.repo}: {result.status} - {result.message}"
-            )
-        if (
-            pre_pull_status is not None
-            and result.status == pre_pull_status.FAST_FORWARDED
-            and is_self_repo(Path(result.path))
-        ):
-            warn(
-                f"Warning: pre_pull fast-forwarded the running code repository '{result.repo}'. "
-                "Please restart any active service after completion."
-            )
+    _review_apply_results(
+        results,
+        hard_fail_statuses=hard_fail_statuses,
+        pre_pull_status=pre_pull_status,
+        is_self_repo=is_self_repo,
+        log=log,
+        warn=effective_warn,
+    )
     return results
