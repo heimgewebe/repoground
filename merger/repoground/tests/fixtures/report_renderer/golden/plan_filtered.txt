@@ -53,6 +53,17 @@
 <!-- zone:begin type="meta" id="meta" -->
 <!-- @meta:start -->
 ```yaml
+diagnostics:
+  warnings:
+  - code: scope_filter_active
+    detail: null
+    message: Filters are active; negative absence claims are not supported.
+  - code: plan_only_mode
+    detail: null
+    message: 'Plan-only mode: no file content is emitted.'
+  - code: non_max_level
+    detail: null
+    message: Level 'summary' may omit low-priority files.
 merge:
   code_only: false
   content:
@@ -113,8 +124,8 @@ merge:
 
 - **Charter:** epistemic_reading_charter v1
 - **Claim Language Guard:** active
-- **Risk Level:** low
-- **Contact Ratio:** 100%
+- **Risk Level:** high
+- **Contact Ratio:** 0%
 
 ## Profile Description
 `summary`
@@ -134,15 +145,12 @@ merge:
 
 - **Total Files:** 1 (Text: 1)
 - **Total Size:** 69.00 B
-- **Included Content:** 1 files (full)
-- **Coverage:** 1/1 Dateien mit vollem Inhalt
+- **Included Content:** 0 files (full)
+- **Coverage:** 0/1 Dateien mit vollem Inhalt
 
 ### Repo Snapshots
 
-- `report-fixture` → 1 files (1 relevant text, 69.00 B, 1 with content)
-
-### Hotspots (Einstiegspunkte)
-- [`docs/guide.md`](#file-report-fixture-docs-guide-md-499434) — repo `report-fixture`, doc; roles: -, tags: runbook
+- `report-fixture` → 1 files (1 relevant text, 69.00 B, 0 with content)
 
 **Folder Highlights:**
 - Docs: `docs`

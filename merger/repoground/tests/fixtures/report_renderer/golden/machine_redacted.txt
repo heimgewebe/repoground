@@ -52,6 +52,11 @@
 <!-- zone:begin type="meta" id="meta" -->
 <!-- @meta:start -->
 ```yaml
+diagnostics:
+  warnings:
+  - code: non_max_level
+    detail: null
+    message: Level 'machine-lean' may omit low-priority files.
 merge:
   code_only: true
   content:
@@ -184,8 +189,8 @@ _Profil: CODE-ONLY – nur Source/Tests/Config/Contracts. Rollen-Shortcut: `entr
 
 | Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |
 | --- | --- | --- | --- | --- | ---: | --- | --- |
-| [`.github/workflows/ci.yml`](#file-f_aea515f51797) | `config` | ci | config | - | 103.00 B | `full` | `f650d0deedc3c05d604d8de1aa69f959` |
-| [`src/main.py`](#file-f_c8b4581f6615) | `source` | entrypoint | entrypoint, ai-context | - | 110.00 B | `full` | `88ded152782ad0251049214f8bad72b7` |
+| [`.github/workflows/ci.yml`](#file-f_23bf81dccf388d200ca09080) | `config` | ci | config | - | 103.00 B | `full` | `f650d0deedc3c05d604d8de1aa69f959` |
+| [`src/main.py`](#file-f_66ed99155b80ba69acae3b5c) | `source` | entrypoint | entrypoint, ai-context | - | 110.00 B | `full` | `88ded152782ad0251049214f8bad72b7` |
 
 <!-- zone:end type="manifest" id="manifest" -->
 <!-- START_OF_CONTENT -->
@@ -196,15 +201,14 @@ _Profil: CODE-ONLY – nur Source/Tests/Config/Contracts. Rollen-Shortcut: `entr
 ### report-fixture
 
 ---
-<!-- FILE_START path=".github/workflows/ci.yml" content_sha256="e59738c25ae0c100af3d28d5c1595a5dd1596326765be4585a5eb43576a79ff3" content_bytes="103" file_bytes="103" truncated="false" -->
-<!-- file:id="FILE:f_aea515f51797" path=".github/workflows/ci.yml" -->
-<a id="file-f_aea515f51797"></a>
+<!-- FILE_START path=".github/workflows/ci.yml" meta="eyJjb250ZW50X2J5dGVzIjoxMDMsImNvbnRlbnRfc2hhMjU2IjoiZTU5NzM4YzI1YWUwYzEwMGFmM2QyOGQ1YzE1OTVhNWRkMTU5NjMyNjc2NWJlNDU4NWE1ZWI0MzU3NmE3OWZmMyIsImZpbGVfYnl0ZXMiOjEwMywicGF0aCI6Ii5naXRodWIvd29ya2Zsb3dzL2NpLnltbCIsInJlcG8iOiJyZXBvcnQtZml4dHVyZSIsInRydW5jYXRlZCI6ZmFsc2V9" -->
+<!-- file:id="FILE:f_23bf81dccf388d200ca09080" path=".github/workflows/ci.yml" -->
 <a id="file-report-fixture-github-workflows-ci-yml"></a>
-<a id="file-report-fixture-github-workflows-ci-yml-f650d0"></a>
+<a id="file-f_23bf81dccf388d200ca09080"></a>
 #### .github/workflows/ci.yml
 
 **Path:** `.github/workflows/ci.yml`
-<!-- zone:begin type="code" lang="yaml" id="FILE:f_aea515f51797" -->
+<!-- zone:begin type="code" lang="yaml" id="FILE:f_23bf81dccf388d200ca09080" -->
 
 ```yaml
 name: ci
@@ -218,20 +222,19 @@ jobs:
 
 ```
 
-<!-- zone:end type="code" id="FILE:f_aea515f51797" -->
-<!-- FILE_END path=".github/workflows/ci.yml" -->
+<!-- zone:end type="code" id="FILE:f_23bf81dccf388d200ca09080" -->
+<!-- FILE_END path=".github/workflows/ci.yml" meta="eyJwYXRoIjoiLmdpdGh1Yi93b3JrZmxvd3MvY2kueW1sIiwicmVwbyI6InJlcG9ydC1maXh0dXJlIn0" -->
 [↑ Manifest](#manifest) · [↑ Index](#index)
 
 ---
-<!-- FILE_START path="src/main.py" content_sha256="b7e60a653b8be58a74526d7359c18fe8a437b88d58597a86d56e895b7c05543a" content_bytes="89" file_bytes="110" truncated="false" -->
-<!-- file:id="FILE:f_c8b4581f6615" path="src/main.py" -->
-<a id="file-f_c8b4581f6615"></a>
+<!-- FILE_START path="src/main.py" meta="eyJjb250ZW50X2J5dGVzIjo4OSwiY29udGVudF9zaGEyNTYiOiJiN2U2MGE2NTNiOGJlNThhNzQ1MjZkNzM1OWMxOGZlOGE0MzdiODhkNTg1OTdhODZkNTZlODk1YjdjMDU1NDNhIiwiZmlsZV9ieXRlcyI6MTEwLCJwYXRoIjoic3JjL21haW4ucHkiLCJyZXBvIjoicmVwb3J0LWZpeHR1cmUiLCJ0cnVuY2F0ZWQiOmZhbHNlfQ" -->
+<!-- file:id="FILE:f_66ed99155b80ba69acae3b5c" path="src/main.py" -->
 <a id="file-report-fixture-src-main-py"></a>
-<a id="file-report-fixture-src-main-py-88ded1"></a>
+<a id="file-f_66ed99155b80ba69acae3b5c"></a>
 #### src/main.py
 
 **Path:** `src/main.py`
-<!-- zone:begin type="code" lang="python" id="FILE:f_c8b4581f6615" -->
+<!-- zone:begin type="code" lang="python" id="FILE:f_66ed99155b80ba69acae3b5c" -->
 
 ```python
 """Fixture entrypoint."""
@@ -243,7 +246,7 @@ def main() -> str:
 
 ```
 
-<!-- zone:end type="code" id="FILE:f_c8b4581f6615" -->
-<!-- FILE_END path="src/main.py" -->
+<!-- zone:end type="code" id="FILE:f_66ed99155b80ba69acae3b5c" -->
+<!-- FILE_END path="src/main.py" meta="eyJwYXRoIjoic3JjL21haW4ucHkiLCJyZXBvIjoicmVwb3J0LWZpeHR1cmUifQ" -->
 [↑ Manifest](#manifest) · [↑ Index](#index)
 

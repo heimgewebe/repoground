@@ -1,3 +1,6 @@
+import base64
+import json
+import re
 from merger.repoground.tests._test_constants import make_generator_info
 from pathlib import Path
 from merger.repoground.core import merge
@@ -48,7 +51,7 @@ def test_meta_density_min_counts(tmp_path):
     assert "Category: source" not in content
 
     # Block counting: file_meta should appear 0 times
-    assert content.count("file_meta:") == 0
+    assert content.count("<!-- file_meta meta=") == 0
 
     # Check for Index reduction note
     assert "_Index reduced (meta=min)_" in content
@@ -97,7 +100,7 @@ def test_meta_density_full_counts(tmp_path):
     assert "MD5: abc" in content
 
     # file_meta should appear exactly once
-    assert content.count("file_meta:") == 1
+    assert content.count("<!-- file_meta meta=") == 1
 
 def test_meta_density_standard_counts(tmp_path):
     """
@@ -144,7 +147,7 @@ def test_meta_density_standard_counts(tmp_path):
     assert "MD5: abc" not in content
 
     # file_meta should be hidden because file is fully included
-    assert content.count("file_meta:") == 0
+    assert content.count("<!-- file_meta meta=") == 0
 
 def test_auto_throttling_trigger(tmp_path):
     """
@@ -261,5 +264,11 @@ def test_file_meta_safety_in_min_mode(tmp_path, monkeypatch):
 
     # In 'min' mode, full files have NO file_meta.
     # But this file is 'truncated', so it MUST have file_meta.
-    assert "file_meta:" in full_text
-    assert "included: truncated" in full_text
+    match = re.search(r'<!-- file_meta meta="([A-Za-z0-9_-]+)" -->', full_text)
+    assert match is not None
+    token = match.group(1)
+    payload = json.loads(
+        base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)).decode("utf-8")
+    )
+    assert payload["included"] == "truncated"
+    assert payload["path"] == "large.py"

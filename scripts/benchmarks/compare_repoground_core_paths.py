@@ -17,6 +17,9 @@ TIMING_REGRESSION_PCT_MAX = 5.0
 PEAK_MEMORY_REGRESSION_PCT_MAX = 5.0
 BENCHMARK_RELATIVE = Path("scripts/benchmarks/repoground_core_paths.py")
 MEASURED_FIELDS = ("wall_seconds_median", "peak_traced_bytes")
+# Timeout per benchmark invocation in seconds.  Prevents runaway runners from
+# blocking CI indefinitely.
+_BENCHMARK_TIMEOUT_SECONDS = 300
 
 
 def _sha256(path: Path) -> str:
@@ -38,6 +41,16 @@ def _git_value(root: Path, expression: str) -> str | None:
     return completed.stdout.strip() if completed.returncode == 0 else None
 
 
+def _git_object_exists_at(root: Path, revision: str) -> bool:
+    completed = subprocess.run(
+        ["git", "cat-file", "-e", revision],
+        cwd=root,
+        check=False,
+        capture_output=True,
+    )
+    return completed.returncode == 0
+
+
 def _git_dirty(root: Path) -> bool | None:
     completed = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -47,6 +60,20 @@ def _git_dirty(root: Path) -> bool | None:
         text=True,
     )
     return bool(completed.stdout.strip()) if completed.returncode == 0 else None
+
+
+def _git_blob_sha256(commit: str, path: str, root: Path) -> str | None:
+    """Compute SHA-256 of a blob at ``commit:path`` for content binding."""
+    try:
+        completed = subprocess.run(
+            ["git", "show", f"{commit}:{path}"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+        )
+        return hashlib.sha256(completed.stdout).hexdigest()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
 
 
 def _percent_change(before: float, after: float) -> float:
@@ -64,13 +91,19 @@ def _run_benchmark(root: Path, samples: int, output: Path) -> dict[str, Any]:
         "--out",
         str(output),
     ]
-    completed = subprocess.run(
-        command,
-        cwd=root,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_BENCHMARK_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"benchmark timed out after {_BENCHMARK_TIMEOUT_SECONDS}s in {root}: {exc}"
+        ) from exc
     if completed.returncode != 0:
         raise RuntimeError(
             f"benchmark failed in {root}: {completed.stderr.strip()[-1000:]}"
@@ -83,13 +116,36 @@ def _run_benchmark(root: Path, samples: int, output: Path) -> dict[str, Any]:
 
 def _aggregate_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
     if all("skipped" in row for row in rows):
-        reasons = sorted({str(row["skipped"]) for row in rows})
-        return {"skipped": reasons, "rounds": len(rows)}
+        # Normalize: flatten skip reasons to sorted unique strings
+        flat_reasons: list[str] = []
+        for row in rows:
+            val = row["skipped"]
+            if isinstance(val, list):
+                flat_reasons.extend(str(r) for r in val)
+            else:
+                flat_reasons.append(str(val))
+        return {
+            "skipped": sorted(set(flat_reasons)),
+            "rounds": len(rows),
+            "samples_per_round": [
+                int(row["samples"]) if "samples" in row else "unknown"
+                for row in rows
+            ],
+        }
     if any("skipped" in row for row in rows):
-        raise RuntimeError("case is measured in only a subset of rounds")
+        # Partial skip: structured contract failure.  All or nothing.
+        return {
+            "skipped": ["partial_skip_not_allowed"],
+            "rounds": len(rows),
+            "status": "fail",
+        }
     for field in MEASURED_FIELDS:
         if any(field not in row for row in rows):
-            raise RuntimeError(f"measured case lacks {field}")
+            return {
+                "skipped": [f"missing_field_{field}"],
+                "rounds": len(rows),
+                "status": "fail",
+            }
     return {
         "rounds": len(rows),
         "samples_per_round": [int(row["samples"]) for row in rows],
@@ -113,8 +169,19 @@ def _aggregate_reports(reports: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _compare_case(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    # Structural failures must never be reclassified as ordinary skips.
+    if before.get("status") == "fail" or after.get("status") == "fail":
+        return {
+            "status": "fail",
+            "reason": "structural measurement failure",
+            "before": before,
+            "after": after,
+        }
     if "skipped" in before or "skipped" in after:
-        if before.get("skipped") != after.get("skipped"):
+        contract_fields = ("skipped", "rounds", "samples_per_round")
+        before_contract = {field: before.get(field) for field in contract_fields}
+        after_contract = {field: after.get(field) for field in contract_fields}
+        if before_contract != after_contract:
             return {
                 "status": "fail",
                 "reason": "skip contract differs",
@@ -122,6 +189,16 @@ def _compare_case(before: dict[str, Any], after: dict[str, Any]) -> dict[str, An
                 "after": after,
             }
         return {"status": "skip", "before": before, "after": after}
+    # Fail-closed: both sides must have required measurement fields
+    for side_label, side_data in [("before", before), ("after", after)]:
+        for field in MEASURED_FIELDS:
+            if field not in side_data or side_data[field] is None:
+                return {
+                    "status": "fail",
+                    "reason": f"{side_label} missing measurement field {field}",
+                    "before": before,
+                    "after": after,
+                }
     timing_change = _percent_change(
         float(before["wall_seconds_median"]), float(after["wall_seconds_median"])
     )
@@ -172,6 +249,60 @@ def _validate_reports(
     }
 
 
+def _validate_before_content_binding(
+    before_root: Path,
+    before_commit: str,
+    before_tree: str,
+    benchmark_script_path: str,
+) -> dict[str, Any]:
+    """Verify that the 'before' checkout content matches the claimed commit.
+
+    Fail-closed: before_root must be an authoritative Git checkout of the
+    claimed commit/tree identity, clean, with claimed commit available.
+    No self-attested CLI copy.
+    """
+    findings: list[str] = []
+    live_commit = _git_value(before_root, "HEAD")
+    if live_commit != before_commit:
+        findings.append(
+            f"before HEAD ({live_commit}) does not match claimed commit ({before_commit})"
+        )
+    live_tree = _git_value(before_root, "HEAD^{tree}")
+    if live_tree is None:
+        findings.append("before HEAD^{tree} is unavailable (shallow or broken checkout)")
+    # Verify claimed before_tree matches live HEAD^{tree} exactly
+    if live_tree is not None and live_tree != before_tree:
+        findings.append(
+            f"before live tree ({live_tree}) does not match claimed before_tree ({before_tree})"
+        )
+    # Verify before worktree is clean — dirty must be exactly False, None is error
+    dirty = _git_dirty(before_root)
+    if dirty is None:
+        findings.append("before worktree dirty status could not be determined")
+    elif dirty is True:
+        findings.append("before worktree is dirty (expected clean)")
+    # Verify claimed commit is reachable
+    if not _git_object_exists_at(before_root, before_commit):
+        findings.append(f"claimed before_commit {before_commit} is not reachable")
+    # Verify benchmark script content identity against the claimed commit
+    live_script_hash = _sha256(before_root / benchmark_script_path)
+    claimed_script_hash = _git_blob_sha256(before_commit, benchmark_script_path, before_root)
+    if claimed_script_hash is None:
+        findings.append(
+            f"benchmark script {benchmark_script_path} not found at claimed commit"
+        )
+    elif live_script_hash != claimed_script_hash:
+        findings.append(
+            "before benchmark script content does not match claimed commit blob"
+        )
+    return {
+        "status": "pass" if not findings else "fail",
+        "findings": findings,
+        "live_commit": live_commit,
+        "live_tree": live_tree,
+    }
+
+
 def compare(
     before_root: Path,
     after_root: Path,
@@ -194,6 +325,15 @@ def compare(
         raise RuntimeError("after revision binding does not match live checkout")
     if _git_dirty(after_root) is not False:
         raise RuntimeError("after worktree must be clean")
+
+    # Fail-closed: validate before content binding against claimed commit
+    before_binding_check = _validate_before_content_binding(
+        before_root, before_commit, before_tree, str(BENCHMARK_RELATIVE)
+    )
+    if before_binding_check["status"] == "fail":
+        raise RuntimeError(
+            f"before content binding failed: {'; '.join(before_binding_check['findings'])}"
+        )
 
     before_reports: list[dict[str, Any]] = []
     after_reports: list[dict[str, Any]] = []
@@ -231,6 +371,7 @@ def compare(
             "rounds": rounds,
             "samples_per_round": samples,
             "warmups_per_revision": warmups,
+            "gate_kind": "performance_smoke_gate",
             "primary_timing_metric": "median of per-round wall_seconds_median",
             "primary_memory_metric": "median of per-round peak_traced_bytes",
             "execution_order": execution_order,
@@ -251,9 +392,10 @@ def compare(
         "binding": {
             "commit": before_commit,
             "tree": before_tree,
-            "source": "git_archive",
+            "source": "clean_git_worktree",
             "worktree_dirty": False,
         },
+        "content_binding": before_binding_check,
         "cases": before_cases,
     }
     after = common | {
@@ -271,6 +413,7 @@ def compare(
         "version": "1.0",
         "status": status,
         "validation": validation,
+        "before_content_binding": before_binding_check,
         "gate": common["configuration"]["timing_gate"],
         "compared_cases": comparisons,
         "failed_cases": failures,
@@ -280,6 +423,7 @@ def compare(
             "absence of regressions on unmeasured paths",
             "production workload representativeness",
             "memory use outside Python tracemalloc",
+            "statistical significance",
         ],
     }
     return before, after, comparison
