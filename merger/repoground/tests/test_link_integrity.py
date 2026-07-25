@@ -99,9 +99,9 @@ def test_no_duplicate_ids(sample_file_info, tmp_path):
 
     assert not duplicates, f"Found duplicate anchor IDs: {duplicates}"
 
-def test_double_anchoring_strategy(sample_file_info, tmp_path):
+def test_stable_hash_anchor(sample_file_info, tmp_path):
     """
-    Test that files have both human-stable (hash) and path-stable anchors.
+    Test that files have a canonical SHA-256 path-identity anchor plus a unique legacy alias.
     """
     files = [sample_file_info]
     source = tmp_path / "my-repo"
@@ -110,13 +110,9 @@ def test_double_anchoring_strategy(sample_file_info, tmp_path):
     (source / "src/main.py").write_text("print('hello')")
     sample_file_info.abs_path = source / "src/main.py"
 
-    # Calculate expected IDs
+    # Calculate expected anchor
     fid = merge._stable_file_id(sample_file_info)
     human_stable = fid.replace("FILE:", "file-")
-
-    repo_slug = merge._slug_token("my-repo")
-    path_slug = merge._slug_token("src/main.py")
-    path_stable = f"file-{repo_slug}-{path_slug}"
 
     report = merge.generate_report_content(
         files=files,
@@ -128,20 +124,21 @@ def test_double_anchoring_strategy(sample_file_info, tmp_path):
 
     ids, _ = parse_ids_and_fragments(report)
 
-    assert human_stable in ids, "Human-stable anchor missing"
-    assert path_stable in ids, "Path-stable anchor missing"
+    repo_slug = merge._slug_token("my-repo")
+    path_slug = merge._slug_token("src/main.py")
+    legacy_alias = f"file-{repo_slug}-{path_slug}"
+    assert human_stable in ids, "SHA-256 path-identity anchor missing"
+    assert legacy_alias in ids, "unique legacy alias missing"
 
 def test_path_sanitization_and_nfc(tmp_path):
-    """Test NFC normalization and path sanitization in anchors."""
-    # Use a file with unicode characters to verify normalization behavior
-    # NFD input 'u\u0308ber.txt' (u + ¨) should be normalized to NFC 'über.txt' (ü)
+    """Test NFC normalization is applied for file identity, and a valid anchor is produced."""
     nfd_name = "u\u0308ber.txt"
     nfc_name = "über.txt"
 
     fi = merge.FileInfo(
         root_label="repo",
         abs_path=tmp_path / nfc_name,
-        rel_path=Path(nfd_name), # Simulate NFD coming from OS
+        rel_path=Path(nfd_name),  # Simulate NFD coming from OS
         size=10,
         is_text=True,
         md5="123",
@@ -150,7 +147,6 @@ def test_path_sanitization_and_nfc(tmp_path):
         ext=".txt"
     )
 
-    # We create a dummy source with the NFD filename
     nfd_source = tmp_path / "nfd_repo"
     nfd_source.mkdir()
     (nfd_source / nfd_name).write_text("content")
@@ -167,13 +163,10 @@ def test_path_sanitization_and_nfc(tmp_path):
 
     ids, _ = parse_ids_and_fragments(report)
 
-    # Verify we have an anchor derived from the file.
-    # Logic: NFD 'u¨ber' -> NFC 'über' -> _slug_token lowercases & strips non-ascii -> 'ber-txt'
-    # This confirms the ID generation pipeline handles unicode inputs without crashing
-    # and performs the expected sanitization steps.
-
-    expected_slug = "file-repo-ber-txt"
-    assert expected_slug in ids, f"Expected sanitized unicode anchor '{expected_slug}' not found in {ids}"
+    # Verify that a hash-based anchor exists for this file
+    fid = merge._stable_file_id(fi)
+    expected_anchor = fid.replace("FILE:", "file-")
+    assert expected_anchor in ids, f"Expected anchor '{expected_anchor}' not found in {ids}"
 
 def test_backlinks_exist(sample_file_info, tmp_path):
     files = [sample_file_info]

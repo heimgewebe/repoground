@@ -1,0 +1,277 @@
+{
+  "before_content_binding": {
+    "findings": [],
+    "live_commit": "c91d640bce2b14c4a78a64e83169d56c818fa662",
+    "live_tree": "36113af31c4cb6ba381302b8fcef61a024049336",
+    "status": "pass"
+  },
+  "bindings": {
+    "after": {
+      "commit": "684fd3aa8f0b99f6b743386e233d09b997144310",
+      "source": "clean_git_worktree",
+      "tree": "457e8af17214a216035a9b3a704ef4c746c9ced2",
+      "worktree_dirty": false
+    },
+    "before": {
+      "commit": "c91d640bce2b14c4a78a64e83169d56c818fa662",
+      "source": "clean_git_worktree",
+      "tree": "36113af31c4cb6ba381302b8fcef61a024049336",
+      "worktree_dirty": false
+    }
+  },
+  "compared_cases": {
+    "atlas_scan": {
+      "after": {
+        "rounds": 2,
+        "samples_per_round": [
+          "unknown",
+          "unknown"
+        ],
+        "skipped": [
+          "not requested (optional subsystem)"
+        ]
+      },
+      "before": {
+        "rounds": 2,
+        "samples_per_round": [
+          "unknown",
+          "unknown"
+        ],
+        "skipped": [
+          "not requested (optional subsystem)"
+        ]
+      },
+      "status": "skip"
+    },
+    "bundle_write_archive": {
+      "after": {
+        "peak_traced_bytes": 1973025,
+        "peak_traced_bytes_samples": [
+          1971985,
+          1974066
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.131199,
+        "wall_seconds_medians": [
+          0.132058,
+          0.13034
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 1987555,
+        "peak_traced_bytes_samples": [
+          1987715,
+          1987396
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.136072,
+        "wall_seconds_medians": [
+          0.140468,
+          0.131677
+        ]
+      },
+      "median_regression_pct": -3.581,
+      "memory_pass": true,
+      "peak_memory_regression_pct": -0.731,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "bundle_write_dual": {
+      "after": {
+        "peak_traced_bytes": 2706333,
+        "peak_traced_bytes_samples": [
+          2706994,
+          2705672
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.310759,
+        "wall_seconds_medians": [
+          0.315066,
+          0.306453
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 2703355,
+        "peak_traced_bytes_samples": [
+          2695642,
+          2711068
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.308623,
+        "wall_seconds_medians": [
+          0.309243,
+          0.308002
+        ]
+      },
+      "median_regression_pct": 0.692,
+      "memory_pass": true,
+      "peak_memory_regression_pct": 0.11,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "retrieval_index_build": {
+      "after": {
+        "peak_traced_bytes": 399136,
+        "peak_traced_bytes_samples": [
+          399136,
+          399136
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.018006,
+        "wall_seconds_medians": [
+          0.018154,
+          0.017858
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 399111,
+        "peak_traced_bytes_samples": [
+          399111,
+          399111
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.018589,
+        "wall_seconds_medians": [
+          0.018815,
+          0.018364
+        ]
+      },
+      "median_regression_pct": -3.136,
+      "memory_pass": true,
+      "peak_memory_regression_pct": 0.006,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "retrieval_query": {
+      "after": {
+        "peak_traced_bytes": 57265,
+        "peak_traced_bytes_samples": [
+          57265,
+          57265
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.000623,
+        "wall_seconds_medians": [
+          0.000621,
+          0.000625
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 57264,
+        "peak_traced_bytes_samples": [
+          57264,
+          57264
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.000636,
+        "wall_seconds_medians": [
+          0.000632,
+          0.00064
+        ]
+      },
+      "median_regression_pct": -2.044,
+      "memory_pass": true,
+      "peak_memory_regression_pct": 0.002,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "service_app_import": {
+      "after": {
+        "peak_traced_bytes": 24394871,
+        "peak_traced_bytes_samples": [
+          24394996,
+          24394746
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 1.123956,
+        "wall_seconds_medians": [
+          1.118408,
+          1.129504
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 24341680,
+        "peak_traced_bytes_samples": [
+          24340708,
+          24342652
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 1.119366,
+        "wall_seconds_medians": [
+          1.114868,
+          1.123863
+        ]
+      },
+      "median_regression_pct": 0.41,
+      "memory_pass": true,
+      "peak_memory_regression_pct": 0.219,
+      "status": "pass",
+      "timing_pass": true
+    }
+  },
+  "does_not_establish": [
+    "cross-host comparability",
+    "absence of regressions on unmeasured paths",
+    "production workload representativeness",
+    "memory use outside Python tracemalloc",
+    "statistical significance"
+  ],
+  "failed_cases": [],
+  "gate": {
+    "median_regression_pct_max": 5.0,
+    "peak_memory_regression_pct_max": 5.0
+  },
+  "kind": "repoground.core_path_benchmark.comparison",
+  "status": "pass",
+  "validation": {
+    "benchmark_script_sha256": "89f221b81659f81427dab62539e8487579e82aa1c399641bfb7b00e77b8ded72",
+    "environment": [
+      "3.10.12",
+      "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+      "x86_64"
+    ],
+    "findings": [],
+    "status": "pass"
+  },
+  "version": "1.0"
+}

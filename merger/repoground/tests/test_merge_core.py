@@ -14,6 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")
 
 from merger.repoground.core.merge import (
     _slug_token,
+    _stable_file_id,
     classify_file_v2,
     _generate_run_id,
     make_output_filename,
@@ -283,29 +284,15 @@ class TestMergeCore(unittest.TestCase):
 
         full_report = "".join(list(iterator))
 
-        # 1. Check for double anchors
-
-        # Verify slug generation invariants
-        slug_rel = _slug_token("src/My File.txt")
-        slug_repo = _slug_token("my-repo")
-
-        # Check invariants rather than hardcoded string
-        self.assertRegex(slug_rel, r"^[a-z0-9-]+$")
-        self.assertTrue(slug_rel.endswith("txt"))
-        self.assertRegex(slug_repo, r"^[a-z0-9-]+$")
-
-        base_anchor = f"file-{slug_repo}-{slug_rel}"
-        # We know md5 prefix is d41d8c
-        full_anchor = f"{base_anchor}-d41d8c"
+        # 1. Check anchors
+        fid = _stable_file_id(fi)
+        hash_anchor = fid.replace("FILE:", "file-")
 
         # Check for HTML anchor tag (primary robustness mechanism)
-        self.assertIn(f'<a id="{full_anchor}"></a>', full_report)
+        self.assertIn(f'<a id="{hash_anchor}"></a>', full_report)
 
         # Check for visible heading (Option A style)
         self.assertIn("#### src/My File.txt", full_report)
-
-        # Check for alias anchor (legacy/backward compatibility)
-        self.assertIn(f'<a id="{base_anchor}"></a>', full_report)
 
     def test_extras_config_from_csv(self):
         from merger.repoground.core.merge import ExtrasConfig

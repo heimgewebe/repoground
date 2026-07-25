@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ast
+import base64
 import datetime
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -150,6 +152,19 @@ def _python_source(report: str, rel_path: str) -> str:
     return fenced.split("\n```", 1)[0]
 
 
+def _decoded_marker_payloads(report: str, marker: str) -> list[dict[str, object]]:
+    tokens = re.findall(
+        rf'<!-- {marker} [^>]*meta="([A-Za-z0-9_-]+)" -->', report
+    )
+    payloads: list[dict[str, object]] = []
+    for token in tokens:
+        padded = token + "=" * (-len(token) % 4)
+        loaded = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        assert isinstance(loaded, dict)
+        payloads.append(loaded)
+    return payloads
+
+
 @pytest.mark.parametrize("name", ["full_extras", "plan_filtered", "machine_redacted"])
 def test_report_renderer_matches_byte_and_block_goldens(name: str) -> None:
     blocks = _render(name)
@@ -223,9 +238,9 @@ def test_renderer_does_not_reorder_caller_list_but_documents_object_enrichment()
     _render_kwargs(_common_kwargs(files) | {"level": "max", "plan_only": False})
     assert [id(file_info) for file_info in files] == original_ids
     assert [file_info.rel_path for file_info in files] == original_paths
-    assert all(file_info.anchor for file_info in files)
-    assert all(file_info.anchor_alias for file_info in files)
-    assert all(file_info.roles is not None for file_info in files)
+    assert all(file_info.roles is None for file_info in files)
+    assert not any(file_info.anchor for file_info in files)
+    assert not any(file_info.anchor_alias for file_info in files)
 
 
 def test_redacted_python_preserves_assignment_and_syntax() -> None:
@@ -300,9 +315,16 @@ def test_slug_collisions_remain_distinct(tmp_path: Path) -> None:
         _file_info(first, rel_path="a_b.py"),
         _file_info(second, rel_path="a-b.py"),
     ]
-    _render_kwargs(_common_kwargs(files) | {"level": "max", "plan_only": False})
-    assert files[0].anchor_alias == files[1].anchor_alias
-    assert files[0].anchor != files[1].anchor
+    report = "".join(
+        _render_kwargs(_common_kwargs(files) | {"level": "max", "plan_only": False})
+    )
+    assert "id=" in report
+    assert files[0].anchor == ""
+    assert files[1].anchor == ""
+    anchors = [m.group(1) for m in re.finditer(r'<a id="([^"]+)"></a>', report)]
+    non_file_anchors = [a for a in anchors if not a.startswith("manifest")]
+    assert len(non_file_anchors) >= 2
+    assert len(set(non_file_anchors)) >= 2
 
 
 def test_empty_sources_and_extract_purpose_failure_are_nonfatal(
@@ -351,7 +373,11 @@ def test_multi_repo_health_fleet_augment_and_truncation(tmp_path: Path) -> None:
     merge_meta = _yaml_meta(report)["merge"]
     assert "Repo `alpha`" in report
     assert "Repo `beta`" in report
-    assert "truncated" in report
+    start_payloads = _decoded_marker_payloads(report, "FILE_START")
+    beta_payload = next(payload for payload in start_payloads if payload["path"] == "two.py")
+    assert beta_payload["truncated"] is False
+    assert beta_payload["content_bytes"] == beta_payload["file_bytes"] == 205
+    assert "- **Max File Bytes:** 32.00 B" in report
     assert "<!-- @fleet-panorama:start -->" in report
     assert "<!-- @augment:start -->" in report
     assert merge_meta["extras"]["augment_sidecar"] is True
@@ -420,7 +446,7 @@ def _differential_scenario(name: str, tmp_path: Path) -> dict[str, object]:
 
 
 @pytest.mark.parametrize("name", SCENARIO_NAMES)
-def test_18_scenario_differential_contract(name: str, tmp_path: Path) -> None:
+def test_18_scenario_target_revision_regression_golden(name: str, tmp_path: Path) -> None:
     expected = json.loads(
         (GOLDEN_ROOT / "differential_scenarios.json").read_text(encoding="utf-8")
     )["scenarios"][name]
@@ -432,13 +458,13 @@ def test_18_scenario_differential_contract(name: str, tmp_path: Path) -> None:
     assert [block["sha256"] for block in actual["blocks"]] == expected["block_sha256"]
 
 
-def test_differential_contract_declares_intentional_corrections() -> None:
+def test_target_goldens_declare_non_differential_purpose() -> None:
     contract = json.loads(
         (GOLDEN_ROOT / "differential_scenarios.json").read_text(encoding="utf-8")
     )
     assert contract["scenario_count"] == 18
-    assert contract["intentional_corrections"] == [
-        "balanced empty manifest zone",
-        "plan-only emitted-content coverage is zero",
-        "redacted assignments preserve source syntax",
-    ]
+    assert contract["purpose"] == "target_revision_regression_golden"
+    assert contract["historical_comparison_tool"] == (
+        "scripts/ci/compare_report_renderer_revisions.py"
+    )
+    assert contract["does_not_establish"] == ["historical_output_parity"]

@@ -173,10 +173,10 @@ _No specific recommendations found._
 - `report-fixture` → 4 files (4 relevant text, 354.00 B, 4 with content)
 
 ### Hotspots (Einstiegspunkte)
-- [`src/main.py`](#file-report-fixture-src-main-py-88ded1) — repo `report-fixture`, source; roles: entrypoint, ai-context, tags: entrypoint
-- [`.github/workflows/ci.yml`](#file-report-fixture-github-workflows-ci-yml-f650d0) — repo `report-fixture`, config; roles: config, tags: ci
-- [`README.md`](#file-report-fixture-readme-md-2165fe) — repo `report-fixture`, doc; roles: doc-essential, ai-context, tags: ai-context
-- [`docs/guide.md`](#file-report-fixture-docs-guide-md-499434) — repo `report-fixture`, doc; roles: -, tags: runbook
+- [`src/main.py`](#file-f_66ed99155b80ba69acae3b5c) — repo `report-fixture`, source; roles: entrypoint, ai-context, tags: entrypoint
+- [`.github/workflows/ci.yml`](#file-f_23bf81dccf388d200ca09080) — repo `report-fixture`, config; roles: config, tags: ci
+- [`README.md`](#file-f_feb1aca1bd0f849da752c8ac) — repo `report-fixture`, doc; roles: doc-essential, ai-context, tags: ai-context
+- [`docs/guide.md`](#file-f_94339037c6de70b8f9077dc4) — repo `report-fixture`, doc; roles: -, tags: runbook
 
 **Folder Highlights:**
 - Code: `src`
@@ -275,23 +275,23 @@ _Kein WGX-/Fleet-Profil gefunden._
 <a id="cat-source"></a>
 ## Category: source
 
-- [`src/main.py`](#file-report-fixture-src-main-py-88ded1)
+- [`src/main.py`](#file-f_66ed99155b80ba69acae3b5c)
 
 <a id="cat-doc"></a>
 ## Category: doc
 
-- [`docs/guide.md`](#file-report-fixture-docs-guide-md-499434)
-- [`README.md`](#file-report-fixture-readme-md-2165fe)
+- [`docs/guide.md`](#file-f_94339037c6de70b8f9077dc4)
+- [`README.md`](#file-f_feb1aca1bd0f849da752c8ac)
 
 <a id="cat-config"></a>
 ## Category: config
 
-- [`.github/workflows/ci.yml`](#file-report-fixture-github-workflows-ci-yml-f650d0)
+- [`.github/workflows/ci.yml`](#file-f_23bf81dccf388d200ca09080)
 
 <a id="tag-ci"></a>
 ## Tag: ci
 
-- [`.github/workflows/ci.yml`](#file-report-fixture-github-workflows-ci-yml-f650d0)
+- [`.github/workflows/ci.yml`](#file-f_23bf81dccf388d200ca09080)
 
 <!-- zone:end type="index" id="index" -->
 <!-- zone:begin type="manifest" id="manifest" -->
@@ -308,10 +308,10 @@ _Kein WGX-/Fleet-Profil gefunden._
 
 | Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |
 | --- | --- | --- | --- | --- | ---: | --- | --- |
-| [`.github/workflows/ci.yml`](#file-f_aea515f51797) | `config` | ci | config | - | 103.00 B | `full` | `f650d0deedc3c05d604d8de1aa69f959` |
-| [`docs/guide.md`](#file-f_2249f25d45e2) | `doc` | runbook | - | - | 69.00 B | `full` | `49943417cc5ee07b655782cbc6aaf25a` |
-| [`README.md`](#file-f_2b7bcd1068a3) | `doc` | ai-context | doc-essential, ai-context | - | 72.00 B | `full` | `2165fe2897e6317ef43824778ebf1e29` |
-| [`src/main.py`](#file-f_c8b4581f6615) | `source` | entrypoint | entrypoint, ai-context | - | 110.00 B | `full` | `88ded152782ad0251049214f8bad72b7` |
+| [`.github/workflows/ci.yml`](#file-f_23bf81dccf388d200ca09080) | `config` | ci | config | - | 103.00 B | `full` | `f650d0deedc3c05d604d8de1aa69f959` |
+| [`docs/guide.md`](#file-f_94339037c6de70b8f9077dc4) | `doc` | runbook | - | - | 69.00 B | `full` | `49943417cc5ee07b655782cbc6aaf25a` |
+| [`README.md`](#file-f_feb1aca1bd0f849da752c8ac) | `doc` | ai-context | doc-essential, ai-context | - | 72.00 B | `full` | `2165fe2897e6317ef43824778ebf1e29` |
+| [`src/main.py`](#file-f_66ed99155b80ba69acae3b5c) | `source` | entrypoint | entrypoint, ai-context | - | 110.00 B | `full` | `88ded152782ad0251049214f8bad72b7` |
 
 <!-- zone:end type="manifest" id="manifest" -->
 <!-- START_OF_CONTENT -->
@@ -322,11 +322,10 @@ _Kein WGX-/Fleet-Profil gefunden._
 ### report-fixture
 
 ---
-<!-- FILE_START path=".github/workflows/ci.yml" content_sha256="e59738c25ae0c100af3d28d5c1595a5dd1596326765be4585a5eb43576a79ff3" content_bytes="103" file_bytes="103" truncated="false" -->
-<!-- file:id="FILE:f_aea515f51797" path=".github/workflows/ci.yml" -->
-<a id="file-f_aea515f51797"></a>
+<!-- FILE_START path=".github/workflows/ci.yml" meta="eyJjb250ZW50X2J5dGVzIjoxMDMsImNvbnRlbnRfc2hhMjU2IjoiZTU5NzM4YzI1YWUwYzEwMGFmM2QyOGQ1YzE1OTVhNWRkMTU5NjMyNjc2NWJlNDU4NWE1ZWI0MzU3NmE3OWZmMyIsImZpbGVfYnl0ZXMiOjEwMywicGF0aCI6Ii5naXRodWIvd29ya2Zsb3dzL2NpLnltbCIsInJlcG8iOiJyZXBvcnQtZml4dHVyZSIsInRydW5jYXRlZCI6ZmFsc2V9" -->
+<!-- file:id="FILE:f_23bf81dccf388d200ca09080" path=".github/workflows/ci.yml" -->
 <a id="file-report-fixture-github-workflows-ci-yml"></a>
-<a id="file-report-fixture-github-workflows-ci-yml-f650d0"></a>
+<a id="file-f_23bf81dccf388d200ca09080"></a>
 #### .github/workflows/ci.yml
 
 **Path:** `.github/workflows/ci.yml`
@@ -335,14 +334,8 @@ _Kein WGX-/Fleet-Profil gefunden._
 - Size: 103.00 B
 - Included: full
 - MD5: f650d0deedc3c05d604d8de1aa69f959
-<!--
-file_meta:
-  repo: report-fixture
-  path: .github/workflows/ci.yml
-  lines: 8
-  included: full
--->
-<!-- zone:begin type="code" lang="yaml" id="FILE:f_aea515f51797" -->
+<!-- file_meta meta="eyJpbmNsdWRlZCI6ImZ1bGwiLCJsaW5lcyI6OCwicGF0aCI6Ii5naXRodWIvd29ya2Zsb3dzL2NpLnltbCIsInJlcG8iOiJyZXBvcnQtZml4dHVyZSJ9" -->
+<!-- zone:begin type="code" lang="yaml" id="FILE:f_23bf81dccf388d200ca09080" -->
 
 ```yaml
 name: ci
@@ -356,16 +349,15 @@ jobs:
 
 ```
 
-<!-- zone:end type="code" id="FILE:f_aea515f51797" -->
-<!-- FILE_END path=".github/workflows/ci.yml" -->
+<!-- zone:end type="code" id="FILE:f_23bf81dccf388d200ca09080" -->
+<!-- FILE_END path=".github/workflows/ci.yml" meta="eyJwYXRoIjoiLmdpdGh1Yi93b3JrZmxvd3MvY2kueW1sIiwicmVwbyI6InJlcG9ydC1maXh0dXJlIn0" -->
 [↑ Manifest](#manifest) · [↑ Index](#index)
 
 ---
-<!-- FILE_START path="docs/guide.md" content_sha256="40b859ee8712b5f3c49999529dd7dbfe7a7fd642d14244fcd0d276ee2fa8d212" content_bytes="69" file_bytes="69" truncated="false" -->
-<!-- file:id="FILE:f_2249f25d45e2" path="docs/guide.md" -->
-<a id="file-f_2249f25d45e2"></a>
+<!-- FILE_START path="docs/guide.md" meta="eyJjb250ZW50X2J5dGVzIjo2OSwiY29udGVudF9zaGEyNTYiOiI0MGI4NTllZTg3MTJiNWYzYzQ5OTk5NTI5ZGQ3ZGJmZTdhN2ZkNjQyZDE0MjQ0ZmNkMGQyNzZlZTJmYThkMjEyIiwiZmlsZV9ieXRlcyI6NjksInBhdGgiOiJkb2NzL2d1aWRlLm1kIiwicmVwbyI6InJlcG9ydC1maXh0dXJlIiwidHJ1bmNhdGVkIjpmYWxzZX0" -->
+<!-- file:id="FILE:f_94339037c6de70b8f9077dc4" path="docs/guide.md" -->
 <a id="file-report-fixture-docs-guide-md"></a>
-<a id="file-report-fixture-docs-guide-md-499434"></a>
+<a id="file-f_94339037c6de70b8f9077dc4"></a>
 #### docs/guide.md
 
 **Path:** `docs/guide.md`
@@ -374,14 +366,8 @@ jobs:
 - Size: 69.00 B
 - Included: full
 - MD5: 49943417cc5ee07b655782cbc6aaf25a
-<!--
-file_meta:
-  repo: report-fixture
-  path: docs/guide.md
-  lines: 3
-  included: full
--->
-<!-- zone:begin type="code" lang="markdown" id="FILE:f_2249f25d45e2" -->
+<!-- file_meta meta="eyJpbmNsdWRlZCI6ImZ1bGwiLCJsaW5lcyI6MywicGF0aCI6ImRvY3MvZ3VpZGUubWQiLCJyZXBvIjoicmVwb3J0LWZpeHR1cmUifQ" -->
+<!-- zone:begin type="code" lang="markdown" id="FILE:f_94339037c6de70b8f9077dc4" -->
 
 ```markdown
 # Guide
@@ -390,16 +376,15 @@ The renderer must preserve anchors, order, and exact bytes.
 
 ```
 
-<!-- zone:end type="code" id="FILE:f_2249f25d45e2" -->
-<!-- FILE_END path="docs/guide.md" -->
+<!-- zone:end type="code" id="FILE:f_94339037c6de70b8f9077dc4" -->
+<!-- FILE_END path="docs/guide.md" meta="eyJwYXRoIjoiZG9jcy9ndWlkZS5tZCIsInJlcG8iOiJyZXBvcnQtZml4dHVyZSJ9" -->
 [↑ Manifest](#manifest) · [↑ Index](#index)
 
 ---
-<!-- FILE_START path="README.md" content_sha256="efe2abc999528b98fd4d472eabb4262755261382a586fca2841296999d586dd0" content_bytes="72" file_bytes="72" truncated="false" -->
-<!-- file:id="FILE:f_2b7bcd1068a3" path="README.md" -->
-<a id="file-f_2b7bcd1068a3"></a>
+<!-- FILE_START path="README.md" meta="eyJjb250ZW50X2J5dGVzIjo3MiwiY29udGVudF9zaGEyNTYiOiJlZmUyYWJjOTk5NTI4Yjk4ZmQ0ZDQ3MmVhYmI0MjYyNzU1MjYxMzgyYTU4NmZjYTI4NDEyOTY5OTlkNTg2ZGQwIiwiZmlsZV9ieXRlcyI6NzIsInBhdGgiOiJSRUFETUUubWQiLCJyZXBvIjoicmVwb3J0LWZpeHR1cmUiLCJ0cnVuY2F0ZWQiOmZhbHNlfQ" -->
+<!-- file:id="FILE:f_feb1aca1bd0f849da752c8ac" path="README.md" -->
 <a id="file-report-fixture-readme-md"></a>
-<a id="file-report-fixture-readme-md-2165fe"></a>
+<a id="file-f_feb1aca1bd0f849da752c8ac"></a>
 #### README.md
 
 **Path:** `README.md`
@@ -408,14 +393,8 @@ The renderer must preserve anchors, order, and exact bytes.
 - Size: 72.00 B
 - Included: full
 - MD5: 2165fe2897e6317ef43824778ebf1e29
-<!--
-file_meta:
-  repo: report-fixture
-  path: README.md
-  lines: 3
-  included: full
--->
-<!-- zone:begin type="code" lang="markdown" id="FILE:f_2b7bcd1068a3" -->
+<!-- file_meta meta="eyJpbmNsdWRlZCI6ImZ1bGwiLCJsaW5lcyI6MywicGF0aCI6IlJFQURNRS5tZCIsInJlcG8iOiJyZXBvcnQtZml4dHVyZSJ9" -->
+<!-- zone:begin type="code" lang="markdown" id="FILE:f_feb1aca1bd0f849da752c8ac" -->
 
 ```markdown
 # Report fixture
@@ -424,16 +403,15 @@ A deterministic repository for renderer parity tests.
 
 ```
 
-<!-- zone:end type="code" id="FILE:f_2b7bcd1068a3" -->
-<!-- FILE_END path="README.md" -->
+<!-- zone:end type="code" id="FILE:f_feb1aca1bd0f849da752c8ac" -->
+<!-- FILE_END path="README.md" meta="eyJwYXRoIjoiUkVBRE1FLm1kIiwicmVwbyI6InJlcG9ydC1maXh0dXJlIn0" -->
 [↑ Manifest](#manifest) · [↑ Index](#index)
 
 ---
-<!-- FILE_START path="src/main.py" content_sha256="ff5375a1a60ce75fff653e4a0a93c7ce7e87e133484d322b9b9e38a7485a1e6f" content_bytes="110" file_bytes="110" truncated="false" -->
-<!-- file:id="FILE:f_c8b4581f6615" path="src/main.py" -->
-<a id="file-f_c8b4581f6615"></a>
+<!-- FILE_START path="src/main.py" meta="eyJjb250ZW50X2J5dGVzIjoxMTAsImNvbnRlbnRfc2hhMjU2IjoiZmY1Mzc1YTFhNjBjZTc1ZmZmNjUzZTRhMGE5M2M3Y2U3ZTg3ZTEzMzQ4NGQzMjJiOWI5ZTM4YTc0ODVhMWU2ZiIsImZpbGVfYnl0ZXMiOjExMCwicGF0aCI6InNyYy9tYWluLnB5IiwicmVwbyI6InJlcG9ydC1maXh0dXJlIiwidHJ1bmNhdGVkIjpmYWxzZX0" -->
+<!-- file:id="FILE:f_66ed99155b80ba69acae3b5c" path="src/main.py" -->
 <a id="file-report-fixture-src-main-py"></a>
-<a id="file-report-fixture-src-main-py-88ded1"></a>
+<a id="file-f_66ed99155b80ba69acae3b5c"></a>
 #### src/main.py
 
 **Path:** `src/main.py`
@@ -442,14 +420,8 @@ A deterministic repository for renderer parity tests.
 - Size: 110.00 B
 - Included: full
 - MD5: 88ded152782ad0251049214f8bad72b7
-<!--
-file_meta:
-  repo: report-fixture
-  path: src/main.py
-  lines: 6
-  included: full
--->
-<!-- zone:begin type="code" lang="python" id="FILE:f_c8b4581f6615" -->
+<!-- file_meta meta="eyJpbmNsdWRlZCI6ImZ1bGwiLCJsaW5lcyI6NiwicGF0aCI6InNyYy9tYWluLnB5IiwicmVwbyI6InJlcG9ydC1maXh0dXJlIn0" -->
+<!-- zone:begin type="code" lang="python" id="FILE:f_66ed99155b80ba69acae3b5c" -->
 
 ```python
 """Fixture entrypoint."""
@@ -461,7 +433,7 @@ def main() -> str:
 
 ```
 
-<!-- zone:end type="code" id="FILE:f_c8b4581f6615" -->
-<!-- FILE_END path="src/main.py" -->
+<!-- zone:end type="code" id="FILE:f_66ed99155b80ba69acae3b5c" -->
+<!-- FILE_END path="src/main.py" meta="eyJwYXRoIjoic3JjL21haW4ucHkiLCJyZXBvIjoicmVwb3J0LWZpeHR1cmUifQ" -->
 [↑ Manifest](#manifest) · [↑ Index](#index)
 

@@ -9,6 +9,7 @@ Implements AI-friendly formatting, tagging, and strict Pflichtenheft structure.
 import os
 import sys
 import json
+import base64
 import hashlib
 import datetime
 import logging
@@ -492,11 +493,11 @@ TEXT_EXTENSIONS = {
 
 
 def _stable_file_id(fi: "FileInfo") -> str:
-    """
-    Stable across runs as long as repo + rel-path stay the same.
-    Avoids relying on Markdown heading anchors or renderer-specific IDs.
-    """
+    """Canonical HTML anchor from SHA-256(root_label + NUL + original rel_path).
 
+    Stable across runs as long as repo + rel-path stay the same.
+    Uses SHA-256 for a globally unique, collision-resistant path anchor.
+    """
     repo = (
         getattr(fi, "root_label", None)
         or getattr(fi, "repo", None)
@@ -510,14 +511,11 @@ def _stable_file_id(fi: "FileInfo") -> str:
         or ""
     )
 
-    # Normalize paths to NFC to ensure stable IDs across platforms (macOS vs Linux)
     repo = unicodedata.normalize("NFC", repo)
     path = unicodedata.normalize("NFC", path)
 
-    raw = f"{repo}:{path}".encode("utf-8", errors="ignore")
-    # Updated in v2.4 (PR1) to include FILE: prefix.
-    # Content addressing only (not security); flag keeps FIPS builds happy.
-    return "FILE:f_" + hashlib.sha1(raw, usedforsecurity=False).hexdigest()[:12]
+    raw = f"{repo}\x00{path}".encode("utf-8", errors="ignore")
+    return "FILE:f_" + hashlib.sha256(raw).hexdigest()[:24]
 
 
 def resolve_canonical_md(md_parts: List[Path]) -> Optional[Path]:  # lenskit:requires-authority=canonical_content
@@ -1753,6 +1751,20 @@ class FileInfo(object):
         self.lens = None # Assigned during scan or later
 
 
+def _copy_file_info(fi: FileInfo) -> FileInfo:
+    """Create a shallow render-local copy of a FileInfo object.
+
+    The copy carries the same slot values (including mutable ones like tags
+    and content which the renderer never mutates).  Render-local fields
+    (anchor, anchor_alias, roles) are written to the copy, leaving the
+    original untouched.
+    """
+    clone = FileInfo.__new__(FileInfo)
+    for slot in FileInfo.__slots__:
+        setattr(clone, slot, getattr(fi, slot))
+    return clone
+
+
 # --- Utilities ---
 
 def _hub_path_file(script_path: Path) -> Path:
@@ -2776,6 +2788,27 @@ def get_repo_snapshot(repo_root: Path) -> Dict[str, Tuple[int, str, str]]:
     return snapshot
 
 
+def _plan_only_epistemic_metrics(files: List[FileInfo], processed_files: List[Tuple[FileInfo, str]]) -> Dict[str, Any]:
+    """Plan-only adjusted epistemic metrics: emitted=0, contact_ratio=0, risk=high.
+
+    When plan_only is active no content is examined so the risk must reflect
+    unread content rather than a potentially misleading 'low' risk derived
+    from the raw file statuses.
+    """
+    base = compute_epistemic_metrics(files, processed_files)
+    base["counts"]["full"] = 0
+    base["counts"]["snippet"] = 0
+    base["counts"]["text_contact"] = 0
+    base["ratios"]["contact_ratio"] = 0.0
+    base["ratios"]["text_coverage_ratio"] = 0.0
+    base["risk"]["level"] = "high"
+    base["risk"]["uncertainty_score"] = 1.0
+    base["risk"]["inputs"]["contact_ratio_all_files"] = 0.0
+    base["risk"]["inputs"]["text_coverage_ratio"] = 0.0
+    base["risk"]["inputs"]["snippet_count"] = 0
+    return base
+
+
 def compute_epistemic_metrics(files: List[FileInfo], processed_files: List[Tuple[FileInfo, str]]) -> Dict[str, Any]:
     """
     Compute epistemic metrics (counts, ratios, risks) in one place.
@@ -2912,6 +2945,34 @@ def _resolve_effective_meta_density(
         return "full"
 
     return meta_density
+
+
+def _normalize_ext_filter(ext_filter: Optional[List[str]]) -> Optional[List[str]]:
+    """Normalize extension filter: casefold, ensure leading dot, deduplicate, sort."""
+    if not ext_filter:
+        return None
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for ext in ext_filter:
+        if not isinstance(ext, str) or not ext.strip():
+            continue
+        e = ext.strip().casefold()
+        if not e.startswith("."):
+            e = "." + e
+        if e not in seen:
+            seen.add(e)
+            normalized.append(e)
+    return sorted(normalized) if normalized else None
+
+
+def _file_matches_ext_filter(fi: "FileInfo", ext_filter: Optional[List[str]]) -> bool:
+    """Check whether a FileInfo matches the normalized ext_filter."""
+    if not ext_filter:
+        return True
+    file_ext = (fi.ext or "").casefold()
+    if not file_ext.startswith("."):
+        file_ext = "." + file_ext
+    return file_ext in ext_filter
 
 
 def _generate_run_id(
@@ -3588,6 +3649,25 @@ class ReportValidator:
                  raise ValidationException(f"Missing required section: {req}")
 
 
+@dataclass(frozen=True, slots=True)
+class _ReportEmission:
+    """Canonical projection of selection and actual content emission."""
+
+    selected_files: int
+    selected_text_files: int
+    includable_files: int
+    emitted_files: int
+    metadata_only_files: int
+    includable_by_root: Tuple[Tuple[str, int], ...]
+    emitted_by_root: Tuple[Tuple[str, int], ...]
+
+    def emitted_for_root(self, root: str) -> int:
+        return dict(self.emitted_by_root).get(root, 0)
+
+    def includable_root_counts(self) -> Dict[str, int]:
+        return dict(self.includable_by_root)
+
+
 @dataclass
 class _ReportRenderState:
     files: List[FileInfo]
@@ -3613,9 +3693,8 @@ class _ReportRenderState:
     roots: Set[str]
     total_size: int
     text_files: List[FileInfo]
-    included_count: int
+    emission: _ReportEmission
     ep_metrics: Dict[str, Any]
-    included_by_root: Dict[str, int]
     declared_purpose: str
     repo_purpose: str
     infra_folders: Set[str]
@@ -3628,6 +3707,8 @@ class _ReportRenderState:
     files_by_root: Dict[str, List[FileInfo]]
     repo_stats: Dict[str, Dict[str, Any]]
     health_collector: Optional[HealthCollector]
+    # Structured optional warnings: tuple of {"code": str, "message": str, "detail": str|None}
+    structured_warnings: Tuple[Dict[str, Any], ...] = ()
 
 
 
@@ -3714,11 +3795,10 @@ def _append_scope_filters(header: List[str], state: _ReportRenderState) -> str:
     else:
         header.append("- **Extension Filter:** `none (all text types)`")
     if state.text_files:
-        emitted_count = 0 if state.plan_only else state.included_count
-        header.append(f"- **Selected Text Files:** {len(state.text_files)}")
-        header.append(f"- **Included Content:** {emitted_count} files")
+        header.append(f"- **Selected Text Files:** {state.emission.selected_text_files}")
+        header.append(f"- **Included Content:** {state.emission.emitted_files} files")
         header.append(
-            f"- **Coverage:** {emitted_count}/{len(state.text_files)} Dateien mit vollem Inhalt"
+            f"- **Coverage:** {state.emission.emitted_files}/{state.emission.selected_text_files} Dateien mit vollem Inhalt"
         )
     header.append("")
     return scope_desc
@@ -3785,9 +3865,9 @@ def _base_report_meta(
     state: _ReportRenderState, render_mode: str, scope_desc: str
 ) -> Dict[str, Any]:
     has_roles = any(file_info.roles for file_info in state.files)
-    text_files_count = len(state.text_files)
-    content_present = not state.plan_only
-    emitted_count = state.included_count if content_present else 0
+    text_files_count = state.emission.selected_text_files
+    content_present = state.emission.emitted_files > 0
+    emitted_count = state.emission.emitted_files
     manifest_present = not state.plan_only
     structure_present = not state.plan_only and state.level != "machine-lean"
     if state.debug:
@@ -3854,6 +3934,10 @@ def _extend_report_meta(meta_dict: Dict[str, Any], state: _ReportRenderState) ->
         augment_meta = _build_augment_meta(state.sources)
         if augment_meta:
             meta_dict["merge"]["augment"] = augment_meta
+    if state.structured_warnings:
+        meta_dict["diagnostics"] = {
+            "warnings": [dict(w) for w in state.structured_warnings],
+        }
 
 
 def _append_report_meta(
@@ -4004,7 +4088,7 @@ def _append_plan_repo_snapshots(plan: List[str], state: _ReportRenderState) -> N
         plan.append(
             f"- `{root}` → {len(root_files)} files "
             f"({_relevant_text_count(root_files)} relevant text, {human_size(root_bytes)}, "
-            f"{state.included_by_root.get(root, 0)} with content)"
+            f"{state.emission.emitted_for_root(root)} with content)"
         )
     plan.append("")
 
@@ -4014,12 +4098,13 @@ def _hotspots_limit(meta_density: str) -> int:
 
 
 def _append_plan_hotspots_and_folders(plan: List[str], state: _ReportRenderState) -> None:
-    limit = _hotspots_limit(state.effective_meta_density)
-    if limit:
-        hotspots = build_hotspots(state.processed_files, limit=limit)
-        if hotspots:
-            plan.extend(hotspots)
-            plan.append("")
+    if not state.plan_only:
+        limit = _hotspots_limit(state.effective_meta_density)
+        if limit:
+            hotspots = build_hotspots(state.processed_files, limit=limit)
+            if hotspots:
+                plan.extend(hotspots)
+                plan.append("")
     plan.append("**Folder Highlights:**")
     folder_lines = (
         (state.code_folders, "Code"),
@@ -4050,11 +4135,11 @@ def _render_report_plan(state: _ReportRenderState) -> str:
         "",
         f"- **Total Files:** {len(state.files)} (Text: {len(state.text_files)})",
         f"- **Total Size:** {human_size(state.total_size)}",
-        f"- **Included Content:** {state.included_count} files (full)",
+        f"- **Included Content:** {state.emission.emitted_files} files (full)",
     ]
     if state.text_files:
         plan.append(
-            f"- **Coverage:** {state.included_count}/{len(state.text_files)} Dateien mit vollem Inhalt"
+            f"- **Coverage:** {state.emission.emitted_files}/{len(state.text_files)} Dateien mit vollem Inhalt"
         )
     plan.append("")
     _append_plan_delta(plan, state)
@@ -4345,20 +4430,48 @@ def _show_file_meta(status: str, meta_density: str) -> bool:
     return meta_density == "full" or status != "full"
 
 
+def _encode_machine_marker(payload: Dict[str, Any]) -> str:
+    """Return canonical single-line Base64url JSON without padding."""
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
 def _append_content_file_meta(
     block: List[str], file_info: FileInfo, status: str, content: str
 ) -> None:
-    block.extend([
-        "<!--",
-        "file_meta:",
-        f"  repo: {file_info.root_label}",
-        f"  path: {file_info.rel_path}",
-        f"  lines: {len(content.splitlines())}",
-        f"  included: {status}",
-    ])
+    payload: Dict[str, Any] = {
+        "included": status,
+        "lines": len(content.splitlines()),
+        "path": str(file_info.rel_path),
+        "repo": file_info.root_label,
+    }
     if getattr(file_info, "inclusion_reason", "normal") != "normal":
-        block.append(f"  inclusion_reason: {file_info.inclusion_reason}")
-    block.append("-->")
+        payload["inclusion_reason"] = file_info.inclusion_reason
+    block.append(f'<!-- file_meta meta="{_encode_machine_marker(payload)}" -->')
+
+
+def _html_attr_escape(value: str) -> str:
+    """Escape a string for safe use inside an HTML attribute value.
+
+    Prevents injection of quotes, ``-->`` (HTML comment close), and
+    ALL control characters (U+0000–U+001F including Tab/CR/LF, U+007F).
+    All controls are numeric-escaped to keep the output single-line and
+    safe in HTML comment attributes.
+    """
+    result = (
+        value.replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("'", "&#39;")
+    )
+    result = re.sub(r"[\x00-\x1f\x7f]", lambda m: f"&#{ord(m.group()):d};", result)
+    return result
 
 
 def _content_fence(content: str) -> str:
@@ -4378,15 +4491,25 @@ def _render_content_file_block(
     content_sha256 = hashlib.sha256(encoded).hexdigest()
     file_id = _stable_file_id(file_info)
     human_stable_id = file_id.replace("FILE:", "file-")
+    safe_path = _html_attr_escape(str(file_info.rel_path))
+    start_meta = _encode_machine_marker({
+        "content_bytes": len(encoded),
+        "content_sha256": content_sha256,
+        "file_bytes": file_info.size,
+        "path": str(file_info.rel_path),
+        "repo": file_info.root_label,
+        "truncated": truncated,
+    })
+    end_meta = _encode_machine_marker({
+        "path": str(file_info.rel_path),
+        "repo": file_info.root_label,
+    })
     block = [
         "---",
-        f'<!-- FILE_START path="{file_info.rel_path}" content_sha256="{content_sha256}" '
-        f'content_bytes="{len(encoded)}" file_bytes="{file_info.size}" '
-        f'truncated="{str(truncated).lower()}" -->',
-        f'<!-- file:id="{file_id}" path="{file_info.rel_path}" -->',
-        f'<a id="{human_stable_id}"></a>',
+        f'<!-- FILE_START path="{safe_path}" meta="{start_meta}" -->',
+        f'<!-- file:id="{file_id}" path="{safe_path}" -->',
     ]
-    if file_info.anchor_alias != file_info.anchor:
+    if file_info.anchor_alias and file_info.anchor_alias != file_info.anchor:
         block.append(f'<a id="{file_info.anchor_alias}"></a>')
     block.extend(_heading_block(4, file_info.anchor, str(file_info.rel_path), nav=state.nav))
     block.append(f"**Path:** `{file_info.rel_path}`")
@@ -4403,7 +4526,7 @@ def _render_content_file_block(
         fence,
         "",
         f'<!-- zone:end type="code" id="{file_id}" -->',
-        f'<!-- FILE_END path="{file_info.rel_path}" -->',
+        f'<!-- FILE_END path="{safe_path}" meta="{end_meta}" -->',
         "[↑ Manifest](#manifest) · [↑ Index](#index)",
     ])
     return "\n".join(block) + "\n\n"
@@ -4428,13 +4551,16 @@ def _iter_report_content_blocks(state: _ReportRenderState) -> Iterator[str]:
 
 
 def _normalize_report_files(
-    files: List[FileInfo], path_filter: Optional[str], code_only: bool
+    files: List[FileInfo], path_filter: Optional[str], code_only: bool,
+    ext_filter: Optional[List[str]] = None,
 ) -> List[FileInfo]:
     selected = (
         [file_info for file_info in files if path_filter in file_info.rel_path.as_posix()]
         if path_filter
         else list(files)
     )
+    if ext_filter:
+        selected = [fi for fi in selected if _file_matches_ext_filter(fi, ext_filter)]
     selected.sort(
         key=lambda file_info: (
             get_repo_sort_index(file_info.root_label),
@@ -4451,15 +4577,63 @@ def _normalize_report_files(
     return selected
 
 
-def _assign_report_file_identity(file_info: FileInfo) -> None:
-    relative_id = _slug_token(file_info.rel_path.as_posix())
-    repo_slug = _slug_token(file_info.root_label)
-    base_anchor = f"file-{repo_slug}-{relative_id}"
-    suffix = (file_info.md5 or "")[:6] if getattr(file_info, "md5", None) else ""
-    file_info.anchor_alias = base_anchor
-    file_info.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
+@dataclass(frozen=True, slots=True)
+class _RenderFileIdentity:
+    """Render-local identity projection for a file. Does not mutate FileInfo."""
+    file_id: str
+    anchor: str
+    anchor_alias: str
+    roles: Tuple[str, ...]
+
+
+def _build_render_identity_map(
+    files: List[FileInfo],
+) -> Dict[Tuple[str, Path], _RenderFileIdentity]:
+    """Build a render-local identity map without mutating caller FileInfo objects.
+
+    Anchor (file:id) uses SHA-256 for global uniqueness.
+    Legacy alias is a human-readable slug derived from root+path; it is only
+    emitted when it is globally unique across all files in the report.  Colliding
+    aliases are suppressed (empty string) rather than disambiguated.
+    """
+    raw: Dict[Tuple[str, Path], _RenderFileIdentity] = {}
+    slug_counts: Dict[str, int] = {}
+    for fi in files:
+        file_id = _stable_file_id(fi)
+        human_id = file_id.replace("FILE:", "file-")
+        slug_base = f"file-{_slug_token(fi.root_label)}-{_slug_token(str(fi.rel_path))}"
+        slug_counts[slug_base] = slug_counts.get(slug_base, 0) + 1
+        roles = tuple(compute_file_roles(fi))
+        raw[(fi.root_label, fi.rel_path)] = _RenderFileIdentity(
+            file_id=file_id,
+            anchor=human_id,
+            anchor_alias=slug_base,
+            roles=roles,
+        )
+    # Suppress non-unique aliases.
+    identity_map: Dict[Tuple[str, Path], _RenderFileIdentity] = {}
+    for key, ident in raw.items():
+        alias = ident.anchor_alias if slug_counts.get(ident.anchor_alias, 0) == 1 else ""
+        identity_map[key] = _RenderFileIdentity(
+            file_id=ident.file_id,
+            anchor=ident.anchor,
+            anchor_alias=alias,
+            roles=ident.roles,
+        )
+    # Uniqueness check: all anchors must be globally unique
+    all_anchors = [ident.anchor for ident in identity_map.values()]
+    if len(all_anchors) != len(set(all_anchors)):
+        dupes = [a for a in set(all_anchors) if all_anchors.count(a) > 1]
+        raise AssertionError(f"non-unique anchors detected: {dupes[:5]}")
+    return identity_map
+
+
+def _assign_report_file_identity(file_info: FileInfo, identity: _RenderFileIdentity) -> None:
+    """Populate anchor/alias/roles on a FileInfo from a pre-computed identity."""
+    file_info.anchor = identity.anchor
+    file_info.anchor_alias = identity.anchor_alias
     if file_info.roles is None:
-        file_info.roles = compute_file_roles(file_info)
+        file_info.roles = list(identity.roles)
 
 
 def _debug_report_classification(
@@ -4475,13 +4649,21 @@ def _debug_report_classification(
 
 
 def _prepare_processed_files(
-    files: List[FileInfo], level: str, max_file_bytes: int, debug: bool
+    files: List[FileInfo], level: str, max_file_bytes: int, debug: bool,
+    identity_map: Optional[Dict[Tuple[str, Path], _RenderFileIdentity]] = None,
 ) -> List[Tuple[FileInfo, str]]:
     processed: List[Tuple[FileInfo, str]] = []
     unknown_categories: Set[str] = set()
     unknown_tags: Set[str] = set()
     for file_info in files:
-        _assign_report_file_identity(file_info)
+        ident = identity_map.get((file_info.root_label, file_info.rel_path)) if identity_map else None
+        if ident is not None:
+            _assign_report_file_identity(file_info, ident)
+        else:
+            file_info.anchor = _stable_file_id(file_info).replace("FILE:", "file-")
+            file_info.anchor_alias = file_info.anchor
+            if file_info.roles is None:
+                file_info.roles = compute_file_roles(file_info)
         if debug:
             _debug_report_classification(file_info, unknown_categories, unknown_tags)
         processed.append(
@@ -4603,6 +4785,34 @@ def _report_health_collector(
     return collector
 
 
+def _collect_structured_warnings(
+    path_filter: Optional[str],
+    ext_filter: Optional[List[str]],
+    plan_only: bool,
+    level: str,
+) -> Tuple[Dict[str, Any], ...]:
+    warnings: List[Dict[str, Any]] = []
+    if path_filter or ext_filter:
+        warnings.append({
+            "code": "scope_filter_active",
+            "message": "Filters are active; negative absence claims are not supported.",
+            "detail": None,
+        })
+    if plan_only:
+        warnings.append({
+            "code": "plan_only_mode",
+            "message": "Plan-only mode: no file content is emitted.",
+            "detail": None,
+        })
+    if level != "max":
+        warnings.append({
+            "code": "non_max_level",
+            "message": f"Level '{level}' may omit low-priority files.",
+            "detail": None,
+        })
+    return tuple(warnings)
+
+
 def _prepare_report_state(
     files: List[FileInfo],
     level: str,
@@ -4623,17 +4833,38 @@ def _prepare_report_state(
     effective_extras = extras if extras is not None else ExtrasConfig.none()
     if debug:
         print("[repoground] merge.py loaded from:", __file__, file=sys.stderr)
-    selected_files = _normalize_report_files(files, path_filter, code_only)
+    ext_filter = _normalize_ext_filter(ext_filter)
+    selected_files = _normalize_report_files(files, path_filter, code_only, ext_filter)
+    # Render-local copies: anchor/alias/roles are written to copies only,
+    # leaving caller FileInfo objects completely untouched.
+    render_files = [_copy_file_info(fi) for fi in selected_files]
+    identity_map = _build_render_identity_map(render_files)
     processed_files = _prepare_processed_files(
-        selected_files, level, max_file_bytes, debug
+        render_files, level, max_file_bytes, debug, identity_map
     )
-    text_files = [file_info for file_info in selected_files if file_info.is_text]
+    text_files = [file_info for file_info in render_files if file_info.is_text]
     included_count = sum(
         1 for _file_info, status in processed_files if status in ("full", "truncated")
     )
     processed_by_root = _group_processed_report_files(processed_files)
     included_by_root = _included_report_files_by_root(processed_files)
-    files_by_root = _group_report_files(selected_files)
+    emitted_by_root = (
+        {root: 0 for root in included_by_root}
+        if plan_only
+        else dict(included_by_root)
+    )
+    emission = _ReportEmission(
+        selected_files=len(render_files),
+        selected_text_files=len(text_files),
+        includable_files=included_count,
+        emitted_files=0 if plan_only else included_count,
+        metadata_only_files=sum(
+            1 for _, status in processed_files if status == "meta-only"
+        ),
+        includable_by_root=tuple(sorted(included_by_root.items())),
+        emitted_by_root=tuple(sorted(emitted_by_root.items())),
+    )
+    files_by_root = _group_report_files(render_files)
     (
         infra_folders,
         code_folders,
@@ -4642,9 +4873,9 @@ def _prepare_report_state(
         organism_contracts,
         organism_pipelines,
         organism_wgx_profiles,
-    ) = _report_folders_and_organs(selected_files)
+    ) = _report_folders_and_organs(render_files)
     return _ReportRenderState(
-        files=selected_files,
+        files=render_files,
         level=level,
         max_file_bytes=max_file_bytes,
         sources=sources,
@@ -4666,12 +4897,11 @@ def _prepare_report_state(
         now=clock.now_utc(),
         processed_files=processed_files,
         processed_by_root=processed_by_root,
-        roots={file_info.root_label for file_info in selected_files},
-        total_size=sum(file_info.size for file_info in selected_files),
+        roots={file_info.root_label for file_info in render_files},
+        total_size=sum(file_info.size for file_info in render_files),
         text_files=text_files,
-        included_count=included_count,
-        ep_metrics=compute_epistemic_metrics(selected_files, processed_files),
-        included_by_root=included_by_root,
+        emission=emission,
+        ep_metrics=_plan_only_epistemic_metrics(render_files, processed_files) if plan_only else compute_epistemic_metrics(render_files, processed_files),
         declared_purpose=PROFILE_USECASE.get(level, "(none)"),
         repo_purpose=_extract_report_repo_purpose(sources),
         infra_folders=infra_folders,
@@ -4682,9 +4912,12 @@ def _prepare_report_state(
         organism_pipelines=organism_pipelines,
         organism_wgx_profiles=organism_wgx_profiles,
         files_by_root=files_by_root,
-        repo_stats=_report_repo_stats(files_by_root, included_by_root),
+        repo_stats=_report_repo_stats(files_by_root, emission.includable_root_counts()),
         health_collector=_report_health_collector(
             effective_extras, sources, files_by_root
+        ),
+        structured_warnings=_collect_structured_warnings(
+            path_filter, ext_filter, plan_only, level
         ),
     )
 
@@ -4973,6 +5206,7 @@ def generate_json_sidecar(
     """
     now = clock.now_utc()
     requested_flags = requested_flags or {"plan_only": plan_only, "code_only": code_only, "meta_none": meta_none}
+    ext_filter = _normalize_ext_filter(ext_filter)
     plan_only, code_only, meta_none, normalized_requested = _normalize_mode_flags(
         requested_flags.get("plan_only", False),
         requested_flags.get("code_only", False),

@@ -46,12 +46,80 @@ def test_compare_case_rejects_timing_or_memory_regression() -> None:
 
 def test_compare_case_requires_identical_skip_contract() -> None:
     same = _compare_case(
-        {"skipped": ["not requested"], "rounds": 2},
-        {"skipped": ["not requested"], "rounds": 2},
+        {
+            "skipped": ["not requested"],
+            "rounds": 2,
+            "samples_per_round": [5, 5],
+        },
+        {
+            "skipped": ["not requested"],
+            "rounds": 2,
+            "samples_per_round": [5, 5],
+        },
     )
     different = _compare_case(
-        {"skipped": ["not requested"], "rounds": 2},
-        {"skipped": ["unavailable"], "rounds": 2},
+        {
+            "skipped": ["not requested"],
+            "rounds": 2,
+            "samples_per_round": [5, 5],
+        },
+        {
+            "skipped": ["unavailable"],
+            "rounds": 2,
+            "samples_per_round": [5, 5],
+        },
     )
     assert same["status"] == "skip"
     assert different["status"] == "fail"
+
+
+def test_compare_case_rejects_skip_round_or_sample_drift() -> None:
+    before = {
+        "skipped": ["not requested"],
+        "rounds": 2,
+        "samples_per_round": [5, 5],
+    }
+    round_drift = _compare_case(
+        before,
+        {
+            "skipped": ["not requested"],
+            "rounds": 3,
+            "samples_per_round": [5, 5, 5],
+        },
+    )
+    sample_drift = _compare_case(
+        before,
+        {
+            "skipped": ["not requested"],
+            "rounds": 2,
+            "samples_per_round": [1, 1],
+        },
+    )
+    assert round_drift["status"] == "fail"
+    assert sample_drift["status"] == "fail"
+
+
+def test_structural_failure_is_never_reclassified_as_skip() -> None:
+    structural_failure = {
+        "status": "fail",
+        "skipped": ["partial_skip_not_allowed"],
+        "rounds": 2,
+        "samples_per_round": ["unknown", "unknown"],
+    }
+    result = _compare_case(structural_failure, dict(structural_failure))
+    assert result["status"] == "fail"
+    assert result["reason"] == "structural measurement failure"
+
+
+def test_aggregate_skip_contract_keeps_round_samples() -> None:
+    aggregate = _aggregate_case(
+        [
+            {"skipped": "not requested", "samples": 5},
+            {"skipped": ["not requested"], "samples": 5},
+        ]
+    )
+    assert aggregate == {
+        "skipped": ["not requested"],
+        "rounds": 2,
+        "samples_per_round": [5, 5],
+    }
