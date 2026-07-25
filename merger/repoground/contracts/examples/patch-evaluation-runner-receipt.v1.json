@@ -1,0 +1,110 @@
+{
+  "accounting": {
+    "cpu_usage_nsec": 1250000000,
+    "io_read_bytes": 1048576,
+    "io_write_bytes": 524288,
+    "memory_current_bytes": 0,
+    "memory_peak_bytes": 268435456,
+    "tasks_current": 0
+  },
+  "artifact": {
+    "path": "/srv/repoground/evaluations/example.json",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "status": "passed"
+  },
+  "authority": "external_runtime_evidence",
+  "created_at": "2026-07-24T20:30:00Z",
+  "does_not_establish": [
+    "correctness",
+    "test_sufficiency",
+    "security_correctness",
+    "merge_readiness",
+    "merge_authorization",
+    "microvm_equivalence"
+  ],
+  "error": null,
+  "input": {
+    "effective_request_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "patch_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "source_request_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "kind": "repoground.patch_evaluation_runner_receipt",
+  "policy": {
+    "cpu_quota_percent": 200,
+    "cpu_time_max_usec": 3600000000,
+    "input_snapshot": "read-only",
+    "io_device_count": 1,
+    "io_devices": [
+      "/dev/nvme0n1p2"
+    ],
+    "io_read_bandwidth_per_device_bps": 104857600,
+    "io_read_total_max_bytes": 188743680000,
+    "io_write_bandwidth_per_device_bps": 52428800,
+    "io_write_total_max_bytes": 94371840000,
+    "memory_max_bytes": 4294967296,
+    "memory_swap_max_bytes": 0,
+    "network": "deny",
+    "persistent_write_root": "/srv/repoground/evaluations",
+    "runtime_max_seconds": 1800,
+    "tasks_max": 256,
+    "workspace_max_bytes": 2147483648
+  },
+  "producer": {
+    "commit": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "name": "repoground-systemd-patch-evaluation-runner",
+    "version": "0.1.0"
+  },
+  "runner": {
+    "cleanup_proven": true,
+    "control_group": "/user.slice/user-1000.slice/user@1000.service/app.slice/repoground-patch-evaluation-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.service",
+    "exec_main_code": "exited",
+    "exec_main_status": 0,
+    "invocation_id": "0123456789abcdef0123456789abcdef",
+    "launcher_returncode": 0,
+    "mode": "systemd-user-transient-service",
+    "policy_readback": {
+      "cgroup": {
+        "cpu_period_usec": 100000,
+        "cpu_quota_usec": 200000,
+        "io": [
+          {
+            "device": "/dev/nvme0n1p2",
+            "major_minor": "259:2",
+            "read_bandwidth_bps": 104857600,
+            "write_bandwidth_bps": 52428800
+          }
+        ],
+        "memory_max_bytes": 4294967296,
+        "memory_swap_max_bytes": 0,
+        "path": "/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/repoground-patch-evaluation-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.service",
+        "tasks_max": 256
+      },
+      "systemd": {
+        "BindPaths": "/srv/repoground/evaluations:/run/repoground-output",
+        "CPUQuotaPerSecUSec": "2s",
+        "IOReadBandwidthMax": "/dev/nvme0n1p2 104857600",
+        "IOWriteBandwidthMax": "/dev/nvme0n1p2 52428800",
+        "KillMode": "control-group",
+        "MemoryMax": "4294967296",
+        "MemorySwapMax": "0",
+        "NoNewPrivileges": "yes",
+        "OOMPolicy": "stop",
+        "PrivateNetwork": "yes",
+        "ProtectSystem": "strict",
+        "ReadOnlyPaths": "/srv/repoground/source /run/user/1000/repoground-patch-evaluation-runner/example",
+        "RemainAfterExit": "yes",
+        "RuntimeMaxUSec": "30min",
+        "StandardError": "null",
+        "StandardOutput": "null",
+        "TasksMax": "256",
+        "TemporaryFileSystem": "/tmp:rw,size=2147483648,mode=0700"
+      }
+    },
+    "policy_readback_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "policy_verified": true,
+    "systemd_result": "success",
+    "unit": "repoground-patch-evaluation-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.service"
+  },
+  "status": "passed",
+  "version": "v1"
+}
