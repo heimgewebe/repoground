@@ -15,6 +15,10 @@ IMPLEMENTATION_TREE = "e08503047d30eb2397e09d70cbafb850f3a5f9e5"
 EVIDENCE_COMMIT = "8b07a47a0407e56af7ef9550c39bbc699f263436"
 EVIDENCE_TREE = "5d072c1f251423af248c70b20e9d8761e4b79805"
 PR_BASE_COMMIT = "2afc2836fa1a49a593c7b57eda43086844e8fb2b"
+CORRECTIVE_IMPLEMENTATION_COMMIT = "684fd3aa8f0b99f6b743386e233d09b997144310"
+CORRECTIVE_IMPLEMENTATION_TREE = "457e8af17214a216035a9b3a704ef4c746c9ced2"
+MERGED_DEFECT_COMMIT = "c91d640bce2b14c4a78a64e83169d56c818fa662"
+MERGED_DEFECT_TREE = "36113af31c4cb6ba381302b8fcef61a024049336"
 
 # Exact expected counts for fail-closed evidence validation
 EXPECTED_EVIDENCE_FILE_COUNT = 4
@@ -36,6 +40,19 @@ EXPECTED_EVIDENCE_FILES = {
     "repoground-legacy-t009-performance.comparison.json",
 }
 RECEIPT_SECTIONS = ("complexity", "performance", "ruff", "targeted_tests")
+CORRECTIVE_EVIDENCE_FILES = {
+    "repoground-legacy-t009-complexity.corrective-v2.measurement.json",
+    "repoground-legacy-t009-differential.corrective-v2.json",
+    "repoground-legacy-t009-performance.corrective-v2.after.json",
+    "repoground-legacy-t009-performance.corrective-v2.before.json",
+    "repoground-legacy-t009-performance.corrective-v2.comparison.json",
+}
+CORRECTIVE_RECEIPT_SECTIONS = (
+    "broad_tests",
+    "complexity",
+    "differential",
+    "performance",
+)
 
 
 def _validate_delivery_evidence_shape(payload: dict[str, object]) -> None:
@@ -244,3 +261,120 @@ def test_t009_delivery_evidence_rejects_missing_receipt_reference() -> None:
     complexity.pop("lifecycle_receipt_sha256")
     with pytest.raises(AssertionError):
         _validate_delivery_evidence_shape(payload)
+
+def _validate_corrective_evidence_shape(payload: dict[str, object]) -> None:
+    assert payload["kind"] == "repoground.corrective_delivery_evidence"
+    assert payload["version"] == "2.1"
+    assert payload["status"] == "pending"
+    assert payload["verification_status"] == "pass"
+    assert payload["delivery_status"] == "pending"
+    evidence_files = payload["evidence_files"]
+    assert isinstance(evidence_files, dict)
+    assert set(evidence_files) == CORRECTIVE_EVIDENCE_FILES
+    for name, record in evidence_files.items():
+        assert isinstance(record, dict), name
+        assert set(record) == {"path", "sha256"}, name
+        assert record["path"] == f"docs/proofs/{name}", name
+        digest = record["sha256"]
+        assert isinstance(digest, str) and len(digest) == 64, name
+        assert digest != "0" * 64, name
+    for section in CORRECTIVE_RECEIPT_SECTIONS:
+        section_payload = payload[section]
+        assert isinstance(section_payload, dict), section
+        assert section_payload["status"] == "pass", section
+        receipt = section_payload["lifecycle_receipt_sha256"]
+        assert isinstance(receipt, str) and len(receipt) == 64, section
+        assert receipt != "0" * 64, section
+
+
+def test_t009_corrective_v2_evidence_is_revision_bound_and_pending() -> None:
+    payload = _load("repoground-legacy-t009-delivery.evidence-v2.json")
+    _validate_corrective_evidence_shape(payload)
+    assert payload["binding"] == {
+        "evidence_parent_commit": CORRECTIVE_IMPLEMENTATION_COMMIT,
+        "implementation_commit": CORRECTIVE_IMPLEMENTATION_COMMIT,
+        "implementation_tree": CORRECTIVE_IMPLEMENTATION_TREE,
+        "merged_defect_commit": MERGED_DEFECT_COMMIT,
+        "merged_defect_tree": MERGED_DEFECT_TREE,
+        "pr_base_commit": PR_BASE_COMMIT,
+        "pr_number": 1098,
+        "worktree_dirty_when_measured": False,
+    }
+    assert payload["final_validation"]["status"] == "pending"
+    assert payload["final_delivery"]["status"] == "pending"
+
+
+def test_t009_corrective_v2_artifacts_match_hashes_and_bindings() -> None:
+    payload = _load("repoground-legacy-t009-delivery.evidence-v2.json")
+    evidence_files = payload["evidence_files"]
+    assert isinstance(evidence_files, dict)
+    for name, record in evidence_files.items():
+        assert isinstance(record, dict), name
+        assert _sha256(ROOT / record["path"]) == record["sha256"], name
+
+    complexity = _load(
+        "repoground-legacy-t009-complexity.corrective-v2.measurement.json"
+    )
+    assert complexity["status"] == "pass"
+    assert complexity["binding"] == {
+        "commit": CORRECTIVE_IMPLEMENTATION_COMMIT,
+        "source": "clean_git_worktree",
+        "tree": CORRECTIVE_IMPLEMENTATION_TREE,
+        "worktree_dirty": False,
+    }
+    assert complexity["complexity"]["observed_budget_dimensions"] == {
+        "excess_total": 2395,
+        "finding_count": 197,
+        "max_complexity": 138,
+    }
+
+    differential = _load("repoground-legacy-t009-differential.corrective-v2.json")
+    assert differential["base"]["commit"] == PR_BASE_COMMIT
+    assert differential["target"] == {
+        "commit": CORRECTIVE_IMPLEMENTATION_COMMIT,
+        "dirty": False,
+        "module_sha256": "516ff69f982473396dd2cd9358a152a8f693bb77576f1a4b983521c3cb5c4708",
+        "tree": CORRECTIVE_IMPLEMENTATION_TREE,
+        "worktree_diff_sha256": None,
+    }
+    assert differential["unapproved_differences"] == {}
+
+    comparison = _load(
+        "repoground-legacy-t009-performance.corrective-v2.comparison.json"
+    )
+    assert comparison["status"] == "pass"
+    assert comparison["failed_cases"] == []
+    assert comparison["bindings"]["before"] == {
+        "commit": MERGED_DEFECT_COMMIT,
+        "source": "clean_git_worktree",
+        "tree": MERGED_DEFECT_TREE,
+        "worktree_dirty": False,
+    }
+    assert comparison["bindings"]["after"] == {
+        "commit": CORRECTIVE_IMPLEMENTATION_COMMIT,
+        "source": "clean_git_worktree",
+        "tree": CORRECTIVE_IMPLEMENTATION_TREE,
+        "worktree_dirty": False,
+    }
+    assert comparison["gate"] == {
+        "median_regression_pct_max": 5.0,
+        "peak_memory_regression_pct_max": 5.0,
+    }
+    for name, result in comparison["compared_cases"].items():
+        assert result["status"] in {"pass", "skip"}, name
+
+
+def test_t009_corrective_v2_rejects_missing_evidence_or_receipt() -> None:
+    payload = _load("repoground-legacy-t009-delivery.evidence-v2.json")
+    evidence_files = payload["evidence_files"]
+    assert isinstance(evidence_files, dict)
+    removed_name = next(iter(evidence_files))
+    removed_record = evidence_files.pop(removed_name)
+    with pytest.raises(AssertionError):
+        _validate_corrective_evidence_shape(payload)
+    evidence_files[removed_name] = removed_record
+    complexity = payload["complexity"]
+    assert isinstance(complexity, dict)
+    complexity["lifecycle_receipt_sha256"] = "0" * 64
+    with pytest.raises(AssertionError):
+        _validate_corrective_evidence_shape(payload)

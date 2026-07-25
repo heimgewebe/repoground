@@ -1,0 +1,1401 @@
+{
+  "base": {
+    "commit": "2afc2836fa1a49a593c7b57eda43086844e8fb2b",
+    "dirty": false,
+    "module_sha256": "b700769ab718b70a73b56c1c13003d9ec1ff7f4d125ab04b31df3cf1a0aa6c77",
+    "tree": "dc591643961ce7c44513ba488cf213dc35c7bd61",
+    "worktree_diff_sha256": null
+  },
+  "comparisons": {
+    "artifact_refs": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "augment_delta": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "code_only": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "src/main.py"
+        ],
+        "coverage": [
+          "2/2 Dateien mit vollem Inhalt",
+          "2/2 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 2,
+        "file_id_count": [
+          2,
+          2
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 2 files (2 relevant text, 213.00 B, 2 with content)"
+        ],
+        "start_count": 2,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "src/main.py"
+        ],
+        "coverage": [
+          "2/2 Dateien mit vollem Inhalt",
+          "2/2 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 2,
+        "file_id_count": [
+          2,
+          2
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 2 files (2 relevant text, 213.00 B, 2 with content)"
+        ],
+        "start_count": 2,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "extension_filter": {
+      "allowed_differences": [
+        "content_paths",
+        "coverage",
+        "end_count",
+        "file_id_count",
+        "snapshots",
+        "start_count",
+        "yaml_content"
+      ],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [
+        "content_paths",
+        "coverage",
+        "end_count",
+        "file_id_count",
+        "snapshots",
+        "start_count"
+      ],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          "src/main.py"
+        ],
+        "coverage": [
+          "1/1 Dateien mit vollem Inhalt",
+          "1/1 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 1,
+        "file_id_count": [
+          1,
+          1
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 1 files (1 relevant text, 110.00 B, 1 with content)"
+        ],
+        "start_count": 1,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "heatmap": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "meta_full": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "meta_min": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "meta_none": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "meta_standard": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "multi_repo": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py",
+          "extra.py"
+        ],
+        "coverage": [
+          "5/5 Dateien mit vollem Inhalt",
+          "5/5 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 5,
+        "file_id_count": [
+          5,
+          5
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)",
+          "- `second-repo` \u2192 1 files (1 relevant text, 110.00 B, 1 with content)"
+        ],
+        "start_count": 5,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py",
+          "extra.py"
+        ],
+        "coverage": [
+          "5/5 Dateien mit vollem Inhalt",
+          "5/5 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 5,
+        "file_id_count": [
+          5,
+          5
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)",
+          "- `second-repo` \u2192 1 files (1 relevant text, 110.00 B, 1 with content)"
+        ],
+        "start_count": 5,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "organism": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "path_filter": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          "src/main.py"
+        ],
+        "coverage": [
+          "1/1 Dateien mit vollem Inhalt",
+          "1/1 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 1,
+        "file_id_count": [
+          1,
+          1
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 1 files (1 relevant text, 110.00 B, 1 with content)"
+        ],
+        "start_count": 1,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          "src/main.py"
+        ],
+        "coverage": [
+          "1/1 Dateien mit vollem Inhalt",
+          "1/1 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 1,
+        "file_id_count": [
+          1,
+          1
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 1 files (1 relevant text, 110.00 B, 1 with content)"
+        ],
+        "start_count": 1,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "plan_only": {
+      "allowed_differences": [
+        "contact_ratio",
+        "coverage",
+        "risk_level",
+        "snapshots",
+        "yaml_content"
+      ],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 0,
+        "file_id_count": [
+          0,
+          0
+        ],
+        "risk_level": [
+          "low"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 0,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [
+        "contact_ratio",
+        "coverage",
+        "risk_level",
+        "snapshots"
+      ],
+      "target_projection": {
+        "contact_ratio": [
+          "0%"
+        ],
+        "content_paths": [],
+        "coverage": [
+          "0/4 Dateien mit vollem Inhalt",
+          "0/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 0,
+        "file_id_count": [
+          0,
+          0
+        ],
+        "risk_level": [
+          "high"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 0 with content)"
+        ],
+        "start_count": 0,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "profile_machine_lean": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "profile_max": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "profile_summary": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "75%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md"
+        ],
+        "coverage": [
+          "3/4 Dateien mit vollem Inhalt",
+          "3/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 3,
+        "file_id_count": [
+          3,
+          3
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 3 with content)"
+        ],
+        "start_count": 3,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "75%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md"
+        ],
+        "coverage": [
+          "3/4 Dateien mit vollem Inhalt",
+          "3/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 3,
+        "file_id_count": [
+          3,
+          3
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 3 with content)"
+        ],
+        "start_count": 3,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "redaction": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    },
+    "truncation": {
+      "allowed_differences": [],
+      "base_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "differing_fields": [],
+      "target_projection": {
+        "contact_ratio": [
+          "100%"
+        ],
+        "content_paths": [
+          ".github/workflows/ci.yml",
+          "docs/guide.md",
+          "README.md",
+          "src/main.py"
+        ],
+        "coverage": [
+          "4/4 Dateien mit vollem Inhalt",
+          "4/4 Dateien mit vollem Inhalt"
+        ],
+        "end_count": 4,
+        "file_id_count": [
+          4,
+          4
+        ],
+        "risk_level": [
+          "low",
+          "`low`"
+        ],
+        "snapshots": [
+          "- `report-fixture` \u2192 4 files (4 relevant text, 354.00 B, 4 with content)"
+        ],
+        "start_count": 4,
+        "yaml_content": {
+          "coverage_included_files": null,
+          "coverage_pct": null,
+          "emitted_files": null,
+          "present": null,
+          "selected_text_files": null
+        }
+      },
+      "unapproved_differences": []
+    }
+  },
+  "intentional_corrections": {
+    "extension_filter": [
+      "content_paths",
+      "coverage",
+      "end_count",
+      "file_id_count",
+      "snapshots",
+      "start_count",
+      "yaml_content"
+    ],
+    "plan_only": [
+      "contact_ratio",
+      "coverage",
+      "risk_level",
+      "snapshots",
+      "yaml_content"
+    ]
+  },
+  "scenarios": [
+    "artifact_refs",
+    "augment_delta",
+    "code_only",
+    "extension_filter",
+    "heatmap",
+    "meta_full",
+    "meta_min",
+    "meta_none",
+    "meta_standard",
+    "multi_repo",
+    "organism",
+    "path_filter",
+    "plan_only",
+    "profile_machine_lean",
+    "profile_max",
+    "profile_summary",
+    "redaction",
+    "truncation"
+  ],
+  "schema_version": 1,
+  "target": {
+    "commit": "684fd3aa8f0b99f6b743386e233d09b997144310",
+    "dirty": false,
+    "module_sha256": "516ff69f982473396dd2cd9358a152a8f693bb77576f1a4b983521c3cb5c4708",
+    "tree": "457e8af17214a216035a9b3a704ef4c746c9ced2",
+    "worktree_diff_sha256": null
+  },
+  "unapproved_differences": {}
+}

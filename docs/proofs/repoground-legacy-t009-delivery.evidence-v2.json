@@ -1,0 +1,118 @@
+{
+  "_corrective": true,
+  "_original": "repoground-legacy-t009-delivery.evidence.json",
+  "binding": {
+    "evidence_parent_commit": "684fd3aa8f0b99f6b743386e233d09b997144310",
+    "implementation_commit": "684fd3aa8f0b99f6b743386e233d09b997144310",
+    "implementation_tree": "457e8af17214a216035a9b3a704ef4c746c9ced2",
+    "merged_defect_commit": "c91d640bce2b14c4a78a64e83169d56c818fa662",
+    "merged_defect_tree": "36113af31c4cb6ba381302b8fcef61a024049336",
+    "pr_base_commit": "2afc2836fa1a49a593c7b57eda43086844e8fb2b",
+    "pr_number": 1098,
+    "worktree_dirty_when_measured": false
+  },
+  "broad_tests": {
+    "argv_sha256": "d30573f5c99680a7390247ef17e8ec6869a717dc6b377ee7a49a9ac602537aaa",
+    "command": "python3 -m pytest -q --tb=short --ignore=tests/test_patch_evaluation_sidecar.py --ignore=tests/test_patch_evaluation_sidecar_host_readback.py",
+    "excluded_files": [
+      "tests/test_patch_evaluation_sidecar.py",
+      "tests/test_patch_evaluation_sidecar_host_readback.py"
+    ],
+    "exclusion_reason": "Bubblewrap namespace creation failed identically on the unchanged merged-defect commit with Resource temporarily unavailable.",
+    "job": "grabowski-job-5e5c5dabd73b",
+    "lifecycle_receipt_sha256": "94f425e00f5a4edc00db51117a8bcfafeb60d18349758cfa8833132f85ebe35b",
+    "status": "pass",
+    "tests_passed": 4847,
+    "tests_skipped": 2
+  },
+  "complexity": {
+    "argv_sha256": "790ef4ea659bc361d4fbe4a2c2fb8124227b55ac692511908f6a7af144c51541",
+    "excess_total": 2395,
+    "finding_count": 197,
+    "job": "grabowski-job-7d68cb9385b6",
+    "lifecycle_receipt_sha256": "b611251b197898d5fc7f2d1bc6b1c3fbb459f5ee63877604371e0cb8b262ff2b",
+    "max_complexity": 138,
+    "status": "pass"
+  },
+  "correction_id": "REPOGROUND-LEGACY-RECONCILIATION-V1-T009-CORRECTIVE-V2",
+  "delivery_status": "pending",
+  "differential": {
+    "argv_sha256": "2a43f3fc24ec8e529d309649d1ea113c7719feaf79a664bccda5e6880351bbb5",
+    "base_commit": "2afc2836fa1a49a593c7b57eda43086844e8fb2b",
+    "job": "grabowski-job-b29d5442041a",
+    "lifecycle_receipt_sha256": "33b4c8b86fd149ee40771d4ad6d15d47eca6e811e3e7b10b135c8890f67966c8",
+    "status": "pass",
+    "target_commit": "684fd3aa8f0b99f6b743386e233d09b997144310",
+    "unapproved_differences": {}
+  },
+  "does_not_establish": [
+    "GitHub required-check success on the final evidence commit",
+    "merge of the corrective pull request",
+    "production deployment of the corrective merge commit",
+    "resolution of the host Bubblewrap namespace failure",
+    "Bureau closeout of the corrective follow-up"
+  ],
+  "evidence_files": {
+    "repoground-legacy-t009-complexity.corrective-v2.measurement.json": {
+      "path": "docs/proofs/repoground-legacy-t009-complexity.corrective-v2.measurement.json",
+      "sha256": "623528616be6ad7b1f313d63b674d1d8eea7bc94009577a1db8731c45c56f60d"
+    },
+    "repoground-legacy-t009-differential.corrective-v2.json": {
+      "path": "docs/proofs/repoground-legacy-t009-differential.corrective-v2.json",
+      "sha256": "e9faf068d33c5816c81e2ab60b4faad61cb99196f191f29ae5b652288d05fc35"
+    },
+    "repoground-legacy-t009-performance.corrective-v2.after.json": {
+      "path": "docs/proofs/repoground-legacy-t009-performance.corrective-v2.after.json",
+      "sha256": "c6f7170e7d339d176d4d26a57f8789b5a20e70320c1208357741233f612412f2"
+    },
+    "repoground-legacy-t009-performance.corrective-v2.before.json": {
+      "path": "docs/proofs/repoground-legacy-t009-performance.corrective-v2.before.json",
+      "sha256": "365fdf9eeee04532e5cd66286dc1fd53569fe7fcbccc1175362ddd3e9c6c8e0d"
+    },
+    "repoground-legacy-t009-performance.corrective-v2.comparison.json": {
+      "path": "docs/proofs/repoground-legacy-t009-performance.corrective-v2.comparison.json",
+      "sha256": "3f5f5b741a47d2aaabd68c073cc163bfd00762741a6f8a00e94f1b430ed6e535"
+    }
+  },
+  "final_delivery": {
+    "reason": "The correction branch is not yet pushed, merged, deployed, or reconciled in Bureau truth.",
+    "status": "pending"
+  },
+  "final_validation": {
+    "github_required_checks": null,
+    "local_status": "pass",
+    "ruff": {
+      "argv_sha256": "f8a82352c628f894c869d62eec568b869f796771c396613e8179cc92c07f2199",
+      "job": "grabowski-job-c1c9abc36a6a",
+      "lifecycle_receipt_sha256": "19bedcf24898349d7312c8dfbffc4976d17254b65d5e67ba56f5322d9a268489",
+      "status": "pass"
+    },
+    "status": "pending",
+    "targeted_tests": {
+      "argv_sha256": "16217d7a0a3ebd3c77ef93e2627f29f111585840ee091cd4be4e25f71b86e430",
+      "job": "grabowski-job-7eb4c062aa59",
+      "lifecycle_receipt_sha256": "6ab619e50e4bee078b435bcf3a5fe7497fc9c52183715e6d1b4588ea4c0c865a",
+      "status": "pass",
+      "tests_passed": 120,
+      "tests_skipped": 0
+    }
+  },
+  "kind": "repoground.corrective_delivery_evidence",
+  "performance": {
+    "argv_sha256": "2c1417237383f647c20d26e17dd443283c09156a93093addf0c1cbcd7937895f",
+    "failed_cases": [],
+    "gate_kind": "performance_smoke_gate",
+    "job": "grabowski-job-dbec140c74a6",
+    "lifecycle_receipt_sha256": "979eb7526bc2f5811ea2a54e432541078f0869287edb3b440493ef3a986d4ecd",
+    "median_regression_pct_max": 5.0,
+    "peak_memory_regression_pct_max": 5.0,
+    "rounds": 2,
+    "samples_per_round": 5,
+    "status": "pass",
+    "warmups_per_revision": 1
+  },
+  "status": "pending",
+  "task": "REPOGROUND-LEGACY-RECONCILIATION-V1-T009",
+  "verification_status": "pass",
+  "version": "2.1"
+}
