@@ -2,6 +2,7 @@
   "_corrective": true,
   "_original": "repoground-legacy-t009-delivery.evidence.json",
   "binding": {
+    "ci_history_fix_commit": "fe41d9cc5defc5a127a42e9c884f60b608ce0a17",
     "evidence_parent_commit": "684fd3aa8f0b99f6b743386e233d09b997144310",
     "implementation_commit": "684fd3aa8f0b99f6b743386e233d09b997144310",
     "implementation_tree": "457e8af17214a216035a9b3a704ef4c746c9ced2",
@@ -19,10 +20,10 @@
       "tests/test_patch_evaluation_sidecar_host_readback.py"
     ],
     "exclusion_reason": "Bubblewrap namespace creation failed identically on the unchanged merged-defect commit with Resource temporarily unavailable.",
-    "job": "grabowski-job-3129e8ecf70b",
-    "lifecycle_receipt_sha256": "960644bd177a9f9edae2a7c09f0805148875f43ca5c113a8526c68a08fbe2edb",
+    "job": "grabowski-job-146cb8299362",
+    "lifecycle_receipt_sha256": "d17158ecee867be7b9955eaacf412e75ddae1c5b5f01f54369e19b1727cf7396",
     "status": "pass",
-    "tests_passed": 4850,
+    "tests_passed": 4853,
     "tests_skipped": 2
   },
   "complexity": {
@@ -79,6 +80,14 @@
     "status": "pending"
   },
   "final_validation": {
+    "ci_regression_tests": {
+      "argv_sha256": "0d02fd3db672dea26602830fd5bbd1492d0ba11a2aae918ff68e9d7ae40a4f55",
+      "job": "grabowski-job-45a726a5ddaf",
+      "lifecycle_receipt_sha256": "0fa691d45814af9662237e033781b270031b5bc53ab8fc562bc8ad981a16cd4e",
+      "status": "pass",
+      "tests_passed": 84,
+      "tests_skipped": 0
+    },
     "github_required_checks": null,
     "local_status": "pass",
     "ruff": {
@@ -86,6 +95,16 @@
       "job": "grabowski-job-c1c9abc36a6a",
       "lifecycle_receipt_sha256": "19bedcf24898349d7312c8dfbffc4976d17254b65d5e67ba56f5322d9a268489",
       "status": "pass"
+    },
+    "shallow_ci_simulation": {
+      "argv_sha256": "01931e0109e70913c239f1c0642785206fa690b68a752fb24237f303665e20cd",
+      "checkout_depth": 1,
+      "head_commit": "fe41d9cc5defc5a127a42e9c884f60b608ce0a17",
+      "job": "grabowski-job-bfee227740c9",
+      "lifecycle_receipt_sha256": "49648db1e9f9461fb75cdfa80f066637f108c1bbf2125a53066bb35239fea7f0",
+      "status": "pass",
+      "tests_passed": 4,
+      "tests_skipped": 2
     },
     "status": "pending",
     "targeted_tests": {

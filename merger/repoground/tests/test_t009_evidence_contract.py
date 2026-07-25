@@ -19,6 +19,7 @@ CORRECTIVE_IMPLEMENTATION_COMMIT = "684fd3aa8f0b99f6b743386e233d09b997144310"
 CORRECTIVE_IMPLEMENTATION_TREE = "457e8af17214a216035a9b3a704ef4c746c9ced2"
 MERGED_DEFECT_COMMIT = "c91d640bce2b14c4a78a64e83169d56c818fa662"
 MERGED_DEFECT_TREE = "36113af31c4cb6ba381302b8fcef61a024049336"
+CI_HISTORY_FIX_COMMIT = "fe41d9cc5defc5a127a42e9c884f60b608ce0a17"
 
 # Exact expected counts for fail-closed evidence validation
 EXPECTED_EVIDENCE_FILE_COUNT = 4
@@ -275,6 +276,7 @@ def test_t009_delivery_evidence_rejects_missing_receipt_reference() -> None:
     with pytest.raises(AssertionError):
         _validate_delivery_evidence_shape(payload)
 
+
 def _validate_corrective_evidence_shape(payload: dict[str, object]) -> None:
     assert payload["kind"] == "repoground.corrective_delivery_evidence"
     assert payload["version"] == "2.1"
@@ -304,6 +306,7 @@ def test_t009_corrective_v2_evidence_is_revision_bound_and_pending() -> None:
     payload = _load("repoground-legacy-t009-delivery.evidence-v2.json")
     _validate_corrective_evidence_shape(payload)
     assert payload["binding"] == {
+        "ci_history_fix_commit": CI_HISTORY_FIX_COMMIT,
         "evidence_parent_commit": CORRECTIVE_IMPLEMENTATION_COMMIT,
         "implementation_commit": CORRECTIVE_IMPLEMENTATION_COMMIT,
         "implementation_tree": CORRECTIVE_IMPLEMENTATION_TREE,
@@ -313,7 +316,29 @@ def test_t009_corrective_v2_evidence_is_revision_bound_and_pending() -> None:
         "pr_number": 1098,
         "worktree_dirty_when_measured": False,
     }
-    assert payload["final_validation"]["status"] == "pending"
+    final_validation = payload["final_validation"]
+    assert final_validation["status"] == "pending"
+    assert final_validation["github_required_checks"] is None
+    assert final_validation["ci_regression_tests"] == {
+        "argv_sha256": "0d02fd3db672dea26602830fd5bbd1492d0ba11a2aae918ff68e9d7ae40a4f55",
+        "job": "grabowski-job-45a726a5ddaf",
+        "lifecycle_receipt_sha256": "0fa691d45814af9662237e033781b270031b5bc53ab8fc562bc8ad981a16cd4e",
+        "status": "pass",
+        "tests_passed": 84,
+        "tests_skipped": 0,
+    }
+    assert final_validation["shallow_ci_simulation"] == {
+        "argv_sha256": "01931e0109e70913c239f1c0642785206fa690b68a752fb24237f303665e20cd",
+        "checkout_depth": 1,
+        "head_commit": CI_HISTORY_FIX_COMMIT,
+        "job": "grabowski-job-bfee227740c9",
+        "lifecycle_receipt_sha256": "49648db1e9f9461fb75cdfa80f066637f108c1bbf2125a53066bb35239fea7f0",
+        "status": "pass",
+        "tests_passed": 4,
+        "tests_skipped": 2,
+    }
+    assert payload["broad_tests"]["tests_passed"] == 4853
+    assert payload["broad_tests"]["tests_skipped"] == 2
     assert payload["final_delivery"]["status"] == "pending"
 
 

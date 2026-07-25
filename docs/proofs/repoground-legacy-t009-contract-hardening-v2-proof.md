@@ -31,11 +31,13 @@ commit is `684fd3aa8f0b99f6b743386e233d09b997144310` with tree
 ## Verification
 
 - focused semantic, evidence, link, redactor and benchmark matrix: 120 passed;
-- broad repository suite excluding the two host-blocked Sidecar files: 4,850 passed, 2 skipped;
+- broad repository suite excluding the two host-blocked Sidecar files: 4,853 passed, 2 skipped;
 - Ruff over all changed Python files: pass;
 - `git diff --check`: pass;
 - graph maintainability ratchet: 197 findings, maximum complexity 138, no new finding;
 - two-revision renderer comparison: no unapproved difference;
+- CI shallow-history regression: 84 passed in the complete checkout;
+- depth-1 CI simulation: 4 passed and 2 explicitly skipped because historical objects were unavailable;
 - performance smoke gate: pass for every measured non-optional case, with 5% timing and traced-memory ceilings.
 
 The two excluded Sidecar test files fail because Bubblewrap cannot create a namespace
