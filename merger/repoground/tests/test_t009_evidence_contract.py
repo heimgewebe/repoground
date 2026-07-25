@@ -226,6 +226,7 @@ def test_t009_implementation_tree_binding_exists_or_checkout_is_shallow() -> Non
 def test_t009_revision_differential_contract() -> None:
     from scripts.ci.compare_report_renderer_revisions import compare_revisions
 
+    _assert_git_object_available_or_fail_closed(f"{PR_BASE_COMMIT}^{{commit}}")
     result = compare_revisions(ROOT, PR_BASE_COMMIT, ROOT)
     assert result["base"]["commit"] == PR_BASE_COMMIT
     assert result["target"]["commit"] != PR_BASE_COMMIT or result["target"]["dirty"]
@@ -237,8 +238,20 @@ def test_t009_revision_differential_contract() -> None:
 def test_t009_revision_differential_rejects_identical_revision() -> None:
     from scripts.ci.compare_report_renderer_revisions import DifferentialError, compare_revisions
 
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    ).stdout.strip()
     with pytest.raises(DifferentialError, match="distinct revisions"):
-        compare_revisions(ROOT, PR_BASE_COMMIT, ROOT, target_revision=PR_BASE_COMMIT)
+        compare_revisions(ROOT, head, ROOT, target_revision=head)
+
+
+def test_t009_revision_differential_rejects_missing_revision() -> None:
+    from scripts.ci.compare_report_renderer_revisions import DifferentialError, compare_revisions
+
+    missing = "0" * 40
+    with pytest.raises(DifferentialError, match="git archive failed"):
+        compare_revisions(ROOT, missing, ROOT)
 
 def test_t009_delivery_evidence_rejects_missing_or_extra_file() -> None:
     payload = _load("repoground-legacy-t009-delivery.evidence.json")
@@ -378,3 +391,33 @@ def test_t009_corrective_v2_rejects_missing_evidence_or_receipt() -> None:
     complexity["lifecycle_receipt_sha256"] = "0" * 64
     with pytest.raises(AssertionError):
         _validate_corrective_evidence_shape(payload)
+
+
+def test_t009_unavailable_history_skips_only_in_shallow_checkout(monkeypatch) -> None:
+    monkeypatch.setitem(
+        _assert_git_object_available_or_fail_closed.__globals__,
+        "_git_object_exists",
+        lambda revision: False,
+    )
+    monkeypatch.setitem(
+        _assert_git_object_available_or_fail_closed.__globals__,
+        "_checkout_is_shallow",
+        lambda: True,
+    )
+    with pytest.raises(pytest.skip.Exception, match="unavailable in shallow clone"):
+        _assert_git_object_available_or_fail_closed("missing^{commit}")
+
+
+def test_t009_unavailable_history_fails_in_complete_checkout(monkeypatch) -> None:
+    monkeypatch.setitem(
+        _assert_git_object_available_or_fail_closed.__globals__,
+        "_git_object_exists",
+        lambda revision: False,
+    )
+    monkeypatch.setitem(
+        _assert_git_object_available_or_fail_closed.__globals__,
+        "_checkout_is_shallow",
+        lambda: False,
+    )
+    with pytest.raises(AssertionError, match="inaccessible in a non-shallow checkout"):
+        _assert_git_object_available_or_fail_closed("missing^{commit}")

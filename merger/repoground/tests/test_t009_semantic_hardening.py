@@ -656,12 +656,15 @@ class TestTwoRevisionDifferential:
         )
 
     def test_real_comparator_uses_distinct_revisions_and_allowlist(self) -> None:
+        from merger.repoground.tests.test_t009_evidence_contract import (
+            _assert_git_object_available_or_fail_closed,
+        )
         from scripts.ci.compare_report_renderer_revisions import compare_revisions
 
         root = Path(__file__).parents[3]
-        result = compare_revisions(
-            root, "2afc2836fa1a49a593c7b57eda43086844e8fb2b", root
-        )
+        base = "2afc2836fa1a49a593c7b57eda43086844e8fb2b"
+        _assert_git_object_available_or_fail_closed(f"{base}^{{commit}}")
+        result = compare_revisions(root, base, root)
         assert result["base"]["commit"] != result["target"]["commit"] or result["target"]["dirty"]
         assert result["base"]["module_sha256"] != result["target"]["module_sha256"]
         assert result["intentional_corrections"]

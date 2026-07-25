@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -145,16 +146,25 @@ def _run_git(repo: Path, *args: str, text: bool = True) -> str | bytes:
 
 
 def _materialize(repo: Path, revision: str, destination: Path) -> None:
-    process = subprocess.Popen(
+    completed = subprocess.run(
         ["git", "archive", "--format=tar", revision],
-        cwd=repo, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cwd=repo, capture_output=True, check=False,
     )
-    assert process.stdout is not None
-    with tarfile.open(fileobj=process.stdout, mode="r|") as archive:
-        archive.extractall(destination, filter="data")
-    stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
-    if process.wait() != 0:
-        raise DifferentialError(f"git archive failed for {revision}: {stderr}")
+    stderr = completed.stderr.decode("utf-8", errors="replace").strip()
+    if completed.returncode != 0:
+        detail = stderr or "git archive returned no diagnostic"
+        raise DifferentialError(f"git archive failed for {revision}: {detail}")
+    if not completed.stdout:
+        raise DifferentialError(
+            f"git archive returned an empty payload for {revision}"
+        )
+    try:
+        with tarfile.open(fileobj=io.BytesIO(completed.stdout), mode="r:") as archive:
+            archive.extractall(destination, filter="data")
+    except tarfile.TarError as exc:
+        raise DifferentialError(
+            f"git archive returned invalid tar data for {revision}: {exc}"
+        ) from exc
 
 
 def _module_sha(root: Path) -> str:
