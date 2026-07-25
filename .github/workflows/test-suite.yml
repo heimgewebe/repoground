@@ -57,7 +57,6 @@ jobs:
       - name: Run full pytest suite
         run: pytest -q -m "not browser and not doc_freshness_live"
 
-
   release-candidate:
     name: release-candidate
     runs-on: ubuntu-latest
@@ -138,3 +137,33 @@ jobs:
             echo "=== node $f"
             node "$f"
           done
+
+  export-pr-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Export exact ten-file PR diff
+        run: |
+          set -euo pipefail
+          base=24eee84dd845fcf5f3a4a82c9e42e64428e76d6d
+          output=repoground-pr-1101-bc61f87b-diff.txt
+          mapfile -t changed < <(git diff --name-only "$base" HEAD -- . ':(exclude).github/workflows/test-suite.yml')
+          test "${#changed[@]}" -eq 10
+          git diff --binary --no-ext-diff "$base" HEAD -- . ':(exclude).github/workflows/test-suite.yml' > "$output"
+          test -s "$output"
+          sha256sum "$output" > "$output.sha256"
+
+      - name: Upload revision-bound PR diff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: repoground-pr-1101-bc61f87b-diff
+          path: |
+            repoground-pr-1101-bc61f87b-diff.txt
+            repoground-pr-1101-bc61f87b-diff.txt.sha256
+          if-no-files-found: error
+          retention-days: 7
