@@ -22,6 +22,37 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _git_object_exists(revision: str) -> bool:
+    completed = subprocess.run(
+        ["git", "cat-file", "-e", revision],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+    )
+    return completed.returncode == 0
+
+
+def _git_blob_sha256(commit: str, path: str) -> str:
+    completed = subprocess.run(
+        ["git", "show", f"{commit}:{path}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    return hashlib.sha256(completed.stdout).hexdigest()
+
+
+def _checkout_is_shallow() -> bool:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--is-shallow-repository"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout.strip() == "true"
+
+
 def test_t009_complexity_measurement_is_revision_bound_and_ratcheted() -> None:
     payload = _load("repoground-legacy-t009-complexity.measurement.json")
     assert payload["status"] == "pass"
@@ -41,22 +72,23 @@ def test_t009_complexity_measurement_is_revision_bound_and_ratcheted() -> None:
     assert contract["measurement_command"] == (
         "python3 scripts/ci/check_graph_maintainability.py --root . --format json"
     )
-    assert contract["ruff_config_sha256"] == _git_blob_sha256(
-        IMPLEMENTATION_COMMIT, "ruff-ci.toml"
-    )
-    assert contract["measurement_script_sha256"] == _git_blob_sha256(
-        IMPLEMENTATION_COMMIT, "scripts/ci/check_graph_maintainability.py"
-    )
 
+    measured_inputs = {
+        "ruff_config_sha256": ROOT / contract["ruff_config_path"],
+        "measurement_script_sha256": ROOT / contract["measurement_script_path"],
+    }
+    for hash_field, path in measured_inputs.items():
+        assert contract[hash_field] == _sha256(path)
 
-def _git_blob_sha256(commit: str, path: str) -> str:
-    completed = subprocess.run(
-        ["git", "show", f"{commit}:{path}"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-    )
-    return hashlib.sha256(completed.stdout).hexdigest()
+    if _git_object_exists(f"{IMPLEMENTATION_COMMIT}^{{commit}}"):
+        assert contract["ruff_config_sha256"] == _git_blob_sha256(
+            IMPLEMENTATION_COMMIT, "ruff-ci.toml"
+        )
+        assert contract["measurement_script_sha256"] == _git_blob_sha256(
+            IMPLEMENTATION_COMMIT, "scripts/ci/check_graph_maintainability.py"
+        )
+    else:
+        assert _checkout_is_shallow()
 
 
 def test_t009_performance_comparison_covers_every_case_and_gate() -> None:
@@ -96,7 +128,11 @@ def test_t009_delivery_evidence_hashes_are_complete() -> None:
         assert _sha256(ROOT / record["path"]) == record["sha256"]
 
 
-def test_t009_implementation_tree_binding_exists_in_git() -> None:
+def test_t009_implementation_tree_binding_exists_or_checkout_is_shallow() -> None:
+    if not _git_object_exists(f"{IMPLEMENTATION_COMMIT}^{{commit}}"):
+        assert _checkout_is_shallow()
+        return
+
     completed = subprocess.run(
         ["git", "rev-parse", f"{IMPLEMENTATION_COMMIT}^{{tree}}"],
         cwd=ROOT,
