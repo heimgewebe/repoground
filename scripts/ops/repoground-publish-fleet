@@ -72,6 +72,14 @@ ACTIVE_LEASE_SCHEMA = "repobrief.active-publication-lease.v1"
 PRUNE_TRANSACTION_SCHEMA = "repobrief.retention-transaction.v1"
 MANAGED_BUILD_RESIDUE_SCHEMA = "repoground.managed-build-residue.v1"
 MANAGED_BUILD_QUARANTINE_SCHEMA = "repoground.managed-build-quarantine.v1"
+MANAGED_BUILD_RETAIN_DECISION_SCHEMA = (
+    "repoground.managed-build-retain-decision.v1"
+)
+MANAGED_BUILD_RETAIN_MIN_REVIEW_SECONDS = 3600
+MANAGED_BUILD_RETAIN_MAX_REVIEW_SECONDS = 365 * 24 * 3600
+GRABOWSKI_CHECKOUT_ARCHIVE_ROOT = (
+    Path.home() / ".local" / "state" / "grabowski" / "checkout-archives"
+)
 MANAGED_BUILD_RESIDUE_STALE_SECONDS = int(
     os.environ.get("REPOGROUND_MANAGED_BUILD_RESIDUE_STALE_SECONDS") or "3600"
 )
@@ -200,6 +208,93 @@ def atomic_write_json(path: Path, payload: dict[str, object]) -> None:
     finally:
         if tmp.exists():
             tmp.unlink()
+
+
+def atomic_create_json(path: Path, payload: dict[str, object]) -> None:
+    """Create one private JSON record without replacing existing evidence."""
+    parent = path.parent
+    parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    parent_metadata = parent.lstat()
+    parent_mode = stat.S_IMODE(parent_metadata.st_mode)
+    if (
+        not stat.S_ISDIR(parent_metadata.st_mode)
+        or parent_metadata.st_uid != os.getuid()
+        or parent_mode & 0o022
+        or parent.resolve(strict=True) != Path(os.path.abspath(parent))
+    ):
+        raise RuntimeError("create-only JSON parent is not owner-controlled")
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    if not nofollow or not directory_flag:
+        raise RuntimeError("create-only JSON requires no-follow directory IO")
+    directory_fd = os.open(
+        parent,
+        os.O_RDONLY | os.O_CLOEXEC | directory_flag | nofollow,
+    )
+    descriptor = -1
+    created_identity: tuple[int, int, int, int, int] | None = None
+    raw = (
+        json.dumps(payload, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+    )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | nofollow
+    try:
+        try:
+            descriptor = os.open(path.name, flags, 0o600, dir_fd=directory_fd)
+        except FileExistsError as exc:
+            raise RuntimeError(
+                f"create-only JSON record already exists: {path}"
+            ) from exc
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_nlink != 1
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise RuntimeError("create-only JSON record identity is unsafe")
+        with os.fdopen(descriptor, "wb", closefd=True) as handle:
+            descriptor = -1
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+            final_metadata = os.fstat(handle.fileno())
+            created_identity = (
+                final_metadata.st_dev,
+                final_metadata.st_ino,
+                final_metadata.st_size,
+                final_metadata.st_mtime_ns,
+                final_metadata.st_ctime_ns,
+            )
+        os.fsync(directory_fd)
+    except BaseException:
+        if descriptor >= 0:
+            os.close(descriptor)
+            descriptor = -1
+        if created_identity is not None:
+            try:
+                current = os.stat(
+                    path.name,
+                    dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                pass
+            else:
+                current_identity = (
+                    current.st_dev,
+                    current.st_ino,
+                    current.st_size,
+                    current.st_mtime_ns,
+                    current.st_ctime_ns,
+                )
+                if current_identity == created_identity:
+                    os.unlink(path.name, dir_fd=directory_fd)
+                    os.fsync(directory_fd)
+        raise
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(directory_fd)
 
 
 def sha256_file(path: Path) -> str:
@@ -747,6 +842,22 @@ def managed_build_residue_record_path(worktree: Path) -> Path:
     return STATE_ROOT / "managed-build-residues" / f"{identity}.json"
 
 
+def managed_build_retain_decision_path(worktree: Path) -> Path:
+    identity = hashlib.sha256(str(worktree.resolve()).encode("utf-8")).hexdigest()
+    return STATE_ROOT / "managed-build-retain-decisions" / f"{identity}.json"
+
+
+def repository_key_for_path(repo: Path) -> str | None:
+    remote = run(
+        ["git", "-C", str(repo), "remote", "get-url", "origin"], check=False
+    ).stdout.strip()
+    parsed = parse_github_remote(remote)
+    if parsed is None:
+        return None
+    owner, name = parsed
+    return f"{owner}/{name}"
+
+
 def managed_build_residue_quarantine_root(worktree: Path) -> Path:
     source_root_path = SOURCE_ROOT.expanduser()
     try:
@@ -789,7 +900,9 @@ def managed_build_identity(worktree: Path, expected_repo: Path) -> dict[str, obj
     }
 
 
-def load_owner_json_object(path: Path, *, label: str) -> dict[str, object]:
+def load_owner_json_snapshot(
+    path: Path, *, label: str
+) -> tuple[dict[str, object], str]:
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if not nofollow:
         raise RuntimeError(f"{label} requires O_NOFOLLOW")
@@ -815,6 +928,11 @@ def load_owner_json_object(path: Path, *, label: str) -> dict[str, object]:
         raise RuntimeError(f"{label} is invalid") from exc
     if not isinstance(payload, dict):
         raise RuntimeError(f"{label} is not an object")
+    return payload, hashlib.sha256(raw).hexdigest()
+
+
+def load_owner_json_object(path: Path, *, label: str) -> dict[str, object]:
+    payload, _sha256 = load_owner_json_snapshot(path, label=label)
     return payload
 
 
@@ -829,6 +947,255 @@ def load_managed_build_residue_record(path: Path) -> dict[str, object]:
                 "managed build residue has no publisher provenance record"
             ) from exc
         raise
+
+
+def _managed_build_retain_projection(
+    payload: dict[str, object], path: Path
+) -> dict[str, object]:
+    return {
+        "path": str(path),
+        "sha256": canonical_sha256(payload),
+        "decision": payload["decision"],
+        "repository": payload["repository"],
+        "task_id": payload["task_id"],
+        "reason": payload["reason"],
+        "recorded_at_unix": payload["recorded_at_unix"],
+        "review_after_unix": payload["review_after_unix"],
+        "recovery_evidence": payload["recovery_evidence"],
+        "automatic_mutation_authorized": False,
+    }
+
+
+def managed_build_recovery_evidence(
+    manifest_path: Path, worktree: Path, expected_repo: Path
+) -> dict[str, object]:
+    archive_root = GRABOWSKI_CHECKOUT_ARCHIVE_ROOT.resolve(strict=True)
+    absolute_manifest = Path(os.path.abspath(manifest_path))
+    if absolute_manifest.parent.resolve(strict=True) != absolute_manifest.parent:
+        raise RuntimeError("managed build recovery manifest parent is not canonical")
+    resolved_manifest = absolute_manifest.resolve(strict=True)
+    if archive_root not in resolved_manifest.parents:
+        raise RuntimeError("managed build recovery manifest is outside archive root")
+    payload, manifest_sha256 = load_owner_json_snapshot(
+        resolved_manifest, label="managed build recovery manifest"
+    )
+    identity = managed_build_identity(worktree, expected_repo)
+    recovery_refs = payload.get("recovery_refs")
+    archive_id = payload.get("archive_id")
+    head_rows = (
+        [
+            row
+            for row in recovery_refs
+            if isinstance(row, dict)
+            and row.get("role") == "head"
+            and row.get("target") == identity["head"]
+            and isinstance(row.get("ref"), str)
+        ]
+        if isinstance(recovery_refs, list)
+        else []
+    )
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("checkout_path") != identity["worktree"]
+        or payload.get("git_common_dir") != identity["git_common_dir"]
+        or payload.get("head") != identity["head"]
+        or Path(str(payload.get("repo"))).resolve() != expected_repo.resolve()
+        or len(head_rows) != 1
+        or not re.fullmatch(
+            r"refs/grabowski/checkouts/[0-9a-f]{16}/[A-Za-z0-9._-]+/head",
+            head_rows[0]["ref"],
+        )
+        or not isinstance(archive_id, str)
+        or not archive_id
+        or head_rows[0]["ref"].split("/")[-2] != archive_id
+        or resolved_manifest.parent.name != archive_id
+        or not isinstance(payload.get("cleanup"), dict)
+        or payload["cleanup"].get("requires_dry_run") is not True
+        or payload["cleanup"].get("tool") != "grabowski_checkout_cleanup"
+        or not isinstance(payload.get("rollback"), dict)
+        or payload["rollback"].get("available") is not True
+    ):
+        raise RuntimeError("managed build recovery manifest is identity-mismatched")
+    recovery_ref = head_rows[0]["ref"]
+    live_target = run(
+        ["git", "-C", str(expected_repo), "rev-parse", recovery_ref], check=False
+    ).stdout.strip()
+    if live_target != identity["head"]:
+        raise RuntimeError("managed build recovery ref is unavailable or changed")
+    return {
+        "manifest": str(resolved_manifest),
+        "manifest_sha256": manifest_sha256,
+        "archive_id": archive_id,
+        "recovery_ref": recovery_ref,
+        "target": identity["head"],
+        "cleanup_tool": "grabowski_checkout_cleanup",
+        "cleanup_requires_dry_run": True,
+        "automatic_cleanup_authorized": False,
+    }
+
+
+def load_active_managed_build_retain_decision(
+    build: Path, worktree: Path, expected_repo: Path
+) -> dict[str, object] | None:
+    path = managed_build_retain_decision_path(worktree)
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return None
+    payload = load_owner_json_object(
+        path, label="managed build retain decision"
+    )
+    identity = managed_build_identity(worktree, expected_repo)
+    observed_repository = repository_key_for_path(expected_repo)
+    task_id = payload.get("task_id")
+    reason = payload.get("reason")
+    recorded_at = payload.get("recorded_at_unix")
+    review_after = payload.get("review_after_unix")
+    snapshot = payload.get("snapshot")
+    stored_recovery = payload.get("recovery_evidence")
+    if not isinstance(stored_recovery, dict) or not isinstance(
+        stored_recovery.get("manifest"), str
+    ):
+        raise RuntimeError("managed build retain decision lacks recovery evidence")
+    observed_recovery = managed_build_recovery_evidence(
+        Path(stored_recovery["manifest"]), worktree, expected_repo
+    )
+    if observed_recovery != stored_recovery:
+        raise RuntimeError("managed build retain recovery evidence changed")
+    if (
+        payload.get("schema") != MANAGED_BUILD_RETAIN_DECISION_SCHEMA
+        or payload.get("decision") != "durable-retain"
+        or payload.get("automatic_mutation_authorized") is not False
+        or not isinstance(payload.get("repository"), str)
+        or observed_repository is None
+        or payload.get("repository") != observed_repository
+        or not isinstance(task_id, str)
+        or not re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{2,127}", task_id)
+        or not isinstance(reason, str)
+        or not reason.strip()
+        or len(reason) > 1000
+        or not isinstance(recorded_at, int)
+        or isinstance(recorded_at, bool)
+        or not isinstance(review_after, int)
+        or isinstance(review_after, bool)
+        or recorded_at > int(time.time())
+        or review_after <= recorded_at
+        or not (
+            MANAGED_BUILD_RETAIN_MIN_REVIEW_SECONDS
+            <= review_after - recorded_at
+            <= MANAGED_BUILD_RETAIN_MAX_REVIEW_SECONDS
+        )
+        or any(payload.get(key) != value for key, value in identity.items())
+        or not isinstance(snapshot, dict)
+    ):
+        raise RuntimeError("managed build retain decision is malformed or identity-mismatched")
+    now = int(time.time())
+    if now >= review_after:
+        raise RuntimeError("managed build retain decision review is due")
+    if managed_build_snapshot(build) != snapshot:
+        raise RuntimeError("managed build retain decision no longer matches build snapshot")
+    return _managed_build_retain_projection(payload, path)
+
+
+def record_managed_build_durable_retain(
+    entry: RepoEntry,
+    ref_segment: str,
+    *,
+    task_id: str,
+    reason: str,
+    review_after_unix: int,
+    recovery_manifest: Path,
+) -> dict[str, object]:
+    if not re.fullmatch(r"[A-Z0-9][A-Z0-9._-]{2,127}", task_id):
+        raise RuntimeError("managed build retain task id is invalid")
+    normalized_reason = reason.strip()
+    if not normalized_reason or len(normalized_reason) > 1000:
+        raise RuntimeError("managed build retain reason is invalid")
+    now = int(time.time())
+    worktree = source_worktree_path(entry, safe_segment(ref_segment))
+    build = worktree / "build"
+    assert_managed_worktree_identity(worktree, entry.path)
+    if not build.exists() or build.is_symlink() or not build.is_dir():
+        raise RuntimeError("managed build retain target is not a real build directory")
+    if not any(build.iterdir()):
+        raise RuntimeError("managed build retain target is empty")
+    assert_managed_worktree_idle(worktree)
+    lease_evidence = require_no_active_managed_build_leases(build, worktree)
+    snapshot = managed_build_snapshot(build)
+    identity = managed_build_identity(worktree, entry.path)
+    recovery_evidence = managed_build_recovery_evidence(
+        recovery_manifest, worktree, entry.path
+    )
+    path = managed_build_retain_decision_path(worktree)
+    expected = {
+        "schema": MANAGED_BUILD_RETAIN_DECISION_SCHEMA,
+        "decision": "durable-retain",
+        "repository": entry.key,
+        "task_id": task_id,
+        "reason": normalized_reason,
+        "review_after_unix": review_after_unix,
+        "snapshot": snapshot,
+        "recovery_evidence": recovery_evidence,
+        "automatic_mutation_authorized": False,
+        **identity,
+    }
+    try:
+        existing = load_owner_json_object(
+            path, label="managed build retain decision"
+        )
+    except RuntimeError as exc:
+        if str(exc) != "managed build retain decision does not exist":
+            raise
+    else:
+        comparable = {key: existing.get(key) for key in expected}
+        if comparable != expected:
+            raise RuntimeError(
+                "existing managed build retain decision conflicts with requested identity"
+            )
+        validated = load_active_managed_build_retain_decision(
+            build, worktree, entry.path
+        )
+        if validated is None:
+            raise RuntimeError("managed build retain decision disappeared during replay")
+        return {
+            "status": "retained",
+            "idempotent_replay": True,
+            "decision": validated,
+            "lease_evidence": lease_evidence,
+        }
+    review_seconds = review_after_unix - now
+    if not (
+        MANAGED_BUILD_RETAIN_MIN_REVIEW_SECONDS
+        <= review_seconds
+        <= MANAGED_BUILD_RETAIN_MAX_REVIEW_SECONDS
+    ):
+        raise RuntimeError(
+            "managed build retain review must be between one hour and one year"
+        )
+    payload = {
+        **expected,
+        "recorded_at_unix": now,
+        "lease_evidence": lease_evidence,
+        "process_evidence": {
+            "checked_at_unix": now,
+            "active_references": [],
+            "does_not_establish": ["future process inactivity"],
+        },
+        "does_not_establish": [
+            "publisher provenance",
+            "stale residue",
+            "cleanup or quarantine authority",
+            "automatic deletion authority",
+            "future source immutability",
+        ],
+    }
+    atomic_create_json(path, payload)
+    return {
+        "status": "retained",
+        "idempotent_replay": False,
+        "decision": _managed_build_retain_projection(payload, path),
+        "lease_evidence": lease_evidence,
+    }
 
 
 def managed_build_quarantine_receipt_path(transaction_id: str) -> Path:
@@ -1051,6 +1418,25 @@ def classify_managed_build_residue(
     build: Path, worktree: Path, expected_repo: Path
 ) -> dict[str, object]:
     lease_evidence = require_no_active_managed_build_leases(build, worktree)
+    try:
+        retain_decision = load_active_managed_build_retain_decision(
+            build, worktree, expected_repo
+        )
+    except RuntimeError as exc:
+        raise managed_build_blocker(
+            build,
+            classification="unknown",
+            reason=str(exc),
+            lease_evidence=lease_evidence,
+        ) from exc
+    if retain_decision is not None:
+        raise managed_build_blocker(
+            build,
+            classification="durable-retain",
+            reason="exact manager retain decision is active",
+            retain_decision=retain_decision,
+            lease_evidence=lease_evidence,
+        )
     record_path = managed_build_residue_record_path(worktree)
     try:
         payload = load_managed_build_residue_record(record_path)
@@ -2965,12 +3351,44 @@ def cleanup_mode(args: argparse.Namespace) -> int:
     return 0 if reports["status"] == "ok" else 1
 
 
+def managed_build_retain_mode(
+    args: argparse.Namespace, entries: list[RepoEntry]
+) -> int:
+    if len(entries) != 1:
+        raise RuntimeError("managed build retain requires exactly one repository")
+    result = record_managed_build_durable_retain(
+        entries[0],
+        args.managed_source_ref,
+        task_id=args.task_id,
+        reason=args.reason,
+        review_after_unix=args.review_after_unix,
+        recovery_manifest=Path(args.recovery_manifest),
+    )
+    summary: dict[str, object] = {
+        "status": "ok",
+        "mode": "managed-build-durable-retain",
+        "repository": entries[0].key,
+        **result,
+    }
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    receipt = LOG_ROOT / "fleet-managed-build-retain-last.json"
+    summary["receipt"] = str(receipt)
+    atomic_write_json(receipt, summary)
+    print(json.dumps(summary, indent=2, sort_keys=True))
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inventory", action="store_true")
     parser.add_argument("--if-changed", action="store_true")
     parser.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--force-republish", action="store_true")
+    parser.add_argument("--record-managed-build-retain", action="store_true")
+    parser.add_argument("--managed-source-ref")
+    parser.add_argument("--task-id")
+    parser.add_argument("--review-after-unix", type=int)
+    parser.add_argument("--recovery-manifest")
     parser.add_argument("--reason")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--retention", type=int, default=DEFAULT_RETENTION)
@@ -2999,6 +3417,36 @@ def main(argv: list[str]) -> int:
         parser.error(
             "--force-republish requires at least one --repo and a non-empty --reason"
         )
+    if args.record_managed_build_retain:
+        if (
+            not args.repo_keys
+            or len(args.repo_keys) != 1
+            or not args.managed_source_ref
+            or not args.task_id
+            or not args.reason
+            or args.review_after_unix is None
+            or not args.recovery_manifest
+        ):
+            parser.error(
+                "--record-managed-build-retain requires exactly one --repo, "
+                "--managed-source-ref, --task-id, --reason, --review-after-unix "
+                "and --recovery-manifest"
+            )
+        if (
+            args.inventory
+            or args.force_republish
+            or args.if_changed
+            or args.limit
+            or args.prune_current
+            or args.prune_legacy
+            or args.prune_special
+            or args.reconcile_prune
+            or args.apply_prune
+        ):
+            parser.error(
+                "--record-managed-build-retain cannot be combined with publication "
+                "or cleanup modes"
+            )
     cleanup_requested = (
         args.prune_current
         or args.prune_legacy
@@ -3035,6 +3483,19 @@ def main(argv: list[str]) -> int:
                 )
             )
             return 2
+    if args.record_managed_build_retain:
+        retain_lock = acquire_lock()
+        if retain_lock is None:
+            print(
+                json.dumps(
+                    {"status": "busy", "reason": "fleet publisher already running"}
+                )
+            )
+            return 0
+        try:
+            return managed_build_retain_mode(args, entries)
+        finally:
+            retain_lock.close()
     if args.inventory:
         print(
             json.dumps(
@@ -3082,7 +3543,7 @@ def main(argv: list[str]) -> int:
             log(f"GENERATOR-PREFLIGHT-FAILED: {exc}")
             print(json.dumps(summary, indent=2, sort_keys=True))
             return 1
-        changed = published = skipped = failed = queued = prune_failed = 0
+        changed = published = skipped = failed = queued = retained = prune_failed = 0
         details: list[dict[str, object]] = []
         protected: set[Path] = set()
         reconciliation = reconcile_prune_transactions(protected=protected, apply=True)
@@ -3210,25 +3671,40 @@ def main(argv: list[str]) -> int:
                     published_detail["source_hygiene_cleanup"] = source_hygiene_cleanup
                 details.append(published_detail)
             except Exception as exc:
+                residue_blocker = parse_managed_build_blocker(exc)
+                if (
+                    residue_blocker is not None
+                    and residue_blocker.get("classification") == "durable-retain"
+                ):
+                    retained += 1
+                    details.append(
+                        {
+                            "repo": entry.key,
+                            "status": "retained",
+                            "managed_build_residue": residue_blocker,
+                        }
+                    )
+                    log(f"RETAINED {entry.key}: {exc}")
+                    continue
                 failed += 1
                 failed_detail: dict[str, object] = {
                     "repo": entry.key,
                     "status": "failed",
                     "error": str(exc)[:2000],
                 }
-                residue_blocker = parse_managed_build_blocker(exc)
                 if residue_blocker is not None:
                     failed_detail["managed_build_residue"] = residue_blocker
                 details.append(failed_detail)
                 log(f"FAILED {entry.key}: {exc}")
         summary: dict[str, object] = {
-            "status": "ok" if failed == 0 else "warn",
+            "status": "warn" if failed or retained else "ok",
             "mode": mode,
             "count": len(entries),
             "changed": changed,
             "published": published,
             "skipped": skipped,
             "queued": queued,
+            "retained": retained,
             "failed": failed,
             "prune_failed": prune_failed,
             "retention": args.retention,
@@ -3252,6 +3728,7 @@ def main(argv: list[str]) -> int:
                         "published",
                         "skipped",
                         "queued",
+                        "retained",
                         "failed",
                         "prune_failed",
                         "retention",
