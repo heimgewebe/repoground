@@ -1,6 +1,18 @@
 name: test-suite
 
+# Full-suite gate. All other test workflows are path-scoped subsets; without
+# this workflow, cross-cutting drift (a feature changing artifact emission and
+# breaking an unrelated test file) is invisible until someone runs the whole
+# suite locally. See docs/proofs/repo-complete-audit-2026-07-proof.md.
+#
+# Deselected from pytest-full:
+# - browser: executed separately by the required browser-tests job
+# - doc_freshness_live: declared non-blocking by design; run with
+#   continue-on-error in doc-freshness.yml
+
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -12,32 +24,117 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  export-pr-diff:
+  pytest-full:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+
+      - name: Install and verify Patch Evaluation sandbox runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes bubblewrap
+          if sysctl kernel.unprivileged_userns_clone >/dev/null 2>&1; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --die-with-parent --new-session --unshare-pid \
+            --ro-bind /usr /usr --ro-bind-try /bin /bin \
+            --ro-bind-try /lib /lib --ro-bind-try /lib64 /lib64 \
+            --proc /proc --dev /dev /usr/bin/true
+
+      - name: Run full pytest suite
+        run: pytest -q -m "not browser and not doc_freshness_live"
+
+
+  release-candidate:
+    name: release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Export exact ten-file PR diff
-        run: |
-          set -euo pipefail
-          base=24eee84dd845fcf5f3a4a82c9e42e64428e76d6d
-          output=repoground-pr-1101-bc61f87b-diff.txt
-          mapfile -t changed < <(git diff --name-only "$base" HEAD -- . ':(exclude).github/workflows/test-suite.yml')
-          test "${#changed[@]}" -eq 10
-          git diff --binary --no-ext-diff "$base" HEAD -- . ':(exclude).github/workflows/test-suite.yml' > "$output"
-          test -s "$output"
-          sha256sum "$output" > "$output.sha256"
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
 
-      - name: Upload revision-bound PR diff
+      - name: Check release contracts
+        run: python scripts/release/check_release_contract.py
+
+      - name: Build and compare deterministic source candidates
+        run: |
+          rm -rf /tmp/repoground-release-a /tmp/repoground-release-b
+          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repoground-release-a
+          python scripts/release/build_release_candidate.py --repo . --ref HEAD --out /tmp/repoground-release-b
+          diff --recursive --brief /tmp/repoground-release-a /tmp/repoground-release-b
+          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repoground-release-a --repo .
+          python scripts/release/verify_release_candidate.py --candidate-dir /tmp/repoground-release-b --repo .
+
+  browser-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container:
+      image: mcr.microsoft.com/playwright/python:v1.61.0-noble@sha256:a9731514f24121d1dcd25d58d0a38146646d290a5998fd80d3e533e7b5e21c69
+      options: --ipc=host
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Install pinned browser-test dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-browser.lock.txt
+
+      - name: Verify pinned Chromium runtime
+        run: python scripts/ci/check_browser_gate_environment.py
+
+      - name: Run Playwright browser tests
+        run: |
+          python -m pytest -q -m browser merger/repoground/tests/test_webui_payload.py \
+            --browser chromium \
+            --output=test-results \
+            --tracing retain-on-failure \
+            --screenshot only-on-failure \
+            --video retain-on-failure
+
+      - name: Upload browser diagnostics after failure
+        if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: repoground-pr-1101-bc61f87b-diff
-          path: |
-            repoground-pr-1101-bc61f87b-diff.txt
-            repoground-pr-1101-bc61f87b-diff.txt.sha256
-          if-no-files-found: error
+          name: browser-test-results-${{ github.run_id }}
+          path: test-results
+          if-no-files-found: ignore
           retention-days: 7
+
+  webui-js-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Run WebUI JS tests
+        run: |
+          set -euo pipefail
+          for f in merger/repoground/frontends/webui/tests/test_*.js; do
+            echo "=== node $f"
+            node "$f"
+          done
