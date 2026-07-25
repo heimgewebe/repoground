@@ -94,6 +94,8 @@
         "ReadOnlyPaths": "/srv/repoground/source /run/user/1000/repoground-patch-evaluation-runner/example",
         "RemainAfterExit": "yes",
         "RuntimeMaxUSec": "30min",
+        "StandardError": "null",
+        "StandardOutput": "null",
         "TasksMax": "256",
         "TemporaryFileSystem": "/tmp:rw,size=2147483648,mode=0700"
       }
