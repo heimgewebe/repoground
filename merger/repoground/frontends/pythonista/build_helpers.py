@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 from typing import Dict, Any, Optional, List, Union
-from build_utils import normalize_path, normalize_repo_id
+if __package__:
+    from merger.repoground.frontends.pythonista.build_utils import normalize_path, normalize_repo_id
+else:
+    from build_utils import normalize_path, normalize_repo_id
 
 def resolve_pool_include_paths(pool_entry: Optional[Union[Dict[str, Any], List[str]]]) -> Optional[List[str]]:
     """
