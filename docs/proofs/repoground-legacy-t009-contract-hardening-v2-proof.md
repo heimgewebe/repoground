@@ -31,7 +31,7 @@ commit is `684fd3aa8f0b99f6b743386e233d09b997144310` with tree
 ## Verification
 
 - focused semantic, evidence, link, redactor and benchmark matrix: 120 passed;
-- broad repository suite excluding the two host-blocked Sidecar files: 4,847 passed, 2 skipped;
+- broad repository suite excluding the two host-blocked Sidecar files: 4,850 passed, 2 skipped;
 - Ruff over all changed Python files: pass;
 - `git diff --check`: pass;
 - graph maintainability ratchet: 197 findings, maximum complexity 138, no new finding;

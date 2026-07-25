@@ -19,10 +19,10 @@
       "tests/test_patch_evaluation_sidecar_host_readback.py"
     ],
     "exclusion_reason": "Bubblewrap namespace creation failed identically on the unchanged merged-defect commit with Resource temporarily unavailable.",
-    "job": "grabowski-job-5e5c5dabd73b",
-    "lifecycle_receipt_sha256": "94f425e00f5a4edc00db51117a8bcfafeb60d18349758cfa8833132f85ebe35b",
+    "job": "grabowski-job-3129e8ecf70b",
+    "lifecycle_receipt_sha256": "960644bd177a9f9edae2a7c09f0805148875f43ca5c113a8526c68a08fbe2edb",
     "status": "pass",
-    "tests_passed": 4847,
+    "tests_passed": 4850,
     "tests_skipped": 2
   },
   "complexity": {
