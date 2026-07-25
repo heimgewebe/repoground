@@ -163,7 +163,16 @@ def _policy(
     for name in ("StandardOutput", "StandardError"):
         if unit.get(name) != "null":
             raise RunnerError(f"systemd policy mismatch for {name}")
-    return _base_policy(unit, run, limits)
+    _, base_readback = _base_policy(unit, run, limits)
+    systemd = dict(base_readback["systemd"])
+    systemd["StandardOutput"] = unit["StandardOutput"]
+    systemd["StandardError"] = unit["StandardError"]
+    readback = {
+        "systemd": systemd,
+        "cgroup": base_readback["cgroup"],
+    }
+    payload = json.dumps(readback, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(payload).hexdigest(), readback
 
 
 def _unit_absent(systemctl: Path, unit: str, timeout: float = 3) -> bool:
