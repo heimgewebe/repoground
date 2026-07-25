@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "kind": "repoground.legacy_t010_pythonista_measurement",
+  "observed_at": "2026-07-25T08:42:54.175606+00:00",
+  "task_id": "REPOGROUND-LEGACY-RECONCILIATION-V1-T010",
+  "repository": "heimgewebe/repoground",
+  "base_sha": "c91d640bce2b14c4a78a64e83169d56c818fa662",
+  "architecture": {
+    "build_lines_before": 4029,
+    "build_lines_after": 3630,
+    "new_module_lines": {
+      "import_contract.py": 89,
+      "source_mode.py": 154,
+      "cli_args.py": 149,
+      "cli_output.py": 114,
+      "cli_runner.py": 267
+    },
+    "main_cli_before": {
+      "name": "main_cli",
+      "lines": 298,
+      "complexity": 62,
+      "module": "build.py"
+    },
+    "main_cli_after": {
+      "name": "main_cli",
+      "lines": 3,
+      "complexity": 1,
+      "module": "build.py"
+    },
+    "new_orchestration_top_complexity": [
+      {
+        "name": "_validate_cli_request",
+        "lines": 56,
+        "complexity": 17,
+        "module": "cli_runner.py"
+      },
+      {
+        "name": "run_pre_pull_two_phase",
+        "lines": 69,
+        "complexity": 16,
+        "module": "source_mode.py"
+      },
+      {
+        "name": "_materialize_remote_sources",
+        "lines": 75,
+        "complexity": 13,
+        "module": "cli_runner.py"
+      },
+      {
+        "name": "extract_delta_meta",
+        "lines": 32,
+        "complexity": 12,
+        "module": "cli_output.py"
+      },
+      {
+        "name": "run_main_cli",
+        "lines": 96,
+        "complexity": 11,
+        "module": "cli_runner.py"
+      },
+      {
+        "name": "_resolve_sources",
+        "lines": 20,
+        "complexity": 8,
+        "module": "cli_runner.py"
+      },
+      {
+        "name": "resolve_headless_source_mode",
+        "lines": 14,
+        "complexity": 8,
+        "module": "source_mode.py"
+      },
+      {
+        "name": "resolve_effective_pre_pull",
+        "lines": 20,
+        "complexity": 6,
+        "module": "source_mode.py"
+      },
+      {
+        "name": "resolve_output_options",
+        "lines": 18,
+        "complexity": 4,
+        "module": "cli_output.py"
+      },
+      {
+        "name": "resolve_effective_headless_source_mode",
+        "lines": 15,
+        "complexity": 4,
+        "module": "source_mode.py"
+      }
+    ]
+  },
+  "performance": {
+    "package_import_before": {
+      "median_seconds": 0.08,
+      "median_rss_kib": 24792
+    },
+    "package_import_after": {
+      "median_seconds": 0.08,
+      "median_rss_kib": 25368
+    },
+    "direct_help_before": {
+      "median_seconds": 0.09,
+      "median_rss_kib": 31552
+    },
+    "direct_help_after": {
+      "median_seconds": 0.09,
+      "median_rss_kib": 30964
+    },
+    "method": "nine local /usr/bin/time runs per mode; medians"
+  },
+  "parity": {
+    "help_output_equal": true,
+    "help_sha256": "e18411e4dbd2a40ca15408cd00017ad375c8462b5a0396718bbc03fbc10d978a",
+    "mocked_scan_and_writer_call_serialization_equal": true,
+    "parity_guard": "passed"
+  },
+  "validation": {
+    "targeted_pythonista_and_parity_tests": {
+      "passed": 69,
+      "failed": 0,
+      "receipt": "4f681cafdc88d58c72bde033ce0245a1b017103b08fa86f4655b44376ff92842"
+    },
+    "ruff_check": "passed",
+    "ruff_format_check": "passed",
+    "py_compile_changed_files": "passed",
+    "git_diff_check": "passed",
+    "full_pytest": {
+      "passed": 4801,
+      "skipped": 2,
+      "failed": 33,
+      "classification": "host_infrastructure_blocker",
+      "common_error": "bwrap: Creating new namespace failed: Resource temporarily unavailable",
+      "changed_pythonista_failures": 0
+    },
+    "isolated_sidecar_rerun": {
+      "passed": 10,
+      "failed": 33,
+      "same_common_error": true
+    }
+  },
+  "host_observation": {
+    "user_processes": 436,
+    "bwrap_processes": 15,
+    "user_namespaces": 20,
+    "max_user_namespaces": 234504,
+    "user_service_cgroup_tasks": 3189,
+    "tasks_max": "max",
+    "zombie_processes": 3,
+    "mutation_performed": false
+  },
+  "followup_bindings": [
+    "RBAW-V1-T006",
+    "REPOGROUND-LEGACY-RECONCILIATION-V1-T014"
+  ],
+  "does_not_establish": [
+    "GitHub CI success",
+    "merge readiness before current-head review",
+    "cause or ownership of foreign bwrap processes",
+    "full T004 completion"
+  ]
+}

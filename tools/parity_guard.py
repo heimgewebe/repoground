@@ -125,6 +125,12 @@ FEATURES = {
 ROOT = Path(__file__).parent.parent.resolve()
 MODEL_PATH = ROOT / "merger/repoground/service/models.py"
 PYTHONISTA_BUILD_PATH = ROOT / "merger/repoground/frontends/pythonista/build.py"
+PYTHONISTA_BUILD_PATHS = (
+    PYTHONISTA_BUILD_PATH,
+    ROOT / "merger/repoground/frontends/pythonista/cli_args.py",
+    ROOT / "merger/repoground/frontends/pythonista/cli_output.py",
+    ROOT / "merger/repoground/frontends/pythonista/cli_runner.py",
+)
 WEBUI_HTML_PATH = ROOT / "merger/repoground/frontends/webui/index.html"
 WEBUI_JS_PATH = ROOT / "merger/repoground/frontends/webui/app.js"
 
@@ -239,18 +245,26 @@ class ParityChecker:
                 self.log_pass(f"Feature '{feature}' present in JobRequest.")
 
     def check_pythonista_build(self):
-        """Check the RepoGround Pythonista CLI surface using its parsed AST."""
-        print(f"Checking RepoGround Pythonista build in {PYTHONISTA_BUILD_PATH}...")
-        try:
-            tree = ast.parse(PYTHONISTA_BUILD_PATH.read_text("utf-8"))
-        except Exception as error:
-            self.log_error(f"Could not parse RepoGround Pythonista build: {error}")
-            return
+        """Check the Pythonista CLI surface across its explicit modules."""
+        rendered_paths = ", ".join(str(path) for path in PYTHONISTA_BUILD_PATHS)
+        print(f"Checking RepoGround Pythonista build modules in {rendered_paths}...")
+        trees = []
+        for path in PYTHONISTA_BUILD_PATHS:
+            try:
+                trees.append(ast.parse(path.read_text("utf-8")))
+            except Exception as error:
+                self.log_error(f"Could not parse Pythonista module {path}: {error}")
+                return
 
-        defined_cli_args = _defined_cli_arguments(tree)
-        accessed_args = _explicit_argument_accesses(tree)
-        has_generic_usage = _uses_generic_argument_mapping(tree)
-        accessed_keys = _literal_subscript_keys(tree)
+        defined_cli_args = set()
+        accessed_args = set()
+        accessed_keys = set()
+        has_generic_usage = False
+        for tree in trees:
+            defined_cli_args.update(_defined_cli_arguments(tree))
+            accessed_args.update(_explicit_argument_accesses(tree))
+            accessed_keys.update(_literal_subscript_keys(tree))
+            has_generic_usage = has_generic_usage or _uses_generic_argument_mapping(tree)
 
         for feature, config in FEATURES.items():
             cli_arg = config.get("cli_arg")

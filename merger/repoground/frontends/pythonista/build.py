@@ -28,58 +28,86 @@ import json
 import re
 import traceback
 import datetime
-import uuid
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
-# Import new utils/helpers (Avoid circular imports!)
-# ARCHITECTURE POLICY:
-# 1. Ensure current directory is in sys.path (for script execution)
-# 2. Use absolute imports exclusively (no try/except relative)
-# 3. This avoids complexity and ensures consistent behavior.
+# Explicit dual import contract:
+# - package mode uses the normal merger.repoground package graph without sys.path mutation;
+# - flat Pythonista execution installs only the deterministic shipped roots.
+if __package__:
+    from merger.repoground.frontends.pythonista.import_contract import (
+        bootstrap_pythonista_imports,
+    )
+else:
+    from import_contract import bootstrap_pythonista_imports
 
-SCRIPT_DIR = Path(__file__).parent.resolve()
-if str(SCRIPT_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPT_DIR))
+IMPORT_PATHS = bootstrap_pythonista_imports(globals().get("__file__"), __package__)
+SCRIPT_DIR = IMPORT_PATHS.script_dir
+
+if __package__:
+    from merger.repoground.frontends.pythonista.build_utils import (
+        normalize_path,
+        normalize_repo_id,
+        safe_script_path,
+    )
+    from merger.repoground.frontends.pythonista.build_helpers import (
+        deserialize_prescan_pool,
+        resolve_pool_include_paths,
+    )
+    from merger.repoground.frontends.pythonista.cli_args import parse_args as parse_cli_args
+    from merger.repoground.frontends.pythonista.cli_output import (
+        extract_delta_meta,
+        resolve_output_options,
+        resolve_scan_options,
+        write_cli_reports,
+    )
+    from merger.repoground.frontends.pythonista.cli_runner import run_main_cli
+    from merger.repoground.frontends.pythonista.source_mode import (
+        git_subprocess_unavailable_message,
+        git_subprocesses_supported,
+        is_ios_runtime,
+        resolve_effective_headless_source_mode,
+        resolve_effective_pre_pull,
+        resolve_headless_source_mode,
+        resolve_pre_pull_switch_value,
+        run_pre_pull_two_phase as _run_pre_pull_two_phase,
+    )
+else:
+    from build_utils import normalize_path, normalize_repo_id, safe_script_path
+    from build_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+    from cli_args import parse_args as parse_cli_args
+    from cli_output import (
+        extract_delta_meta,
+        resolve_output_options,
+        resolve_scan_options,
+        write_cli_reports,
+    )
+    from cli_runner import run_main_cli
+    from source_mode import (
+        git_subprocess_unavailable_message,
+        git_subprocesses_supported,
+        is_ios_runtime,
+        resolve_effective_headless_source_mode,
+        resolve_effective_pre_pull,
+        resolve_headless_source_mode,
+        resolve_pre_pull_switch_value,
+        run_pre_pull_two_phase as _run_pre_pull_two_phase,
+    )
 
 
-def _insert_after_script_dir(path_s: str) -> None:
-    """Helper to insert paths deterministically after SCRIPT_DIR."""
-    if path_s in sys.path:
-        return
-    try:
-        # Insert after SCRIPT_DIR if present, otherwise at start
-        idx = sys.path.index(str(SCRIPT_DIR)) + 1
-        sys.path.insert(idx, path_s)
-    except ValueError:
-        sys.path.insert(0, path_s)
-
-
-# --- FIX START ---
-# Auto-detect project root to fix ModuleNotFoundError in standalone mode
-try:
-    # Walk up until we find the 'merger' directory
-    # Structure: .../merger/repoground/frontends/pythonista/build.py
-    # We want to add '.../' to sys.path so 'import merger' works.
-    _p = SCRIPT_DIR
-    while _p.name != "merger" and _p.parent != _p:
-        _p = _p.parent
-
-    if _p.name == "merger":
-        # Deterministic order: SCRIPT_DIR -> REPO_ROOT -> MERGER_DIR
-        # Note: We insert in reverse order of desired precedence because each call
-        # inserts immediately after SCRIPT_DIR, pushing previous insertions down.
-        _insert_after_script_dir(str(_p))         # Ends up at SCRIPT_DIR + 2
-        _insert_after_script_dir(str(_p.parent))  # Ends up at SCRIPT_DIR + 1
-except Exception as e:
-    try:
-        print(f"[RepoGround] Warning: auto path-detection failed: {e}", file=sys.stderr)
-    except Exception:
-        print(f"[RepoGround] Warning: auto path-detection failed: {e}")
-# --- FIX END ---
-
-from build_utils import normalize_path, normalize_repo_id, safe_script_path
-from build_helpers import deserialize_prescan_pool, resolve_pool_include_paths
+# Compatibility surface consumed by tests and the dependency-injected CLI runner.
+__all__ = [
+    "extract_delta_meta",
+    "git_subprocess_unavailable_message",
+    "git_subprocesses_supported",
+    "is_ios_runtime",
+    "parse_cli_args",
+    "resolve_effective_headless_source_mode",
+    "resolve_headless_source_mode",
+    "resolve_output_options",
+    "resolve_scan_options",
+    "write_cli_reports",
+]
 
 
 def _flatten_meta(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -376,152 +404,20 @@ except ImportError:
 # *before* the subprocess path is reached — never handled after the fact. Local
 # filesystem scans use no subprocess and stay available.
 
-def is_ios_runtime() -> bool:
-    """True when running under Pythonista/iOS, where subprocesses are unavailable."""
-    return sys.platform == "ios"
-
-
-def git_subprocesses_supported() -> bool:
-    """False on Pythonista/iOS; True everywhere RepoGround build can spawn git subprocesses."""
-    return not is_ios_runtime()
-
-
-def git_subprocess_unavailable_message(feature: str) -> str:
-    """One-line explanation for a git-backed feature that cannot run on iOS."""
-    return (
-        f"{feature} requires git subprocesses and is not supported in Pythonista/iOS. "
-        "Disable this option or run RepoGround build on desktop/server."
+def run_pre_pull_two_phase(sources, log=print, warn=None):
+    """Run the portable two-phase pre-pull with current runtime integrations."""
+    return _run_pre_pull_two_phase(
+        sources,
+        plan_pre_pull_repos=plan_pre_pull_repos,
+        apply_pre_pull_plans=apply_pre_pull_plans,
+        is_self_repo=is_self_repo,
+        pre_pull_status=PrePullStatus,
+        hard_fail_statuses=HARD_FAIL_STATUSES,
+        warn_statuses=WARN_STATUSES,
+        log=log,
+        warn=warn,
     )
 
-
-def resolve_headless_source_mode(args) -> str:
-    """Map parsed headless CLI args onto the effective source mode.
-
-    Explicit ``--source-mode`` wins; otherwise derive from the legacy
-    ``--pre-pull``/``--plan-only`` flags. ``local-ff`` degrades to
-    ``local_current`` under ``--plan-only`` (plan-only never mutates).
-    """
-    sm = getattr(args, "source_mode", None)
-    plan_only = bool(getattr(args, "plan_only", False))
-    if sm == "remote-snapshot":
-        return "remote_snapshot"
-    if sm == "local-current":
-        return "local_current"
-    if sm == "local-ff":
-        return "local_current" if plan_only else "local_ff"
-    requested = getattr(args, "pre_pull", None)
-    if requested is None:
-        requested = not plan_only
-    return "local_ff" if (requested and not plan_only) else "local_current"
-
-
-def resolve_pre_pull_switch_value(pre_pull_switch) -> bool:
-    """Return the pre-pull boolean from a UI switch, defaulting to True when absent.
-
-    Accepts a Pythonista ``ui.Switch`` object or ``None`` (missing widget).
-    Default-True matches the documented pre_pull default across all surfaces.
-    """
-    return True if pre_pull_switch is None else bool(pre_pull_switch.value)
-
-
-def resolve_effective_pre_pull(pre_pull, plan_only, *, log=None, notify=None) -> bool:
-    """Decide whether pre-pull actually runs, applying the iOS capability gate.
-
-    The base rule is ``pre_pull and not plan_only``. On Pythonista/iOS the result
-    is forced ``False`` because git subprocesses are unavailable there — so a
-    requested (or stored-default) pre-pull never reaches ``run_pre_pull_two_phase``
-    and the local scan proceeds as-is. ``log`` (and optional ``notify`` for a HUD)
-    receive a one-line hint only when an otherwise-active pre-pull is suppressed
-    on iOS. Off-iOS behaviour is unchanged.
-    """
-    effective = bool(pre_pull and not plan_only)
-    if effective and not git_subprocesses_supported():
-        hint = (
-            "Pre-pull disabled on iOS: git subprocesses are not supported in "
-            "Pythonista. Scanning the local working tree as-is."
-        )
-        if log is not None:
-            log(hint)
-        if notify is not None:
-            notify("Pre-pull disabled on iOS (no git subprocess)")
-        return False
-    return effective
-
-
-def resolve_effective_headless_source_mode(args, *, log=print) -> str:
-    """Map headless CLI args to an effective source mode, applying the iOS capability gate.
-
-    Wraps ``resolve_headless_source_mode``. On Pythonista/iOS the implicit
-    ``local_ff`` default (plain invocation with no source-mode flags) is degraded
-    to ``local_current`` with a log hint. Explicit git-backed modes on iOS are
-    rejected earlier (exit 2 in ``main_cli``), so this path is only reached for
-    the implicit default.
-    """
-    mode = resolve_headless_source_mode(args)
-    if mode == "local_ff" and not git_subprocesses_supported():
-        if log is not None:
-            log(
-                "Implicit local_ff/default fast-forward disabled on iOS: git subprocesses "
-                "are not supported in Pythonista; scanning the local working tree as-is."
-            )
-        mode = "local_current"
-    return mode
-
-
-def run_pre_pull_two_phase(sources, log=print, warn=None):
-    """Two-phase fast-forward-only pre-pull across all sources (shared by UI + headless).
-
-    Callers invoke this only when effective pre-pull is True (pre_pull and not
-    plan_only). It raises RuntimeError if pre-pull is requested but the repo_sync
-    module is unavailable (never a silent skip), and ValueError on any hard-fail.
-    Planning happens for ALL repos before ANY apply, so no repo is fast-forwarded
-    when another repo's plan hard-fails. The running code repo gets a restart
-    reminder only on an actual fast-forward; never auto-restart.
-    """
-    if warn is None:
-        def warn(message):
-            print(message, file=sys.stderr)
-
-    if plan_pre_pull_repos is None or apply_pre_pull_plans is None:
-        raise RuntimeError("Pre-pull requested but repo_sync module is unavailable.")
-
-    log("Pre-pull enabled: planning updates for all repositories (fast-forward only)...")
-    plans = plan_pre_pull_repos(sources)
-
-    hard_failures = []
-    for plan in plans:
-        log(f"Pre-pull plan {plan.repo}: {plan.status} - {plan.message}")
-        if plan.stderr:
-            log(f"Pre-pull plan {plan.repo} detail: {plan.stderr.strip()}")
-        if plan.status in WARN_STATUSES:
-            warn(f"Warning: {plan.repo}: {plan.status} - {plan.message}")
-        if plan.status in HARD_FAIL_STATUSES:
-            hard_failures.append(plan)
-
-    if hard_failures:
-        detail = "; ".join(f"{p.repo}: {p.status} - {p.message}" for p in hard_failures)
-        raise ValueError(
-            f"Pre-pull plan failed (no repo HEADs or working trees were fast-forwarded): {detail}"
-        )
-
-    log("Pre-pull plan OK: applying fast-forwards...")
-    results = apply_pre_pull_plans(plans)
-    for result in results:
-        log(f"Pre-pull apply {result.repo}: {result.status} - {result.message}")
-        if result.stderr:
-            log(f"Pre-pull apply {result.repo} detail: {result.stderr.strip()}")
-        if result.status in HARD_FAIL_STATUSES:
-            raise ValueError(f"Pre-pull apply failed for {result.repo}: {result.status} - {result.message}")
-        if (
-            PrePullStatus is not None
-            and result.status == PrePullStatus.FAST_FORWARDED
-            and is_self_repo(Path(result.path))
-        ):
-            warn(
-                f"Warning: pre_pull fast-forwarded the running code repository '{result.repo}'. "
-                "Please restart any active service after completion."
-            )
-    return results
 
 PROFILE_DESCRIPTIONS = {
     # Kurzbeschreibung der Profile für den UI-Hint
@@ -3692,304 +3588,9 @@ def _is_headless_requested() -> bool:
     # 3) ui-Framework nicht verfügbar
     return ("--headless" in sys.argv) or (os.environ.get("REPOGROUND_HEADLESS") == "1") or (ui is None)
 
-def main_cli():
-    import argparse
-    parser = argparse.ArgumentParser(description="RepoGround build")
-    parser.add_argument("paths", nargs="*", help="Repositories to merge")
-    parser.add_argument("--hub", help="RepoGround hub base directory")
-    parser.add_argument("--level", choices=["overview", "summary", "dev", "max"], default=DEFAULT_LEVEL)
-    parser.add_argument("--mode", choices=["gesamt", "pro-repo"], default=DEFAULT_MODE)
-    # 0 = unbegrenzt pro Datei
-    parser.add_argument(
-        "--max-bytes",
-        type=str,
-        default=str(DEFAULT_MAX_FILE_BYTES),
-        help="Max bytes per file (e.g. 5MB, 500K, or 0 for unlimited)",
-    )
-    # Default: ab 25 MB wird gesplittet, aber kein Gesamtlimit – es werden
-    # beliebig viele Parts erzeugt.
-    parser.add_argument("--split-size", help="Split output into chunks (e.g. 50MB, 1GB)", default=DEFAULT_SPLIT_SIZE)
-    parser.add_argument("--plan-only", action="store_true")
-    parser.add_argument("--code-only", action="store_true", help="Include only code/test/config/contract categories")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
-    parser.add_argument("--headless", action="store_true", help="Force headless (no Pythonista UI/editor)")
-    pre_pull_group = parser.add_mutually_exclusive_group()
-    pre_pull_group.add_argument(
-        "--pre-pull",
-        dest="pre_pull",
-        action="store_true",
-        default=None,
-        help="Fast-forward-only update before scanning (default: enabled unless --plan-only)",
-    )
-    pre_pull_group.add_argument(
-        "--no-pre-pull",
-        dest="pre_pull",
-        action="store_false",
-        help="Disable the fast-forward-only pre-pull; scan the current on-disk state as-is",
-    )
-    parser.add_argument(
-        "--extras",
-        help="Comma-separated list of extras (health,organism_index,fleet_panorama,delta_reports,augment_sidecar,json_sidecar,heatmap; alias: ai_heatmap) or 'none'",
-        default=DEFAULT_EXTRAS,
-    )
-    parser.add_argument("--extensions", help="Comma-separated list of extensions (e.g. .md,.py) to include", default=None)
-    parser.add_argument("--path-filter", help="Path substring to include (e.g. docs/)", default=None)
-    parser.add_argument("--json-sidecar", action="store_true", help="Generate JSON sidecar file alongside markdown report")
-    parser.add_argument("--meta-density", choices=["min", "standard", "full", "auto"], default="auto", help="Control metadata verbosity")
-    parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"], default="dual", help="Output mode: archive (MD only), retrieval (Chunk Index), or dual (both)")
-    parser.add_argument("--redact-secrets", action="store_true", help="Enable heuristic secret redaction")
-    parser.add_argument(
-        "--source-mode",
-        choices=["local-current", "local-ff", "remote-snapshot"],
-        default=None,
-        help="RepoGround service source acquisition mode (local-current / local-ff / remote-snapshot)",
-    )
-    parser.add_argument(
-        "--remote-ref",
-        default=None,
-        help="Explicit remote ref for remote-snapshot (e.g. origin/main or a commit SHA)",
-    )
-    parser.add_argument(
-        "--remote-ref-policy",
-        choices=["upstream", "same-branch", "default-branch"],
-        default=None,
-        help=(
-            "remote-snapshot ref policy when --remote-ref is absent (default: upstream). "
-            "Non-default policies require --source-mode remote-snapshot."
-        ),
-    )
-
-    args = parser.parse_args()
-
-    # Defensive local variables — argparse attributes depend on the exact set of
-    # registered arguments; getattr guards against missing attrs (e.g. when the
-    # parser is extended or reloaded in tests).
-    source_mode_arg = getattr(args, "source_mode", None)
-    pre_pull_arg = getattr(args, "pre_pull", None)
-    plan_only_arg = bool(getattr(args, "plan_only", False))
-    remote_ref_arg = getattr(args, "remote_ref", None)
-    remote_ref_policy_arg = getattr(args, "remote_ref_policy", None)
-
-    # Pythonista/iOS capability gate: git subprocesses are unavailable there, so
-    # reject *explicit* git-backed requests early — before hub detection or any
-    # git/network access — with a clear message instead of crashing later in
-    # subprocess.run(). This is an additional capability gate, not a replacement
-    # for the source-mode control plane below (which still runs on every host).
-    # The implicit default (no flags) is degraded to a local scan further down.
-    if is_ios_runtime():
-        if pre_pull_arg is True:
-            print(f"Error: {git_subprocess_unavailable_message('--pre-pull')}", file=sys.stderr)
-            sys.exit(2)
-        if source_mode_arg == "local-ff":
-            print(f"Error: {git_subprocess_unavailable_message('--source-mode local-ff')}", file=sys.stderr)
-            sys.exit(2)
-        if source_mode_arg == "remote-snapshot":
-            print(f"Error: {git_subprocess_unavailable_message('--source-mode remote-snapshot')}", file=sys.stderr)
-            sys.exit(2)
-
-    # plan_only never mutates local repos; an explicit --pre-pull contradicts it.
-    if getattr(args, "plan_only", False) and getattr(args, "pre_pull", None) is True:
-        print(
-            "Error: --plan-only and --pre-pull are mutually exclusive "
-            "(plan_only never mutates local repos).",
-            file=sys.stderr,
-        )
-        sys.exit(2)
-
-    # Reject contradictory --source-mode / --pre-pull combinations.
-    if source_mode_arg == "local-current" and pre_pull_arg is True:
-        print("Error: --source-mode local-current does not fast-forward; remove --pre-pull.", file=sys.stderr)
-        sys.exit(2)
-    if source_mode_arg == "local-ff" and pre_pull_arg is False:
-        print("Error: --source-mode local-ff implies a fast-forward pre-pull; remove --no-pre-pull.", file=sys.stderr)
-        sys.exit(2)
-    if source_mode_arg == "remote-snapshot" and pre_pull_arg is True:
-        print("Error: --source-mode remote-snapshot never mutates the local repo; remove --pre-pull.", file=sys.stderr)
-        sys.exit(2)
-
-    # Central control plane: the same rules /api/jobs enforces. Catches
-    # local-ff + plan-only, remote-ref / non-default policy on a local mode, etc.
-    # Runs before any hub detection or remote git access (headless: exit 2, no network).
-    if validate_source_mode_request is not None:
-        _canon_mode = source_mode_arg.replace("-", "_") if source_mode_arg else None
-        _canon_policy = remote_ref_policy_arg.replace("-", "_") if remote_ref_policy_arg else None
-        try:
-            validate_source_mode_request(
-                repo_source_mode=_canon_mode,
-                pre_pull=pre_pull_arg,
-                plan_only=plan_only_arg,
-                remote_ref=remote_ref_arg,
-                remote_ref_policy=_canon_policy,
-            )
-        except SourceModeConflictError as exc:
-            print(f"Error: {exc}", file=sys.stderr)
-            sys.exit(2)
-
-    try:
-        hub = detect_hub_dir(SCRIPT_PATH, args.hub)
-    except FileNotFoundError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    sources = []
-    if args.paths:
-        for p in args.paths:
-            path = Path(p)
-            if not path.exists():
-                path = hub / p
-            if path.exists() and path.is_dir():
-                sources.append(path)
-            else:
-                print(f"Warning: {path} not found.")
-    else:
-        repos = find_repos_in_hub(hub)
-        for r in repos:
-            sources.append(hub / r)
-
-    if not sources:
-        cwd = Path.cwd()
-        print(f"No sources in hub ({hub}). Scanning current directory: {cwd}")
-        sources.append(cwd)
-
-    print(f"Hub: {hub}")
-    print(f"Sources: {[s.name for s in sources]}")
-
-    # RepoGround service source acquisition: the effective source mode decides how the content
-    # to scan is acquired. local_ff keeps the bounded pre-pull; local_current
-    # scans the tree as-is; remote_snapshot scans an isolated remote materialization
-    # without ever mutating the local repo.
-    # On iOS the implicit local_ff default is degraded to local_current here (with
-    # a log hint); explicit git-backed modes were already rejected with exit 2 above.
-    effective_source_mode = resolve_effective_headless_source_mode(args)
-    remote_ref_policy = (remote_ref_policy_arg or "upstream").replace("-", "_")
-
-    if effective_source_mode == "remote_snapshot":
-        if materialize_remote_snapshot is None or resolve_remote_ref is None:
-            print(
-                "Error: remote_snapshot requested but source_acquisition module is unavailable.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        merges_dir = get_merges_dir(hub)
-        job_id = "headless-" + uuid.uuid4().hex[:12]
-        if plan_only_arg:
-            # Dry-plan: resolve refs only, never materialize or scan.
-            ok = True
-            for src in sources:
-                resolution = resolve_remote_ref(
-                    src, remote_ref=remote_ref_arg, remote_ref_policy=remote_ref_policy
-                )
-                if resolution.status == SourceStatus.RESOLVED:
-                    commit_short = (resolution.resolved_commit or "")[:12]
-                    print(f"remote_snapshot plan {resolution.repo}: would scan {resolution.resolved_ref} ({commit_short})")
-                else:
-                    ok = False
-                    print(f"Error: remote_snapshot plan {resolution.repo}: {resolution.status} - {resolution.message}", file=sys.stderr)
-            if not ok:
-                sys.exit(1)
-            print("remote_snapshot plan_only: ref resolution complete; skipping scan and bundle write.")
-            return
-        snapshot_sources = []
-        for src in sources:
-            result = materialize_remote_snapshot(
-                src,
-                remote_ref=remote_ref_arg,
-                remote_ref_policy=remote_ref_policy,
-                cache_root=merges_dir,
-                job_id=job_id,
-            )
-            if result.status != SourceStatus.SNAPSHOT_CREATED or not result.snapshot_path:
-                print(f"Error: remote_snapshot {result.repo}: {result.status} - {result.message}", file=sys.stderr)
-                sys.exit(1)
-            for w in result.warnings:
-                print(f"Warning: {result.repo}: {w}")
-            commit_short = (result.resolved_commit or "")[:12]
-            print(f"remote_snapshot {result.repo}: scanning {result.resolved_ref} ({commit_short}); local repo not mutated")
-            snapshot_sources.append(Path(result.snapshot_path))
-        sources = snapshot_sources
-    elif effective_source_mode == "local_ff":
-        try:
-            run_pre_pull_two_phase(sources, log=print)
-        except Exception as e:
-            # Includes the "repo_sync unavailable" case: never silently skip a
-            # requested pre-pull — fail loudly and do not scan.
-            print(f"Error: {e}", file=sys.stderr)
-            sys.exit(1)
-    elif plan_only_arg and pre_pull_arg is not False:
-        print("Pre-pull skipped because plan_only=True.")
-
-    max_bytes = parse_human_size(str(args.max_bytes))
-    if max_bytes < 0:
-        max_bytes = 0
-
-    ext_list = _normalize_ext_list(args.extensions) if args.extensions else None
-    path_filter = args.path_filter
-
-    summaries = []
-    for src in sources:
-        print(f"Scanning {src.name}...")
-        summary = scan_repo(src, ext_list, path_filter, max_bytes, calculate_md5=True, include_hidden=True)
-        summaries.append(summary)
-
-    # Default: ab 25 MB wird gesplittet, aber kein Gesamtlimit – es werden
-    # beliebig viele Parts erzeugt.
-    split_size = 0
-    if args.split_size:
-        split_size = parse_human_size(args.split_size)
-        print(f"Splitting at {split_size} bytes")
-
-    extras_config, warnings = ExtrasConfig.from_csv(args.extras)
-    for w in warnings:
-        print(f"Warning: {w}")
-
-    # Handle --json-sidecar flag
-    if args.json_sidecar:
-        extras_config.json_sidecar = True
-
-    merges_dir = get_merges_dir(hub)
-
-    # Try to extract delta_meta if delta_reports is enabled
-    delta_meta = None
-    if extras_config.delta_reports and summaries and len(summaries) == 1:
-        # Only try to find delta for single-repo merges
-        repo_name = summaries[0]["name"]
-        try:
-            mod = _load_repoground_extractor_module()
-            if mod and hasattr(mod, "find_latest_diff_for_repo") and hasattr(mod, "extract_delta_meta_from_diff_file"):
-                diff_path = mod.find_latest_diff_for_repo(merges_dir, repo_name)
-                if diff_path:
-                    delta_meta = mod.extract_delta_meta_from_diff_file(diff_path)
-                    if delta_meta and args.debug:
-                        print(f"Delta metadata extracted from {diff_path.name}")
-        except Exception as e:
-            if args.debug:
-                print(f"Warning: Could not extract delta metadata: {e}")
-
-    artifacts = write_reports_v2(
-        merges_dir,
-        hub,
-        summaries,
-        args.level,
-        args.mode,
-        max_bytes,
-        plan_only_arg,
-        args.code_only,
-        split_size,
-        debug=args.debug,
-        path_filter=path_filter,
-        ext_filter=ext_list,
-        extras=extras_config,
-        delta_meta=delta_meta,
-        meta_density=args.meta_density,
-        output_mode=args.output_mode,
-        redact_secrets=args.redact_secrets,
-        generator_info={"name": "repoground", "platform": "cli"},
-    )
-
-    out_paths = artifacts.get_all_paths()
-    print(f"Generated {len(out_paths)} report(s):")
-    for p in out_paths:
-        print(f"  - {p}")
+def main_cli(argv=None):
+    """Run the headless contract through the explicit orchestration module."""
+    return run_main_cli(sys.modules[__name__], argv)
 
 
 def main():
