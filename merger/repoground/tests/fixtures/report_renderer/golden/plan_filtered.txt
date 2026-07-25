@@ -1,0 +1,156 @@
+<!-- READING_POLICY canonical="merge_md" navigation="dump_index,chunk_index,sidecar_json" -->
+**READING POLICY (verbindlich):**
+- Dieses Markdown ist die kanonische Quelle und vollständig zu lesen.
+- Die JSON-Datei ist nur Index/Metadaten/Einstieg und enthält NICHT die volle Information.
+
+
+# RepoGround Report (v2.x)
+
+> **Kanonischer Hinweis**
+>
+> Dieses Markdown-Dokument ist die vollständige und verbindliche Darstellung des RepoGround-Bundles.
+> Alle Inhalte, Strukturen, Dateien und Kontexte sind hier vollständig enthalten.
+>
+> Begleitende JSON-Dateien dienen ausschließlich der maschinellen Navigation,
+> Filterung und Metainformation.
+> **Kein inhaltlich relevanter Aspekt ist ausschließlich im JSON enthalten.**
+
+**Human Contract:** `repolens-report` (v2.4)
+**Primary Contract (Agent):** `repolens-agent` (v2) — siehe `artifacts.index_json`
+
+**Meta-Density:** `standard` (Reduzierter Overhead)
+⚠️ **Auto-Drosselung:** Wegen aktiver Filter wurde der Meta-Overhead reduziert.
+
+**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**
+**Nutze ihn als Token-sparenden Vorab-Scan; fehlender Code ist Absicht (Modus), nicht „vergessen“.**
+
+## Source & Profile
+- **Source:** repo
+- **Profile:** `summary`
+- **Generated At:** 2026-07-24 12:00:00 (UTC)
+- **Max File Bytes:** unlimited
+- **Spec-Version:** 2.4
+- **Contract:** repolens-report
+- **Contract-Version:** 2.4
+- **Plan Only:** true
+- **Code Only:** false
+- **Render Mode:** `plan-only`
+### Navigation
+- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)
+- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.
+
+⚠️ **Hinweis:** Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein von Dateien im Repository. Fehlende Einträge bedeuten lediglich „nicht im Ausschnitt enthalten“.
+
+- **Declared Purpose:** Tools – Doku/Kontext
+- **Repo Purpose:** Report fixture
+- **Scope:** single repo `report-fixture`
+- **Path Filter:** `docs/`
+- **Extension Filter:** `none (all text types)`
+- **Selected Text Files:** 1
+- **Included Content:** 0 files
+- **Coverage:** 0/1 Dateien mit vollem Inhalt
+
+<!-- zone:begin type="meta" id="meta" -->
+<!-- @meta:start -->
+```yaml
+merge:
+  code_only: false
+  content:
+    emitted_files: 0
+    present: false
+  content_present: false
+  contract: repolens-report
+  contract_version: '2.4'
+  coverage:
+    coverage_pct: 0.0
+    included_files: 0
+    text_files: 1
+  depends_semantics: placeholder
+  ext_filter: null
+  extras:
+    augment_sidecar: false
+    delta_reports: false
+    fleet_panorama: false
+    health: false
+    heatmap: false
+    json_sidecar: false
+    organism_index: false
+  generated_at: '2026-07-24T12:00:00Z'
+  manifest_present: false
+  max_file_bytes: 0
+  meta_density: standard
+  path_filter: docs/
+  plan_only: true
+  profile: summary
+  render_mode: plan-only
+  requested_meta_density: auto
+  scope: single repo `report-fixture`
+  selection:
+    selected_files: 1
+    text_files: 1
+  source_repos:
+  - repo
+  spec_version: '2.4'
+  structure_present: false
+  total_files: 1
+  total_size_bytes: 69
+```
+<!-- @meta:end -->
+<!-- zone:end type="meta" id="meta" -->
+
+## Epistemic Reading Charter (Condensed)
+**Status:** Normative | **Applied:** true | **Scope:** report_header
+
+1. **Facts:** `full`/`snippet` = read. `meta` = unread/structure only.
+2. **Constraint:** Strong claims only with `full` contact. `meta` requires hypothetical language.
+3. **Duty:** If `risk_level != low`, explicitly flag uncertainty.
+4. **Guard:** Do not simulate knowledge you don't have.
+
+*Full Charter: merger/repoground/assets/epistemic_reading_charter.md*
+
+
+## Epistemic Declaration
+
+- **Charter:** epistemic_reading_charter v1
+- **Claim Language Guard:** active
+- **Risk Level:** low
+- **Contact Ratio:** 100%
+
+## Profile Description
+`summary`
+- Voll: README, Runbooks, ai-context, docs/, .wgx/, .github/workflows/, zentrale Config, Contracts
+- Code & Tests: Manifest + Struktur; nur Prioritätsdateien (README, Runbooks, ai-context) voll
+
+## Reading Plan
+
+1. Hinweis: Dieser Merge wurde im **PLAN-ONLY** Modus erzeugt.
+   - Enthält nur: Profilbeschreibung, Plan und Meta (`@meta`).
+   - Enthält **nicht**: `Structure`, `Manifest` oder `Content`-Blöcke.
+
+2. Nutze diesen Merge, um schnell zu entscheiden, ob sich ein Voll-Merge lohnt,
+   ohne Tokens für Dateiinhalte zu verbrauchen.
+
+## Plan
+
+- **Total Files:** 1 (Text: 1)
+- **Total Size:** 69.00 B
+- **Included Content:** 1 files (full)
+- **Coverage:** 1/1 Dateien mit vollem Inhalt
+
+### Repo Snapshots
+
+- `report-fixture` → 1 files (1 relevant text, 69.00 B, 1 with content)
+
+### Hotspots (Einstiegspunkte)
+- [`docs/guide.md`](#file-report-fixture-docs-guide-md-499434) — repo `report-fixture`, doc; roles: -, tags: runbook
+
+**Folder Highlights:**
+- Docs: `docs`
+
+### Organism Overview
+
+- AI-Kontext-Organe: 0 Datei(en) (`ai-context`)
+- Contracts: 0 Datei(en) (category = `contract`)
+- Pipelines (CI/CD): 0 Datei(en) (Tag `ci`)
+- Fleet-/WGX-Profile: 0 Datei(en) (Tag `wgx-profile`)
+

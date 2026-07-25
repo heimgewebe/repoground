@@ -7,12 +7,12 @@ class Redactor:
 
     PATTERNS = [
         (
-            r"(?i)(api[_-]?key|access[_-]?token|secret[_-]?key)[\s:=]+([\"']?)([\w-]{20,})",
-            r"\1\2[REDACTED]",
+            r"(?i)(api[_-]?key|access[_-]?token|secret[_-]?key)([\s:=]+)([\"\']?)([\w-]{20,})",
+            r"\1\2\3[REDACTED]",
         ),
         (
-            r"(?i)(password|passwd|pwd)[\s:=]+([\"']?)([\w-]{6,})",
-            r"\1\2[REDACTED]",
+            r"(?i)(password|passwd|pwd)([\s:=]+)([\"\']?)([\w-]{6,})",
+            r"\1\2\3[REDACTED]",
         ),
         (r"(AKIA[0-9A-Z]{16})", "[AWS_KEY_REDACTED]"),
         (

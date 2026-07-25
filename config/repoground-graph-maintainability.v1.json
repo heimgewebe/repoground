@@ -35,9 +35,9 @@
         "max_complexity": 170,
         "excess_total": 2654
       },
-      "finding_count_max": 198,
-      "max_complexity_max": 148,
-      "excess_total_max": 2533
+      "finding_count_max": 197,
+      "max_complexity_max": 138,
+      "excess_total_max": 2395
     }
   },
   "does_not_establish": [

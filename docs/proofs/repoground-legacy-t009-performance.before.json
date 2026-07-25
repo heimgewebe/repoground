@@ -1,0 +1,131 @@
+{
+  "benchmark_script_sha256": "89f221b81659f81427dab62539e8487579e82aa1c399641bfb7b00e77b8ded72",
+  "binding": {
+    "commit": "24eee84dd845fcf5f3a4a82c9e42e64428e76d6d",
+    "source": "git_archive",
+    "tree": "b3dca00e531b57f0b04841d69e64ce919957e9e1",
+    "worktree_dirty": false
+  },
+  "cases": {
+    "atlas_scan": {
+      "rounds": 2,
+      "skipped": [
+        "not requested (optional subsystem)"
+      ]
+    },
+    "bundle_write_archive": {
+      "peak_traced_bytes": 1988519,
+      "peak_traced_bytes_samples": [
+        1988221,
+        1988817
+      ],
+      "rounds": 2,
+      "samples_per_round": [
+        5,
+        5
+      ],
+      "wall_seconds_median": 0.125451,
+      "wall_seconds_medians": [
+        0.122188,
+        0.128715
+      ]
+    },
+    "bundle_write_dual": {
+      "peak_traced_bytes": 2716501,
+      "peak_traced_bytes_samples": [
+        2716394,
+        2716608
+      ],
+      "rounds": 2,
+      "samples_per_round": [
+        5,
+        5
+      ],
+      "wall_seconds_median": 0.302921,
+      "wall_seconds_medians": [
+        0.297549,
+        0.308293
+      ]
+    },
+    "retrieval_index_build": {
+      "peak_traced_bytes": 399111,
+      "peak_traced_bytes_samples": [
+        399111,
+        399111
+      ],
+      "rounds": 2,
+      "samples_per_round": [
+        5,
+        5
+      ],
+      "wall_seconds_median": 0.01852,
+      "wall_seconds_medians": [
+        0.018299,
+        0.01874
+      ]
+    },
+    "retrieval_query": {
+      "peak_traced_bytes": 57264,
+      "peak_traced_bytes_samples": [
+        57264,
+        57264
+      ],
+      "rounds": 2,
+      "samples_per_round": [
+        5,
+        5
+      ],
+      "wall_seconds_median": 0.000642,
+      "wall_seconds_medians": [
+        0.000644,
+        0.000639
+      ]
+    },
+    "service_app_import": {
+      "peak_traced_bytes": 24276842,
+      "peak_traced_bytes_samples": [
+        24276237,
+        24277447
+      ],
+      "rounds": 2,
+      "samples_per_round": [
+        5,
+        5
+      ],
+      "wall_seconds_median": 1.108538,
+      "wall_seconds_medians": [
+        1.102663,
+        1.114414
+      ]
+    }
+  },
+  "configuration": {
+    "execution_order": [
+      "before",
+      "after",
+      "after",
+      "before"
+    ],
+    "primary_memory_metric": "median of per-round peak_traced_bytes",
+    "primary_timing_metric": "median of per-round wall_seconds_median",
+    "rounds": 2,
+    "samples_per_round": 5,
+    "timing_gate": {
+      "median_regression_pct_max": 5.0,
+      "peak_memory_regression_pct_max": 5.0
+    },
+    "warmups_per_revision": 1
+  },
+  "environment": {
+    "host": "heim-pc",
+    "python_executable": "/usr/bin/python3",
+    "validated_benchmark_environment": [
+      "3.10.12",
+      "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+      "x86_64"
+    ]
+  },
+  "kind": "repoground.core_path_benchmark.aggregate",
+  "side": "before",
+  "version": "1.0"
+}

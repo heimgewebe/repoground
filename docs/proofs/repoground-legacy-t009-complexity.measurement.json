@@ -1,0 +1,142 @@
+{
+  "binding": {
+    "commit": "44013f1fdc75a584a618076bc03d50650a24c7dc",
+    "source": "git_archive",
+    "tree": "e08503047d30eb2397e09d70cbafb850f3a5f9e5",
+    "worktree_dirty": false
+  },
+  "complexity": {
+    "baseline_count": 198,
+    "budget": {
+      "excess_total_max": 2395,
+      "finding_count_max": 197,
+      "historical_reference": {
+        "finding_count": 213,
+        "max_complexity": 170,
+        "observed_on": "2026-07-17",
+        "task": "REPOGROUND-LEGACY-RECONCILIATION-V1-T004"
+      },
+      "max_complexity_max": 138,
+      "policy": "the aggregate budget must fall over time and may never be raised above a recorded reference scan; every budgeted dimension must be bounded by at least one reference, and raising a ceiling above one is rejected",
+      "slice_start_reference": {
+        "commit": "5188d2faf335aaaefe4d27122df71d770647cb5b",
+        "excess_total": 2654,
+        "finding_count": 200,
+        "max_complexity": 170,
+        "measured_with": "ruff check --config ruff-ci.toml --select C901 .",
+        "observed_on": "2026-07-23"
+      }
+    },
+    "current_count": 197,
+    "current_max": 138,
+    "new_count": 0,
+    "observed_budget_dimensions": {
+      "excess_total": 2395,
+      "finding_count": 197,
+      "max_complexity": 138
+    },
+    "resolved_count": 1
+  },
+  "does_not_establish": [
+    "absence of maintainability problems below C901 threshold",
+    "architecture quality",
+    "runtime reachability",
+    "semantic correctness of graph classification",
+    "test completeness"
+  ],
+  "findings": [],
+  "kind": "repoground.graph_maintainability_check",
+  "measurement": {
+    "does_not_establish": [
+      "runtime call reachability",
+      "semantic correctness of inferred layers",
+      "complete entrypoint discovery",
+      "absence of dynamic imports",
+      "overall maintainability"
+    ],
+    "entrypoints": {
+      "counts_by_projection": {
+        "fixture": 3,
+        "product": 15,
+        "script": 35,
+        "test": 20
+      },
+      "projection_sum": 73,
+      "skipped_files_count": 2,
+      "total": 73
+    },
+    "graph": {
+      "edge_count": 5711,
+      "edges_per_parsed_file": 9.271103896103897,
+      "external_node_count": 229,
+      "external_to_file_ratio": 0.3717532467532468,
+      "file_node_count": 616,
+      "file_unknown_layer_count": 0,
+      "file_unknown_layer_share": 0.0,
+      "files_parsed": 616,
+      "files_seen": 618,
+      "legacy_all_node_unknown_share": 0.4103703703703704,
+      "parse_success_rate": 0.9967637540453075,
+      "projections": {
+        "fixture": {
+          "file_count": 36,
+          "layers": {
+            "test": 36
+          },
+          "unknown_layer_count": 0,
+          "unknown_layer_share": 0.0
+        },
+        "product": {
+          "file_count": 202,
+          "layers": {
+            "adapter": 7,
+            "architecture": 13,
+            "atlas": 8,
+            "cli": 35,
+            "contract": 1,
+            "core": 95,
+            "frontend": 7,
+            "product": 5,
+            "retrieval": 19,
+            "service": 12
+          },
+          "unknown_layer_count": 0,
+          "unknown_layer_share": 0.0
+        },
+        "script": {
+          "file_count": 38,
+          "layers": {
+            "benchmark": 3,
+            "infra": 33,
+            "product": 2
+          },
+          "unknown_layer_count": 0,
+          "unknown_layer_share": 0.0
+        },
+        "test": {
+          "file_count": 340,
+          "layers": {
+            "test": 340
+          },
+          "unknown_layer_count": 0,
+          "unknown_layer_share": 0.0
+        }
+      }
+    },
+    "kind": "repoground.graph_maintainability_measurement",
+    "version": "1.0"
+  },
+  "measurement_contract": {
+    "archive_sha256": "976bb98c25536ce46c1d05a2fea6d0c988dff3648cc4cdf8371cdbfb5c12875a",
+    "measured_at": "2026-07-24T21:11:38.303389+00:00",
+    "measurement_command": "python3 scripts/ci/check_graph_maintainability.py --root . --format json",
+    "measurement_script_path": "scripts/ci/check_graph_maintainability.py",
+    "measurement_script_sha256": "90b101a37c67022bc585dce9b11a65c982fd5a6af58e1b60adda8065275a9db0",
+    "python_version": "Python 3.10.12",
+    "ruff_config_path": "ruff-ci.toml",
+    "ruff_config_sha256": "df97091d1a3e4cec551469263490809998e1f72329711fdda0d323c95ded17a1",
+    "ruff_version": "ruff 0.15.13"
+  },
+  "status": "pass",
+  "version": "1.0"
+}

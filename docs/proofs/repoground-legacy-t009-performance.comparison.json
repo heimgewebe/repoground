@@ -1,0 +1,262 @@
+{
+  "bindings": {
+    "after": {
+      "commit": "44013f1fdc75a584a618076bc03d50650a24c7dc",
+      "source": "clean_git_worktree",
+      "tree": "e08503047d30eb2397e09d70cbafb850f3a5f9e5",
+      "worktree_dirty": false
+    },
+    "before": {
+      "commit": "24eee84dd845fcf5f3a4a82c9e42e64428e76d6d",
+      "source": "git_archive",
+      "tree": "b3dca00e531b57f0b04841d69e64ce919957e9e1",
+      "worktree_dirty": false
+    }
+  },
+  "compared_cases": {
+    "atlas_scan": {
+      "after": {
+        "rounds": 2,
+        "skipped": [
+          "not requested (optional subsystem)"
+        ]
+      },
+      "before": {
+        "rounds": 2,
+        "skipped": [
+          "not requested (optional subsystem)"
+        ]
+      },
+      "status": "skip"
+    },
+    "bundle_write_archive": {
+      "after": {
+        "peak_traced_bytes": 1985589,
+        "peak_traced_bytes_samples": [
+          1983367,
+          1987812
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.127694,
+        "wall_seconds_medians": [
+          0.126824,
+          0.128564
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 1988519,
+        "peak_traced_bytes_samples": [
+          1988221,
+          1988817
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.125451,
+        "wall_seconds_medians": [
+          0.122188,
+          0.128715
+        ]
+      },
+      "median_regression_pct": 1.788,
+      "memory_pass": true,
+      "peak_memory_regression_pct": -0.147,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "bundle_write_dual": {
+      "after": {
+        "peak_traced_bytes": 2706863,
+        "peak_traced_bytes_samples": [
+          2705197,
+          2708529
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.304553,
+        "wall_seconds_medians": [
+          0.303012,
+          0.306093
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 2716501,
+        "peak_traced_bytes_samples": [
+          2716394,
+          2716608
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.302921,
+        "wall_seconds_medians": [
+          0.297549,
+          0.308293
+        ]
+      },
+      "median_regression_pct": 0.539,
+      "memory_pass": true,
+      "peak_memory_regression_pct": -0.355,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "retrieval_index_build": {
+      "after": {
+        "peak_traced_bytes": 399111,
+        "peak_traced_bytes_samples": [
+          399111,
+          399111
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.018267,
+        "wall_seconds_medians": [
+          0.018442,
+          0.018092
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 399111,
+        "peak_traced_bytes_samples": [
+          399111,
+          399111
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.01852,
+        "wall_seconds_medians": [
+          0.018299,
+          0.01874
+        ]
+      },
+      "median_regression_pct": -1.366,
+      "memory_pass": true,
+      "peak_memory_regression_pct": 0.0,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "retrieval_query": {
+      "after": {
+        "peak_traced_bytes": 57264,
+        "peak_traced_bytes_samples": [
+          57264,
+          57264
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.000623,
+        "wall_seconds_medians": [
+          0.000619,
+          0.000628
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 57264,
+        "peak_traced_bytes_samples": [
+          57264,
+          57264
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 0.000642,
+        "wall_seconds_medians": [
+          0.000644,
+          0.000639
+        ]
+      },
+      "median_regression_pct": -2.96,
+      "memory_pass": true,
+      "peak_memory_regression_pct": 0.0,
+      "status": "pass",
+      "timing_pass": true
+    },
+    "service_app_import": {
+      "after": {
+        "peak_traced_bytes": 24344659,
+        "peak_traced_bytes_samples": [
+          24344396,
+          24344922
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 1.104875,
+        "wall_seconds_medians": [
+          1.103192,
+          1.106559
+        ]
+      },
+      "before": {
+        "peak_traced_bytes": 24276842,
+        "peak_traced_bytes_samples": [
+          24276237,
+          24277447
+        ],
+        "rounds": 2,
+        "samples_per_round": [
+          5,
+          5
+        ],
+        "wall_seconds_median": 1.108538,
+        "wall_seconds_medians": [
+          1.102663,
+          1.114414
+        ]
+      },
+      "median_regression_pct": -0.33,
+      "memory_pass": true,
+      "peak_memory_regression_pct": 0.279,
+      "status": "pass",
+      "timing_pass": true
+    }
+  },
+  "does_not_establish": [
+    "cross-host comparability",
+    "absence of regressions on unmeasured paths",
+    "production workload representativeness",
+    "memory use outside Python tracemalloc"
+  ],
+  "failed_cases": [],
+  "gate": {
+    "median_regression_pct_max": 5.0,
+    "peak_memory_regression_pct_max": 5.0
+  },
+  "kind": "repoground.core_path_benchmark.comparison",
+  "status": "pass",
+  "validation": {
+    "benchmark_script_sha256": "89f221b81659f81427dab62539e8487579e82aa1c399641bfb7b00e77b8ded72",
+    "environment": [
+      "3.10.12",
+      "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+      "x86_64"
+    ],
+    "findings": [],
+    "status": "pass"
+  },
+  "version": "1.0"
+}

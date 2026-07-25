@@ -1,11 +1,11 @@
 {
   "kind": "repoground.c901_baseline",
   "version": "1.0",
-  "observed_on": "2026-07-23",
+  "observed_on": "2026-07-24",
   "ruff_config": "ruff-ci.toml",
   "threshold": 10,
-  "finding_count": 198,
-  "max_complexity": 148,
+  "finding_count": 197,
+  "max_complexity": 138,
   "findings": [
     {
       "path": "merger/repoground/adapters/atlas.py",
@@ -481,11 +481,6 @@
       "path": "merger/repoground/core/merge.py",
       "qualified_name": "infer_repo_role",
       "max_complexity": 12
-    },
-    {
-      "path": "merger/repoground/core/merge.py",
-      "qualified_name": "iter_report_blocks",
-      "max_complexity": 148
     },
     {
       "path": "merger/repoground/core/merge.py",

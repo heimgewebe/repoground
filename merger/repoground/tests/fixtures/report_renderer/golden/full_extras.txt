@@ -1,0 +1,467 @@
+<!-- READING_POLICY canonical="merge_md" navigation="dump_index,chunk_index,sidecar_json" -->
+**READING POLICY (verbindlich):**
+- Dieses Markdown ist die kanonische Quelle und vollständig zu lesen.
+- Die JSON-Datei ist nur Index/Metadaten/Einstieg und enthält NICHT die volle Information.
+
+
+# RepoGround Report (v2.x)
+
+> **Kanonischer Hinweis**
+>
+> Dieses Markdown-Dokument ist die vollständige und verbindliche Darstellung des RepoGround-Bundles.
+> Alle Inhalte, Strukturen, Dateien und Kontexte sind hier vollständig enthalten.
+>
+> Begleitende JSON-Dateien dienen ausschließlich der maschinellen Navigation,
+> Filterung und Metainformation.
+> **Kein inhaltlich relevanter Aspekt ist ausschließlich im JSON enthalten.**
+
+**Human Contract:** `repolens-report` (v2.4)
+**Primary Contract (Agent):** `repolens-agent` (v2) — siehe `artifacts.index_json`
+
+## Source & Profile
+- **Source:** repo
+- **Profile:** `max`
+- **Generated At:** 2026-07-24 12:00:00 (UTC)
+- **Max File Bytes:** unlimited
+- **Spec-Version:** 2.4
+- **Contract:** repolens-report
+- **Contract-Version:** 2.4
+- **Plan Only:** false
+- **Code Only:** false
+- **Render Mode:** `full`
+## 📦 Artifacts
+<!-- artifact:index_json basename="fixture.index.json" -->
+- Index JSON: [fixture.index.json](fixture.index.json)
+<!-- artifact:augment_sidecar basename="fixture.augment.json" -->
+- Augment Sidecar: [fixture.augment.json](fixture.augment.json)
+
+### Navigation
+- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)
+- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.
+
+- **Declared Purpose:** Tools – Vollsnapshot
+- **Repo Purpose:** Report fixture
+- **Scope:** single repo `report-fixture`
+- **Path Filter:** `none (full tree)`
+- **Extension Filter:** `none (all text types)`
+- **Selected Text Files:** 4
+- **Included Content:** 4 files
+- **Coverage:** 4/4 Dateien mit vollem Inhalt
+
+<!-- zone:begin type="meta" id="meta" -->
+<!-- @meta:start -->
+```yaml
+merge:
+  code_only: false
+  content:
+    emitted_files: 4
+    present: true
+  content_present: true
+  contract: repolens-report
+  contract_version: '2.4'
+  coverage:
+    coverage_pct: 100.0
+    included_files: 4
+    text_files: 4
+  delta:
+    base_import: '2026-07-23T12:00:00Z'
+    current_timestamp: '2026-07-24T12:00:00Z'
+    summary:
+      files_added: 1
+      files_changed: 2
+      files_removed: 0
+  depends_semantics: placeholder
+  ext_filter: null
+  extras:
+    augment_sidecar: false
+    delta_reports: true
+    fleet_panorama: false
+    health: false
+    heatmap: true
+    json_sidecar: false
+    organism_index: true
+  generated_at: '2026-07-24T12:00:00Z'
+  manifest_present: true
+  max_file_bytes: 0
+  meta_density: full
+  path_filter: null
+  plan_only: false
+  profile: max
+  render_mode: full
+  requested_meta_density: full
+  role_semantics: heuristic
+  scope: single repo `report-fixture`
+  selection:
+    selected_files: 4
+    text_files: 4
+  source_repos:
+  - repo
+  spec_version: '2.4'
+  structure_present: true
+  total_files: 4
+  total_size_bytes: 354
+```
+<!-- @meta:end -->
+<!-- zone:end type="meta" id="meta" -->
+
+## Epistemic Reading Charter (Condensed)
+**Status:** Normative | **Applied:** true | **Scope:** report_header
+
+1. **Facts:** `full`/`snippet` = read. `meta` = unread/structure only.
+2. **Constraint:** Strong claims only with `full` contact. `meta` requires hypothetical language.
+3. **Duty:** If `risk_level != low`, explicitly flag uncertainty.
+4. **Guard:** Do not simulate knowledge you don't have.
+
+*Full Charter: merger/repoground/assets/epistemic_reading_charter.md*
+
+
+## Epistemic Declaration
+
+- **Charter:** epistemic_reading_charter v1
+- **Claim Language Guard:** active
+- **Risk Level:** low
+- **Contact Ratio:** 100%
+
+## Reading Lenses
+
+Active lenses: `entrypoints`, `core`, `interfaces`, `data_models`, `pipelines`, `ui`, `guards`
+
+### Recommended subset (focus, not exclusion)
+
+_No specific recommendations found._
+
+> All files are included below. This subset is a focus suggestion, not a filter.
+
+## Epistemic Status
+
+- **Active Lenses:** entrypoints, core, interfaces, data_models, pipelines, ui, guards
+- **Text Contact Breakdown:**
+  - full: 4
+  - snippet: 0
+  - meta: 0
+- **Contact Ratio (all files):** 100%
+- **Text Coverage (text files):** 100%
+- **Truncated Files:** 0
+- **Risk Level:** `low`
+
+## Profile Description
+`max`
+- alle Textdateien → voll
+- keine Kürzung (Dateien werden ggf. gesplittet)
+
+## Reading Plan
+
+1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`
+2. Danach: `Structure` -> `Manifest` -> `Content`
+3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“
+
+## Plan
+
+- **Total Files:** 4 (Text: 4)
+- **Total Size:** 354.00 B
+- **Included Content:** 4 files (full)
+- **Coverage:** 4/4 Dateien mit vollem Inhalt
+
+### Delta Summary
+
+- Files added: 1
+- Files removed: 0
+- Files changed: 2
+
+### Repo Snapshots
+
+- `report-fixture` → 4 files (4 relevant text, 354.00 B, 4 with content)
+
+### Hotspots (Einstiegspunkte)
+- [`src/main.py`](#file-report-fixture-src-main-py-88ded1) — repo `report-fixture`, source; roles: entrypoint, ai-context, tags: entrypoint
+- [`.github/workflows/ci.yml`](#file-report-fixture-github-workflows-ci-yml-f650d0) — repo `report-fixture`, config; roles: config, tags: ci
+- [`README.md`](#file-report-fixture-readme-md-2165fe) — repo `report-fixture`, doc; roles: doc-essential, ai-context, tags: ai-context
+- [`docs/guide.md`](#file-report-fixture-docs-guide-md-499434) — repo `report-fixture`, doc; roles: -, tags: runbook
+
+**Folder Highlights:**
+- Code: `src`
+- Docs: `docs`
+- Infra: `.github`
+
+### Organism Overview
+
+- AI-Kontext-Organe: 1 Datei(en) (`ai-context`)
+- Contracts: 0 Datei(en) (category = `contract`)
+- Pipelines (CI/CD): 1 Datei(en) (Tag `ci`)
+- Fleet-/WGX-Profile: 0 Datei(en) (Tag `wgx-profile`)
+
+<!-- @delta:start -->
+## ♻ Delta Report
+
+- **Base Import:** 2026-07-23T12:00:00Z
+- **Current:** 2026-07-24T12:00:00Z
+
+**Summary:**
+- Files added: 1
+- Files removed: 0
+- Files changed: 2
+
+<!-- @delta:end -->
+<!-- @organism-index:start -->
+## 🧬 Organism Index
+
+**Repo:** `report-fixture`
+**Rolle:** service
+
+**Organ-Status:**
+- AI-Kontext: 1 Datei(en)
+- Verträge (Contracts): 0 Datei(en)
+- Pipelines (CI/CD): 1 Workflow(s)
+- WGX / Fleet-Profile: 0 Profil(e)
+
+### AI-Kontext
+- `README.md`
+
+### Verträge (Contracts)
+_Keine Contract-Dateien gefunden._
+
+### Pipelines (CI/CD)
+- `.github/workflows/ci.yml`
+
+### WGX / Fleet-Profile
+_Kein WGX-/Fleet-Profil gefunden._
+
+<!-- @organism-index:end -->
+<!-- @heatmap:start -->
+## 🔥 AI Heatmap – Code Hotspots
+
+### Top-Level Hotspots (Files by Size)
+1. `src/main.py`
+   - Size: 110.00 B
+   - Category: source
+   - Tags: entrypoint
+
+2. `.github/workflows/ci.yml`
+   - Size: 103.00 B
+   - Category: config
+   - Tags: ci
+
+### Top Folder Hotspots
+- `src/` → 1 Files, 110.00 B
+- `.github/workflows/` → 1 Files, 103.00 B
+- `docs/` → 1 Files, 69.00 B
+
+<!-- @heatmap:end -->
+<!-- zone:begin type="structure" id="structure" -->
+## 📁 Structure
+
+```
+📁 report-fixture/
+    📁 .github/
+        📁 workflows/
+            📄 ci.yml
+    📁 docs/
+        📄 guide.md
+    📁 src/
+        📄 main.py
+    📄 README.md
+```
+
+<!-- zone:end type="structure" id="structure" -->
+<!-- zone:begin type="index" id="index" -->
+<a id="index"></a>
+## 🧭 Index
+
+- [Source](#cat-source)
+- [Doc](#cat-doc)
+- [Config](#cat-config)
+- [CI Pipelines](#tag-ci)
+
+<a id="cat-source"></a>
+## Category: source
+
+- [`src/main.py`](#file-report-fixture-src-main-py-88ded1)
+
+<a id="cat-doc"></a>
+## Category: doc
+
+- [`docs/guide.md`](#file-report-fixture-docs-guide-md-499434)
+- [`README.md`](#file-report-fixture-readme-md-2165fe)
+
+<a id="cat-config"></a>
+## Category: config
+
+- [`.github/workflows/ci.yml`](#file-report-fixture-github-workflows-ci-yml-f650d0)
+
+<a id="tag-ci"></a>
+## Tag: ci
+
+- [`.github/workflows/ci.yml`](#file-report-fixture-github-workflows-ci-yml-f650d0)
+
+<!-- zone:end type="index" id="index" -->
+<!-- zone:begin type="manifest" id="manifest" -->
+<a id="manifest"></a>
+## 🧾 Manifest
+
+**Repos im Merge:** [report-fixture](#manifest-report-fixture)
+
+<a id="manifest-report-fixture"></a>
+### Repo `report-fixture`
+
+- Rolle: service
+- Umfang: 4 Dateien (4 Text), 354.00 B; Inhalt: 4 mit Content
+
+| Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |
+| --- | --- | --- | --- | --- | ---: | --- | --- |
+| [`.github/workflows/ci.yml`](#file-f_aea515f51797) | `config` | ci | config | - | 103.00 B | `full` | `f650d0deedc3c05d604d8de1aa69f959` |
+| [`docs/guide.md`](#file-f_2249f25d45e2) | `doc` | runbook | - | - | 69.00 B | `full` | `49943417cc5ee07b655782cbc6aaf25a` |
+| [`README.md`](#file-f_2b7bcd1068a3) | `doc` | ai-context | doc-essential, ai-context | - | 72.00 B | `full` | `2165fe2897e6317ef43824778ebf1e29` |
+| [`src/main.py`](#file-f_c8b4581f6615) | `source` | entrypoint | entrypoint, ai-context | - | 110.00 B | `full` | `88ded152782ad0251049214f8bad72b7` |
+
+<!-- zone:end type="manifest" id="manifest" -->
+<!-- START_OF_CONTENT -->
+## 📄 Content
+
+**Repos im Merge:** [report-fixture](#repo-report-fixture)
+<a id="repo-report-fixture"></a>
+### report-fixture
+
+---
+<!-- FILE_START path=".github/workflows/ci.yml" content_sha256="e59738c25ae0c100af3d28d5c1595a5dd1596326765be4585a5eb43576a79ff3" content_bytes="103" file_bytes="103" truncated="false" -->
+<!-- file:id="FILE:f_aea515f51797" path=".github/workflows/ci.yml" -->
+<a id="file-f_aea515f51797"></a>
+<a id="file-report-fixture-github-workflows-ci-yml"></a>
+<a id="file-report-fixture-github-workflows-ci-yml-f650d0"></a>
+#### .github/workflows/ci.yml
+
+**Path:** `.github/workflows/ci.yml`
+- Category: config
+- Tags: ci
+- Size: 103.00 B
+- Included: full
+- MD5: f650d0deedc3c05d604d8de1aa69f959
+<!--
+file_meta:
+  repo: report-fixture
+  path: .github/workflows/ci.yml
+  lines: 8
+  included: full
+-->
+<!-- zone:begin type="code" lang="yaml" id="FILE:f_aea515f51797" -->
+
+```yaml
+name: ci
+on:
+  push:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pytest
+
+```
+
+<!-- zone:end type="code" id="FILE:f_aea515f51797" -->
+<!-- FILE_END path=".github/workflows/ci.yml" -->
+[↑ Manifest](#manifest) · [↑ Index](#index)
+
+---
+<!-- FILE_START path="docs/guide.md" content_sha256="40b859ee8712b5f3c49999529dd7dbfe7a7fd642d14244fcd0d276ee2fa8d212" content_bytes="69" file_bytes="69" truncated="false" -->
+<!-- file:id="FILE:f_2249f25d45e2" path="docs/guide.md" -->
+<a id="file-f_2249f25d45e2"></a>
+<a id="file-report-fixture-docs-guide-md"></a>
+<a id="file-report-fixture-docs-guide-md-499434"></a>
+#### docs/guide.md
+
+**Path:** `docs/guide.md`
+- Category: doc
+- Tags: runbook
+- Size: 69.00 B
+- Included: full
+- MD5: 49943417cc5ee07b655782cbc6aaf25a
+<!--
+file_meta:
+  repo: report-fixture
+  path: docs/guide.md
+  lines: 3
+  included: full
+-->
+<!-- zone:begin type="code" lang="markdown" id="FILE:f_2249f25d45e2" -->
+
+```markdown
+# Guide
+
+The renderer must preserve anchors, order, and exact bytes.
+
+```
+
+<!-- zone:end type="code" id="FILE:f_2249f25d45e2" -->
+<!-- FILE_END path="docs/guide.md" -->
+[↑ Manifest](#manifest) · [↑ Index](#index)
+
+---
+<!-- FILE_START path="README.md" content_sha256="efe2abc999528b98fd4d472eabb4262755261382a586fca2841296999d586dd0" content_bytes="72" file_bytes="72" truncated="false" -->
+<!-- file:id="FILE:f_2b7bcd1068a3" path="README.md" -->
+<a id="file-f_2b7bcd1068a3"></a>
+<a id="file-report-fixture-readme-md"></a>
+<a id="file-report-fixture-readme-md-2165fe"></a>
+#### README.md
+
+**Path:** `README.md`
+- Category: doc
+- Tags: ai-context
+- Size: 72.00 B
+- Included: full
+- MD5: 2165fe2897e6317ef43824778ebf1e29
+<!--
+file_meta:
+  repo: report-fixture
+  path: README.md
+  lines: 3
+  included: full
+-->
+<!-- zone:begin type="code" lang="markdown" id="FILE:f_2b7bcd1068a3" -->
+
+```markdown
+# Report fixture
+
+A deterministic repository for renderer parity tests.
+
+```
+
+<!-- zone:end type="code" id="FILE:f_2b7bcd1068a3" -->
+<!-- FILE_END path="README.md" -->
+[↑ Manifest](#manifest) · [↑ Index](#index)
+
+---
+<!-- FILE_START path="src/main.py" content_sha256="ff5375a1a60ce75fff653e4a0a93c7ce7e87e133484d322b9b9e38a7485a1e6f" content_bytes="110" file_bytes="110" truncated="false" -->
+<!-- file:id="FILE:f_c8b4581f6615" path="src/main.py" -->
+<a id="file-f_c8b4581f6615"></a>
+<a id="file-report-fixture-src-main-py"></a>
+<a id="file-report-fixture-src-main-py-88ded1"></a>
+#### src/main.py
+
+**Path:** `src/main.py`
+- Category: source
+- Tags: entrypoint
+- Size: 110.00 B
+- Included: full
+- MD5: 88ded152782ad0251049214f8bad72b7
+<!--
+file_meta:
+  repo: report-fixture
+  path: src/main.py
+  lines: 6
+  included: full
+-->
+<!-- zone:begin type="code" lang="python" id="FILE:f_c8b4581f6615" -->
+
+```python
+"""Fixture entrypoint."""
+
+API_KEY = "fixture-secret-value-1234567890"
+
+def main() -> str:
+    return "ready"
+
+```
+
+<!-- zone:end type="code" id="FILE:f_c8b4581f6615" -->
+<!-- FILE_END path="src/main.py" -->
+[↑ Manifest](#manifest) · [↑ Index](#index)
+

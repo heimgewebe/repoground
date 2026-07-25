@@ -1,0 +1,75 @@
+{
+  "binding": {
+    "base_commit": "24eee84dd845fcf5f3a4a82c9e42e64428e76d6d",
+    "base_tree": "b3dca00e531b57f0b04841d69e64ce919957e9e1",
+    "implementation_commit": "44013f1fdc75a584a618076bc03d50650a24c7dc",
+    "implementation_tree": "e08503047d30eb2397e09d70cbafb850f3a5f9e5",
+    "worktree_dirty_when_measured": false
+  },
+  "complexity": {
+    "excess_total": 2395,
+    "finding_count": 197,
+    "job": "grabowski-job-fd8a97c9dd48",
+    "lifecycle_receipt_sha256": "a5c5b75fbf75d5357f7e5bbc48a886be0a014fc7726d1b5c26e364ddb2d75cd0",
+    "max_complexity": 138,
+    "status": "pass"
+  },
+  "does_not_establish": [
+    "completion of umbrella task T004",
+    "correctness of unrelated legacy functions",
+    "absence of regressions on unmeasured paths",
+    "production deployment of the later merge commit",
+    "final GitHub required-check status"
+  ],
+  "evidence_files": {
+    "repoground-legacy-t009-complexity.measurement.json": {
+      "path": "docs/proofs/repoground-legacy-t009-complexity.measurement.json",
+      "sha256": "e55e14ae93e332ceb5ca30634e4e8fd8ec7c4722db637f59f1fddfa1ef4c2d03"
+    },
+    "repoground-legacy-t009-performance.after.json": {
+      "path": "docs/proofs/repoground-legacy-t009-performance.after.json",
+      "sha256": "e195cd81359e37c326b9e1dea17363bc9727840a5b093067a0c75f65992a8d89"
+    },
+    "repoground-legacy-t009-performance.before.json": {
+      "path": "docs/proofs/repoground-legacy-t009-performance.before.json",
+      "sha256": "f4987cefd570b158370613b6e4ee6623fc914942ca41f99a07dfe31e9d124efe"
+    },
+    "repoground-legacy-t009-performance.comparison.json": {
+      "path": "docs/proofs/repoground-legacy-t009-performance.comparison.json",
+      "sha256": "2f45837c5138e6161d7117ab59c9fd37478037a43d079b1cdfc6cdc2ac2fb867"
+    }
+  },
+  "final_delivery": {
+    "reason": "full repository and required GitHub checks must run on the evidence commit; their final-head receipt is external canonical delivery evidence",
+    "status": "pending"
+  },
+  "kind": "repoground.delivery_evidence",
+  "performance": {
+    "job": "grabowski-job-f378200dfdc1",
+    "lifecycle_receipt_sha256": "00dfcdfbcf1ee0313ff684f6588ce30fa4a9453723940239f3e14da7b8bbbb14",
+    "peak_memory_regression_pct_max": 5.0,
+    "primary_metric": "median of per-round wall_seconds_median",
+    "rounds": 2,
+    "samples_per_round": 5,
+    "status": "pass",
+    "timing_regression_pct_max": 5.0,
+    "warmups_per_revision": 1
+  },
+  "ruff": {
+    "job": "grabowski-job-f5f278c58828",
+    "lifecycle_receipt_sha256": "cdb8ff7eaa4fd33e15ab5ad61955917f590de5912c8e660eaac60a11cebe56c5",
+    "status": "pass",
+    "version": "0.15.13"
+  },
+  "status": "pass",
+  "targeted_tests": {
+    "command": "python3 -m pytest -q merger/repoground/tests/test_report_renderer_parity.py merger/repoground/tests/test_compare_core_path_benchmark.py",
+    "job": "grabowski-job-2b0fbe042f18",
+    "lifecycle_receipt_sha256": "0a35715ec6838ceae2f9e0d43e69bad0380fa8e1876a937e5998b276fa0bd86b",
+    "status": "pass",
+    "tests_passed": 42,
+    "tests_skipped": 0
+  },
+  "task": "REPOGROUND-LEGACY-RECONCILIATION-V1-T009",
+  "version": "1.0"
+}

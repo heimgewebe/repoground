@@ -1,0 +1,249 @@
+<!-- READING_POLICY canonical="merge_md" navigation="dump_index,chunk_index,sidecar_json" -->
+**READING POLICY (verbindlich):**
+- Dieses Markdown ist die kanonische Quelle und vollständig zu lesen.
+- Die JSON-Datei ist nur Index/Metadaten/Einstieg und enthält NICHT die volle Information.
+
+
+# RepoGround Report (v2.x)
+
+> **Kanonischer Hinweis**
+>
+> Dieses Markdown-Dokument ist die vollständige und verbindliche Darstellung des RepoGround-Bundles.
+> Alle Inhalte, Strukturen, Dateien und Kontexte sind hier vollständig enthalten.
+>
+> Begleitende JSON-Dateien dienen ausschließlich der maschinellen Navigation,
+> Filterung und Metainformation.
+> **Kein inhaltlich relevanter Aspekt ist ausschließlich im JSON enthalten.**
+
+**Human Contract:** `repolens-report` (v2.4)
+**Primary Contract (Agent):** `repolens-agent` (v2) — siehe `artifacts.index_json`
+
+**Meta-Density:** `min` (Reduzierter Overhead)
+
+**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**
+**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**
+
+## Source & Profile
+- **Source:** repo
+- **Profile:** `machine-lean`
+- **Generated At:** 2026-07-24 12:00:00 (UTC)
+- **Max File Bytes:** unlimited
+- **Spec-Version:** 2.4
+- **Contract:** repolens-report
+- **Contract-Version:** 2.4
+- **Plan Only:** false
+- **Code Only:** true
+- **Render Mode:** `code-only`
+### Navigation
+- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)
+- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.
+
+⚠️ **Hinweis:** Dieses Profil/Filter erlaubt keine Aussagen über das Nicht-Vorhandensein von Dateien im Repository. Fehlende Einträge bedeuten lediglich „nicht im Ausschnitt enthalten“.
+
+- **Declared Purpose:** Tools – Machine-Lean
+- **Repo Purpose:** Report fixture
+- **Scope:** single repo `report-fixture`
+- **Path Filter:** `none (full tree)`
+- **Extension Filter:** `none (all text types)`
+- **Selected Text Files:** 2
+- **Included Content:** 2 files
+- **Coverage:** 2/2 Dateien mit vollem Inhalt
+
+<!-- zone:begin type="meta" id="meta" -->
+<!-- @meta:start -->
+```yaml
+merge:
+  code_only: true
+  content:
+    emitted_files: 2
+    present: true
+  content_present: true
+  contract: repolens-report
+  contract_version: '2.4'
+  coverage:
+    coverage_pct: 100.0
+    included_files: 2
+    text_files: 2
+  depends_semantics: placeholder
+  ext_filter: null
+  extras:
+    augment_sidecar: false
+    delta_reports: false
+    fleet_panorama: false
+    health: false
+    heatmap: false
+    json_sidecar: false
+    organism_index: false
+  generated_at: '2026-07-24T12:00:00Z'
+  manifest_present: true
+  max_file_bytes: 0
+  meta_density: min
+  path_filter: null
+  plan_only: false
+  profile: machine-lean
+  render_mode: code-only
+  requested_meta_density: min
+  role_semantics: heuristic
+  scope: single repo `report-fixture`
+  selection:
+    selected_files: 2
+    text_files: 2
+  source_repos:
+  - repo
+  spec_version: '2.4'
+  structure_present: false
+  total_files: 2
+  total_size_bytes: 213
+```
+<!-- @meta:end -->
+<!-- zone:end type="meta" id="meta" -->
+
+## Epistemic Reading Charter (Condensed)
+**Status:** Normative | **Applied:** true | **Scope:** report_header
+
+1. **Facts:** `full`/`snippet` = read. `meta` = unread/structure only.
+2. **Constraint:** Strong claims only with `full` contact. `meta` requires hypothetical language.
+3. **Duty:** If `risk_level != low`, explicitly flag uncertainty.
+4. **Guard:** Do not simulate knowledge you don't have.
+
+*Full Charter: merger/repoground/assets/epistemic_reading_charter.md*
+
+
+## Epistemic Declaration
+
+- **Charter:** epistemic_reading_charter v1
+- **Claim Language Guard:** active
+- **Risk Level:** low
+- **Contact Ratio:** 100%
+
+## Epistemic Status
+
+- **Active Lenses:** entrypoints, core, interfaces, data_models, pipelines, ui, guards
+- **Text Contact Breakdown:**
+  - full: 2
+  - snippet: 0
+  - meta: 0
+- **Contact Ratio (all files):** 100%
+- **Text Coverage (text files):** 100%
+- **Truncated Files:** 0
+- **Risk Level:** `low`
+
+## Profile Description
+`machine-lean`
+- Lean Snapshot: volle Inhalte, reduzierter Baum/Decorations
+- Manifest + Index + Content für Maschinen-Parsing optimiert
+
+## Reading Plan
+
+1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`
+2. Danach: `Manifest` -> `Content`
+3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“
+
+## Plan
+
+- **Total Files:** 2 (Text: 2)
+- **Total Size:** 213.00 B
+- **Included Content:** 2 files (full)
+- **Coverage:** 2/2 Dateien mit vollem Inhalt
+
+### Repo Snapshots
+
+- `report-fixture` → 2 files (2 relevant text, 213.00 B, 2 with content)
+
+**Folder Highlights:**
+- Code: `src`
+- Infra: `.github`
+
+### Organism Overview
+
+- AI-Kontext-Organe: 0 Datei(en) (`ai-context`)
+- Contracts: 0 Datei(en) (category = `contract`)
+- Pipelines (CI/CD): 1 Datei(en) (Tag `ci`)
+- Fleet-/WGX-Profile: 0 Datei(en) (Tag `wgx-profile`)
+
+<!-- zone:begin type="index" id="index" -->
+<a id="index"></a>
+## 🧭 Index
+
+_Index reduced (meta=min)_
+
+<!-- zone:end type="index" id="index" -->
+<!-- zone:begin type="manifest" id="manifest" -->
+<a id="manifest"></a>
+## 🧾 Manifest (Code-Only)
+
+**Repos im Merge:** [report-fixture](#manifest-report-fixture)
+
+_Profil: CODE-ONLY – nur Source/Tests/Config/Contracts. Rollen-Shortcut: `entrypoint`=CLIs/Starts, `config`=zentral, `ci`=Workflows, `test`=Tests._
+
+<a id="manifest-report-fixture"></a>
+### Repo `report-fixture`
+
+- Rolle: service
+- Umfang: 2 Dateien (2 Text), 213.00 B; Inhalt: 2 mit Content
+
+| Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |
+| --- | --- | --- | --- | --- | ---: | --- | --- |
+| [`.github/workflows/ci.yml`](#file-f_aea515f51797) | `config` | ci | config | - | 103.00 B | `full` | `f650d0deedc3c05d604d8de1aa69f959` |
+| [`src/main.py`](#file-f_c8b4581f6615) | `source` | entrypoint | entrypoint, ai-context | - | 110.00 B | `full` | `88ded152782ad0251049214f8bad72b7` |
+
+<!-- zone:end type="manifest" id="manifest" -->
+<!-- START_OF_CONTENT -->
+## 📄 Content
+
+**Repos im Merge:** [report-fixture](#repo-report-fixture)
+<a id="repo-report-fixture"></a>
+### report-fixture
+
+---
+<!-- FILE_START path=".github/workflows/ci.yml" content_sha256="e59738c25ae0c100af3d28d5c1595a5dd1596326765be4585a5eb43576a79ff3" content_bytes="103" file_bytes="103" truncated="false" -->
+<!-- file:id="FILE:f_aea515f51797" path=".github/workflows/ci.yml" -->
+<a id="file-f_aea515f51797"></a>
+<a id="file-report-fixture-github-workflows-ci-yml"></a>
+<a id="file-report-fixture-github-workflows-ci-yml-f650d0"></a>
+#### .github/workflows/ci.yml
+
+**Path:** `.github/workflows/ci.yml`
+<!-- zone:begin type="code" lang="yaml" id="FILE:f_aea515f51797" -->
+
+```yaml
+name: ci
+on:
+  push:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: python -m pytest
+
+```
+
+<!-- zone:end type="code" id="FILE:f_aea515f51797" -->
+<!-- FILE_END path=".github/workflows/ci.yml" -->
+[↑ Manifest](#manifest) · [↑ Index](#index)
+
+---
+<!-- FILE_START path="src/main.py" content_sha256="b7e60a653b8be58a74526d7359c18fe8a437b88d58597a86d56e895b7c05543a" content_bytes="89" file_bytes="110" truncated="false" -->
+<!-- file:id="FILE:f_c8b4581f6615" path="src/main.py" -->
+<a id="file-f_c8b4581f6615"></a>
+<a id="file-report-fixture-src-main-py"></a>
+<a id="file-report-fixture-src-main-py-88ded1"></a>
+#### src/main.py
+
+**Path:** `src/main.py`
+<!-- zone:begin type="code" lang="python" id="FILE:f_c8b4581f6615" -->
+
+```python
+"""Fixture entrypoint."""
+
+API_KEY = "[REDACTED]"
+
+def main() -> str:
+    return "ready"
+
+```
+
+<!-- zone:end type="code" id="FILE:f_c8b4581f6615" -->
+<!-- FILE_END path="src/main.py" -->
+[↑ Manifest](#manifest) · [↑ Index](#index)
+

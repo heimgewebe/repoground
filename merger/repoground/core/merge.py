@@ -3155,8 +3155,8 @@ def read_smart_content(fi: FileInfo, max_bytes: int, encoding="utf-8") -> Tuple[
         return f"_Error reading file: {e}_", False, ""
 
 def is_priority_file(fi: FileInfo) -> bool:
-    if "ai-context" in fi.tags: return True
-    if "runbook" in fi.tags: return True
+    if "ai-context" in (fi.tags or []): return True
+    if "runbook" in (fi.tags or []): return True
     if fi.rel_path.name.lower() == "readme.md": return True
     return False
 
@@ -3266,7 +3266,9 @@ def check_fleet_consistency(files: List[FileInfo]) -> List[str]:
 
     # Check for missing .wgx/profile.yml in repos
     for root in roots:
-        has_profile = any(f.root_label == root and "wgx-profile" in f.tags for f in files)
+        has_profile = any(
+            f.root_label == root and "wgx-profile" in (f.tags or []) for f in files
+        )
         if not has_profile:
              if root in REPO_ORDER:
                  warnings.append(f"- {root}: missing .wgx/profile.yml")
@@ -3586,6 +3588,1107 @@ class ReportValidator:
                  raise ValidationException(f"Missing required section: {req}")
 
 
+@dataclass
+class _ReportRenderState:
+    files: List[FileInfo]
+    level: str
+    max_file_bytes: int
+    sources: List[Path]
+    plan_only: bool
+    code_only: bool
+    debug: bool
+    path_filter: Optional[str]
+    ext_filter: Optional[List[str]]
+    extras: ExtrasConfig
+    delta_meta: Optional[Dict[str, Any]]
+    artifact_refs: Optional[Dict[str, str]]
+    requested_meta_density: str
+    effective_meta_density: str
+    meta_none: bool
+    redactor: Optional[Redactor]
+    nav: NavStyle
+    now: datetime.datetime
+    processed_files: List[Tuple[FileInfo, str]]
+    processed_by_root: Dict[str, List[Tuple[FileInfo, str]]]
+    roots: Set[str]
+    total_size: int
+    text_files: List[FileInfo]
+    included_count: int
+    ep_metrics: Dict[str, Any]
+    included_by_root: Dict[str, int]
+    declared_purpose: str
+    repo_purpose: str
+    infra_folders: Set[str]
+    code_folders: Set[str]
+    doc_folders: Set[str]
+    organism_ai_ctx: List[FileInfo]
+    organism_contracts: List[FileInfo]
+    organism_pipelines: List[FileInfo]
+    organism_wgx_profiles: List[FileInfo]
+    files_by_root: Dict[str, List[FileInfo]]
+    repo_stats: Dict[str, Dict[str, Any]]
+    health_collector: Optional[HealthCollector]
+
+
+
+def _append_report_header_intro(header: List[str], state: _ReportRenderState) -> str:
+    header.append('<!-- READING_POLICY canonical="merge_md" navigation="dump_index,chunk_index,sidecar_json" -->')
+    header.append(READING_POLICY_BANNER)
+    header.append(f"{CANONICAL_REPORT_HEADING} (v{SPEC_VERSION.split('.')[0]}.x)")
+    header.append("")
+    header.extend([
+        "> **Kanonischer Hinweis**",
+        ">",
+        "> Dieses Markdown-Dokument ist die vollständige und verbindliche Darstellung des RepoGround-Bundles.",
+        "> Alle Inhalte, Strukturen, Dateien und Kontexte sind hier vollständig enthalten.",
+        ">",
+        "> Begleitende JSON-Dateien dienen ausschließlich der maschinellen Navigation,",
+        "> Filterung und Metainformation.",
+        "> **Kein inhaltlich relevanter Aspekt ist ausschließlich im JSON enthalten.**",
+        "",
+        "**Human Contract:** `repolens-report` (v2.4)",
+        f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.index_json`",
+        "",
+    ])
+    render_mode = _effective_render_mode(state.plan_only, state.code_only, state.meta_none)
+    if state.meta_none:
+        header.extend(["**Meta-Mode:** `none` (Interpretation disabled)", ""])
+    elif state.effective_meta_density != "full":
+        header.append(f"**Meta-Density:** `{state.effective_meta_density}` (Reduzierter Overhead)")
+        if state.requested_meta_density == "auto" and state.effective_meta_density == "standard":
+            header.append("⚠️ **Auto-Drosselung:** Wegen aktiver Filter wurde der Meta-Overhead reduziert.")
+        header.append("")
+    if render_mode == "meta-only":
+        header.extend([
+            "**META-ONLY Modus:** Dieser Merge enthält ausschließlich Meta-, Struktur-, Index- und Analyse-Informationen.",
+            "**Kein Code, keine Planinhalte. Gedacht als Entscheidungs- und Steuerungsartefakt für Agenten.**",
+            "",
+        ])
+    else:
+        if state.code_only:
+            header.extend([
+                "**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**",
+                "**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**",
+                "",
+            ])
+        if state.plan_only:
+            header.extend([
+                "**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**",
+                "**Nutze ihn als Token-sparenden Vorab-Scan; fehlender Code ist Absicht (Modus), nicht „vergessen“.**",
+                "",
+            ])
+    return render_mode
+
+
+def _append_artifact_links(header: List[str], artifact_refs: Optional[Dict[str, str]]) -> None:
+    if not artifact_refs:
+        return
+    header.append("## 📦 Artifacts")
+    if artifact_refs.get("index_json_basename"):
+        basename = artifact_refs["index_json_basename"]
+        header.append(f'<!-- artifact:index_json basename="{basename}" -->')
+        header.append(f"- Index JSON: [{basename}]({basename})")
+    if artifact_refs.get("augment_sidecar_basename"):
+        basename = artifact_refs["augment_sidecar_basename"]
+        header.append(f'<!-- artifact:augment_sidecar basename="{basename}" -->')
+        header.append(f"- Augment Sidecar: [{basename}]({basename})")
+    header.append("")
+
+
+def _append_scope_filters(header: List[str], state: _ReportRenderState) -> str:
+    allows_negative_claims = state.level == "max" and not state.path_filter and not state.ext_filter
+    if not allows_negative_claims:
+        header.extend([EPISTEMIC_HUMILITY_WARNING, ""])
+    header.append(f"- **Declared Purpose:** {state.declared_purpose}")
+    if state.repo_purpose and state.repo_purpose != "(none)":
+        header.append(f"- **Repo Purpose:** {state.repo_purpose}")
+    scope_desc = describe_scope(state.files)
+    header.append(f"- **Scope:** {scope_desc}")
+    header.append(
+        f"- **Path Filter:** `{state.path_filter}`"
+        if state.path_filter
+        else "- **Path Filter:** `none (full tree)`"
+    )
+    if state.ext_filter:
+        header.append("- **Extension Filter:** " + ", ".join(f"`{ext}`" for ext in sorted(state.ext_filter)))
+    else:
+        header.append("- **Extension Filter:** `none (all text types)`")
+    if state.text_files:
+        emitted_count = 0 if state.plan_only else state.included_count
+        header.append(f"- **Selected Text Files:** {len(state.text_files)}")
+        header.append(f"- **Included Content:** {emitted_count} files")
+        header.append(
+            f"- **Coverage:** {emitted_count}/{len(state.text_files)} Dateien mit vollem Inhalt"
+        )
+    header.append("")
+    return scope_desc
+
+
+def _append_report_source_profile(
+    header: List[str], state: _ReportRenderState, render_mode: str
+) -> str:
+    header.append("## Source & Profile")
+    source_names = sorted(source.name for source in state.sources)
+    header.extend([
+        f"- **Source:** {', '.join(source_names)}",
+        f"- **Profile:** `{state.level}`",
+        f"- **Generated At:** {state.now.strftime('%Y-%m-%d %H:%M:%S')} (UTC)",
+    ])
+    if state.max_file_bytes and state.max_file_bytes > 0:
+        header.append(f"- **Max File Bytes:** {human_size(state.max_file_bytes)}")
+    else:
+        header.append("- **Max File Bytes:** unlimited")
+    header.extend([
+        f"- **Spec-Version:** {SPEC_VERSION}",
+        f"- **Contract:** {MERGE_CONTRACT_NAME}",
+        f"- **Contract-Version:** {MERGE_CONTRACT_VERSION}",
+        f"- **Plan Only:** {str(bool(state.plan_only)).lower()}",
+        f"- **Code Only:** {str(bool(state.code_only)).lower()}",
+        f"- **Render Mode:** `{render_mode}`",
+    ])
+    _append_artifact_links(header, state.artifact_refs)
+    header.extend([
+        "### Navigation",
+        "- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)",
+        "- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.",
+        "",
+    ])
+    return _append_scope_filters(header, state)
+
+
+def _coverage_percentage(included_count: int, text_files_count: int) -> float:
+    if not text_files_count:
+        return 0.0
+    return round((included_count / text_files_count) * 100.0, 1)
+
+
+def _report_health_meta(health_collector: Any) -> Dict[str, Any]:
+    all_health = health_collector.get_all_health()
+    if any(health.status == "critical" for health in all_health):
+        overall = "critical"
+    elif any(health.status == "warn" for health in all_health):
+        overall = "warning"
+    else:
+        overall = "ok"
+    missing = set()
+    for health in all_health:
+        if not health.has_contracts:
+            missing.add("contracts")
+        if not health.has_ci_workflows:
+            missing.add("ci")
+        if not health.has_wgx_profile:
+            missing.add("wgx-profile")
+    return {"status": overall, "missing": sorted(missing)}
+
+
+def _base_report_meta(
+    state: _ReportRenderState, render_mode: str, scope_desc: str
+) -> Dict[str, Any]:
+    has_roles = any(file_info.roles for file_info in state.files)
+    text_files_count = len(state.text_files)
+    content_present = not state.plan_only
+    emitted_count = state.included_count if content_present else 0
+    manifest_present = not state.plan_only
+    structure_present = not state.plan_only and state.level != "machine-lean"
+    if state.debug:
+        print(
+            "[lenskit] meta flags:",
+            state.plan_only,
+            state.level,
+            content_present,
+            manifest_present,
+            structure_present,
+            file=sys.stderr,
+        )
+    return {
+        "merge": {
+            "spec_version": SPEC_VERSION,
+            "profile": state.level,
+            "contract": MERGE_CONTRACT_NAME,
+            "contract_version": MERGE_CONTRACT_VERSION,
+            **({"role_semantics": "heuristic"} if has_roles else {}),
+            "depends_semantics": "placeholder",
+            "plan_only": state.plan_only,
+            "code_only": state.code_only,
+            "render_mode": render_mode,
+            **({"mode": "none", "warning": "interpretation_disabled"} if state.meta_none else {}),
+            "max_file_bytes": state.max_file_bytes,
+            "scope": scope_desc,
+            "source_repos": sorted(source.name for source in state.sources),
+            "path_filter": state.path_filter,
+            "ext_filter": sorted(state.ext_filter) if state.ext_filter else None,
+            "meta_density": state.effective_meta_density,
+            "requested_meta_density": state.requested_meta_density,
+            "generated_at": state.now.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "total_files": len(state.files),
+            "total_size_bytes": state.total_size,
+            "content_present": content_present,
+            "manifest_present": manifest_present,
+            "structure_present": structure_present,
+            "selection": {
+                "selected_files": len(state.files),
+                "text_files": text_files_count,
+            },
+            "content": {
+                "present": content_present,
+                "emitted_files": emitted_count,
+            },
+            "coverage": {
+                "included_files": emitted_count,
+                "text_files": text_files_count,
+                "coverage_pct": _coverage_percentage(emitted_count, text_files_count),
+            },
+        }
+    }
+
+
+def _extend_report_meta(meta_dict: Dict[str, Any], state: _ReportRenderState) -> None:
+    extras_meta = _build_extras_meta(state.extras, len(state.roots))
+    if extras_meta:
+        meta_dict["merge"]["extras"] = extras_meta
+    if state.extras.health and state.health_collector:
+        meta_dict["merge"]["health"] = _report_health_meta(state.health_collector)
+    if state.extras.delta_reports:
+        meta_dict["merge"]["delta"] = state.delta_meta or {"enabled": True}
+    if state.extras.augment_sidecar:
+        augment_meta = _build_augment_meta(state.sources)
+        if augment_meta:
+            meta_dict["merge"]["augment"] = augment_meta
+
+
+def _append_report_meta(
+    header: List[str], state: _ReportRenderState, render_mode: str, scope_desc: str
+) -> None:
+    meta_lines = [
+        '<!-- zone:begin type="meta" id="meta" -->',
+        "<!-- @meta:start -->",
+        "```yaml",
+    ]
+    meta_dict = _base_report_meta(state, render_mode, scope_desc)
+    _extend_report_meta(meta_dict, state)
+    if yaml:
+        meta_lines.extend(yaml.safe_dump(meta_dict).rstrip("\n").splitlines())
+    else:
+        meta_lines.append("# YAML support missing")
+    meta_lines.extend([
+        "```",
+        "<!-- @meta:end -->",
+        '<!-- zone:end type="meta" id="meta" -->',
+        "",
+    ])
+    header.extend(meta_lines)
+
+
+def _append_report_charter(header: List[str], state: _ReportRenderState) -> None:
+    if not state.meta_none:
+        risk_level = state.ep_metrics["risk"]["level"]
+        contact_ratio_pct = int(state.ep_metrics["ratios"]["contact_ratio"] * 100)
+        header.extend([
+            _CHARTER_FALLBACK,
+            "",
+            "## Epistemic Declaration",
+            "",
+            "- **Charter:** epistemic_reading_charter v1",
+            "- **Claim Language Guard:** active",
+            f"- **Risk Level:** {risk_level}",
+            f"- **Contact Ratio:** {contact_ratio_pct}%",
+            "",
+        ])
+    if not state.plan_only and not state.meta_none:
+        active_lenses = lenses.LENS_IDS
+        header.extend(
+            _render_reading_lenses(
+                state.files,
+                active_lenses,
+                meta_density=state.effective_meta_density,
+            )
+        )
+        header.extend(_render_epistemic_status(state.files, active_lenses, state.ep_metrics))
+
+
+def _append_profile_description(header: List[str], level: str) -> None:
+    header.append("## Profile Description")
+    descriptions = {
+        "overview": [
+            "`overview`",
+            "- Nur: README (voll), Runbook (voll), ai-context (voll)",
+            "- Andere Dateien: Included = meta-only",
+        ],
+        "summary": [
+            "`summary`",
+            "- Voll: README, Runbooks, ai-context, docs/, .wgx/, .github/workflows/, zentrale Config, Contracts",
+            "- Code & Tests: Manifest + Struktur; nur Prioritätsdateien (README, Runbooks, ai-context) voll",
+        ],
+        "dev": [
+            "`dev`",
+            "- Code, Tests, Config, CI, Contracts, ai-context, wgx-profile → voll",
+            "- Doku nur für Prioritätsdateien voll (README, Runbooks, ai-context), sonst Manifest",
+            "- Lockfiles / Artefakte: ab bestimmter Größe meta-only",
+        ],
+        "machine-lean": [
+            "`machine-lean`",
+            "- Lean Snapshot: volle Inhalte, reduzierter Baum/Decorations",
+            "- Manifest + Index + Content für Maschinen-Parsing optimiert",
+        ],
+        "max": [
+            "`max`",
+            "- alle Textdateien → voll",
+            "- keine Kürzung (Dateien werden ggf. gesplittet)",
+        ],
+    }
+    header.extend(descriptions.get(level, [f"`{level}` (custom)"]))
+    header.append("")
+
+
+def _append_reading_plan(header: List[str], state: _ReportRenderState) -> None:
+    header.extend(["## Reading Plan", ""])
+    if state.plan_only:
+        header.extend([
+            "1. Hinweis: Dieser Merge wurde im **PLAN-ONLY** Modus erzeugt.",
+            "   - Enthält nur: Profilbeschreibung, Plan und Meta (`@meta`).",
+            "   - Enthält **nicht**: `Structure`, `Manifest` oder `Content`-Blöcke.",
+            "",
+            "2. Nutze diesen Merge, um schnell zu entscheiden, ob sich ein Voll-Merge lohnt,",
+            "   ohne Tokens für Dateiinhalte zu verbrauchen.",
+        ])
+    else:
+        header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
+        header.append(
+            "2. Danach: `Manifest` -> `Content`"
+            if state.level == "machine-lean"
+            else "2. Danach: `Structure` -> `Manifest` -> `Content`"
+        )
+        header.append("3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“")
+    header.append("")
+
+
+def _render_report_header(state: _ReportRenderState) -> str:
+    header: List[str] = []
+    render_mode = _append_report_header_intro(header, state)
+    scope_desc = _append_report_source_profile(header, state, render_mode)
+    _append_report_meta(header, state, render_mode, scope_desc)
+    _append_report_charter(header, state)
+    _append_profile_description(header, state.level)
+    _append_reading_plan(header, state)
+    return "\n".join(header) + "\n"
+
+
+def _append_plan_delta(plan: List[str], state: _ReportRenderState) -> None:
+    if not (state.extras.delta_reports and isinstance(state.delta_meta, dict)):
+        return
+    summary = state.delta_meta.get("summary", {})
+    if not isinstance(summary, dict):
+        return
+    plan.extend([
+        "### Delta Summary",
+        "",
+        f"- Files added: {summary.get('files_added', 0)}",
+        f"- Files removed: {summary.get('files_removed', 0)}",
+        f"- Files changed: {summary.get('files_changed', 0)}",
+        "",
+    ])
+
+
+def _relevant_text_count(files: List[FileInfo]) -> int:
+    categories = {"source", "doc", "config", "test", "contract"}
+    return sum(1 for file_info in files if file_info.is_text and file_info.category in categories)
+
+
+def _append_plan_repo_snapshots(plan: List[str], state: _ReportRenderState) -> None:
+    if not state.files_by_root:
+        return
+    plan.extend(["### Repo Snapshots", ""])
+    for root in sorted(state.files_by_root):
+        root_files = state.files_by_root[root]
+        root_bytes = sum(file_info.size for file_info in root_files)
+        plan.append(
+            f"- `{root}` → {len(root_files)} files "
+            f"({_relevant_text_count(root_files)} relevant text, {human_size(root_bytes)}, "
+            f"{state.included_by_root.get(root, 0)} with content)"
+        )
+    plan.append("")
+
+
+def _hotspots_limit(meta_density: str) -> int:
+    return {"standard": 3, "full": 8}.get(meta_density, 0)
+
+
+def _append_plan_hotspots_and_folders(plan: List[str], state: _ReportRenderState) -> None:
+    limit = _hotspots_limit(state.effective_meta_density)
+    if limit:
+        hotspots = build_hotspots(state.processed_files, limit=limit)
+        if hotspots:
+            plan.extend(hotspots)
+            plan.append("")
+    plan.append("**Folder Highlights:**")
+    folder_lines = (
+        (state.code_folders, "Code"),
+        (state.doc_folders, "Docs"),
+        (state.infra_folders, "Infra"),
+    )
+    for folders, label in folder_lines:
+        if folders:
+            plan.append(f"- {label}: `{', '.join(sorted(folders))}`")
+    plan.append("")
+
+
+def _append_plan_organism_overview(plan: List[str], state: _ReportRenderState) -> None:
+    plan.extend([
+        "### Organism Overview",
+        "",
+        f"- AI-Kontext-Organe: {len(state.organism_ai_ctx)} Datei(en) (`ai-context`)",
+        f"- Contracts: {len(state.organism_contracts)} Datei(en) (category = `contract`)",
+        f"- Pipelines (CI/CD): {len(state.organism_pipelines)} Datei(en) (Tag `ci`)",
+        f"- Fleet-/WGX-Profile: {len(state.organism_wgx_profiles)} Datei(en) (Tag `wgx-profile`)",
+        "",
+    ])
+
+
+def _render_report_plan(state: _ReportRenderState) -> str:
+    plan = [
+        "## Plan",
+        "",
+        f"- **Total Files:** {len(state.files)} (Text: {len(state.text_files)})",
+        f"- **Total Size:** {human_size(state.total_size)}",
+        f"- **Included Content:** {state.included_count} files (full)",
+    ]
+    if state.text_files:
+        plan.append(
+            f"- **Coverage:** {state.included_count}/{len(state.text_files)} Dateien mit vollem Inhalt"
+        )
+    plan.append("")
+    _append_plan_delta(plan, state)
+    _append_plan_repo_snapshots(plan, state)
+    _append_plan_hotspots_and_folders(plan, state)
+    _append_plan_organism_overview(plan, state)
+    return "\n".join(plan) + "\n"
+
+
+def _render_health_analysis(state: _ReportRenderState) -> Optional[str]:
+    if not (state.extras.health and state.health_collector):
+        return None
+    return state.health_collector.render_markdown() or None
+
+
+def _render_delta_analysis(state: _ReportRenderState) -> Optional[str]:
+    if not (state.extras.delta_reports and state.delta_meta):
+        return None
+    try:
+        return _render_delta_block(state.delta_meta) or None
+    except Exception as exc:
+        return f"\n<!-- delta-error: {exc} -->\n"
+
+
+def _render_fleet_analysis(state: _ReportRenderState) -> Optional[str]:
+    if not state.extras.fleet_panorama:
+        return None
+    return _render_fleet_panorama(state.sources, state.files) or None
+
+
+def _append_organism_detail(
+    lines: List[str], title: str, files: List[FileInfo], empty_message: str
+) -> None:
+    lines.append(f"### {title}")
+    if files:
+        lines.extend(f"- `{file_info.rel_path}`" for file_info in files)
+    else:
+        lines.append(empty_message)
+    lines.append("")
+
+
+def _render_organism_analysis(state: _ReportRenderState) -> Optional[str]:
+    if not (state.extras.organism_index and len(state.roots) == 1):
+        return None
+    repo_name = next(iter(state.roots))
+    lines = [
+        "<!-- @organism-index:start -->",
+        "## 🧬 Organism Index",
+        "",
+        f"**Repo:** `{repo_name}`",
+        f"**Rolle:** {infer_repo_role(repo_name, state.files)}",
+        "",
+        "**Organ-Status:**",
+        f"- AI-Kontext: {len(state.organism_ai_ctx)} Datei(en)",
+        f"- Verträge (Contracts): {len(state.organism_contracts)} Datei(en)",
+        f"- Pipelines (CI/CD): {len(state.organism_pipelines)} Workflow(s)",
+        f"- WGX / Fleet-Profile: {len(state.organism_wgx_profiles)} Profil(e)",
+        "",
+    ]
+    details = (
+        ("AI-Kontext", state.organism_ai_ctx, "_Keine AI-Kontext-Dateien gefunden._"),
+        ("Verträge (Contracts)", state.organism_contracts, "_Keine Contract-Dateien gefunden._"),
+        ("Pipelines (CI/CD)", state.organism_pipelines, "_Keine CI/CD-Workflows gefunden._"),
+        ("WGX / Fleet-Profile", state.organism_wgx_profiles, "_Kein WGX-/Fleet-Profil gefunden._"),
+    )
+    for title, files, empty_message in details:
+        _append_organism_detail(lines, title, files, empty_message)
+    lines.extend(["<!-- @organism-index:end -->", ""])
+    return "\n".join(lines)
+
+
+def _render_heatmap_analysis(state: _ReportRenderState) -> Optional[str]:
+    if not state.extras.heatmap:
+        return None
+    return HeatmapCollector(state.files).render_markdown() or None
+
+
+def _render_augment_analysis(state: _ReportRenderState) -> Optional[str]:
+    if not state.extras.augment_sidecar:
+        return None
+    return _render_augment_block(
+        state.sources, meta_density=state.effective_meta_density
+    ) or None
+
+
+def _iter_report_analysis_blocks(state: _ReportRenderState) -> Iterator[str]:
+    renderers = (
+        _render_health_analysis,
+        _render_delta_analysis,
+        _render_fleet_analysis,
+        _render_organism_analysis,
+        _render_heatmap_analysis,
+        _render_augment_analysis,
+    )
+    for renderer in renderers:
+        block = renderer(state)
+        if block:
+            yield block
+
+
+def _render_report_structure(state: _ReportRenderState) -> Optional[str]:
+    if state.level == "machine-lean":
+        return None
+    structure = [
+        '<!-- zone:begin type="structure" id="structure" -->',
+        "## 📁 Structure",
+        "",
+        build_tree(state.files),
+        "",
+        '<!-- zone:end type="structure" id="structure" -->',
+    ]
+    return "\n".join(structure) + "\n"
+
+
+def _index_files_by_category(files: List[FileInfo]) -> Dict[str, List[FileInfo]]:
+    categories = ("source", "doc", "config", "contract", "test")
+    grouped: Dict[str, List[FileInfo]] = {category: [] for category in categories}
+    for file_info in files:
+        if file_info.category in grouped:
+            grouped[file_info.category].append(file_info)
+    return {category: grouped[category] for category in categories if grouped[category]}
+
+
+def _append_index_file_section(
+    lines: List[str], token: str, title: str, files: List[FileInfo], nav: NavStyle
+) -> None:
+    lines.extend(_heading_block(2, token, title, nav=nav))
+    lines.extend(f"- [`{file_info.rel_path}`](#{file_info.anchor})" for file_info in files)
+    lines.append("")
+
+
+def _append_full_report_index(lines: List[str], state: _ReportRenderState) -> None:
+    category_files = _index_files_by_category(state.files)
+    ci_files = [file_info for file_info in state.files if "ci" in (file_info.tags or [])]
+    wgx_files = [
+        file_info
+        for file_info in state.files
+        if "wgx-profile" in (file_info.tags or [])
+    ]
+    lines.extend(
+        f"- [{category.capitalize()}](#cat-{_slug_token(category)})"
+        for category in category_files
+    )
+    if ci_files:
+        lines.append("- [CI Pipelines](#tag-ci)")
+    if wgx_files:
+        lines.append("- [WGX Profiles](#tag-wgx-profile)")
+    lines.append("")
+    for category, files in category_files.items():
+        _append_index_file_section(
+            lines,
+            f"cat-{_slug_token(category)}",
+            f"Category: {category}",
+            files,
+            state.nav,
+        )
+    if ci_files:
+        _append_index_file_section(lines, "tag-ci", "Tag: ci", ci_files, state.nav)
+    if wgx_files:
+        _append_index_file_section(
+            lines, "tag-wgx-profile", "Tag: wgx-profile", wgx_files, state.nav
+        )
+
+
+def _render_report_index(state: _ReportRenderState) -> str:
+    lines = ['<!-- zone:begin type="index" id="index" -->']
+    lines.extend(_heading_block(2, "index", "🧭 Index", nav=state.nav))
+    if state.effective_meta_density == "min":
+        lines.extend(["_Index reduced (meta=min)_", ""])
+    else:
+        _append_full_report_index(lines, state)
+    lines.append('<!-- zone:end type="index" id="index" -->')
+    return "\n".join(lines) + "\n"
+
+
+def _manifest_row(file_info: FileInfo, status: str) -> str:
+    tags = ", ".join(file_info.tags) if file_info.tags else "-"
+    roles = ", ".join(file_info.roles) if file_info.roles else "-"
+    included = f"{status} (noise)" if is_noise_file(file_info) else status
+    stable_anchor = _stable_file_id(file_info).replace("FILE:", "file-")
+    path = f"[`{file_info.rel_path}`](#{stable_anchor})"
+    return (
+        f"| {path} | `{file_info.category}` | {tags} | {roles} | - | "
+        f"{human_size(file_info.size)} | `{included}` | `{file_info.md5}` |"
+    )
+
+
+def _append_manifest_root(lines: List[str], state: _ReportRenderState, root: str) -> None:
+    root_files = state.files_by_root[root]
+    stats = state.repo_stats.get(root, {})
+    lines.extend(
+        _heading_block(3, f"manifest-{_slug_token(root)}", f"Repo `{root}`", nav=state.nav)
+    )
+    lines.append(f"- Rolle: {infer_repo_role(root, root_files)}")
+    if stats:
+        lines.append(
+            f"- Umfang: {stats.get('total', 0)} Dateien "
+            f"({stats.get('text_files', 0)} Text), {human_size(stats.get('bytes', 0))}; "
+            f"Inhalt: {stats.get('included', 0)} mit Content"
+        )
+    lines.extend([
+        "",
+        "| Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |",
+        "| --- | --- | --- | --- | --- | ---: | --- | --- |",
+    ])
+    lines.extend(
+        _manifest_row(file_info, status)
+        for file_info, status in state.processed_by_root.get(root, [])
+    )
+    lines.append("")
+
+
+def _render_manifest_block(state: _ReportRenderState) -> str:
+    lines = ['<!-- zone:begin type="manifest" id="manifest" -->']
+    title = "🧾 Manifest (Code-Only)" if state.code_only else "🧾 Manifest"
+    lines.extend(_heading_block(2, "manifest", title, nav=state.nav))
+    roots = sorted(state.files_by_root)
+    if roots:
+        navigation = " · ".join(
+            f"[{root}](#manifest-{_slug_token(root)})" for root in roots
+        )
+        lines.extend([f"**Repos im Merge:** {navigation}", ""])
+    if state.code_only:
+        lines.extend([
+            "_Profil: CODE-ONLY – nur Source/Tests/Config/Contracts. Rollen-Shortcut: "
+            "`entrypoint`=CLIs/Starts, `config`=zentral, `ci`=Workflows, `test`=Tests._",
+            "",
+        ])
+    if not roots:
+        lines.extend(["_Keine Dateien im Manifest._", ""])
+        lines.append('<!-- zone:end type="manifest" id="manifest" -->')
+        return "\n".join(lines) + "\n"
+    for root in roots:
+        _append_manifest_root(lines, state, root)
+    lines.append('<!-- zone:end type="manifest" id="manifest" -->')
+    return "\n".join(lines) + "\n"
+
+
+def _render_consistency_block(files: List[FileInfo]) -> Optional[str]:
+    warnings = check_fleet_consistency(files)
+    if not warnings:
+        return None
+    return "\n".join(["## Fleet Consistency", "", *warnings, ""]) + "\n"
+
+
+def _iter_report_manifest_blocks(state: _ReportRenderState) -> Iterator[str]:
+    yield _render_manifest_block(state)
+    consistency = _render_consistency_block(state.files)
+    if consistency:
+        yield consistency
+
+
+def _visible_content_roots(processed_files: List[Tuple[FileInfo, str]]) -> Set[str]:
+    return {
+        file_info.root_label
+        for file_info, status in processed_files
+        if status in ("full", "truncated")
+    }
+
+
+def _render_content_header(state: _ReportRenderState) -> str:
+    lines = ["## 📄 Content", ""]
+    visible_roots = _visible_content_roots(state.processed_files)
+    if visible_roots:
+        navigation = " · ".join(
+            f"[{root}](#repo-{_slug_token(root)})" for root in sorted(visible_roots)
+        )
+        lines.extend([f"**Repos im Merge:** {navigation}", ""])
+    return "\n".join(lines)
+
+
+def _append_content_summary(
+    block: List[str], file_info: FileInfo, status: str, meta_density: str
+) -> None:
+    if meta_density == "min":
+        return
+    block.append(f"- Category: {file_info.category}")
+    block.append(f"- Tags: {', '.join(file_info.tags)}" if file_info.tags else "- Tags: -")
+    block.extend([
+        f"- Size: {human_size(file_info.size)}",
+        f"- Included: {status}",
+    ])
+    if meta_density == "full":
+        block.append(f"- MD5: {file_info.md5}")
+
+
+def _show_file_meta(status: str, meta_density: str) -> bool:
+    return meta_density == "full" or status != "full"
+
+
+def _append_content_file_meta(
+    block: List[str], file_info: FileInfo, status: str, content: str
+) -> None:
+    block.extend([
+        "<!--",
+        "file_meta:",
+        f"  repo: {file_info.root_label}",
+        f"  path: {file_info.rel_path}",
+        f"  lines: {len(content.splitlines())}",
+        f"  included: {status}",
+    ])
+    if getattr(file_info, "inclusion_reason", "normal") != "normal":
+        block.append(f"  inclusion_reason: {file_info.inclusion_reason}")
+    block.append("-->")
+
+
+def _content_fence(content: str) -> str:
+    ticks = re.findall(r"`{3,}", content) if "```" in content else []
+    return "`" * max(3, (max(map(len, ticks)) + 1) if ticks else 3)
+
+
+def _render_content_file_block(
+    state: _ReportRenderState, file_info: FileInfo, status: str
+) -> str:
+    content, truncated, _truncation_message = read_smart_content(
+        file_info, state.max_file_bytes
+    )
+    if state.redactor:
+        content, _ = state.redactor.redact(content)
+    encoded = content.encode("utf-8")
+    content_sha256 = hashlib.sha256(encoded).hexdigest()
+    file_id = _stable_file_id(file_info)
+    human_stable_id = file_id.replace("FILE:", "file-")
+    block = [
+        "---",
+        f'<!-- FILE_START path="{file_info.rel_path}" content_sha256="{content_sha256}" '
+        f'content_bytes="{len(encoded)}" file_bytes="{file_info.size}" '
+        f'truncated="{str(truncated).lower()}" -->',
+        f'<!-- file:id="{file_id}" path="{file_info.rel_path}" -->',
+        f'<a id="{human_stable_id}"></a>',
+    ]
+    if file_info.anchor_alias != file_info.anchor:
+        block.append(f'<a id="{file_info.anchor_alias}"></a>')
+    block.extend(_heading_block(4, file_info.anchor, str(file_info.rel_path), nav=state.nav))
+    block.append(f"**Path:** `{file_info.rel_path}`")
+    _append_content_summary(block, file_info, status, state.effective_meta_density)
+    if _show_file_meta(status, state.effective_meta_density):
+        _append_content_file_meta(block, file_info, status, content)
+    fence = _content_fence(content)
+    language = lang_for(file_info.ext)
+    block.extend([
+        f'<!-- zone:begin type="code" lang="{language}" id="{file_id}" -->',
+        "",
+        f"{fence}{language}",
+        content,
+        fence,
+        "",
+        f'<!-- zone:end type="code" id="{file_id}" -->',
+        f'<!-- FILE_END path="{file_info.rel_path}" -->',
+        "[↑ Manifest](#manifest) · [↑ Index](#index)",
+    ])
+    return "\n".join(block) + "\n\n"
+
+
+def _iter_report_content_blocks(state: _ReportRenderState) -> Iterator[str]:
+    yield "<!-- START_OF_CONTENT -->\n"
+    yield _render_content_header(state)
+    current_root = None
+    for file_info, status in state.processed_files:
+        if status in ("omitted", "meta-only"):
+            continue
+        if file_info.root_label != current_root:
+            repo_slug = _slug_token(file_info.root_label)
+            yield "\n".join(
+                _heading_block(
+                    3, f"repo-{repo_slug}", file_info.root_label, nav=state.nav
+                )
+            ) + "\n"
+            current_root = file_info.root_label
+        yield _render_content_file_block(state, file_info, status)
+
+
+def _normalize_report_files(
+    files: List[FileInfo], path_filter: Optional[str], code_only: bool
+) -> List[FileInfo]:
+    selected = (
+        [file_info for file_info in files if path_filter in file_info.rel_path.as_posix()]
+        if path_filter
+        else list(files)
+    )
+    selected.sort(
+        key=lambda file_info: (
+            get_repo_sort_index(file_info.root_label),
+            file_info.root_label.lower(),
+            str(file_info.rel_path).lower(),
+        )
+    )
+    if code_only:
+        return [
+            file_info
+            for file_info in selected
+            if file_info.category in DEBUG_CONFIG.code_only_categories
+        ]
+    return selected
+
+
+def _assign_report_file_identity(file_info: FileInfo) -> None:
+    relative_id = _slug_token(file_info.rel_path.as_posix())
+    repo_slug = _slug_token(file_info.root_label)
+    base_anchor = f"file-{repo_slug}-{relative_id}"
+    suffix = (file_info.md5 or "")[:6] if getattr(file_info, "md5", None) else ""
+    file_info.anchor_alias = base_anchor
+    file_info.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
+    if file_info.roles is None:
+        file_info.roles = compute_file_roles(file_info)
+
+
+def _debug_report_classification(
+    file_info: FileInfo,
+    unknown_categories: Set[str],
+    unknown_tags: Set[str],
+) -> None:
+    if file_info.category not in DEBUG_CONFIG.allowed_categories:
+        unknown_categories.add(file_info.category)
+    for tag in file_info.tags or []:
+        if tag not in DEBUG_CONFIG.allowed_tags:
+            unknown_tags.add(tag)
+
+
+def _prepare_processed_files(
+    files: List[FileInfo], level: str, max_file_bytes: int, debug: bool
+) -> List[Tuple[FileInfo, str]]:
+    processed: List[Tuple[FileInfo, str]] = []
+    unknown_categories: Set[str] = set()
+    unknown_tags: Set[str] = set()
+    for file_info in files:
+        _assign_report_file_identity(file_info)
+        if debug:
+            _debug_report_classification(file_info, unknown_categories, unknown_tags)
+        processed.append(
+            (file_info, determine_inclusion_status(file_info, level, max_file_bytes))
+        )
+    if debug:
+        print("DEBUG: total files:", len(files), file=sys.stderr)
+        print("DEBUG: unknown categories:", unknown_categories, file=sys.stderr)
+        print("DEBUG: unknown tags:", unknown_tags, file=sys.stderr)
+        print(
+            "DEBUG: files without anchors:",
+            [file_info.rel_path for file_info in files if not hasattr(file_info, "anchor")],
+            file=sys.stderr,
+        )
+    return processed
+
+
+def _extract_report_repo_purpose(sources: List[Path]) -> str:
+    purpose = ""
+    try:
+        if sources:
+            purpose = extract_purpose(sources[0])
+    except Exception as exc:
+        sys.stderr.write(f"Warning: extract_purpose failed: {exc}\n")
+    return purpose or "(none)"
+
+
+def _report_folders_and_organs(
+    files: List[FileInfo],
+) -> Tuple[
+    Set[str],
+    Set[str],
+    Set[str],
+    List[FileInfo],
+    List[FileInfo],
+    List[FileInfo],
+    List[FileInfo],
+]:
+    infra_folders: Set[str] = set()
+    code_folders: Set[str] = set()
+    doc_folders: Set[str] = set()
+    ai_context: List[FileInfo] = []
+    contracts: List[FileInfo] = []
+    pipelines: List[FileInfo] = []
+    wgx_profiles: List[FileInfo] = []
+    for file_info in files:
+        parts = file_info.rel_path.parts
+        if ".github" in parts or ".wgx" in parts or "contracts" in parts:
+            infra_folders.add(parts[0])
+        if "src" in parts or "scripts" in parts:
+            code_folders.add(parts[0])
+        if "docs" in parts:
+            doc_folders.add("docs")
+        if file_info.category == "contract":
+            contracts.append(file_info)
+        if "ai-context" in (file_info.tags or []):
+            ai_context.append(file_info)
+        if "ci" in (file_info.tags or []):
+            pipelines.append(file_info)
+        if "wgx-profile" in (file_info.tags or []):
+            wgx_profiles.append(file_info)
+    return (
+        infra_folders,
+        code_folders,
+        doc_folders,
+        ai_context,
+        contracts,
+        pipelines,
+        wgx_profiles,
+    )
+
+
+def _group_report_files(files: List[FileInfo]) -> Dict[str, List[FileInfo]]:
+    grouped: Dict[str, List[FileInfo]] = {}
+    for file_info in files:
+        grouped.setdefault(file_info.root_label, []).append(file_info)
+    return grouped
+
+
+def _group_processed_report_files(
+    processed_files: List[Tuple[FileInfo, str]],
+) -> Dict[str, List[Tuple[FileInfo, str]]]:
+    grouped: Dict[str, List[Tuple[FileInfo, str]]] = {}
+    for file_info, status in processed_files:
+        grouped.setdefault(file_info.root_label, []).append((file_info, status))
+    return grouped
+
+
+def _included_report_files_by_root(
+    processed_files: List[Tuple[FileInfo, str]],
+) -> Dict[str, int]:
+    included: Dict[str, int] = {}
+    for file_info, status in processed_files:
+        if status in ("full", "truncated"):
+            included[file_info.root_label] = included.get(file_info.root_label, 0) + 1
+    return included
+
+
+def _report_repo_stats(
+    files_by_root: Dict[str, List[FileInfo]], included_by_root: Dict[str, int]
+) -> Dict[str, Dict[str, Any]]:
+    return {
+        root: summarize_repo(root_files, included_by_root.get(root, 0))
+        for root, root_files in files_by_root.items()
+    }
+
+
+def _report_health_collector(
+    extras: ExtrasConfig,
+    sources: List[Path],
+    files_by_root: Dict[str, List[FileInfo]],
+) -> Optional[HealthCollector]:
+    if not extras.health:
+        return None
+    derived_hub = sources[0].parent if sources else None
+    collector = HealthCollector(hub_path=derived_hub)
+    for root in sorted(files_by_root):
+        collector.analyze_repo(root, files_by_root[root])
+    return collector
+
+
+def _prepare_report_state(
+    files: List[FileInfo],
+    level: str,
+    max_file_bytes: int,
+    sources: List[Path],
+    plan_only: bool,
+    code_only: bool,
+    debug: bool,
+    path_filter: Optional[str],
+    ext_filter: Optional[List[str]],
+    extras: Optional[ExtrasConfig],
+    delta_meta: Optional[Dict[str, Any]],
+    artifact_refs: Optional[Dict[str, str]],
+    meta_density: str,
+    meta_none: bool,
+    redact_secrets: bool,
+) -> _ReportRenderState:
+    effective_extras = extras if extras is not None else ExtrasConfig.none()
+    if debug:
+        print("[repoground] merge.py loaded from:", __file__, file=sys.stderr)
+    selected_files = _normalize_report_files(files, path_filter, code_only)
+    processed_files = _prepare_processed_files(
+        selected_files, level, max_file_bytes, debug
+    )
+    text_files = [file_info for file_info in selected_files if file_info.is_text]
+    included_count = sum(
+        1 for _file_info, status in processed_files if status in ("full", "truncated")
+    )
+    processed_by_root = _group_processed_report_files(processed_files)
+    included_by_root = _included_report_files_by_root(processed_files)
+    files_by_root = _group_report_files(selected_files)
+    (
+        infra_folders,
+        code_folders,
+        doc_folders,
+        organism_ai_ctx,
+        organism_contracts,
+        organism_pipelines,
+        organism_wgx_profiles,
+    ) = _report_folders_and_organs(selected_files)
+    return _ReportRenderState(
+        files=selected_files,
+        level=level,
+        max_file_bytes=max_file_bytes,
+        sources=sources,
+        plan_only=plan_only,
+        code_only=code_only,
+        debug=debug,
+        path_filter=path_filter,
+        ext_filter=ext_filter,
+        extras=effective_extras,
+        delta_meta=delta_meta,
+        artifact_refs=artifact_refs,
+        requested_meta_density=meta_density,
+        effective_meta_density=_resolve_effective_meta_density(
+            meta_density, path_filter, ext_filter, meta_none
+        ),
+        meta_none=meta_none,
+        redactor=Redactor() if redact_secrets else None,
+        nav=NavStyle(emit_search_markers=False),
+        now=clock.now_utc(),
+        processed_files=processed_files,
+        processed_by_root=processed_by_root,
+        roots={file_info.root_label for file_info in selected_files},
+        total_size=sum(file_info.size for file_info in selected_files),
+        text_files=text_files,
+        included_count=included_count,
+        ep_metrics=compute_epistemic_metrics(selected_files, processed_files),
+        included_by_root=included_by_root,
+        declared_purpose=PROFILE_USECASE.get(level, "(none)"),
+        repo_purpose=_extract_report_repo_purpose(sources),
+        infra_folders=infra_folders,
+        code_folders=code_folders,
+        doc_folders=doc_folders,
+        organism_ai_ctx=organism_ai_ctx,
+        organism_contracts=organism_contracts,
+        organism_pipelines=organism_pipelines,
+        organism_wgx_profiles=organism_wgx_profiles,
+        files_by_root=files_by_root,
+        repo_stats=_report_repo_stats(files_by_root, included_by_root),
+        health_collector=_report_health_collector(
+            effective_extras, sources, files_by_root
+        ),
+    )
+
+
 def iter_report_blocks(
     files: List[FileInfo],
     level: str,
@@ -3603,1031 +4706,35 @@ def iter_report_blocks(
     meta_none: bool = False,
     redact_secrets: bool = False,
 ) -> Iterator[str]:
-    if extras is None:
-        extras = ExtrasConfig.none()
-
-    redactor = Redactor() if redact_secrets else None
-
-    # --- hard safety defaults (prevents UnboundLocalError even under refactors) ---
-    content_present = False
-    manifest_present = False
-    structure_present = False
-
-    if debug:
-        print("[repoground] merge.py loaded from:", __file__, file=sys.stderr)
-
-    # Resolve Effective Meta Density (Consistency Fix)
-    requested_meta_density = meta_density
-    effective_meta_density = _resolve_effective_meta_density(
-        meta_density, path_filter, ext_filter, meta_none
+    state = _prepare_report_state(
+        files,
+        level,
+        max_file_bytes,
+        sources,
+        plan_only,
+        code_only,
+        debug,
+        path_filter,
+        ext_filter,
+        extras,
+        delta_meta,
+        artifact_refs,
+        meta_density,
+        meta_none,
+        redact_secrets,
     )
-
-    # Navigation style: default should be quiet.
-    # You can later expose this as a UI toggle if desired.
-    nav = NavStyle(emit_search_markers=False)
-
-    # UTC Timestamp - ensure strict UTC for Z-suffix validity
-    now = clock.now_utc()
-
-    # Strict Path Filtering (Hard Include)
-    # Move before sort for performance (minor optimization)
-    if path_filter:
-        # User explicitly requested a filter path.
-        # This acts as a hard filter for manifest and content, overriding force_include logic from scan_repo.
-        files = [f for f in files if path_filter in f.rel_path.as_posix()]
-
-    # Sort files according to strict multi-repo order and then path
-    files.sort(key=lambda fi: (get_repo_sort_index(fi.root_label), fi.root_label.lower(), str(fi.rel_path).lower()))
-
-    # Optional Code-only-Filter
-    if code_only:
-        files = [fi for fi in files if fi.category in DEBUG_CONFIG.code_only_categories]
-
-    # Pre-calculate status based on Profile Strict Logic
-    processed_files = []
-
-    unknown_categories = set()
-    unknown_tags = set()
-    roots = set(f.root_label for f in files)
-
-    for fi in files:
-        # Generate deterministic anchor based on slugified repo + path, with collision-safe suffix
-        rel_id = _slug_token(fi.rel_path.as_posix())
-        repo_slug = _slug_token(fi.root_label)
-        base_anchor = f"file-{repo_slug}-{rel_id}"
-        suffix = (fi.md5 or "")[:6] if getattr(fi, "md5", None) else ""
-        fi.anchor_alias = base_anchor
-        fi.anchor = f"{base_anchor}-{suffix}" if suffix else base_anchor
-
-        # Compute file roles if not already present
-        if fi.roles is None:
-            fi.roles = compute_file_roles(fi)
-
-        # Debug checks
-        # Kategorien strikt gemäß Spec v2.4 (via DebugConfig).
-        # "other" ist gültig, aber signalisiert: nicht eindeutig klassifizierbar.
-        if debug and fi.category not in DEBUG_CONFIG.allowed_categories:
-            unknown_categories.add(fi.category)
-        # If you want "other" as a warning signal, do it explicitly elsewhere (e.g. health metrics).
-
-        # Check tags against the configured allow-list
-        if debug:
-            for tag in (fi.tags or []):
-                if tag not in DEBUG_CONFIG.allowed_tags:
-                    unknown_tags.add(tag)
-
-        status = determine_inclusion_status(fi, level, max_file_bytes)
-
-        # Explicitly removed: automatic downgrade from "full" to "truncated"
-        # if status == "full" and fi.size > max_file_bytes:
-        #    status = "truncated"
-
-        processed_files.append((fi, status))
-
-    if debug:
-        print("DEBUG: total files:", len(files), file=sys.stderr)
-        print("DEBUG: unknown categories:", unknown_categories, file=sys.stderr)
-        print("DEBUG: unknown tags:", unknown_tags, file=sys.stderr)
-        print("DEBUG: files without anchors:", [fi.rel_path for fi in files if not hasattr(fi, "anchor")], file=sys.stderr)
-
-    total_size = sum(fi.size for fi in files)
-    text_files = [fi for fi in files if fi.is_text]
-    included_count = sum(1 for _, s in processed_files if s in ("full", "truncated"))
-
-    # Calculate Epistemic Metrics (SR-Fix-5, 6, 7)
-    # Single Source of Truth
-    ep_metrics = compute_epistemic_metrics(files, processed_files)
-
-    # pro-Repo-Statistik für "mit Inhalt" (full/truncated),
-    # um später im Plan pro Repo eine Coverage-Zeile auszugeben
-    included_by_root: Dict[str, int] = {}
-
-    # Declared Purpose (Spec v2.4): based on Profile (level)
-    declared_purpose = PROFILE_USECASE.get(level, "(none)")
-
-    # Repository Purpose (extracted from README/docs)
-    repo_purpose = ""
-    try:
-        if sources:
-            repo_purpose = extract_purpose(sources[0])
-    except Exception as e:
-        sys.stderr.write(f"Warning: extract_purpose failed: {e}\n")
-
-    if not repo_purpose:
-        repo_purpose = "(none)"
-
-    infra_folders = set()
-    code_folders = set()
-    doc_folders = set()
-
-    # Organismus-Rollen (ohne neue Tags/Kategorien):
-    organism_ai_ctx: List[FileInfo] = []
-    organism_contracts: List[FileInfo] = []
-    organism_pipelines: List[FileInfo] = []
-    organism_wgx_profiles: List[FileInfo] = []
-
-    for fi in files:
-        parts = fi.rel_path.parts
-        if ".github" in parts or ".wgx" in parts or "contracts" in parts:
-            infra_folders.add(parts[0])
-        if "src" in parts or "scripts" in parts:
-            code_folders.add(parts[0])
-        if "docs" in parts:
-            doc_folders.add("docs")
-
-        # Organismus-Rollen:
-        if fi.category == "contract":
-            organism_contracts.append(fi)
-        if "ai-context" in (fi.tags or []):
-            organism_ai_ctx.append(fi)
-        if "ci" in (fi.tags or []):
-            organism_pipelines.append(fi)
-        if "wgx-profile" in (fi.tags or []):
-            organism_wgx_profiles.append(fi)
-
-    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
-    # Re-calculate or re-use existing categorization?
-    # We need files_by_root NOW for Health Check, before Header.
-    # It was originally calculated later (at Plan block).
-    # So we move the calculation here.
-    files_by_root: Dict[str, List[FileInfo]] = {}
-    for fi in files:
-        files_by_root.setdefault(fi.root_label, []).append(fi)
-
-    # jetzt, nachdem processed_files existiert, die Coverage pro Root berechnen
-    for fi, status in processed_files:
-        if status in ("full", "truncated"):
-            included_by_root[fi.root_label] = included_by_root.get(fi.root_label, 0) + 1
-
-    repo_stats: Dict[str, Dict[str, Any]] = {}
-    for root, root_files in files_by_root.items():
-        repo_stats[root] = summarize_repo(root_files, included_by_root.get(root, 0))
-
-    # Pre-Calculation for Health (needed for Meta Block)
-    health_collector = None
-    if extras.health:
-        # Pass hub path if available (via sources)
-        # sources list typically contains the repo roots.
-        # But HealthCollector is initialized once for the merge.
-        # If this is a multi-repo merge, sources are diverse.
-        # Best effort: try to derive hub from first source.
-        derived_hub = None
-        if sources:
-            derived_hub = sources[0].parent
-
-        health_collector = HealthCollector(hub_path=derived_hub)
-        # Analyze each repo
-        for root in sorted(files_by_root.keys()):
-            root_files = files_by_root[root]
-            health_collector.analyze_repo(root, root_files)
-
-    # --- 1. Header ---
-    header = []
-    # Machine-readable reading policy sentinel
-    header.append('<!-- READING_POLICY canonical="merge_md" navigation="dump_index,chunk_index,sidecar_json" -->')
-    header.append(READING_POLICY_BANNER)
-    header.append(f"{CANONICAL_REPORT_HEADING} (v{SPEC_VERSION.split('.')[0]}.x)")
-    header.append("")
-
-    # --- Canonical Note (Epistemic Protection) ---
-    header.append("> **Kanonischer Hinweis**")
-    header.append(">")
-    header.append("> Dieses Markdown-Dokument ist die vollständige und verbindliche Darstellung des RepoGround-Bundles.")
-    header.append("> Alle Inhalte, Strukturen, Dateien und Kontexte sind hier vollständig enthalten.")
-    header.append(">")
-    header.append("> Begleitende JSON-Dateien dienen ausschließlich der maschinellen Navigation,")
-    header.append("> Filterung und Metainformation.")
-    header.append("> **Kein inhaltlich relevanter Aspekt ist ausschließlich im JSON enthalten.**")
-    header.append("")
-
-    # --- Contract roles (agent-first clarity) ---
-    # Human-readable report contract (this Markdown)
-    header.append("**Human Contract:** `repolens-report` (v2.4)")
-    # Machine-readable primary contract (the JSON primary artifact)
-    header.append(f"**Primary Contract (Agent):** `{AGENT_CONTRACT_NAME}` ({AGENT_CONTRACT_VERSION}) — siehe `artifacts.index_json`")
-    header.append("")
-
-    render_mode = _effective_render_mode(plan_only, code_only, meta_none)
-
-    if meta_none:
-        header.append("**Meta-Mode:** `none` (Interpretation disabled)")
-        header.append("")
-    elif effective_meta_density != "full":
-        header.append(f"**Meta-Density:** `{effective_meta_density}` (Reduzierter Overhead)")
-        if requested_meta_density == "auto" and effective_meta_density == "standard":
-            header.append("⚠️ **Auto-Drosselung:** Wegen aktiver Filter wurde der Meta-Overhead reduziert.")
-        header.append("")
-
-    if render_mode == "meta-only":
-        header.append("**META-ONLY Modus:** Dieser Merge enthält ausschließlich Meta-, Struktur-, Index- und Analyse-Informationen.")
-        header.append("**Kein Code, keine Planinhalte. Gedacht als Entscheidungs- und Steuerungsartefakt für Agenten.**")
-        header.append("")
-    else:
-        if code_only:
-            header.append("**Profil: CODE-ONLY – dieser Merge enthält bewusst nur Source-Code, Tests, technische Configs und Contracts.**")
-            header.append("**Keine Beschreibungs-Dokus; nutze Manifest, Roles und Hotspots als Einstiegspunkte.**")
-            header.append("")
-        if plan_only:
-            header.append("**Profil: PLAN-ONLY – dieser Merge enthält nur Plan-/Doku-/Struktur-Kontext (kein Code, keine Tests).**")
-            header.append("**Nutze ihn als Token-sparenden Vorab-Scan; fehlender Code ist Absicht (Modus), nicht „vergessen“.**")
-            header.append("")
-
-    # --- 2. Source & Profile ---
-    header.append("## Source & Profile")
-    source_names = sorted([s.name for s in sources])
-    header.append(f"- **Source:** {', '.join(source_names)}")
-    header.append(f"- **Profile:** `{level}`")
-    header.append(f"- **Generated At:** {now.strftime('%Y-%m-%d %H:%M:%S')} (UTC)")
-    if max_file_bytes and max_file_bytes > 0:
-        header.append(f"- **Max File Bytes:** {human_size(max_file_bytes)}")
-    else:
-        # 0 / None = kein per-File-Limit – alles wird vollständig gelesen
-        header.append("- **Max File Bytes:** unlimited")
-    header.append(f"- **Spec-Version:** {SPEC_VERSION}")
-    header.append(f"- **Contract:** {MERGE_CONTRACT_NAME}")
-    header.append(f"- **Contract-Version:** {MERGE_CONTRACT_VERSION}")
-    header.append(f"- **Plan Only:** {str(bool(plan_only)).lower()}")
-    header.append(f"- **Code Only:** {str(bool(code_only)).lower()}")
-    header.append(f"- **Render Mode:** `{render_mode}`")
-
-    # Artifacts section (Recommendation 1: Portable Links)
-    if artifact_refs:
-        header.append("## 📦 Artifacts")
-        if artifact_refs.get("index_json_basename"):
-            bn = artifact_refs['index_json_basename']
-            header.append(f"<!-- artifact:index_json basename=\"{bn}\" -->")
-            header.append(f"- Index JSON: [{bn}]({bn})")
-        if artifact_refs.get("augment_sidecar_basename"):
-            bn = artifact_refs['augment_sidecar_basename']
-            header.append(f"<!-- artifact:augment_sidecar basename=\"{bn}\" -->")
-            header.append(f"- Augment Sidecar: [{bn}]({bn})")
-        header.append("")
-
-    # One-time navigation note (no per-file chatter).
-    header.append("### Navigation")
-    header.append("- **Index:** [#index](#index) · **Manifest:** [#manifest](#manifest)")
-    header.append("- Wenn dein Viewer nicht springt: nutze die Suche nach `manifest`, `index` oder `file-...`.")
-    header.append("")
-
-    # Requirement 2: Profile Capability Warning (Epistemic Humility)
-    # Profiles other than max/full/dev cannot prove absence.
-    # Also if any filters are active.
-    # Note: 'full' is not a standard RepoGround build profile key (overview, summary, dev, max, machine-lean).
-    # 'max' is the full profile.
-    allows_negative_claims = (level in ("max",)) and not path_filter and not ext_filter
-
-    if not allows_negative_claims:
-        header.append(EPISTEMIC_HUMILITY_WARNING)
-        header.append("")
-
-    header.append(f"- **Declared Purpose:** {declared_purpose}")
-    if repo_purpose and repo_purpose != "(none)":
-        header.append(f"- **Repo Purpose:** {repo_purpose}")
-
-    # Scope-Zeile: welche Roots/Repos sind beteiligt?
-    scope_desc = describe_scope(files)
-    header.append(f"- **Scope:** {scope_desc}")
-
-    # Neue, explizite Filterangaben
-    if path_filter:
-        header.append(f"- **Path Filter:** `{path_filter}`")
-    else:
-        header.append("- **Path Filter:** `none (full tree)`")
-
-    if ext_filter:
-        header.append(
-            "- **Extension Filter:** "
-            + ", ".join(f"`{e}`" for e in sorted(ext_filter))
-        )
-    else:
-        header.append("- **Extension Filter:** `none (all text types)`")
-
-    # Coverage in header (for quick AI assessment)
-    if text_files:
-        # Spec v2.4: Coverage line
-        header.append(f"- **Coverage:** {included_count}/{len(text_files)} Dateien mit vollem Inhalt")
-
-    header.append("")
-
-    # --- 3. Machine-readable Meta Block (für KIs) ---
-    # Wir bauen das Meta-Objekt sauber als Dict auf und dumpen es dann als YAML
-    # Spec v2.4 requirement: @meta is mandatory in all modes, including plan-only.
-    meta_lines: List[str] = []
-    # Wrap in zone marker
-    meta_lines.append("<!-- zone:begin type=\"meta\" id=\"meta\" -->")
-    meta_lines.append("<!-- @meta:start -->")
-    meta_lines.append("```yaml")
-
-    # Coverage-Infos für KIs: Wie viel des relevanten Textbestands ist wirklich als Voll-Content drin?
-    total_files = len(files)
-
-    # Flags for machine readability of content presence
-    # Plan-Only means NO content, NO manifest (usually), NO structure.
-    # Check actual logic below: plan_only causes early return before structure/manifest/content.
-    content_present = not plan_only
-    # Manifest is present unless plan_only (logic: if plan_only: return)
-    manifest_present = not plan_only
-    # Structure is present unless plan_only OR machine_lean
-    structure_present = (not plan_only) and (level != "machine-lean")
-
-    text_files_count = len(text_files)
-    if text_files_count:
-        coverage_raw = (included_count / text_files_count) * 100.0
-        coverage_pct = round(coverage_raw, 1)
-    else:
-        coverage_pct = 0.0
-
-    if debug:
-        print("[lenskit] meta flags:", plan_only, level, content_present, manifest_present, structure_present, file=sys.stderr)
-
-    # Determine if roles are actually present/computed
-    # Security fix (PR12): Ensure roles are computed before consulting them for meta
-    for fi in files:
-        if fi.roles is None:
-            fi.roles = compute_file_roles(fi)
-    has_roles = any(fi.roles for fi in files)
-
-    meta_dict: Dict[str, Any] = {
-        "merge": {
-            "spec_version": SPEC_VERSION,
-            "profile": level,
-            "contract": MERGE_CONTRACT_NAME,
-            "contract_version": MERGE_CONTRACT_VERSION,
-            # Only declare semantics if roles are present (Empfehlung A)
-            **({"role_semantics": "heuristic"} if has_roles else {}),
-            # Declare Depends as placeholder (Empfehlung B)
-            "depends_semantics": "placeholder",
-            "plan_only": plan_only,
-            "code_only": code_only,
-            "render_mode": render_mode,
-            **({"mode": "none", "warning": "interpretation_disabled"} if meta_none else {}),
-            "max_file_bytes": max_file_bytes,
-            "scope": scope_desc,
-            "source_repos": sorted([s.name for s in sources]) if sources else [],
-            "path_filter": path_filter,  # Use actual value, not description
-            "ext_filter": sorted(ext_filter) if ext_filter else None,  # Use actual value, not description
-            "meta_density": effective_meta_density,
-            "requested_meta_density": requested_meta_density,
-            "generated_at": now.strftime('%Y-%m-%dT%H:%M:%SZ'),  # ISO-8601 timestamp
-            "total_files": total_files,        # Total number of files in the merge
-            "total_size_bytes": total_size,    # Sum of all file sizes
-            "content_present": content_present,
-            "manifest_present": manifest_present,
-            "structure_present": structure_present,
-            "coverage": {
-                "included_files": included_count,
-                "text_files": text_files_count,
-                "coverage_pct": coverage_pct,
-            },
-        }
-    }
-
-    # Extras-Flags
-    if extras:
-        extras_meta = _build_extras_meta(extras, len(roots))
-        if extras_meta:
-            meta_dict["merge"]["extras"] = extras_meta
-
-    # Health-Status
-    if extras and extras.health and health_collector:
-        # Determine overall status from collector results
-        all_health = health_collector.get_all_health()
-        if any(h.status == "critical" for h in all_health):
-            overall = "critical"
-        elif any(h.status == "warn" for h in all_health):
-            overall = "warning"
-        else:
-            overall = "ok"
-
-        missing_set = set()
-        for h in all_health:
-            # Naive mapping logic for 'missing' based on recommendations/warnings
-            if not h.has_contracts: missing_set.add("contracts")
-            if not h.has_ci_workflows: missing_set.add("ci")
-            if not h.has_wgx_profile: missing_set.add("wgx-profile")
-
-        meta_dict["merge"]["health"] = {
-            "status": overall,
-            "missing": sorted(list(missing_set)),
-        }
-
-    # --- Delta Meta (NEW fully correct block) ---
-    if extras and extras.delta_reports:
-        if delta_meta:
-            # Use the real delta metadata if provided
-            meta_dict["merge"]["delta"] = delta_meta
-        else:
-            # Minimal enabling marker
-            meta_dict["merge"]["delta"] = {
-                "enabled": True
-            }
-
-    # Augment-Metadaten
-    if extras and extras.augment_sidecar:
-        augment_meta = _build_augment_meta(sources)
-        if augment_meta:
-            meta_dict["merge"]["augment"] = augment_meta
-
-    # Dump to YAML (ohne sort_keys, damit auch ältere PyYAML-Versionen in Pythonista funktionieren)
-    if yaml:
-        meta_yaml = yaml.safe_dump(meta_dict)
-        for line in meta_yaml.rstrip("\n").splitlines():
-            meta_lines.append(line)
-    else:
-        meta_lines.append("# YAML support missing")
-
-    meta_lines.append("```")
-    meta_lines.append("<!-- @meta:end -->")
-    meta_lines.append("<!-- zone:end type=\"meta\" id=\"meta\" -->")
-    meta_lines.append("")
-    header.extend(meta_lines)
-
-    # --- 3.1 Epistemic Charter & Declaration (T-Charter-1 + ED-1) ---
-    # Moved after Meta block as requested.
-    # Spec v2.4 requirement: Charter is mandatory in all modes, including plan-only.
-    # User requested condensed version in report header.
-    # Full charter is available in assets/epistemic_reading_charter.md
-
-    # META: NONE GUARD
-    if not meta_none:
-        header.append(_CHARTER_FALLBACK)
-        header.append("")
-
-        # Epistemic Declaration
-        # Use computed metrics
-        _risk_level = ep_metrics["risk"]["level"]
-        _contact_ratio_pct = int(ep_metrics["ratios"]["contact_ratio"] * 100)
-
-        decl = []
-        decl.append("## Epistemic Declaration")
-        decl.append("")
-        decl.append("- **Charter:** epistemic_reading_charter v1")
-        decl.append("- **Claim Language Guard:** active")
-        decl.append(f"- **Risk Level:** {_risk_level}")
-        decl.append(f"- **Contact Ratio:** {_contact_ratio_pct}%")
-        decl.append("")
-        header.extend(decl)
-
-    # --- 3a. Reading Lenses & Epistemic Status (New in v2.4) ---
-    if not plan_only and not meta_none:
-        active_lenses = lenses.LENS_IDS # Default to all canonical
-
-        # Reading Lenses
-        # Pass meta_density for budgeting
-        header.extend(_render_reading_lenses(files, active_lenses, meta_density=effective_meta_density))
-
-        # Epistemic Status
-        header.extend(_render_epistemic_status(files, active_lenses, ep_metrics))
-
-    # --- 4. Profile Description ---
-    header.append("## Profile Description")
-    if level == "overview":
-        header.append("`overview`")
-        header.append("- Nur: README (voll), Runbook (voll), ai-context (voll)")
-        header.append("- Andere Dateien: Included = meta-only")
-    elif level == "summary":
-        header.append("`summary`")
-        header.append("- Voll: README, Runbooks, ai-context, docs/, .wgx/, .github/workflows/, zentrale Config, Contracts")
-        header.append("- Code & Tests: Manifest + Struktur; nur Prioritätsdateien (README, Runbooks, ai-context) voll")
-    elif level == "dev":
-        header.append("`dev`")
-        header.append("- Code, Tests, Config, CI, Contracts, ai-context, wgx-profile → voll")
-        header.append("- Doku nur für Prioritätsdateien voll (README, Runbooks, ai-context), sonst Manifest")
-        header.append("- Lockfiles / Artefakte: ab bestimmter Größe meta-only")
-    elif level == "machine-lean":
-        header.append("`machine-lean`")
-        header.append("- Lean Snapshot: volle Inhalte, reduzierter Baum/Decorations")
-        header.append("- Manifest + Index + Content für Maschinen-Parsing optimiert")
-    elif level == "max":
-        header.append("`max`")
-        header.append("- alle Textdateien → voll")
-        header.append("- keine Kürzung (Dateien werden ggf. gesplittet)")
-    else:
-        header.append(f"`{level}` (custom)")
-    header.append("")
-
-    # --- 4. Reading Plan ---
-    header.append("## Reading Plan")
-    header.append("")
-    if plan_only:
-        # Plan-Only: explizit machen, dass nur Plan & Meta im Merge sind.
-        header.append("1. Hinweis: Dieser Merge wurde im **PLAN-ONLY** Modus erzeugt.")
-        header.append("   - Enthält nur: Profilbeschreibung, Plan und Meta (`@meta`).")
-        header.append("   - Enthält **nicht**: `Structure`, `Manifest` oder `Content`-Blöcke.")
-        header.append("")
-        header.append("2. Nutze diesen Merge, um schnell zu entscheiden, ob sich ein Voll-Merge lohnt,")
-        header.append("   ohne Tokens für Dateiinhalte zu verbrauchen.")
-    else:
-        # Standard-Lesepfad für Voll-Merges
-        header.append("1. Lies zuerst: `README.md`, `docs/runbook*.md`, `*.ai-context.yml`")
-        if level == "machine-lean":
-            header.append("2. Danach: `Manifest` -> `Content`")
-        else:
-            header.append("2. Danach: `Structure` -> `Manifest` -> `Content`")
-        header.append("3. Hinweis: „Multi-Repo-Merges: jeder Repo hat eigenen Block 📦“")
-    header.append("")
-
-    yield "\n".join(header) + "\n"
-
-    # --- 5. Plan ---
-    plan: List[str] = []
-    plan.append("## Plan")
-    plan.append("")
-    plan.append(f"- **Total Files:** {len(files)} (Text: {len(text_files)})")
-    plan.append(f"- **Total Size:** {human_size(total_size)}")
-    plan.append(f"- **Included Content:** {included_count} files (full)")
-    if text_files:
-        plan.append(
-            f"- **Coverage:** {included_count}/{len(text_files)} Dateien mit vollem Inhalt"
-        )
-    plan.append("")
-
-    # Optional Delta Summary (if delta_meta is provided with summary)
-    if extras.delta_reports and delta_meta and isinstance(delta_meta, dict):
-        summary = delta_meta.get("summary", {})
-        if isinstance(summary, dict):
-            plan.append("### Delta Summary")
-            plan.append("")
-            files_added = summary.get("files_added", 0)
-            files_removed = summary.get("files_removed", 0)
-            files_changed = summary.get("files_changed", 0)
-            plan.append(f"- Files added: {files_added}")
-            plan.append(f"- Files removed: {files_removed}")
-            plan.append(f"- Files changed: {files_changed}")
-            plan.append("")
-
-    # Mini-Summary pro Repo – damit KIs schnell die Lastverteilung sehen
-    # files_by_root was calculated earlier for Health Check
-
-    if files_by_root:
-        plan.append("### Repo Snapshots")
-        plan.append("")
-        for root in sorted(files_by_root.keys()):
-            root_files = files_by_root[root]
-            root_total = len(root_files)
-            # „relevante Textdateien“: Code, Docs, Config, Tests, CI, Contracts
-            root_text = sum(
-                1
-                for f in root_files
-                if f.is_text
-                and f.category in {"source", "doc", "config", "test", "contract"}
-            )
-            root_bytes = sum(f.size for f in root_files)
-            root_included = included_by_root.get(root, 0)
-            plan.append(
-                f"- `{root}` → {root_total} files "
-                f"({root_text} relevant text, {human_size(root_bytes)}, {root_included} with content)"
-            )
-        plan.append("")
-
-    # Meta-Throttling for Hotspots (Spec 3e)
-    # hotspots_limit: min/none=0, standard=3, full=8
-    hotspots_limit = 0
-    if effective_meta_density == "standard":
-        hotspots_limit = 3
-    elif effective_meta_density == "full":
-        hotspots_limit = 8
-
-    if hotspots_limit > 0:
-        hotspots = build_hotspots(processed_files, limit=hotspots_limit)
-        if hotspots:
-            plan.extend(hotspots)
-            plan.append("")
-    plan.append("**Folder Highlights:**")
-    if code_folders: plan.append(f"- Code: `{', '.join(sorted(code_folders))}`")
-    if doc_folders: plan.append(f"- Docs: `{', '.join(sorted(doc_folders))}`")
-    if infra_folders: plan.append(f"- Infra: `{', '.join(sorted(infra_folders))}`")
-    plan.append("")
-
-    # Organismus-Overview (im Plan, ohne Spec-Reihenfolge zu brechen)
-    plan.append("### Organism Overview")
-    plan.append("")
-    plan.append(
-        f"- AI-Kontext-Organe: {len(organism_ai_ctx)} Datei(en) (`ai-context`)"
-    )
-    plan.append(
-        f"- Contracts: {len(organism_contracts)} Datei(en) (category = `contract`)"
-    )
-    plan.append(
-        f"- Pipelines (CI/CD): {len(organism_pipelines)} Datei(en) (Tag `ci`)"
-    )
-    plan.append(
-        f"- Fleet-/WGX-Profile: {len(organism_wgx_profiles)} Datei(en) (Tag `wgx-profile`)"
-    )
-    plan.append("")
-
-    yield "\n".join(plan) + "\n"
-
-    # --- Health Report (Stage 1: Repo Doctor) ---
-    # Note: health_collector was already populated before header generation
-    if extras.health and health_collector:
-        health_report = health_collector.render_markdown()
-        if health_report:
-            yield health_report
-
-    # --- Delta Report Block (NEW) ---
-    if extras.delta_reports and delta_meta:
-        try:
-            delta_block = _render_delta_block(delta_meta)
-            if delta_block:
-                yield delta_block
-        except Exception as e:
-            yield f"\n<!-- delta-error: {e} -->\n"
-
-    # --- Fleet Panorama (Stage 2 Multi-Repo) ---
-    if extras.fleet_panorama:
-        fleet_block = _render_fleet_panorama(sources, files)
-        if fleet_block:
-            yield fleet_block
-
-    # --- Organism Index (Stage 2: Single Repo) ---
-    if extras.organism_index and len(roots) == 1:
-        # Single-Repo-Organismus: Rolle + Organe explizit sichtbar machen
-        repo_name = list(roots)[0]
-        repo_role = infer_repo_role(repo_name, files)
-
-        organism_index: List[str] = []
-        organism_index.append("<!-- @organism-index:start -->")
-        organism_index.append("## 🧬 Organism Index")
-        organism_index.append("")
-        organism_index.append(f"**Repo:** `{repo_name}`")
-        organism_index.append(f"**Rolle:** {repo_role}")
-        organism_index.append("")
-        organism_index.append("**Organ-Status:**")
-        organism_index.append(f"- AI-Kontext: {len(organism_ai_ctx)} Datei(en)")
-        organism_index.append(f"- Verträge (Contracts): {len(organism_contracts)} Datei(en)")
-        organism_index.append(f"- Pipelines (CI/CD): {len(organism_pipelines)} Workflow(s)")
-        organism_index.append(f"- WGX / Fleet-Profile: {len(organism_wgx_profiles)} Profil(e)")
-        organism_index.append("")
-
-        # Detaillierte Abschnitte mit Fallbacks
-
-        # AI-Kontext
-        if organism_ai_ctx:
-            organism_index.append("### AI-Kontext")
-            for fi in organism_ai_ctx:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### AI-Kontext")
-            organism_index.append("_Keine AI-Kontext-Dateien gefunden._")
-            organism_index.append("")
-
-        # Verträge / Contracts
-        if organism_contracts:
-            organism_index.append("### Verträge (Contracts)")
-            for fi in organism_contracts:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### Verträge (Contracts)")
-            organism_index.append("_Keine Contract-Dateien gefunden._")
-            organism_index.append("")
-
-        # Pipelines / CI
-        if organism_pipelines:
-            organism_index.append("### Pipelines (CI/CD)")
-            for fi in organism_pipelines:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### Pipelines (CI/CD)")
-            organism_index.append("_Keine CI/CD-Workflows gefunden._")
-            organism_index.append("")
-
-        # WGX / Fleet-Profile
-        if organism_wgx_profiles:
-            organism_index.append("### WGX / Fleet-Profile")
-            for fi in organism_wgx_profiles:
-                organism_index.append(f"- `{fi.rel_path}`")
-            organism_index.append("")
-        else:
-            organism_index.append("### WGX / Fleet-Profile")
-            organism_index.append("_Kein WGX-/Fleet-Profil gefunden._")
-            organism_index.append("")
-
-        organism_index.append("<!-- @organism-index:end -->")
-        organism_index.append("")
-        yield "\n".join(organism_index)
-
-    # --- AI Heatmap (Stage 3: Auto-Discovery) ---
-    if extras.heatmap:
-        heatmap_collector = HeatmapCollector(files)
-        hm_report = heatmap_collector.render_markdown()
-        if hm_report:
-            yield hm_report
-
-    # --- Augment Intelligence (Stage 4: Sidecar) ---
-    if extras.augment_sidecar:
-        augment_block = _render_augment_block(sources, meta_density=effective_meta_density)
-        if augment_block:
-            yield augment_block
-
-    if plan_only:
+    yield _render_report_header(state)
+    yield _render_report_plan(state)
+    yield from _iter_report_analysis_blocks(state)
+    if state.plan_only:
         return
+    structure_block = _render_report_structure(state)
+    if structure_block is not None:
+        yield structure_block
+    yield _render_report_index(state)
+    yield from _iter_report_manifest_blocks(state)
+    yield from _iter_report_content_blocks(state)
 
-    # --- 6. Structure --- (skipped for machine-lean)
-    if level != "machine-lean":
-        structure = []
-        structure.append("<!-- zone:begin type=\"structure\" id=\"structure\" -->")
-        structure.append("## 📁 Structure")
-        structure.append("")
-        structure.append(build_tree(files))
-        structure.append("")
-        structure.append("<!-- zone:end type=\"structure\" id=\"structure\" -->")
-        yield "\n".join(structure) + "\n"
-
-    # --- Index (Patch B) ---
-    # Generated Categories Index - Only show non-empty categories/tags
-    index_blocks = []
-    index_blocks.append("<!-- zone:begin type=\"index\" id=\"index\" -->")
-    index_blocks.extend(_heading_block(2, "index", "🧭 Index", nav=nav))
-
-    if effective_meta_density == "min":
-        index_blocks.append("_Index reduced (meta=min)_")
-        index_blocks.append("")
-    else:
-        # Pre-check which categories/tags have files
-        cats_to_idx = ["source", "doc", "config", "contract", "test"]
-        non_empty_cats = []
-        for c in cats_to_idx:
-            cat_files = [f for f in files if f.category == c]
-            if cat_files:
-                non_empty_cats.append(c)
-
-        # Check tag presence
-        ci_files = [f for f in files if "ci" in (f.tags or [])]
-        wgx_files = [f for f in files if "wgx-profile" in f.tags]
-
-        # Build TOC - only for non-empty sections
-        for c in non_empty_cats:
-            index_blocks.append(f"- [{c.capitalize()}](#cat-{_slug_token(c)})")
-
-        # Add tag TOC entries only if they have files
-        if ci_files:
-            index_blocks.append("- [CI Pipelines](#tag-ci)")
-        if wgx_files:
-            index_blocks.append("- [WGX Profiles](#tag-wgx-profile)")
-
-        index_blocks.append("")
-
-        # Category Lists - only non-empty
-        for c in non_empty_cats:
-            cat_files = [f for f in files if f.category == c]
-            index_blocks.extend(_heading_block(2, f"cat-{_slug_token(c)}", f"Category: {c}", nav=nav))
-            for f in cat_files:
-                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-            index_blocks.append("")
-
-        # Tag Lists – only non-empty
-        if ci_files:
-            index_blocks.extend(_heading_block(2, "tag-ci", "Tag: ci", nav=nav))
-            for f in ci_files:
-                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-            index_blocks.append("")
-
-        if wgx_files:
-            index_blocks.extend(_heading_block(2, "tag-wgx-profile", "Tag: wgx-profile", nav=nav))
-            for f in wgx_files:
-                index_blocks.append(f"- [`{f.rel_path}`](#{f.anchor})")
-            index_blocks.append("")
-
-    index_blocks.append("<!-- zone:end type=\"index\" id=\"index\" -->")
-    yield "\n".join(index_blocks) + "\n"
-
-    # --- 7. Manifest (Patch A) ---
-    manifest: List[str] = []
-    manifest.append("<!-- zone:begin type=\"manifest\" id=\"manifest\" -->")
-    manifest.extend(_heading_block(2, "manifest", "🧾 Manifest" if not code_only else "🧾 Manifest (Code-Only)", nav=nav))
-
-    roots_sorted = sorted(files_by_root.keys())
-    if roots_sorted:
-        manifest_nav = " · ".join(
-            f"[{r}](#manifest-{_slug_token(r)})" for r in roots_sorted
-        )
-        manifest.append(f"**Repos im Merge:** {manifest_nav}")
-        manifest.append("")
-
-    if code_only:
-        manifest.append(
-            "_Profil: CODE-ONLY – nur Source/Tests/Config/Contracts. Rollen-Shortcut: "
-            "`entrypoint`=CLIs/Starts, `config`=zentral, `ci`=Workflows, `test`=Tests._"
-        )
-        manifest.append("")
-
-    if not roots_sorted:
-        manifest.append("_Keine Dateien im Manifest._")
-        manifest.append("")
-        yield "\n".join(manifest) + "\n"
-    else:
-        for root in roots_sorted:
-            root_files = files_by_root[root]
-            stats = repo_stats.get(root, {})
-            repo_role = infer_repo_role(root, root_files)
-
-            manifest.extend(_heading_block(3, f"manifest-{_slug_token(root)}", f"Repo `{root}`", nav=nav))
-            manifest.append(
-                f"- Rolle: {repo_role}"
-            )
-            if stats:
-                manifest.append(
-                    f"- Umfang: {stats.get('total', 0)} Dateien "
-                    f"({stats.get('text_files', 0)} Text), {human_size(stats.get('bytes', 0))}; "
-                    f"Inhalt: {stats.get('included', 0)} mit Content"
-                )
-            manifest.append("")
-            # Updated to include 'Role' column (Recommendation 5) and 'Depends'
-            manifest.append("| Path | Category | Tags | Role? | Depends? | Size | Included | MD5 |")
-            manifest.append("| --- | --- | --- | --- | --- | ---: | --- | --- |")
-
-            for fi, status in processed_files:
-                if fi.root_label != root:
-                    continue
-
-                tags_str = ", ".join(fi.tags) if fi.tags else "-"
-                # Use joined roles or '-' for the new column
-                roles_str = ", ".join(fi.roles) if fi.roles else "-"
-                included_label = status
-                if is_noise_file(fi):
-                    included_label = f"{status} (noise)"
-
-                # Use stable ID anchor for Manifest links
-                stable_anchor = _stable_file_id(fi).replace("FILE:", "file-")
-                path_str = f"[`{fi.rel_path}`](#{stable_anchor})"
-                manifest.append(
-                    f"| {path_str} | `{fi.category}` | {tags_str} | {roles_str} | - | "
-                    f"{human_size(fi.size)} | `{included_label}` | `{fi.md5}` |"
-                )
-            manifest.append("")
-
-        manifest.append("<!-- zone:end type=\"manifest\" id=\"manifest\" -->")
-        yield "\n".join(manifest) + "\n"
-
-    # --- Optional: Fleet Consistency ---
-    consistency_warnings = check_fleet_consistency(files)
-    if consistency_warnings:
-        cons = []
-        cons.append("## Fleet Consistency")
-        cons.append("")
-        for w in consistency_warnings:
-            cons.append(w)
-        cons.append("")
-        yield "\n".join(cons) + "\n"
-
-    # --- 8. Content ---
-    # Spec v2.4 Section 2: "7. 📄 Content" implies ## level to match invariants.
-    # However, legacy "Lean hierarchy" used # Content.
-    # We adopt ## 📄 Content for strict compliance and shift sub-levels.
-
-    # Fix: Agent noise reduction (v2.4 Patch D)
-    # Insert strict start-of-content marker before the content header.
-    # Logic note: This block is reached only if plan_only is False (checked above).
-    # Thus, the marker correctly signals the start of the content section when it exists.
-    yield "<!-- START_OF_CONTENT -->\n"
-
-    content_header: List[str] = ["## 📄 Content", ""]
-    # Only list repos that actually have visible content blocks (full/truncated).
-    # meta-only/omitted files don't generate file blocks, so their repo header might be skipped if *all* files are skipped.
-    # We check if a repo has at least one file with status "full" or "truncated".
-
-    # Pre-calculate repos with actual content
-    visible_roots = set()
-    for fi, status in processed_files:
-        if status in ("full", "truncated"):
-            visible_roots.add(fi.root_label)
-
-    if visible_roots:
-        nav_links = " · ".join(
-            f"[{root}](#repo-{_slug_token(root)})" for root in sorted(visible_roots)
-        )
-        content_header.append(f"**Repos im Merge:** {nav_links}")
-        content_header.append("")
-
-    yield "\n".join(content_header)
-
-    current_root = None
-
-    for fi, status in processed_files:
-        if status in ("omitted", "meta-only"):
-            continue
-
-        if fi.root_label != current_root:
-            repo_slug = _slug_token(fi.root_label)
-            # Level 3 for Repos (was 2)
-            yield "\n".join(_heading_block(3, f"repo-{repo_slug}", fi.root_label, nav=nav)) + "\n"
-            current_root = fi.root_label
-
-        # Read content early to get byte count for marker
-        content, truncated, trunc_msg = read_smart_content(fi, max_file_bytes)
-        if redactor:
-            content, _ = redactor.redact(content)
-
-        # Calculate SHA256 of content for marker
-        content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
-        content_bytes = len(content.encode("utf-8"))
-
-        block = ["---"]
-
-        # 1. Stable File Marker (with path) - PR1 + Machine-Readable Extensions
-        fid = _stable_file_id(fi) # Now returns FILE:f_...
-
-        # Machine-First: Explicit FILE_START marker
-        block.append(f'<!-- FILE_START path="{fi.rel_path}" content_sha256="{content_sha256}" content_bytes="{content_bytes}" file_bytes="{fi.size}" truncated="{str(truncated).lower()}" -->')
-
-        # Fix PR13: Quote attributes to handle paths with spaces
-        # Fix PR13-Followup: Quote id as well for consistency
-        block.append(f'<!-- file:id="{fid}" path="{fi.rel_path}" -->')
-
-        # 2. Stable Anchors (explicit) - Double Anchoring Strategy
-        # Requirement: Every file block MUST have stable anchors in BOTH forms.
-
-        # Form A: Human-stable (FILE_ID based)
-        # fid is FILE:f_<hash>, we want file-f_<hash>
-        human_stable_id = fid.replace("FILE:", "file-")
-        block.append(f'<a id="{human_stable_id}"></a>')
-
-        # Form B: Path-stable (file-<repo>-<path-sanitized>)
-        # fi.anchor_alias holds the base anchor (file-{repo_slug}-{rel_id})
-        path_stable_id = fi.anchor_alias
-
-        # fi.anchor is the ID used for the heading (may include collision suffix)
-        header_id = fi.anchor
-
-        # Avoid duplicate ID if path_stable_id == header_id, as _heading_block will emit header_id
-        if path_stable_id != header_id:
-            block.append(f'<a id="{path_stable_id}"></a>')
-
-        # Level 4 for Files (was 3)
-        # _heading_block emits <a id="{header_id}"></a> which covers the path-stable ID + suffix case
-        block.extend(_heading_block(4, header_id, str(fi.rel_path), nav=nav))
-        block.append(f"**Path:** `{fi.rel_path}`")
-
-        # Header Drosselung: meta=min versteckt Details
-        if effective_meta_density != "min":
-            block.append(f"- Category: {fi.category}")
-            if fi.tags:
-                block.append(f"- Tags: {', '.join(fi.tags)}")
-            else:
-                block.append("- Tags: -")
-            block.append(f"- Size: {human_size(fi.size)}")
-            block.append(f"- Included: {status}")
-
-            # MD5 nur bei full oder standard (wenn gewünscht, hier full only)
-            if effective_meta_density == "full":
-                block.append(f"- MD5: {fi.md5}")
-
-        # File Meta Block (Spec Patch)
-        # Gate: min -> aus, standard -> nur wenn partial/truncated, full -> immer
-        show_file_meta = False
-        if effective_meta_density == "full":
-            show_file_meta = True
-        elif effective_meta_density == "standard":
-            if status != "full":
-                show_file_meta = True
-        # Sonderregel: bei partial/truncated zwingend minimale Herkunftsspur
-        if status != "full":
-            show_file_meta = True
-
-        if show_file_meta:
-            block.append("<!--")
-            block.append("file_meta:")
-            block.append(f"  repo: {fi.root_label}")
-            block.append(f"  path: {fi.rel_path}")
-            block.append(f"  lines: {len(content.splitlines())}")
-            block.append(f"  included: {status}")
-            if getattr(fi, "inclusion_reason", "normal") != "normal":
-                block.append(f"  inclusion_reason: {fi.inclusion_reason}")
-            block.append("-->")
-
-        # Dynamic fence length to escape content containing backticks
-        max_ticks = 0
-        if "```" in content:
-            ticks = re.findall(r"`{3,}", content)
-            if ticks:
-                max_ticks = max(len(t) for t in ticks)
-
-        fence_len = max(3, max_ticks + 1)
-        fence = "`" * fence_len
-
-        lang = lang_for(fi.ext)
-
-        # Zone wrapper for code content
-        # Fix PR13: Quote attributes
-        block.append(f'<!-- zone:begin type="code" lang="{lang}" id="{fid}" -->')
-        block.append("")
-        block.append(f"{fence}{lang}")
-        block.append(content)
-        block.append(f"{fence}")
-        block.append("")
-        # PR-Optimierung: deterministic markers
-        block.append(f'<!-- zone:end type="code" id="{fid}" -->')
-
-        # Machine-First: Explicit FILE_END marker
-        block.append(f'<!-- FILE_END path="{fi.rel_path}" -->')
-
-        # Backlinks: keep them simple
-        block.append("[↑ Manifest](#manifest) · [↑ Index](#index)")
-        yield "\n".join(block) + "\n\n"
 
 def generate_report_content(
     files: List[FileInfo],

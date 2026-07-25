@@ -1,0 +1,2 @@
+# Report goldens preserve exact renderer bytes, including the terminal blank line.
+merger/repoground/tests/fixtures/report_renderer/golden/*.txt whitespace=-blank-at-eof
