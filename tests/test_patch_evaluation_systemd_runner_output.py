@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -61,24 +62,34 @@ def test_policy_rejects_journal_output(
         )
 
 
-def test_policy_accepts_null_output_and_delegates(
+def test_policy_binds_null_output_into_digest(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    expected = ("a" * 64, {"systemd": {}, "cgroup": {}})
+    base = {
+        "systemd": {"PrivateNetwork": "yes"},
+        "cgroup": {"path": "/sys/fs/cgroup/example"},
+    }
     monkeypatch.setattr(
         runner,
         "_base_policy",
-        lambda unit, run, limits: expected,
+        lambda unit, run, limits: ("0" * 64, base),
     )
 
-    assert (
-        runner._policy(
-            {"StandardOutput": "null", "StandardError": "null"},
-            None,
-            None,
-        )
-        == expected
+    digest, readback = runner._policy(
+        {"StandardOutput": "null", "StandardError": "null"},
+        None,
+        None,
     )
+    payload = json.dumps(
+        readback,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+    assert digest == hashlib.sha256(payload).hexdigest()
+    assert readback["systemd"]["StandardOutput"] == "null"
+    assert readback["systemd"]["StandardError"] == "null"
+    assert readback["systemd"]["PrivateNetwork"] == "yes"
 
 
 def test_atomic_receipt_accepts_linked_payload_after_directory_fsync_error(
