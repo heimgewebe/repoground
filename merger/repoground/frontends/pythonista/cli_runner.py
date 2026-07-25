@@ -12,25 +12,34 @@ def _exit_usage(message: str) -> None:
     raise SystemExit(2)
 
 
-def _validate_cli_request(api: Any, args: Any) -> tuple:
-    source_mode = getattr(args, "source_mode", None)
-    pre_pull = getattr(args, "pre_pull", None)
-    plan_only = bool(getattr(args, "plan_only", False))
-    remote_ref = getattr(args, "remote_ref", None)
-    remote_ref_policy = getattr(args, "remote_ref_policy", None)
+def _read_cli_request(args: Any) -> tuple:
+    return (
+        getattr(args, "source_mode", None),
+        getattr(args, "pre_pull", None),
+        bool(getattr(args, "plan_only", False)),
+        getattr(args, "remote_ref", None),
+        getattr(args, "remote_ref_policy", None),
+    )
 
-    if api.is_ios_runtime():
-        if pre_pull is True:
-            _exit_usage(api.git_subprocess_unavailable_message("--pre-pull"))
-        if source_mode == "local-ff":
-            _exit_usage(
-                api.git_subprocess_unavailable_message("--source-mode local-ff")
-            )
-        if source_mode == "remote-snapshot":
-            _exit_usage(
-                api.git_subprocess_unavailable_message("--source-mode remote-snapshot")
-            )
 
+def _validate_ios_request(api: Any, source_mode: Any, pre_pull: Any) -> None:
+    if not api.is_ios_runtime():
+        return
+    if pre_pull is True:
+        _exit_usage(api.git_subprocess_unavailable_message("--pre-pull"))
+    if source_mode == "local-ff":
+        _exit_usage(api.git_subprocess_unavailable_message("--source-mode local-ff"))
+    if source_mode == "remote-snapshot":
+        _exit_usage(
+            api.git_subprocess_unavailable_message("--source-mode remote-snapshot")
+        )
+
+
+def _validate_pre_pull_combination(
+    source_mode: Any,
+    pre_pull: Any,
+    plan_only: bool,
+) -> None:
     if plan_only and pre_pull is True:
         _exit_usage(
             "--plan-only and --pre-pull are mutually exclusive "
@@ -51,23 +60,48 @@ def _validate_cli_request(api: Any, args: Any) -> tuple:
             "remove --pre-pull."
         )
 
-    if api.validate_source_mode_request is not None:
-        canonical_mode = source_mode.replace("-", "_") if source_mode else None
-        canonical_policy = (
-            remote_ref_policy.replace("-", "_") if remote_ref_policy else None
-        )
-        try:
-            api.validate_source_mode_request(
-                repo_source_mode=canonical_mode,
-                pre_pull=pre_pull,
-                plan_only=plan_only,
-                remote_ref=remote_ref,
-                remote_ref_policy=canonical_policy,
-            )
-        except api.SourceModeConflictError as exc:
-            _exit_usage(str(exc))
 
-    return source_mode, pre_pull, plan_only, remote_ref, remote_ref_policy
+def _validate_control_plane_request(
+    api: Any,
+    *,
+    source_mode: Any,
+    pre_pull: Any,
+    plan_only: bool,
+    remote_ref: Any,
+    remote_ref_policy: Any,
+) -> None:
+    if api.validate_source_mode_request is None:
+        return
+    canonical_mode = source_mode.replace("-", "_") if source_mode else None
+    canonical_policy = (
+        remote_ref_policy.replace("-", "_") if remote_ref_policy else None
+    )
+    try:
+        api.validate_source_mode_request(
+            repo_source_mode=canonical_mode,
+            pre_pull=pre_pull,
+            plan_only=plan_only,
+            remote_ref=remote_ref,
+            remote_ref_policy=canonical_policy,
+        )
+    except api.SourceModeConflictError as exc:
+        _exit_usage(str(exc))
+
+
+def _validate_cli_request(api: Any, args: Any) -> tuple:
+    request = _read_cli_request(args)
+    source_mode, pre_pull, plan_only, remote_ref, remote_ref_policy = request
+    _validate_ios_request(api, source_mode, pre_pull)
+    _validate_pre_pull_combination(source_mode, pre_pull, plan_only)
+    _validate_control_plane_request(
+        api,
+        source_mode=source_mode,
+        pre_pull=pre_pull,
+        plan_only=plan_only,
+        remote_ref=remote_ref,
+        remote_ref_policy=remote_ref_policy,
+    )
+    return request
 
 
 def _resolve_sources(api: Any, args: Any, hub: Path) -> list:
