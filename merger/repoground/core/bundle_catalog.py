@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from merger.repoground.core.bundle_identity import is_bundle_manifest
+from merger.repoground.core.post_health_binding import post_health_binding_status
 
 KIND = "repoground.bundle_catalog"
 VERSION = "v1"
@@ -195,40 +196,113 @@ def manifest_repo_aliases(document: Mapping[str, Any]) -> list[str]:
     return sorted(aliases)
 
 
+def _health_metadata_issue(
+    *,
+    expected_sha256: Any,
+    expected_bytes: Any,
+    require_integrity: bool,
+) -> str | None:
+    if not require_integrity:
+        return None
+    if (
+        not isinstance(expected_bytes, int)
+        or isinstance(expected_bytes, bool)
+        or expected_bytes < 0
+    ):
+        return "health artifact byte size missing or invalid in manifest"
+    if not isinstance(expected_sha256, str) or not _SHA256_RE.fullmatch(
+        expected_sha256
+    ):
+        return "health artifact sha256 missing or invalid in manifest"
+    return None
+
+
+def _health_content_issue(
+    raw: bytes,
+    *,
+    expected_sha256: Any,
+    expected_bytes: Any,
+) -> str | None:
+    if isinstance(expected_bytes, int) and len(raw) != expected_bytes:
+        return "health artifact byte size does not match manifest"
+    if (
+        isinstance(expected_sha256, str)
+        and _SHA256_RE.fullmatch(expected_sha256)
+        and _sha256_bytes(raw) != expected_sha256
+    ):
+        return "health artifact sha256 does not match manifest"
+    return None
+
+
+def _health_binding_issue(
+    document: Mapping[str, Any],
+    *,
+    expected_manifest_path: Path | None,
+    expected_manifest_run_id: Any,
+    expected_manifest_sha256: str | None,
+    require_manifest_binding: bool,
+) -> str | None:
+    if not require_manifest_binding:
+        return None
+    if expected_manifest_path is None:
+        return "post_emit_health manifest path expectation is missing"
+    binding_status, binding_detail = post_health_binding_status(
+        document,
+        resolved_manifest=expected_manifest_path.resolve(),
+        manifest_run_id=expected_manifest_run_id,
+        manifest_sha256=expected_manifest_sha256,
+    )
+    return None if binding_status == "pass" else binding_detail
+
+
 def _health_json_status(
     path: Path,
     *,
     expected_sha256: Any = None,
     expected_bytes: Any = None,
     require_integrity: bool = False,
+    expected_manifest_path: Path | None = None,
+    expected_manifest_run_id: Any = None,
+    expected_manifest_sha256: str | None = None,
+    require_manifest_binding: bool = False,
 ) -> tuple[str, str | None]:
-    if require_integrity:
-        if (
-            not isinstance(expected_bytes, int)
-            or isinstance(expected_bytes, bool)
-            or expected_bytes < 0
-        ):
-            return "invalid", "health artifact byte size missing or invalid in manifest"
-        if not isinstance(expected_sha256, str) or not _SHA256_RE.fullmatch(
-            expected_sha256
-        ):
-            return "invalid", "health artifact sha256 missing or invalid in manifest"
+    issue = _health_metadata_issue(
+        expected_sha256=expected_sha256,
+        expected_bytes=expected_bytes,
+        require_integrity=require_integrity,
+    )
+    if issue is not None:
+        return "invalid", issue
     try:
         document, raw = _load_json_object(path, MAX_HEALTH_BYTES)
     except BundleCatalogError as exc:
         return "invalid", str(exc)
-    if isinstance(expected_bytes, int) and len(raw) != expected_bytes:
-        return "invalid", "health artifact byte size does not match manifest"
-    if isinstance(expected_sha256, str) and _SHA256_RE.fullmatch(expected_sha256):
-        if _sha256_bytes(raw) != expected_sha256:
-            return "invalid", "health artifact sha256 does not match manifest"
+    issue = _health_content_issue(
+        raw,
+        expected_sha256=expected_sha256,
+        expected_bytes=expected_bytes,
+    )
+    if issue is not None:
+        return "invalid", issue
     status = document.get("status") or document.get("verdict")
-    if status == "pass":
-        return "pass", None
-    return "invalid", f"health status is {status!r}, expected 'pass'"
+    if status != "pass":
+        return "invalid", f"health status is {status!r}, expected 'pass'"
+    issue = _health_binding_issue(
+        document,
+        expected_manifest_path=expected_manifest_path,
+        expected_manifest_run_id=expected_manifest_run_id,
+        expected_manifest_sha256=expected_manifest_sha256,
+        require_manifest_binding=require_manifest_binding,
+    )
+    return ("invalid", issue) if issue is not None else ("pass", None)
 
 
-def _candidate_health(path: Path, document: Mapping[str, Any]) -> tuple[str, list[str]]:
+def _candidate_health(
+    path: Path,
+    document: Mapping[str, Any],
+    *,
+    manifest_sha256: str,
+) -> tuple[str, list[str]]:
     reasons: list[str] = []
     links = document.get("links") if isinstance(document.get("links"), Mapping) else {}
     for key in (
@@ -271,7 +345,13 @@ def _candidate_health(path: Path, document: Mapping[str, Any]) -> tuple[str, lis
     if post_path is None:
         reasons.append("post_emit_health path missing or invalid")
     else:
-        status, reason = _health_json_status(post_path)
+        status, reason = _health_json_status(
+            post_path,
+            expected_manifest_path=path,
+            expected_manifest_run_id=document.get("run_id"),
+            expected_manifest_sha256=manifest_sha256,
+            require_manifest_binding=True,
+        )
         if status != "pass":
             reasons.append(reason or "post_emit_health invalid")
 
@@ -294,7 +374,9 @@ def inspect_bundle_health(bundle_manifest: str | Path) -> dict[str, Any]:
             "reasons": [str(exc)],
             "mutation_boundary": {"writes": [], "read_paths_do_not_refresh": True},
         }
-    health_status, reasons = _candidate_health(path, document)
+    health_status, reasons = _candidate_health(
+        path, document, manifest_sha256=_sha256_bytes(raw)
+    )
     return {
         "kind": "repoground.bundle_health",
         "version": VERSION,
@@ -345,7 +427,9 @@ def discover_bundle_catalog(bundle_root: str | Path) -> dict[str, Any]:
             created_at_utc = None
             timestamp_status = "invalid"
             timestamp_reason = str(exc)
-        health_status, health_reasons = _candidate_health(path, document)
+        health_status, health_reasons = _candidate_health(
+            path, document, manifest_sha256=_sha256_bytes(raw)
+        )
         candidates.append(
             {
                 "stem": path.name[: -len(MANIFEST_SUFFIX)],

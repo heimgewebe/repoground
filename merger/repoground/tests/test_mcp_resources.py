@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,6 +15,28 @@ from merger.repoground.tests.test_ask_context_cli import (
     _add_artifact,
     _complete_basic_bundle,
 )
+
+
+def _bind_post_health(bundle: dict) -> None:
+    manifest = bundle["manifest"].resolve()
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    post_path = manifest.parent / document["links"]["post_emit_health_path"]
+    post_path.write_text(
+        json.dumps(
+            {
+                "kind": "health",
+                "status": "pass",
+                "bundle_manifest_path": str(manifest),
+                "bundle_run_id": document["run_id"],
+                "bundle_manifest_sha256": hashlib.sha256(
+                    manifest.read_bytes()
+                ).hexdigest(),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _bundle_with_health(tmp_path: Path) -> dict:
@@ -41,6 +64,7 @@ def _bundle_with_health(tmp_path: Path) -> dict:
     bundle["manifest"].write_text(
         json.dumps(document, sort_keys=True) + "\n", encoding="utf-8"
     )
+    _bind_post_health(bundle)
     return bundle
 
 
@@ -89,6 +113,7 @@ def test_mcp_resource_list_selects_one_readable_newest_generation_per_stem(tmp_p
         bundle["manifest"].write_text(
             json.dumps(document, sort_keys=True) + "\n", encoding="utf-8"
         )
+        _bind_post_health(bundle)
 
     listed = list_mcp_resources(tmp_path)
     manifest_uri = "repoground://snapshot/demo/manifest"

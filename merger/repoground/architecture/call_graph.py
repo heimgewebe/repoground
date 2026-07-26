@@ -97,6 +97,18 @@ def _argument_names(arguments: ast.arguments) -> set[str]:
     return names
 
 
+def _match_pattern_names(pattern: ast.pattern) -> set[str]:
+    names: set[str] = set()
+    for child in ast.walk(pattern):
+        if isinstance(child, ast.MatchAs) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.MatchStar) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.MatchMapping) and child.rest:
+            names.add(child.rest)
+    return names
+
+
 class _BindingCollector(ast.NodeVisitor):
     """Collect bindings owned by one function, lambda, class or comprehension."""
 
@@ -161,6 +173,15 @@ class _BindingCollector(ast.NodeVisitor):
             self.local.add(node.name)
         for statement in node.body:
             self.visit(statement)
+        return None
+
+    def visit_Match(self, node: ast.Match) -> Any:
+        for case in node.cases:
+            self.local.update(_match_pattern_names(case.pattern))
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
         return None
 
 
@@ -472,14 +493,19 @@ class _CallGraphVisitor(ast.NodeVisitor):
                 from_imports=imports,
             )
 
-    def _bind_or_invalidate_targets(self, targets: Iterable[ast.expr]) -> None:
-        target_list = tuple(targets)
-        names = set().union(*(_target_names(target) for target in target_list))
+    def _bind_or_invalidate_names(self, names: set[str]) -> None:
+        if not names:
+            return
         if self.stack:
             self._invalidate_local_imports(names)
             return
-        for target in target_list:
-            self._bind_module_target(target)
+        for name in names:
+            self.state.add_binding(name, "assign")
+
+    def _bind_or_invalidate_targets(self, targets: Iterable[ast.expr]) -> None:
+        target_list = tuple(targets)
+        names = set().union(*(_target_names(target) for target in target_list))
+        self._bind_or_invalidate_names(names)
 
     def _bind_module_target(self, target: ast.expr) -> None:
         if isinstance(target, ast.Name):
@@ -519,6 +545,72 @@ class _CallGraphVisitor(ast.NodeVisitor):
         for target in node.targets:
             self.visit(target)
         self._bind_or_invalidate_targets(node.targets)
+        return None
+
+    def _visit_for_statement(self, node: ast.For | ast.AsyncFor) -> None:
+        self.visit(node.iter)
+        self.visit(node.target)
+        names = _target_names(node.target)
+        self._bind_or_invalidate_names(names)
+        for statement in node.body:
+            self.visit(statement)
+        # The loop target is rebound on every iteration. An import inside the body
+        # must not make post-loop calls look unconditionally bound to that import.
+        self._bind_or_invalidate_names(names)
+        for statement in node.orelse:
+            self.visit(statement)
+
+    def visit_For(self, node: ast.For) -> Any:
+        self._visit_for_statement(node)
+        return None
+
+    def visit_AsyncFor(self, node: ast.AsyncFor) -> Any:
+        self._visit_for_statement(node)
+        return None
+
+    def _visit_with_statement(self, node: ast.With | ast.AsyncWith) -> None:
+        for item in node.items:
+            self.visit(item.context_expr)
+            if item.optional_vars is not None:
+                self.visit(item.optional_vars)
+                self._bind_or_invalidate_targets((item.optional_vars,))
+        for statement in node.body:
+            self.visit(statement)
+
+    def visit_With(self, node: ast.With) -> Any:
+        self._visit_with_statement(node)
+        return None
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> Any:
+        self._visit_with_statement(node)
+        return None
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> Any:
+        if node.type is not None:
+            self.visit(node.type)
+        names = {node.name} if isinstance(node.name, str) else set()
+        self._bind_or_invalidate_names(names)
+        for statement in node.body:
+            self.visit(statement)
+        # Python clears an exception target after the handler suite.
+        self._bind_or_invalidate_names(names)
+        return None
+
+    def visit_Match(self, node: ast.Match) -> Any:
+        self.visit(node.subject)
+        bound_names = set().union(
+            *(_match_pattern_names(case.pattern) for case in node.cases)
+        )
+        for case in node.cases:
+            # Cases are mutually exclusive. Reset the conservative binding state so
+            # an import in one case cannot leak into a later case during AST traversal.
+            self._bind_or_invalidate_names(bound_names)
+            self.visit(case.pattern)
+            if case.guard is not None:
+                self.visit(case.guard)
+            for statement in case.body:
+                self.visit(statement)
+        self._bind_or_invalidate_names(bound_names)
         return None
 
     def visit_Call(self, node: ast.Call) -> Any:

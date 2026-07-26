@@ -35,9 +35,8 @@ def _write_bundle(
         {"verdict": output_status},
     )
     post_path = bundle_dir / f"{stem}.bundle_health.post.json"
-    _write_json(post_path, {"status": "pass"})
     manifest = bundle_dir / f"{stem}.bundle.manifest.json"
-    _write_json(
+    _, manifest_sha = _write_json(
         manifest,
         {
             "kind": "repoground.bundle.manifest",
@@ -69,6 +68,15 @@ def _write_bundle(
                 "agent_export_gate_status": "pass",
                 "export_safety_report_status": "pass",
             },
+        },
+    )
+    _write_json(
+        post_path,
+        {
+            "status": "pass",
+            "bundle_manifest_path": str(manifest.resolve()),
+            "bundle_run_id": run_id,
+            "bundle_manifest_sha256": manifest_sha,
         },
     )
     return manifest
@@ -281,6 +289,40 @@ def test_selector_rejects_output_health_without_valid_integrity_metadata(tmp_pat
     )
     assert "byte size missing or invalid" in reasons
     assert "sha256 missing or invalid" in reasons
+
+
+def test_selector_rejects_post_health_bound_to_another_publication(tmp_path):
+    manifest = _write_bundle(
+        tmp_path,
+        directory="repo/main/stale-post",
+        stem="stale-post",
+        created_at="2026-07-25T21:00:00Z",
+        run_id="stale-post-run",
+    )
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    post_path = manifest.parent / document["links"]["post_emit_health_path"]
+    stale = json.loads(post_path.read_text(encoding="utf-8"))
+    stale.update(
+        {
+            "bundle_manifest_path": str(
+                (tmp_path / "other.bundle.manifest.json").resolve()
+            ),
+            "bundle_run_id": "other-run",
+            "bundle_manifest_sha256": "0" * 64,
+        }
+    )
+    _write_json(post_path, stale)
+
+    catalog = discover_bundle_catalog(tmp_path)
+    selection = select_bundle_manifest(tmp_path, repo="repoground")
+
+    assert selection["status"] == "missing"
+    candidate = next(
+        item for item in catalog["candidates"] if item["stem"] == "stale-post"
+    )
+    assert candidate["selection_eligible"] is False
+    assert candidate["health_status"] == "invalid"
+    assert any("does not match" in reason for reason in candidate["health_reasons"])
 
 
 def test_selector_fails_closed_for_equal_newest_identity(tmp_path):

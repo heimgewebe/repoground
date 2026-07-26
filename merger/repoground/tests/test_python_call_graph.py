@@ -318,6 +318,79 @@ def dotted():
     assert dotted[1]["resolution_reason"] == "attribute_root_lexically_shadowed_name"
 
 
+def test_local_import_is_invalidated_by_control_flow_bindings(tmp_path):
+    target = tmp_path / "pkg" / "target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        """
+def for_binding(items):
+    from pkg.target import run
+    for run in items:
+        pass
+    run()
+
+async def async_for_binding(items):
+    from pkg.target import run
+    async for run in items:
+        pass
+    run()
+
+def with_binding(manager):
+    import pkg.target as local_target
+    with manager as local_target:
+        pass
+    local_target.run()
+
+async def async_with_binding(manager):
+    import pkg.target as local_target
+    async with manager as local_target:
+        pass
+    local_target.run()
+
+def except_binding():
+    from pkg.target import run
+    try:
+        raise RuntimeError()
+    except RuntimeError as run:
+        pass
+    run()
+
+def match_binding(value):
+    import pkg.target as local_target
+    match value:
+        case {"target": local_target}:
+            pass
+    local_target.run()
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    simple = [call for call in calls if call["callee_expression"] == "run"]
+    dotted = [call for call in calls if call["callee_expression"] == "local_target.run"]
+
+    assert {call["caller_qualified_name"] for call in simple} == {
+        "for_binding",
+        "async_for_binding",
+        "except_binding",
+    }
+    assert {call["caller_qualified_name"] for call in dotted} == {
+        "with_binding",
+        "async_with_binding",
+        "match_binding",
+    }
+    assert all(call["evidence_level"] == "S0" for call in (*simple, *dotted))
+    assert all(call["resolved_target_ids"] == [] for call in (*simple, *dotted))
+    assert all(
+        call["resolution_reason"] == "lexically_shadowed_name" for call in simple
+    )
+    assert all(
+        call["resolution_reason"] == "attribute_root_lexically_shadowed_name"
+        for call in dotted
+    )
+
+
 def test_local_import_can_be_reestablished_after_rebinding(tmp_path):
     target = tmp_path / "pkg" / "target.py"
     target.parent.mkdir(parents=True)
