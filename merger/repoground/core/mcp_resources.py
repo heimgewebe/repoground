@@ -196,21 +196,21 @@ def _manifest_candidates(bundle_root: str | Path) -> list[Path]:
             continue
         pool.sort(
             key=lambda item: (
-                str(item.get("created_at") or ""),
+                str(item.get("created_at_utc") or item.get("created_at") or ""),
                 str(item.get("run_id") or ""),
                 str(item["manifest_path"]),
             ),
             reverse=True,
         )
         newest_key = (
-            str(pool[0].get("created_at") or ""),
+            str(pool[0].get("created_at_utc") or pool[0].get("created_at") or ""),
             str(pool[0].get("run_id") or ""),
         )
         tied = [
             item
             for item in pool
             if (
-                str(item.get("created_at") or ""),
+                str(item.get("created_at_utc") or item.get("created_at") or ""),
                 str(item.get("run_id") or ""),
             )
             == newest_key

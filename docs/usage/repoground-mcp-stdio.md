@@ -32,9 +32,16 @@ python3 -m merger.repoground.cli.mcp_stdio \
 
 The repository tracks `.mcp.json`, which starts `scripts/repoground-mcp-project.py`.
 For a checkout opened as an MCP-aware project, this is the canonical configuration. The launcher
-binds `--repo-root` to that checkout and uses `~/.local/share/repoground/bundles` by default.
-Set `REPOGROUND_BUNDLE_ROOT` only when an operator intentionally uses another existing bundle
-root. Snapshot creation remains disabled unless `REPOGROUND_MCP_ENABLE_SNAPSHOT_CREATE=1`.
+binds `--repo-root` to that checkout and discovers the canonical publication catalog in a nearby
+`manifest-publications/bundles` directory. It selects one uniquely healthy bundle whose repository
+identity matches the checkout; it does not fall back to the legacy
+`~/.local/share/repoground/bundles` location.
+
+`REPOGROUND_PUBLICATION_ROOT` overrides the discovered canonical publication catalog. The
+higher-priority `REPOGROUND_BUNDLE_ROOT` override may instead name another existing catalog or one
+exact bundle manifest for an intentional operator-controlled setup. `REPOGROUND_REPO_ID` can bind
+selection to an explicit qualified repository identity when Git `origin` is unavailable. Snapshot
+creation remains disabled unless `REPOGROUND_MCP_ENABLE_SNAPSHOT_CREATE=1`.
 
 ## Generic MCP client configuration
 

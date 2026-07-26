@@ -1,3 +1,9 @@
+import json
+
+from merger.repoground.tests.test_ask_context_cli import (
+    _add_artifact,
+    _complete_basic_bundle,
+)
 from merger.repoground.core import ask_context, mcp_tools
 
 
@@ -158,3 +164,30 @@ def test_query_uses_text_retrieval_for_broad_question(monkeypatch):
     assert result["route"] == "text_retrieval"
     assert result["retrieval"]["strategy"] == "exact_and"
     assert "navigation_hits" not in result
+
+
+def test_snapshot_status_surfaces_unhealthy_exact_manifest(tmp_path):
+    bundle = _complete_basic_bundle(tmp_path)
+    _add_artifact(
+        bundle,
+        "output_health",
+        "demo.output_health.json",
+        json.dumps({"verdict": "fail"}) + "\n",
+    )
+    post_path = bundle["manifest"].parent / "demo.bundle_health.post.json"
+    post_path.write_text(json.dumps({"status": "pass"}) + "\n", encoding="utf-8")
+    document = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    document["links"] = {
+        "post_emit_health_path": post_path.name,
+        "bundle_surface_validation_status": "pass",
+        "agent_export_gate_status": "pass",
+        "export_safety_report_status": "pass",
+    }
+    bundle["manifest"].write_text(json.dumps(document), encoding="utf-8")
+
+    result = mcp_tools.snapshot_status(bundle_manifest=bundle["manifest"])
+
+    assert result["status"] == "unhealthy"
+    assert result["health"]["health_status"] == "invalid"
+    assert any("expected 'pass'" in reason for reason in result["health"]["reasons"])
+    assert result["snapshot"]["health_status"] == "invalid"

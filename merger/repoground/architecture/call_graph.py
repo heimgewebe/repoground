@@ -270,6 +270,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
     def visit_FunctionDef(self, node: ast.FunctionDef) -> Any:
         self._register_def(node.name, "function")
         self._visit_function_header(node)
+        self._invalidate_local_imports({node.name})
         frame = _function_frame(
             node,
             name=node.name,
@@ -285,6 +286,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> Any:
         self._register_def(node.name, "async_function")
         self._visit_function_header(node)
+        self._invalidate_local_imports({node.name})
         frame = _function_frame(
             node,
             name=node.name,
@@ -307,6 +309,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
             self.visit(keyword.value)
         for type_param in getattr(node, "type_params", ()):
             self.visit(type_param)
+        self._invalidate_local_imports({node.name})
         self.stack.append(_class_frame(node))
         for statement in node.body:
             self.visit(statement)
@@ -385,11 +388,23 @@ class _CallGraphVisitor(ast.NodeVisitor):
             return None
 
         aliases = dict(self.stack[-1].module_aliases)
+        imports = {
+            local: (module, original)
+            for local, module, original in self.stack[-1].from_imports
+        }
         for alias in node.names:
             local = alias.asname or alias.name.split(".")[0]
             aliases[local] = alias.name if alias.asname else local
+            imports.pop(local, None)
         self.stack[-1] = replace(
-            self.stack[-1], module_aliases=tuple(sorted(aliases.items()))
+            self.stack[-1],
+            module_aliases=tuple(sorted(aliases.items())),
+            from_imports=tuple(
+                sorted(
+                    (local, module, original)
+                    for local, (module, original) in imports.items()
+                )
+            ),
         )
         return None
 
@@ -417,13 +432,16 @@ class _CallGraphVisitor(ast.NodeVisitor):
             local: (module, original)
             for local, module, original in self.stack[-1].from_imports
         }
+        aliases = dict(self.stack[-1].module_aliases)
         for alias in node.names:
             if alias.name == "*" or not source:
                 continue
             local = alias.asname or alias.name
             imports[local] = (source, alias.name)
+            aliases.pop(local, None)
         self.stack[-1] = replace(
             self.stack[-1],
+            module_aliases=tuple(sorted(aliases.items())),
             from_imports=tuple(
                 sorted(
                     (local, module, original)
@@ -433,6 +451,36 @@ class _CallGraphVisitor(ast.NodeVisitor):
         )
         return None
 
+    def _invalidate_local_imports(self, names: set[str]) -> None:
+        if not self.stack or not names:
+            return
+        frame = self.stack[-1]
+        aliases = tuple(
+            (local, module)
+            for local, module in frame.module_aliases
+            if local not in names
+        )
+        imports = tuple(
+            (local, module, original)
+            for local, module, original in frame.from_imports
+            if local not in names
+        )
+        if aliases != frame.module_aliases or imports != frame.from_imports:
+            self.stack[-1] = replace(
+                frame,
+                module_aliases=aliases,
+                from_imports=imports,
+            )
+
+    def _bind_or_invalidate_targets(self, targets: Iterable[ast.expr]) -> None:
+        target_list = tuple(targets)
+        names = set().union(*(_target_names(target) for target in target_list))
+        if self.stack:
+            self._invalidate_local_imports(names)
+            return
+        for target in target_list:
+            self._bind_module_target(target)
+
     def _bind_module_target(self, target: ast.expr) -> None:
         if isinstance(target, ast.Name):
             self.state.add_binding(target.id, "assign")
@@ -441,22 +489,36 @@ class _CallGraphVisitor(ast.NodeVisitor):
                 self._bind_module_target(element)
 
     def visit_Assign(self, node: ast.Assign) -> Any:
-        if not self.stack:
-            for target in node.targets:
-                self._bind_module_target(target)
-        self.generic_visit(node)
+        self.visit(node.value)
+        for target in node.targets:
+            self.visit(target)
+        self._bind_or_invalidate_targets(node.targets)
         return None
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
-        if not self.stack:
-            self._bind_module_target(node.target)
-        self.generic_visit(node)
+        self.visit(node.annotation)
+        if node.value is not None:
+            self.visit(node.value)
+        self.visit(node.target)
+        self._bind_or_invalidate_targets((node.target,))
+        return None
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> Any:
+        self.visit(node.target)
+        self.visit(node.value)
+        self._bind_or_invalidate_targets((node.target,))
         return None
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> Any:
-        if not self.stack:
-            self._bind_module_target(node.target)
-        self.generic_visit(node)
+        self.visit(node.value)
+        self.visit(node.target)
+        self._bind_or_invalidate_targets((node.target,))
+        return None
+
+    def visit_Delete(self, node: ast.Delete) -> Any:
+        for target in node.targets:
+            self.visit(target)
+        self._bind_or_invalidate_targets(node.targets)
         return None
 
     def visit_Call(self, node: ast.Call) -> Any:

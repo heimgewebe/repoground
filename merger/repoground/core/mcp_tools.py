@@ -354,13 +354,18 @@ def snapshot_status(
     from merger.repoground.core.bundle_access import (
         snapshot_status as access_snapshot_status,
     )
+    from merger.repoground.core.bundle_catalog import inspect_bundle_health
 
     snapshot = access_snapshot_status(bundle_manifest)
     availability = _availability_block(snapshot)
     freshness = _freshness_block(snapshot)
-    status = (
-        "available" if availability["status"] == "available" else availability["status"]
-    )
+    health = inspect_bundle_health(bundle_manifest)
+    if availability["status"] != "available":
+        status = availability["status"]
+    elif health["health_status"] != "pass":
+        status = "unhealthy"
+    else:
+        status = "available"
     return {
         "kind": READ_ONLY_KIND,
         "version": READ_ONLY_VERSION,
@@ -374,7 +379,9 @@ def snapshot_status(
             "profile": snapshot.get("profile"),
             "artifact_count": snapshot.get("artifact_count"),
             "roles": snapshot.get("roles"),
+            "health_status": health.get("health_status"),
         },
+        "health": health,
         "availability": availability,
         "freshness": freshness,
         "result_semantics": "repobrief.snapshot_status.v1",

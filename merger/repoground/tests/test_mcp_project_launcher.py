@@ -109,3 +109,14 @@ def test_selected_bundle_fails_closed_when_catalog_is_ambiguous(tmp_path, monkey
 
     with pytest.raises(BundleCatalogError, match="newest_bundle_identity_ambiguous"):
         module._selected_bundle_manifest()
+
+
+def test_project_launcher_documentation_matches_canonical_publication_roots():
+    documentation = (REPO_ROOT / "docs/usage/repoground-mcp-stdio.md").read_text(
+        encoding="utf-8"
+    )
+    assert "manifest-publications/bundles" in documentation
+    assert "REPOGROUND_PUBLICATION_ROOT" in documentation
+    assert "REPOGROUND_BUNDLE_ROOT" in documentation
+    assert "REPOGROUND_REPO_ID" in documentation
+    assert "does not fall back" in documentation

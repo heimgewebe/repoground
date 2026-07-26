@@ -5,6 +5,7 @@ from pathlib import Path
 from merger.repoground.core.bundle_catalog import (
     discover_bundle_catalog,
     manifest_repo_aliases,
+    manifest_repo_identities,
     normalize_repo_remote,
     select_bundle_manifest,
 )
@@ -102,6 +103,96 @@ def test_manifest_repo_aliases_include_canonical_and_short_identity():
         "heimgewebe__repoground__main",
         "repoground",
     ]
+
+
+def test_manifest_repo_identities_prefer_explicit_remote():
+    identities = manifest_repo_identities(
+        {
+            "snapshot_provenance": {
+                "repositories": [
+                    {
+                        "name": "wrong-owner__repoground__main",
+                        "repo_remote": "git@github.com:right-owner/repoground.git",
+                    }
+                ]
+            }
+        }
+    )
+    assert identities == ["right-owner/repoground"]
+
+
+def test_short_repo_selector_fails_closed_across_owners(tmp_path):
+    first = _write_bundle(
+        tmp_path,
+        directory="owner-a/main/run",
+        stem="owner-a",
+        created_at="2026-07-25T20:00:00Z",
+        run_id="owner-a-run",
+        remote="git@github.com:owner-a/repoground.git",
+    )
+    second = _write_bundle(
+        tmp_path,
+        directory="owner-b/main/run",
+        stem="owner-b",
+        created_at="2026-07-25T21:00:00Z",
+        run_id="owner-b-run",
+        remote="git@github.com:owner-b/repoground.git",
+    )
+
+    short = select_bundle_manifest(tmp_path, repo="repoground")
+    qualified = select_bundle_manifest(tmp_path, repo="owner-a/repoground")
+    underscored = select_bundle_manifest(tmp_path, repo="owner-b__repoground")
+
+    assert short["status"] == "ambiguous"
+    assert short["reason"] == "repository_identity_ambiguous"
+    assert short["repo_identity_groups"] == [
+        "owner-a/repoground",
+        "owner-b/repoground",
+    ]
+    assert qualified["selected"]["manifest_path"] == str(first.resolve())
+    assert underscored["selected"]["manifest_path"] == str(second.resolve())
+
+
+def test_selector_orders_created_at_by_normalized_utc_and_rejects_invalid(tmp_path):
+    earlier = _write_bundle(
+        tmp_path,
+        directory="repo/main/earlier",
+        stem="earlier",
+        created_at="2026-07-25T23:30:00+02:00",
+        run_id="earlier-run",
+    )
+    later = _write_bundle(
+        tmp_path,
+        directory="repo/main/later",
+        stem="later",
+        created_at="2026-07-25T22:00:00Z",
+        run_id="later-run",
+    )
+    _write_bundle(
+        tmp_path,
+        directory="repo/main/invalid",
+        stem="invalid",
+        created_at="zzzz",
+        run_id="invalid-run",
+    )
+
+    catalog = discover_bundle_catalog(tmp_path)
+    selection = select_bundle_manifest(tmp_path, repo="heimgewebe/repoground")
+
+    assert selection["status"] == "available"
+    assert selection["selected"]["manifest_path"] == str(later.resolve())
+    assert selection["selected"]["manifest_path"] != str(earlier.resolve())
+    assert selection["selected"]["created_at_utc"] == "2026-07-25T22:00:00.000000Z"
+    invalid = next(item for item in catalog["candidates"] if item["stem"] == "invalid")
+    assert invalid["timestamp_status"] == "invalid"
+    assert invalid["selection_eligible"] is False
+    assert "created_at" in invalid["timestamp_reason"]
+    invalid_only = select_bundle_manifest(
+        invalid["manifest_path"],
+        repo="heimgewebe/repoground",
+        require_healthy=False,
+    )
+    assert invalid_only["status"] == "missing"
 
 
 def test_catalog_ignores_hidden_generation_copy_and_selects_publication(tmp_path):

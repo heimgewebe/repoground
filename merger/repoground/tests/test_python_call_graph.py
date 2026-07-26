@@ -285,6 +285,60 @@ def before_binding():
     assert simple_unresolved["resolved_target_ids"] == []
 
 
+def test_local_import_is_invalidated_by_later_rebinding(tmp_path):
+    target = tmp_path / "pkg" / "target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        """
+def before():
+    from pkg.target import run
+    run()
+    run = lambda: 2
+    run()
+
+def dotted():
+    import pkg.target as local_target
+    local_target.run()
+    local_target = object()
+    local_target.run()
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    simple = [call for call in calls if call["callee_expression"] == "run"]
+    dotted = [call for call in calls if call["callee_expression"] == "local_target.run"]
+
+    assert [call["evidence_level"] for call in simple] == ["S1", "S0"]
+    assert simple[0]["resolution_reason"] == "local_imported_internal_name"
+    assert simple[1]["resolution_reason"] == "lexically_shadowed_name"
+    assert [call["evidence_level"] for call in dotted] == ["S1", "S0"]
+    assert dotted[0]["resolution_reason"] == "local_module_alias_call"
+    assert dotted[1]["resolution_reason"] == "attribute_root_lexically_shadowed_name"
+
+
+def test_local_import_can_be_reestablished_after_rebinding(tmp_path):
+    target = tmp_path / "pkg" / "target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        """
+def caller():
+    from pkg.target import run
+    run = lambda: 2
+    from pkg.target import run
+    run()
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    call = _single_call(calls, "run")
+    assert call["evidence_level"] == "S1"
+    assert call["resolution_reason"] == "local_imported_internal_name"
+
+
 def test_method_does_not_resolve_bare_class_scope_imports(tmp_path):
     target = tmp_path / "toolkit" / "target.py"
     target.parent.mkdir(parents=True)

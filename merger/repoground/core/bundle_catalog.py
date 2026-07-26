@@ -12,6 +12,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -122,6 +123,59 @@ def _canonical_name_aliases(name: Any) -> set[str]:
     return aliases
 
 
+def _canonical_repo_identity(value: Any) -> str | None:
+    remote = normalize_repo_remote(value)
+    if remote:
+        return remote
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip().casefold()
+    parts = raw.split("__")
+    if len(parts) >= 2 and parts[0] and parts[1]:
+        return f"{parts[0]}/{parts[1]}"
+    return None
+
+
+def manifest_repo_identities(document: Mapping[str, Any]) -> list[str]:
+    """Return canonical owner/repository identities, preferring explicit remotes."""
+    provenance = document.get("snapshot_provenance")
+    repositories = (
+        provenance.get("repositories") if isinstance(provenance, Mapping) else None
+    )
+    identities: set[str] = set()
+    fallback: set[str] = set()
+    for record in repositories if isinstance(repositories, list) else []:
+        if not isinstance(record, Mapping):
+            continue
+        remote = normalize_repo_remote(record.get("repo_remote"))
+        if remote:
+            identities.add(remote)
+            continue
+        for key in ("name", "repo"):
+            identity = _canonical_repo_identity(record.get(key))
+            if identity:
+                fallback.add(identity)
+    return sorted(identities or fallback)
+
+
+def _normalized_created_at(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise BundleCatalogError("bundle created_at is missing or invalid")
+    raw = value.strip()
+    candidate = f"{raw[:-1]}+00:00" if raw.endswith(("Z", "z")) else raw
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise BundleCatalogError("bundle created_at is not valid ISO-8601") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise BundleCatalogError("bundle created_at must include a timezone")
+    return (
+        parsed.astimezone(timezone.utc)
+        .isoformat(timespec="microseconds")
+        .replace("+00:00", "Z")
+    )
+
+
 def manifest_repo_aliases(document: Mapping[str, Any]) -> list[str]:
     aliases: set[str] = set()
     provenance = document.get("snapshot_provenance")
@@ -224,6 +278,35 @@ def _candidate_health(path: Path, document: Mapping[str, Any]) -> tuple[str, lis
     return ("pass", []) if not reasons else ("invalid", reasons)
 
 
+def inspect_bundle_health(bundle_manifest: str | Path) -> dict[str, Any]:
+    """Inspect manifest-bound health without selecting or refreshing a bundle."""
+    path = Path(bundle_manifest).expanduser().resolve()
+    try:
+        document, raw = _manifest_document(path)
+    except BundleCatalogError as exc:
+        return {
+            "kind": "repoground.bundle_health",
+            "version": VERSION,
+            "status": "invalid",
+            "health_status": "invalid",
+            "bundle_manifest": str(path),
+            "manifest_sha256": None,
+            "reasons": [str(exc)],
+            "mutation_boundary": {"writes": [], "read_paths_do_not_refresh": True},
+        }
+    health_status, reasons = _candidate_health(path, document)
+    return {
+        "kind": "repoground.bundle_health",
+        "version": VERSION,
+        "status": "available" if health_status == "pass" else "unhealthy",
+        "health_status": health_status,
+        "bundle_manifest": str(path),
+        "manifest_sha256": _sha256_bytes(raw),
+        "reasons": reasons,
+        "mutation_boundary": {"writes": [], "read_paths_do_not_refresh": True},
+    }
+
+
 def _manifest_paths(root: Path) -> list[Path]:
     if root.is_file():
         return [root]
@@ -254,6 +337,14 @@ def discover_bundle_catalog(bundle_root: str | Path) -> dict[str, Any]:
         except BundleCatalogError as exc:
             rejected.append({"manifest_path": str(path), "reason": str(exc)})
             continue
+        try:
+            created_at_utc = _normalized_created_at(document.get("created_at"))
+            timestamp_status = "valid"
+            timestamp_reason = None
+        except BundleCatalogError as exc:
+            created_at_utc = None
+            timestamp_status = "invalid"
+            timestamp_reason = str(exc)
         health_status, health_reasons = _candidate_health(path, document)
         candidates.append(
             {
@@ -262,10 +353,16 @@ def discover_bundle_catalog(bundle_root: str | Path) -> dict[str, Any]:
                 "manifest_sha256": _sha256_bytes(raw),
                 "run_id": document.get("run_id"),
                 "created_at": document.get("created_at"),
+                "created_at_utc": created_at_utc,
+                "timestamp_status": timestamp_status,
+                "timestamp_reason": timestamp_reason,
                 "repo_aliases": manifest_repo_aliases(document),
+                "repo_identities": manifest_repo_identities(document),
                 "health_status": health_status,
                 "health_reasons": health_reasons,
-                "selection_eligible": health_status == "pass",
+                "selection_eligible": (
+                    health_status == "pass" and timestamp_status == "valid"
+                ),
             }
         )
     return {
@@ -282,12 +379,41 @@ def discover_bundle_catalog(bundle_root: str | Path) -> dict[str, Any]:
     }
 
 
-def _normalized_requested_repo(repo: Any) -> str | None:
+def _normalized_requested_repo(repo: Any) -> tuple[str | None, bool]:
     if repo is None:
-        return None
+        return None, False
     if not isinstance(repo, str) or not repo.strip():
         raise BundleCatalogError("repo must be null or a non-empty repository identity")
-    return normalize_repo_remote(repo) or repo.strip().casefold()
+    raw = repo.strip()
+    canonical = _canonical_repo_identity(raw)
+    if canonical:
+        return canonical, True
+    return raw.casefold(), False
+
+
+def _candidate_matches_repo(
+    candidate: Mapping[str, Any], requested_repo: str | None, qualified: bool
+) -> bool:
+    if requested_repo is None:
+        return True
+    if qualified:
+        identities = candidate.get("repo_identities")
+        return isinstance(identities, list) and requested_repo in identities
+    aliases = candidate.get("repo_aliases")
+    return isinstance(aliases, list) and requested_repo in aliases
+
+
+def _short_repo_identity_groups(
+    matches: list[dict[str, Any]], requested_repo: str
+) -> set[str]:
+    groups: set[str] = set()
+    for candidate in matches:
+        identities = candidate.get("repo_identities")
+        if isinstance(identities, list) and identities:
+            groups.update(str(identity) for identity in identities)
+        else:
+            groups.add(f"unqualified:{requested_repo}")
+    return groups
 
 
 def select_bundle_manifest(
@@ -298,22 +424,44 @@ def select_bundle_manifest(
     require_healthy: bool = True,
 ) -> dict[str, Any]:
     catalog = discover_bundle_catalog(bundle_root)
-    requested_repo = _normalized_requested_repo(repo)
+    requested_repo, requested_repo_qualified = _normalized_requested_repo(repo)
     if stem is not None and (not isinstance(stem, str) or not stem.strip()):
         raise BundleCatalogError("stem must be null or a non-empty string")
 
-    matches = []
+    identity_matches = []
     for candidate in catalog["candidates"]:
         if stem is not None and candidate["stem"] != stem:
             continue
-        if (
-            requested_repo is not None
-            and requested_repo not in candidate["repo_aliases"]
+        if not _candidate_matches_repo(
+            candidate, requested_repo, requested_repo_qualified
         ):
             continue
-        if require_healthy and not candidate["selection_eligible"]:
+        if candidate.get("timestamp_status") != "valid":
             continue
-        matches.append(candidate)
+        identity_matches.append(candidate)
+
+    if requested_repo is not None and not requested_repo_qualified:
+        identity_groups = _short_repo_identity_groups(identity_matches, requested_repo)
+        if len(identity_groups) > 1:
+            return {
+                "kind": "repoground.bundle_selection",
+                "version": VERSION,
+                "status": "ambiguous",
+                "bundle_root": catalog["bundle_root"],
+                "requested_repo": requested_repo,
+                "requested_stem": stem,
+                "selected": None,
+                "reason": "repository_identity_ambiguous",
+                "repo_identity_groups": sorted(identity_groups),
+                "matches": identity_matches,
+                "does_not_establish": list(DOES_NOT_ESTABLISH),
+            }
+
+    matches = [
+        candidate
+        for candidate in identity_matches
+        if not require_healthy or candidate["health_status"] == "pass"
+    ]
     if not matches:
         return {
             "kind": "repoground.bundle_selection",
@@ -332,20 +480,20 @@ def select_bundle_manifest(
 
     matches.sort(
         key=lambda item: (
-            str(item.get("created_at") or ""),
+            str(item.get("created_at_utc") or ""),
             str(item.get("run_id") or ""),
             str(item["manifest_path"]),
         ),
         reverse=True,
     )
     newest_key = (
-        str(matches[0].get("created_at") or ""),
+        str(matches[0].get("created_at_utc") or ""),
         str(matches[0].get("run_id") or ""),
     )
     tied = [
         item
         for item in matches
-        if (str(item.get("created_at") or ""), str(item.get("run_id") or ""))
+        if (str(item.get("created_at_utc") or ""), str(item.get("run_id") or ""))
         == newest_key
     ]
     if len(tied) != 1:
@@ -370,7 +518,7 @@ def select_bundle_manifest(
         "requested_stem": stem,
         "selected": matches[0],
         "match_count": len(matches),
-        "selection_policy": "newest_healthy_by_created_at_then_run_id",
+        "selection_policy": "newest_healthy_by_created_at_utc_then_run_id",
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
 
