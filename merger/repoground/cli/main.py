@@ -86,6 +86,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_ground import register_ground_command
     register_ground_command(subparsers)
 
+    # Explicit optional diagnostics; never part of normal query or service flows.
+    from .cmd_diagnostics import register_diagnostics_commands
+    register_diagnostics_commands(subparsers)
+
     # Index command
     index_parser = subparsers.add_parser("index", help="Build or verify retrieval index")
     index_parser.add_argument("--dump", required=True, help="Path to dump_index.json")
@@ -295,7 +299,8 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)
-    elif parsed_args.command in {"token-budget", "evidence-query", "retrieval-snapshot"}:
+    elif parsed_args.command in {"token-budget", "evidence-query", "retrieval-snapshot", "diagnostics"}:
+        from .cmd_diagnostics import run_diagnostics
         from .cmd_evidence_query import run_evidence_query
         from .cmd_incremental_snapshot import run_incremental_snapshot
         from .cmd_token_budget import run_token_budget
@@ -304,6 +309,7 @@ def main(args: Optional[List[str]] = None) -> int:
             "token-budget": run_token_budget,
             "evidence-query": run_evidence_query,
             "retrieval-snapshot": run_incremental_snapshot,
+            "diagnostics": run_diagnostics,
         }
         return handlers[parsed_args.command](parsed_args)
     elif parsed_args.command == "artifact":
