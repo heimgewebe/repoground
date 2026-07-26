@@ -173,3 +173,46 @@ Reverting removes only the opt-in CLI, its tests, its documentation, the review 
 - CLI reachability proves a product entrypoint exists; it does not prove real-world usage frequency.
 - The current host could not evaluate the two Bubblewrap-dependent sidecar files.
 - GitHub CI and a fresh external review of the review-hardened head remain separate post-push evidence.
+
+## Second review-hardening addendum
+
+Codex reviewed PR head `b00e443b6b39e56503fc4ddb87e0a666e042eab0` and identified a second P2 boundary issue. Object-shaped retrieval-evaluation details could still carry invalid field types. In particular, `"is_relevant": "false"` is a truthy string in Python and could silently suppress a miss, while a non-string `query` could produce a diagnostics artifact that violates its schema.
+
+The finding is addressed by revision `e080654c4c4b0d11d426a44d4088028bbff79163`.
+
+- Parent head: `b00e443b6b39e56503fc4ddb87e0a666e042eab0`
+- Field-hardening diff format: `git diff --binary --no-ext-diff <parent>..<field-hardening>`
+- Field-hardening diff bytes: `7510`
+- Field-hardening diff SHA-256: `09c640246ac6072d442e5058ed7478e5c39dde9e42128e469b1168db0b2952d4`
+
+The adapter now validates these present fields before miss classification:
+
+- `query`: string;
+- `expected`: list of strings;
+- `is_relevant`: boolean;
+- `found_count`: non-negative integer, explicitly excluding booleans;
+- `top_results`: list of strings.
+
+Missing fields retain the previous bounded defaults. Present malformed fields fail with exit code 2 and without a traceback. Nine parameterized regression cases cover scalar/list mismatches, invalid list members, boolean-as-integer ambiguity and negative hit counts.
+
+Verification on the exact field-hardening revision:
+
+- focused diagnostics tests: `45 passed in 0.84s`;
+- relevant domain, CLI and retrieval-diagnostics tests: `160 passed in 1.17s`;
+- broad suite excluding only the two already documented host-blocked Bubblewrap files: `4877 passed, 2 skipped in 149.90s`;
+- durable broad-test task: `f681a924ca8a45c8a14b488e`;
+- durable lifecycle receipt SHA-256: `98ee3e1be27530188343811a3346348d7bceeb40607548104f1911a9fed332c7`;
+- Ruff changed-scope check: pass;
+- graph-maintainability ratchet: pass;
+- module reachability: `205 production modules, 0 unproven, 0 documentation-only, 0 test-only`.
+
+Thirty fresh-process normal CLI starts were measured after the broad suite completed:
+
+| Revision | Median | p90 | Minimum | Maximum |
+|---|---:|---:|---:|---:|
+| base `main` | 142.167 ms | 145.178 ms | 137.477 ms | 150.679 ms |
+| field-hardened implementation | 143.214 ms | 144.771 ms | 138.812 ms | 147.088 ms |
+
+Observed median delta: `+1.047 ms` or approximately `+0.74%`. The validation functions remain behind the lazy diagnostics parser and therefore do not execute during normal `--help`, indexing, querying, service, MCP, merge or publication paths. The measured delta is compatible with fresh-process noise, but is reported rather than treated as zero.
+
+This addendum supersedes the earlier statement that a fresh external review of the first review-hardened head remained pending. A further current-head review and current-head GitHub CI are still separate post-push gates.
