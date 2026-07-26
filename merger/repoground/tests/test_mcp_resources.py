@@ -10,7 +10,10 @@ from merger.repoground.core.mcp_resources import (
     read_mcp_resource,
     resource_templates,
 )
-from merger.repoground.tests.test_ask_context_cli import _add_artifact, _complete_basic_bundle
+from merger.repoground.tests.test_ask_context_cli import (
+    _add_artifact,
+    _complete_basic_bundle,
+)
 
 
 def _bundle_with_health(tmp_path: Path) -> dict:
@@ -76,10 +79,18 @@ def test_mcp_read_manifest_resource_carries_context_and_content(tmp_path):
 def test_mcp_read_canonical_reading_pack_health_and_availability_resources(tmp_path):
     bundle = _bundle_with_health(tmp_path)
 
-    canonical = read_mcp_resource("repoground://snapshot/demo/canonical", bundle_root=bundle["manifest"].parent)
-    reading = read_mcp_resource("repoground://snapshot/demo/reading-pack", bundle_root=bundle["manifest"].parent)
-    health = read_mcp_resource("repoground://snapshot/demo/health", bundle_root=bundle["manifest"].parent)
-    availability = read_mcp_resource("repoground://snapshot/demo/availability", bundle_root=bundle["manifest"].parent)
+    canonical = read_mcp_resource(
+        "repoground://snapshot/demo/canonical", bundle_root=bundle["manifest"].parent
+    )
+    reading = read_mcp_resource(
+        "repoground://snapshot/demo/reading-pack", bundle_root=bundle["manifest"].parent
+    )
+    health = read_mcp_resource(
+        "repoground://snapshot/demo/health", bundle_root=bundle["manifest"].parent
+    )
+    availability = read_mcp_resource(
+        "repoground://snapshot/demo/availability", bundle_root=bundle["manifest"].parent
+    )
 
     assert canonical["resource_role"] == "canonical_md"
     assert "hello resolved world" in canonical["content_text"]
@@ -88,12 +99,20 @@ def test_mcp_read_canonical_reading_pack_health_and_availability_resources(tmp_p
     assert health["resource_role"] == "post_emit_health"
     assert health["content_json"]["status"] == "pass"
     assert availability["resource_role"] == "availability_model"
-    assert availability["content_json"]["status"] in {"available", "partial", "missing", "unknown", "pass", "warn", "fail"}
+    assert availability["content_json"]["status"] in {
+        "available",
+        "partial",
+        "missing",
+        "unknown",
+        "pass",
+        "warn",
+        "fail",
+    }
 
 
 def test_mcp_read_arbitrary_artifact_resource(tmp_path):
     bundle = _complete_basic_bundle(tmp_path)
-    _add_artifact(bundle, "extra_json", "extra.json", "{\"ok\": true}\n")
+    _add_artifact(bundle, "extra_json", "extra.json", '{"ok": true}\n')
 
     result = read_mcp_resource(
         "repoground://snapshot/demo/artifact/extra_json",
@@ -122,28 +141,37 @@ def test_mcp_read_bundle_manifest_artifact_role_is_available(tmp_path):
 def test_mcp_file_bundle_root_accepts_only_real_bundle_manifest(tmp_path):
     bundle = _complete_basic_bundle(tmp_path)
 
-    ok = read_mcp_resource("repoground://snapshot/demo/manifest", bundle_root=bundle["manifest"])
+    ok = read_mcp_resource(
+        "repoground://snapshot/demo/manifest", bundle_root=bundle["manifest"]
+    )
 
     assert ok["status"] == "available"
     assert ok["content_json"]["kind"] == "repolens.bundle.manifest"
 
     secret = tmp_path / "demo.txt"
     secret.write_text("plain secret\n", encoding="utf-8")
-    missing = read_mcp_resource("repoground://snapshot/demo/manifest", bundle_root=secret)
+    missing = read_mcp_resource(
+        "repoground://snapshot/demo/manifest", bundle_root=secret
+    )
 
     assert missing["status"] == "blocked"
-    assert missing["reason"] == "bundle root is not a RepoLens bundle manifest file"
+    assert missing["reason"] == "bundle root is not a RepoGround bundle manifest file"
     assert "content_text" not in missing
 
 
 def test_mcp_file_bundle_root_rejects_fake_manifest_shape(tmp_path):
     fake = tmp_path / "fake.bundle.manifest.json"
-    fake.write_text(json.dumps({"kind": "not-a-repolens-manifest", "run_id": "fake", "artifacts": []}), encoding="utf-8")
+    fake.write_text(
+        json.dumps(
+            {"kind": "not-a-repolens-manifest", "run_id": "fake", "artifacts": []}
+        ),
+        encoding="utf-8",
+    )
 
     result = read_mcp_resource("repoground://snapshot/fake/manifest", bundle_root=fake)
 
     assert result["status"] == "blocked"
-    assert result["reason"] == "bundle root is not a valid RepoLens bundle manifest"
+    assert result["reason"] == "bundle root is not a valid RepoGround bundle manifest"
     assert "content_text" not in result
 
 
@@ -161,10 +189,15 @@ def test_mcp_file_bundle_root_rejects_invalid_json_manifest(tmp_path):
 def test_mcp_file_bundle_root_reports_stem_mismatch(tmp_path):
     bundle = _complete_basic_bundle(tmp_path)
 
-    result = read_mcp_resource("repoground://snapshot/other/manifest", bundle_root=bundle["manifest"])
+    result = read_mcp_resource(
+        "repoground://snapshot/other/manifest", bundle_root=bundle["manifest"]
+    )
 
     assert result["status"] == "blocked"
-    assert result["reason"] == "bundle root file stem does not match requested snapshot stem"
+    assert (
+        result["reason"]
+        == "bundle root file stem does not match requested snapshot stem"
+    )
     assert result["bundle_root_stem"] == "demo"
     assert result["requested_stem"] == "other"
 
@@ -174,13 +207,15 @@ def test_mcp_artifact_resource_blocks_paths_outside_bundle_root(tmp_path):
     outside = tmp_path.parent / "secret.txt"
     outside.write_text("do not read me\n", encoding="utf-8")
     data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
-    data["artifacts"].append({
-        "role": "escape_attempt",
-        "path": str(outside),
-        "content_type": "text/plain",
-        "bytes": outside.stat().st_size,
-        "sha256": "0" * 64,
-    })
+    data["artifacts"].append(
+        {
+            "role": "escape_attempt",
+            "path": str(outside),
+            "content_type": "text/plain",
+            "bytes": outside.stat().st_size,
+            "sha256": "0" * 64,
+        }
+    )
     bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
 
     result = read_mcp_resource(
@@ -191,7 +226,9 @@ def test_mcp_artifact_resource_blocks_paths_outside_bundle_root(tmp_path):
     assert result["status"] == "blocked"
     assert "content_text" not in result
     assert "do not read me" not in json.dumps(result)
-    assert result["reason"] == "artifact path escapes bundle root for role: escape_attempt"
+    assert (
+        result["reason"] == "artifact path escapes bundle root for role: escape_attempt"
+    )
 
 
 def test_mcp_artifact_resource_blocks_relative_escape_paths(tmp_path):
@@ -199,13 +236,15 @@ def test_mcp_artifact_resource_blocks_relative_escape_paths(tmp_path):
     outside = tmp_path.parent / f"{tmp_path.name}-relative-secret.txt"
     outside.write_text("relative secret\n", encoding="utf-8")
     data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
-    data["artifacts"].append({
-        "role": "relative_escape",
-        "path": f"../{outside.name}",
-        "content_type": "text/plain",
-        "bytes": outside.stat().st_size,
-        "sha256": "0" * 64,
-    })
+    data["artifacts"].append(
+        {
+            "role": "relative_escape",
+            "path": f"../{outside.name}",
+            "content_type": "text/plain",
+            "bytes": outside.stat().st_size,
+            "sha256": "0" * 64,
+        }
+    )
     bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
 
     result = read_mcp_resource(
@@ -228,13 +267,15 @@ def test_mcp_artifact_resource_blocks_symlink_escape_paths(tmp_path):
     except OSError:
         pytest.skip("symlink creation not supported on this platform")
     data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
-    data["artifacts"].append({
-        "role": "symlink_escape",
-        "path": link.name,
-        "content_type": "text/plain",
-        "bytes": outside.stat().st_size,
-        "sha256": "0" * 64,
-    })
+    data["artifacts"].append(
+        {
+            "role": "symlink_escape",
+            "path": link.name,
+            "content_type": "text/plain",
+            "bytes": outside.stat().st_size,
+            "sha256": "0" * 64,
+        }
+    )
     bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
 
     result = read_mcp_resource(
@@ -268,12 +309,16 @@ def test_mcp_artifact_resource_blocks_integrity_mismatch(tmp_path):
 def test_mcp_artifact_resource_blocks_missing_integrity_metadata(tmp_path):
     bundle = _complete_basic_bundle(tmp_path)
     data = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
-    data["artifacts"].append({
-        "role": "no_integrity",
-        "path": "no_integrity.txt",
-        "content_type": "text/plain",
-    })
-    (bundle["manifest"].parent / "no_integrity.txt").write_text("not trusted\n", encoding="utf-8")
+    data["artifacts"].append(
+        {
+            "role": "no_integrity",
+            "path": "no_integrity.txt",
+            "content_type": "text/plain",
+        }
+    )
+    (bundle["manifest"].parent / "no_integrity.txt").write_text(
+        "not trusted\n", encoding="utf-8"
+    )
     bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
 
     result = read_mcp_resource(
@@ -292,13 +337,15 @@ def test_mcp_artifact_resource_blocks_invalid_sha_metadata(tmp_path):
     content = "not trusted\n"
     artifact = bundle["manifest"].parent / "bad_sha.txt"
     artifact.write_text(content, encoding="utf-8")
-    data["artifacts"].append({
-        "role": "bad_sha",
-        "path": artifact.name,
-        "content_type": "text/plain",
-        "bytes": artifact.stat().st_size,
-        "sha256": "not-a-sha",
-    })
+    data["artifacts"].append(
+        {
+            "role": "bad_sha",
+            "path": artifact.name,
+            "content_type": "text/plain",
+            "bytes": artifact.stat().st_size,
+            "sha256": "not-a-sha",
+        }
+    )
     bundle["manifest"].write_text(json.dumps(data), encoding="utf-8")
 
     result = read_mcp_resource(
@@ -373,22 +420,30 @@ def test_each_listed_mcp_resource_read_carries_context(tmp_path):
         assert result["mutation_boundary"]["does_not_create_snapshots"] is True
 
 
-
 def test_mcp_missing_snapshot_explains_missing_context(tmp_path):
-    result = read_mcp_resource("repoground://snapshot/missing/manifest", bundle_root=tmp_path)
+    result = read_mcp_resource(
+        "repoground://snapshot/missing/manifest", bundle_root=tmp_path
+    )
 
     assert result["status"] == "missing"
     assert result["bundle_manifest"] is None
     assert result["snapshot_context"]["availability"]["status"] == "unknown"
-    assert "snapshot stem not found" in result["snapshot_context"]["availability"]["reason"]
+    assert (
+        "snapshot stem not found"
+        in result["snapshot_context"]["availability"]["reason"]
+    )
 
 
 def test_mcp_resource_reads_do_not_write_bundle_files(tmp_path):
     bundle = _bundle_with_health(tmp_path)
     before = {path.name for path in tmp_path.iterdir()}
 
-    read_mcp_resource("repoground://snapshot/demo/manifest", bundle_root=bundle["manifest"].parent)
-    read_mcp_resource("repoground://snapshot/demo/canonical", bundle_root=bundle["manifest"].parent)
+    read_mcp_resource(
+        "repoground://snapshot/demo/manifest", bundle_root=bundle["manifest"].parent
+    )
+    read_mcp_resource(
+        "repoground://snapshot/demo/canonical", bundle_root=bundle["manifest"].parent
+    )
     list_mcp_resources(bundle["manifest"].parent)
 
     after = {path.name for path in tmp_path.iterdir()}
@@ -414,4 +469,7 @@ def test_mcp_resource_rejects_retired_scheme(tmp_path):
     bundle = _bundle_with_health(tmp_path)
 
     with pytest.raises(RepoGroundMcpResourceError):
-        read_mcp_resource("repo" + "brief://snapshot/demo/manifest", bundle_root=bundle["manifest"].parent)
+        read_mcp_resource(
+            "repo" + "brief://snapshot/demo/manifest",
+            bundle_root=bundle["manifest"].parent,
+        )

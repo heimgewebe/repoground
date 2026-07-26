@@ -1,7 +1,9 @@
 """Compare a RepoGround snapshot with one explicit local Git working tree."""
+
 from __future__ import annotations
 
 from .bundle_identity import is_bundle_manifest
+from .bundle_catalog import normalize_repo_remote
 
 import json
 import os
@@ -133,6 +135,7 @@ def repository_live_provenance(repo_root: str | Path) -> dict[str, Any]:
         return base
 
     branch, _branch_error = _git(root, "symbolic-ref", "--short", "-q", "HEAD")
+    remote, _remote_error = _git(root, "config", "--get", "remote.origin.url")
     status, status_error = _git(
         root,
         "status",
@@ -144,6 +147,7 @@ def repository_live_provenance(repo_root: str | Path) -> dict[str, Any]:
             "git_commit": commit,
             "git_dirty": None if status_error is not None else bool(status),
             "git_branch": branch or None,
+            "repo_remote": remote or None,
             "provenance_status": "present",
             "freshness_basis": "git_commit_and_working_tree",
         }
@@ -153,7 +157,9 @@ def repository_live_provenance(repo_root: str | Path) -> dict[str, Any]:
 
 def _repository_records(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
     provenance = manifest.get("snapshot_provenance")
-    repositories = provenance.get("repositories") if isinstance(provenance, dict) else None
+    repositories = (
+        provenance.get("repositories") if isinstance(provenance, dict) else None
+    )
     if not isinstance(repositories, list):
         return []
     return [record for record in repositories if isinstance(record, dict)]
@@ -162,11 +168,25 @@ def _repository_records(manifest: Mapping[str, Any]) -> list[dict[str, Any]]:
 def _record_for_repo(
     records: list[dict[str, Any]],
     repo_root: Path,
+    current: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     resolved = str(repo_root.resolve())
     exact = [record for record in records if record.get("repo_root") == resolved]
     if len(exact) == 1:
         return exact[0]
+
+    current_remote = normalize_repo_remote(current.get("repo_remote"))
+    if current_remote:
+        remote_matches = [
+            record
+            for record in records
+            if normalize_repo_remote(record.get("repo_remote")) == current_remote
+        ]
+        if len(remote_matches) == 1:
+            return remote_matches[0]
+        if len(remote_matches) > 1:
+            return None
+
     named = [record for record in records if record.get("name") == repo_root.name]
     if len(named) == 1 and not named[0].get("repo_root"):
         return named[0]
@@ -285,9 +305,17 @@ def evaluate_live_freshness(
         )
 
     explicit_root = Path(repo_root).expanduser().resolve()
-    snapshot = _record_for_repo(records, explicit_root)
+    current: Mapping[str, Any] | None = None
+    snapshot = _record_for_repo(records, explicit_root, {})
     if snapshot is None:
-        reason = "snapshot_provenance_missing" if not records else "repository_selection_ambiguous"
+        current = probe(explicit_root)
+        snapshot = _record_for_repo(records, explicit_root, current)
+    if snapshot is None:
+        reason = (
+            "snapshot_provenance_missing"
+            if not records
+            else "repository_selection_ambiguous"
+        )
         return _base(
             status="unknown",
             reason=reason,
@@ -303,7 +331,8 @@ def evaluate_live_freshness(
     if blocked is not None:
         return blocked
 
-    current = probe(explicit_root)
+    if current is None:
+        current = probe(explicit_root)
     blocked = _current_gate(
         current,
         manifest_path=manifest_path,

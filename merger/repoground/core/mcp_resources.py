@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from merger.repoground.core import bundle_access
+from merger.repoground.core.bundle_catalog import discover_bundle_catalog
 
 KIND = "repoground.mcp.resource_read"
 LIST_KIND = "repoground.mcp.resource_list"
@@ -133,7 +134,9 @@ def _decode_json_bytes(
 
 def _bundle_manifest_validation_issue(path: Path) -> dict[str, Any] | None:
     if not path.is_file() or not path.name.endswith(MANIFEST_SUFFIX):
-        return _bytes_issue("blocked", "bundle root is not a RepoLens bundle manifest file")
+        return _bytes_issue(
+            "blocked", "bundle root is not a RepoGround bundle manifest file"
+        )
     data, issue = _read_bounded_bytes(
         path,
         max_bytes=MAX_MANIFEST_BYTES,
@@ -157,7 +160,9 @@ def _bundle_manifest_validation_issue(path: Path) -> dict[str, Any] | None:
         or not isinstance(parsed.get("run_id"), str)
         or not isinstance(parsed.get("artifacts"), list)
     ):
-        return _bytes_issue("blocked", "bundle root is not a valid RepoLens bundle manifest")
+        return _bytes_issue(
+            "blocked", "bundle root is not a valid RepoGround bundle manifest"
+        )
     return None
 
 
@@ -171,17 +176,27 @@ def _manifest_candidates(bundle_root: str | Path) -> list[Path]:
         return [root] if _is_bundle_manifest_file(root) else []
     if not root.exists() or not root.is_dir():
         return []
-    return [path for path in sorted(root.glob(f"*{MANIFEST_SUFFIX}")) if _is_bundle_manifest_file(path)]
+    catalog = discover_bundle_catalog(root)
+    paths = [
+        Path(item["manifest_path"])
+        for item in catalog.get("candidates", [])
+        if isinstance(item, dict) and isinstance(item.get("manifest_path"), str)
+    ]
+    return sorted(set(paths))
 
 
 def _find_manifest(bundle_root: str | Path, stem: str) -> Path | None:
-    for path in _manifest_candidates(bundle_root):
-        if _manifest_stem(path) == stem:
-            return path
-    return None
+    matches = [
+        path
+        for path in _manifest_candidates(bundle_root)
+        if _manifest_stem(path) == stem
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
-def _bundle_root_file_issue(bundle_root: str | Path, stem: str) -> dict[str, Any] | None:
+def _bundle_root_file_issue(
+    bundle_root: str | Path, stem: str
+) -> dict[str, Any] | None:
     root = Path(bundle_root).expanduser().resolve()
     if not root.exists() or not root.is_file():
         return None
@@ -205,16 +220,22 @@ def _resource_uri(stem: str, suffix: str) -> str:
 def _parse_resource_uri(uri: str) -> tuple[str, str, str | None]:
     parsed = urlparse(uri)
     if parsed.scheme != "repoground" or parsed.netloc != "snapshot":
-        raise RepoGroundMcpResourceError("resource URI must start with repoground://snapshot/")
+        raise RepoGroundMcpResourceError(
+            "resource URI must start with repoground://snapshot/"
+        )
     parts = [unquote(part) for part in parsed.path.split("/") if part]
     if len(parts) < 2:
-        raise RepoGroundMcpResourceError("resource URI must include snapshot stem and resource name")
+        raise RepoGroundMcpResourceError(
+            "resource URI must include snapshot stem and resource name"
+        )
     stem, resource_name = parts[0], parts[1]
     if not stem or ".." in stem or "/" in stem:
         raise RepoGroundMcpResourceError("resource stem is invalid")
     if resource_name == "artifact":
         if len(parts) != 3 or not parts[2] or "/" in parts[2] or ".." in parts[2]:
-            raise RepoGroundMcpResourceError("artifact resource URI must include one artifact role")
+            raise RepoGroundMcpResourceError(
+                "artifact resource URI must include one artifact role"
+            )
         return stem, resource_name, parts[2]
     if len(parts) != 2 or resource_name not in FIXED_RESOURCE_KINDS:
         raise RepoGroundMcpResourceError("unsupported RepoGround MCP resource URI")
@@ -225,10 +246,15 @@ def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _artifact_integrity_issue(data: bytes, artifact: dict[str, Any]) -> dict[str, Any] | None:
+def _artifact_integrity_issue(
+    data: bytes, artifact: dict[str, Any]
+) -> dict[str, Any] | None:
     expected_bytes = artifact.get("bytes")
     if not isinstance(expected_bytes, int):
-        return _bytes_issue("integrity_unavailable", "artifact byte size is missing or invalid in manifest")
+        return _bytes_issue(
+            "integrity_unavailable",
+            "artifact byte size is missing or invalid in manifest",
+        )
     actual_bytes = len(data)
     if actual_bytes != expected_bytes:
         return _bytes_issue(
@@ -238,8 +264,12 @@ def _artifact_integrity_issue(data: bytes, artifact: dict[str, Any]) -> dict[str
             actual_bytes=actual_bytes,
         )
     expected_sha256 = artifact.get("sha256")
-    if not isinstance(expected_sha256, str) or not _SHA256_RE.fullmatch(expected_sha256):
-        return _bytes_issue("integrity_unavailable", "artifact sha256 is missing or invalid in manifest")
+    if not isinstance(expected_sha256, str) or not _SHA256_RE.fullmatch(
+        expected_sha256
+    ):
+        return _bytes_issue(
+            "integrity_unavailable", "artifact sha256 is missing or invalid in manifest"
+        )
     expected_sha256_normalized = expected_sha256.lower()
     actual_sha256 = _sha256_bytes(data)
     if actual_sha256 != expected_sha256_normalized:
@@ -280,12 +310,20 @@ def _read_manifest_content(result: dict[str, Any], manifest: Path) -> dict[str, 
     return _apply_artifact_bytes(result, data)
 
 
-def _context_for_manifest(manifest: Path | None, *, reason: str | None = None) -> dict[str, Any]:
+def _context_for_manifest(
+    manifest: Path | None, *, reason: str | None = None
+) -> dict[str, Any]:
     if manifest is None:
         return {
             "health": {"status": "unknown", "reason": reason or "manifest unavailable"},
-            "freshness": {"status": "unknown", "reason": reason or "manifest unavailable"},
-            "availability": {"status": "unknown", "reason": reason or "manifest unavailable"},
+            "freshness": {
+                "status": "unknown",
+                "reason": reason or "manifest unavailable",
+            },
+            "availability": {
+                "status": "unknown",
+                "reason": reason or "manifest unavailable",
+            },
         }
     status = bundle_access.snapshot_status(manifest)
     health = bundle_access.get_artifact(manifest, "post_emit_health")
@@ -296,12 +334,18 @@ def _context_for_manifest(manifest: Path | None, *, reason: str | None = None) -
             "status": health.get("status", "unknown"),
             "artifact": health.get("artifact"),
         },
-        "freshness": freshness if isinstance(freshness, dict) else {"status": "unknown"},
-        "availability": availability_model if isinstance(availability_model, dict) else {"status": "unknown"},
+        "freshness": freshness
+        if isinstance(freshness, dict)
+        else {"status": "unknown"},
+        "availability": availability_model
+        if isinstance(availability_model, dict)
+        else {"status": "unknown"},
     }
 
 
-def _base_result(uri: str, manifest: Path | None, *, status: str, reason: str | None = None) -> dict[str, Any]:
+def _base_result(
+    uri: str, manifest: Path | None, *, status: str, reason: str | None = None
+) -> dict[str, Any]:
     return {
         "kind": KIND,
         "version": VERSION,
@@ -332,17 +376,19 @@ def _safe_bundle_file(manifest: Path, artifact: dict[str, Any]) -> Path | None:
 def _read_artifact_resource(uri: str, manifest: Path, role: str) -> dict[str, Any]:
     if role == "bundle_manifest":
         result = _base_result(uri, manifest, status="available")
-        result.update({
-            "resource_role": "bundle_manifest",
-            "content_type": "application/json",
-            "artifact_ref": {
-                "role": "bundle_manifest",
-                "path": manifest.name,
-                "absolute_path": str(manifest),
-                "file_exists": manifest.is_file(),
-                "bytes": manifest.stat().st_size if manifest.is_file() else None,
-            },
-        })
+        result.update(
+            {
+                "resource_role": "bundle_manifest",
+                "content_type": "application/json",
+                "artifact_ref": {
+                    "role": "bundle_manifest",
+                    "path": manifest.name,
+                    "absolute_path": str(manifest),
+                    "file_exists": manifest.is_file(),
+                    "bytes": manifest.stat().st_size if manifest.is_file() else None,
+                },
+            }
+        )
         return _read_manifest_content(result, manifest)
 
     ref = bundle_access.get_artifact(manifest, role)
@@ -399,23 +445,37 @@ def list_mcp_resources(bundle_root: str | Path) -> dict[str, Any]:
     resources: list[dict[str, Any]] = []
     for manifest in _manifest_candidates(bundle_root):
         stem = _manifest_stem(manifest)
-        for suffix in ("manifest", "canonical", "reading-pack", "health", "availability"):
-            resources.append({"uri": _resource_uri(stem, suffix), "snapshot_stem": stem, "resource": suffix})
+        for suffix in (
+            "manifest",
+            "canonical",
+            "reading-pack",
+            "health",
+            "availability",
+        ):
+            resources.append(
+                {
+                    "uri": _resource_uri(stem, suffix),
+                    "snapshot_stem": stem,
+                    "resource": suffix,
+                }
+            )
         for role in bundle_access.available_roles(manifest):
-            resources.append({
-                "uri": _resource_uri(stem, f"artifact/{role}"),
-                "snapshot_stem": stem,
-                "resource": "artifact",
-                "role": role,
-            })
+            resources.append(
+                {
+                    "uri": _resource_uri(stem, f"artifact/{role}"),
+                    "snapshot_stem": stem,
+                    "resource": "artifact",
+                    "role": role,
+                }
+            )
     return {
         "kind": LIST_KIND,
         "version": VERSION,
         "status": "ok",
         "bundle_root": str(Path(bundle_root).expanduser().resolve()),
-            "resources": resources,
-            "templates": resource_templates()["templates"],
-            "mutation_boundary": _read_only_boundary(),
+        "resources": resources,
+        "templates": resource_templates()["templates"],
+        "mutation_boundary": _read_only_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
 
@@ -426,20 +486,32 @@ def read_mcp_resource(uri: str, *, bundle_root: str | Path) -> dict[str, Any]:
     if manifest is None:
         bundle_root_issue = _bundle_root_file_issue(bundle_root, stem)
         if bundle_root_issue is not None:
-            result = _base_result(uri, None, status=bundle_root_issue["status"], reason=bundle_root_issue["reason"])
+            result = _base_result(
+                uri,
+                None,
+                status=bundle_root_issue["status"],
+                reason=bundle_root_issue["reason"],
+            )
             result.update(bundle_root_issue)
             return result
-        return _base_result(uri, None, status="missing", reason=f"snapshot stem not found: {stem}")
+        return _base_result(
+            uri, None, status="missing", reason=f"snapshot stem not found: {stem}"
+        )
     if resource_name == "manifest":
         return _read_artifact_resource(uri, manifest, "bundle_manifest")
     if resource_name == "availability":
         result = _base_result(uri, manifest, status="available")
-        result.update({
-            "resource_role": "availability_model",
-            "content_type": "application/json",
-            "content_json": result["snapshot_context"]["availability"],
-            "content_text": json.dumps(result["snapshot_context"]["availability"], indent=2, sort_keys=True) + "\n",
-        })
+        result.update(
+            {
+                "resource_role": "availability_model",
+                "content_type": "application/json",
+                "content_json": result["snapshot_context"]["availability"],
+                "content_text": json.dumps(
+                    result["snapshot_context"]["availability"], indent=2, sort_keys=True
+                )
+                + "\n",
+            }
+        )
         return result
     if resource_name == "artifact":
         assert role is not None
