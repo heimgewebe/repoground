@@ -4,12 +4,13 @@ The producer parses source text only. It records every ``ast.Call`` and resolves
 only a deliberately small set of targets that are unique under the modelled
 lexical bindings. Everything else remains explicit S0 navigation evidence.
 """
+
 from __future__ import annotations
 
 import ast
 import os
 from operator import attrgetter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -42,6 +43,8 @@ class _ScopeFrame:
     local_bindings: frozenset[str] = field(default_factory=frozenset)
     global_names: frozenset[str] = field(default_factory=frozenset)
     nonlocal_names: frozenset[str] = field(default_factory=frozenset)
+    module_aliases: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    from_imports: tuple[tuple[str, str, str], ...] = field(default_factory=tuple)
     start_line: int | None = None
     end_line: int | None = None
     receiver_name: str | None = None
@@ -83,7 +86,10 @@ def _relative_import_base(module: str, is_package: bool, level: int) -> str | No
 
 
 def _argument_names(arguments: ast.arguments) -> set[str]:
-    names = {arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
+    names = {
+        arg.arg
+        for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)
+    }
     if arguments.vararg is not None:
         names.add(arguments.vararg.arg)
     if arguments.kwarg is not None:
@@ -167,7 +173,9 @@ def _function_frame(
 ) -> _ScopeFrame:
     collector = _BindingCollector()
     collector.local.update(_argument_names(node.args))
-    body: Iterable[ast.AST] = (node.body,) if isinstance(node, ast.Lambda) else node.body
+    body: Iterable[ast.AST] = (
+        (node.body,) if isinstance(node, ast.Lambda) else node.body
+    )
     for statement in body:
         collector.visit(statement)
     collector.local.difference_update(collector.global_names)
@@ -220,10 +228,14 @@ class _CallGraphVisitor(ast.NodeVisitor):
         named_frames = [frame for frame in self.stack if frame.name]
         if not named_frames:
             self.state.add_binding(name, "def" if kind in _FUNCTION_KINDS else "class")
-            table = self.state.functions if kind in _FUNCTION_KINDS else self.state.classes
+            table = (
+                self.state.functions if kind in _FUNCTION_KINDS else self.state.classes
+            )
             table.setdefault(name, []).append(symbol_id)
         elif kind in _FUNCTION_KINDS and named_frames[-1].kind == "class":
-            class_qualified = ".".join(frame.name for frame in named_frames if frame.name)
+            class_qualified = ".".join(
+                frame.name for frame in named_frames if frame.name
+            )
             self.state.methods.setdefault((class_qualified, name), []).append(symbol_id)
 
     def _visit_present(self, nodes: Iterable[ast.AST | None]) -> None:
@@ -231,7 +243,9 @@ class _CallGraphVisitor(ast.NodeVisitor):
             if child is not None:
                 self.visit(child)
 
-    def _visit_function_header(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+    def _visit_function_header(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> None:
         arguments = (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
         optional_nodes = (
             *node.args.kw_defaults,
@@ -245,7 +259,9 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self._visit_present(optional_nodes)
         self._visit_present(getattr(node, "type_params", ()))
 
-    def _direct_method_receiver(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
+    def _direct_method_receiver(
+        self, node: ast.FunctionDef | ast.AsyncFunctionDef
+    ) -> str | None:
         if not self.stack or self.stack[-1].kind != "class":
             return None
         positional = (*node.args.posonlyargs, *node.args.args)
@@ -366,17 +382,28 @@ class _CallGraphVisitor(ast.NodeVisitor):
                 else:
                     self.state.imported_module_names.add(alias.name)
                     self.state.add_binding(alias.name.split(".")[0], "import")
+            return None
+
+        aliases = dict(self.stack[-1].module_aliases)
+        for alias in node.names:
+            local = alias.asname or alias.name.split(".")[0]
+            aliases[local] = alias.name if alias.asname else local
+        self.stack[-1] = replace(
+            self.stack[-1], module_aliases=tuple(sorted(aliases.items()))
+        )
         return None
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> Any:
+        if node.level:
+            base = _relative_import_base(self.state.module, self.is_package, node.level)
+            source = (
+                None
+                if base is None
+                else ".".join(part for part in (base, node.module or "") if part)
+            )
+        else:
+            source = node.module
         if not self.stack:
-            if node.level:
-                base = _relative_import_base(self.state.module, self.is_package, node.level)
-                source = None if base is None else ".".join(
-                    part for part in (base, node.module or "") if part
-                )
-            else:
-                source = node.module
             for alias in node.names:
                 if alias.name == "*":
                     continue
@@ -384,6 +411,26 @@ class _CallGraphVisitor(ast.NodeVisitor):
                 self.state.add_binding(local, "import")
                 if source:
                     self.state.from_imports[local] = (source, alias.name)
+            return None
+
+        imports = {
+            local: (module, original)
+            for local, module, original in self.stack[-1].from_imports
+        }
+        for alias in node.names:
+            if alias.name == "*" or not source:
+                continue
+            local = alias.asname or alias.name
+            imports[local] = (source, alias.name)
+        self.stack[-1] = replace(
+            self.stack[-1],
+            from_imports=tuple(
+                sorted(
+                    (local, module, original)
+                    for local, (module, original) in imports.items()
+                )
+            ),
+        )
         return None
 
     def _bind_module_target(self, target: ast.expr) -> None:
@@ -507,19 +554,17 @@ class _Resolver:
     def __init__(self, modules: dict[str, list[_ModuleState]]) -> None:
         self.modules = modules
 
-    def _target_in_module(self, module: str, name: str, reason_prefix: str) -> dict[str, Any]:
+    def _target_in_module(
+        self, module: str, name: str, reason_prefix: str
+    ) -> dict[str, Any]:
         states = self.modules.get(module, [])
         if not states:
             return _verdict("unresolved", f"{reason_prefix}_foreign_module")
         functions = [
-            symbol_id
-            for state in states
-            for symbol_id in state.functions.get(name, [])
+            symbol_id for state in states for symbol_id in state.functions.get(name, [])
         ]
         classes = [
-            symbol_id
-            for state in states
-            for symbol_id in state.classes.get(name, [])
+            symbol_id for state in states for symbol_id in state.classes.get(name, [])
         ]
         all_targets = sorted(set(functions) | set(classes))
         definition_count = len(functions) + len(classes)
@@ -561,7 +606,11 @@ class _Resolver:
                     return "lexically_shadowed_name", False
             elif frame.kind == "comprehension" and name in frame.local_bindings:
                 return "comprehension_binding", False
-            elif frame.kind == "class" and not inside_function and name in frame.local_bindings:
+            elif (
+                frame.kind == "class"
+                and not inside_function
+                and name in frame.local_bindings
+            ):
                 return "class_scope_binding", False
         return None, False
 
@@ -625,7 +674,9 @@ class _Resolver:
         definition_count = len(local_functions) + len(local_classes)
         if definition_count == 1:
             relation_type = "constructs" if local_classes else "calls"
-            reason = "local_class_constructor" if local_classes else "local_module_function"
+            reason = (
+                "local_class_constructor" if local_classes else "local_module_function"
+            )
             return _verdict(
                 "resolved",
                 reason,
@@ -641,9 +692,36 @@ class _Resolver:
             return _verdict("ambiguous", reason, candidates=candidates)
         return _verdict("unresolved", "unknown_name")
 
+    def _resolve_local_import_name(
+        self, name: str, stack: Sequence[_ScopeFrame]
+    ) -> dict[str, Any] | None:
+        for frame in reversed(stack):
+            if frame.kind in (*_FUNCTION_KINDS, "lambda"):
+                if name in frame.global_names or name in frame.nonlocal_names:
+                    return None
+            imported = {
+                local: (module, original)
+                for local, module, original in frame.from_imports
+            }.get(name)
+            if imported is not None:
+                source_module, original = imported
+                if source_module not in self.modules:
+                    return None
+                return self._target_in_module(
+                    source_module,
+                    original,
+                    "local_imported_internal_name",
+                )
+            if name in frame.local_bindings:
+                return None
+        return None
+
     def _resolve_name(
         self, state: _ModuleState, name: str, stack: Sequence[_ScopeFrame]
     ) -> dict[str, Any]:
+        local_import = self._resolve_local_import_name(name, stack)
+        if local_import is not None:
+            return local_import
         shadow_reason, force_module = self._shadow_reason(name, stack)
         if shadow_reason:
             return _verdict("unresolved", shadow_reason)
@@ -658,12 +736,16 @@ class _Resolver:
         candidates = sorted(set(local_functions) | set(local_classes))
         if "assign" in sources:
             status = "candidate" if candidates else "unresolved"
-            return _verdict(status, "name_rebound_at_module_level", candidates=candidates)
+            return _verdict(
+                status, "name_rebound_at_module_level", candidates=candidates
+            )
         if len(sources) > 1:
             return self._multiple_binding_verdict(state, name, candidates)
         if name in state.from_imports:
             source_module, original = state.from_imports[name]
-            return self._target_in_module(source_module, original, "imported_internal_name")
+            return self._target_in_module(
+                source_module, original, "imported_internal_name"
+            )
         if "import" in sources:
             return _verdict("unresolved", "module_object_called")
         return self._local_binding_verdict(local_functions, local_classes)
@@ -713,9 +795,57 @@ class _Resolver:
             )
         return _verdict("unresolved", "method_not_defined_in_same_class")
 
+    def _resolve_local_import_dotted(
+        self, parts: list[str], stack: Sequence[_ScopeFrame]
+    ) -> dict[str, Any] | None:
+        root = parts[0]
+        for frame in reversed(stack):
+            if frame.kind in (*_FUNCTION_KINDS, "lambda"):
+                if root in frame.global_names:
+                    return None
+                if root in frame.nonlocal_names:
+                    continue
+
+            module_alias = dict(frame.module_aliases).get(root)
+            if module_alias is not None:
+                target_module = ".".join(
+                    part for part in (module_alias, *parts[1:-1]) if part
+                )
+                if target_module not in self.modules:
+                    return None
+                return self._target_in_module(
+                    target_module,
+                    parts[-1],
+                    "local_module_alias_call",
+                )
+
+            imported = {
+                local: (module, original)
+                for local, module, original in frame.from_imports
+            }.get(root)
+            if imported is not None:
+                source, original = imported
+                imported_module = ".".join(
+                    part for part in (source, original, *parts[1:-1]) if part
+                )
+                if imported_module not in self.modules:
+                    return None
+                return self._target_in_module(
+                    imported_module,
+                    parts[-1],
+                    "local_from_import_module_call",
+                )
+
+            if root in frame.local_bindings:
+                return _verdict("unresolved", "attribute_root_lexically_shadowed_name")
+        return None
+
     def _resolve_module_dotted(
         self, state: _ModuleState, parts: list[str], stack: Sequence[_ScopeFrame]
     ) -> dict[str, Any]:
+        local_import = self._resolve_local_import_dotted(parts, stack)
+        if local_import is not None:
+            return local_import
         shadow_reason, _ = self._shadow_reason(parts[0], stack)
         if shadow_reason:
             return _verdict("unresolved", f"attribute_root_{shadow_reason}")
@@ -766,7 +896,9 @@ class _Resolver:
             "start_col": raw_call["start_col"],
             "end_line": raw_call["end_line"],
             "end_col": raw_call["end_col"],
-            "range_ref": _range_ref(state.path, raw_call["start_line"], raw_call["end_line"]),
+            "range_ref": _range_ref(
+                state.path, raw_call["start_line"], raw_call["end_line"]
+            ),
             "callee_expression": ast.unparse(func),
             "simple_name": simple_name,
         }
@@ -775,13 +907,17 @@ class _Resolver:
         return record
 
 
-def extract_python_calls(repo_root: Path) -> tuple[list[dict[str, Any]], int, list[str]]:
+def extract_python_calls(
+    repo_root: Path,
+) -> tuple[list[dict[str, Any]], int, list[str]]:
     """Return deterministic call records plus bounded parse diagnostics."""
     modules: dict[str, list[_ModuleState]] = {}
     skipped_files_count = 0
     skipped_errors: list[str] = []
     for root, dirs, files in os.walk(repo_root, topdown=True):
-        dirs[:] = sorted(directory for directory in dirs if directory not in EXCLUDED_DIRS)
+        dirs[:] = sorted(
+            directory for directory in dirs if directory not in EXCLUDED_DIRS
+        )
         for file_name in sorted(files):
             if not file_name.endswith(".py"):
                 continue

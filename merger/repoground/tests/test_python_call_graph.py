@@ -5,6 +5,7 @@ covers every safe resolution rule (local module function, imported internal
 name, module alias, self/cls method, direct recursion) plus the conservative
 outcomes (ambiguous, dynamic, foreign, module scope, parse errors).
 """
+
 import ast
 import json
 from pathlib import Path
@@ -21,7 +22,7 @@ from merger.repoground.architecture.call_graph import (
 )
 from merger.repoground.core.bundle_access import _call_record_is_valid
 
-GOLDSET_TEXT_PY = '''import os.path
+GOLDSET_TEXT_PY = """import os.path
 import utilkit.numbers as num
 from utilkit.numbers import double
 from external_lib import shim
@@ -58,9 +59,9 @@ class Formatter:
 
 
 TOP = slugify("Hi")
-'''
+"""
 
-GOLDSET_NUMBERS_PY = '''def double(x):
+GOLDSET_NUMBERS_PY = """def double(x):
     return x * 2
 
 
@@ -82,7 +83,7 @@ def use_cond(x):
 
 def use_double(x):
     return double(double(x))
-'''
+"""
 
 
 def write_utility_goldset(root: Path) -> Path:
@@ -114,7 +115,9 @@ def test_call_graph_document_is_deterministic_and_matches_schema(tmp_path):
 
     assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
 
-    schema_path = Path(__file__).parent.parent / "contracts" / "python-call-graph.v1.schema.json"
+    schema_path = (
+        Path(__file__).parent.parent / "contracts" / "python-call-graph.v1.schema.json"
+    )
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
     jsonschema.validate(instance=first, schema=schema)
 
@@ -126,7 +129,12 @@ def test_call_graph_document_is_deterministic_and_matches_schema(tmp_path):
     assert sum(first["resolution_counts"].values()) == first["call_count"]
     assert sum(first["evidence_counts"].values()) == first["call_count"]
     assert sum(first["relation_counts"].values()) == first["call_count"]
-    assert first["resolution_statuses"] == ["resolved", "candidate", "ambiguous", "unresolved"]
+    assert first["resolution_statuses"] == [
+        "resolved",
+        "candidate",
+        "ambiguous",
+        "unresolved",
+    ]
     assert first["relation_types"] == ["calls", "constructs"]
     # Calls are sorted by path, line, column, expression.
     keys = [
@@ -183,13 +191,98 @@ def test_safe_resolution_imported_internal_name_and_alias(tmp_path):
     assert len(imported) == 1
     assert imported[0]["resolution_status"] == "resolved"
     assert imported[0]["resolution_reason"] == "imported_internal_name"
-    assert imported[0]["resolved_target_ids"] == ["py:utilkit:numbers.py:function:double"]
+    assert imported[0]["resolved_target_ids"] == [
+        "py:utilkit:numbers.py:function:double"
+    ]
 
     alias = _single_call(calls, "num.triple")
     assert alias["resolution_status"] == "resolved"
     assert alias["resolution_reason"] == "module_alias_call"
     assert alias["resolved_target_ids"] == ["py:utilkit:numbers.py:function:triple"]
     assert alias["simple_name"] == "triple"
+
+
+def test_safe_resolution_local_module_imports_after_binding(tmp_path):
+    package = tmp_path / "toolkit"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "target.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    (package / "consumer.py").write_text(
+        """
+def from_import():
+    from toolkit import target
+    return target.run()
+
+
+def alias_import():
+    import toolkit.target as local_target
+    return local_target.run()
+
+
+def simple_import():
+    from toolkit.target import run
+    return run()
+
+
+def before_simple_binding():
+    run()
+    from toolkit.target import run
+
+
+def before_binding():
+    local_target.run()
+    import toolkit.target as local_target
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    target_calls = _calls_by_expression(calls, "target.run")
+    alias_calls = _calls_by_expression(calls, "local_target.run")
+    simple_calls = _calls_by_expression(calls, "run")
+
+    assert len(target_calls) == 1
+    assert target_calls[0]["resolution_status"] == "resolved"
+    assert target_calls[0]["resolution_reason"] == "local_from_import_module_call"
+    assert target_calls[0]["resolved_target_ids"] == [
+        "py:toolkit:target.py:function:run"
+    ]
+
+    assert len(alias_calls) == 2
+    resolved = next(
+        call for call in alias_calls if call["caller_qualified_name"] == "alias_import"
+    )
+    unresolved = next(
+        call
+        for call in alias_calls
+        if call["caller_qualified_name"] == "before_binding"
+    )
+    assert resolved["resolution_status"] == "resolved"
+    assert resolved["resolution_reason"] == "local_module_alias_call"
+    assert resolved["resolved_target_ids"] == ["py:toolkit:target.py:function:run"]
+    assert unresolved["resolution_status"] == "unresolved"
+    assert unresolved["resolution_reason"] == "attribute_root_lexically_shadowed_name"
+    assert unresolved["resolved_target_ids"] == []
+
+    assert len(simple_calls) == 2
+    simple_resolved = next(
+        call
+        for call in simple_calls
+        if call["caller_qualified_name"] == "simple_import"
+    )
+    simple_unresolved = next(
+        call
+        for call in simple_calls
+        if call["caller_qualified_name"] == "before_simple_binding"
+    )
+    assert simple_resolved["resolution_status"] == "resolved"
+    assert simple_resolved["resolution_reason"] == "local_imported_internal_name"
+    assert simple_resolved["resolved_target_ids"] == [
+        "py:toolkit:target.py:function:run"
+    ]
+    assert simple_unresolved["resolution_status"] == "unresolved"
+    assert simple_unresolved["resolution_reason"] == "lexically_shadowed_name"
+    assert simple_unresolved["resolved_target_ids"] == []
 
 
 def test_safe_resolution_self_and_cls_methods_same_class(tmp_path):
@@ -199,13 +292,17 @@ def test_safe_resolution_self_and_cls_methods_same_class(tmp_path):
     self_call = _single_call(calls, "self.indent")
     assert self_call["resolution_status"] == "resolved"
     assert self_call["resolution_reason"] == "self_method_same_class"
-    assert self_call["resolved_target_ids"] == ["py:utilkit:text.py:function:Formatter.indent"]
+    assert self_call["resolved_target_ids"] == [
+        "py:utilkit:text.py:function:Formatter.indent"
+    ]
     assert self_call["caller_qualified_name"] == "Formatter.format"
 
     cls_call = _single_call(calls, "cls.default")
     assert cls_call["resolution_status"] == "resolved"
     assert cls_call["resolution_reason"] == "cls_method_same_class"
-    assert cls_call["resolved_target_ids"] == ["py:utilkit:text.py:function:Formatter.default"]
+    assert cls_call["resolved_target_ids"] == [
+        "py:utilkit:text.py:function:Formatter.default"
+    ]
 
 
 def test_safe_resolution_direct_recursion(tmp_path):
@@ -346,7 +443,7 @@ def test_missing_ast_end_position_is_normalized_to_valid_range():
     assert _call_record_is_valid(record) is True
 
 
-SCOPE_GOLDSET_PY = '''
+SCOPE_GOLDSET_PY = """
 def target():
     return 1
 
@@ -430,7 +527,7 @@ class Receiver:
 
     def wrong(alias):
         return self.other()
-'''
+"""
 
 
 def _write_scope_goldset(root: Path) -> None:
@@ -582,19 +679,13 @@ def test_self_resolution_requires_actual_direct_method_receiver(tmp_path):
 
 def test_module_name_collision_preserves_all_calls_and_refuses_resolution(tmp_path):
     (tmp_path / "foo.py").write_text(
-        "def target():\n"
-        "    return 1\n\n"
-        "def file_caller():\n"
-        "    return target()\n",
+        "def target():\n    return 1\n\ndef file_caller():\n    return target()\n",
         encoding="utf-8",
     )
     package = tmp_path / "foo"
     package.mkdir()
     (package / "__init__.py").write_text(
-        "def target():\n"
-        "    return 2\n\n"
-        "def package_caller():\n"
-        "    return target()\n",
+        "def target():\n    return 2\n\ndef package_caller():\n    return target()\n",
         encoding="utf-8",
     )
     (tmp_path / "consumer.py").write_text(
@@ -631,7 +722,6 @@ def test_module_name_collision_preserves_all_calls_and_refuses_resolution(tmp_pa
         "py:foo:__init__.py:function:target",
     }
 
-
     aliased = next(
         call
         for call in calls
@@ -650,9 +740,7 @@ def test_module_name_collision_preserves_all_calls_and_refuses_resolution(tmp_pa
 
 def test_bare_method_name_is_not_treated_as_direct_recursion(tmp_path):
     (tmp_path / "sample.py").write_text(
-        "class Worker:\n"
-        "    def run(self):\n"
-        "        return run()\n",
+        "class Worker:\n    def run(self):\n        return run()\n",
         encoding="utf-8",
     )
 
@@ -668,11 +756,7 @@ def test_bare_method_name_is_not_treated_as_direct_recursion(tmp_path):
 
 def test_redefined_module_function_is_not_treated_as_direct_recursion(tmp_path):
     (tmp_path / "sample.py").write_text(
-        "def walk():\n"
-        "    return walk()\n"
-        "\n"
-        "def walk():\n"
-        "    return 0\n",
+        "def walk():\n    return walk()\n\ndef walk():\n    return 0\n",
         encoding="utf-8",
     )
 
