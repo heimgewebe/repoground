@@ -347,3 +347,57 @@ def test_eval_report_rejects_non_object_index_records_without_traceback(
     assert captured.out == ""
     assert "chunk index line 1 must be a JSON object" in captured.err
     assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_error"),
+    [
+        ("query", 7, "['query'] to be a string"),
+        ("expected", "src/auth/session.py", "['expected'] to be a list of strings"),
+        ("expected", [7], "['expected'][0] to be a string"),
+        ("is_relevant", "false", "['is_relevant'] to be a boolean"),
+        ("found_count", "0", "['found_count'] to be an integer"),
+        ("found_count", True, "['found_count'] to be an integer"),
+        ("found_count", -1, "['found_count'] to be non-negative"),
+        (
+            "top_results",
+            "src/auth/session.py",
+            "['top_results'] to be a list of strings",
+        ),
+        ("top_results", [7], "['top_results'][0] to be a string"),
+    ],
+)
+def test_eval_report_rejects_invalid_detail_field_types_without_traceback(
+    tmp_path,
+    capsys,
+    field,
+    value,
+    expected_error,
+):
+    detail = {
+        "query": "session authority",
+        "expected": ["src/auth/session.py"],
+        "is_relevant": False,
+        "found_count": 0,
+        "top_results": [],
+    }
+    detail[field] = value
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {"metrics": {"recall@10": 0.0}, "details": [detail]},
+    )
+
+    code = main(
+        [
+            "diagnostics",
+            "eval-report",
+            "--eval-results",
+            str(eval_results),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err

@@ -9,7 +9,7 @@ It only explains why misses occurred.
 """
 
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import re
 from .eval_diagnostics import RetrievalEvalDiagnosticsCalibrator
 
@@ -20,6 +20,57 @@ def _require_eval_detail(value: Any, *, index: int) -> Dict[str, Any]:
             f"Expected retrieval_eval['details'][{index}] to be an object."
         )
     return value
+
+
+def _require_detail_string_list(
+    value: Any,
+    *,
+    index: int,
+    field: str,
+) -> List[str]:
+    path = f"retrieval_eval['details'][{index}]['{field}']"
+    if not isinstance(value, list):
+        raise ValueError(f"Expected {path} to be a list of strings.")
+    for item_index, item in enumerate(value):
+        if not isinstance(item, str):
+            raise ValueError(f"Expected {path}[{item_index}] to be a string.")
+    return value
+
+
+def _validate_eval_detail_fields(
+    detail: Dict[str, Any],
+    *,
+    index: int,
+) -> Tuple[str, List[str], bool, int, List[str]]:
+    prefix = f"retrieval_eval['details'][{index}]"
+
+    query_text = detail.get("query", "")
+    if not isinstance(query_text, str):
+        raise ValueError(f"Expected {prefix}['query'] to be a string.")
+
+    expected = _require_detail_string_list(
+        detail.get("expected", []),
+        index=index,
+        field="expected",
+    )
+
+    is_relevant = detail.get("is_relevant", False)
+    if not isinstance(is_relevant, bool):
+        raise ValueError(f"Expected {prefix}['is_relevant'] to be a boolean.")
+
+    found_count = detail.get("found_count", 0)
+    if isinstance(found_count, bool) or not isinstance(found_count, int):
+        raise ValueError(f"Expected {prefix}['found_count'] to be an integer.")
+    if found_count < 0:
+        raise ValueError(f"Expected {prefix}['found_count'] to be non-negative.")
+
+    top_results = _require_detail_string_list(
+        detail.get("top_results", []),
+        index=index,
+        field="top_results",
+    )
+
+    return query_text, expected, is_relevant, found_count, top_results
 
 
 def integrate_diagnostics_with_eval_results(
@@ -93,7 +144,9 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
     misses: List[Dict[str, Any]] = []
     if "details" not in eval_results:
         if "results" in eval_results:
-            raise ValueError("Expected retrieval_eval field 'details', found unsupported legacy key 'results'.")
+            raise ValueError(
+                "Expected retrieval_eval field 'details', found unsupported legacy key 'results'."
+            )
         raise ValueError("Expected retrieval_eval field 'details'.")
 
     details = eval_results.get("details", [])
@@ -104,37 +157,36 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
 
     for detail_idx, detail in enumerate(details):
         detail = _require_eval_detail(detail, index=detail_idx)
+        (
+            query_text,
+            expected,
+            is_relevant,
+            found_count,
+            top_results,
+        ) = _validate_eval_detail_fields(detail, index=detail_idx)
+
         # Only process misses (is_relevant=false)
-        if detail.get("is_relevant", False):
+        if is_relevant:
             continue
-
-        query_text = detail.get("query", "")
-        expected = detail.get("expected", [])
-        if not isinstance(expected, list):
-            expected = [str(expected)]
-        found_count = detail.get("found_count", 0)
-        if not isinstance(found_count, int):
-            found_count = 0
-
-        top_results = detail.get("top_results", [])
-        if not isinstance(top_results, list):
-            top_results = []
         # Prefer configured eval k from metrics (e.g., recall@10), because top_results
         # may be shorter than k for low-hit queries.
-        top_k = configured_top_k if configured_top_k is not None else (len(top_results) if len(top_results) > 0 else None)
+        top_k = (
+            configured_top_k
+            if configured_top_k is not None
+            else (len(top_results) if len(top_results) > 0 else None)
+        )
 
         # For each expected target, create a miss record
         for expected_target in expected:
-            if not isinstance(expected_target, str):
-                expected_target = str(expected_target)
-
             # Try to determine if target was in results
             found_in_results = False
             rank_in_results = None
 
             # Check if target was found (substring match in results)
             for rank_idx, res_path in enumerate(top_results):
-                if isinstance(res_path, str) and (expected_target in res_path or res_path in expected_target):
+                if isinstance(res_path, str) and (
+                    expected_target in res_path or res_path in expected_target
+                ):
                     found_in_results = True
                     rank_in_results = rank_idx + 1
                     break
