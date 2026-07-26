@@ -11,6 +11,10 @@ from merger.repoground.core.bundle_access import (
     resolve_required_reading_for_bundle,
     snapshot_status,
 )
+from merger.repoground.core.manifest_snapshot import (
+    active_manifest_snapshot,
+    resolve_manifest_path,
+)
 
 # Bilingual (EN/DE) function-word stoplist. These words carry no retrieval
 # signal but, because the FTS router AND-joins every term, a single one that is
@@ -258,7 +262,12 @@ def _availability_block(snapshot: dict[str, Any]) -> dict[str, Any]:
 def _snapshot_ref(
     snapshot: dict[str, Any], manifest_path: Path, freshness: dict[str, Any]
 ) -> dict[str, Any]:
-    manifest_sha = _sha256_file(manifest_path)
+    bound_snapshot = active_manifest_snapshot(manifest_path)
+    manifest_sha = (
+        bound_snapshot.binding.sha256
+        if bound_snapshot is not None
+        else _sha256_file(manifest_path)
+    )
     result: dict[str, Any] = {
         "stem": manifest_path.name.replace(".bundle.manifest.json", ""),
         "manifest_path": str(manifest_path),
@@ -464,7 +473,7 @@ def build_ask_context_pack(
     existing read-only index query and reports token budget as a constraint, not as a
     quality or correctness proof.
     """
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     snapshot = snapshot_status(manifest_path)
     freshness = _freshness_block(snapshot)
     availability = _availability_block(snapshot)

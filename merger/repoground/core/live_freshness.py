@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .bundle_identity import is_bundle_manifest
 from .bundle_catalog import normalize_repo_remote
+from .manifest_snapshot import active_manifest_snapshot, resolve_manifest_path
 
 import json
 import os
@@ -31,6 +32,9 @@ Probe = Callable[[str | Path], dict[str, Any]]
 
 
 def _load_manifest(path: Path) -> dict[str, Any]:
+    snapshot = active_manifest_snapshot(path)
+    if snapshot is not None:
+        return snapshot.json_object()
     try:
         with path.open("rb") as handle:
             raw = handle.read(MAX_MANIFEST_BYTES + 1)
@@ -293,7 +297,7 @@ def evaluate_live_freshness(
     probe: Probe = repository_live_provenance,
 ) -> dict[str, Any]:
     """Compare snapshot provenance with one explicitly authorized local checkout."""
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     records = _repository_records(_load_manifest(manifest_path))
     if repo_root is None:
         return _base(

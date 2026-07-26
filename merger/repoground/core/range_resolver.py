@@ -11,6 +11,7 @@ except ImportError:
 
 from .bundle_identity import is_bundle_manifest
 from .constants import ArtifactRole
+from .manifest_snapshot import active_manifest_snapshot
 
 
 _CONTRACTS_DIR = Path(__file__).parent.parent / "contracts"
@@ -173,6 +174,14 @@ def build_derived_range_ref_v2(
     }
 
 
+def _load_range_manifest(manifest_path: Path) -> Dict[str, Any]:
+    snapshot = active_manifest_snapshot(manifest_path)
+    if snapshot is not None:
+        return snapshot.json_object()
+    with manifest_path.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def resolve_range_ref(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any]:
     """
     Resolves a range_ref against a bundle.manifest.json or dump_index.json to extract
@@ -181,8 +190,7 @@ def resolve_range_ref(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any
     if not manifest_path.exists():
         raise FileNotFoundError(f"Manifest not found: {manifest_path}")
 
-    with manifest_path.open("r", encoding="utf-8") as f:
-        manifest = json.load(f)
+    manifest = _load_range_manifest(manifest_path)
 
     is_v2 = ref.get("range_ref_version") == "2"
     schema_path = _RANGE_REF_V2_SCHEMA_PATH if is_v2 else _RANGE_REF_V1_SCHEMA_PATH

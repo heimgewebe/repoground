@@ -48,6 +48,7 @@ class _ScopeFrame:
     start_line: int | None = None
     end_line: int | None = None
     receiver_name: str | None = None
+    type_alias_name: str | None = None
 
 
 class _ModuleState:
@@ -168,6 +169,18 @@ class _BindingCollector(ast.NodeVisitor):
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> Any:
         return None
 
+    def visit_TypeAlias(self, node: Any) -> Any:
+        name = getattr(node, "name", None)
+        if isinstance(name, ast.Name):
+            self.local.add(name.id)
+        for type_param in getattr(node, "type_params", ()):  # Python 3.12+
+            if isinstance(type_param, ast.AST):
+                self.visit(type_param)
+        value = getattr(node, "value", None)
+        if isinstance(value, ast.AST):
+            self.visit(value)
+        return None
+
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> Any:
         if isinstance(node.name, str):
             self.local.add(node.name)
@@ -233,11 +246,60 @@ def _target_names(target: ast.AST) -> set[str]:
     }
 
 
+def _type_parameter_names(type_params: Iterable[ast.AST]) -> set[str]:
+    names: set[str] = set()
+    for type_param in type_params:
+        name = getattr(type_param, "name", None)
+        if isinstance(name, str):
+            names.add(name)
+        elif isinstance(name, ast.Name):
+            names.add(name.id)
+    return names
+
+
+def _statement_falls_through(statement: ast.stmt) -> bool:
+    if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+        return False
+    if isinstance(statement, ast.If):
+        return _statements_fall_through(statement.body) or _statements_fall_through(
+            statement.orelse
+        )
+    try_star_type = getattr(ast, "TryStar", None)
+    if isinstance(statement, ast.Try) or (
+        try_star_type is not None and isinstance(statement, try_star_type)
+    ):
+        if statement.finalbody and not _statements_fall_through(statement.finalbody):
+            return False
+        normal_path_falls_through = _statements_fall_through(
+            statement.body
+        ) and _statements_fall_through(statement.orelse)
+        handler_falls_through = any(
+            _statements_fall_through(handler.body) for handler in statement.handlers
+        )
+        return normal_path_falls_through or handler_falls_through
+    if isinstance(statement, (ast.With, ast.AsyncWith)):
+        return _statements_fall_through(statement.body)
+    return True
+
+
+def _statements_fall_through(statements: Sequence[ast.stmt]) -> bool:
+    return all(_statement_falls_through(statement) for statement in statements)
+
+
+def _type_alias_binding_reason(frame: _ScopeFrame, name: str) -> str:
+    if name == frame.type_alias_name:
+        return "type_alias_self_binding"
+    return "type_parameter_binding"
+
+
 class _CallGraphVisitor(ast.NodeVisitor):
     def __init__(self, path: str, is_package: bool) -> None:
         self.state = _ModuleState(path, _module_name(path))
         self.is_package = is_package
         self.stack: list[_ScopeFrame] = []
+        self._loop_break_bindings: list[list[dict[str, tuple[str, ...]]]] = []
+        self._loop_continue_bindings: list[list[dict[str, tuple[str, ...]]]] = []
+        self._suppress_loop_exits = 0
 
     def _qualified(self, name: str) -> str:
         return ".".join([*(frame.name for frame in self.stack if frame.name), name])
@@ -299,8 +361,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
             receiver_name=self._direct_method_receiver(node),
         )
         self.stack.append(frame)
-        for statement in node.body:
-            self.visit(statement)
+        self._visit_statement_list(node.body)
         self.stack.pop()
         return None
 
@@ -315,8 +376,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
             receiver_name=self._direct_method_receiver(node),
         )
         self.stack.append(frame)
-        for statement in node.body:
-            self.visit(statement)
+        self._visit_statement_list(node.body)
         self.stack.pop()
         return None
 
@@ -332,8 +392,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
             self.visit(type_param)
         self._invalidate_local_imports({node.name})
         self.stack.append(_class_frame(node))
-        for statement in node.body:
-            self.visit(statement)
+        self._visit_statement_list(node.body)
         self.stack.pop()
         return None
 
@@ -493,6 +552,72 @@ class _CallGraphVisitor(ast.NodeVisitor):
                 from_imports=imports,
             )
 
+    def _local_import_bindings(self) -> dict[str, tuple[str, ...]]:
+        if not self.stack:
+            return {}
+        frame = self.stack[-1]
+        bindings = {local: ("module", module) for local, module in frame.module_aliases}
+        bindings.update(
+            {
+                local: ("symbol", module, original)
+                for local, module, original in frame.from_imports
+            }
+        )
+        return bindings
+
+    def _set_local_import_bindings(self, bindings: dict[str, tuple[str, ...]]) -> None:
+        if not self.stack:
+            return
+        frame = self.stack[-1]
+        self.stack[-1] = replace(
+            frame,
+            module_aliases=tuple(
+                sorted(
+                    (local, binding[1])
+                    for local, binding in bindings.items()
+                    if binding[0] == "module"
+                )
+            ),
+            from_imports=tuple(
+                sorted(
+                    (local, binding[1], binding[2])
+                    for local, binding in bindings.items()
+                    if binding[0] == "symbol"
+                )
+            ),
+        )
+
+    @staticmethod
+    def _intersect_import_bindings(
+        *states: dict[str, tuple[str, ...]],
+    ) -> dict[str, tuple[str, ...]]:
+        if not states:
+            return {}
+        first, *rest = states
+        return {
+            name: binding
+            for name, binding in first.items()
+            if all(state.get(name) == binding for state in rest)
+        }
+
+    def _visit_unreachable_statement_list(self, statements: Sequence[ast.stmt]) -> None:
+        imports_before = self._local_import_bindings()
+        self._suppress_loop_exits += 1
+        try:
+            for statement in statements:
+                self.visit(statement)
+        finally:
+            self._suppress_loop_exits -= 1
+            self._set_local_import_bindings(imports_before)
+
+    def _visit_statement_list(self, statements: Sequence[ast.stmt]) -> bool:
+        for index, statement in enumerate(statements):
+            self.visit(statement)
+            if not _statement_falls_through(statement):
+                self._visit_unreachable_statement_list(statements[index + 1 :])
+                return False
+        return True
+
     def _bind_or_invalidate_names(self, names: set[str]) -> None:
         if not names:
             return
@@ -547,18 +672,375 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self._bind_or_invalidate_targets(node.targets)
         return None
 
+    def visit_TypeAlias(self, node: Any) -> Any:
+        name = getattr(node, "name", None)
+        alias_name = name.id if isinstance(name, ast.Name) else None
+        type_params = tuple(getattr(node, "type_params", ()))  # Python 3.12+
+        visible_type_parameters: set[str] = set()
+        for type_param in type_params:
+            if isinstance(type_param, ast.AST):
+                self.stack.append(
+                    _ScopeFrame(
+                        name=None,
+                        kind="type_alias",
+                        local_bindings=frozenset(visible_type_parameters),
+                    )
+                )
+                try:
+                    self.visit(type_param)
+                finally:
+                    self.stack.pop()
+                visible_type_parameters.update(_type_parameter_names((type_param,)))
+        value = getattr(node, "value", None)
+        if isinstance(value, ast.AST):
+            self.stack.append(
+                _ScopeFrame(
+                    name=None,
+                    kind="type_alias",
+                    local_bindings=frozenset(
+                        visible_type_parameters
+                        | ({alias_name} if alias_name is not None else set())
+                    ),
+                    type_alias_name=alias_name,
+                )
+            )
+            try:
+                self.visit(value)
+            finally:
+                self.stack.pop()
+        if isinstance(name, ast.Name):
+            self._bind_or_invalidate_names({name.id})
+        return None
+
+    def visit_If(self, node: ast.If) -> Any:
+        self.visit(node.test)
+        imports_before = self._local_import_bindings()
+
+        body_falls_through = self._visit_statement_list(node.body)
+        imports_after_body = self._local_import_bindings()
+
+        self._set_local_import_bindings(imports_before)
+        else_falls_through = self._visit_statement_list(node.orelse)
+        imports_after_else = self._local_import_bindings()
+
+        reachable_states = []
+        if body_falls_through:
+            reachable_states.append(imports_after_body)
+        if else_falls_through:
+            reachable_states.append(imports_after_else)
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*reachable_states)
+        )
+        return None
+
+    @staticmethod
+    def _binding_names_in_statements(statements: Iterable[ast.stmt]) -> set[str]:
+        collector = _BindingCollector()
+        for statement in statements:
+            collector.visit(statement)
+        return collector.local
+
+    @staticmethod
+    def _loop_exit_checkpoint(
+        exit_stack: list[list[dict[str, tuple[str, ...]]]],
+    ) -> tuple[list[dict[str, tuple[str, ...]]] | None, int]:
+        if not exit_stack:
+            return None, 0
+        states = exit_stack[-1]
+        return states, len(states)
+
+    @staticmethod
+    def _take_loop_exits_since(
+        checkpoint: tuple[list[dict[str, tuple[str, ...]]] | None, int],
+    ) -> list[dict[str, tuple[str, ...]]]:
+        states, start = checkpoint
+        if states is None:
+            return []
+        pending = list(states[start:])
+        del states[start:]
+        return pending
+
+    @staticmethod
+    def _bindings_without_names(
+        bindings: dict[str, tuple[str, ...]],
+        changed_names: set[str],
+    ) -> dict[str, tuple[str, ...]]:
+        return {
+            name: binding
+            for name, binding in bindings.items()
+            if name not in changed_names
+        }
+
+    def _visit_try_handler(self, handler: ast.ExceptHandler) -> bool:
+        if handler.type is not None:
+            self.visit(handler.type)
+        handler_names = {handler.name} if isinstance(handler.name, str) else set()
+        self._bind_or_invalidate_names(handler_names)
+        handler_falls_through = self._visit_statement_list(handler.body)
+        self._bind_or_invalidate_names(handler_names)
+        return handler_falls_through
+
+    def _visit_try_handlers(
+        self,
+        handlers: Sequence[ast.ExceptHandler],
+        handler_entry: dict[str, tuple[str, ...]],
+    ) -> list[dict[str, tuple[str, ...]]]:
+        normal_exit_states = []
+        for handler in handlers:
+            self._set_local_import_bindings(handler_entry)
+            if self._visit_try_handler(handler):
+                normal_exit_states.append(self._local_import_bindings())
+        return normal_exit_states
+
+    def _visit_try_else_path(
+        self,
+        statements: Sequence[ast.stmt],
+        *,
+        body_falls_through: bool,
+        imports_after_body: dict[str, tuple[str, ...]],
+    ) -> list[dict[str, tuple[str, ...]]]:
+        self._set_local_import_bindings(imports_after_body)
+        if not body_falls_through:
+            self._visit_unreachable_statement_list(statements)
+            return []
+        if self._visit_statement_list(statements):
+            return [self._local_import_bindings()]
+        return []
+
+    def _visit_try_except_else_paths(
+        self,
+        node: ast.Try | ast.TryStar,
+        imports_before_try: dict[str, tuple[str, ...]],
+    ) -> list[dict[str, tuple[str, ...]]]:
+        body_falls_through = self._visit_statement_list(node.body)
+        imports_after_body = self._local_import_bindings()
+        handler_entry = self._bindings_without_names(
+            imports_before_try,
+            self._binding_names_in_statements(node.body),
+        )
+        normal_exit_states = self._visit_try_handlers(
+            node.handlers,
+            handler_entry,
+        )
+        normal_exit_states.extend(
+            self._visit_try_else_path(
+                node.orelse,
+                body_falls_through=body_falls_through,
+                imports_after_body=imports_after_body,
+            )
+        )
+        return normal_exit_states
+
+    def _exceptional_finally_entry(
+        self,
+        node: ast.Try | ast.TryStar,
+        imports_before_try: dict[str, tuple[str, ...]],
+    ) -> dict[str, tuple[str, ...]]:
+        changed_before_finally = self._binding_names_in_statements(
+            [
+                *node.body,
+                *(statement for handler in node.handlers for statement in handler.body),
+                *node.orelse,
+            ]
+        )
+        changed_before_finally.update(
+            handler.name for handler in node.handlers if isinstance(handler.name, str)
+        )
+        return self._bindings_without_names(
+            imports_before_try,
+            changed_before_finally,
+        )
+
+    @staticmethod
+    def _apply_finally_bindings(
+        imports: dict[str, tuple[str, ...]],
+        imports_after_finally: dict[str, tuple[str, ...]],
+        changed_names: set[str],
+    ) -> dict[str, tuple[str, ...]]:
+        result = {
+            local: binding
+            for local, binding in imports.items()
+            if local not in changed_names
+        }
+        result.update(
+            {
+                local: binding
+                for local, binding in imports_after_finally.items()
+                if local in changed_names
+            }
+        )
+        return result
+
+    def _paths_after_finally(
+        self,
+        paths: Sequence[dict[str, tuple[str, ...]]],
+        *,
+        final_falls_through: bool,
+        imports_after_finally: dict[str, tuple[str, ...]],
+        changed_names: set[str],
+    ) -> list[dict[str, tuple[str, ...]]]:
+        if not final_falls_through:
+            return []
+        return [
+            self._apply_finally_bindings(
+                imports,
+                imports_after_finally,
+                changed_names,
+            )
+            for imports in paths
+        ]
+
+    @staticmethod
+    def _restore_loop_exits_after_finally(
+        checkpoint: tuple[list[dict[str, tuple[str, ...]]] | None, int],
+        resumed_exits: Sequence[dict[str, tuple[str, ...]]],
+    ) -> None:
+        states, start = checkpoint
+        if states is None:
+            return
+        exits_from_finally = list(states[start:])
+        states[start:] = [*resumed_exits, *exits_from_finally]
+
+    def _visit_try_finally_paths(
+        self,
+        node: ast.Try | ast.TryStar,
+        *,
+        imports_before_try: dict[str, tuple[str, ...]],
+        normal_exit_states: Sequence[dict[str, tuple[str, ...]]],
+        break_checkpoint: tuple[
+            list[dict[str, tuple[str, ...]]] | None,
+            int,
+        ],
+        continue_checkpoint: tuple[
+            list[dict[str, tuple[str, ...]]] | None,
+            int,
+        ],
+    ) -> None:
+        pending_breaks = self._take_loop_exits_since(break_checkpoint)
+        pending_continues = self._take_loop_exits_since(continue_checkpoint)
+        finally_entry = self._intersect_import_bindings(
+            *normal_exit_states,
+            *pending_breaks,
+            *pending_continues,
+            self._exceptional_finally_entry(node, imports_before_try),
+        )
+        self._set_local_import_bindings(finally_entry)
+        final_falls_through = self._visit_statement_list(node.finalbody)
+        imports_after_finally = self._local_import_bindings()
+        changed_names = self._binding_names_in_statements(node.finalbody)
+
+        normal_after_finally = self._paths_after_finally(
+            normal_exit_states,
+            final_falls_through=final_falls_through,
+            imports_after_finally=imports_after_finally,
+            changed_names=changed_names,
+        )
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*normal_after_finally)
+        )
+        breaks_after_finally = self._paths_after_finally(
+            pending_breaks,
+            final_falls_through=final_falls_through,
+            imports_after_finally=imports_after_finally,
+            changed_names=changed_names,
+        )
+        self._restore_loop_exits_after_finally(
+            break_checkpoint,
+            breaks_after_finally,
+        )
+        continues_after_finally = self._paths_after_finally(
+            pending_continues,
+            final_falls_through=final_falls_through,
+            imports_after_finally=imports_after_finally,
+            changed_names=changed_names,
+        )
+        self._restore_loop_exits_after_finally(
+            continue_checkpoint,
+            continues_after_finally,
+        )
+
+    def _visit_try_statement(self, node: ast.Try | ast.TryStar) -> None:
+        imports_before_try = self._local_import_bindings()
+        break_checkpoint = self._loop_exit_checkpoint(self._loop_break_bindings)
+        continue_checkpoint = self._loop_exit_checkpoint(self._loop_continue_bindings)
+        normal_exit_states = self._visit_try_except_else_paths(
+            node,
+            imports_before_try,
+        )
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*normal_exit_states)
+        )
+        if node.finalbody:
+            self._visit_try_finally_paths(
+                node,
+                imports_before_try=imports_before_try,
+                normal_exit_states=normal_exit_states,
+                break_checkpoint=break_checkpoint,
+                continue_checkpoint=continue_checkpoint,
+            )
+
+    def visit_Try(self, node: ast.Try) -> Any:
+        self._visit_try_statement(node)
+        return None
+
+    def visit_TryStar(self, node: ast.TryStar) -> Any:
+        self._visit_try_statement(node)
+        return None
+
     def _visit_for_statement(self, node: ast.For | ast.AsyncFor) -> None:
         self.visit(node.iter)
+        imports_after_iter = self._local_import_bindings()
         self.visit(node.target)
         names = _target_names(node.target)
         self._bind_or_invalidate_names(names)
-        for statement in node.body:
-            self.visit(statement)
-        # The loop target is rebound on every iteration. An import inside the body
-        # must not make post-loop calls look unconditionally bound to that import.
-        self._bind_or_invalidate_names(names)
-        for statement in node.orelse:
-            self.visit(statement)
+        self._loop_break_bindings.append([])
+        self._loop_continue_bindings.append([])
+        try:
+            body_falls_through = self._visit_statement_list(node.body)
+        finally:
+            break_bindings = self._loop_break_bindings.pop()
+            continue_bindings = self._loop_continue_bindings.pop()
+
+        def without_target_names(
+            state: dict[str, tuple[str, ...]],
+        ) -> dict[str, tuple[str, ...]]:
+            return {
+                name: binding for name, binding in state.items() if name not in names
+            }
+
+        break_bindings = [
+            without_target_names(break_state) for break_state in break_bindings
+        ]
+        continue_bindings = [
+            without_target_names(continue_state) for continue_state in continue_bindings
+        ]
+
+        # The loop may execute zero times. A target-name reimport observed while
+        # walking the body is not definite: it may be conditional, and another
+        # iteration rebinds the target first. ``else`` may establish it again.
+        # Other imports must agree before the loop and on body fallthrough.
+        imports_after_body = {
+            name: binding
+            for name, binding in self._local_import_bindings().items()
+            if name not in names
+        }
+        normal_exit_states = [imports_after_iter, *continue_bindings]
+        if body_falls_through:
+            normal_exit_states.append(imports_after_body)
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*normal_exit_states)
+        )
+        else_falls_through = self._visit_statement_list(node.orelse)
+        imports_after_else = self._local_import_bindings()
+
+        # Every possible break skips ``else``. Keep only the identical import
+        # bindings present on the else path and on every observed break path.
+        reachable_states = list(break_bindings)
+        if else_falls_through:
+            reachable_states.append(imports_after_else)
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*reachable_states)
+        )
 
     def visit_For(self, node: ast.For) -> Any:
         self._visit_for_statement(node)
@@ -566,6 +1048,41 @@ class _CallGraphVisitor(ast.NodeVisitor):
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> Any:
         self._visit_for_statement(node)
+        return None
+
+    def visit_While(self, node: ast.While) -> Any:
+        self.visit(node.test)
+        imports_after_test = self._local_import_bindings()
+        self._loop_break_bindings.append([])
+        self._loop_continue_bindings.append([])
+        try:
+            body_falls_through = self._visit_statement_list(node.body)
+        finally:
+            break_bindings = self._loop_break_bindings.pop()
+            continue_bindings = self._loop_continue_bindings.pop()
+        normal_exit_states = [imports_after_test, *continue_bindings]
+        if body_falls_through:
+            normal_exit_states.append(self._local_import_bindings())
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*normal_exit_states)
+        )
+        else_falls_through = self._visit_statement_list(node.orelse)
+        reachable_states = list(break_bindings)
+        if else_falls_through:
+            reachable_states.append(self._local_import_bindings())
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*reachable_states)
+        )
+        return None
+
+    def visit_Break(self, _node: ast.Break) -> Any:
+        if self._loop_break_bindings and not self._suppress_loop_exits:
+            self._loop_break_bindings[-1].append(self._local_import_bindings())
+        return None
+
+    def visit_Continue(self, _node: ast.Continue) -> Any:
+        if self._loop_continue_bindings and not self._suppress_loop_exits:
+            self._loop_continue_bindings[-1].append(self._local_import_bindings())
         return None
 
     def _visit_with_statement(self, node: ast.With | ast.AsyncWith) -> None:
@@ -772,6 +1289,8 @@ class _Resolver:
                     return "lexically_shadowed_name", False
             elif frame.kind == "comprehension" and name in frame.local_bindings:
                 return "comprehension_binding", False
+            elif frame.kind == "type_alias" and name in frame.local_bindings:
+                return _type_alias_binding_reason(frame, name), False
             elif (
                 frame.kind == "class"
                 and not inside_function

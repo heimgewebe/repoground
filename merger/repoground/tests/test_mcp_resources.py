@@ -164,6 +164,9 @@ def test_mcp_read_canonical_reading_pack_health_and_availability_resources(tmp_p
     assert "Agent pack" in reading["content_text"]
     assert health["resource_role"] == "post_emit_health"
     assert health["content_json"]["status"] == "pass"
+    assert health["artifact_ref"]["authority"] == "diagnostic_signal"
+    assert health["artifact_ref"]["canonicality"] == "diagnostic"
+    assert health["artifact_ref"]["risk_class"] == "diagnostic"
     assert availability["resource_role"] == "availability_model"
     assert availability["content_json"]["status"] in {
         "available",
@@ -174,6 +177,219 @@ def test_mcp_read_canonical_reading_pack_health_and_availability_resources(tmp_p
         "warn",
         "fail",
     }
+
+
+def test_mcp_health_validates_and_returns_the_same_single_read_bytes(
+    tmp_path, monkeypatch
+):
+    bundle = _bundle_with_health(tmp_path)
+    manifest = bundle["manifest"].resolve()
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    health_path = (
+        manifest.parent / document["links"]["post_emit_health_path"]
+    ).resolve()
+    expected = health_path.read_bytes()
+    original_read = mcp_resources._read_bounded_bytes
+    read_counts = {"manifest": 0, "health": 0}
+
+    def counted_read(path, **kwargs):
+        resolved = path.resolve()
+        if resolved == manifest:
+            read_counts["manifest"] += 1
+        elif resolved == health_path:
+            read_counts["health"] += 1
+        return original_read(path, **kwargs)
+
+    monkeypatch.setattr(mcp_resources, "_read_bounded_bytes", counted_read)
+    result = read_mcp_resource(
+        "repoground://snapshot/demo/health",
+        bundle_root=manifest.parent,
+    )
+
+    assert result["status"] == "available"
+    assert result["content_text"].encode("utf-8") == expected
+    assert result["artifact_ref"]["bytes"] == len(expected)
+    assert result["artifact_ref"]["sha256"] == hashlib.sha256(expected).hexdigest()
+    assert read_counts == {"manifest": 1, "health": 1}
+
+
+def test_mcp_health_fails_closed_on_exchanged_health_bytes(tmp_path, monkeypatch):
+    bundle = _bundle_with_health(tmp_path)
+    manifest = bundle["manifest"].resolve()
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    health_path = (
+        manifest.parent / document["links"]["post_emit_health_path"]
+    ).resolve()
+    exchanged = (
+        json.dumps(
+            {
+                "kind": "health",
+                "status": "pass",
+                "bundle_manifest_path": str(manifest),
+                "bundle_run_id": "other-run",
+                "bundle_manifest_sha256": "0" * 64,
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    original_read = mcp_resources._read_bounded_bytes
+    health_reads = 0
+
+    def exchange_health(path, **kwargs):
+        nonlocal health_reads
+        if path.resolve() == health_path:
+            health_reads += 1
+            return exchanged, None
+        return original_read(path, **kwargs)
+
+    monkeypatch.setattr(mcp_resources, "_read_bounded_bytes", exchange_health)
+    result = read_mcp_resource(
+        "repoground://snapshot/demo/health",
+        bundle_root=manifest.parent,
+    )
+
+    assert result["status"] == "unhealthy"
+    assert "does not match" in result["reason"]
+    assert "content_text" not in result
+    assert health_reads == 1
+
+
+def test_mcp_health_blocks_valid_json_above_health_limit(tmp_path):
+    bundle = _bundle_with_health(tmp_path)
+    manifest = bundle["manifest"].resolve()
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    health_path = (
+        manifest.parent / document["links"]["post_emit_health_path"]
+    ).resolve()
+    oversized = {
+        "kind": "health",
+        "status": "pass",
+        "bundle_manifest_path": str(manifest),
+        "bundle_run_id": document["run_id"],
+        "bundle_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "padding": "x" * mcp_resources.MAX_HEALTH_BYTES,
+    }
+    health_path.write_text(
+        json.dumps(oversized, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    health_bytes = health_path.stat().st_size
+    assert mcp_resources.MAX_HEALTH_BYTES < health_bytes
+    assert health_bytes < mcp_resources.MAX_RESOURCE_BYTES
+
+    result = read_mcp_resource(
+        "repoground://snapshot/demo/health",
+        bundle_root=manifest.parent,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["artifact_ref"] is None
+    assert "post_emit_health exceeds MCP resource size limit" in result["reason"]
+    assert "content_text" not in result
+    assert "content_json" not in result
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason_fragment"),
+    [
+        ("missing_output_health", "output_health artifact missing"),
+        ("output_health_hash_drift", "sha256 does not match manifest"),
+        (
+            "manifest_gate_failed",
+            "bundle_surface_validation_status='fail'",
+        ),
+    ],
+)
+def test_mcp_health_requires_complete_bundle_health_gates(
+    tmp_path,
+    failure,
+    reason_fragment,
+):
+    bundle = _bundle_with_health(tmp_path)
+    manifest = bundle["manifest"].resolve()
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    output_health = next(
+        item for item in document["artifacts"] if item["role"] == "output_health"
+    )
+
+    if failure == "missing_output_health":
+        document["artifacts"].remove(output_health)
+        manifest.write_text(
+            json.dumps(document, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        _bind_post_health(bundle)
+    elif failure == "output_health_hash_drift":
+        output_path = manifest.parent / output_health["path"]
+        original = output_path.read_bytes()
+        drifted = original.replace(b'"pass"', b'"fail"', 1)
+        assert len(drifted) == len(original)
+        output_path.write_bytes(drifted)
+    else:
+        document["links"]["bundle_surface_validation_status"] = "fail"
+        manifest.write_text(
+            json.dumps(document, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        _bind_post_health(bundle)
+
+    result = read_mcp_resource(
+        "repoground://snapshot/demo/health",
+        bundle_root=manifest.parent,
+    )
+
+    assert result["status"] == "unhealthy"
+    assert result["snapshot_context"]["health"]["health_status"] == "invalid"
+    assert reason_fragment in result["reason"]
+    assert result["artifact_ref"] is None
+    assert "content_text" not in result
+
+
+def test_mcp_health_path_exchange_after_validation_cannot_change_returned_bytes(
+    tmp_path,
+    monkeypatch,
+):
+    bundle = _bundle_with_health(tmp_path)
+    manifest = bundle["manifest"].resolve()
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    health_path = (
+        manifest.parent / document["links"]["post_emit_health_path"]
+    ).resolve()
+    expected = health_path.read_bytes()
+    exchanged = b'{"kind":"health","status":"fail"}\n'
+    original_inspection = mcp_resources.inspect_bundle_health_documents
+    original_read = mcp_resources._read_bounded_bytes
+    health_reads = 0
+
+    def counted_read(path, **kwargs):
+        nonlocal health_reads
+        if path.resolve() == health_path:
+            health_reads += 1
+        return original_read(path, **kwargs)
+
+    def inspect_then_exchange(*args, **kwargs):
+        inspection = original_inspection(*args, **kwargs)
+        health_path.write_bytes(exchanged)
+        return inspection
+
+    monkeypatch.setattr(mcp_resources, "_read_bounded_bytes", counted_read)
+    monkeypatch.setattr(
+        mcp_resources,
+        "inspect_bundle_health_documents",
+        inspect_then_exchange,
+    )
+
+    result = read_mcp_resource(
+        "repoground://snapshot/demo/health",
+        bundle_root=manifest.parent,
+    )
+
+    assert result["status"] == "available"
+    assert result["content_text"].encode("utf-8") == expected
+    assert result["artifact_ref"]["sha256"] == hashlib.sha256(expected).hexdigest()
+    assert health_path.read_bytes() == exchanged
+    assert health_reads == 1
 
 
 def test_mcp_read_arbitrary_artifact_resource(tmp_path):

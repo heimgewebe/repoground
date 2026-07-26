@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from merger.repoground.core.bundle_identity import is_bundle_manifest
+from merger.repoground.core.manifest_snapshot import (
+    active_manifest_snapshot,
+    resolve_manifest_path,
+)
 from merger.repoground.core.post_health_binding import post_health_binding_status
 
 KIND = "repoground.bundle_catalog"
@@ -71,7 +75,11 @@ def _load_json_object(path: Path, max_bytes: int) -> tuple[dict[str, Any], bytes
 
 
 def _manifest_document(path: Path) -> tuple[dict[str, Any], bytes]:
-    document, raw = _load_json_object(path, MAX_MANIFEST_BYTES)
+    snapshot = active_manifest_snapshot(path)
+    if snapshot is None:
+        document, raw = _load_json_object(path, MAX_MANIFEST_BYTES)
+    else:
+        document, raw = snapshot.json_object(), snapshot.raw
     if (
         not is_bundle_manifest(document)
         or not isinstance(document.get("run_id"), str)
@@ -248,11 +256,58 @@ def _health_binding_issue(
         return "post_emit_health manifest path expectation is missing"
     binding_status, binding_detail = post_health_binding_status(
         document,
-        resolved_manifest=expected_manifest_path.resolve(),
+        resolved_manifest=resolve_manifest_path(expected_manifest_path),
         manifest_run_id=expected_manifest_run_id,
         manifest_sha256=expected_manifest_sha256,
     )
     return None if binding_status == "pass" else binding_detail
+
+
+def _health_document_status(
+    document: Mapping[str, Any],
+    raw: bytes,
+    *,
+    expected_sha256: Any = None,
+    expected_bytes: Any = None,
+    require_integrity: bool = False,
+    expected_manifest_path: Path | None = None,
+    expected_manifest_run_id: Any = None,
+    expected_manifest_sha256: str | None = None,
+    require_manifest_binding: bool = False,
+) -> tuple[str, str | None]:
+    issue = _health_metadata_issue(
+        expected_sha256=expected_sha256,
+        expected_bytes=expected_bytes,
+        require_integrity=require_integrity,
+    )
+    if issue is not None:
+        return "invalid", issue
+    try:
+        decoded = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return "invalid", "health artifact is not valid UTF-8 JSON"
+    if not isinstance(decoded, dict):
+        return "invalid", "health artifact must be a JSON object"
+    if decoded != document:
+        return "invalid", "health document does not match supplied artifact bytes"
+    issue = _health_content_issue(
+        raw,
+        expected_sha256=expected_sha256,
+        expected_bytes=expected_bytes,
+    )
+    if issue is not None:
+        return "invalid", issue
+    status = document.get("status") or document.get("verdict")
+    if status != "pass":
+        return "invalid", f"health status is {status!r}, expected 'pass'"
+    issue = _health_binding_issue(
+        document,
+        expected_manifest_path=expected_manifest_path,
+        expected_manifest_run_id=expected_manifest_run_id,
+        expected_manifest_sha256=expected_manifest_sha256,
+        require_manifest_binding=require_manifest_binding,
+    )
+    return ("invalid", issue) if issue is not None else ("pass", None)
 
 
 def _health_json_status(
@@ -277,24 +332,52 @@ def _health_json_status(
         document, raw = _load_json_object(path, MAX_HEALTH_BYTES)
     except BundleCatalogError as exc:
         return "invalid", str(exc)
-    issue = _health_content_issue(
+    return _health_document_status(
+        document,
         raw,
         expected_sha256=expected_sha256,
         expected_bytes=expected_bytes,
-    )
-    if issue is not None:
-        return "invalid", issue
-    status = document.get("status") or document.get("verdict")
-    if status != "pass":
-        return "invalid", f"health status is {status!r}, expected 'pass'"
-    issue = _health_binding_issue(
-        document,
+        require_integrity=require_integrity,
         expected_manifest_path=expected_manifest_path,
         expected_manifest_run_id=expected_manifest_run_id,
         expected_manifest_sha256=expected_manifest_sha256,
         require_manifest_binding=require_manifest_binding,
     )
-    return ("invalid", issue) if issue is not None else ("pass", None)
+
+
+def _post_health_issue(
+    path: Path,
+    document: Mapping[str, Any],
+    *,
+    manifest_sha256: str,
+    post_health_source: tuple[Path, Mapping[str, Any], bytes] | None,
+) -> str | None:
+    links = document.get("links") if isinstance(document.get("links"), Mapping) else {}
+    post_path = _safe_child(path.parent, links.get("post_emit_health_path"))
+    if post_path is None:
+        return "post_emit_health path missing or invalid"
+    if post_health_source is None:
+        status, reason = _health_json_status(
+            post_path,
+            expected_manifest_path=path,
+            expected_manifest_run_id=document.get("run_id"),
+            expected_manifest_sha256=manifest_sha256,
+            require_manifest_binding=True,
+        )
+        return None if status == "pass" else reason or "post_emit_health invalid"
+
+    source_path, source_document, source_raw = post_health_source
+    if source_path.resolve() != post_path:
+        return "supplied post_emit_health path does not match manifest link"
+    status, reason = _health_document_status(
+        source_document,
+        source_raw,
+        expected_manifest_path=path,
+        expected_manifest_run_id=document.get("run_id"),
+        expected_manifest_sha256=manifest_sha256,
+        require_manifest_binding=True,
+    )
+    return None if status == "pass" else reason or "post_emit_health invalid"
 
 
 def _candidate_health(
@@ -302,6 +385,7 @@ def _candidate_health(
     document: Mapping[str, Any],
     *,
     manifest_sha256: str,
+    post_health_source: tuple[Path, Mapping[str, Any], bytes] | None = None,
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     links = document.get("links") if isinstance(document.get("links"), Mapping) else {}
@@ -341,26 +425,76 @@ def _candidate_health(
             if status != "pass":
                 reasons.append(reason or "output_health invalid")
 
-    post_path = _safe_child(path.parent, links.get("post_emit_health_path"))
-    if post_path is None:
-        reasons.append("post_emit_health path missing or invalid")
-    else:
-        status, reason = _health_json_status(
-            post_path,
-            expected_manifest_path=path,
-            expected_manifest_run_id=document.get("run_id"),
-            expected_manifest_sha256=manifest_sha256,
-            require_manifest_binding=True,
-        )
-        if status != "pass":
-            reasons.append(reason or "post_emit_health invalid")
+    post_issue = _post_health_issue(
+        path,
+        document,
+        manifest_sha256=manifest_sha256,
+        post_health_source=post_health_source,
+    )
+    if post_issue is not None:
+        reasons.append(post_issue)
 
     return ("pass", []) if not reasons else ("invalid", reasons)
 
 
+def inspect_bundle_health_documents(
+    bundle_manifest: str | Path,
+    *,
+    manifest_document: Mapping[str, Any],
+    manifest_bytes: bytes,
+    post_health_path: str | Path,
+    post_health_document: Mapping[str, Any],
+    post_health_bytes: bytes,
+) -> dict[str, Any]:
+    """Inspect whole-bundle health from one already-read manifest/health pair."""
+    path = resolve_manifest_path(bundle_manifest)
+    try:
+        decoded_manifest = json.loads(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        decoded_manifest = None
+    if (
+        not isinstance(decoded_manifest, dict)
+        or decoded_manifest != manifest_document
+        or not is_bundle_manifest(manifest_document)
+        or not isinstance(manifest_document.get("run_id"), str)
+        or not isinstance(manifest_document.get("artifacts"), list)
+    ):
+        return {
+            "kind": "repoground.bundle_health",
+            "version": VERSION,
+            "status": "invalid",
+            "health_status": "invalid",
+            "bundle_manifest": str(path),
+            "manifest_sha256": None,
+            "reasons": ["invalid RepoGround bundle manifest"],
+            "mutation_boundary": {"writes": [], "read_paths_do_not_refresh": True},
+        }
+    manifest_sha256 = _sha256_bytes(manifest_bytes)
+    health_status, reasons = _candidate_health(
+        path,
+        manifest_document,
+        manifest_sha256=manifest_sha256,
+        post_health_source=(
+            Path(post_health_path).expanduser().resolve(),
+            post_health_document,
+            post_health_bytes,
+        ),
+    )
+    return {
+        "kind": "repoground.bundle_health",
+        "version": VERSION,
+        "status": "available" if health_status == "pass" else "unhealthy",
+        "health_status": health_status,
+        "bundle_manifest": str(path),
+        "manifest_sha256": manifest_sha256,
+        "reasons": reasons,
+        "mutation_boundary": {"writes": [], "read_paths_do_not_refresh": True},
+    }
+
+
 def inspect_bundle_health(bundle_manifest: str | Path) -> dict[str, Any]:
     """Inspect manifest-bound health without selecting or refreshing a bundle."""
-    path = Path(bundle_manifest).expanduser().resolve()
+    path = resolve_manifest_path(bundle_manifest)
     try:
         document, raw = _manifest_document(path)
     except BundleCatalogError as exc:

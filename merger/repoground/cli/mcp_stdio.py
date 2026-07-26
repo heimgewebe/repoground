@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -13,6 +13,13 @@ from merger.repoground.core.live_freshness import (
     DOES_NOT_ESTABLISH as FRESHNESS_DOES_NOT_ESTABLISH,
 )
 from merger.repoground.core.live_freshness import evaluate_live_freshness
+from merger.repoground.core.manifest_snapshot import (
+    ManifestBinding,
+    ManifestBindingError,
+    capture_manifest_snapshot,
+    manifest_path_identity,
+    use_manifest_binding,
+)
 
 PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS = (PROTOCOL_VERSION, "2025-03-26", "2024-11-05")
@@ -389,7 +396,9 @@ class RepoGroundMcpStdioServer:
             raise McpProtocolError(-32602, "bundle_manifest does not exist")
         return manifest
 
-    def _resolve_manifest(self, arguments: Mapping[str, Any]) -> Path:
+    def _resolve_manifest(
+        self, arguments: Mapping[str, Any]
+    ) -> tuple[Path, ManifestBinding]:
         raw_manifest = arguments.get("bundle_manifest")
         repo = arguments.get("repo")
         stem = arguments.get("stem")
@@ -399,7 +408,16 @@ class RepoGroundMcpStdioServer:
                     -32602,
                     "bundle_manifest cannot be combined with repo or stem selectors",
                 )
-            return self._guard_manifest(raw_manifest)
+            selected_path = manifest_path_identity(raw_manifest)
+            manifest = self._guard_manifest(raw_manifest)
+            try:
+                binding = capture_manifest_snapshot(
+                    manifest,
+                    selected_path=selected_path,
+                ).binding
+            except ManifestBindingError as exc:
+                raise self._manifest_binding_error(exc) from exc
+            return selected_path, binding
         from merger.repoground.core.bundle_catalog import select_bundle_manifest
 
         selection = select_bundle_manifest(
@@ -410,7 +428,17 @@ class RepoGroundMcpStdioServer:
         )
         selected = selection.get("selected")
         manifest = selected.get("manifest_path") if isinstance(selected, dict) else None
-        if selection.get("status") != "available" or not isinstance(manifest, str):
+        manifest_sha256 = (
+            selected.get("manifest_sha256") if isinstance(selected, dict) else None
+        )
+        run_id = selected.get("run_id") if isinstance(selected, dict) else None
+        if (
+            selection.get("status") != "available"
+            or not isinstance(manifest, str)
+            or not isinstance(manifest_sha256, str)
+            or not isinstance(run_id, str)
+            or not run_id
+        ):
             raise McpProtocolError(
                 -32602,
                 "no unique healthy RepoGround bundle matched the selector",
@@ -421,19 +449,52 @@ class RepoGroundMcpStdioServer:
                     "requested_stem": selection.get("requested_stem"),
                 },
             )
-        return self._guard_manifest(manifest)
+        guarded = self._guard_manifest(manifest)
+        selected_path = manifest_path_identity(manifest)
+        return selected_path, ManifestBinding(
+            selected_path=selected_path,
+            resolved_path=guarded,
+            sha256=manifest_sha256,
+            run_id=run_id,
+        )
 
     def _selected_call_args(
         self, arguments: Mapping[str, Any]
-    ) -> tuple[dict[str, Any], Path]:
-        manifest = self._resolve_manifest(arguments)
+    ) -> tuple[dict[str, Any], Path, ManifestBinding]:
+        manifest, binding = self._resolve_manifest(arguments)
         call_args = {
             key: value
             for key, value in arguments.items()
             if key not in {"bundle_manifest", "repo", "stem"}
         }
         call_args["bundle_manifest"] = str(manifest)
-        return call_args, manifest
+        return call_args, manifest, binding
+
+    @staticmethod
+    def _manifest_binding_error(exc: ManifestBindingError) -> McpProtocolError:
+        return McpProtocolError(
+            -32001,
+            "selected RepoGround bundle manifest binding failed",
+            {
+                "status": "manifest_binding_failed",
+                "reason": str(exc),
+            },
+        )
+
+    def _invoke_bound_tool(
+        self,
+        handler: Callable[..., dict[str, Any]],
+        call_args: dict[str, Any],
+        manifest: Path,
+        binding: ManifestBinding,
+    ) -> dict[str, Any]:
+        try:
+            with use_manifest_binding(binding):
+                payload = handler(**call_args)
+                payload["live_freshness"] = self._safe_live_freshness(manifest)
+                return payload
+        except ManifestBindingError as exc:
+            raise self._manifest_binding_error(exc) from exc
 
     @staticmethod
     def _guard_bundle_path(raw_path: Any, manifest: Path, *, label: str) -> str | None:
@@ -578,28 +639,34 @@ class RepoGroundMcpStdioServer:
         return discover_bundle_catalog(self.bundle_root)
 
     def _call_snapshot_status(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args, manifest = self._selected_call_args(arguments)
+        call_args, manifest, binding = self._selected_call_args(arguments)
         from merger.repoground.core import mcp_tools
 
-        payload = mcp_tools.snapshot_status(**call_args)
-        payload["live_freshness"] = self._safe_live_freshness(manifest)
-        return payload
+        return self._invoke_bound_tool(
+            mcp_tools.snapshot_status,
+            call_args,
+            manifest,
+            binding,
+        )
 
     def _call_ask_context(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args, manifest = self._selected_call_args(arguments)
+        call_args, manifest, binding = self._selected_call_args(arguments)
         query = call_args.get("query")
         if not isinstance(query, str) or not query.strip():
             raise McpProtocolError(-32602, "ask_context requires a non-empty query")
         from merger.repoground.core import mcp_tools
 
-        payload = mcp_tools.ask_context(**call_args)
-        payload["live_freshness"] = self._safe_live_freshness(manifest)
-        return payload
+        return self._invoke_bound_tool(
+            mcp_tools.ask_context,
+            call_args,
+            manifest,
+            binding,
+        )
 
     def _call_query_existing_index(
         self, arguments: Mapping[str, Any]
     ) -> dict[str, Any]:
-        call_args, manifest = self._selected_call_args(arguments)
+        call_args, manifest, binding = self._selected_call_args(arguments)
         query = call_args.get("query")
         if not isinstance(query, str) or not query.strip():
             raise McpProtocolError(
@@ -619,39 +686,48 @@ class RepoGroundMcpStdioServer:
             )
         from merger.repoground.core import mcp_tools
 
-        payload = mcp_tools.query_existing_index(**call_args)
-        payload["live_freshness"] = self._safe_live_freshness(manifest)
-        return payload
+        return self._invoke_bound_tool(
+            mcp_tools.query_existing_index,
+            call_args,
+            manifest,
+            binding,
+        )
 
     def _call_range_get(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args, manifest = self._selected_call_args(arguments)
+        call_args, manifest, binding = self._selected_call_args(arguments)
         if not isinstance(call_args.get("range_ref"), dict):
             raise McpProtocolError(-32602, "range_get requires an object range_ref")
         from merger.repoground.core import mcp_tools
 
-        payload = mcp_tools.range_get(**call_args)
-        payload["live_freshness"] = self._safe_live_freshness(manifest)
-        return payload
+        return self._invoke_bound_tool(
+            mcp_tools.range_get,
+            call_args,
+            manifest,
+            binding,
+        )
 
     def _call_grounding_verify(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args, manifest = self._selected_call_args(arguments)
+        call_args, manifest, binding = self._selected_call_args(arguments)
         if not isinstance(call_args.get("declaration"), dict):
             raise McpProtocolError(
                 -32602, "grounding_verify requires an object declaration"
             )
         call_args["citation_map"] = self._guard_bundle_path(
             call_args.get("citation_map"),
-            manifest,
+            binding.resolved_path,
             label="citation_map",
         )
         from merger.repoground.core import mcp_tools
 
-        payload = mcp_tools.grounding_verify(**call_args)
-        payload["live_freshness"] = self._safe_live_freshness(manifest)
-        return payload
+        return self._invoke_bound_tool(
+            mcp_tools.grounding_verify,
+            call_args,
+            manifest,
+            binding,
+        )
 
     def _call_find_symbol(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args, manifest = self._selected_call_args(arguments)
+        call_args, manifest, binding = self._selected_call_args(arguments)
         name = call_args.get("name")
         if not isinstance(name, str) or not name.strip():
             raise McpProtocolError(-32602, "find_symbol requires a non-empty name")
@@ -664,14 +740,17 @@ class RepoGroundMcpStdioServer:
                 "find_symbol kind must be one of class, function, async_function, or null",
                 {"allowed_kinds": list(mcp_tools.FIND_SYMBOL_KINDS)},
             )
-        payload = mcp_tools.find_symbol(**call_args)
-        payload["live_freshness"] = self._safe_live_freshness(manifest)
-        return payload
+        return self._invoke_bound_tool(
+            mcp_tools.find_symbol,
+            call_args,
+            manifest,
+            binding,
+        )
 
     def _call_call_navigation(
         self, tool: str, arguments: Mapping[str, Any]
     ) -> dict[str, Any]:
-        call_args, manifest = self._selected_call_args(arguments)
+        call_args, manifest, binding = self._selected_call_args(arguments)
         name = call_args.get("name")
         if not isinstance(name, str) or not name.strip():
             raise McpProtocolError(-32602, f"{tool} requires a non-empty name")
@@ -689,9 +768,12 @@ class RepoGroundMcpStdioServer:
             "get_callers": mcp_tools.get_callers,
             "get_callees": mcp_tools.get_callees,
         }
-        payload = handlers[tool](**call_args)
-        payload["live_freshness"] = self._safe_live_freshness(manifest)
-        return payload
+        return self._invoke_bound_tool(
+            handlers[tool],
+            call_args,
+            manifest,
+            binding,
+        )
 
     def _call_snapshot_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if not self.enable_snapshot_create or self.repo_root is None:
@@ -725,7 +807,12 @@ class RepoGroundMcpStdioServer:
         if handler is not None:
             return handler(arguments)
         if name == "live_freshness":
-            return self._safe_live_freshness(self._resolve_manifest(arguments))
+            manifest, binding = self._resolve_manifest(arguments)
+            try:
+                with use_manifest_binding(binding):
+                    return self._safe_live_freshness(manifest)
+            except ManifestBindingError as exc:
+                raise self._manifest_binding_error(exc) from exc
         if name in ("find_references", "get_callers", "get_callees"):
             return self._call_call_navigation(name, arguments)
         raise McpProtocolError(-32602, f"unknown or disabled tool: {name}")

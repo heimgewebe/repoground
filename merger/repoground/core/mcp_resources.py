@@ -11,8 +11,9 @@ from urllib.parse import unquote, urlparse
 
 from merger.repoground.core import bundle_access
 from merger.repoground.core.bundle_catalog import (
+    MAX_HEALTH_BYTES,
     discover_bundle_catalog,
-    inspect_bundle_health,
+    inspect_bundle_health_documents,
 )
 
 KIND = "repoground.mcp.resource_read"
@@ -348,43 +349,101 @@ def _read_manifest_content(result: dict[str, Any], manifest: Path) -> dict[str, 
     return _apply_artifact_bytes(result, data)
 
 
-def _linked_post_health_artifact(
-    manifest: Path,
-) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+def _decode_json_object(data: bytes, *, label: str) -> dict[str, Any]:
     try:
-        document = json.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None, {"status": "invalid", "reasons": ["bundle manifest unreadable"]}
-    links = document.get("links") if isinstance(document, dict) else None
+        value = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not valid UTF-8 JSON") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return value
+
+
+def _linked_post_health_from_manifest_bytes(
+    manifest: Path,
+    manifest_data: bytes,
+) -> tuple[dict[str, Any] | None, dict[str, Any], bytes | None]:
+    try:
+        document = _decode_json_object(manifest_data, label="bundle manifest")
+    except ValueError as exc:
+        return (
+            None,
+            {
+                "status": "invalid",
+                "health_status": "invalid",
+                "reasons": [str(exc)],
+            },
+            None,
+        )
+    links = document.get("links")
     raw_path = links.get("post_emit_health_path") if isinstance(links, dict) else None
     if not isinstance(raw_path, str) or not raw_path:
-        return None, {"status": "missing", "reasons": ["post_emit_health link missing"]}
+        return (
+            None,
+            {
+                "status": "missing",
+                "health_status": "missing",
+                "reasons": ["post_emit_health link missing"],
+            },
+            None,
+        )
     path = (manifest.parent / raw_path).resolve()
     try:
         path.relative_to(manifest.parent.resolve())
     except ValueError:
-        return None, {
-            "status": "blocked",
-            "reasons": ["post_emit_health path escapes bundle root"],
-        }
-    health = inspect_bundle_health(manifest)
-    if health.get("status") != "available" or not path.is_file():
-        return None, health
+        return (
+            None,
+            {
+                "status": "blocked",
+                "health_status": "blocked",
+                "reasons": ["post_emit_health path escapes bundle root"],
+            },
+            None,
+        )
     data, read_issue = _read_bounded_bytes(
         path,
-        max_bytes=MAX_RESOURCE_BYTES,
+        max_bytes=MAX_HEALTH_BYTES,
         too_large_reason="post_emit_health exceeds MCP resource size limit",
         unavailable_reason="post_emit_health unavailable",
     )
     if read_issue is not None or data is None:
-        return None, {
-            "status": read_issue.get("status", "unknown") if read_issue else "unknown",
-            "reasons": [
-                read_issue.get("reason", "post_emit_health unavailable")
+        return (
+            None,
+            {
+                "status": read_issue.get("status", "unknown")
                 if read_issue
-                else "post_emit_health unavailable"
-            ],
-        }
+                else "unknown",
+                "health_status": "unknown",
+                "reasons": [
+                    read_issue.get("reason", "post_emit_health unavailable")
+                    if read_issue
+                    else "post_emit_health unavailable"
+                ],
+            },
+            None,
+        )
+    try:
+        health_document = _decode_json_object(data, label="post_emit_health")
+    except ValueError as exc:
+        return (
+            None,
+            {
+                "status": "invalid",
+                "health_status": "invalid",
+                "reasons": [str(exc)],
+            },
+            None,
+        )
+    health = inspect_bundle_health_documents(
+        manifest,
+        manifest_document=document,
+        manifest_bytes=manifest_data,
+        post_health_path=path,
+        post_health_document=health_document,
+        post_health_bytes=data,
+    )
+    if health.get("status") != "available" or health.get("health_status") != "pass":
+        return None, health, None
     return (
         {
             "role": "post_emit_health",
@@ -396,11 +455,65 @@ def _linked_post_health_artifact(
             "sha256": _sha256_bytes(data),
             "authority": "diagnostic_signal",
             "canonicality": "diagnostic",
-            "risk_class": "health",
-            "integrity_source": "manifest_binding_revalidated_at_read",
+            "risk_class": "diagnostic",
+            "integrity_source": "exact_returned_bytes_manifest_binding",
         },
         health,
+        data,
     )
+
+
+def _linked_post_health_artifact(
+    manifest: Path,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    manifest_data, manifest_issue = _read_bounded_bytes(
+        manifest,
+        max_bytes=MAX_MANIFEST_BYTES,
+        too_large_reason="bundle manifest exceeds MCP manifest size limit",
+        unavailable_reason="bundle manifest unavailable",
+    )
+    if manifest_issue is not None or manifest_data is None:
+        return None, {
+            "status": manifest_issue.get("status", "unknown")
+            if manifest_issue
+            else "unknown",
+            "health_status": "unknown",
+            "reasons": [
+                manifest_issue.get("reason", "bundle manifest unavailable")
+                if manifest_issue
+                else "bundle manifest unavailable"
+            ],
+        }
+    artifact, health, _data = _linked_post_health_from_manifest_bytes(
+        manifest,
+        manifest_data,
+    )
+    return artifact, health
+
+
+def _context_from_manifest_document(
+    manifest: Path,
+    document: dict[str, Any],
+    *,
+    health_artifact: dict[str, Any] | None,
+    health_inspection: dict[str, Any],
+) -> dict[str, Any]:
+    from merger.repoground.core.availability import snapshot_availability_model
+
+    availability = snapshot_availability_model(manifest, document)
+    freshness = availability.get("freshness")
+    return {
+        "health": {
+            "status": health_inspection.get("status", "unknown"),
+            "health_status": health_inspection.get("health_status"),
+            "reasons": health_inspection.get("reasons", []),
+            "artifact": health_artifact,
+        },
+        "freshness": freshness
+        if isinstance(freshness, dict)
+        else {"status": "unknown"},
+        "availability": availability,
+    }
 
 
 def _context_for_manifest(
@@ -439,7 +552,12 @@ def _context_for_manifest(
 
 
 def _base_result(
-    uri: str, manifest: Path | None, *, status: str, reason: str | None = None
+    uri: str,
+    manifest: Path | None,
+    *,
+    status: str,
+    reason: str | None = None,
+    snapshot_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "kind": KIND,
@@ -450,7 +568,9 @@ def _base_result(
         },
         "status": status,
         "bundle_manifest": str(manifest) if manifest else None,
-        "snapshot_context": _context_for_manifest(manifest, reason=reason),
+        "snapshot_context": snapshot_context
+        if snapshot_context is not None
+        else _context_for_manifest(manifest, reason=reason),
         "mutation_boundary": _read_only_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
@@ -466,6 +586,105 @@ def _safe_bundle_file(manifest: Path, artifact: dict[str, Any]) -> Path | None:
     except ValueError:
         return None
     return path
+
+
+def _read_health_resource(uri: str, manifest: Path) -> dict[str, Any]:
+    manifest_data, manifest_issue = _read_bounded_bytes(
+        manifest,
+        max_bytes=MAX_MANIFEST_BYTES,
+        too_large_reason="bundle manifest exceeds MCP manifest size limit",
+        unavailable_reason="bundle manifest unavailable",
+    )
+    if manifest_issue is not None or manifest_data is None:
+        reason = (
+            manifest_issue.get("reason", "bundle manifest unavailable")
+            if manifest_issue
+            else "bundle manifest unavailable"
+        )
+        result = _base_result(
+            uri,
+            manifest,
+            status=manifest_issue.get("status", "unknown")
+            if manifest_issue
+            else "unknown",
+            reason=reason,
+            snapshot_context=_context_for_manifest(None, reason=reason),
+        )
+        result.update({"resource_role": "post_emit_health", "artifact_ref": None})
+        result["reason"] = reason
+        return result
+    try:
+        document = _decode_json_object(manifest_data, label="bundle manifest")
+    except ValueError as exc:
+        reason = str(exc)
+        result = _base_result(
+            uri,
+            manifest,
+            status="invalid",
+            reason=reason,
+            snapshot_context=_context_for_manifest(None, reason=reason),
+        )
+        result.update(
+            {
+                "resource_role": "post_emit_health",
+                "artifact_ref": None,
+                "reason": reason,
+            }
+        )
+        return result
+    if (
+        not is_bundle_manifest(document)
+        or not isinstance(document.get("run_id"), str)
+        or not document["run_id"]
+        or not isinstance(document.get("artifacts"), list)
+    ):
+        reason = "bundle root is not a valid RepoGround bundle manifest"
+        result = _base_result(
+            uri,
+            manifest,
+            status="blocked",
+            reason=reason,
+            snapshot_context=_context_for_manifest(None, reason=reason),
+        )
+        result.update(
+            {
+                "resource_role": "post_emit_health",
+                "artifact_ref": None,
+                "reason": reason,
+            }
+        )
+        return result
+
+    artifact, health, health_data = _linked_post_health_from_manifest_bytes(
+        manifest,
+        manifest_data,
+    )
+    context = _context_from_manifest_document(
+        manifest,
+        document,
+        health_artifact=artifact,
+        health_inspection=health,
+    )
+    result = _base_result(
+        uri,
+        manifest,
+        status=health.get("status", "unknown"),
+        snapshot_context=context,
+    )
+    result.update(
+        {
+            "resource_role": "post_emit_health",
+            "artifact_ref": artifact,
+        }
+    )
+    if artifact is None or health_data is None:
+        result["reason"] = (
+            "; ".join(str(item) for item in health.get("reasons", []) if item)
+            or "post_emit_health unavailable or unbound"
+        )
+        return result
+    result["content_type"] = "application/json"
+    return _apply_artifact_bytes(result, health_data)
 
 
 def _read_artifact_resource(uri: str, manifest: Path, role: str) -> dict[str, Any]:
@@ -487,15 +706,7 @@ def _read_artifact_resource(uri: str, manifest: Path, role: str) -> dict[str, An
         return _read_manifest_content(result, manifest)
 
     if role == "post_emit_health":
-        artifact, health = _linked_post_health_artifact(manifest)
-        result = _base_result(uri, manifest, status=health.get("status", "unknown"))
-        result.update({"resource_role": role, "artifact_ref": artifact})
-        if artifact is None:
-            result["reason"] = (
-                "; ".join(str(item) for item in health.get("reasons", []) if item)
-                or "post_emit_health unavailable or unbound"
-            )
-            return result
+        return _read_health_resource(uri, manifest)
     else:
         ref = bundle_access.get_artifact(manifest, role)
         result = _base_result(uri, manifest, status=ref.get("status", "unknown"))

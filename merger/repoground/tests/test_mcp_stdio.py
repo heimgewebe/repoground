@@ -1,4 +1,6 @@
+import hashlib
 import json
+import sqlite3
 import subprocess
 import sys
 from io import StringIO
@@ -12,6 +14,14 @@ from merger.repoground.cli.mcp_stdio import (
     serve_stdio,
 )
 from merger.repoground.core import mcp_resources, mcp_tools
+from merger.repoground.core.manifest_snapshot import active_manifest_snapshot
+from merger.repoground.tests.test_answer_grounding_verifier import (
+    _bundle as _grounding_bundle,
+)
+from merger.repoground.tests.test_answer_grounding_verifier import (
+    _declaration as _grounding_declaration,
+)
+from merger.repoground.tests.test_ask_context_cli import _complete_basic_bundle
 
 
 def _manifest(tmp_path: Path) -> Path:
@@ -483,7 +493,11 @@ def test_mcp_stdio_repo_selector_resolves_manifest_without_exposing_host_path(
         "select_bundle_manifest",
         lambda *_args, **_kwargs: {
             "status": "available",
-            "selected": {"manifest_path": str(manifest)},
+            "selected": {
+                "manifest_path": str(manifest),
+                "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+                "run_id": "demo",
+            },
         },
     )
 
@@ -506,6 +520,533 @@ def test_mcp_stdio_repo_selector_resolves_manifest_without_exposing_host_path(
 
     assert response["result"]["isError"] is False
     assert seen == {"bundle_manifest": str(manifest.resolve())}
+
+
+def test_mcp_stdio_fails_closed_when_selected_manifest_is_atomically_replaced(
+    tmp_path, monkeypatch
+):
+    manifest = _manifest(tmp_path)
+    selected_bytes = manifest.read_bytes()
+    selected_sha256 = hashlib.sha256(selected_bytes).hexdigest()
+    replacement = tmp_path / "replacement.bundle.manifest.json"
+    replacement.write_text(
+        json.dumps(
+            {
+                "kind": "repolens.bundle.manifest",
+                "run_id": "replacement",
+                "artifacts": [],
+                "snapshot_provenance": {"version": "v1", "repositories": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = RepoGroundMcpStdioServer(bundle_root=tmp_path)
+    _initialize(server)
+
+    from merger.repoground.core import bundle_catalog
+
+    def select_then_replace(*_args, **_kwargs):
+        selected = {
+            "manifest_path": str(manifest),
+            "manifest_sha256": selected_sha256,
+            "run_id": "demo",
+        }
+        replacement.replace(manifest)
+        return {"status": "available", "selected": selected}
+
+    monkeypatch.setattr(
+        bundle_catalog,
+        "select_bundle_manifest",
+        select_then_replace,
+    )
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 14,
+            "method": "tools/call",
+            "params": {
+                "name": "snapshot_status",
+                "arguments": {"repo": "heimgewebe/repoground"},
+            },
+        }
+    )
+
+    assert response["error"]["code"] == -32001
+    assert response["error"]["data"]["status"] == "manifest_binding_failed"
+    assert "digest" in response["error"]["data"]["reason"]
+
+
+def test_mcp_stdio_fails_closed_when_manifest_remains_replaced_during_handler(
+    tmp_path, monkeypatch
+):
+    manifest = _manifest(tmp_path)
+    replacement = tmp_path / "replacement.bundle.manifest.json"
+    replacement.write_text(
+        json.dumps(
+            {
+                "kind": "repolens.bundle.manifest",
+                "run_id": "replacement",
+                "artifacts": [],
+                "snapshot_provenance": {"version": "v1", "repositories": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    server = RepoGroundMcpStdioServer(bundle_root=manifest)
+    _initialize(server)
+
+    from merger.repoground.core import bundle_access
+
+    def replace_during_handler(**arguments):
+        replacement.replace(manifest)
+        snapshot = bundle_access.snapshot_status(arguments["bundle_manifest"])
+        return {
+            "status": "available",
+            "selected_run_id": snapshot["bundle_run_id"],
+        }
+
+    monkeypatch.setattr(mcp_tools, "snapshot_status", replace_during_handler)
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 15,
+            "method": "tools/call",
+            "params": {
+                "name": "snapshot_status",
+                "arguments": {"bundle_manifest": str(manifest)},
+            },
+        }
+    )
+
+    assert response["error"]["code"] == -32001
+    assert response["error"]["data"]["status"] == "manifest_binding_failed"
+
+
+def test_mcp_stdio_consumes_bound_bytes_across_exchange_and_restore(
+    tmp_path, monkeypatch
+):
+    manifest = _manifest(tmp_path)
+    original_document = json.loads(manifest.read_text(encoding="utf-8"))
+    original_document["artifacts"] = [
+        {"role": "selected_marker", "path": "selected.txt"}
+    ]
+    manifest.write_text(json.dumps(original_document), encoding="utf-8")
+    (tmp_path / "selected.txt").write_text("selected\n", encoding="utf-8")
+    original_bytes = manifest.read_bytes()
+    replacement_bytes = json.dumps(
+        {
+            "kind": "repolens.bundle.manifest",
+            "run_id": "replacement",
+            "artifacts": [{"role": "selected_marker", "path": "replacement.txt"}],
+            "snapshot_provenance": {"version": "v1", "repositories": []},
+        }
+    ).encode("utf-8")
+    (tmp_path / "replacement.txt").write_text("replacement\n", encoding="utf-8")
+    server = RepoGroundMcpStdioServer(bundle_root=manifest)
+    _initialize(server)
+
+    from merger.repoground.core import bundle_access
+
+    def exchange_and_restore(**arguments):
+        replacement = tmp_path / "replacement.bundle.manifest.json"
+        replacement.write_bytes(replacement_bytes)
+        replacement.replace(manifest)
+        snapshot = bundle_access.snapshot_status(arguments["bundle_manifest"])
+        artifact = bundle_access.get_artifact(
+            arguments["bundle_manifest"],
+            "selected_marker",
+        )
+        restored = tmp_path / "restored.bundle.manifest.json"
+        restored.write_bytes(original_bytes)
+        restored.replace(manifest)
+        return {
+            "status": "available",
+            "selected_run_id": snapshot["bundle_run_id"],
+            "selected_artifact_path": artifact["artifact"]["path"],
+        }
+
+    monkeypatch.setattr(mcp_tools, "snapshot_status", exchange_and_restore)
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 16,
+            "method": "tools/call",
+            "params": {
+                "name": "snapshot_status",
+                "arguments": {"bundle_manifest": str(manifest)},
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    assert response["result"]["structuredContent"]["selected_run_id"] == "demo"
+    assert (
+        response["result"]["structuredContent"]["selected_artifact_path"]
+        == "selected.txt"
+    )
+
+
+@pytest.mark.parametrize("replacement_outside_bundle_root", [False, True])
+def test_mcp_stdio_symlink_exchange_and_restore_uses_selected_manifest_bytes(
+    tmp_path,
+    monkeypatch,
+    replacement_outside_bundle_root,
+):
+    bundle_root = tmp_path / "bundles"
+    bundle_root.mkdir()
+    selected = _manifest(bundle_root)
+    selected_bytes = selected.read_bytes()
+    selected_sha256 = hashlib.sha256(selected_bytes).hexdigest()
+
+    replacement_root = (
+        tmp_path / "outside" if replacement_outside_bundle_root else bundle_root
+    )
+    replacement_root.mkdir(exist_ok=True)
+    replacement = replacement_root / "replacement.bundle.manifest.json"
+    replacement.write_text(
+        json.dumps(
+            {
+                "kind": "repolens.bundle.manifest",
+                "run_id": "replacement",
+                "artifacts": [],
+                "snapshot_provenance": {"version": "v1", "repositories": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+    selected_link = bundle_root / "active.bundle.manifest.json"
+    selected_link.symlink_to(selected)
+
+    def point_link_at(target):
+        staged = bundle_root / ".active.bundle.manifest.json.next"
+        staged.symlink_to(target)
+        staged.replace(selected_link)
+
+    server = RepoGroundMcpStdioServer(bundle_root=bundle_root)
+    _initialize(server)
+
+    original_snapshot_status = mcp_tools.snapshot_status
+
+    def exchange_read_and_restore(**arguments):
+        point_link_at(replacement)
+        try:
+            bound = active_manifest_snapshot(arguments["bundle_manifest"])
+            payload = original_snapshot_status(**arguments)
+        finally:
+            point_link_at(selected)
+        assert bound is not None
+        payload.update(
+            {
+                "bound_selected_path": str(bound.selected_path),
+                "bound_resolved_path": str(bound.resolved_path),
+                "bound_sha256": hashlib.sha256(bound.raw).hexdigest(),
+                "selected_run_id": payload["snapshot"]["bundle_run_id"],
+            }
+        )
+        return payload
+
+    monkeypatch.setattr(mcp_tools, "snapshot_status", exchange_read_and_restore)
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 19,
+            "method": "tools/call",
+            "params": {
+                "name": "snapshot_status",
+                "arguments": {"bundle_manifest": str(selected_link)},
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    result = response["result"]["structuredContent"]
+    assert result["bound_selected_path"] == str(selected_link.absolute())
+    assert result["bound_resolved_path"] == str(selected.resolve())
+    assert result["bound_sha256"] == selected_sha256
+    assert result["selected_run_id"] == "demo"
+    assert selected_link.resolve() == selected.resolve()
+
+
+def test_mcp_stdio_grounding_verify_pins_selected_symlink_target_during_exchange(
+    tmp_path,
+    monkeypatch,
+):
+    selected_root = tmp_path / "selected"
+    replacement_root = tmp_path / "replacement"
+    selected_root.mkdir()
+    replacement_root.mkdir()
+    selected_manifest, citation_map, range_ref = _grounding_bundle(
+        selected_root,
+        content=b"Line 1\nselected\nLine 3\n",
+    )
+    replacement_manifest, _, _ = _grounding_bundle(
+        replacement_root,
+        content=b"Line 1\nreplaced\nLine 3\n",
+    )
+    selected_link = tmp_path / "active.bundle.manifest.json"
+    selected_link.symlink_to(selected_manifest)
+    declaration = _grounding_declaration(range_ref)
+    declaration.pop("snapshot_ref")
+    declaration["declared_artifacts"] = [
+        "agent_reading_pack",
+        "canonical_md",
+        "citation_map_jsonl",
+        "snapshot_plan_json",
+    ]
+
+    def point_link_at(target):
+        staged = tmp_path / ".active.bundle.manifest.json.next"
+        staged.symlink_to(target)
+        staged.replace(selected_link)
+
+    server = RepoGroundMcpStdioServer(bundle_root=tmp_path)
+    _initialize(server)
+    original_grounding_verify = mcp_tools.grounding_verify
+
+    def exchange_verify_and_restore(**arguments):
+        point_link_at(replacement_manifest)
+        try:
+            return original_grounding_verify(**arguments)
+        finally:
+            point_link_at(selected_manifest)
+
+    monkeypatch.setattr(
+        mcp_tools,
+        "grounding_verify",
+        exchange_verify_and_restore,
+    )
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 20,
+            "method": "tools/call",
+            "params": {
+                "name": "grounding_verify",
+                "arguments": {
+                    "bundle_manifest": str(selected_link),
+                    "citation_map": str(citation_map),
+                    "declaration": declaration,
+                    "task_profile": "basic_repo_question",
+                },
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    result = response["result"]["structuredContent"]
+    assert result["status"] == "pass"
+    assert result["verdict"]["status"] == "pass"
+    assert {check["status"] for check in result["verdict"]["citation_checks"]} == {
+        "resolved"
+    }
+    assert result["verdict"]["range_checks"][0]["status"] == "resolved"
+    assert result["verdict"]["snapshot_ref"]["manifest_path"] == str(
+        selected_link.absolute()
+    )
+    assert selected_link.resolve() == selected_manifest.resolve()
+
+
+def test_mcp_stdio_ask_context_keeps_selected_manifest_metadata_across_exchange(
+    tmp_path, monkeypatch
+):
+    bundle = _complete_basic_bundle(tmp_path)
+    manifest = bundle["manifest"].resolve()
+    selected_bytes = manifest.read_bytes()
+    selected_document = json.loads(selected_bytes)
+    selected_sha256 = hashlib.sha256(selected_bytes).hexdigest()
+    replacement_document = dict(selected_document)
+    replacement_document["run_id"] = "replacement-run"
+    replacement_bytes = json.dumps(replacement_document).encode("utf-8")
+    replacement_sha256 = hashlib.sha256(replacement_bytes).hexdigest()
+    server = RepoGroundMcpStdioServer(bundle_root=manifest)
+    _initialize(server)
+
+    from merger.repoground.core import ask_context as ask_context_module
+
+    original_snapshot_status = ask_context_module.snapshot_status
+    original_ask_context = mcp_tools.ask_context
+    observed_run_ids = []
+
+    def exchange_before_snapshot_status(bundle_manifest):
+        replacement = tmp_path / "replacement.bundle.manifest.json"
+        replacement.write_bytes(replacement_bytes)
+        replacement.replace(manifest)
+        status = original_snapshot_status(bundle_manifest)
+        observed_run_ids.append(status["bundle_run_id"])
+        return status
+
+    def ask_then_restore(**arguments):
+        try:
+            return original_ask_context(**arguments)
+        finally:
+            restored = tmp_path / "restored.bundle.manifest.json"
+            restored.write_bytes(selected_bytes)
+            restored.replace(manifest)
+
+    monkeypatch.setattr(
+        ask_context_module,
+        "snapshot_status",
+        exchange_before_snapshot_status,
+    )
+    monkeypatch.setattr(mcp_tools, "ask_context", ask_then_restore)
+
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 17,
+            "method": "tools/call",
+            "params": {
+                "name": "ask_context",
+                "arguments": {
+                    "bundle_manifest": str(manifest),
+                    "query": "hello",
+                },
+            },
+        }
+    )
+
+    context_pack = response["result"]["structuredContent"]["context_pack"]
+    assert response["result"]["isError"] is False
+    assert context_pack["resolved_ranges"][0]["status"] == "resolved"
+    assert context_pack["snapshot_ref"]["manifest_sha256"] == selected_sha256
+    assert context_pack["snapshot_ref"]["manifest_sha256"] != replacement_sha256
+    assert observed_run_ids == [selected_document["run_id"]]
+    assert observed_run_ids != [replacement_document["run_id"]]
+
+
+def test_mcp_stdio_query_rejects_sqlite_from_exchanged_generation(
+    tmp_path,
+    monkeypatch,
+):
+    (tmp_path / "selected").mkdir()
+    (tmp_path / "replacement").mkdir()
+    selected = _complete_basic_bundle(tmp_path / "selected")
+    replacement = _complete_basic_bundle(tmp_path / "replacement")
+    selected_manifest = selected["manifest"].resolve()
+    selected_index = selected["index_path"].resolve()
+    replacement_manifest = replacement["manifest"].resolve()
+    replacement_index = replacement["index_path"].resolve()
+
+    with sqlite3.connect(replacement_index) as connection:
+        connection.execute(
+            "UPDATE chunks_fts SET content = ?",
+            ("generation_b_only",),
+        )
+    replacement_document = json.loads(replacement_manifest.read_text(encoding="utf-8"))
+    replacement_sqlite = next(
+        artifact
+        for artifact in replacement_document["artifacts"]
+        if artifact["role"] == "sqlite_index"
+    )
+    replacement_sqlite["bytes"] = replacement_index.stat().st_size
+    replacement_sqlite["sha256"] = hashlib.sha256(
+        replacement_index.read_bytes()
+    ).hexdigest()
+    replacement_document["run_id"] = "generation-b"
+    replacement_manifest.write_text(
+        json.dumps(replacement_document, sort_keys=True),
+        encoding="utf-8",
+    )
+    generation_b = mcp_tools.query_existing_index(
+        bundle_manifest=replacement_manifest,
+        query="generation_b_only",
+    )
+    assert generation_b["retrieval"]["match_count"] == 1
+
+    selected_manifest_bytes = selected_manifest.read_bytes()
+    selected_index_sha256 = hashlib.sha256(selected_index.read_bytes()).hexdigest()
+    replacement_manifest_bytes = replacement_manifest.read_bytes()
+    replacement_index_bytes = replacement_index.read_bytes()
+    replacement_index_sha256 = hashlib.sha256(replacement_index_bytes).hexdigest()
+    assert replacement_index_sha256 != selected_index_sha256
+
+    server = RepoGroundMcpStdioServer(bundle_root=selected_manifest)
+    _initialize(server)
+
+    from merger.repoground.core import ask_context as ask_context_module
+
+    original_snapshot_status = ask_context_module.snapshot_status
+    original_query = ask_context_module.query_existing_index
+    original_tool = mcp_tools.query_existing_index
+    observed_queries = []
+    exchanged = False
+
+    def exchange_before_query(bundle_manifest):
+        nonlocal exchanged
+        if not exchanged:
+            sqlite_replacement = selected_index.with_name("generation-b.index.sqlite")
+            sqlite_replacement.write_bytes(replacement_index_bytes)
+            sqlite_replacement.replace(selected_index)
+            manifest_replacement = selected_manifest.with_name(
+                "generation-b.bundle.manifest.json"
+            )
+            manifest_replacement.write_bytes(replacement_manifest_bytes)
+            manifest_replacement.replace(selected_manifest)
+            exchanged = True
+        return original_snapshot_status(bundle_manifest)
+
+    def record_query(*args, **kwargs):
+        result = original_query(*args, **kwargs)
+        observed_queries.append(result)
+        return result
+
+    def query_then_restore_manifest(**arguments):
+        try:
+            return original_tool(**arguments)
+        finally:
+            restored = selected_manifest.with_name(
+                "generation-a-restored.bundle.manifest.json"
+            )
+            restored.write_bytes(selected_manifest_bytes)
+            restored.replace(selected_manifest)
+
+    monkeypatch.setattr(
+        ask_context_module,
+        "snapshot_status",
+        exchange_before_query,
+    )
+    monkeypatch.setattr(
+        ask_context_module,
+        "query_existing_index",
+        record_query,
+    )
+    monkeypatch.setattr(
+        mcp_tools,
+        "query_existing_index",
+        query_then_restore_manifest,
+    )
+
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 18,
+            "method": "tools/call",
+            "params": {
+                "name": "query_existing_index",
+                "arguments": {
+                    "bundle_manifest": str(selected_manifest),
+                    "query": "generation_b_only",
+                },
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    assert len(observed_queries) == 1
+    assert observed_queries[0]["status"] == "invalid"
+    assert observed_queries[0]["error_code"] == "sqlite_index_integrity_mismatch"
+    assert observed_queries[0]["query_result"] is None
+    result = response["result"]["structuredContent"]
+    assert result["retrieval"]["match_count"] == 0
+    assert result["retrieval_hits"] == []
+    assert result["resolved_ranges"] == []
+    assert any(
+        "sqlite_index" in caveat["detail"] for caveat in result["answer_caveats"]
+    )
+    assert selected_manifest.read_bytes() == selected_manifest_bytes
+    assert hashlib.sha256(selected_index.read_bytes()).hexdigest() == (
+        replacement_index_sha256
+    )
 
 
 def test_mcp_stdio_exposes_bundle_discovery_as_read_only_tool(tmp_path, monkeypatch):
