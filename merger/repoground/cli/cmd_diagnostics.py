@@ -17,11 +17,7 @@ from typing import Any
 _MAX_JSON_BYTES = 8 * 1024 * 1024
 
 
-def _read_json(
-    path_value: str,
-    *,
-    expected_type: type | tuple[type, ...] | None = None,
-) -> Any:
+def _read_input_payload(path_value: str) -> tuple[Path, bytes]:
     path = Path(path_value).expanduser()
     before_open = path.lstat()
     if stat.S_ISLNK(before_open.st_mode):
@@ -55,6 +51,15 @@ def _read_json(
 
     if len(payload) > _MAX_JSON_BYTES:
         raise ValueError(f"input exceeds {_MAX_JSON_BYTES} bytes while reading: {path}")
+    return path, payload
+
+
+def _read_json(
+    path_value: str,
+    *,
+    expected_type: type | tuple[type, ...] | None = None,
+) -> Any:
+    path, payload = _read_input_payload(path_value)
     value = json.loads(payload.decode("utf-8"))
     if expected_type is not None and not isinstance(value, expected_type):
         expected_name = (
@@ -64,6 +69,38 @@ def _read_json(
         )
         raise ValueError(f"input must contain JSON {expected_name}: {path}")
     return value
+
+
+def _read_validated_citation_map_jsonl(
+    path_value: str,
+) -> dict[str, dict[str, Any]]:
+    path, payload = _read_input_payload(path_value)
+    text = payload.decode("utf-8")
+    entries: dict[str, dict[str, Any]] = {}
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"citation map line {line_number} must be valid JSON: {path}"
+            ) from exc
+        if not isinstance(record, dict):
+            raise ValueError(
+                f"citation map line {line_number} must be a JSON object: {path}"
+            )
+        citation_id = record.get("citation_id")
+        if not isinstance(citation_id, str) or not citation_id:
+            raise ValueError(
+                f"citation map line {line_number} field 'citation_id' must be a non-empty string: {path}"
+            )
+        if citation_id in entries:
+            raise ValueError(
+                f"citation map line {line_number} duplicates citation_id {citation_id!r}: {path}"
+            )
+        entries[citation_id] = record
+    return entries
 
 
 def _require_list_items(
@@ -190,10 +227,16 @@ def _run_answer_delta(args: argparse.Namespace) -> dict[str, Any]:
     )
 
     declaration = _read_json(args.old_declaration, expected_type=dict)
+    citation_entries = (
+        _read_validated_citation_map_jsonl(args.new_citation_map)
+        if args.new_citation_map
+        else None
+    )
     return check_answer_grounding_delta(
         declaration,
         new_bundle_manifest=args.new_bundle_manifest,
         new_citation_map=args.new_citation_map,
+        new_citation_entries=citation_entries,
     )
 
 

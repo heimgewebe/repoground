@@ -171,13 +171,25 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
     tmp_path, capsys, monkeypatch
 ):
     declaration = _write_json(tmp_path / "declaration.json", {"used_citations": []})
+    citation_map = tmp_path / "citations.jsonl"
+    citation_map.write_text(
+        json.dumps({"citation_id": "cit_0000000000000001"}) + "\n",
+        encoding="utf-8",
+    )
     seen = {}
 
-    def fake_check(value, *, new_bundle_manifest, new_citation_map):
+    def fake_check(
+        value,
+        *,
+        new_bundle_manifest,
+        new_citation_map,
+        new_citation_entries,
+    ):
         seen.update(
             value=value,
             manifest=new_bundle_manifest,
             citation_map=new_citation_map,
+            citation_entries=new_citation_entries,
         )
         return {"kind": "repobrief.answer_grounding_delta_verdict", "status": "valid"}
 
@@ -194,7 +206,7 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
             "--new-bundle-manifest",
             "bundle.manifest.json",
             "--new-citation-map",
-            "citations.jsonl",
+            str(citation_map),
         ],
     )
 
@@ -203,7 +215,10 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
     assert seen == {
         "value": {"used_citations": []},
         "manifest": "bundle.manifest.json",
-        "citation_map": "citations.jsonl",
+        "citation_map": str(citation_map),
+        "citation_entries": {
+            "cit_0000000000000001": {"citation_id": "cit_0000000000000001"}
+        },
     }
 
 
@@ -393,6 +408,67 @@ def test_eval_report_rejects_invalid_detail_field_types_without_traceback(
             "eval-report",
             "--eval-results",
             str(eval_results),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("citation_line", "expected_error"),
+    [
+        ("[]", "citation map line 1 must be a JSON object"),
+        (
+            json.dumps({"citation_id": 7}),
+            "citation map line 1 field 'citation_id' must be a non-empty string",
+        ),
+        (
+            json.dumps({}),
+            "citation map line 1 field 'citation_id' must be a non-empty string",
+        ),
+        (
+            json.dumps({"citation_id": ""}),
+            "citation map line 1 field 'citation_id' must be a non-empty string",
+        ),
+        (
+            "\n".join(
+                [
+                    json.dumps({"citation_id": "duplicate"}),
+                    json.dumps({"citation_id": "duplicate"}),
+                ]
+            ),
+            "citation map line 2 duplicates citation_id 'duplicate'",
+        ),
+        ("{", "citation map line 1 must be valid JSON"),
+    ],
+)
+def test_answer_delta_rejects_invalid_citation_map_records_without_traceback(
+    tmp_path,
+    capsys,
+    citation_line,
+    expected_error,
+):
+    declaration = _write_json(
+        tmp_path / "declaration.json",
+        {"used_citations": [{"citation_id": "cit_0000000000000001"}]},
+    )
+    citation_map = tmp_path / "citations.jsonl"
+    citation_map.write_text(citation_line + "\n", encoding="utf-8")
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            "bundle.manifest.json",
+            "--new-citation-map",
+            str(citation_map),
         ]
     )
     captured = capsys.readouterr()

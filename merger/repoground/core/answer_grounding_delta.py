@@ -73,19 +73,45 @@ def _freshness_from_snapshot_ref(snapshot_ref: Mapping[str, Any] | None) -> str:
     return str(value) if isinstance(value, str) and value else "unknown"
 
 
+def _copy_citation_entries(
+    entries: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    copied: dict[str, dict[str, Any]] = {}
+    for citation_id, entry in entries.items():
+        if not isinstance(citation_id, str) or not citation_id:
+            raise ValueError("citation entry key must be a non-empty string")
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"citation entry {citation_id!r} must be a mapping")
+        if entry.get("citation_id") != citation_id:
+            raise ValueError(f"citation entry {citation_id!r} must contain the same citation_id")
+        copied[citation_id] = dict(entry)
+    return copied
+
+
+def _load_citation_entries(
+    citation_map: str | Path | None,
+    prevalidated_entries: Mapping[str, Mapping[str, Any]] | None,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    if prevalidated_entries is None:
+        return _read_citation_map(citation_map)
+    return _copy_citation_entries(prevalidated_entries), []
+
+
 def check_answer_grounding_delta(
     old_declaration: Mapping[str, Any],
     *,
     new_bundle_manifest: str | Path,
     new_citation_map: str | Path | None = None,
+    new_citation_entries: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Check old declared citations/ranges against a newer snapshot.
 
     Read-only: this function reads explicitly supplied existing files only. It does not
     create snapshots, fetch Git state, refresh bundles, or normalize freshness statuses.
+    When ``new_citation_entries`` is supplied, the citation-map path is not reread.
     """
     manifest_path = Path(new_bundle_manifest).expanduser().resolve()
-    entries, diagnostics = _read_citation_map(new_citation_map)
+    entries, diagnostics = _load_citation_entries(new_citation_map, new_citation_entries)
     citation_checks: list[dict[str, Any]] = []
     range_checks: list[dict[str, Any]] = []
 

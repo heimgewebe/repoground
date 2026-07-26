@@ -91,3 +91,22 @@ def test_answer_grounding_delta_preserves_existing_freshness_status(tmp_path):
 
     assert verdict["old_snapshot_freshness_status"] == "stale"
     assert verdict["new_snapshot_freshness_status"] == "unknown"
+
+
+def test_answer_grounding_delta_uses_prevalidated_entries_without_rereading_map(tmp_path):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    record = json.loads(citation_map.read_text(encoding="utf-8").splitlines()[0])
+    entries = {record["citation_id"]: record}
+    citation_map.unlink()
+
+    verdict = check_answer_grounding_delta(
+        declaration,
+        new_bundle_manifest=manifest,
+        new_citation_map=citation_map,
+        new_citation_entries=entries,
+    )
+
+    assert verdict["status"] == "valid"
+    assert verdict["citation_checks"][0]["status"] == "valid"
+    assert verdict["diagnostics"] == []
