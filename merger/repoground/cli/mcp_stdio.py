@@ -709,26 +709,23 @@ class RepoGroundMcpStdioServer:
         return mcp_tools.snapshot_create(**call_args)
 
     def _tool_payload(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        if name == "bundle_discover":
-            return self._call_bundle_discover(arguments)
-        if name == "snapshot_status":
-            return self._call_snapshot_status(arguments)
-        if name == "ask_context":
-            return self._call_ask_context(arguments)
-        if name == "query_existing_index":
-            return self._call_query_existing_index(arguments)
-        if name == "range_get":
-            return self._call_range_get(arguments)
-        if name == "grounding_verify":
-            return self._call_grounding_verify(arguments)
+        handlers = {
+            "bundle_discover": self._call_bundle_discover,
+            "snapshot_status": self._call_snapshot_status,
+            "ask_context": self._call_ask_context,
+            "query_existing_index": self._call_query_existing_index,
+            "range_get": self._call_range_get,
+            "grounding_verify": self._call_grounding_verify,
+            "find_symbol": self._call_find_symbol,
+            "snapshot_create": self._call_snapshot_create,
+        }
+        handler = handlers.get(name)
+        if handler is not None:
+            return handler(arguments)
         if name == "live_freshness":
             return self._safe_live_freshness(self._resolve_manifest(arguments))
-        if name == "find_symbol":
-            return self._call_find_symbol(arguments)
         if name in ("find_references", "get_callers", "get_callees"):
             return self._call_call_navigation(name, arguments)
-        if name == "snapshot_create":
-            return self._call_snapshot_create(arguments)
         raise McpProtocolError(-32602, f"unknown or disabled tool: {name}")
 
     @staticmethod
