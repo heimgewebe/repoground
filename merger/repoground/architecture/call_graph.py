@@ -12,7 +12,7 @@ import os
 from operator import attrgetter
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 
 from merger.repoground.architecture.call_graph_contract import (
     MAX_SKIPPED_ERRORS,
@@ -507,6 +507,18 @@ def _named_frames(stack: Sequence[_ScopeFrame]) -> list[_ScopeFrame]:
     return [frame for frame in stack if frame.name and frame.kind in CALLER_KINDS]
 
 
+def _visible_import_frames(
+    stack: Sequence[_ScopeFrame],
+) -> Iterator[_ScopeFrame]:
+    inside_function = False
+    for frame in reversed(stack):
+        if frame.kind in (*_FUNCTION_KINDS, "lambda"):
+            inside_function = True
+        if inside_function and frame.kind == "class":
+            continue
+        yield frame
+
+
 def _caller_fields(path: str, stack: Sequence[_ScopeFrame]) -> dict[str, Any]:
     named = _named_frames(stack)
     if not named:
@@ -695,7 +707,7 @@ class _Resolver:
     def _resolve_local_import_name(
         self, name: str, stack: Sequence[_ScopeFrame]
     ) -> dict[str, Any] | None:
-        for frame in reversed(stack):
+        for frame in _visible_import_frames(stack):
             if frame.kind in (*_FUNCTION_KINDS, "lambda"):
                 if name in frame.global_names or name in frame.nonlocal_names:
                     return None
@@ -799,7 +811,7 @@ class _Resolver:
         self, parts: list[str], stack: Sequence[_ScopeFrame]
     ) -> dict[str, Any] | None:
         root = parts[0]
-        for frame in reversed(stack):
+        for frame in _visible_import_frames(stack):
             if frame.kind in (*_FUNCTION_KINDS, "lambda"):
                 if root in frame.global_names:
                     return None

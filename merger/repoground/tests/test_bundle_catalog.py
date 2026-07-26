@@ -154,6 +154,44 @@ def test_selector_skips_newer_unhealthy_bundle(tmp_path):
     assert selection["match_count"] == 1
 
 
+def test_selector_rejects_output_health_without_valid_integrity_metadata(tmp_path):
+    cases = (
+        ("missing-bytes", lambda artifact: artifact.pop("bytes")),
+        ("missing-sha", lambda artifact: artifact.pop("sha256")),
+        ("malformed-sha", lambda artifact: artifact.update({"sha256": "bad"})),
+    )
+    for label, mutate in cases:
+        manifest = _write_bundle(
+            tmp_path,
+            directory=f"repo/main/{label}",
+            stem=label,
+            created_at="2026-07-25T21:00:00Z",
+            run_id=f"{label}-run",
+        )
+        document = json.loads(manifest.read_text(encoding="utf-8"))
+        artifact = next(
+            item for item in document["artifacts"] if item["role"] == "output_health"
+        )
+        mutate(artifact)
+        _write_json(manifest, document)
+
+    catalog = discover_bundle_catalog(tmp_path)
+    selection = select_bundle_manifest(tmp_path, repo="repoground")
+
+    assert selection["status"] == "missing"
+    assert {item["stem"] for item in catalog["candidates"]} == {
+        "missing-bytes",
+        "missing-sha",
+        "malformed-sha",
+    }
+    assert all(item["selection_eligible"] is False for item in catalog["candidates"])
+    reasons = " ".join(
+        reason for item in catalog["candidates"] for reason in item["health_reasons"]
+    )
+    assert "byte size missing or invalid" in reasons
+    assert "sha256 missing or invalid" in reasons
+
+
 def test_selector_fails_closed_for_equal_newest_identity(tmp_path):
     for directory in ("repo/main/a", "repo/main/b"):
         _write_bundle(

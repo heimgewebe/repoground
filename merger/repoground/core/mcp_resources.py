@@ -177,12 +177,47 @@ def _manifest_candidates(bundle_root: str | Path) -> list[Path]:
     if not root.exists() or not root.is_dir():
         return []
     catalog = discover_bundle_catalog(root)
-    paths = [
-        Path(item["manifest_path"])
+    candidates = [
+        item
         for item in catalog.get("candidates", [])
-        if isinstance(item, dict) and isinstance(item.get("manifest_path"), str)
+        if isinstance(item, dict)
+        and isinstance(item.get("stem"), str)
+        and isinstance(item.get("manifest_path"), str)
     ]
-    return sorted(set(paths))
+    selected: list[Path] = []
+    for stem in sorted({str(item["stem"]) for item in candidates}):
+        matches = [item for item in candidates if item["stem"] == stem]
+        healthy = [item for item in matches if item.get("selection_eligible") is True]
+        if healthy:
+            pool = healthy
+        elif len(matches) == 1:
+            pool = matches
+        else:
+            continue
+        pool.sort(
+            key=lambda item: (
+                str(item.get("created_at") or ""),
+                str(item.get("run_id") or ""),
+                str(item["manifest_path"]),
+            ),
+            reverse=True,
+        )
+        newest_key = (
+            str(pool[0].get("created_at") or ""),
+            str(pool[0].get("run_id") or ""),
+        )
+        tied = [
+            item
+            for item in pool
+            if (
+                str(item.get("created_at") or ""),
+                str(item.get("run_id") or ""),
+            )
+            == newest_key
+        ]
+        if len(tied) == 1:
+            selected.append(Path(tied[0]["manifest_path"]))
+    return sorted(set(selected))
 
 
 def _find_manifest(bundle_root: str | Path, stem: str) -> Path | None:

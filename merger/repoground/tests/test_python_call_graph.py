@@ -285,6 +285,37 @@ def before_binding():
     assert simple_unresolved["resolved_target_ids"] == []
 
 
+def test_method_does_not_resolve_bare_class_scope_imports(tmp_path):
+    target = tmp_path / "toolkit" / "target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        """
+class Consumer:
+    from toolkit.target import run
+    import toolkit.target as local_target
+
+    def bare(self):
+        run()
+
+    def dotted(self):
+        local_target.run()
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    bare = _single_call(calls, "run")
+    dotted = _single_call(calls, "local_target.run")
+
+    assert bare["caller_qualified_name"] == "Consumer.bare"
+    assert bare["resolution_status"] == "unresolved"
+    assert bare["resolved_target_ids"] == []
+    assert dotted["caller_qualified_name"] == "Consumer.dotted"
+    assert dotted["resolution_status"] == "unresolved"
+    assert dotted["resolved_target_ids"] == []
+
+
 def test_safe_resolution_self_and_cls_methods_same_class(tmp_path):
     write_utility_goldset(tmp_path)
     calls, _, _ = extract_python_calls(tmp_path)

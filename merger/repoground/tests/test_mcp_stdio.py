@@ -639,3 +639,45 @@ def test_mcp_stdio_text_summary_does_not_duplicate_structured_payload(
     assert len(text.encode("utf-8")) < 300
     assert result["structuredContent"]["blob"] == "x" * 10000
     assert json.loads(text)["details"].startswith("Use structuredContent")
+
+
+def test_mcp_stdio_legacy_protocol_keeps_full_payload_in_text(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path)
+    server = RepoGroundMcpStdioServer(bundle_root=manifest)
+    initialized = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "legacy-test", "version": "1"},
+            },
+        }
+    )
+    assert initialized["result"]["protocolVersion"] == "2025-03-26"
+    monkeypatch.setattr(
+        mcp_tools,
+        "ask_context",
+        lambda **_arguments: {"status": "ok", "blob": "x" * 10000},
+    )
+
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 13,
+            "method": "tools/call",
+            "params": {
+                "name": "ask_context",
+                "arguments": {
+                    "bundle_manifest": str(manifest),
+                    "query": "hello",
+                },
+            },
+        }
+    )
+
+    result = response["result"]
+    assert json.loads(result["content"][0]["text"])["blob"] == "x" * 10000
+    assert result["structuredContent"]["blob"] == "x" * 10000

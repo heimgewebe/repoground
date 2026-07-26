@@ -333,6 +333,7 @@ class RepoGroundMcpStdioServer:
             self.bundle_root if self.bundle_root.is_dir() else self.bundle_root.parent
         )
         self._negotiated = False
+        self._protocol_version: str | None = None
 
     def _initialize(self, params: Mapping[str, Any]) -> dict[str, Any]:
         requested = params.get("protocolVersion")
@@ -340,6 +341,7 @@ class RepoGroundMcpStdioServer:
             requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
         )
         self._negotiated = True
+        self._protocol_version = negotiated
         return {
             "protocolVersion": negotiated,
             "capabilities": {
@@ -749,6 +751,11 @@ class RepoGroundMcpStdioServer:
             summary["stem"] = selected.get("stem")
         return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
 
+    def _tool_text(self, name: str, payload: Mapping[str, Any]) -> str:
+        if self._protocol_version == PROTOCOL_VERSION:
+            return self._tool_text_summary(name, payload)
+        return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+
     def _tool_call(self, params: Mapping[str, Any]) -> dict[str, Any]:
         name = params.get("name")
         arguments = params.get("arguments", {})
@@ -766,16 +773,14 @@ class RepoGroundMcpStdioServer:
                 "content": [
                     {
                         "type": "text",
-                        "text": self._tool_text_summary(name, error_payload),
+                        "text": self._tool_text(name, error_payload),
                     }
                 ],
                 "structuredContent": error_payload,
                 "isError": True,
             }
         return {
-            "content": [
-                {"type": "text", "text": self._tool_text_summary(name, payload)}
-            ],
+            "content": [{"type": "text", "text": self._tool_text(name, payload)}],
             "structuredContent": payload,
             "isError": False,
         }

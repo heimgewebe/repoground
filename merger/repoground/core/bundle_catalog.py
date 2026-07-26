@@ -142,8 +142,23 @@ def manifest_repo_aliases(document: Mapping[str, Any]) -> list[str]:
 
 
 def _health_json_status(
-    path: Path, *, expected_sha256: Any = None, expected_bytes: Any = None
+    path: Path,
+    *,
+    expected_sha256: Any = None,
+    expected_bytes: Any = None,
+    require_integrity: bool = False,
 ) -> tuple[str, str | None]:
+    if require_integrity:
+        if (
+            not isinstance(expected_bytes, int)
+            or isinstance(expected_bytes, bool)
+            or expected_bytes < 0
+        ):
+            return "invalid", "health artifact byte size missing or invalid in manifest"
+        if not isinstance(expected_sha256, str) or not _SHA256_RE.fullmatch(
+            expected_sha256
+        ):
+            return "invalid", "health artifact sha256 missing or invalid in manifest"
     try:
         document, raw = _load_json_object(path, MAX_HEALTH_BYTES)
     except BundleCatalogError as exc:
@@ -193,6 +208,7 @@ def _candidate_health(path: Path, document: Mapping[str, Any]) -> tuple[str, lis
                 output_path,
                 expected_sha256=output_health.get("sha256"),
                 expected_bytes=output_health.get("bytes"),
+                require_integrity=True,
             )
             if status != "pass":
                 reasons.append(reason or "output_health invalid")

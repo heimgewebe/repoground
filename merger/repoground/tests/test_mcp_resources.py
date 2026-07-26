@@ -17,12 +17,29 @@ from merger.repoground.tests.test_ask_context_cli import (
 
 
 def _bundle_with_health(tmp_path: Path) -> dict:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     bundle = _complete_basic_bundle(tmp_path)
+    _add_artifact(
+        bundle,
+        "output_health",
+        "demo.output_health.json",
+        json.dumps({"kind": "health", "verdict": "pass"}) + "\n",
+    )
     _add_artifact(
         bundle,
         "post_emit_health",
         "demo.bundle_health.post.json",
         json.dumps({"kind": "health", "status": "pass"}) + "\n",
+    )
+    document = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+    document["links"] = {
+        "post_emit_health_path": "demo.bundle_health.post.json",
+        "bundle_surface_validation_status": "pass",
+        "agent_export_gate_status": "pass",
+        "export_safety_report_status": "pass",
+    }
+    bundle["manifest"].write_text(
+        json.dumps(document, sort_keys=True) + "\n", encoding="utf-8"
     )
     return bundle
 
@@ -57,6 +74,30 @@ def test_mcp_resource_list_exposes_concrete_snapshot_resources(tmp_path):
     assert "repoground://snapshot/demo/availability" in uris
     assert "repoground://snapshot/demo/artifact/canonical_md" in uris
     assert listed["mutation_boundary"]["writes"] == []
+
+
+def test_mcp_resource_list_selects_one_readable_newest_generation_per_stem(tmp_path):
+    older = _bundle_with_health(tmp_path / "older")
+    newer = _bundle_with_health(tmp_path / "newer")
+    for bundle, run_id, created_at in (
+        (older, "old-run", "2026-07-25T20:00:00Z"),
+        (newer, "new-run", "2026-07-25T21:00:00Z"),
+    ):
+        document = json.loads(bundle["manifest"].read_text(encoding="utf-8"))
+        document["run_id"] = run_id
+        document["created_at"] = created_at
+        bundle["manifest"].write_text(
+            json.dumps(document, sort_keys=True) + "\n", encoding="utf-8"
+        )
+
+    listed = list_mcp_resources(tmp_path)
+    manifest_uri = "repoground://snapshot/demo/manifest"
+    assert [item["uri"] for item in listed["resources"]].count(manifest_uri) == 1
+
+    readback = read_mcp_resource(manifest_uri, bundle_root=tmp_path)
+    assert readback["status"] == "available"
+    assert readback["content_json"]["run_id"] == "new-run"
+    assert readback["bundle_manifest"] == str(newer["manifest"].resolve())
 
 
 def test_mcp_read_manifest_resource_carries_context_and_content(tmp_path):
