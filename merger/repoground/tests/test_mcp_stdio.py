@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from merger.repoground.cli.mcp_stdio import PROTOCOL_VERSION, RepoGroundMcpStdioServer, serve_stdio
+from merger.repoground.cli.mcp_stdio import (
+    PROTOCOL_VERSION,
+    RepoGroundMcpStdioServer,
+    serve_stdio,
+)
 from merger.repoground.core import mcp_resources, mcp_tools
 
 
@@ -127,7 +131,11 @@ def test_mcp_stdio_lists_read_tools_and_hides_snapshot_create_by_default(tmp_pat
     assert initialized["result"]["protocolVersion"] == PROTOCOL_VERSION
     assert initialized["result"]["capabilities"]["tools"]["listChanged"] is False
     assert {tool["name"] for tool in _tools(server)} == {
+        "bundle_discover",
+        "snapshot_status",
         "ask_context",
+        "query_existing_index",
+        "range_get",
         "grounding_verify",
         "live_freshness",
         "find_symbol",
@@ -157,7 +165,9 @@ def test_mcp_stdio_exposes_startup_bound_snapshot_create_schema(tmp_path):
     )
     _initialize(server)
 
-    definition = next(tool for tool in _tools(server) if tool["name"] == "snapshot_create")
+    definition = next(
+        tool for tool in _tools(server) if tool["name"] == "snapshot_create"
+    )
     properties = definition["inputSchema"]["properties"]
 
     assert definition["inputSchema"]["required"] == ["profile"]
@@ -165,7 +175,9 @@ def test_mcp_stdio_exposes_startup_bound_snapshot_create_schema(tmp_path):
     assert "output_root" not in properties
 
 
-def test_snapshot_create_injects_startup_roots_and_rejects_overrides(tmp_path, monkeypatch):
+def test_snapshot_create_injects_startup_roots_and_rejects_overrides(
+    tmp_path, monkeypatch
+):
     repo = tmp_path / "repo"
     bundles = tmp_path / "bundles"
     repo.mkdir()
@@ -278,7 +290,9 @@ def test_mcp_stdio_calls_existing_ask_handler_and_adds_freshness(tmp_path, monke
     assert seen["bundle_manifest"] == str(manifest.resolve())
 
 
-def test_mcp_stdio_resource_read_preserves_content_and_adds_metadata(tmp_path, monkeypatch):
+def test_mcp_stdio_resource_read_preserves_content_and_adds_metadata(
+    tmp_path, monkeypatch
+):
     manifest = _manifest(tmp_path)
     server = RepoGroundMcpStdioServer(bundle_root=tmp_path, repo_root=tmp_path)
     _initialize(server)
@@ -452,3 +466,176 @@ def test_mcp_stdio_dispatches_get_callees_and_adds_freshness(tmp_path, monkeypat
         "path": "pkg/a.py",
         "k": 7,
     }
+
+
+def test_mcp_stdio_repo_selector_resolves_manifest_without_exposing_host_path(
+    tmp_path, monkeypatch
+):
+    manifest = _manifest(tmp_path)
+    server = RepoGroundMcpStdioServer(bundle_root=tmp_path)
+    _initialize(server)
+    seen = {}
+
+    from merger.repoground.core import bundle_catalog
+
+    monkeypatch.setattr(
+        bundle_catalog,
+        "select_bundle_manifest",
+        lambda *_args, **_kwargs: {
+            "status": "available",
+            "selected": {"manifest_path": str(manifest)},
+        },
+    )
+
+    def fake_snapshot_status(**arguments):
+        seen.update(arguments)
+        return {"status": "available", "tool": "snapshot_status"}
+
+    monkeypatch.setattr(mcp_tools, "snapshot_status", fake_snapshot_status)
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "snapshot_status",
+                "arguments": {"repo": "heimgewebe/repoground"},
+            },
+        }
+    )
+
+    assert response["result"]["isError"] is False
+    assert seen == {"bundle_manifest": str(manifest.resolve())}
+
+
+def test_mcp_stdio_exposes_bundle_discovery_as_read_only_tool(tmp_path, monkeypatch):
+    server = RepoGroundMcpStdioServer(bundle_root=tmp_path)
+    _initialize(server)
+
+    from merger.repoground.core import bundle_catalog
+
+    monkeypatch.setattr(
+        bundle_catalog,
+        "discover_bundle_catalog",
+        lambda root: {
+            "status": "available",
+            "bundle_root": str(root),
+            "candidate_count": 1,
+        },
+    )
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {"name": "bundle_discover", "arguments": {}},
+        }
+    )
+
+    assert response["result"]["structuredContent"]["candidate_count"] == 1
+    assert response["result"]["isError"] is False
+
+
+def test_mcp_stdio_dispatches_bounded_query_and_range_read(tmp_path, monkeypatch):
+    manifest = _manifest(tmp_path)
+    server = RepoGroundMcpStdioServer(bundle_root=manifest)
+    _initialize(server)
+    seen = []
+
+    def fake_query(**arguments):
+        seen.append(("query", arguments))
+        return {
+            "status": "available",
+            "retrieval": {"strategy": "or_relaxed", "match_count": 2},
+        }
+
+    def fake_range(**arguments):
+        seen.append(("range", arguments))
+        return {"status": "resolved", "result": {"text": "demo"}}
+
+    monkeypatch.setattr(mcp_tools, "query_existing_index", fake_query)
+    monkeypatch.setattr(mcp_tools, "range_get", fake_range)
+
+    query = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "query_existing_index",
+                "arguments": {
+                    "bundle_manifest": str(manifest),
+                    "query": "natural language",
+                    "max_context_tokens": 500,
+                },
+            },
+        }
+    )
+    range_result = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "range_get",
+                "arguments": {
+                    "bundle_manifest": str(manifest),
+                    "range_ref": {"ref": "demo"},
+                },
+            },
+        }
+    )
+
+    assert query["result"]["structuredContent"]["retrieval"]["strategy"] == "or_relaxed"
+    assert range_result["result"]["structuredContent"]["status"] == "resolved"
+    assert seen == [
+        (
+            "query",
+            {
+                "query": "natural language",
+                "max_context_tokens": 500,
+                "bundle_manifest": str(manifest.resolve()),
+            },
+        ),
+        (
+            "range",
+            {
+                "range_ref": {"ref": "demo"},
+                "bundle_manifest": str(manifest.resolve()),
+            },
+        ),
+    ]
+
+
+def test_mcp_stdio_text_summary_does_not_duplicate_structured_payload(
+    tmp_path, monkeypatch
+):
+    manifest = _manifest(tmp_path)
+    server = RepoGroundMcpStdioServer(bundle_root=manifest)
+    _initialize(server)
+
+    monkeypatch.setattr(
+        mcp_tools,
+        "ask_context",
+        lambda **_arguments: {"status": "ok", "blob": "x" * 10000},
+    )
+    response = server.handle_message(
+        {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "ask_context",
+                "arguments": {
+                    "bundle_manifest": str(manifest),
+                    "query": "hello",
+                },
+            },
+        }
+    )
+
+    result = response["result"]
+    text = result["content"][0]["text"]
+    assert len(text.encode("utf-8")) < 300
+    assert result["structuredContent"]["blob"] == "x" * 10000
+    assert json.loads(text)["details"].startswith("Use structuredContent")

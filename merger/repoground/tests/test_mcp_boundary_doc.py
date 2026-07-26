@@ -1,5 +1,12 @@
 from pathlib import Path
 
+from merger.repoground.cli.mcp_stdio import tool_names
+from scripts.docmeta.sync_repoground_mcp_tools import (
+    END_MARKER,
+    START_MARKER,
+    render_tool_block,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MCP_BOUNDARY_DOC = REPO_ROOT / "docs/architecture/repoground-mcp-boundary.md"
@@ -16,17 +23,12 @@ MCP_RESOURCES = (
     "repoground://snapshot/{stem}/artifact/{role}",
 )
 
-READ_ONLY_TOOLS = (
-    "snapshot_list",
-    "snapshot_status",
-    "artifact_get",
-    "required_reading_resolve",
-    "range_get",
-    "query_existing_index",
-    "ask_context",
-    "grounding_verify",
-    "live_freshness",
+READ_ONLY_TOOLS = tuple(
+    dict.fromkeys(
+        (*tool_names(), "snapshot_list", "artifact_get", "required_reading_resolve")
+    )
 )
+
 
 FORBIDDEN_OPERATIONS = (
     "git_push",
@@ -177,7 +179,9 @@ def test_mcp_boundary_doc_names_concrete_readonly_resource_adapter() -> None:
 def test_mcp_usage_doc_has_stable_start_and_client_configuration() -> None:
     text = _read(MCP_USAGE_DOC)
 
-    assert "python3 /absolute/path/to/repoground/scripts/repoground-mcp-stdio.py" in text
+    assert (
+        "python3 /absolute/path/to/repoground/scripts/repoground-mcp-stdio.py" in text
+    )
     assert "python3 -m merger.repoground.cli.mcp_stdio" in text
     assert '"mcpServers"' in text
     assert '"repoground": {' in text
@@ -187,3 +191,12 @@ def test_mcp_usage_doc_has_stable_start_and_client_configuration() -> None:
     assert "--enable-snapshot-create" in text
     assert "cannot choose another source repository or output root" in text
     assert "repo_root_not_configured" not in text
+
+
+def test_mcp_tool_blocks_are_generated_from_runtime_registry() -> None:
+    expected = render_tool_block()
+    for path in (MCP_BOUNDARY_DOC, MCP_USAGE_DOC):
+        text = _read(path)
+        start = text.index(START_MARKER)
+        end = text.index(END_MARKER, start) + len(END_MARKER)
+        assert text[start:end] == expected

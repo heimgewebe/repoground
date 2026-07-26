@@ -72,11 +72,26 @@ size, path, and integrity checks.
 
 ## Read-only tools
 
-The MCP tools available by default are:
+The MCP tools available by default are generated from the runtime registry:
 
-- `ask_context`
-- `grounding_verify`
-- `live_freshness`
+<!-- repoground-mcp-tools:start -->
+- `bundle_discover`: List healthy existing bundles or select one by repository identity/stem.
+- `snapshot_status`: Read health, availability and freshness for one selected existing bundle.
+- `ask_context`: Build a cited context pack from one existing RepoGround bundle.
+- `query_existing_index`: Route exact symbol-definition questions to the symbol index; otherwise use exact AND and labelled OR fallback with bounded cited ranges.
+- `range_get`: Resolve one exact bundle range reference without reading a live workspace.
+- `grounding_verify`: Verify declared citations and ranges against an existing RepoGround bundle.
+- `live_freshness`: Compare snapshot Git provenance with the configured local checkout without refreshing it.
+- `find_symbol`: Locate Python symbol definitions by name with exact path and line range.
+- `find_references`: List bounded static call sites for a callee name.
+- `get_callers`: Group uniquely resolved callers for one exact target symbol.
+- `get_callees`: Group uniquely resolved outgoing calls for one exact caller symbol.
+<!-- repoground-mcp-tools:end -->
+
+Every read tool that targets one snapshot accepts either an exact `bundle_manifest`
+inside the startup root or the agent-facing `repo`/`stem` selector. Combining an
+exact path with selectors is rejected. Selection considers only healthy bundles and
+fails closed when the newest identity is ambiguous.
 
 The underlying read-only library surface also contains:
 

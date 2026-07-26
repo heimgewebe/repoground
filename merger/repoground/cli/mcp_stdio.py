@@ -1,4 +1,5 @@
 """Minimal newline-delimited MCP stdio transport for RepoGround."""
+
 from __future__ import annotations
 
 import argparse
@@ -38,138 +39,166 @@ def _read_annotations() -> dict[str, bool]:
     }
 
 
+def _selector_properties() -> dict[str, Any]:
+    return {
+        "bundle_manifest": {
+            "type": ["string", "null"],
+            "description": "Optional exact manifest path inside the startup bundle root.",
+        },
+        "repo": {
+            "type": ["string", "null"],
+            "description": "Repository identity such as owner/repository or repository name.",
+        },
+        "stem": {
+            "type": ["string", "null"],
+            "description": "Optional exact snapshot stem.",
+        },
+    }
+
+
 def _tool_definitions(enable_snapshot_create: bool) -> list[dict[str, Any]]:
+    selector = _selector_properties()
+
+    def schema(
+        properties: dict[str, Any], required: list[str] | None = None
+    ) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {**selector, **properties},
+            "required": required or [],
+            "additionalProperties": False,
+        }
+
     tools: list[dict[str, Any]] = [
+        {
+            "name": "bundle_discover",
+            "title": "RepoGround bundle discovery",
+            "description": "List healthy existing bundles or select one by repository identity/stem.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "repo": selector["repo"],
+                    "stem": selector["stem"],
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+            "annotations": _read_annotations(),
+        },
+        {
+            "name": "snapshot_status",
+            "title": "RepoGround snapshot status",
+            "description": "Read health, availability and freshness for one selected existing bundle.",
+            "inputSchema": schema({"verbose": {"type": "boolean", "default": False}}),
+            "annotations": _read_annotations(),
+        },
         {
             "name": "ask_context",
             "title": "RepoGround context pack",
             "description": "Build a cited context pack from one existing RepoGround bundle.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "bundle_manifest": {"type": "string"},
+            "inputSchema": schema(
+                {
                     "query": {"type": "string"},
-                    "task_profile": {"type": "string", "default": "basic_repo_question"},
-                    "max_context_tokens": {"type": "integer", "minimum": 1, "default": 8000},
-                    "max_answer_tokens": {"type": "integer", "minimum": 1, "default": 1200},
-                    "k": {"type": "integer", "minimum": 1, "maximum": 100, "default": 5},
+                    "task_profile": {
+                        "type": "string",
+                        "default": "basic_repo_question",
+                    },
+                    "max_context_tokens": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 8000,
+                    },
+                    "max_answer_tokens": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1200,
+                    },
+                    "k": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 5,
+                    },
+                    "verbose": {"type": "boolean", "default": False},
                 },
-                "required": ["bundle_manifest", "query"],
-                "additionalProperties": False,
-            },
+                ["query"],
+            ),
+            "annotations": _read_annotations(),
+        },
+        {
+            "name": "query_existing_index",
+            "title": "RepoGround bounded query",
+            "description": "Route exact symbol-definition questions to the symbol index; otherwise use exact AND and labelled OR fallback with bounded cited ranges.",
+            "inputSchema": schema(
+                {
+                    "query": {"type": "string"},
+                    "task_profile": {
+                        "type": "string",
+                        "default": "basic_repo_question",
+                    },
+                    "max_context_tokens": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 2000,
+                    },
+                    "k": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 5,
+                    },
+                    "verbose": {"type": "boolean", "default": False},
+                },
+                ["query"],
+            ),
+            "annotations": _read_annotations(),
+        },
+        {
+            "name": "range_get",
+            "title": "RepoGround range reader",
+            "description": "Resolve one exact bundle range reference without reading a live workspace.",
+            "inputSchema": schema(
+                {
+                    "range_ref": {"type": "object"},
+                    "verbose": {"type": "boolean", "default": False},
+                },
+                ["range_ref"],
+            ),
             "annotations": _read_annotations(),
         },
         {
             "name": "grounding_verify",
             "title": "RepoGround grounding verifier",
             "description": "Verify declared citations and ranges against an existing RepoGround bundle.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
+            "inputSchema": schema(
+                {
                     "declaration": {"type": "object"},
-                    "bundle_manifest": {"type": "string"},
                     "citation_map": {"type": ["string", "null"]},
                     "task_profile": {"type": ["string", "null"]},
+                    "verbose": {"type": "boolean", "default": False},
                 },
-                "required": ["declaration", "bundle_manifest"],
-                "additionalProperties": False,
-            },
+                ["declaration"],
+            ),
             "annotations": _read_annotations(),
         },
         {
             "name": "live_freshness",
             "title": "RepoGround live freshness",
-            "description": (
-                "Compare snapshot Git provenance with the configured local checkout "
-                "without refreshing it."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {"bundle_manifest": {"type": "string"}},
-                "required": ["bundle_manifest"],
-                "additionalProperties": False,
-            },
+            "description": "Compare snapshot Git provenance with the configured local checkout without refreshing it.",
+            "inputSchema": schema({}),
             "annotations": _read_annotations(),
         },
         {
             "name": "find_symbol",
             "title": "RepoGround symbol locator",
-            "description": (
-                "Locate Python symbol definitions (function/class/async_function) by name "
-                "in an existing RepoGround bundle. Answers 'where is X defined?' with an "
-                "exact path and line range."
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "bundle_manifest": {"type": "string"},
+            "description": "Locate Python symbol definitions by name with exact path and line range.",
+            "inputSchema": schema(
+                {
                     "name": {"type": "string", "minLength": 1},
                     "kind": {
                         "type": ["string", "null"],
                         "enum": [None, "class", "function", "async_function"],
                     },
-                    "path": {"type": ["string", "null"]},
-                    "k": {"type": "integer", "minimum": 1, "maximum": 200, "default": 25},
-                },
-                "required": ["bundle_manifest", "name"],
-                "additionalProperties": False,
-            },
-            "annotations": _read_annotations(),
-        },
-        {
-            "name": "find_references",
-            "title": "RepoGround call reference locator",
-            "description": (
-                "List static call sites for a callee name from an existing RepoGround "
-                "bundle's python_call_graph artifact. Exact matches first; bounded, "
-                "read-only, no refresh. Answers 'where is X called?'"
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "bundle_manifest": {"type": "string"},
-                    "name": {"type": "string", "minLength": 1},
-                    "path": {"type": ["string", "null"]},
-                    "k": {"type": "integer", "minimum": 1, "maximum": 200, "default": 25},
-                },
-                "required": ["bundle_manifest", "name"],
-                "additionalProperties": False,
-            },
-            "annotations": _read_annotations(),
-        },
-        {
-            "name": "get_callers",
-            "title": "RepoGround caller locator",
-            "description": (
-                "Select one exact symbol and group only S1 call edges to it by unique "
-                "enclosing caller. Unresolved name similarities stay separate. "
-                "Answers 'who calls X?'"
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "bundle_manifest": {"type": "string"},
-                    "name": {"type": "string", "minLength": 1},
-                    "path": {"type": ["string", "null"]},
-                    "k": {"type": "integer", "minimum": 1, "maximum": 200, "default": 25},
-                },
-                "required": ["bundle_manifest", "name"],
-                "additionalProperties": False,
-            },
-            "annotations": _read_annotations(),
-        },
-        {
-            "name": "get_callees",
-            "title": "RepoGround callee locator",
-            "description": (
-                "Select one exact caller symbol, group its uniquely resolved S1 targets, "
-                "and retain unresolved S0 call sites separately. Answers 'what does X call?'"
-            ),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "bundle_manifest": {"type": "string"},
-                    "name": {"type": "string", "minLength": 1},
                     "path": {"type": ["string", "null"]},
                     "k": {
                         "type": "integer",
@@ -177,29 +206,69 @@ def _tool_definitions(enable_snapshot_create: bool) -> list[dict[str, Any]]:
                         "maximum": 200,
                         "default": 25,
                     },
+                    "verbose": {"type": "boolean", "default": False},
                 },
-                "required": ["bundle_manifest", "name"],
-                "additionalProperties": False,
-            },
+                ["name"],
+            ),
             "annotations": _read_annotations(),
         },
     ]
+    for name, title, description in (
+        (
+            "find_references",
+            "RepoGround call reference locator",
+            "List bounded static call sites for a callee name.",
+        ),
+        (
+            "get_callers",
+            "RepoGround caller locator",
+            "Group uniquely resolved callers for one exact target symbol.",
+        ),
+        (
+            "get_callees",
+            "RepoGround callee locator",
+            "Group uniquely resolved outgoing calls for one exact caller symbol.",
+        ),
+    ):
+        tools.append(
+            {
+                "name": name,
+                "title": title,
+                "description": description,
+                "inputSchema": schema(
+                    {
+                        "name": {"type": "string", "minLength": 1},
+                        "path": {"type": ["string", "null"]},
+                        "k": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 200,
+                            "default": 25,
+                        },
+                        "verbose": {"type": "boolean", "default": False},
+                    },
+                    ["name"],
+                ),
+                "annotations": _read_annotations(),
+            }
+        )
     if enable_snapshot_create:
         tools.append(
             {
                 "name": "snapshot_create",
                 "title": "RepoGround snapshot create",
-                "description": (
-                    "Create RepoGround bundle artifacts for the startup-bound repository "
-                    "inside the startup-bound bundle root."
-                ),
+                "description": "Create bundle artifacts for the startup-bound repository and output root.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "profile": {"type": "string"},
                         "output_subdir": {"type": ["string", "null"]},
                         "output_mode": {"type": ["string", "null"]},
-                        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1800},
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 1800,
+                        },
                         "max_file_bytes": {"type": "string"},
                         "max_total_bytes": {"type": "string"},
                         "split_size": {"type": "string"},
@@ -221,6 +290,16 @@ def _tool_definitions(enable_snapshot_create: bool) -> list[dict[str, Any]]:
     return tools
 
 
+def tool_registry(enable_snapshot_create: bool = False) -> tuple[dict[str, Any], ...]:
+    """Public immutable-length registry projection for docs and drift checks."""
+    return tuple(_tool_definitions(enable_snapshot_create))
+
+
+def tool_names(enable_snapshot_create: bool = False) -> tuple[str, ...]:
+    """Public name projection used by documentation drift checks."""
+    return tuple(tool["name"] for tool in tool_registry(enable_snapshot_create))
+
+
 class RepoGroundMcpStdioServer:
     """Bind existing RepoGround handlers to the MCP JSON-RPC lifecycle."""
 
@@ -234,13 +313,21 @@ class RepoGroundMcpStdioServer:
         self.bundle_root = Path(bundle_root).expanduser().resolve()
         if not self.bundle_root.exists():
             raise ValueError(f"bundle root does not exist: {self.bundle_root}")
-        if self.bundle_root.is_file() and not self.bundle_root.name.endswith(MANIFEST_SUFFIX):
-            raise ValueError("file-valued bundle root must be a *.bundle.manifest.json file")
-        self.repo_root = Path(repo_root).expanduser().resolve() if repo_root is not None else None
+        if self.bundle_root.is_file() and not self.bundle_root.name.endswith(
+            MANIFEST_SUFFIX
+        ):
+            raise ValueError(
+                "file-valued bundle root must be a *.bundle.manifest.json file"
+            )
+        self.repo_root = (
+            Path(repo_root).expanduser().resolve() if repo_root is not None else None
+        )
         if self.repo_root is not None and not self.repo_root.is_dir():
             raise ValueError(f"repo root is not a directory: {self.repo_root}")
         if enable_snapshot_create and self.repo_root is None:
-            raise ValueError("--enable-snapshot-create requires an explicit --repo-root")
+            raise ValueError(
+                "--enable-snapshot-create requires an explicit --repo-root"
+            )
         self.enable_snapshot_create = enable_snapshot_create
         self.snapshot_output_root = (
             self.bundle_root if self.bundle_root.is_dir() else self.bundle_root.parent
@@ -249,7 +336,9 @@ class RepoGroundMcpStdioServer:
 
     def _initialize(self, params: Mapping[str, Any]) -> dict[str, Any]:
         requested = params.get("protocolVersion")
-        negotiated = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
+        negotiated = (
+            requested if requested in SUPPORTED_PROTOCOL_VERSIONS else PROTOCOL_VERSION
+        )
         self._negotiated = True
         return {
             "protocolVersion": negotiated,
@@ -257,7 +346,11 @@ class RepoGroundMcpStdioServer:
                 "resources": {"subscribe": False, "listChanged": False},
                 "tools": {"listChanged": False},
             },
-            "serverInfo": {"name": SERVER_NAME, "title": "RepoGround", "version": SERVER_VERSION},
+            "serverInfo": {
+                "name": SERVER_NAME,
+                "title": "RepoGround",
+                "version": SERVER_VERSION,
+            },
             "instructions": (
                 "RepoGround reads existing deterministic bundles, including documented legacy identities. Reads never refresh snapshots. "
                 "Use live_freshness before relying on a snapshot. snapshot_create is exposed only "
@@ -274,7 +367,9 @@ class RepoGroundMcpStdioServer:
             raise McpProtocolError(-32602, "bundle_manifest must be a non-empty string")
         manifest = Path(raw_path).expanduser().resolve()
         if not manifest.name.endswith(MANIFEST_SUFFIX):
-            raise McpProtocolError(-32602, "bundle_manifest must name a RepoGround bundle manifest")
+            raise McpProtocolError(
+                -32602, "bundle_manifest must name a RepoGround bundle manifest"
+            )
         if self.bundle_root.is_file():
             allowed = manifest == self.bundle_root
         else:
@@ -285,22 +380,74 @@ class RepoGroundMcpStdioServer:
             else:
                 allowed = True
         if not allowed:
-            raise McpProtocolError(-32602, "bundle_manifest is outside the configured bundle root")
+            raise McpProtocolError(
+                -32602, "bundle_manifest is outside the configured bundle root"
+            )
         if not manifest.is_file():
             raise McpProtocolError(-32602, "bundle_manifest does not exist")
         return manifest
+
+    def _resolve_manifest(self, arguments: Mapping[str, Any]) -> Path:
+        raw_manifest = arguments.get("bundle_manifest")
+        repo = arguments.get("repo")
+        stem = arguments.get("stem")
+        if raw_manifest is not None:
+            if repo is not None or stem is not None:
+                raise McpProtocolError(
+                    -32602,
+                    "bundle_manifest cannot be combined with repo or stem selectors",
+                )
+            return self._guard_manifest(raw_manifest)
+        from merger.repoground.core.bundle_catalog import select_bundle_manifest
+
+        selection = select_bundle_manifest(
+            self.bundle_root,
+            repo=repo,
+            stem=stem,
+            require_healthy=True,
+        )
+        selected = selection.get("selected")
+        manifest = selected.get("manifest_path") if isinstance(selected, dict) else None
+        if selection.get("status") != "available" or not isinstance(manifest, str):
+            raise McpProtocolError(
+                -32602,
+                "no unique healthy RepoGround bundle matched the selector",
+                {
+                    "status": selection.get("status"),
+                    "reason": selection.get("reason"),
+                    "requested_repo": selection.get("requested_repo"),
+                    "requested_stem": selection.get("requested_stem"),
+                },
+            )
+        return self._guard_manifest(manifest)
+
+    def _selected_call_args(
+        self, arguments: Mapping[str, Any]
+    ) -> tuple[dict[str, Any], Path]:
+        manifest = self._resolve_manifest(arguments)
+        call_args = {
+            key: value
+            for key, value in arguments.items()
+            if key not in {"bundle_manifest", "repo", "stem"}
+        }
+        call_args["bundle_manifest"] = str(manifest)
+        return call_args, manifest
 
     @staticmethod
     def _guard_bundle_path(raw_path: Any, manifest: Path, *, label: str) -> str | None:
         if raw_path is None:
             return None
         if not isinstance(raw_path, str) or not raw_path:
-            raise McpProtocolError(-32602, f"{label} must be null or a non-empty string")
+            raise McpProtocolError(
+                -32602, f"{label} must be null or a non-empty string"
+            )
         path = Path(raw_path).expanduser().resolve()
         try:
             path.relative_to(manifest.parent.resolve())
         except ValueError as exc:
-            raise McpProtocolError(-32602, f"{label} is outside the bundle directory") from exc
+            raise McpProtocolError(
+                -32602, f"{label} is outside the bundle directory"
+            ) from exc
         if not path.is_file():
             raise McpProtocolError(-32602, f"{label} does not exist")
         return str(path)
@@ -394,7 +541,9 @@ class RepoGroundMcpStdioServer:
         if not isinstance(text, str):
             text = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True)
         content_type = result.get("content_type")
-        mime_type = content_type if isinstance(content_type, str) else "application/json"
+        mime_type = (
+            content_type if isinstance(content_type, str) else "application/json"
+        )
         resource_meta = {
             "status": result.get("status"),
             "snapshotContext": result.get("snapshot_context"),
@@ -409,20 +558,85 @@ class RepoGroundMcpStdioServer:
             },
         }
 
+    def _call_bundle_discover(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        from merger.repoground.core.bundle_catalog import (
+            discover_bundle_catalog,
+            select_bundle_manifest,
+        )
+
+        repo = arguments.get("repo")
+        stem = arguments.get("stem")
+        if repo is not None or stem is not None:
+            return select_bundle_manifest(
+                self.bundle_root,
+                repo=repo,
+                stem=stem,
+                require_healthy=True,
+            )
+        return discover_bundle_catalog(self.bundle_root)
+
+    def _call_snapshot_status(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        call_args, manifest = self._selected_call_args(arguments)
+        from merger.repoground.core import mcp_tools
+
+        payload = mcp_tools.snapshot_status(**call_args)
+        payload["live_freshness"] = self._safe_live_freshness(manifest)
+        return payload
+
     def _call_ask_context(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args = dict(arguments)
-        manifest = self._guard_manifest(call_args.get("bundle_manifest"))
-        call_args["bundle_manifest"] = str(manifest)
+        call_args, manifest = self._selected_call_args(arguments)
+        query = call_args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise McpProtocolError(-32602, "ask_context requires a non-empty query")
         from merger.repoground.core import mcp_tools
 
         payload = mcp_tools.ask_context(**call_args)
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
 
+    def _call_query_existing_index(
+        self, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        call_args, manifest = self._selected_call_args(arguments)
+        query = call_args.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise McpProtocolError(
+                -32602, "query_existing_index requires a non-empty query"
+            )
+        k = call_args.get("k", 5)
+        if not isinstance(k, int) or isinstance(k, bool) or not 1 <= k <= 100:
+            raise McpProtocolError(
+                -32602,
+                "query_existing_index k must be an integer between 1 and 100",
+            )
+        budget = call_args.get("max_context_tokens", 2000)
+        if not isinstance(budget, int) or isinstance(budget, bool) or budget < 1:
+            raise McpProtocolError(
+                -32602,
+                "query_existing_index max_context_tokens must be a positive integer",
+            )
+        from merger.repoground.core import mcp_tools
+
+        payload = mcp_tools.query_existing_index(**call_args)
+        payload["live_freshness"] = self._safe_live_freshness(manifest)
+        return payload
+
+    def _call_range_get(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        call_args, manifest = self._selected_call_args(arguments)
+        if not isinstance(call_args.get("range_ref"), dict):
+            raise McpProtocolError(-32602, "range_get requires an object range_ref")
+        from merger.repoground.core import mcp_tools
+
+        payload = mcp_tools.range_get(**call_args)
+        payload["live_freshness"] = self._safe_live_freshness(manifest)
+        return payload
+
     def _call_grounding_verify(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args = dict(arguments)
-        manifest = self._guard_manifest(call_args.get("bundle_manifest"))
-        call_args["bundle_manifest"] = str(manifest)
+        call_args, manifest = self._selected_call_args(arguments)
+        if not isinstance(call_args.get("declaration"), dict):
+            raise McpProtocolError(
+                -32602, "grounding_verify requires an object declaration"
+            )
         call_args["citation_map"] = self._guard_bundle_path(
             call_args.get("citation_map"),
             manifest,
@@ -435,10 +649,7 @@ class RepoGroundMcpStdioServer:
         return payload
 
     def _call_find_symbol(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args = dict(arguments)
-        # Fail closed at the transport boundary: reject an empty name (which would
-        # otherwise list the first k symbols) or an unknown kind, independent of
-        # any client-side inputSchema enforcement.
+        call_args, manifest = self._selected_call_args(arguments)
         name = call_args.get("name")
         if not isinstance(name, str) or not name.strip():
             raise McpProtocolError(-32602, "find_symbol requires a non-empty name")
@@ -451,18 +662,14 @@ class RepoGroundMcpStdioServer:
                 "find_symbol kind must be one of class, function, async_function, or null",
                 {"allowed_kinds": list(mcp_tools.FIND_SYMBOL_KINDS)},
             )
-        manifest = self._guard_manifest(call_args.get("bundle_manifest"))
-        call_args["bundle_manifest"] = str(manifest)
         payload = mcp_tools.find_symbol(**call_args)
-        # Nav results reflect the snapshot; surface freshness so the agent knows
-        # whether the index may lag the live working tree.
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
 
-    def _call_call_navigation(self, tool: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        call_args = dict(arguments)
-        # Fail closed at the transport boundary, independent of client-side
-        # inputSchema enforcement: reject an empty name and an out-of-bounds k.
+    def _call_call_navigation(
+        self, tool: str, arguments: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        call_args, manifest = self._selected_call_args(arguments)
         name = call_args.get("name")
         if not isinstance(name, str) or not name.strip():
             raise McpProtocolError(-32602, f"{tool} requires a non-empty name")
@@ -473,8 +680,6 @@ class RepoGroundMcpStdioServer:
                 f"{tool} k must be an integer between 1 and 200",
                 {"k": k},
             )
-        manifest = self._guard_manifest(call_args.get("bundle_manifest"))
-        call_args["bundle_manifest"] = str(manifest)
         from merger.repoground.core import mcp_tools
 
         handlers = {
@@ -482,10 +687,7 @@ class RepoGroundMcpStdioServer:
             "get_callers": mcp_tools.get_callers,
             "get_callees": mcp_tools.get_callees,
         }
-        handler = handlers[tool]
-        payload = handler(**call_args)
-        # Call-graph results reflect the snapshot; surface freshness so the agent
-        # knows whether the artifact may lag the live working tree.
+        payload = handlers[tool](**call_args)
         payload["live_freshness"] = self._safe_live_freshness(manifest)
         return payload
 
@@ -507,13 +709,20 @@ class RepoGroundMcpStdioServer:
         return mcp_tools.snapshot_create(**call_args)
 
     def _tool_payload(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if name == "bundle_discover":
+            return self._call_bundle_discover(arguments)
+        if name == "snapshot_status":
+            return self._call_snapshot_status(arguments)
         if name == "ask_context":
             return self._call_ask_context(arguments)
+        if name == "query_existing_index":
+            return self._call_query_existing_index(arguments)
+        if name == "range_get":
+            return self._call_range_get(arguments)
         if name == "grounding_verify":
             return self._call_grounding_verify(arguments)
         if name == "live_freshness":
-            manifest = self._guard_manifest(arguments.get("bundle_manifest"))
-            return self._safe_live_freshness(manifest)
+            return self._safe_live_freshness(self._resolve_manifest(arguments))
         if name == "find_symbol":
             return self._call_find_symbol(arguments)
         if name in ("find_references", "get_callers", "get_callees"):
@@ -522,11 +731,34 @@ class RepoGroundMcpStdioServer:
             return self._call_snapshot_create(arguments)
         raise McpProtocolError(-32602, f"unknown or disabled tool: {name}")
 
+    @staticmethod
+    def _tool_text_summary(name: str, payload: Mapping[str, Any]) -> str:
+        summary: dict[str, Any] = {
+            "tool": name,
+            "status": payload.get("status", "unknown"),
+            "details": "Use structuredContent for the complete typed result.",
+        }
+        retrieval = payload.get("retrieval")
+        if isinstance(retrieval, Mapping):
+            summary["strategy"] = retrieval.get("strategy")
+            summary["match_count"] = retrieval.get("match_count")
+        result = payload.get("result")
+        if isinstance(result, Mapping):
+            hit_count = result.get("hit_count")
+            if isinstance(hit_count, int):
+                summary["hit_count"] = hit_count
+        selected = payload.get("selected")
+        if isinstance(selected, Mapping):
+            summary["stem"] = selected.get("stem")
+        return json.dumps(summary, ensure_ascii=False, separators=(",", ":"))
+
     def _tool_call(self, params: Mapping[str, Any]) -> dict[str, Any]:
         name = params.get("name")
         arguments = params.get("arguments", {})
         if not isinstance(name, str) or not isinstance(arguments, dict):
-            raise McpProtocolError(-32602, "tools/call requires name and object arguments")
+            raise McpProtocolError(
+                -32602, "tools/call requires name and object arguments"
+            )
         try:
             payload = self._tool_payload(name, arguments)
         except McpProtocolError:
@@ -535,17 +767,17 @@ class RepoGroundMcpStdioServer:
             error_payload = {"status": "error", "tool": name, "error": str(exc)}
             return {
                 "content": [
-                    {"type": "text", "text": json.dumps(error_payload, ensure_ascii=False)}
+                    {
+                        "type": "text",
+                        "text": self._tool_text_summary(name, error_payload),
+                    }
                 ],
                 "structuredContent": error_payload,
                 "isError": True,
             }
         return {
             "content": [
-                {
-                    "type": "text",
-                    "text": json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
-                }
+                {"type": "text", "text": self._tool_text_summary(name, payload)}
             ],
             "structuredContent": payload,
             "isError": False,
@@ -574,7 +806,9 @@ class RepoGroundMcpStdioServer:
             return _error_response(None, -32600, "invalid JSON-RPC request")
         method = message.get("method")
         if not isinstance(method, str):
-            return _error_response(message.get("id"), -32600, "request method is required")
+            return _error_response(
+                message.get("id"), -32600, "request method is required"
+            )
         if "id" not in message:
             return None
         request_id = message.get("id")
@@ -586,11 +820,15 @@ class RepoGroundMcpStdioServer:
         except McpProtocolError as exc:
             return _error_response(request_id, exc.code, exc.message, exc.data)
         except Exception as exc:
-            return _error_response(request_id, -32603, "internal error", {"detail": str(exc)})
+            return _error_response(
+                request_id, -32603, "internal error", {"detail": str(exc)}
+            )
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def _error_response(request_id: Any, code: int, message: str, data: Any = None) -> dict[str, Any]:
+def _error_response(
+    request_id: Any, code: int, message: str, data: Any = None
+) -> dict[str, Any]:
     error: dict[str, Any] = {"code": code, "message": message}
     if data is not None:
         error["data"] = data
