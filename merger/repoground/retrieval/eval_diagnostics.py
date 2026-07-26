@@ -35,6 +35,24 @@ DOES_NOT_PROVE: Tuple[str, ...] = (
 )
 
 
+def _require_json_object(value: Any, *, source: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{source} must be a JSON object")
+    return value
+
+
+def _optional_string_field(
+    record: Dict[str, Any],
+    *,
+    field: str,
+    source: str,
+) -> Optional[str]:
+    value = record.get(field)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"{source} field '{field}' must be a string")
+    return value
+
+
 class RetrievalEvalDiagnosticsError(Exception):
     """Base exception for diagnostics module."""
     pass
@@ -137,15 +155,18 @@ class IndexInspector:
         paths = set()
         try:
             with open(self.index_path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_number, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
                     try:
                         chunk = json.loads(line)
-                        if "path" in chunk:
-                            paths.add(chunk["path"])
-                    except (json.JSONDecodeError, KeyError):
+                    except json.JSONDecodeError:
                         continue
+                    source = f"chunk index line {line_number}"
+                    chunk = _require_json_object(chunk, source=source)
+                    path = _optional_string_field(chunk, field="path", source=source)
+                    if path is not None:
+                        paths.add(path)
         except (IOError, OSError) as e:
             raise MissingArtifactError(
                 f"Failed to read chunk index from {self.index_path}: {e}"
@@ -176,16 +197,18 @@ class IndexInspector:
 
         try:
             with open(self.index_path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_number, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
                     try:
                         chunk = json.loads(line)
                     except json.JSONDecodeError:
                         continue
-                    path = chunk.get("path")
-                    chunk_id = chunk.get("chunk_id")
-                    if isinstance(path, str) and isinstance(chunk_id, str):
+                    source = f"chunk index line {line_number}"
+                    chunk = _require_json_object(chunk, source=source)
+                    path = _optional_string_field(chunk, field="path", source=source)
+                    chunk_id = _optional_string_field(chunk, field="chunk_id", source=source)
+                    if path is not None and chunk_id is not None:
                         mapping.setdefault(path, set()).add(chunk_id)
         except (IOError, OSError) as e:
             raise MissingArtifactError(
@@ -278,16 +301,22 @@ class IndexInspector:
         citation_map = {}
         try:
             with open(citation_path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_number, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
                     try:
                         record = json.loads(line)
-                        # Assume citation_id is the key
-                        if "citation_id" in record:
-                            citation_map[record["citation_id"]] = record
                     except json.JSONDecodeError:
                         continue
+                    source = f"citation map line {line_number}"
+                    record = _require_json_object(record, source=source)
+                    citation_id = _optional_string_field(
+                        record,
+                        field="citation_id",
+                        source=source,
+                    )
+                    if citation_id is not None:
+                        citation_map[citation_id] = record
         except (IOError, OSError) as e:
             raise MissingArtifactError(
                 f"Failed to read citation_map from {citation_path}: {e}"
@@ -598,7 +627,8 @@ class RetrievalEvalDiagnosticsCalibrator:
             "diagnostic_inconclusive": 0,
         }
 
-        for miss in misses:
+        for miss_index, miss in enumerate(misses):
+            miss = _require_json_object(miss, source=f"misses[{miss_index}]")
             record = self.diagnose_miss(
                 query_id=miss.get("query_id", ""),
                 query_text=miss.get("query_text", ""),

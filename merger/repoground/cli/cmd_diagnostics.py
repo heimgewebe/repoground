@@ -66,6 +66,21 @@ def _read_json(
     return value
 
 
+def _require_list_items(
+    value: list[Any],
+    *,
+    item_type: type,
+    label: str,
+) -> list[Any]:
+    for index, item in enumerate(value):
+        if not isinstance(item, item_type):
+            raise ValueError(
+                f"{label}[{index}] must be JSON {item_type.__name__}, "
+                f"got {type(item).__name__}"
+            )
+    return value
+
+
 def _emit(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
@@ -185,7 +200,11 @@ def _run_answer_delta(args: argparse.Namespace) -> dict[str, Any]:
 def _run_history_lens(args: argparse.Namespace) -> dict[str, Any]:
     from merger.repoground.core.history_lens import build_history_lens
 
-    records = _read_json(args.records, expected_type=list)
+    records = _require_list_items(
+        _read_json(args.records, expected_type=list),
+        item_type=dict,
+        label="records",
+    )
     return build_history_lens(
         records,
         profile=args.profile,
@@ -196,7 +215,11 @@ def _run_history_lens(args: argparse.Namespace) -> dict[str, Any]:
 def _run_memory_build(args: argparse.Namespace) -> dict[str, Any]:
     from merger.repoground.core.memory import build_memory_record
 
-    citations = _read_json(args.citations, expected_type=list)
+    citations = _require_list_items(
+        _read_json(args.citations, expected_type=list),
+        item_type=dict,
+        label="citations",
+    )
     metadata = _read_json(args.metadata, expected_type=dict) if args.metadata else None
     return build_memory_record(
         claim_text=args.claim_text,
@@ -214,6 +237,8 @@ def _run_memory_check(args: argparse.Namespace) -> dict[str, Any]:
 
     record = _read_json(args.memory_record, expected_type=dict)
     citations = _read_json(args.current_citations, expected_type=(dict, list))
+    if isinstance(citations, list):
+        _require_list_items(citations, item_type=dict, label="current citations")
     return check_memory_recall(
         record,
         current_citations=citations,
@@ -227,7 +252,13 @@ def _run_audit_plan(args: argparse.Namespace) -> dict[str, Any]:
 
     paths = list(args.changed_path)
     if args.paths_file:
-        paths.extend(_read_json(args.paths_file, expected_type=list))
+        paths.extend(
+            _require_list_items(
+                _read_json(args.paths_file, expected_type=list),
+                item_type=str,
+                label="paths",
+            )
+        )
     return plan_audit_lanes(
         paths,
         review_query=args.review_query,
@@ -239,10 +270,22 @@ def _run_audit_findings(args: argparse.Namespace) -> dict[str, Any]:
     from merger.repoground.retrieval.audit_finding import adapt_audit_findings
 
     plan = _read_json(args.plan, expected_type=dict)
-    candidates = _read_json(args.candidates, expected_type=list)
-    citation_ids = _read_json(args.citation_ids, expected_type=list)
+    candidates = _require_list_items(
+        _read_json(args.candidates, expected_type=list),
+        item_type=dict,
+        label="candidates",
+    )
+    citation_ids = _require_list_items(
+        _read_json(args.citation_ids, expected_type=list),
+        item_type=str,
+        label="citation ids",
+    )
     verification_records = (
-        _read_json(args.verification_records, expected_type=list)
+        _require_list_items(
+            _read_json(args.verification_records, expected_type=list),
+            item_type=dict,
+            label="verification records",
+        )
         if args.verification_records
         else []
     )

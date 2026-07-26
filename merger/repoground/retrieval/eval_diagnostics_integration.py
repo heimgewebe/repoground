@@ -14,6 +14,14 @@ import re
 from .eval_diagnostics import RetrievalEvalDiagnosticsCalibrator
 
 
+def _require_eval_detail(value: Any, *, index: int) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(
+            f"Expected retrieval_eval['details'][{index}] to be an object."
+        )
+    return value
+
+
 def integrate_diagnostics_with_eval_results(
     eval_results: Dict[str, Any],
     index_path: Optional[Path] = None,
@@ -95,6 +103,7 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
     configured_top_k = _infer_top_k_from_metrics(eval_results.get("metrics", {}))
 
     for detail_idx, detail in enumerate(details):
+        detail = _require_eval_detail(detail, index=detail_idx)
         # Only process misses (is_relevant=false)
         if detail.get("is_relevant", False):
             continue

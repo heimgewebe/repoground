@@ -267,3 +267,83 @@ def test_json_inputs_reject_symbolic_links(tmp_path, capsys):
     assert code == 2
     assert captured.out == ""
     assert "refusing symbolic-link input" in captured.err
+
+
+def test_history_lens_rejects_non_object_records_without_traceback(tmp_path, capsys):
+    records = _write_json(tmp_path / "records.json", [1])
+
+    code = main(
+        [
+            "diagnostics",
+            "history-lens",
+            "--records",
+            str(records),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "records[0] must be JSON dict, got int" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_eval_report_rejects_non_object_details_without_traceback(tmp_path, capsys):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {"metrics": {}, "details": [1]},
+    )
+
+    code = main(
+        [
+            "diagnostics",
+            "eval-report",
+            "--eval-results",
+            str(eval_results),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "Expected retrieval_eval['details'][0] to be an object" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_eval_report_rejects_non_object_index_records_without_traceback(
+    tmp_path, capsys
+):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "session authority",
+                    "expected": ["src/auth/session.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        },
+    )
+    index = tmp_path / "chunk-index.jsonl"
+    index.write_text("[]\n", encoding="utf-8")
+
+    code = main(
+        [
+            "diagnostics",
+            "eval-report",
+            "--eval-results",
+            str(eval_results),
+            "--index",
+            str(index),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "chunk index line 1 must be a JSON object" in captured.err
+    assert "Traceback" not in captured.err
