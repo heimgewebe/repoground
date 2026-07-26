@@ -216,3 +216,48 @@ Thirty fresh-process normal CLI starts were measured after the broad suite compl
 Observed median delta: `+1.047 ms` or approximately `+0.74%`. The validation functions remain behind the lazy diagnostics parser and therefore do not execute during normal `--help`, indexing, querying, service, MCP, merge or publication paths. The measured delta is compatible with fresh-process noise, but is reported rather than treated as zero.
 
 This addendum supersedes the earlier statement that a fresh external review of the first review-hardened head remained pending. A further current-head review and current-head GitHub CI are still separate post-push gates.
+
+
+## Third review-hardening addendum
+
+Codex reviewed PR head `edb317473c13c6100b486f8db96e7f7108b5c9f5` and identified a third P2 boundary issue. `answer-delta` still delegated its citation-map path to older tolerant domain loading. A well-formed but structurally invalid JSONL line such as `[]` could therefore be ignored and misreported as a missing citation with exit code 0 instead of a malformed-input error.
+
+The finding is addressed by revision `3cb2350cd94e2bc3891b6349793e6a70611fb183`.
+
+- Parent head: `edb317473c13c6100b486f8db96e7f7108b5c9f5`
+- Citation-map-hardening diff format: `git diff --binary --no-ext-diff <parent>..<citation-map-hardening>`
+- Citation-map-hardening diff bytes: `10592`
+- Citation-map-hardening diff SHA-256: `d23ef945fe95f842f3bcf373d568b06ed2e56204af87b1d24b1950bd80e6e7af`
+
+The CLI adapter now reads a supplied answer citation map once through the existing bounded, no-symlink file loader and requires every nonblank JSONL line to:
+
+- contain valid JSON;
+- be an object;
+- contain a non-empty string `citation_id`;
+- use a `citation_id` that has not already appeared in the same map.
+
+The parsed records are passed into `check_answer_grounding_delta()` through the optional `new_citation_entries` parameter. When that parameter is supplied, the domain function validates and copies the in-memory mapping and does not reread the citation-map path. A regression test deletes the original map before evaluation and still obtains a valid result, proving that validation and consumption use the same parsed records rather than two path reads.
+
+Six CLI regression cases cover non-object records, missing, empty and non-string IDs, duplicate IDs and invalid JSON. These inputs return exit code 2 with empty stdout and no traceback.
+
+Verification on the exact citation-map-hardening revision:
+
+- focused answer-delta and CLI tests: `31 passed in 1.12s`;
+- relevant domain, CLI and retrieval-diagnostics tests: `167 passed in 1.34s`;
+- broad suite excluding only the two already documented host-blocked Bubblewrap files: `4884 passed, 2 skipped in 148.99s`;
+- durable broad-test task: `c06ec494a85b4c8282c812e8`;
+- durable lifecycle receipt SHA-256: `c8d8dbde5c2d1b9f99661aae3802790d81259cdf6b71b302f23fc37e01da4918`;
+- Ruff changed-scope check: pass;
+- graph-maintainability ratchet: pass;
+- module reachability: `205 production modules, 0 unproven, 0 documentation-only, 0 test-only`.
+
+Thirty fresh-process normal CLI starts were measured after the broad suite completed:
+
+| Revision | Median | p90 | Minimum | Maximum |
+|---|---:|---:|---:|---:|
+| base `main` | 139.228 ms | 141.323 ms | 135.801 ms | 141.881 ms |
+| citation-map-hardened implementation | 140.228 ms | 142.329 ms | 136.065 ms | 146.392 ms |
+
+Observed median delta: `+1.000 ms` or approximately `+0.72%`. The strict citation-map reader remains behind the lazy diagnostics parser and executes only when `diagnostics answer-delta --new-citation-map` is invoked. The measured normal-start delta is compatible with process-start noise, but is reported rather than treated as zero.
+
+Rollback of this addendum is the revert of `3cb2350cd94e2bc3891b6349793e6a70611fb183`; the previous tolerant domain path remains available to pre-existing callers that do not supply prevalidated entries. Current-head GitHub CI and a fresh Codex review remain separate post-push gates.
