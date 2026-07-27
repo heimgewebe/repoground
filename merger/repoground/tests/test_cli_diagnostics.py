@@ -370,6 +370,8 @@ def test_eval_report_rejects_non_object_index_records_without_traceback(
         ("query", 7, "['query'] to be a string"),
         ("expected", "src/auth/session.py", "['expected'] to be a list of strings"),
         ("expected", [7], "['expected'][0] to be a string"),
+        ("expected", [""], "['expected'][0] to be a non-empty string"),
+        ("expected", ["   "], "['expected'][0] to be a non-empty string"),
         ("is_relevant", "false", "['is_relevant'] to be a boolean"),
         ("found_count", "0", "['found_count'] to be an integer"),
         ("found_count", True, "['found_count'] to be an integer"),
@@ -380,6 +382,8 @@ def test_eval_report_rejects_non_object_index_records_without_traceback(
             "['top_results'] to be a list of strings",
         ),
         ("top_results", [7], "['top_results'][0] to be a string"),
+        ("top_results", [""], "['top_results'][0] to be a non-empty string"),
+        ("top_results", ["   "], "['top_results'][0] to be a non-empty string"),
     ],
 )
 def test_eval_report_rejects_invalid_detail_field_types_without_traceback(

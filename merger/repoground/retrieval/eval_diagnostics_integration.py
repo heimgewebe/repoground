@@ -34,6 +34,10 @@ def _require_detail_string_list(
     for item_index, item in enumerate(value):
         if not isinstance(item, str):
             raise ValueError(f"Expected {path}[{item_index}] to be a string.")
+        if not item.strip():
+            raise ValueError(
+                f"Expected {path}[{item_index}] to be a non-empty string."
+            )
     return value
 
 
