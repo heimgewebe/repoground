@@ -43,9 +43,36 @@ index f98a10fb5..8cdfffe35 100644
  - C901 on all changed production modules: **pass**;
  - graph-maintainability gate: **pass** at 193 findings, max 138, excess 2,348,
 diff --git a/docs/proofs/repoground-legacy-t011-bundle-access.measurement.json b/docs/proofs/repoground-legacy-t011-bundle-access.measurement.json
-index 72ad45c2b..5b2806fd4 100644
+index 72ad45c2b..7eff853b0 100644
 --- a/docs/proofs/repoground-legacy-t011-bundle-access.measurement.json
 +++ b/docs/proofs/repoground-legacy-t011-bundle-access.measurement.json
+@@ -27,7 +27,7 @@
+     "extracted_modules": [
+       {
+         "path": "merger/repoground/core/bounded_artifact_read.py",
+-        "lines": 181
++        "lines": 186
+       },
+       {
+         "path": "merger/repoground/core/bundle_roles.py",
+@@ -47,7 +47,7 @@
+       }
+     ],
+     "aggregate_product_lines_before": 3676,
+-    "aggregate_product_lines_after": 4282,
++    "aggregate_product_lines_after": 4287,
+     "aggregate_line_reduction_claimed": false
+   },
+   "complexity": {
+@@ -102,7 +102,7 @@
+     "new_adversarial_suite": {
+       "path": "merger/repoground/tests/test_bundle_access_decomposition.py",
+       "result": "pass",
+-      "passed": 20
++      "passed": 21
+     },
+     "ruff_changed_files": "pass",
+     "ruff_c901_changed_modules": "pass",
 @@ -149,13 +149,13 @@
    "source_sha256": {
      "config/repoground-c901-baseline.v1.json": "7a848e6b846f2dd8e85d3bf38b8fad5510571521dde580a58e0bab4a8328b7f3",
