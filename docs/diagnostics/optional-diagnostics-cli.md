@@ -14,6 +14,7 @@ The explicit CLI gives each module a real consumer while preserving its authorit
 - retrieval-evaluation detail fields enforce string, boolean, non-negative integer and string-list contracts;
 - answer citation maps require valid JSONL objects with unique, non-empty string citation IDs;
 - a validated answer citation map is passed as parsed records and is not reread by path;
+- answer declarations require list-shaped citation and range collections with valid evidence members;
 - malformed structured inputs return exit code 2 without a traceback;
 - results are emitted as deterministic JSON;
 - diagnostic outputs do not become repository truth, merge authority or review completeness evidence;

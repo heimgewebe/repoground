@@ -261,3 +261,47 @@ Thirty fresh-process normal CLI starts were measured after the broad suite compl
 Observed median delta: `+1.000 ms` or approximately `+0.72%`. The strict citation-map reader remains behind the lazy diagnostics parser and executes only when `diagnostics answer-delta --new-citation-map` is invoked. The measured normal-start delta is compatible with process-start noise, but is reported rather than treated as zero.
 
 Rollback of this addendum is the revert of `3cb2350cd94e2bc3891b6349793e6a70611fb183`; the previous tolerant domain path remains available to pre-existing callers that do not supply prevalidated entries. Current-head GitHub CI and a fresh Codex review remain separate post-push gates.
+
+
+## Fourth review-hardening addendum
+
+Codex reviewed PR head `6aad39035b78ddb67660b62cfd3dcdd205b464f0` and identified a fourth P2 boundary issue. The `answer-delta` adapter validated only that the old declaration was an object. Object-valued or otherwise malformed `used_citations` and `used_ranges` collections could therefore be iterated by the tolerant domain function and silently omit declared evidence. In the concrete review example, an object-valued `used_citations` collection beside one valid range could still produce an overall `valid` result with no citation checks.
+
+The finding is addressed by revision `dcba932d00e074f685da26a703ebf777271d3a21`.
+
+- Parent head: `6aad39035b78ddb67660b62cfd3dcdd205b464f0`
+- Declaration-hardening diff format: `git diff --binary --no-ext-diff <parent>..<declaration-hardening>`
+- Declaration-hardening diff bytes: `4819`
+- Declaration-hardening diff SHA-256: `f435059dd11bc1b80d26c78f426cf99c5b6098986f2fa00e05917fc458c4b938`
+
+At the CLI boundary:
+
+- missing `used_citations` and `used_ranges` remain compatible with the previous empty-declaration defaults;
+- present `used_citations` and `used_ranges` values must be JSON lists;
+- every list member must be a JSON object;
+- each citation member must carry a non-empty string `citation_id`;
+- each range member must carry an object-valued `range_ref`.
+
+Nine parameterized regression cases cover the Codex example, object-valued collections, scalar list members, missing, empty and non-string citation IDs, and missing or non-object range references. All malformed inputs return exit code 2 with empty stdout and no traceback.
+
+Verification on the exact declaration-hardening revision:
+
+- focused answer-delta and CLI tests: `40 passed in 1.29s`;
+- relevant domain, CLI and retrieval-diagnostics tests: `176 passed in 1.66s`;
+- broad suite excluding only the two already documented host-blocked Bubblewrap files: `4893 passed, 2 skipped in 189.12s`;
+- durable broad-test task: `2f90a62335ff47c0b22eaff8`;
+- durable lifecycle receipt SHA-256: `6963f8dce31bd680825296805c2489c61ef8258c0fdf6623c8bdaf78ce52fb9b`;
+- Ruff changed-scope check: pass;
+- graph-maintainability ratchet: pass;
+- module reachability: `205 production modules, 0 unproven, 0 documentation-only, 0 test-only`.
+
+Thirty fresh-process normal CLI starts were measured after the broad suite completed:
+
+| Revision | Median | p90 | Minimum | Maximum |
+|---|---:|---:|---:|---:|
+| base `main` | 142.541 ms | 146.209 ms | 137.695 ms | 151.107 ms |
+| declaration-hardened implementation | 144.485 ms | 147.171 ms | 141.525 ms | 151.200 ms |
+
+Observed median delta: `+1.944 ms` or approximately `+1.36%`. The declaration validator remains behind the lazy diagnostics parser and executes only for `diagnostics answer-delta`. The normal-start delta is reported as measured and may include fresh-process noise.
+
+Rollback of this addendum is the revert of `dcba932d00e074f685da26a703ebf777271d3a21`. Current-head GitHub CI and a fresh Codex review remain separate post-push gates.
