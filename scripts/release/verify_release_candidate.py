@@ -20,6 +20,7 @@ from scripts.release.build_release_candidate import (
     KIND,
     LICENSE_EXPRESSION,
     LOCK_PATHS,
+    RETIRED_RELEASE_CONTRACT_PATHS,
     SEMANTIC_CONSTRAINTS_PATH,
     SEMANTIC_INPUT_PATH,
     SEMANTIC_LOCK_PATH,
@@ -80,7 +81,13 @@ def _sha256(path: Path) -> str:
 
 def _safe_name(name: str) -> bool:
     path = Path(name)
-    return bool(name) and not path.is_absolute() and ".." not in path.parts
+    raw_parts = name.split("/")
+    return (
+        bool(name)
+        and not path.is_absolute()
+        and bool(raw_parts)
+        and all(part not in {"", ".", ".."} for part in raw_parts)
+    )
 
 
 def _load_candidate(
@@ -153,7 +160,11 @@ def _archive_members(
         raise ValueError("archive SHA-256 does not match manifest")
     if archive_path.stat().st_size != expected_bytes:
         raise ValueError("archive byte size does not match manifest")
-    if not isinstance(prefix, str) or not prefix.endswith("/") or not _safe_name(prefix):
+    if (
+        not isinstance(prefix, str)
+        or not prefix.endswith("/")
+        or not _safe_name(prefix[:-1])
+    ):
         raise ValueError("archive prefix is invalid")
     raw = archive_path.read_bytes()
     if len(raw) < 8 or int.from_bytes(raw[4:8], "little") != 0:
@@ -200,6 +211,22 @@ def _archive_members(
     if observed_order != expected_order:
         raise ValueError("archive member order is not canonical")
     return members
+
+
+def _reject_retired_release_contract_members(
+    members: dict[str, tarfile.TarInfo],
+    prefix: str,
+) -> None:
+    present = sorted(
+        path
+        for path in RETIRED_RELEASE_CONTRACT_PATHS
+        if f"{prefix}{path}" in members
+    )
+    if present:
+        raise ValueError(
+            "retired RepoBrief release contracts are forbidden in RepoGround "
+            "release candidates: " + ", ".join(present)
+        )
 
 
 def _read_archive_member(archive_path: Path, name: str) -> bytes:
@@ -455,6 +482,11 @@ def _verify_release_candidate(
         raise ValueError("distribution boundary mismatch")
 
     members = _archive_members(manifest, archive_path)
+    archive = manifest.get("archive")
+    assert isinstance(archive, dict)
+    prefix = archive.get("prefix")
+    assert isinstance(prefix, str)
+    _reject_retired_release_contract_members(members, prefix)
     _verify_manifest_contract(manifest, archive_path, contract)
     if repo is not None:
         _compare_with_repo(

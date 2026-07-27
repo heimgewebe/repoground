@@ -26,6 +26,8 @@ REMOVED_DEBRIS = (
 REMOVED_LEGACY_RELEASE_SURFACES = (
     ROOT / "scripts/release/verify_repobrief_release_candidate.py",
     ROOT / "docs/release/semantic-extension-platforms.v1.json",
+    ROOT / "merger/repoground/contracts/repobrief-release-candidate.v1.schema.json",
+    ROOT / "merger/repoground/contracts/repobrief-semantic-platforms.v1.schema.json",
 )
 
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -69,16 +71,6 @@ def test_release_surface_is_repoground_only() -> None:
     assert "LEGACY_CONTRACT" not in verifier
     assert "verify_legacy_release_candidate" not in verifier
 
-    # Contract deletion is governed separately: legacy schemas remain protected
-    # compatibility artifacts but are no longer part of the canonical verifier.
-    assert (
-        ROOT
-        / "merger/repoground/contracts/repobrief-release-candidate.v1.schema.json"
-    ).is_file()
-    assert (
-        ROOT
-        / "merger/repoground/contracts/repobrief-semantic-platforms.v1.schema.json"
-    ).is_file()
 
     licensing = (ROOT / "docs/release/licensing.md").read_text(encoding="utf-8")
     assert "Apache-2.0" in licensing

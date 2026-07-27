@@ -2,6 +2,8 @@ name: "contracts-validate"
 
 permissions:
   contents: read
+  issues: read
+  pull-requests: read
 
 concurrency:
   # Keep PR-specific groups to prevent cross-branch cancellations.
@@ -19,7 +21,6 @@ defaults:
 
 env:
   FAIL_ON_NO_BASE: "1"
-  ALLOW_REMOVALS: "0"
 
 jobs:
   immutable-ci-supply-chain:
@@ -148,8 +149,14 @@ jobs:
     timeout-minutes: 8
     env:
       GH_DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
+      GH_EVENT_NAME: ${{ github.event_name }}
       GH_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      GH_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      GH_PR_NUMBER: ${{ github.event.pull_request.number }}
       GH_PUSH_BEFORE: ${{ github.event.before }}
+      GH_REPOSITORY: ${{ github.repository }}
+      GH_COMMIT_SHA: ${{ github.sha }}
+      GITHUB_TOKEN: ${{ github.token }}
       PROTECTED_REGEX: '^(merger/repoground/contracts/|docs/contracts/)'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -162,40 +169,86 @@ jobs:
           set -euo pipefail
           is_truthy() { case "${1:-0}" in 1|true|yes|on) return 0 ;; esac; return 1; }
 
-          if is_truthy "${ALLOW_REMOVALS:-0}"; then
-            echo "::notice::ALLOW_REMOVALS=1 → skipping guard"
-            exit 0
+          pr_number="${GH_PR_NUMBER:-}"
+          pr_head_sha="${GH_PR_HEAD_SHA:-}"
+          pr_base_sha="${GH_PR_BASE_SHA:-}"
+          temporary_files=()
+          cleanup() {
+            if (( ${#temporary_files[@]} )); then
+              rm -f -- "${temporary_files[@]}"
+            fi
+          }
+          trap cleanup EXIT
+
+          if [[ "${GH_EVENT_NAME:-}" == "push" ]]; then
+            associated_prs="$(mktemp)"
+            temporary_files+=("$associated_prs")
+            if curl --fail --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GH_REPOSITORY}/commits/${GH_COMMIT_SHA}/pulls?per_page=100" \
+              > "$associated_prs"
+            then
+              if subject="$(
+                python3 scripts/ci/check_contract_deletion_authorization.py \
+                  resolve-push-pr \
+                  --pull-requests "$associated_prs" \
+                  --commit-sha "$GH_COMMIT_SHA"
+              )"
+              then
+                read -r pr_number pr_head_sha pr_base_sha <<< "$subject"
+              else
+                pr_number=""
+                pr_head_sha=""
+                pr_base_sha=""
+              fi
+            else
+              echo "::warning::Could not resolve an associated pull request; failing closed"
+              pr_number=""
+              pr_head_sha=""
+              pr_base_sha=""
+            fi
           fi
 
           base=""
           base_src=""
 
-          if [[ -n "${GH_PR_BASE_SHA:-}" ]] && git rev-parse --verify "${GH_PR_BASE_SHA}^{commit}" &>/dev/null; then
-            if mb="$(git merge-base "$GH_PR_BASE_SHA" HEAD 2>/dev/null)"; then
-              base="$mb"; base_src="merge-base(pr_base,HEAD)"
+          if [[ -n "$pr_base_sha" ]] \
+            && git rev-parse --verify "${pr_base_sha}^{commit}" &>/dev/null
+          then
+            if mb="$(git merge-base "$pr_base_sha" HEAD 2>/dev/null)"; then
+              base="$mb"
+              base_src="merge-base(pr_base,HEAD)"
             fi
           fi
 
-          if [[ -z "$base" && -n "${GH_PUSH_BEFORE:-}" && ! "${GH_PUSH_BEFORE}" =~ ^0{40}$ ]] \
-             && git rev-parse --verify "${GH_PUSH_BEFORE}^{commit}" &>/dev/null; then
-            base="$GH_PUSH_BEFORE"; base_src="push_before"
+          if [[ -z "$base" \
+            && -n "${GH_PUSH_BEFORE:-}" \
+            && ! "${GH_PUSH_BEFORE}" =~ ^0{40}$ ]] \
+            && git rev-parse --verify "${GH_PUSH_BEFORE}^{commit}" &>/dev/null
+          then
+            base="$GH_PUSH_BEFORE"
+            base_src="push_before"
           fi
 
           if [[ -z "$base" ]]; then
-            git fetch -q origin "${GH_DEFAULT_BRANCH}" || true
+            git fetch -q origin "$GH_DEFAULT_BRANCH" || true
             if git rev-parse "origin/${GH_DEFAULT_BRANCH}^{commit}" &>/dev/null; then
               if mb="$(git merge-base "origin/${GH_DEFAULT_BRANCH}" HEAD 2>/dev/null)"; then
-                base="$mb"; base_src="merge-base(origin/${GH_DEFAULT_BRANCH},HEAD)"
+                base="$mb"
+                base_src="merge-base(origin/${GH_DEFAULT_BRANCH},HEAD)"
               fi
             fi
           fi
 
           if [[ -z "$base" ]]; then
             if is_truthy "${FAIL_ON_NO_BASE:-1}"; then
-              echo "::error::Cannot determine merge-base"; exit 1
-            else
-              echo "::notice::No merge-base found - skipping guard"; exit 0
+              echo "::error::Cannot determine merge-base"
+              exit 1
             fi
+            echo "::notice::No merge-base found - skipping guard"
+            exit 0
           fi
 
           echo "::notice::Checking diff from ${base:0:8}...HEAD (source=$base_src)"
@@ -207,16 +260,54 @@ jobs:
             p2="${fields[2]:-}"
             [[ "$p1" =~ ${PROTECTED_REGEX} ]] || continue
             case "$status" in
-              D)  blocked+=("DELETE: $p1") ;;
+              D) blocked+=("DELETE: $p1") ;;
               R*) blocked+=("RENAME: $p1 → ${p2:-(unknown destination)}") ;;
             esac
           done < <(git diff --name-status --diff-filter=DR "${base}...HEAD")
 
           if (( ${#blocked[@]} )); then
+            blocked_sorted="$(printf '%s\n' "${blocked[@]}" | LC_ALL=C sort -u)"
+            paths_sha256="$(printf '%s\n' "$blocked_sorted" | sha256sum | awk '{print $1}')"
+            marker="/authorize-contract-removal pr=${pr_number} base=${base} head=${pr_head_sha} paths_sha256=${paths_sha256}"
+            authorized=0
+
+            if [[ -n "$pr_number" && -n "$pr_head_sha" ]]; then
+              comments_json="$(mktemp)"
+              temporary_files+=("$comments_json")
+              if curl --fail --silent --show-error \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${GH_REPOSITORY}/issues/${pr_number}/comments?per_page=100" \
+                > "$comments_json"
+              then
+                if python3 scripts/ci/check_contract_deletion_authorization.py \
+                  verify-comments \
+                  --comments "$comments_json" \
+                  --marker "$marker"
+                then
+                  authorized=1
+                fi
+              else
+                echo "::warning::Could not read PR authorization comments; failing closed"
+              fi
+            fi
+
+            if (( authorized )); then
+              echo "::notice::Exact protected-file removal authorization accepted"
+              while IFS= read -r item; do
+                printf '  • %s\n' "$item"
+              done <<< "$blocked_sorted"
+              exit 0
+            fi
+
             echo "::group::❌ Protected file deletions blocked"
-            printf '  • %s\n' "${blocked[@]}" | sort -u
+            while IFS= read -r item; do
+              printf '  • %s\n' "$item"
+            done <<< "$blocked_sorted"
             echo "::endgroup::"
             echo "::error::Guard violation"
+            echo "::error::Required exact trusted-human comment: $marker"
             exit 1
           fi
 

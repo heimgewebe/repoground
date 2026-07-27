@@ -14,6 +14,7 @@ import jsonschema
 import pytest
 
 from scripts.release.build_release_candidate import (
+    RETIRED_RELEASE_CONTRACT_PATHS,
     build_release_candidate,
     safe_symlink_target,
 )
@@ -143,6 +144,58 @@ def _reverse_archive_members(candidate: Path) -> None:
 
     manifest_path = next(candidate.glob("*.release.json"))
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["archive"]["bytes"] = archive_path.stat().st_size
+    manifest["archive"]["sha256"] = hashlib.sha256(
+        archive_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(candidate)
+
+
+def _rename_archive_member(
+    candidate: Path, source_relative: str, target_relative: str
+) -> None:
+    archive_path = next(candidate.glob("*.tar.gz"))
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prefix = manifest["archive"]["prefix"]
+    source_name = f"{prefix}{source_relative}"
+    target_name = f"{prefix}{target_relative}"
+
+    members: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    renamed = False
+    with gzip.open(archive_path, "rb") as gz:
+        with tarfile.open(fileobj=gz, mode="r:") as tar:
+            for member in tar.getmembers():
+                handle = tar.extractfile(member) if member.isfile() else None
+                payload = handle.read() if handle is not None else None
+                if member.name == source_name:
+                    member.name = target_name
+                    renamed = True
+                members.append((member, payload))
+    assert renamed
+
+    root_name = prefix.rstrip("/")
+    root = next(item for item in members if item[0].name == root_name)
+    children = sorted(
+        (item for item in members if item[0].name != root_name),
+        key=lambda item: item[0].name[len(prefix) :].encode(
+            "utf-8", errors="surrogateescape"
+        ),
+    )
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for member, payload in (root, *children):
+            tar.addfile(member, io.BytesIO(payload) if payload is not None else None)
+    compressed = io.BytesIO()
+    with gzip.GzipFile(
+        filename="", mode="wb", fileobj=compressed, compresslevel=9, mtime=0
+    ) as gz:
+        gz.write(tar_buffer.getvalue())
+    archive_path.write_bytes(compressed.getvalue())
+
     manifest["archive"]["bytes"] = archive_path.stat().st_size
     manifest["archive"]["sha256"] = hashlib.sha256(
         archive_path.read_bytes()
@@ -485,6 +538,102 @@ def test_release_contract_rejects_lock_python_mismatch(tmp_path: Path) -> None:
     codes = {item["code"] for item in report["findings"]}
     assert "WORKFLOW_LOCK_PYTHON_MISMATCH" in codes
 
+
+
+def test_retired_release_contract_paths_match_compatibility_exit() -> None:
+    exit_contract = json.loads(
+        (ROOT / "docs/contracts/repoground-compatibility-exit.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    retired_paths = {
+        item["former_path"] for item in exit_contract["retired_contracts"]
+    }
+    assert retired_paths == set(RETIRED_RELEASE_CONTRACT_PATHS)
+
+
+@pytest.mark.parametrize(
+    "retired_path",
+    (
+        "merger/repoground/contracts/repobrief-release-candidate.v1.schema.json",
+        "merger/repoground/contracts/repobrief-semantic-platforms.v1.schema.json",
+    ),
+)
+def test_retired_repobrief_release_contract_is_rejected(
+    tmp_path: Path, retired_path: str
+) -> None:
+    repo = _repo(tmp_path)
+    path = repo / retired_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", retired_path)
+    _git(repo, "commit", "-qm", "add retired release contract")
+
+    with pytest.raises(
+        ValueError, match="retired RepoBrief release contracts are forbidden"
+    ):
+        build_release_candidate(repo, tmp_path / "candidate")
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+@pytest.mark.parametrize("retired_path", RETIRED_RELEASE_CONTRACT_PATHS)
+def test_verifier_rejects_archived_retired_repobrief_release_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retired_path: str,
+    source_bound: bool,
+) -> None:
+    repo = _repo(tmp_path)
+    path = repo / retired_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", retired_path)
+    _git(repo, "commit", "-qm", "add retired release contract")
+
+    monkeypatch.setattr(
+        "scripts.release.build_release_candidate._reject_retired_release_contracts",
+        lambda entries: None,
+    )
+    candidate = tmp_path / "candidate"
+    build_release_candidate(repo, candidate)
+
+    kwargs = {"repo": repo} if source_bound else {}
+    with pytest.raises(
+        ValueError, match="retired RepoBrief release contracts are forbidden"
+    ):
+        verify_release_candidate(candidate, **kwargs)
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+@pytest.mark.parametrize("retired_path", RETIRED_RELEASE_CONTRACT_PATHS)
+@pytest.mark.parametrize("alias_template", ("./{path}", "{path}/"))
+def test_verifier_rejects_noncanonical_alias_for_retired_release_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retired_path: str,
+    alias_template: str,
+    source_bound: bool,
+) -> None:
+    repo = _repo(tmp_path)
+    path = repo / retired_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", retired_path)
+    _git(repo, "commit", "-qm", "add retired release contract")
+
+    monkeypatch.setattr(
+        "scripts.release.build_release_candidate._reject_retired_release_contracts",
+        lambda entries: None,
+    )
+    candidate = tmp_path / "candidate-noncanonical-alias"
+    build_release_candidate(repo, candidate)
+    _rename_archive_member(
+        candidate, retired_path, alias_template.format(path=retired_path)
+    )
+
+    kwargs = {"repo": repo} if source_bound else {}
+    with pytest.raises(ValueError, match="unsafe archive member"):
+        verify_release_candidate(candidate, **kwargs)
 
 
 def test_legacy_repobrief_release_identity_is_rejected(tmp_path: Path) -> None:

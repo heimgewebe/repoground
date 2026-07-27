@@ -2,6 +2,10 @@
 
 Diese Matrix dokumentiert die Verbindungen zwischen Systemrollen, Schemata, Abhängigkeiten und Drift-Risiken, wie sie aktuell in `merger/repoground/contracts/` abgebildet sind.
 
+## Terminal entfernte Release-Verträge
+
+Die früheren Schemata `repobrief-release-candidate.v1.schema.json` und `repobrief-semantic-platforms.v1.schema.json` sind **nicht unterstützt** und dürfen weder im aktuellen Vertragsbaum noch in RepoGround-Release-Archiven vorkommen. Ihre Nachfolger sind `repoground-release-candidate.v1.schema.json` und `repoground-semantic-platforms.v1.schema.json`. Die ehemaligen Pfade, Schema-IDs und `kind`-Werte bleiben ausschließlich im terminalen, nicht autoritativen Vertrag [`repoground-compatibility-exit.v1.json`](repoground-compatibility-exit.v1.json) dokumentiert. Historische Proof- und Messartefakte werden nicht umgeschrieben.
+
 ## Schema-Abhängigkeiten und Enum-Vollständigkeit
 
 | Schema Name | Zweck | Typische Attribute | Verwendete Typen / Enumerationen | Referenzen (`$ref`) | Relevanz / Drift-Risiko |

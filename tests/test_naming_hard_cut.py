@@ -109,6 +109,40 @@ def test_protected_compatibility_contract_is_terminal_only() -> None:
     assert data["policy"]["zero_usage_window_days"] == 0
     assert data["policy"]["active_aliases_may_be_restored"] is False
 
+    retired = {item["former_kind"]: item for item in data["retired_contracts"]}
+    assert set(retired) == {
+        "repobrief.release_candidate",
+        "repobrief.semantic_platforms",
+    }
+    assert retired["repobrief.release_candidate"] == {
+        "former_path": (
+            "merger/repoground/contracts/"
+            "repobrief-release-candidate.v1.schema.json"
+        ),
+        "former_schema_id": (
+            "https://heimgewebe.local/schema/"
+            "repobrief-release-candidate.v1.schema.json"
+        ),
+        "former_kind": "repobrief.release_candidate",
+        "status": "unsupported",
+        "successor_path": (
+            "merger/repoground/contracts/"
+            "repoground-release-candidate.v1.schema.json"
+        ),
+        "current_tree_presence": "forbidden",
+        "release_archive_presence": "forbidden",
+    }
+    assert retired["repobrief.semantic_platforms"]["status"] == "unsupported"
+    assert retired["repobrief.semantic_platforms"]["successor_path"].endswith(
+        "repoground-semantic-platforms.v1.schema.json"
+    )
+    assert all(
+        item["current_tree_presence"] == "forbidden"
+        and item["release_archive_presence"] == "forbidden"
+        for item in retired.values()
+    )
+
+
 def test_removed_entrypoint_files_are_absent() -> None:
     former = _former_product()
     removed = [
