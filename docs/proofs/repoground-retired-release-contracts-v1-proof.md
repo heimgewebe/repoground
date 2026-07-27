@@ -42,6 +42,11 @@ rejected the former release identity.
 - The deterministic release builder rejects either retired path before archive bytes are
   written.
 - Repository hygiene requires both paths to stay absent.
+- The contracts deletion guard has no broad environment bypass. A protected deletion
+  requires an exact pull-request comment by a trusted human repository collaborator,
+  bound to the PR number, merge-base, final PR head SHA and SHA-256 of the sorted
+  deletion set. PR and associated push runs verify the same marker; missing, malformed,
+  stale, ambiguous or unreadable authorization evidence fails closed.
 - `repoground-compatibility-exit.v1.json` records former paths, schema IDs and kinds as
   `unsupported`, binds the existing RepoGround successor schemas, and forbids current-tree
   and release-archive presence.
