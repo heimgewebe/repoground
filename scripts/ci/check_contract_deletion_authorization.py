@@ -116,6 +116,41 @@ def _github_page_url(url: str, *, page: int) -> str:
     )
 
 
+def _read_github_json_page(
+    request: Request,
+    *,
+    page: int,
+    opener: Callable[..., Any],
+) -> list[Any]:
+    try:
+        with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            raw = response.read(MAX_PAGE_BYTES + 1)
+    except (OSError, URLError) as exc:
+        raise ValueError(f"GitHub API page {page} could not be read") from exc
+    if len(raw) > MAX_PAGE_BYTES:
+        raise ValueError(f"GitHub API page {page} exceeds the byte limit")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"GitHub API page {page} is not valid JSON") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"GitHub API page {page} must be a JSON array")
+    if len(payload) > PAGE_SIZE:
+        raise ValueError(f"GitHub API page {page} exceeds the item limit")
+    return payload
+
+
+def _github_request(url: str, *, page: int, token: str) -> Request:
+    return Request(
+        _github_page_url(url, page=page),
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+
+
 def fetch_paginated_json(
     url: str,
     *,
@@ -132,37 +167,17 @@ def fetch_paginated_json(
     collected: list[Any] = []
 
     for page in range(1, max_pages + 2):
-        request = Request(
-            _github_page_url(url, page=page),
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {token}",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
+        payload = _read_github_json_page(
+            _github_request(url, page=page, token=token),
+            page=page,
+            opener=open_request,
         )
-        try:
-            with open_request(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
-                raw = response.read(MAX_PAGE_BYTES + 1)
-        except (OSError, URLError) as exc:
-            raise ValueError(f"GitHub API page {page} could not be read") from exc
-        if len(raw) > MAX_PAGE_BYTES:
-            raise ValueError(f"GitHub API page {page} exceeds the byte limit")
-        try:
-            payload = json.loads(raw)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ValueError(f"GitHub API page {page} is not valid JSON") from exc
-        if not isinstance(payload, list):
-            raise ValueError(f"GitHub API page {page} must be a JSON array")
-        if len(payload) > PAGE_SIZE:
-            raise ValueError(f"GitHub API page {page} exceeds the item limit")
-
         if page > max_pages:
             if payload:
                 raise ValueError(
                     f"GitHub API pagination exceeds the {max_pages}-page limit"
                 )
             break
-
         collected.extend(payload)
         if len(payload) < PAGE_SIZE:
             break
