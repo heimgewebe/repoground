@@ -82,8 +82,6 @@ def _sha256(path: Path) -> str:
 def _safe_name(name: str) -> bool:
     path = Path(name)
     raw_parts = name.split("/")
-    if name.endswith("/"):
-        raw_parts = raw_parts[:-1]
     return (
         bool(name)
         and not path.is_absolute()
@@ -162,7 +160,11 @@ def _archive_members(
         raise ValueError("archive SHA-256 does not match manifest")
     if archive_path.stat().st_size != expected_bytes:
         raise ValueError("archive byte size does not match manifest")
-    if not isinstance(prefix, str) or not prefix.endswith("/") or not _safe_name(prefix):
+    if (
+        not isinstance(prefix, str)
+        or not prefix.endswith("/")
+        or not _safe_name(prefix[:-1])
+    ):
         raise ValueError("archive prefix is invalid")
     raw = archive_path.read_bytes()
     if len(raw) < 8 or int.from_bytes(raw[4:8], "little") != 0:

@@ -42,7 +42,7 @@ identity but still accepted canonical RepoGround archives containing the retired
 - Both retired schema files are removed from the active contract directory.
 - The deterministic release builder rejects either retired path before archive bytes are
   written.
-- The verifier requires canonical raw archive member paths, imports the same denylist and
+- The verifier requires canonical raw archive member paths, including no trailing slash on members, imports the same denylist and
   rejects either retired path immediately after safe member enumeration, both without and
   with repository source binding.
 - Repository hygiene requires both paths to stay absent.
@@ -62,7 +62,7 @@ identity but still accepted canonical RepoGround archives containing the retired
 ## Validation
 
 - `python3 -m pytest tests/test_repository_hygiene.py tests/test_naming_hard_cut.py merger/repoground/tests/test_release_packaging.py -q`
-  - Result: `41 passed`.
+  - Result: `45 passed`.
 - `python3 -m ruff check scripts/release/build_release_candidate.py scripts/release/verify_release_candidate.py merger/repoground/tests/test_release_packaging.py tests/test_repository_hygiene.py tests/test_naming_hard_cut.py`
   - Result: `All checks passed`.
 - Full repository suite, durable task `2929a8340b4e43c0aee35d68`:

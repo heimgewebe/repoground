@@ -606,10 +606,12 @@ def test_verifier_rejects_archived_retired_repobrief_release_contract(
 
 @pytest.mark.parametrize("source_bound", (False, True))
 @pytest.mark.parametrize("retired_path", RETIRED_RELEASE_CONTRACT_PATHS)
-def test_verifier_rejects_dot_alias_for_retired_release_contract(
+@pytest.mark.parametrize("alias_template", ("./{path}", "{path}/"))
+def test_verifier_rejects_noncanonical_alias_for_retired_release_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     retired_path: str,
+    alias_template: str,
     source_bound: bool,
 ) -> None:
     repo = _repo(tmp_path)
@@ -623,9 +625,11 @@ def test_verifier_rejects_dot_alias_for_retired_release_contract(
         "scripts.release.build_release_candidate._reject_retired_release_contracts",
         lambda entries: None,
     )
-    candidate = tmp_path / "candidate-dot-alias"
+    candidate = tmp_path / "candidate-noncanonical-alias"
     build_release_candidate(repo, candidate)
-    _rename_archive_member(candidate, retired_path, f"./{retired_path}")
+    _rename_archive_member(
+        candidate, retired_path, alias_template.format(path=retired_path)
+    )
 
     kwargs = {"repo": repo} if source_bound else {}
     with pytest.raises(ValueError, match="unsafe archive member"):
