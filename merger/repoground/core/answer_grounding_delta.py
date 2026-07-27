@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
 from merger.repoground.core.answer_grounding import NON_CLAIMS
-from merger.repoground.core.range_resolver import resolve_range_ref
+from merger.repoground.core.availability import snapshot_freshness_model
 from merger.repoground.core.bundle_access import snapshot_status
+from merger.repoground.core.range_resolver import resolve_range_ref
 
 KIND = "repobrief.answer_grounding_delta_verdict"
 VERSION = "1.0"
@@ -55,9 +57,13 @@ def _range_ref_from_citation(entry: Mapping[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _check_range(manifest: Path, range_ref: dict[str, Any]) -> tuple[str, str]:
+def _check_range(
+    manifest: Path,
+    range_ref: dict[str, Any],
+    manifest_data: Mapping[str, Any] | None,
+) -> tuple[str, str]:
     try:
-        resolve_range_ref(manifest, range_ref)
+        resolve_range_ref(manifest, range_ref, manifest_data=manifest_data)
     except Exception as exc:
         detail = str(exc)
         if "hash mismatch" in detail.lower():
@@ -73,19 +79,73 @@ def _freshness_from_snapshot_ref(snapshot_ref: Mapping[str, Any] | None) -> str:
     return str(value) if isinstance(value, str) and value else "unknown"
 
 
+def _copy_citation_entries(
+    entries: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    copied: dict[str, dict[str, Any]] = {}
+    for citation_id, entry in entries.items():
+        if not isinstance(citation_id, str) or not citation_id:
+            raise ValueError("citation entry key must be a non-empty string")
+        if not isinstance(entry, Mapping):
+            raise ValueError(f"citation entry {citation_id!r} must be a mapping")
+        if entry.get("citation_id") != citation_id:
+            raise ValueError(f"citation entry {citation_id!r} must contain the same citation_id")
+        copied[citation_id] = dict(entry)
+    return copied
+
+
+def _load_citation_entries(
+    citation_map: str | Path | None,
+    prevalidated_entries: Mapping[str, Mapping[str, Any]] | None,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    if prevalidated_entries is None:
+        return _read_citation_map(citation_map)
+    return _copy_citation_entries(prevalidated_entries), []
+
+
+def _manifest_context(
+    manifest: str | Path,
+    prevalidated_data: Mapping[str, Any] | None,
+) -> tuple[Path, dict[str, Any] | None]:
+    path = Path(manifest).expanduser()
+    if prevalidated_data is None:
+        return path.resolve(), None
+    if not path.is_absolute():
+        path = path.absolute()
+    return path, deepcopy(dict(prevalidated_data))
+
+
+def _new_snapshot_freshness(
+    manifest_path: Path,
+    manifest_data: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    if manifest_data is not None:
+        return snapshot_freshness_model(manifest_data)
+    status = snapshot_status(manifest_path)
+    freshness = status.get("freshness") if isinstance(status, dict) else None
+    return freshness if isinstance(freshness, Mapping) else None
+
+
 def check_answer_grounding_delta(
     old_declaration: Mapping[str, Any],
     *,
     new_bundle_manifest: str | Path,
+    new_bundle_manifest_data: Mapping[str, Any] | None = None,
     new_citation_map: str | Path | None = None,
+    new_citation_entries: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Check old declared citations/ranges against a newer snapshot.
 
     Read-only: this function reads explicitly supplied existing files only. It does not
     create snapshots, fetch Git state, refresh bundles, or normalize freshness statuses.
+    When ``new_citation_entries`` is supplied, the citation-map path is not reread.
+    When ``new_bundle_manifest_data`` is supplied, the manifest path is not reread.
     """
-    manifest_path = Path(new_bundle_manifest).expanduser().resolve()
-    entries, diagnostics = _read_citation_map(new_citation_map)
+    manifest_path, manifest_data = _manifest_context(
+        new_bundle_manifest,
+        new_bundle_manifest_data,
+    )
+    entries, diagnostics = _load_citation_entries(new_citation_map, new_citation_entries)
     citation_checks: list[dict[str, Any]] = []
     range_checks: list[dict[str, Any]] = []
 
@@ -111,7 +171,7 @@ def check_answer_grounding_delta(
                 "detail": "New citation entry has no comparable range reference.",
             })
             continue
-        status, detail = _check_range(manifest_path, range_ref)
+        status, detail = _check_range(manifest_path, range_ref, manifest_data)
         citation_checks.append({"citation_id": citation_id, "status": status, "detail": detail})
 
     for idx, item in enumerate(old_declaration.get("used_ranges") or [], start=1):
@@ -122,7 +182,11 @@ def check_answer_grounding_delta(
                 "detail": "Old declaration range is missing range_ref.",
             })
             continue
-        status, detail = _check_range(manifest_path, dict(item["range_ref"]))
+        status, detail = _check_range(
+            manifest_path,
+            dict(item["range_ref"]),
+            manifest_data,
+        )
         range_checks.append({
             "range_id": str(item.get("claim_ref") or f"declared-range-{idx}"),
             "status": status,
@@ -139,8 +203,7 @@ def check_answer_grounding_delta(
     else:
         status = "valid"
 
-    new_status = snapshot_status(manifest_path)
-    new_freshness = new_status.get("freshness") if isinstance(new_status, dict) else None
+    new_freshness = _new_snapshot_freshness(manifest_path, manifest_data)
     return {
         "kind": KIND,
         "version": VERSION,

@@ -9,6 +9,7 @@ import stat
 import tempfile
 from collections import OrderedDict
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -161,15 +162,38 @@ def resolve_required_reading_for_bundle(
     }
 
 
-def snapshot_status(bundle_manifest: str | Path) -> dict[str, Any]:
-    manifest_path = resolve_manifest_path(bundle_manifest)
-    manifest = _read_json_object(manifest_path)
+def snapshot_status(
+    bundle_manifest: str | Path,
+    *,
+    manifest_data: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project snapshot status without refreshing bundle state.
+
+    Supplying ``manifest_data`` avoids rereading the manifest; the path remains
+    the trusted base for resolving relative artifact paths.
+    """
+    requested_manifest_path = Path(bundle_manifest).expanduser()
+    if manifest_data is None:
+        manifest_path = resolve_manifest_path(requested_manifest_path)
+        manifest = _read_json_object(manifest_path)
+    else:
+        if not isinstance(manifest_data, Mapping):
+            raise ValueError("manifest_data must be a mapping")
+        # The caller already verified this manifest generation. Keep its lexical
+        # absolute path as the artifact-root anchor instead of following a later
+        # replacement symlink at the final manifest name.
+        manifest_path = requested_manifest_path.absolute()
+        manifest = deepcopy(dict(manifest_data))
     artifacts = [_artifact_record(manifest_path, a) for a in _artifact_list(manifest)]
     roles = sorted(str(a["role"]) for a in artifacts if isinstance(a.get("role"), str))
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     from merger.repoground.core.availability import snapshot_availability_model
 
-    availability_model = snapshot_availability_model(manifest_path, manifest)
+    availability_model = snapshot_availability_model(
+        manifest_path,
+        manifest,
+        resolve_manifest_path=manifest_data is None,
+    )
     return {
         "kind": "repobrief.snapshot_status",
         "version": "v1",

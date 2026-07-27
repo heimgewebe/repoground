@@ -1,5 +1,6 @@
 """Tests for retrieval evaluation diagnostics calibrator."""
 
+import io
 import json
 from pathlib import Path
 
@@ -112,9 +113,76 @@ class TestIndexInspector:
         mapping = inspector.load_path_to_chunk_ids()
         assert mapping["merger/repoground/core/merge.py"] == {"c1"}
 
+    def test_index_views_share_one_read_generation(self, monkeypatch, tmp_path):
+        index_path = tmp_path / "chunks.jsonl"
+        first_generation = (
+            json.dumps({"chunk_id": "c1", "path": "src/first.py"}) + "\n"
+        )
+        second_generation = (
+            json.dumps({"chunk_id": "c2", "path": "src/second.py"}) + "\n"
+        )
+        generations = [first_generation, second_generation]
+        open_count = 0
+        real_open = open
+
+        def generation_open(path, *args, **kwargs):
+            nonlocal open_count
+            if Path(path) == index_path:
+                payload = generations[min(open_count, len(generations) - 1)]
+                open_count += 1
+                return io.StringIO(payload)
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", generation_open)
+        calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=index_path)
+
+        report = calibrator.generate_report([])
+
+        assert open_count == 1
+        assert calibrator._index_paths == {"src/first.py"}
+        assert calibrator._path_to_chunk_ids == {"src/first.py": {"c1"}}
+        assert report["metadata"]["index_stats"] == {
+            "total_chunks": 1,
+            "total_paths": 1,
+            "canonical_md_exists": False,
+            "citation_map_exists": False,
+        }
+
+    def test_force_reload_replaces_both_index_views_from_one_generation(
+        self, monkeypatch, tmp_path
+    ):
+        index_path = tmp_path / "chunks.jsonl"
+        generations = [
+            json.dumps({"chunk_id": "c1", "path": "src/first.py"}) + "\n",
+            json.dumps({"chunk_id": "c2", "path": "src/second.py"}) + "\n",
+        ]
+        open_count = 0
+        real_open = open
+
+        def generation_open(path, *args, **kwargs):
+            nonlocal open_count
+            if Path(path) == index_path:
+                payload = generations[min(open_count, len(generations) - 1)]
+                open_count += 1
+                return io.StringIO(payload)
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", generation_open)
+        inspector = IndexInspector(index_path)
+
+        assert inspector.load_index_paths() == {"src/first.py"}
+        assert inspector.load_path_to_chunk_ids() == {"src/first.py": {"c1"}}
+        assert open_count == 1
+
+        assert inspector.load_path_to_chunk_ids(force_reload=True) == {
+            "src/second.py": {"c2"}
+        }
+        assert inspector.load_index_paths() == {"src/second.py"}
+        assert open_count == 2
+
 
 class TestIntegrationExtraction:
-    def test_extract_uses_details_structure(self):
+    def test_extracts_only_unmatched_expected_targets_per_query(self):
         eval_results = {
             "metrics": {"total_queries": 2},
             "details": [
@@ -136,10 +204,213 @@ class TestIntegrationExtraction:
         }
 
         misses = _extract_misses_from_eval(eval_results)
-        assert len(misses) == 2
+        assert len(misses) == 1
         assert misses[0]["query_id"] == "q0"
+        assert misses[0]["expected_target"] == "iter_report_blocks"
         assert misses[0]["query_had_zero_hits"] is False
         assert misses[0]["top_k"] == 2
+
+    def test_extracts_partial_hit_even_when_query_is_relevant(self):
+        eval_results = {
+            "metrics": {"recall@2": 50.0},
+            "details": [
+                {
+                    "query": "find both modules",
+                    "expected": ["src/a.py", "src/b.py"],
+                    "is_relevant": True,
+                    "found_count": 1,
+                    "top_results": ["src/a.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+
+        assert [miss["expected_target"] for miss in misses] == ["src/b.py"]
+        assert misses[0]["found_in_results"] is False
+        assert misses[0]["rank_in_results"] is None
+
+    def test_extract_skips_complete_hits_within_top_k(self):
+        eval_results = {
+            "metrics": {"recall@2": 100.0},
+            "details": [
+                {
+                    "query": "find both modules",
+                    "expected": ["src/a.py", "src/b.py"],
+                    "is_relevant": False,
+                    "found_count": 2,
+                    "top_results": ["src/a.py", "src/b.py"],
+                }
+            ],
+        }
+
+        assert _extract_misses_from_eval(eval_results) == []
+
+    def test_extract_does_not_reverse_match_result_inside_expected_target(self):
+        eval_results = {
+            "metrics": {"recall@1": 0.0},
+            "details": [
+                {
+                    "query": "find exact module",
+                    "expected": ["src/foo.py.extra"],
+                    "is_relevant": False,
+                    "found_count": 1,
+                    "top_results": ["src/foo.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+
+        assert len(misses) == 1
+        assert misses[0]["expected_target"] == "src/foo.py.extra"
+        assert misses[0]["found_in_results"] is False
+        assert misses[0]["rank_in_results"] is None
+
+    def test_extract_keeps_found_target_below_configured_top_k_as_miss(self):
+        eval_results = {
+            "metrics": {"recall@1": 0.0},
+            "details": [
+                {
+                    "query": "find target",
+                    "expected": ["src/target.py"],
+                    "is_relevant": True,
+                    "found_count": 2,
+                    "top_results": ["src/noise.py", "src/target.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+
+        assert len(misses) == 1
+        assert misses[0]["expected_target"] == "src/target.py"
+        assert misses[0]["found_in_results"] is True
+        assert misses[0]["rank_in_results"] == 2
+        assert misses[0]["top_k"] == 1
+
+    def test_extract_ignores_nonpositive_inferred_top_k(self, tmp_artifacts):
+        eval_results = {
+            "metrics": {"recall@0": 0.0},
+            "details": [
+                {
+                    "query": "find merge",
+                    "expected": ["merger/repoground/core/merge.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        ).generate_report(misses)
+        schema_path = (
+            Path(__file__).parents[1]
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        assert misses[0]["top_k"] is None
+        assert report["diagnostics"][0]["diagnosis_details"]["top_k"] is None
+        jsonschema.validate(instance=report, schema=schema)
+
+    def test_index_matching_uses_evaluator_one_way_semantics(self, tmp_path):
+        index_path = tmp_path / "chunks.jsonl"
+        index_path.write_text(
+            json.dumps({"chunk_id": "c1", "path": "src/foo.py"}) + "\n",
+            encoding="utf-8",
+        )
+        eval_results = {
+            "metrics": {"recall@1": 0.0},
+            "details": [
+                {
+                    "query": "find extended target",
+                    "expected": ["src/foo.py.extra"],
+                    "is_relevant": False,
+                    "found_count": 1,
+                    "top_results": ["src/foo.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=index_path
+        ).generate_report(misses)
+
+        assert report["diagnostics"][0]["primary_diagnosis"] == (
+            "target_missing_from_index"
+        )
+        assert report["diagnostics"][0]["diagnosis_details"][
+            "target_found_in_index"
+        ] is False
+
+    def test_query_execution_error_is_diagnostic_inconclusive(
+        self, tmp_artifacts
+    ):
+        eval_results = {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "find merge",
+                    "expected": ["merger/repoground/core/merge.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                    "error": "backend unavailable",
+                    "why_fail": "query execution failed",
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        ).generate_report(misses)
+
+        assert misses[0]["query_error"] == "backend unavailable"
+        diagnosis = report["diagnostics"][0]
+        assert diagnosis["primary_diagnosis"] == "diagnostic_inconclusive"
+        assert diagnosis["primary_diagnosis"] != "target_exists_not_in_top_k"
+        assert diagnosis["diagnosis_details"]["confidence"] == "low"
+        assert "query execution failed" in diagnosis["diagnosis_details"][
+            "instrumentation_notes"
+        ]
+
+    def test_query_execution_error_from_explain_is_diagnostic_inconclusive(
+        self, tmp_artifacts
+    ):
+        eval_results = {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "find merge",
+                    "expected": ["merger/repoground/core/merge.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                    "error": "backend unavailable",
+                    "explain": {
+                        "filters": {},
+                        "why_fail": "query execution failed",
+                    },
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        ).generate_report(misses)
+
+        assert misses[0]["query_error"] == "backend unavailable"
+        diagnosis = report["diagnostics"][0]
+        assert diagnosis["primary_diagnosis"] == "diagnostic_inconclusive"
+        assert diagnosis["primary_diagnosis"] != "target_exists_not_in_top_k"
 
     def test_extract_rejects_legacy_results_key(self):
         eval_results = {
@@ -411,6 +682,66 @@ class TestRetrievalEvalDiagnosticsCalibrator:
         )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         jsonschema.validate(instance=report, schema=schema)
+
+    def test_report_is_byte_stable_without_timestamp(self, tmp_artifacts):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"],
+            canonical_path=tmp_artifacts["canonical"],
+            citation_path=tmp_artifacts["citation"],
+        )
+
+        first = calibrator.generate_report([])
+        second = calibrator.generate_report([])
+
+        assert first == second
+        assert calibrator.to_json(first) == calibrator.to_json(second)
+        assert "timestamp" not in first["metadata"]
+
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(instance=first, schema=schema)
+
+    def test_report_preserves_explicit_stable_timestamp(self, tmp_artifacts):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        )
+        timestamp = "2026-05-26T12:00:00Z"
+
+        report = calibrator.generate_report([], timestamp=timestamp)
+
+        assert report["metadata"]["timestamp"] == timestamp
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(
+            instance=report,
+            schema=schema,
+            format_checker=jsonschema.FormatChecker(),
+        )
+
+    @pytest.mark.parametrize(
+        "timestamp",
+        ["", "   ", 7, "not-a-date", "2026-05-26T12:00:00"],
+    )
+    def test_report_rejects_invalid_optional_timestamp(
+        self, tmp_artifacts, timestamp
+    ):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="timestamp must be an RFC 3339 date-time when provided",
+        ):
+            calibrator.generate_report([], timestamp=timestamp)
 
     def test_report_carries_does_not_prove_boundary(self, tmp_artifacts):
         # C1 L3: the diagnostics artifact must carry a machine-readable inference

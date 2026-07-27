@@ -125,7 +125,7 @@ def _complete_graph_availability(base: dict[str, Any], *, status: str, reason: s
     return base
 
 
-def graph_availability_model(manifest_path: str | Path, manifest: Mapping[str, Any], *, profile: str | None = None) -> dict[str, Any]:
+def graph_availability_model(manifest_path: str | Path, manifest: Mapping[str, Any], *, profile: str | None = None, resolve_manifest_path: bool = True) -> dict[str, Any]:
     """Report graph availability without promoting graph evidence to truth.
 
     This is a read-only snapshot projection. It may surface whether graph
@@ -134,7 +134,8 @@ def graph_availability_model(manifest_path: str | Path, manifest: Mapping[str, A
     retrieval.
     """
 
-    path = Path(manifest_path).expanduser().resolve()
+    requested_path = Path(manifest_path).expanduser()
+    path = requested_path.resolve() if resolve_manifest_path else requested_path.absolute()
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     effective_profile = profile if profile is not None else capabilities.get("repobrief_profile")
     if not isinstance(effective_profile, str) or effective_profile not in PROFILE_ARTIFACT_RULES:
@@ -266,8 +267,9 @@ def snapshot_freshness_model(manifest: Mapping[str, Any], *, max_age_seconds: in
     return result
 
 
-def snapshot_availability_model(manifest_path: str | Path, manifest: Mapping[str, Any], *, profile: str | None = None, max_age_seconds: int | None = None, as_of: datetime.datetime | None = None) -> dict[str, Any]:
-    path = Path(manifest_path).expanduser().resolve()
+def snapshot_availability_model(manifest_path: str | Path, manifest: Mapping[str, Any], *, profile: str | None = None, max_age_seconds: int | None = None, as_of: datetime.datetime | None = None, resolve_manifest_path: bool = True) -> dict[str, Any]:
+    requested_path = Path(manifest_path).expanduser()
+    path = requested_path.resolve() if resolve_manifest_path else requested_path.absolute()
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     effective_profile = profile if profile is not None else capabilities.get("repobrief_profile")
     if not isinstance(effective_profile, str) or effective_profile not in PROFILE_ARTIFACT_RULES:
@@ -290,4 +292,4 @@ def snapshot_availability_model(manifest_path: str | Path, manifest: Mapping[str
         status = "warn"
     else:
         status = "pass"
-    return {"kind": KIND, "version": VERSION, "status": status, "profile": effective_profile, "bundle_manifest": str(path), "availability_values": list(AVAILABILITY_VALUES), "freshness_values": list(FRESHNESS_VALUES), "availability_counts": availability_counts, "artifacts": artifacts, "freshness": snapshot_freshness_model(manifest, max_age_seconds=max_age_seconds, as_of=as_of), "graph_availability": graph_availability_model(path, manifest, profile=effective_profile), "does_not_establish": list(DOES_NOT_ESTABLISH)}
+    return {"kind": KIND, "version": VERSION, "status": status, "profile": effective_profile, "bundle_manifest": str(path), "availability_values": list(AVAILABILITY_VALUES), "freshness_values": list(FRESHNESS_VALUES), "availability_counts": availability_counts, "artifacts": artifacts, "freshness": snapshot_freshness_model(manifest, max_age_seconds=max_age_seconds, as_of=as_of), "graph_availability": graph_availability_model(path, manifest, profile=effective_profile, resolve_manifest_path=False), "does_not_establish": list(DOES_NOT_ESTABLISH)}

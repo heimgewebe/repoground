@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from merger.repoground.cli import cmd_diagnostics
 from merger.repoground.core.answer_grounding_delta import check_answer_grounding_delta
 from merger.repoground.tests.test_answer_grounding_verifier import _bundle, _declaration
 
@@ -91,3 +92,84 @@ def test_answer_grounding_delta_preserves_existing_freshness_status(tmp_path):
 
     assert verdict["old_snapshot_freshness_status"] == "stale"
     assert verdict["new_snapshot_freshness_status"] == "unknown"
+
+
+def test_answer_grounding_delta_uses_prevalidated_entries_without_rereading_map(tmp_path):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    record = json.loads(citation_map.read_text(encoding="utf-8").splitlines()[0])
+    entries = {record["citation_id"]: record}
+    citation_map.unlink()
+
+    verdict = check_answer_grounding_delta(
+        declaration,
+        new_bundle_manifest=manifest,
+        new_citation_map=citation_map,
+        new_citation_entries=entries,
+    )
+
+    assert verdict["status"] == "valid"
+    assert verdict["citation_checks"][0]["status"] == "valid"
+    assert verdict["diagnostics"] == []
+
+
+def test_answer_grounding_delta_uses_prevalidated_manifest_after_file_removal(
+    tmp_path,
+):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    record = json.loads(citation_map.read_text(encoding="utf-8").splitlines()[0])
+    entries = {record["citation_id"]: record}
+    manifest.unlink()
+
+    verdict = check_answer_grounding_delta(
+        declaration,
+        new_bundle_manifest=manifest,
+        new_bundle_manifest_data=manifest_data,
+        new_citation_map=citation_map,
+        new_citation_entries=entries,
+    )
+
+    assert verdict["status"] == "valid"
+    assert verdict["citation_checks"][0]["status"] == "valid"
+    assert verdict["range_checks"][0]["status"] == "valid"
+
+
+def test_prevalidated_manifest_keeps_original_bundle_anchor_after_symlink_swap(
+    tmp_path,
+):
+    original_bundle = tmp_path / "original"
+    replacement_bundle = tmp_path / "replacement"
+    original_bundle.mkdir()
+    replacement_bundle.mkdir()
+    manifest, citation_map, range_ref = _bundle(original_bundle)
+    replacement_manifest, _replacement_map, _replacement_range = _bundle(
+        replacement_bundle,
+        content=b"Line 1\nOther 2\nLine 3\n",
+    )
+    declaration = _declaration(range_ref)
+    manifest_path, manifest_data = cmd_diagnostics._read_json_with_path(
+        str(manifest),
+        expected_type=dict,
+    )
+    record = json.loads(citation_map.read_text(encoding="utf-8").splitlines()[0])
+    entries = {record["citation_id"]: record}
+
+    manifest.unlink()
+    manifest.symlink_to(replacement_manifest)
+
+    verdict = check_answer_grounding_delta(
+        declaration,
+        new_bundle_manifest=manifest_path,
+        new_bundle_manifest_data=manifest_data,
+        new_citation_map=citation_map,
+        new_citation_entries=entries,
+    )
+
+    assert manifest_path == manifest
+    assert manifest_path.is_absolute()
+    assert manifest.is_symlink()
+    assert verdict["status"] == "valid"
+    assert verdict["citation_checks"][0]["status"] == "valid"
+    assert verdict["range_checks"][0]["status"] == "valid"

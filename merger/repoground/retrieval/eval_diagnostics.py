@@ -15,10 +15,12 @@ the gold set. It answers "why" a miss occurred, enabling targeted remediation de
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timezone
 import re
+
+from .diagnostics_json import strict_json_loads
 
 
 # C1 L3 inference boundary for the retrieval-eval-diagnostics.v1 artifact
@@ -33,6 +35,97 @@ DOES_NOT_PROVE: Tuple[str, ...] = (
     "retrieval_eval_does_not_prove_retrieval_completeness",
     "diagnosis_is_diagnostic_not_authoritative",
 )
+
+
+def _require_json_object(value: Any, *, source: str) -> Dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{source} must be a JSON object")
+    return value
+
+
+def _optional_string_field(
+    record: Dict[str, Any],
+    *,
+    field: str,
+    source: str,
+    require_nonempty: bool = False,
+) -> Optional[str]:
+    value = record.get(field)
+    if value is not None and not isinstance(value, str):
+        raise ValueError(f"{source} field '{field}' must be a string")
+    if require_nonempty and isinstance(value, str) and not value.strip():
+        raise ValueError(f"{source} field '{field}' must be a non-empty string")
+    return value
+
+
+def _required_nonempty_string_field(
+    record: Dict[str, Any],
+    *,
+    field: str,
+    source: str,
+) -> str:
+    value = _optional_string_field(
+        record,
+        field=field,
+        source=source,
+        require_nonempty=True,
+    )
+    if value is None:
+        raise ValueError(f"{source} field '{field}' is required")
+    return value
+
+
+def _required_chunk_identifier(
+    record: Dict[str, Any],
+    *,
+    source: str,
+) -> str:
+    chunk_id = _optional_string_field(
+        record,
+        field="chunk_id",
+        source=source,
+        require_nonempty=True,
+    )
+    legacy_id = _optional_string_field(
+        record,
+        field="id",
+        source=source,
+        require_nonempty=True,
+    )
+    if chunk_id is None and legacy_id is None:
+        raise ValueError(f"{source} field 'chunk_id' or 'id' is required")
+    if chunk_id is not None and legacy_id is not None and chunk_id != legacy_id:
+        raise ValueError(
+            f"{source} fields 'chunk_id' and 'id' must match when both are present"
+        )
+    if chunk_id is not None:
+        return chunk_id
+    assert legacy_id is not None
+    return legacy_id
+
+
+_RFC3339_DATETIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
+
+
+def _validate_report_timestamp(timestamp: Any) -> Optional[str]:
+    if timestamp is None:
+        return None
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        raise ValueError("timestamp must be an RFC 3339 date-time when provided")
+    if _RFC3339_DATETIME.fullmatch(timestamp) is None:
+        raise ValueError("timestamp must be an RFC 3339 date-time when provided")
+    normalized = timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(
+            "timestamp must be an RFC 3339 date-time when provided"
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must be an RFC 3339 date-time when provided")
+    return timestamp
 
 
 class RetrievalEvalDiagnosticsError(Exception):
@@ -115,84 +208,75 @@ class IndexInspector:
         self._canonical_md_content: Optional[str] = None
         self._citation_map_cache: Optional[Dict[str, Any]] = None
 
-    def load_index_paths(self, force_reload: bool = False) -> set:
-        """
-        Load all unique paths from the index (chunk_index).
+    def _load_index_views(
+        self,
+        force_reload: bool = False,
+    ) -> Tuple[set, Dict[str, set]]:
+        """Load path and chunk-id views from one validated index generation."""
+        if (
+            self._index_paths_cache is not None
+            and self._path_to_chunk_ids_cache is not None
+            and not force_reload
+        ):
+            return self._index_paths_cache, self._path_to_chunk_ids_cache
 
-        Args:
-            force_reload: Force reload from disk.
-
-        Returns:
-            Set of all unique paths in the index.
-        """
-        if self._index_paths_cache is not None and not force_reload:
-            return self._index_paths_cache
-
+        paths: set = set()
+        mapping: Dict[str, set] = {}
         if self.index_path is None:
-            return set()
+            self._index_paths_cache = paths
+            self._path_to_chunk_ids_cache = mapping
+            return paths, mapping
 
         if self.index_path.suffix != ".jsonl":
-            raise MissingArtifactError(f"Unsupported chunk index format: {self.index_path}")
+            raise MissingArtifactError(
+                f"Unsupported chunk index format: {self.index_path}"
+            )
 
-        paths = set()
+        seen_chunk_ids: set[str] = set()
         try:
             with open(self.index_path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_number, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
+                    source = f"chunk index line {line_number}"
                     try:
-                        chunk = json.loads(line)
-                        if "path" in chunk:
-                            paths.add(chunk["path"])
-                    except (json.JSONDecodeError, KeyError):
-                        continue
-        except (IOError, OSError) as e:
+                        chunk = strict_json_loads(line, source=source)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"chunk index line {line_number} must be valid JSON"
+                        ) from exc
+                    chunk = _require_json_object(chunk, source=source)
+                    indexed_path = _required_nonempty_string_field(
+                        chunk,
+                        field="path",
+                        source=source,
+                    )
+                    chunk_id = _required_chunk_identifier(chunk, source=source)
+                    if chunk_id in seen_chunk_ids:
+                        raise ValueError(
+                            f"{source} duplicates chunk identifier {chunk_id!r}"
+                        )
+                    seen_chunk_ids.add(chunk_id)
+                    paths.add(indexed_path)
+                    mapping.setdefault(indexed_path, set()).add(chunk_id)
+        except (IOError, OSError) as exc:
             raise MissingArtifactError(
-                f"Failed to read chunk index from {self.index_path}: {e}"
-            )
-        # For SQLite index, would need similar logic
-        # For now, assume JSONL format
+                f"Failed to read chunk index from {self.index_path}: {exc}"
+            ) from exc
 
+        # Replace both views only after the complete generation validated.
         self._index_paths_cache = paths
+        self._path_to_chunk_ids_cache = mapping
+        return paths, mapping
+
+    def load_index_paths(self, force_reload: bool = False) -> set:
+        """Load all unique paths from the index."""
+        paths, _mapping = self._load_index_views(force_reload=force_reload)
         return paths
 
     def load_path_to_chunk_ids(self, force_reload: bool = False) -> Dict[str, set]:
-        """
-        Load mapping of path -> set(chunk_id) from chunk index JSONL.
-
-        This is required to bridge path-based expectations to citation_map entries,
-        which are keyed by citation_id and reference chunk_id.
-        """
-        if self._path_to_chunk_ids_cache is not None and not force_reload:
-            return self._path_to_chunk_ids_cache
-
-        mapping: Dict[str, set] = {}
-        if self.index_path is None:
-            self._path_to_chunk_ids_cache = mapping
-            return mapping
-
-        if self.index_path.suffix != ".jsonl":
-            raise MissingArtifactError(f"Unsupported chunk index format: {self.index_path}")
-
-        try:
-            with open(self.index_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    path = chunk.get("path")
-                    chunk_id = chunk.get("chunk_id")
-                    if isinstance(path, str) and isinstance(chunk_id, str):
-                        mapping.setdefault(path, set()).add(chunk_id)
-        except (IOError, OSError) as e:
-            raise MissingArtifactError(
-                f"Failed to read chunk index from {self.index_path}: {e}"
-            )
-
-        self._path_to_chunk_ids_cache = mapping
+        """Load the path-to-chunk-id mapping from the same index generation."""
+        _paths, mapping = self._load_index_views(force_reload=force_reload)
         return mapping
 
     @staticmethod
@@ -200,7 +284,7 @@ class IndexInspector:
         """Return index paths that contain the expected target as substring."""
         if not isinstance(expected_target, str) or not expected_target:
             return []
-        return sorted([p for p in index_paths if expected_target in p or p in expected_target])
+        return sorted([p for p in index_paths if expected_target in p])
 
     def load_canonical_md(self, canonical_path: Path) -> str:
         """
@@ -278,16 +362,36 @@ class IndexInspector:
         citation_map = {}
         try:
             with open(citation_path, "r", encoding="utf-8") as f:
-                for line in f:
+                for line_number, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
                     try:
-                        record = json.loads(line)
-                        # Assume citation_id is the key
-                        if "citation_id" in record:
-                            citation_map[record["citation_id"]] = record
-                    except json.JSONDecodeError:
-                        continue
+                        record = strict_json_loads(
+                            line,
+                            source=f"citation map line {line_number}",
+                        )
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"citation map line {line_number} must be valid JSON"
+                        ) from exc
+                    source = f"citation map line {line_number}"
+                    record = _require_json_object(record, source=source)
+                    citation_id = _required_nonempty_string_field(
+                        record,
+                        field="citation_id",
+                        source=source,
+                    )
+                    _optional_string_field(
+                        record,
+                        field="chunk_id",
+                        source=source,
+                        require_nonempty=True,
+                    )
+                    if citation_id in citation_map:
+                        raise ValueError(
+                            f"{source} duplicates citation_id {citation_id!r}"
+                        )
+                    citation_map[citation_id] = record
         except (IOError, OSError) as e:
             raise MissingArtifactError(
                 f"Failed to read citation_map from {citation_path}: {e}"
@@ -563,9 +667,46 @@ class RetrievalEvalDiagnosticsCalibrator:
         # Keep symbol-like names (e.g., "iter_report_blocks", "Class.method") ambiguous.
         return bool(re.search(r"\.[A-Za-z0-9]{1,8}$", target))
 
+    def _diagnose_report_miss(self, miss: Dict[str, Any]) -> DiagnosticsRecord:
+        query_error = miss.get("query_error")
+        if query_error is not None:
+            if not isinstance(query_error, str) or not query_error.strip():
+                raise ValueError("query_error must be a non-empty string when provided")
+            return DiagnosticsRecord(
+                query_id=miss.get("query_id", ""),
+                query_text=miss.get("query_text", ""),
+                expected_target=miss.get("expected_target", ""),
+                primary_diagnosis="diagnostic_inconclusive",
+                diagnosis_details={
+                    "target_found_in_index": False,
+                    "target_found_in_canonical": False,
+                    "target_found_in_citation_map": False,
+                    "rank_in_results": None,
+                    "top_k": miss.get("top_k"),
+                    "query_had_zero_hits": True,
+                    "canonical_path_check": "unavailable",
+                    "possible_path_variants": [],
+                    "staleness_indicator": "none",
+                    "secondary_diagnoses": [],
+                    "confidence": "low",
+                    "instrumentation_notes": f"query execution failed: {query_error}",
+                },
+            )
+        return self.diagnose_miss(
+            query_id=miss.get("query_id", ""),
+            query_text=miss.get("query_text", ""),
+            expected_target=miss.get("expected_target", ""),
+            found_in_results=miss.get("found_in_results", False),
+            rank_in_results=miss.get("rank_in_results"),
+            top_k=miss.get("top_k"),
+            query_had_zero_hits=miss.get("query_had_zero_hits", False),
+        )
+
     def generate_report(
         self,
         misses: List[Dict[str, Any]],
+        *,
+        timestamp: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a complete diagnostics report from a list of misses.
@@ -579,10 +720,14 @@ class RetrievalEvalDiagnosticsCalibrator:
                 - rank_in_results: Optional[int]
                 - top_k: Optional[int]
                 - query_had_zero_hits: bool
+            timestamp: Optional stable source/run timestamp supplied by the caller.
+                The standard deterministic report omits it.
 
         Returns:
             Complete diagnostics report conforming to schema.
         """
+        timestamp = _validate_report_timestamp(timestamp)
+
         # Load artifacts once
         self._load_artifacts()
 
@@ -598,16 +743,9 @@ class RetrievalEvalDiagnosticsCalibrator:
             "diagnostic_inconclusive": 0,
         }
 
-        for miss in misses:
-            record = self.diagnose_miss(
-                query_id=miss.get("query_id", ""),
-                query_text=miss.get("query_text", ""),
-                expected_target=miss.get("expected_target", ""),
-                found_in_results=miss.get("found_in_results", False),
-                rank_in_results=miss.get("rank_in_results"),
-                top_k=miss.get("top_k"),
-                query_had_zero_hits=miss.get("query_had_zero_hits", False),
-            )
+        for miss_index, miss in enumerate(misses):
+            miss = _require_json_object(miss, source=f"misses[{miss_index}]")
+            record = self._diagnose_report_miss(miss)
 
             diagnostics_records.append(record.to_dict())
             breakdowns[record.primary_diagnosis] += 1
@@ -620,22 +758,25 @@ class RetrievalEvalDiagnosticsCalibrator:
             else 0
         )
 
+        metadata: Dict[str, Any] = {
+            "version": "1.0",
+            "total_misses": len(misses),
+            "diagnostic_breakdowns": breakdowns,
+            "index_stats": {
+                "total_chunks": total_chunks,
+                "total_paths": total_paths,
+                "canonical_md_exists": self._canonical_md is not None,
+                "citation_map_exists": self._citation_map is not None,
+            },
+        }
+        if timestamp is not None:
+            metadata["timestamp"] = timestamp
+
         report = {
             "authority": "diagnostic_signal",
             "risk_class": "diagnostic",
             "does_not_prove": list(DOES_NOT_PROVE),
-            "metadata": {
-                "version": "1.0",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "total_misses": len(misses),
-                "diagnostic_breakdowns": breakdowns,
-                "index_stats": {
-                    "total_chunks": total_chunks,
-                    "total_paths": total_paths,
-                    "canonical_md_exists": self._canonical_md is not None,
-                    "citation_map_exists": self._citation_map is not None,
-                },
-            },
+            "metadata": metadata,
             "diagnostics": sorted(
                 diagnostics_records,
                 key=lambda x: (x["query_id"], x["expected_target"]),
