@@ -313,9 +313,16 @@ def test_json_input_recursion_errors_exit_two_without_traceback(
     assert "Traceback" not in captured.err
 
 
-def test_deep_json_inputs_fail_closed_without_traceback(tmp_path, capsys):
+def test_json_inputs_reject_nesting_beyond_deterministic_limit_without_traceback(
+    tmp_path,
+    capsys,
+):
     records = tmp_path / "records.json"
-    records.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
+    nesting_depth = diagnostics_json.MAX_JSON_NESTING_DEPTH + 1
+    records.write_text(
+        "[" * nesting_depth + "0" + "]" * nesting_depth,
+        encoding="utf-8",
+    )
 
     code = main(
         [
@@ -330,7 +337,25 @@ def test_deep_json_inputs_fail_closed_without_traceback(tmp_path, capsys):
     assert code == 2
     assert captured.out == ""
     assert captured.err.startswith("Error: ")
+    assert "exceeds the supported JSON nesting depth" in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_json_nesting_ignores_brackets_in_escaped_strings(tmp_path, capsys):
+    bracket_count = diagnostics_json.MAX_JSON_NESTING_DEPTH + 1
+    bracket_text = 'escaped backslash and quote: \\" ' + "[{" * bracket_count
+    records = _write_json(
+        tmp_path / "records.json",
+        [{"commit": "a" * 40, "path": "src/a.py", "author": bracket_text}],
+    )
+
+    code, result = _run(
+        capsys,
+        ["history-lens", "--records", str(records), "--profile", "summary"],
+    )
+
+    assert code == 0
+    assert result["kind"] == "repobrief.history_lens"
 
 
 @pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
@@ -583,6 +608,42 @@ def test_answer_delta_rejects_non_finite_jsonl_without_traceback(
     assert code == 2
     assert captured.out == ""
     assert "non-finite JSON constant 'NaN'" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_answer_delta_rejects_jsonl_beyond_deterministic_limit_without_traceback(
+    tmp_path,
+    capsys,
+):
+    declaration = _write_json(tmp_path / "declaration.json", {"used_citations": []})
+    citation_map = tmp_path / "citations.jsonl"
+    array_depth = diagnostics_json.MAX_JSON_NESTING_DEPTH
+    citation_line = (
+        '{"citation_id":"cit-1","nested":'
+        + "[" * array_depth
+        + "0"
+        + "]" * array_depth
+        + "}"
+    )
+    citation_map.write_text(citation_line + "\n", encoding="utf-8")
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            "bundle.manifest.json",
+            "--new-citation-map",
+            str(citation_map),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "citation map line 1 exceeds the supported JSON nesting depth" in captured.err
     assert "Traceback" not in captured.err
 
 
