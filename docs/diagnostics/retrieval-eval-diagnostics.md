@@ -97,7 +97,6 @@ The calibrator asks five questions in sequence:
   ],
   "metadata": {
     "version": "1.0",
-    "timestamp": "2026-05-26T12:00:00Z",
     "total_misses": 47,
     "diagnostic_breakdowns": {
       "target_in_top_k": 0,
@@ -140,6 +139,9 @@ The calibrator asks five questions in sequence:
   ]
 }
 ```
+
+The standard producer omits `metadata.timestamp`, so identical inputs produce byte-stable JSON.
+Callers may supply a stable source or run timestamp explicitly; RepoGround never inserts the current wall clock automatically.
 
 Optional overfetch diagnostics example (explicitly separate from default top-k-only diagnostics):
 

@@ -83,6 +83,7 @@ def integrate_diagnostics_with_eval_results(
     canonical_path: Optional[Path] = None,
     citation_path: Optional[Path] = None,
     output_path: Optional[Path] = None,
+    report_timestamp: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Integrate diagnostics calibrator with existing eval results.
@@ -97,6 +98,7 @@ def integrate_diagnostics_with_eval_results(
         canonical_path: Path to canonical_md artifact
         citation_path: Path to citation_map_jsonl
         output_path: Optional path to save diagnostics report
+        report_timestamp: Optional stable source/run timestamp to include in metadata.
 
     Returns:
         Dictionary with original eval results and added diagnostics report.
@@ -111,7 +113,9 @@ def integrate_diagnostics_with_eval_results(
     misses = _extract_misses_from_eval(eval_results)
 
     # Generate diagnostic report
-    diagnostics_report = calibrator.generate_report(misses)
+    diagnostics_report = calibrator.generate_report(
+        misses, timestamp=report_timestamp
+    )
 
     # Optionally save report
     if output_path:

@@ -17,7 +17,6 @@ the gold set. It answers "why" a miss occurred, enabling targeted remediation de
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-from datetime import datetime, timezone
 import re
 
 from .diagnostics_json import strict_json_loads
@@ -683,6 +682,8 @@ class RetrievalEvalDiagnosticsCalibrator:
     def generate_report(
         self,
         misses: List[Dict[str, Any]],
+        *,
+        timestamp: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a complete diagnostics report from a list of misses.
@@ -696,10 +697,16 @@ class RetrievalEvalDiagnosticsCalibrator:
                 - rank_in_results: Optional[int]
                 - top_k: Optional[int]
                 - query_had_zero_hits: bool
+            timestamp: Optional stable source/run timestamp supplied by the caller.
+                The standard deterministic report omits it.
 
         Returns:
             Complete diagnostics report conforming to schema.
         """
+        if timestamp is not None:
+            if not isinstance(timestamp, str) or not timestamp.strip():
+                raise ValueError("timestamp must be a non-empty string when provided")
+
         # Load artifacts once
         self._load_artifacts()
 
@@ -738,22 +745,25 @@ class RetrievalEvalDiagnosticsCalibrator:
             else 0
         )
 
+        metadata: Dict[str, Any] = {
+            "version": "1.0",
+            "total_misses": len(misses),
+            "diagnostic_breakdowns": breakdowns,
+            "index_stats": {
+                "total_chunks": total_chunks,
+                "total_paths": total_paths,
+                "canonical_md_exists": self._canonical_md is not None,
+                "citation_map_exists": self._citation_map is not None,
+            },
+        }
+        if timestamp is not None:
+            metadata["timestamp"] = timestamp
+
         report = {
             "authority": "diagnostic_signal",
             "risk_class": "diagnostic",
             "does_not_prove": list(DOES_NOT_PROVE),
-            "metadata": {
-                "version": "1.0",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "total_misses": len(misses),
-                "diagnostic_breakdowns": breakdowns,
-                "index_stats": {
-                    "total_chunks": total_chunks,
-                    "total_paths": total_paths,
-                    "canonical_md_exists": self._canonical_md is not None,
-                    "citation_map_exists": self._citation_map is not None,
-                },
-            },
+            "metadata": metadata,
             "diagnostics": sorted(
                 diagnostics_records,
                 key=lambda x: (x["query_id"], x["expected_target"]),

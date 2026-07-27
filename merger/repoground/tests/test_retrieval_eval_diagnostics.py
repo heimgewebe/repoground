@@ -492,6 +492,59 @@ class TestRetrievalEvalDiagnosticsCalibrator:
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         jsonschema.validate(instance=report, schema=schema)
 
+    def test_report_is_byte_stable_without_timestamp(self, tmp_artifacts):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"],
+            canonical_path=tmp_artifacts["canonical"],
+            citation_path=tmp_artifacts["citation"],
+        )
+
+        first = calibrator.generate_report([])
+        second = calibrator.generate_report([])
+
+        assert first == second
+        assert calibrator.to_json(first) == calibrator.to_json(second)
+        assert "timestamp" not in first["metadata"]
+
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(instance=first, schema=schema)
+
+    def test_report_preserves_explicit_stable_timestamp(self, tmp_artifacts):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        )
+        timestamp = "2026-05-26T12:00:00Z"
+
+        report = calibrator.generate_report([], timestamp=timestamp)
+
+        assert report["metadata"]["timestamp"] == timestamp
+        schema_path = (
+            Path(__file__).resolve().parent.parent
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.validate(instance=report, schema=schema)
+
+    @pytest.mark.parametrize("timestamp", ["", "   ", 7])
+    def test_report_rejects_invalid_optional_timestamp(
+        self, tmp_artifacts, timestamp
+    ):
+        calibrator = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="timestamp must be a non-empty string when provided",
+        ):
+            calibrator.generate_report([], timestamp=timestamp)
+
     def test_report_carries_does_not_prove_boundary(self, tmp_artifacts):
         # C1 L3: the diagnostics artifact must carry a machine-readable inference
         # boundary (resolves the C2.4-tracked deferral). The producer emits the

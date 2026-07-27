@@ -446,6 +446,30 @@ def test_eval_report_cli_delegates_without_changing_metrics(
     assert seen["citation_path"] is None
 
 
+def test_eval_report_stdout_is_byte_stable(tmp_path, capsys):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {"metrics": {"recall@10": 100.0}, "details": []},
+    )
+    args = [
+        "diagnostics",
+        "eval-report",
+        "--eval-results",
+        str(eval_results),
+    ]
+
+    first_code = main(args)
+    first = capsys.readouterr()
+    second_code = main(args)
+    second = capsys.readouterr()
+
+    assert first_code == second_code == 0
+    assert first.err == second.err == ""
+    assert first.out == second.out
+    payload = json.loads(first.out)
+    assert "timestamp" not in payload["diagnostics_report"]["metadata"]
+
+
 def test_json_inputs_reject_symbolic_links(tmp_path, capsys):
     target = _write_json(tmp_path / "records.json", [])
     link = tmp_path / "records-link.json"
