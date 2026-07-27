@@ -257,6 +257,32 @@ def _type_parameter_names(type_params: Iterable[ast.AST]) -> set[str]:
     return names
 
 
+def _match_pattern_is_irrefutable(pattern: ast.pattern) -> bool:
+    if isinstance(pattern, ast.MatchAs):
+        return pattern.pattern is None or _match_pattern_is_irrefutable(pattern.pattern)
+    if isinstance(pattern, ast.MatchOr):
+        return any(_match_pattern_is_irrefutable(item) for item in pattern.patterns)
+    return False
+
+
+def _match_is_exhaustive(node: ast.Match) -> bool:
+    return any(
+        case.guard is None and _match_pattern_is_irrefutable(case.pattern)
+        for case in node.cases
+    )
+
+
+def _match_falls_through(node: ast.Match) -> bool:
+    if not _match_is_exhaustive(node):
+        return True
+    for case in node.cases:
+        if _statements_fall_through(case.body):
+            return True
+        if case.guard is None and _match_pattern_is_irrefutable(case.pattern):
+            return False
+    return False
+
+
 def _statement_falls_through(statement: ast.stmt) -> bool:
     if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
         return False
@@ -264,6 +290,8 @@ def _statement_falls_through(statement: ast.stmt) -> bool:
         return _statements_fall_through(statement.body) or _statements_fall_through(
             statement.orelse
         )
+    if isinstance(statement, ast.Match):
+        return _match_falls_through(statement)
     try_star_type = getattr(ast, "TryStar", None)
     if isinstance(statement, ast.Try) or (
         try_star_type is not None and isinstance(statement, try_star_type)
@@ -1115,19 +1143,48 @@ class _CallGraphVisitor(ast.NodeVisitor):
 
     def visit_Match(self, node: ast.Match) -> Any:
         self.visit(node.subject)
-        bound_names = set().union(
-            *(_match_pattern_names(case.pattern) for case in node.cases)
-        )
+        if not self.stack:
+            for case in node.cases:
+                for name in _match_pattern_names(case.pattern):
+                    self.state.add_binding(name, "assign")
+        next_case_state = self._local_import_bindings()
+        fallthrough_states: list[dict[str, tuple[str, ...]]] = []
+        exhaustive = False
         for case in node.cases:
-            # Cases are mutually exclusive. Reset the conservative binding state so
-            # an import in one case cannot leak into a later case during AST traversal.
-            self._bind_or_invalidate_names(bound_names)
+            pattern_names = _match_pattern_names(case.pattern)
+            pattern_miss_state = next_case_state
+            pattern_success_state = self._bindings_without_names(
+                next_case_state,
+                pattern_names,
+            )
+            self._set_local_import_bindings(pattern_success_state)
             self.visit(case.pattern)
             if case.guard is not None:
                 self.visit(case.guard)
-            for statement in case.body:
-                self.visit(statement)
-        self._bind_or_invalidate_names(bound_names)
+                guard_state = self._local_import_bindings()
+                # A later case can be reached either because this pattern did not
+                # match or because its guard was false. Retain only imports that
+                # survive both paths.
+                next_case_state = self._intersect_import_bindings(
+                    pattern_miss_state,
+                    guard_state,
+                )
+            else:
+                guard_state = pattern_success_state
+                next_case_state = pattern_miss_state
+            self._set_local_import_bindings(guard_state)
+            if self._visit_statement_list(case.body):
+                fallthrough_states.append(self._local_import_bindings())
+            if case.guard is None and _match_pattern_is_irrefutable(case.pattern):
+                exhaustive = True
+                break
+        if not exhaustive:
+            # A refutable match may select no case. The pre-match path is therefore
+            # a reachable exit and must prevent conditional imports becoming S1.
+            fallthrough_states.append(next_case_state)
+        self._set_local_import_bindings(
+            self._intersect_import_bindings(*fallthrough_states)
+        )
         return None
 
     def visit_Call(self, node: ast.Call) -> Any:

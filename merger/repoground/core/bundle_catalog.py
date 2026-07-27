@@ -11,7 +11,10 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
+import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -29,6 +32,7 @@ MANIFEST_SUFFIX = ".bundle.manifest.json"
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 MAX_HEALTH_BYTES = 4 * 1024 * 1024
 MAX_DISCOVERED_MANIFESTS = 2000
+_OPEN_TIMEOUT_SECONDS = 1.0
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 _GITHUB_SCP_RE = re.compile(r"^[^@]+@github\.com:(?P<slug>[^/]+/[^/]+?)(?:\.git)?$")
 _GITHUB_URL_RE = re.compile(
@@ -48,30 +52,443 @@ class BundleCatalogError(ValueError):
     """Raised when discovery or selection cannot remain deterministic."""
 
 
+@dataclass(frozen=True, slots=True)
+class _StableRead:
+    selected_path: Path
+    resolved_path: Path
+    raw: bytes
+    identity: tuple[int, int, int, int, int, int]
+
+
 def _sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _read_bounded(path: Path, max_bytes: int) -> bytes:
+def _file_identity(metadata: os.stat_result) -> tuple[int, int, int, int, int, int]:
+    return (
+        int(metadata.st_dev),
+        int(metadata.st_ino),
+        int(metadata.st_mode),
+        int(metadata.st_size),
+        int(metadata.st_mtime_ns),
+        int(metadata.st_ctime_ns),
+    )
+
+
+def _absolute_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path.expanduser())))
+
+
+def _resolve_read_path(
+    path: Path,
+    *,
+    root: Path | None,
+    label: str,
+) -> Path:
     try:
-        with path.open("rb") as handle:
-            data = handle.read(max_bytes + 1)
+        resolved = path.resolve(strict=True)
+    except (OSError, RuntimeError) as exc:
+        raise BundleCatalogError(f"file cannot be resolved: {path}") from exc
+    if root is not None:
+        try:
+            resolved.relative_to(root)
+        except ValueError as exc:
+            raise BundleCatalogError(
+                f"{label} resolves outside catalog root: {path}"
+            ) from exc
+    return resolved
+
+
+_PORTABLE_READ_HELPER = r"""
+import json
+import os
+import stat
+import sys
+
+path = sys.argv[1]
+limit = int(sys.argv[2])
+expected = tuple(json.loads(sys.argv[3]))
+
+
+def emit(status, **fields):
+    payload = {"status": status, **fields}
+    sys.stdout.buffer.write(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8") + b"\n"
+    )
+
+
+flags = (
+    os.O_RDONLY
+    | getattr(os, "O_BINARY", 0)
+    | getattr(os, "O_CLOEXEC", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+try:
+    descriptor = os.open(path, flags)
+except OSError as exc:
+    emit("error", reason=f"file cannot be opened: {exc}")
+    raise SystemExit(0)
+
+try:
+    before = os.fstat(descriptor)
+    identity = (
+        int(before.st_dev),
+        int(before.st_ino),
+        int(before.st_mode),
+        int(before.st_size),
+        int(before.st_mtime_ns),
+        int(before.st_ctime_ns),
+    )
+    if not stat.S_ISREG(before.st_mode):
+        emit("error", reason="file is not regular")
+        raise SystemExit(0)
+    if identity != expected:
+        emit("error", reason="file identity changed before reading")
+        raise SystemExit(0)
+    if before.st_size > limit:
+        emit("error", reason="file exceeds bounded catalog read")
+        raise SystemExit(0)
+
+    chunks = []
+    remaining = limit + 1
+    while remaining:
+        chunk = os.read(descriptor, min(1024 * 1024, remaining))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    raw = b"".join(chunks)
+    after = os.fstat(descriptor)
+    after_identity = (
+        int(after.st_dev),
+        int(after.st_ino),
+        int(after.st_mode),
+        int(after.st_size),
+        int(after.st_mtime_ns),
+        int(after.st_ctime_ns),
+    )
+    if after_identity != identity or len(raw) != after.st_size:
+        emit("error", reason="file changed while reading")
+        raise SystemExit(0)
+finally:
+    os.close(descriptor)
+
+emit("ok", identity=list(identity), raw_length=len(raw))
+sys.stdout.buffer.write(raw)
+"""
+
+
+def _nonblocking_open_available() -> bool:
+    value = getattr(os, "O_NONBLOCK", 0)
+    return isinstance(value, int) and bool(value)
+
+
+def _portable_reader_output(
+    stdout: bytes,
+    *,
+    path: Path,
+    max_bytes: int,
+) -> tuple[dict[str, Any], bytes]:
+    if len(stdout) > max_bytes + 4096:
+        raise BundleCatalogError(f"portable file reader exceeded output bound: {path}")
+    header, separator, raw = stdout.partition(b"\n")
+    if not separator:
+        raise BundleCatalogError(f"portable file reader returned no header: {path}")
+    try:
+        metadata = json.loads(header.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BundleCatalogError(
+            f"portable file reader returned an invalid header: {path}"
+        ) from exc
+    if not isinstance(metadata, dict):
+        raise BundleCatalogError(
+            f"portable file reader returned an invalid header: {path}"
+        )
+    return metadata, raw
+
+
+def _portable_reader_identity(
+    metadata: dict[str, Any],
+    raw: bytes,
+    *,
+    path: Path,
+    expected_identity: tuple[int, int, int, int, int, int],
+) -> tuple[int, int, int, int, int, int]:
+    if metadata.get("status") != "ok":
+        reason = metadata.get("reason")
+        detail = reason if isinstance(reason, str) and reason else "file cannot be read"
+        raise BundleCatalogError(f"{detail}: {path}")
+    raw_identity = metadata.get("identity")
+    valid_identity = (
+        isinstance(raw_identity, list)
+        and len(raw_identity) == 6
+        and all(isinstance(item, int) for item in raw_identity)
+    )
+    if not valid_identity:
+        raise BundleCatalogError(
+            f"portable file reader returned invalid identity: {path}"
+        )
+    identity = tuple(raw_identity)
+    if identity != expected_identity:
+        raise BundleCatalogError(f"file identity changed before reading: {path}")
+    if metadata.get("raw_length") != len(raw):
+        raise BundleCatalogError(
+            f"portable file reader returned truncated bytes: {path}"
+        )
+    return identity
+
+
+def _read_bounded_portable(
+    path: Path,
+    max_bytes: int,
+    expected_identity: tuple[int, int, int, int, int, int],
+) -> tuple[bytes, tuple[int, int, int, int, int, int]]:
+    command = [
+        sys.executable,
+        "-I",
+        "-c",
+        _PORTABLE_READ_HELPER,
+        os.fspath(path),
+        str(max_bytes),
+        json.dumps(expected_identity, separators=(",", ":")),
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            check=False,
+            timeout=_OPEN_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BundleCatalogError(
+            f"file open exceeded time bound: {path}"
+        ) from exc
+    if completed.returncode != 0:
+        raise BundleCatalogError(f"portable file reader failed: {path}")
+    metadata, raw = _portable_reader_output(
+        completed.stdout,
+        path=path,
+        max_bytes=max_bytes,
+    )
+    identity = _portable_reader_identity(
+        metadata,
+        raw,
+        path=path,
+        expected_identity=expected_identity,
+    )
+    return raw, identity
+
+
+def _open_binary(path: Path) -> Any:
+    nonblocking = getattr(os, "O_NONBLOCK", 0)
+    if not isinstance(nonblocking, int) or not nonblocking:
+        raise BundleCatalogError("nonblocking descriptor open is unavailable")
+    flags = (
+        os.O_RDONLY
+        | nonblocking
+        | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    descriptor = os.open(path, flags)
+    try:
+        return os.fdopen(descriptor, "rb")
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def _assert_stable_read_path(
+    *,
+    selected_path: Path,
+    resolved_path: Path,
+    identity: tuple[int, int, int, int, int, int],
+    root: Path | None,
+    label: str,
+) -> None:
+    current_resolved = _resolve_read_path(
+        selected_path,
+        root=root,
+        label=label,
+    )
+    if current_resolved != resolved_path:
+        raise BundleCatalogError(f"file target changed while reading: {selected_path}")
+    try:
+        current_identity = _file_identity(current_resolved.stat())
+    except OSError as exc:
+        raise BundleCatalogError(
+            f"file identity cannot be verified: {selected_path}"
+        ) from exc
+    if current_identity != identity:
+        raise BundleCatalogError(f"file identity changed while reading: {selected_path}")
+
+
+def _preliminary_regular_identity(
+    resolved_path: Path,
+    selected_path: Path,
+    max_bytes: int,
+) -> tuple[int, int, int, int, int, int]:
+    preliminary = resolved_path.stat()
+    if not stat.S_ISREG(preliminary.st_mode):
+        raise BundleCatalogError(f"file is not regular: {selected_path}")
+    if preliminary.st_size > max_bytes:
+        raise BundleCatalogError(
+            f"file exceeds bounded catalog read: {selected_path}"
+        )
+    return _file_identity(preliminary)
+
+
+def _read_nonblocking_stable(
+    resolved_path: Path,
+    selected_path: Path,
+    max_bytes: int,
+    preliminary_identity: tuple[int, int, int, int, int, int],
+    *,
+    root: Path | None,
+    label: str,
+) -> tuple[bytes, tuple[int, int, int, int, int, int], tuple[int, int, int, int, int, int]]:
+    with _open_binary(resolved_path) as handle:
+        descriptor = handle.fileno()
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise BundleCatalogError(f"file is not regular: {selected_path}")
+        identity = _file_identity(before)
+        if identity != preliminary_identity:
+            raise BundleCatalogError(
+                f"file identity changed before reading: {selected_path}"
+            )
+        if before.st_size > max_bytes:
+            raise BundleCatalogError(
+                f"file exceeds bounded catalog read: {selected_path}"
+            )
+        _assert_stable_read_path(
+            selected_path=selected_path,
+            resolved_path=resolved_path,
+            identity=identity,
+            root=root,
+            label=label,
+        )
+        raw = handle.read(max_bytes + 1)
+        after_identity = _file_identity(os.fstat(descriptor))
+    return raw, identity, after_identity
+
+
+def _read_bounded_stable(
+    path: Path,
+    max_bytes: int,
+    *,
+    root: Path | None = None,
+    label: str = "file",
+) -> _StableRead:
+    selected_path = _absolute_path(path)
+    resolved_path = _resolve_read_path(
+        selected_path,
+        root=root,
+        label=label,
+    )
+    try:
+        preliminary_identity = _preliminary_regular_identity(
+            resolved_path,
+            selected_path,
+            max_bytes,
+        )
+        _assert_stable_read_path(
+            selected_path=selected_path,
+            resolved_path=resolved_path,
+            identity=preliminary_identity,
+            root=root,
+            label=label,
+        )
+        if _nonblocking_open_available():
+            raw, identity, after_identity = _read_nonblocking_stable(
+                resolved_path,
+                selected_path,
+                max_bytes,
+                preliminary_identity,
+                root=root,
+                label=label,
+            )
+        else:
+            raw, identity = _read_bounded_portable(
+                resolved_path,
+                max_bytes,
+                preliminary_identity,
+            )
+            after_identity = identity
+    except BundleCatalogError:
+        raise
     except OSError as exc:
         raise BundleCatalogError(f"file cannot be read: {path}") from exc
-    if len(data) > max_bytes:
-        raise BundleCatalogError(f"file exceeds bounded catalog read: {path}")
-    return data
+
+    if len(raw) > max_bytes:
+        raise BundleCatalogError(
+            f"file exceeds bounded catalog read: {selected_path}"
+        )
+    if identity != after_identity or len(raw) != identity[3]:
+        raise BundleCatalogError(f"file changed while reading: {selected_path}")
+    _assert_stable_read_path(
+        selected_path=selected_path,
+        resolved_path=resolved_path,
+        identity=identity,
+        root=root,
+        label=label,
+    )
+    return _StableRead(
+        selected_path=selected_path,
+        resolved_path=resolved_path,
+        raw=raw,
+        identity=identity,
+    )
 
 
-def _load_json_object(path: Path, max_bytes: int) -> tuple[dict[str, Any], bytes]:
-    raw = _read_bounded(path, max_bytes)
+def _read_bounded(
+    path: Path,
+    max_bytes: int,
+    *,
+    root: Path | None = None,
+    label: str = "file",
+) -> bytes:
+    return _read_bounded_stable(
+        path,
+        max_bytes,
+        root=root,
+        label=label,
+    ).raw
+
+
+def _decode_json_object(path: Path, raw: bytes) -> dict[str, Any]:
     try:
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BundleCatalogError(f"file is not valid UTF-8 JSON: {path}") from exc
     if not isinstance(value, dict):
         raise BundleCatalogError(f"JSON document must be an object: {path}")
-    return value, raw
+    return value
+
+
+def _load_json_object(
+    path: Path,
+    max_bytes: int,
+    *,
+    root: Path | None = None,
+    label: str = "file",
+) -> tuple[dict[str, Any], bytes]:
+    raw = _read_bounded(path, max_bytes, root=root, label=label)
+    return _decode_json_object(path, raw), raw
+
+
+def _validate_manifest_document(
+    path: Path,
+    document: dict[str, Any],
+    raw: bytes,
+) -> tuple[dict[str, Any], bytes]:
+    if (
+        not is_bundle_manifest(document)
+        or not isinstance(document.get("run_id"), str)
+        or not isinstance(document.get("artifacts"), list)
+    ):
+        raise BundleCatalogError(f"invalid RepoGround bundle manifest: {path}")
+    return document, raw
 
 
 def _manifest_document(path: Path) -> tuple[dict[str, Any], bytes]:
@@ -80,13 +497,7 @@ def _manifest_document(path: Path) -> tuple[dict[str, Any], bytes]:
         document, raw = _load_json_object(path, MAX_MANIFEST_BYTES)
     else:
         document, raw = snapshot.json_object(), snapshot.raw
-    if (
-        not is_bundle_manifest(document)
-        or not isinstance(document.get("run_id"), str)
-        or not isinstance(document.get("artifacts"), list)
-    ):
-        raise BundleCatalogError(f"invalid RepoGround bundle manifest: {path}")
-    return document, raw
+    return _validate_manifest_document(path, document, raw)
 
 
 def _safe_child(root: Path, raw_path: Any) -> Path | None:
@@ -256,7 +667,7 @@ def _health_binding_issue(
         return "post_emit_health manifest path expectation is missing"
     binding_status, binding_detail = post_health_binding_status(
         document,
-        resolved_manifest=resolve_manifest_path(expected_manifest_path),
+        resolved_manifest=expected_manifest_path,
         manifest_run_id=expected_manifest_run_id,
         manifest_sha256=expected_manifest_sha256,
     )
@@ -320,6 +731,7 @@ def _health_json_status(
     expected_manifest_run_id: Any = None,
     expected_manifest_sha256: str | None = None,
     require_manifest_binding: bool = False,
+    read_root: Path | None = None,
 ) -> tuple[str, str | None]:
     issue = _health_metadata_issue(
         expected_sha256=expected_sha256,
@@ -329,7 +741,12 @@ def _health_json_status(
     if issue is not None:
         return "invalid", issue
     try:
-        document, raw = _load_json_object(path, MAX_HEALTH_BYTES)
+        document, raw = _load_json_object(
+            path,
+            MAX_HEALTH_BYTES,
+            root=read_root,
+            label="bundle artifact",
+        )
     except BundleCatalogError as exc:
         return "invalid", str(exc)
     return _health_document_status(
@@ -351,6 +768,7 @@ def _post_health_issue(
     *,
     manifest_sha256: str,
     post_health_source: tuple[Path, Mapping[str, Any], bytes] | None,
+    read_root: Path | None,
 ) -> str | None:
     links = document.get("links") if isinstance(document.get("links"), Mapping) else {}
     post_path = _safe_child(path.parent, links.get("post_emit_health_path"))
@@ -363,6 +781,7 @@ def _post_health_issue(
             expected_manifest_run_id=document.get("run_id"),
             expected_manifest_sha256=manifest_sha256,
             require_manifest_binding=True,
+            read_root=read_root,
         )
         return None if status == "pass" else reason or "post_emit_health invalid"
 
@@ -386,6 +805,7 @@ def _candidate_health(
     *,
     manifest_sha256: str,
     post_health_source: tuple[Path, Mapping[str, Any], bytes] | None = None,
+    read_root: Path | None = None,
 ) -> tuple[str, list[str]]:
     reasons: list[str] = []
     links = document.get("links") if isinstance(document.get("links"), Mapping) else {}
@@ -421,6 +841,7 @@ def _candidate_health(
                 expected_sha256=output_health.get("sha256"),
                 expected_bytes=output_health.get("bytes"),
                 require_integrity=True,
+                read_root=read_root,
             )
             if status != "pass":
                 reasons.append(reason or "output_health invalid")
@@ -430,6 +851,7 @@ def _candidate_health(
         document,
         manifest_sha256=manifest_sha256,
         post_health_source=post_health_source,
+        read_root=read_root,
     )
     if post_issue is not None:
         reasons.append(post_issue)
@@ -527,31 +949,59 @@ def _manifest_paths(root: Path) -> list[Path]:
     if root.is_file():
         return [root]
     if not root.is_dir():
-        return []
+        return (
+            [root]
+            if root.name.endswith(MANIFEST_SUFFIX)
+            and (root.exists() or root.is_symlink())
+            else []
+        )
     paths: list[Path] = []
     for path in root.rglob(f"*{MANIFEST_SUFFIX}"):
-        if not path.is_file():
-            continue
         relative = path.relative_to(root)
         if any(part.startswith(".") for part in relative.parts[:-1]):
             continue
-        paths.append(path.resolve())
+        paths.append(path)
         if len(paths) > MAX_DISCOVERED_MANIFESTS:
             raise BundleCatalogError(
                 f"bundle discovery exceeded {MAX_DISCOVERED_MANIFESTS} manifests"
             )
-    return sorted(set(paths))
+    return sorted(paths)
 
 
 def discover_bundle_catalog(bundle_root: str | Path) -> dict[str, Any]:
-    root = Path(bundle_root).expanduser().resolve()
+    selected_root = _absolute_path(Path(bundle_root))
+    root = selected_root.resolve()
+    if selected_root.is_dir():
+        discovery_root = root
+        read_root = root
+    else:
+        discovery_root = selected_root
+        read_root = selected_root.parent.resolve()
     candidates: list[dict[str, Any]] = []
     rejected: list[dict[str, str]] = []
-    for path in _manifest_paths(root):
+    seen_resolved_paths: set[Path] = set()
+    for selected_path in _manifest_paths(discovery_root):
         try:
-            document, raw = _manifest_document(path)
+            stable_read = _read_bounded_stable(
+                selected_path,
+                MAX_MANIFEST_BYTES,
+                root=read_root,
+                label="bundle manifest candidate",
+            )
+            path = stable_read.resolved_path
+            if path in seen_resolved_paths:
+                continue
+            seen_resolved_paths.add(path)
+            document = _decode_json_object(path, stable_read.raw)
+            document, raw = _validate_manifest_document(
+                path,
+                document,
+                stable_read.raw,
+            )
         except BundleCatalogError as exc:
-            rejected.append({"manifest_path": str(path), "reason": str(exc)})
+            rejected.append(
+                {"manifest_path": str(selected_path), "reason": str(exc)}
+            )
             continue
         try:
             created_at_utc = _normalized_created_at(document.get("created_at"))
@@ -562,8 +1012,24 @@ def discover_bundle_catalog(bundle_root: str | Path) -> dict[str, Any]:
             timestamp_status = "invalid"
             timestamp_reason = str(exc)
         health_status, health_reasons = _candidate_health(
-            path, document, manifest_sha256=_sha256_bytes(raw)
+            path,
+            document,
+            manifest_sha256=_sha256_bytes(raw),
+            read_root=read_root,
         )
+        try:
+            _assert_stable_read_path(
+                selected_path=stable_read.selected_path,
+                resolved_path=stable_read.resolved_path,
+                identity=stable_read.identity,
+                root=read_root,
+                label="bundle manifest candidate",
+            )
+        except BundleCatalogError as exc:
+            rejected.append(
+                {"manifest_path": str(selected_path), "reason": str(exc)}
+            )
+            continue
         candidates.append(
             {
                 "stem": path.name[: -len(MANIFEST_SUFFIX)],

@@ -831,6 +831,314 @@ def both_reachable_branches_import(cond):
     assert len(_calls_by_expression(calls, "else_probe")) == 3
 
 
+def test_match_import_merge_is_exhaustive_guarded_and_fallthrough_aware(tmp_path):
+    target = tmp_path / "pkg" / "target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    alternative = tmp_path / "pkg" / "alternative.py"
+    alternative.write_text("def run():\n    return 2\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        """
+def non_exhaustive(value):
+    match value:
+        case 1:
+            from pkg.target import run
+    run()
+
+
+def guarded_wildcard(value, allowed):
+    match value:
+        case _ if allowed:
+            from pkg.target import run
+    run()
+
+
+def non_exhaustive_identical_cases(value):
+    match value:
+        case 1:
+            from pkg.target import run
+        case 2:
+            from pkg.target import run
+    run()
+
+
+def unmatched_preserves_existing_import(value):
+    from pkg.target import run
+    match value:
+        case 1:
+            pass
+    run()
+
+
+def exhaustive_fallthrough(value):
+    match value:
+        case 1:
+            from pkg.target import run
+        case _:
+            from pkg.target import run
+    run()
+
+
+def irrefutable_capture(value):
+    match value:
+        case captured:
+            from pkg.target import run
+    run()
+
+
+def exhaustive_with_terminating_case(value):
+    match value:
+        case 1:
+            return
+        case _:
+            from pkg.target import run
+    run()
+
+
+def terminating_divergent_import(value):
+    match value:
+        case 1:
+            from pkg.alternative import run
+            return
+        case _:
+            from pkg.target import run
+    run()
+
+
+def guarded_terminating_then_default(value, allowed):
+    match value:
+        case 1 if allowed:
+            return
+        case _:
+            from pkg.target import run
+    run()
+
+
+def guarded_identical_fallthrough(value, allowed):
+    match value:
+        case 1 if allowed:
+            from pkg.target import run
+        case _:
+            from pkg.target import run
+    run()
+
+
+def guarded_divergent_fallthrough(value, allowed):
+    match value:
+        case 1 if allowed:
+            from pkg.alternative import run
+        case _:
+            from pkg.target import run
+    run()
+
+
+def all_match_cases_terminate(value, branch):
+    if branch:
+        match value:
+            case 1:
+                return
+            case _:
+                raise RuntimeError
+    else:
+        from pkg.target import run
+    run()
+
+
+def divergent_fallthrough(value):
+    match value:
+        case 1:
+            from pkg.target import run
+        case _:
+            from pkg.alternative import run
+    run()
+
+
+def default_without_import(value):
+    match value:
+        case 1:
+            from pkg.target import run
+        case _:
+            pass
+    run()
+
+
+def capture_invalidates_existing_import(value):
+    from pkg.target import run
+    match value:
+        case run:
+            pass
+    run()
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    run_calls = {
+        call["caller_qualified_name"]: call
+        for call in calls
+        if call["callee_expression"] == "run"
+    }
+
+    assert {name: call["evidence_level"] for name, call in run_calls.items()} == {
+        "non_exhaustive": "S0",
+        "guarded_wildcard": "S0",
+        "non_exhaustive_identical_cases": "S0",
+        "unmatched_preserves_existing_import": "S1",
+        "exhaustive_fallthrough": "S1",
+        "irrefutable_capture": "S1",
+        "exhaustive_with_terminating_case": "S1",
+        "terminating_divergent_import": "S1",
+        "guarded_terminating_then_default": "S1",
+        "guarded_identical_fallthrough": "S1",
+        "guarded_divergent_fallthrough": "S0",
+        "all_match_cases_terminate": "S1",
+        "divergent_fallthrough": "S0",
+        "default_without_import": "S0",
+        "capture_invalidates_existing_import": "S0",
+    }
+    assert all(
+        run_calls[name]["resolution_reason"] == "local_imported_internal_name"
+        for name in (
+            "exhaustive_fallthrough",
+            "irrefutable_capture",
+            "exhaustive_with_terminating_case",
+            "terminating_divergent_import",
+            "guarded_terminating_then_default",
+            "guarded_identical_fallthrough",
+            "all_match_cases_terminate",
+            "unmatched_preserves_existing_import",
+        )
+    )
+    assert all(
+        run_calls[name]["resolution_reason"] == "lexically_shadowed_name"
+        for name in (
+            "non_exhaustive",
+            "guarded_wildcard",
+            "non_exhaustive_identical_cases",
+            "guarded_divergent_fallthrough",
+            "divergent_fallthrough",
+            "default_without_import",
+            "capture_invalidates_existing_import",
+        )
+    )
+
+
+def test_module_match_captures_rebind_import_definition_and_module_alias(tmp_path):
+    target = tmp_path / "pkg" / "target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        """
+from pkg.target import run as imported_run
+import pkg.target as target_alias
+
+
+def defined_run():
+    return 1
+
+
+match value:
+    case {"imported": imported_run}:
+        pass
+    case {"defined": defined_run}:
+        pass
+    case {"module": target_alias}:
+        pass
+
+imported_run()
+defined_run()
+target_alias.run()
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    by_expression = {
+        expression: _calls_by_expression(calls, expression)[0]
+        for expression in ("imported_run", "defined_run", "target_alias.run")
+    }
+
+    assert all(call["evidence_level"] == "S0" for call in by_expression.values())
+    assert by_expression["imported_run"]["resolution_reason"] == (
+        "name_rebound_at_module_level"
+    )
+    assert by_expression["defined_run"]["resolution_reason"] == (
+        "name_rebound_at_module_level"
+    )
+    assert by_expression["target_alias.run"]["resolution_reason"] == (
+        "shadowed_attribute_root"
+    )
+
+
+def test_match_capture_miss_and_success_fallthrough_states_are_distinct(tmp_path):
+    target = tmp_path / "pkg" / "target.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("def run():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "consumer.py").write_text(
+        """
+def capture_success_terminates(value):
+    from pkg.target import run
+    match value:
+        case {"x": run}:
+            return
+    run()
+
+
+def capture_success_falls_through(value):
+    from pkg.target import run
+    match value:
+        case {"x": run}:
+            pass
+    run()
+
+
+def unrelated_capture_guard_success_terminates(value, allowed):
+    from pkg.target import run
+    match value:
+        case {"x": captured} if allowed:
+            return
+    run()
+
+
+def captured_name_guard_success_terminates(value, allowed):
+    from pkg.target import run
+    match value:
+        case {"x": run} if allowed:
+            return
+    run()
+""",
+        encoding="utf-8",
+    )
+
+    calls, _, _ = extract_python_calls(tmp_path)
+    run_calls = {
+        call["caller_qualified_name"]: call
+        for call in calls
+        if call["callee_expression"] == "run"
+    }
+
+    assert {
+        name: call["evidence_level"] for name, call in run_calls.items()
+    } == {
+        "capture_success_terminates": "S1",
+        "capture_success_falls_through": "S0",
+        "unrelated_capture_guard_success_terminates": "S1",
+        "captured_name_guard_success_terminates": "S0",
+    }
+    assert run_calls["capture_success_terminates"]["resolution_reason"] == (
+        "local_imported_internal_name"
+    )
+    assert run_calls["unrelated_capture_guard_success_terminates"][
+        "resolution_reason"
+    ] == "local_imported_internal_name"
+    assert run_calls["capture_success_falls_through"]["resolution_reason"] == (
+        "lexically_shadowed_name"
+    )
+    assert run_calls["captured_name_guard_success_terminates"][
+        "resolution_reason"
+    ] == "lexically_shadowed_name"
+
+
 def test_try_fallthrough_keeps_only_safe_reachable_import_paths(tmp_path):
     target = tmp_path / "pkg" / "target.py"
     target.parent.mkdir(parents=True)
