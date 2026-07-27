@@ -273,7 +273,7 @@
       ]
     },
     "query-readonly-index": {
-      "authority": "Read-only query callers pass an absolute canonical index selected from validated artifact or bundle metadata.",
+      "authority": "Read-only query callers pass either an absolute canonical chunk-index path or a descriptor path pinned to an artifact whose bytes and SHA-256 were verified against the active bundle manifest.",
       "expected_occurrences": 1,
       "files": [
         "merger/repoground/retrieval/query_core.py"
@@ -281,8 +281,8 @@
       "sites": [
         {
           "path": "merger/repoground/retrieval/query_core.py",
-          "scope": "execute_query",
-          "statement": "conn = sqlite3.connect(db_uri, uri=True)"
+          "scope": "_open_query_connection",
+          "statement": "return sqlite3.connect(db_uri, uri=True)"
         }
       ],
       "tests": [
@@ -292,7 +292,8 @@
         "merger/repoground/tests/test_retrieval_query.py::test_query_read_only_uses_immutable_sqlite_uri"
       ],
       "validation": [
-        "Read-only mode requires the canonical chunk-index SQLite suffix and an absolute path.",
+        "Read-only mode requires an absolute path; manifest-bound callers query only a verified /proc/self/fd or /dev/fd descriptor while the pinned handle remains open.",
+        "The separately validated source path must carry the canonical chunk-index SQLite suffix.",
         "The SQLite URI uses mode=ro and immutable=1."
       ]
     },

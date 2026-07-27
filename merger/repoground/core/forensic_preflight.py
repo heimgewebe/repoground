@@ -15,6 +15,7 @@ from .claim_evidence_diagnostics import (
 )
 from .path_security import resolve_secure_path
 from .post_emit_health import derive_post_health_path
+from .post_health_binding import post_health_binding_status
 
 try:
     import jsonschema
@@ -121,75 +122,6 @@ def _validate_claim_map_schema(claim_map_doc: Dict[str, Any]) -> Tuple[str, str]
     except jsonschema.ValidationError as e:  # type: ignore[union-attr]
         return "fail", f"claim_evidence_map schema invalid: {e.message}"
     return "pass", "claim_evidence_map schema valid"
-
-
-def _is_lower_sha256(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == _SHA256_LEN
-        and all(char in "0123456789abcdef" for char in value)
-    )
-
-
-def _post_health_hash_binding_status(
-    post_doc: Dict[str, Any],
-    manifest_sha256: Optional[str],
-) -> Tuple[str, str, bool]:
-    declared_sha256 = post_doc.get("bundle_manifest_sha256")
-    if declared_sha256 is None:
-        return "pass", "post_emit_health has no manifest hash binding", False
-    if not _is_lower_sha256(declared_sha256):
-        return "fail", "post_emit_health bundle_manifest_sha256 is invalid", True
-    if manifest_sha256 is None:
-        return (
-            "blocked",
-            "requested manifest could not be hashed for post_emit_health binding",
-            True,
-        )
-    if declared_sha256 != manifest_sha256:
-        return (
-            "fail",
-            "post_emit_health bundle_manifest_sha256 does not match requested manifest",
-            True,
-        )
-    return "pass", "post_emit_health hash matches requested manifest", True
-
-
-def _post_health_binding_status(
-    post_doc: Dict[str, Any],
-    *,
-    resolved_manifest: Path,
-    manifest_run_id: Any,
-    manifest_sha256: Optional[str],
-) -> Tuple[str, str]:
-    post_manifest_path = post_doc.get("bundle_manifest_path")
-    if not isinstance(post_manifest_path, str) or not post_manifest_path:
-        return "blocked", "post_emit_health missing bundle_manifest_path binding"
-    hash_status, hash_detail, hash_bound = _post_health_hash_binding_status(
-        post_doc, manifest_sha256
-    )
-    if hash_status != "pass":
-        return hash_status, hash_detail
-    path_bound = _resolve(post_manifest_path) == resolved_manifest
-    if not path_bound and not hash_bound:
-        return (
-            "fail",
-            "post_emit_health bundle_manifest_path does not match requested manifest",
-        )
-    if isinstance(manifest_run_id, str):
-        post_bundle_run_id = post_doc.get("bundle_run_id")
-        if not isinstance(post_bundle_run_id, str) or not post_bundle_run_id:
-            return "blocked", "post_emit_health missing bundle_run_id binding"
-        if post_bundle_run_id != manifest_run_id:
-            return "fail", "post_emit_health bundle_run_id does not match manifest run_id"
-    if path_bound and hash_bound:
-        return (
-            "pass",
-            "post_emit_health path-bound and hash-verified against requested manifest",
-        )
-    if path_bound:
-        return "pass", "post_emit_health path-bound to requested manifest"
-    return "pass", "post_emit_health hash-bound to requested manifest bytes"
 
 
 def compute_forensic_preflight(
@@ -322,7 +254,7 @@ def compute_forensic_preflight(
         errors.append(f"post_emit_health missing: {post_err}")
     else:
         checks.append(_check("post_emit_health_present", "pass", "post_emit_health loaded"))
-        binding_status, binding_detail = _post_health_binding_status(
+        binding_status, binding_detail = post_health_binding_status(
             post_doc,
             resolved_manifest=resolved_manifest,
             manifest_run_id=manifest.get("run_id"),

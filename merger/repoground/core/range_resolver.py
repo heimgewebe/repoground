@@ -12,6 +12,7 @@ except ImportError:
 
 from .bundle_identity import is_bundle_manifest
 from .constants import ArtifactRole
+from .manifest_snapshot import active_manifest_snapshot
 
 
 _CONTRACTS_DIR = Path(__file__).parent.parent / "contracts"
@@ -51,6 +52,9 @@ def _load_manifest(
     manifest_data: Mapping[str, Any] | None,
 ) -> Any:
     if manifest_data is None:
+        snapshot = active_manifest_snapshot(manifest_path)
+        if snapshot is not None:
+            return snapshot.json_object()
         if not manifest_path.exists():
             raise FileNotFoundError(f"Manifest not found: {manifest_path}")
         with manifest_path.open("r", encoding="utf-8") as f:

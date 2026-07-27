@@ -8,9 +8,11 @@ Covers two guarantees added on top of the deterministic FTS retrieval:
 * resolved ranges surface the original repository source address so navigation
   tasks do not have to parse it out of the excerpt text.
 """
+
 from merger.repoground.core.ask_context import (
     _content_tokens,
     _or_fts_query,
+    _resolved_ranges,
     build_ask_context_pack,
 )
 from merger.repoground.tests.test_ask_context_cli import (
@@ -84,9 +86,71 @@ def test_content_tokens_drop_stopwords_and_dedupe():
 
 def test_content_tokens_adds_deterministic_snake_case_parts_for_or_fallback():
     assert _content_tokens("How does build_live_repo_address work?") == [
-        "build_live_repo_address", "build", "live", "repo", "address", "work"
+        "build_live_repo_address",
+        "build",
+        "live",
+        "repo",
+        "address",
+        "work",
     ]
 
 
 def test_or_fts_query_quotes_terms_to_keep_them_literal():
     assert _or_fts_query(["live", "freshness"]) == '"live" OR "freshness"'
+
+
+def test_resolved_ranges_share_budget_and_drop_empty_or_duplicate_hits():
+    base = {
+        "artifact_role": "canonical_md",
+        "range_status": "resolved",
+        "range": {"text": "x" * 5000},
+    }
+    query_result = {
+        "resolved_evidence": {
+            "hits": [
+                {
+                    **base,
+                    "source_path": "src/first.py",
+                    "source_line_range": {"start_line": 1, "end_line": 10},
+                    "range_ref": {"ref": "first"},
+                },
+                {
+                    **base,
+                    "source_path": "src/second.py",
+                    "source_line_range": {"start_line": 1, "end_line": 10},
+                    "range_ref": {"ref": "second"},
+                },
+                {
+                    **base,
+                    "source_path": "docs/diagnostics/third.json",
+                    "source_line_range": {"start_line": 1, "end_line": 10},
+                    "range_ref": {"ref": "third"},
+                },
+                {
+                    **base,
+                    "range": {"text": ""},
+                    "source_path": "src/empty.py",
+                    "range_ref": {"ref": "empty"},
+                },
+                {
+                    **base,
+                    "source_path": "src/first.py",
+                    "source_line_range": {"start_line": 1, "end_line": 10},
+                    "range_ref": {"ref": "first"},
+                },
+            ]
+        }
+    }
+
+    ranges, used_chars, truncated = _resolved_ranges(
+        query_result, max_context_tokens=1000
+    )
+
+    assert [item["source_path"] for item in ranges] == [
+        "src/first.py",
+        "src/second.py",
+        "docs/diagnostics/third.json",
+    ]
+    assert all(0 < len(item["text_excerpt"]) <= 1600 for item in ranges)
+    assert used_chars <= 4000
+    assert truncated is True

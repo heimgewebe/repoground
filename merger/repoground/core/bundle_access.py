@@ -5,12 +5,15 @@ import json
 import logging
 import os
 import re
+import stat
+import tempfile
 from collections import OrderedDict
+from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any, Mapping, Sequence
+from typing import Any, BinaryIO, Iterator, Mapping, Sequence
 
 from merger.repoground.architecture.call_graph_contract import (
     MAX_SKIPPED_ERRORS as MAX_CALL_GRAPH_SKIPPED_ERRORS,
@@ -20,6 +23,10 @@ from merger.repoground.architecture.call_graph_contract import (
 from merger.repoground.core.call_navigation_index import (
     CallNavigationIndex,
     SymbolNavigationIndex,
+)
+from merger.repoground.core.manifest_snapshot import (
+    active_manifest_snapshot,
+    resolve_manifest_path,
 )
 from merger.repoground.core.response_projection import project_read_result
 
@@ -49,6 +56,9 @@ logger = logging.getLogger(__name__)
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
+    snapshot = active_manifest_snapshot(path)
+    if snapshot is not None:
+        return snapshot.json_object()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -99,7 +109,7 @@ def _artifact_record(bundle_manifest: Path, artifact: dict[str, Any]) -> dict[st
 
 
 def available_roles(bundle_manifest: str | Path) -> list[str]:
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     manifest = _read_json_object(manifest_path)
     roles: set[str] = {"bundle_manifest"}
     for artifact in _artifact_list(manifest):
@@ -128,7 +138,7 @@ def resolve_required_reading_for_bundle(
         resolve_required_reading,
     )
 
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     roles = available_roles(manifest_path)
     required = resolve_required_reading(
         default_required_reading_protocol(),
@@ -164,7 +174,7 @@ def snapshot_status(
     """
     requested_manifest_path = Path(bundle_manifest).expanduser()
     if manifest_data is None:
-        manifest_path = requested_manifest_path.resolve()
+        manifest_path = resolve_manifest_path(requested_manifest_path)
         manifest = _read_json_object(manifest_path)
     else:
         if not isinstance(manifest_data, Mapping):
@@ -224,7 +234,7 @@ def list_artifacts(bundle_manifest: str | Path) -> dict[str, Any]:
 
 
 def get_artifact(bundle_manifest: str | Path, role: str) -> dict[str, Any]:
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     manifest = _read_json_object(manifest_path)
     matches = [a for a in _artifact_list(manifest) if a.get("role") == role]
     if not matches:
@@ -259,6 +269,313 @@ def get_artifact(bundle_manifest: str | Path, role: str) -> dict[str, Any]:
 
 
 MAX_QUERY_EXISTING_INDEX_K = 100
+_SQLITE_HASH_CHUNK_BYTES = 1024 * 1024
+_FILE_DESCRIPTOR_ROOTS = (Path("/proc/self/fd"), Path("/dev/fd"))
+
+
+class _SqliteArtifactValidationError(ValueError):
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+def _sqlite_file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
+
+
+def _query_path_for_descriptor(
+    descriptor: int,
+    expected_identity: tuple[int, int, int, int, int],
+) -> Path:
+    for root in _FILE_DESCRIPTOR_ROOTS:
+        candidate = root / str(descriptor)
+        try:
+            observed_identity = _sqlite_file_identity(candidate.stat())
+        except OSError:
+            continue
+        if observed_identity == expected_identity:
+            return candidate
+    raise _SqliteArtifactValidationError(
+        "sqlite_index_descriptor_unavailable",
+        "sqlite_index cannot be pinned to a verified file descriptor",
+    )
+
+
+def _portable_copy_flags(*, write: bool) -> int:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL if write else os.O_RDONLY
+    flags |= getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return flags
+
+
+def _write_portable_sqlite_copy(
+    handle: BinaryIO,
+    destination: Path,
+    *,
+    expected_bytes: int,
+    expected_sha256: str,
+    expected_identity: tuple[int, int, int, int, int],
+) -> None:
+    digest = hashlib.sha256()
+    observed_bytes = 0
+    try:
+        handle.seek(0)
+        descriptor = os.open(destination, _portable_copy_flags(write=True), 0o600)
+        with os.fdopen(descriptor, "wb") as target:
+            for chunk in iter(
+                lambda: handle.read(_SQLITE_HASH_CHUNK_BYTES),
+                b"",
+            ):
+                observed_bytes += len(chunk)
+                digest.update(chunk)
+                target.write(chunk)
+            target.flush()
+            os.fsync(target.fileno())
+    except OSError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_portable_copy_failed",
+            f"sqlite_index verified copy could not be created: {exc}",
+        ) from exc
+
+    if (
+        observed_bytes != expected_bytes
+        or digest.hexdigest() != expected_sha256
+        or _sqlite_file_identity(os.fstat(handle.fileno())) != expected_identity
+    ):
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_mismatch",
+            "sqlite_index bytes changed while creating the verified copy",
+        )
+    try:
+        os.chmod(destination, stat.S_IRUSR)
+    except OSError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_portable_copy_failed",
+            f"sqlite_index verified copy could not be made read-only: {exc}",
+        ) from exc
+
+
+def _verify_portable_sqlite_copy(
+    path: Path,
+    *,
+    expected_bytes: int,
+    expected_sha256: str,
+) -> None:
+    try:
+        descriptor = os.open(path, _portable_copy_flags(write=False))
+        with os.fdopen(descriptor, "rb") as handle:
+            before = os.fstat(handle.fileno())
+            if stat.S_IMODE(before.st_mode) & 0o222:
+                raise _SqliteArtifactValidationError(
+                    "sqlite_index_integrity_mismatch",
+                    "sqlite_index verified copy is not read-only",
+                )
+            identity = _verify_sqlite_handle(
+                handle,
+                expected_bytes=expected_bytes,
+                expected_sha256=expected_sha256,
+            )
+        current = os.stat(path, follow_symlinks=False)
+    except _SqliteArtifactValidationError:
+        raise
+    except OSError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_mismatch",
+            f"sqlite_index verified copy is unavailable: {exc}",
+        ) from exc
+    if not stat.S_ISREG(current.st_mode) or _sqlite_file_identity(current) != identity:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_mismatch",
+            "sqlite_index verified copy changed while it was checked",
+        )
+
+
+@contextmanager
+def _portable_verified_sqlite_copy(
+    handle: BinaryIO,
+    *,
+    expected_bytes: int,
+    expected_sha256: str,
+    expected_identity: tuple[int, int, int, int, int],
+) -> Iterator[Path]:
+    try:
+        temporary = tempfile.TemporaryDirectory(prefix="repoground-sqlite-")
+    except OSError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_portable_copy_failed",
+            f"sqlite_index private temporary directory could not be created: {exc}",
+        ) from exc
+
+    with temporary as directory:
+        query_path = Path(directory) / "verified.index.sqlite"
+        _write_portable_sqlite_copy(
+            handle,
+            query_path,
+            expected_bytes=expected_bytes,
+            expected_sha256=expected_sha256,
+            expected_identity=expected_identity,
+        )
+        _verify_portable_sqlite_copy(
+            query_path,
+            expected_bytes=expected_bytes,
+            expected_sha256=expected_sha256,
+        )
+        yield query_path
+        _verify_portable_sqlite_copy(
+            query_path,
+            expected_bytes=expected_bytes,
+            expected_sha256=expected_sha256,
+        )
+
+
+def _sqlite_integrity_contract(artifact: dict[str, Any]) -> tuple[int, str]:
+    expected_bytes = artifact.get("bytes")
+    expected_sha256 = artifact.get("sha256")
+    if (
+        not isinstance(expected_bytes, int)
+        or isinstance(expected_bytes, bool)
+        or expected_bytes < 0
+        or not _is_sha256(expected_sha256)
+    ):
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_unavailable",
+            "sqlite_index bytes/sha256 contract is missing or invalid in manifest",
+        )
+    return expected_bytes, expected_sha256
+
+
+def _open_sqlite_artifact(index_path: Path) -> BinaryIO:
+    try:
+        return index_path.open("rb")
+    except FileNotFoundError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_file_missing",
+            "sqlite_index artifact file does not exist",
+        ) from exc
+    except OSError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_unreadable",
+            f"sqlite_index artifact cannot be opened: {exc}",
+        ) from exc
+
+
+def _verify_sqlite_handle(
+    handle: BinaryIO,
+    *,
+    expected_bytes: int,
+    expected_sha256: str,
+) -> tuple[int, int, int, int, int]:
+    before = os.fstat(handle.fileno())
+    if not stat.S_ISREG(before.st_mode):
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_path_invalid",
+            "sqlite_index artifact is not a regular file",
+        )
+    if before.st_size != expected_bytes:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_mismatch",
+            "sqlite_index byte size does not match active manifest",
+        )
+
+    digest = hashlib.sha256()
+    observed_bytes = 0
+    for chunk in iter(lambda: handle.read(_SQLITE_HASH_CHUNK_BYTES), b""):
+        observed_bytes += len(chunk)
+        digest.update(chunk)
+    identity = _sqlite_file_identity(before)
+    stable_identity = _sqlite_file_identity(os.fstat(handle.fileno()))
+    if (
+        observed_bytes != expected_bytes
+        or digest.hexdigest() != expected_sha256
+        or stable_identity != identity
+    ):
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_mismatch",
+            "sqlite_index bytes do not match active manifest",
+        )
+    return identity
+
+
+def _require_current_sqlite_path(
+    index_path: Path,
+    expected_identity: tuple[int, int, int, int, int],
+) -> None:
+    try:
+        current_identity = _sqlite_file_identity(index_path.stat())
+    except OSError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_mismatch",
+            "sqlite_index path changed during manifest verification",
+        ) from exc
+    if current_identity != expected_identity:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_integrity_mismatch",
+            "sqlite_index path changed during manifest verification",
+        )
+
+
+@contextmanager
+def _verified_sqlite_query_path(
+    manifest_path: Path,
+    artifact: dict[str, Any],
+) -> Iterator[Path]:
+    from merger.repoground.retrieval.query_core import (
+        validate_read_only_sqlite_source_path,
+    )
+
+    index_path = _safe_artifact_path(manifest_path.parent, artifact.get("path"))
+    if index_path is None:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_path_invalid",
+            "sqlite_index artifact path is invalid",
+        )
+    try:
+        validate_read_only_sqlite_source_path(index_path)
+    except ValueError as exc:
+        raise _SqliteArtifactValidationError(
+            "sqlite_index_path_invalid",
+            str(exc),
+        ) from exc
+
+    handle = _open_sqlite_artifact(index_path)
+    with handle:
+        expected_bytes, expected_sha256 = _sqlite_integrity_contract(artifact)
+        identity = _verify_sqlite_handle(
+            handle,
+            expected_bytes=expected_bytes,
+            expected_sha256=expected_sha256,
+        )
+        _require_current_sqlite_path(index_path, identity)
+        try:
+            try:
+                descriptor_path = _query_path_for_descriptor(
+                    handle.fileno(),
+                    identity,
+                )
+            except _SqliteArtifactValidationError as exc:
+                if exc.error_code != "sqlite_index_descriptor_unavailable":
+                    raise
+                with _portable_verified_sqlite_copy(
+                    handle,
+                    expected_bytes=expected_bytes,
+                    expected_sha256=expected_sha256,
+                    expected_identity=identity,
+                ) as portable_path:
+                    yield portable_path
+            else:
+                yield descriptor_path
+        finally:
+            if _sqlite_file_identity(os.fstat(handle.fileno())) != identity:
+                raise _SqliteArtifactValidationError(
+                    "sqlite_index_integrity_mismatch",
+                    "sqlite_index changed while it was queried",
+                )
 
 
 def _read_only_mutation_boundary() -> dict[str, Any]:
@@ -322,7 +639,7 @@ def range_get(
 ) -> dict[str, Any]:
     if compact is not None:
         verbose = not compact
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     if not isinstance(range_ref, dict):
         return _invalid_read_result(
             kind="repobrief.range_get",
@@ -1096,7 +1413,7 @@ def query_existing_index(
 ) -> dict[str, Any]:
     if compact is not None:
         verbose = not compact
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     if not isinstance(query, str):
         return _invalid_read_result(
             kind="repobrief.query_existing_index",
@@ -1153,29 +1470,45 @@ def query_existing_index(
         )
 
     index_path = Path(str(artifact["absolute_path"]))
-    if not index_path.exists():
-        return _invalid_read_result(
-            kind="repobrief.query_existing_index",
-            bundle_manifest=manifest_path,
-            status="missing",
-            error="sqlite_index artifact file does not exist",
-            error_code="sqlite_index_file_missing",
-            extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
-            verbose=verbose,
-        )
 
     from merger.repoground.retrieval.query_core import execute_query
 
     try:
-        query_result = execute_query(
-            index_path,
-            query,
-            k=k,
-            filters=filters or {},
-            trace=False,
-            build_context=False,
-            read_only=True,
-            _prepared_fts_query=prepared_fts_query,
+        with _verified_sqlite_query_path(manifest_path, artifact) as query_path:
+            validated_source_path = (
+                index_path
+                if query_path.parent in _FILE_DESCRIPTOR_ROOTS
+                and query_path.name.isdecimal()
+                else None
+            )
+            query_result = execute_query(
+                query_path,
+                query,
+                k=k,
+                filters=filters or {},
+                trace=False,
+                build_context=False,
+                read_only=True,
+                _prepared_fts_query=prepared_fts_query,
+                _validated_read_only_source_path=validated_source_path,
+            )
+    except _SqliteArtifactValidationError as exc:
+        status = (
+            "missing" if exc.error_code == "sqlite_index_file_missing" else "invalid"
+        )
+        return _invalid_read_result(
+            kind="repobrief.query_existing_index",
+            bundle_manifest=manifest_path,
+            status=status,
+            error=str(exc),
+            error_code=exc.error_code,
+            extra={
+                "query": query,
+                "k": k,
+                "query_result": None,
+                "index_artifact": artifact,
+            },
+            verbose=verbose,
         )
     except Exception as exc:
         return _invalid_read_result(
@@ -1355,7 +1688,7 @@ def search_symbol_index(
     """
     if compact is not None:
         verbose = not compact
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     return project_read_result(
         _search_symbol_index_full(manifest_path, query, k=k, kind=kind, path=path),
         manifest_path,
@@ -1623,6 +1956,106 @@ def _artifact_stat_matches_fingerprint(
     )
 
 
+def _fingerprint_matches_active_manifest_snapshot(
+    fingerprint: _ArtifactSourceFingerprint,
+) -> bool | None:
+    snapshot = active_manifest_snapshot(fingerprint.manifest_path)
+    if snapshot is None:
+        return None
+    return fingerprint.manifest_sha256 == snapshot.binding.sha256
+
+
+def _artifact_bytes_match_fingerprint(
+    fingerprint: _ArtifactSourceFingerprint,
+    artifact_path: Path,
+) -> bool:
+    artifact_bytes, artifact_stat, failure, _detail = _read_stable_artifact_bytes(
+        artifact_path
+    )
+    if failure is not None or artifact_bytes is None or artifact_stat is None:
+        return False
+    if not _artifact_stat_matches_fingerprint(fingerprint, artifact_stat):
+        return False
+    if hashlib.sha256(artifact_bytes).hexdigest() != fingerprint.artifact_sha256:
+        return False
+    try:
+        artifact_after_stat = artifact_path.stat()
+    except OSError:
+        return False
+    return _artifact_stat_matches_fingerprint(
+        fingerprint,
+        artifact_after_stat,
+    )
+
+
+def _bound_artifact_source_is_current(
+    fingerprint: _ArtifactSourceFingerprint,
+    artifact_path: Path,
+    *,
+    requires_content: bool,
+) -> bool:
+    if not requires_content:
+        try:
+            artifact_stat = artifact_path.stat()
+        except OSError:
+            return False
+        if _stat_identity_is_strong(artifact_stat):
+            return _artifact_stat_matches_fingerprint(
+                fingerprint,
+                artifact_stat,
+            )
+    return _artifact_bytes_match_fingerprint(fingerprint, artifact_path)
+
+
+def _fast_artifact_source_validation(
+    fingerprint: _ArtifactSourceFingerprint,
+    manifest_path: Path,
+    artifact_path: Path,
+) -> bool | None:
+    try:
+        manifest_stat = manifest_path.stat()
+        artifact_stat = artifact_path.stat()
+    except OSError:
+        return False
+    if not (
+        _stat_identity_is_strong(manifest_stat)
+        and _stat_identity_is_strong(artifact_stat)
+    ):
+        return None
+    return _manifest_stat_matches_fingerprint(
+        fingerprint,
+        manifest_stat,
+    ) and _artifact_stat_matches_fingerprint(fingerprint, artifact_stat)
+
+
+def _source_bytes_match_fingerprint(
+    fingerprint: _ArtifactSourceFingerprint,
+    manifest_path: Path,
+    artifact_path: Path,
+) -> bool:
+    manifest_bytes, manifest_stat, manifest_failure, _manifest_detail = (
+        _read_stable_regular_file_bytes(manifest_path)
+    )
+    if (
+        manifest_failure is not None
+        or manifest_bytes is None
+        or manifest_stat is None
+        or not _manifest_stat_matches_fingerprint(fingerprint, manifest_stat)
+        or hashlib.sha256(manifest_bytes).hexdigest() != fingerprint.manifest_sha256
+    ):
+        return False
+    if not _artifact_bytes_match_fingerprint(fingerprint, artifact_path):
+        return False
+    try:
+        manifest_after_stat = manifest_path.stat()
+    except OSError:
+        return False
+    return _manifest_stat_matches_fingerprint(
+        fingerprint,
+        manifest_after_stat,
+    )
+
+
 def _cache_validation_mode() -> str:
     """Return the cache-validation mode while preserving legacy semantics.
 
@@ -1716,6 +2149,36 @@ def _read_stable_regular_file_bytes(
     return raw, stat_after, None, None
 
 
+def _read_artifact_manifest_source(
+    manifest_path: Path,
+) -> tuple[
+    bytes | None,
+    Any,
+    tuple[int, int, int, int, int] | None,
+    str | None,
+    str | None,
+]:
+    snapshot = active_manifest_snapshot(manifest_path)
+    if snapshot is not None:
+        identity = snapshot.file_identity
+        return (
+            snapshot.raw,
+            snapshot.json_object(),
+            (identity[0], identity[1], identity[3], identity[4], identity[5]),
+            None,
+            None,
+        )
+    raw, manifest_stat, failure, detail = _read_stable_regular_file_bytes(manifest_path)
+    if failure is not None:
+        return None, None, None, failure, detail
+    assert raw is not None and manifest_stat is not None
+    try:
+        manifest = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, None, None, "unreadable", str(exc)
+    return raw, manifest, _file_identity(manifest_stat), None, None
+
+
 def _read_registered_artifact_source(
     manifest_path: Path, role: str
 ) -> tuple[
@@ -1724,16 +2187,12 @@ def _read_registered_artifact_source(
     str | None,
     str | None,
 ]:
-    manifest_bytes, manifest_stat, failure, detail = _read_stable_regular_file_bytes(
-        manifest_path
+    manifest_bytes, manifest, manifest_identity, failure, detail = (
+        _read_artifact_manifest_source(manifest_path)
     )
     if failure is not None:
         return None, None, failure, detail
-    assert manifest_bytes is not None and manifest_stat is not None
-    try:
-        manifest = json.loads(manifest_bytes)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return None, None, "unreadable", str(exc)
+    assert manifest_bytes is not None and manifest_identity is not None
     if not isinstance(manifest, dict):
         return None, None, "unreadable", "bundle manifest must be a JSON object"
     try:
@@ -1768,13 +2227,13 @@ def _read_registered_artifact_source(
     if _is_sha256(declared_sha256) and actual_sha256 != declared_sha256:
         return None, artifact, "sha256_mismatch", None
     fingerprint = _ArtifactSourceFingerprint(
-        manifest_path=str(manifest_path.resolve()),
+        manifest_path=str(resolve_manifest_path(manifest_path)),
         manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
-        manifest_device=manifest_stat.st_dev,
-        manifest_inode=manifest_stat.st_ino,
-        manifest_size=manifest_stat.st_size,
-        manifest_mtime_ns=manifest_stat.st_mtime_ns,
-        manifest_ctime_ns=manifest_stat.st_ctime_ns,
+        manifest_device=manifest_identity[0],
+        manifest_inode=manifest_identity[1],
+        manifest_size=manifest_identity[2],
+        manifest_mtime_ns=manifest_identity[3],
+        manifest_ctime_ns=manifest_identity[4],
         role=role,
         absolute_path=str(artifact_path),
         artifact_sha256=actual_sha256,
@@ -1805,63 +2264,43 @@ def _artifact_source_is_current(
     """Validate one cached generation without reparsing its JSON payload.
 
     Cold loads and post-build checks always hash bytes read from one pinned file
-    descriptor. Warm lookups use the manifest hash plus strong file identity
-    metadata. ``REPOGROUND_CACHE_VALIDATION=strict`` forces a full hash
-    on every lookup; the legacy strict-hash switch remains supported. Weak
-    identities such as zero device or inode values automatically use strict
-    validation.
+    descriptor. Request-bound lookups authorize the cached manifest hash only
+    from the active snapshot and never from transient path bytes. Other warm
+    lookups use the manifest hash plus strong file identity metadata.
+    ``REPOGROUND_CACHE_VALIDATION=strict`` forces a full hash on every lookup;
+    the legacy strict-hash switch remains supported. Weak identities such as
+    zero device or inode values automatically use strict validation.
     """
     manifest_path = Path(fingerprint.manifest_path)
     artifact_path = Path(fingerprint.absolute_path)
+    active_manifest_match = _fingerprint_matches_active_manifest_snapshot(fingerprint)
+    if active_manifest_match is False:
+        return False
 
     requires_content = _source_content_verification_required(
         fingerprint,
         verify_content=verify_content,
     )
-    if not requires_content:
-        try:
-            manifest_stat = manifest_path.stat()
-            artifact_stat = artifact_path.stat()
-        except OSError:
-            return False
-        if _stat_identity_is_strong(manifest_stat) and _stat_identity_is_strong(
-            artifact_stat
-        ):
-            return _manifest_stat_matches_fingerprint(
-                fingerprint,
-                manifest_stat,
-            ) and _artifact_stat_matches_fingerprint(fingerprint, artifact_stat)
-        requires_content = True
+    if active_manifest_match is True:
+        return _bound_artifact_source_is_current(
+            fingerprint,
+            artifact_path,
+            requires_content=requires_content,
+        )
 
-    manifest_bytes, manifest_stat, manifest_failure, _manifest_detail = (
-        _read_stable_regular_file_bytes(manifest_path)
-    )
-    if (
-        manifest_failure is not None
-        or manifest_bytes is None
-        or manifest_stat is None
-        or not _manifest_stat_matches_fingerprint(fingerprint, manifest_stat)
-        or hashlib.sha256(manifest_bytes).hexdigest() != fingerprint.manifest_sha256
-    ):
-        return False
-    artifact_bytes, artifact_stat, failure, _detail = (
-        _read_stable_artifact_bytes(artifact_path)
-    )
-    if failure is not None or artifact_bytes is None or artifact_stat is None:
-        return False
-    if not _artifact_stat_matches_fingerprint(fingerprint, artifact_stat):
-        return False
-    if hashlib.sha256(artifact_bytes).hexdigest() != fingerprint.artifact_sha256:
-        return False
-    try:
-        manifest_after_stat = manifest_path.stat()
-        artifact_after_stat = artifact_path.stat()
-    except OSError:
-        return False
-    return _manifest_stat_matches_fingerprint(
+    if not requires_content:
+        fast_validation = _fast_artifact_source_validation(
+            fingerprint,
+            manifest_path,
+            artifact_path,
+        )
+        if fast_validation is not None:
+            return fast_validation
+    return _source_bytes_match_fingerprint(
         fingerprint,
-        manifest_after_stat,
-    ) and _artifact_stat_matches_fingerprint(fingerprint, artifact_after_stat)
+        manifest_path,
+        artifact_path,
+    )
 
 def _cache_state(
     cache: OrderedDict[Any, Any], key: Any, state: Any
@@ -1903,7 +2342,7 @@ def _drop_symbol_navigation_state_if_current(
 def _cached_call_navigation_state(
     manifest_path: Path,
 ) -> _CallNavigationState | None:
-    resolved_manifest = str(manifest_path.resolve())
+    resolved_manifest = str(resolve_manifest_path(manifest_path))
     with _CALL_NAVIGATION_CACHE_LOCK:
         # Snapshot at most two LRU entries so validation can release the lock;
         # a live reversed iterator would become invalid under concurrent mutation.
@@ -1913,6 +2352,8 @@ def _cached_call_navigation_state(
             if fingerprint.manifest_path == resolved_manifest
     ]
     for fingerprint, state in candidates:
+        if _fingerprint_matches_active_manifest_snapshot(fingerprint) is False:
+            continue
         if not _artifact_source_is_current(fingerprint):
             with _CALL_NAVIGATION_CACHE_LOCK:
                 _drop_call_navigation_state_if_current(fingerprint, state)
@@ -1927,7 +2368,7 @@ def _cached_call_navigation_state(
 def _cached_symbol_navigation_state(
     manifest_path: Path, call_state: _CallNavigationState
 ) -> _SymbolNavigationState | None:
-    resolved_manifest = str(manifest_path.resolve())
+    resolved_manifest = str(resolve_manifest_path(manifest_path))
     with _CALL_NAVIGATION_CACHE_LOCK:
         # Keep the same bounded snapshot rule as the call-navigation cache.
         candidates = [
@@ -1937,6 +2378,8 @@ def _cached_symbol_navigation_state(
             and cache_key[1].manifest_path == resolved_manifest
     ]
     for cache_key, state in candidates:
+        if _fingerprint_matches_active_manifest_snapshot(cache_key[1]) is False:
+            continue
         if not _artifact_source_is_current(cache_key[1]):
             with _CALL_NAVIGATION_CACHE_LOCK:
                 _drop_symbol_navigation_state_if_current(cache_key, state)
@@ -2820,7 +3263,7 @@ def find_references(
     """
     if compact is not None:
         verbose = not compact
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     return project_read_result(
         _find_references_full(manifest_path, name, path=path, k=k),
         manifest_path,
@@ -2902,7 +3345,7 @@ def get_callers(
     """
     if compact is not None:
         verbose = not compact
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     return project_read_result(
         _get_callers_full(manifest_path, name, path=path, k=k),
         manifest_path,
@@ -3053,7 +3496,7 @@ def get_callees(
     """
     if compact is not None:
         verbose = not compact
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    manifest_path = resolve_manifest_path(bundle_manifest)
     return project_read_result(
         _get_callees_full(manifest_path, name, path=path, k=k),
         manifest_path,

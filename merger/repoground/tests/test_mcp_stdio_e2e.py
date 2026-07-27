@@ -60,7 +60,9 @@ def _manifest(path: Path, *, repo: Path, commit: str) -> Path:
     return manifest
 
 
-def test_mcp_stdio_launcher_completes_handshake_outside_checkout(tmp_path: Path) -> None:
+def test_mcp_stdio_launcher_completes_handshake_outside_checkout(
+    tmp_path: Path,
+) -> None:
     client_cwd = tmp_path / "client-cwd"
     bundle_root = tmp_path / "bundles"
     client_cwd.mkdir()
@@ -108,10 +110,12 @@ def test_mcp_stdio_launcher_completes_handshake_outside_checkout(tmp_path: Path)
     responses = [json.loads(line) for line in completed.stdout.splitlines()]
     assert [response["id"] for response in responses] == [1, 2]
     assert responses[0]["result"]["protocolVersion"] == PROTOCOL_VERSION
-    assert {
-        tool["name"] for tool in responses[1]["result"]["tools"]
-    } == {
+    assert {tool["name"] for tool in responses[1]["result"]["tools"]} == {
+        "bundle_discover",
+        "snapshot_status",
         "ask_context",
+        "query_existing_index",
+        "range_get",
         "grounding_verify",
         "live_freshness",
         "find_symbol",
@@ -235,7 +239,9 @@ def _symbol_manifest(bundle_root: Path, *, repo: Path, commit: str) -> Path:
     return manifest
 
 
-def _run_launcher(bundle_root: Path, repo_root: Path | None, requests: list[dict]) -> list[dict]:
+def _run_launcher(
+    bundle_root: Path, repo_root: Path | None, requests: list[dict]
+) -> list[dict]:
     args = [sys.executable, str(MCP_LAUNCHER), "--bundle-root", str(bundle_root)]
     if repo_root is not None:
         args += ["--repo-root", str(repo_root)]
@@ -266,7 +272,9 @@ def _handshake(next_id: int, *calls: dict) -> list[dict]:
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git executable unavailable")
-def test_find_symbol_tools_call_returns_ranked_location_and_freshness(tmp_path: Path) -> None:
+def test_find_symbol_tools_call_returns_ranked_location_and_freshness(
+    tmp_path: Path,
+) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "--initial-branch=main")
@@ -296,8 +304,12 @@ def test_find_symbol_tools_call_returns_ranked_location_and_freshness(tmp_path: 
     responses = _run_launcher(bundle_root, repo, requests)
     call_response = next(r for r in responses if r.get("id") == 2)
     assert "error" not in call_response, call_response
-    payload = json.loads(call_response["result"]["content"][0]["text"])
+    summary = json.loads(call_response["result"]["content"][0]["text"])
+    payload = call_response["result"]["structuredContent"]
 
+    assert summary["tool"] == "find_symbol"
+    assert summary["status"] == "available"
+    assert len(call_response["result"]["content"][0]["text"].encode("utf-8")) < 300
     assert payload["tool"] == "find_symbol"
     assert payload["status"] == "available"
     hits = payload["result"]["hits"]
@@ -312,12 +324,16 @@ def test_find_symbol_tools_call_returns_ranked_location_and_freshness(tmp_path: 
     assert payload["live_freshness"]["current_provenance"]["git_commit"] == commit
 
 
-def test_find_symbol_tools_call_rejects_empty_name_and_invalid_kind(tmp_path: Path) -> None:
+def test_find_symbol_tools_call_rejects_empty_name_and_invalid_kind(
+    tmp_path: Path,
+) -> None:
     bundle_root = tmp_path / "bundles"
     bundle_root.mkdir()
     manifest = bundle_root / "demo.bundle.manifest.json"
     manifest.write_text(
-        json.dumps({"kind": "repolens.bundle.manifest", "run_id": "demo", "artifacts": []}),
+        json.dumps(
+            {"kind": "repolens.bundle.manifest", "run_id": "demo", "artifacts": []}
+        ),
         encoding="utf-8",
     )
 
@@ -338,7 +354,11 @@ def test_find_symbol_tools_call_rejects_empty_name_and_invalid_kind(tmp_path: Pa
             "method": "tools/call",
             "params": {
                 "name": "find_symbol",
-                "arguments": {"bundle_manifest": str(manifest), "name": "run", "kind": "macro"},
+                "arguments": {
+                    "bundle_manifest": str(manifest),
+                    "name": "run",
+                    "kind": "macro",
+                },
             },
         },
     )
@@ -544,8 +564,12 @@ def test_get_callees_tools_call_round_trips_evidence_over_stdio(tmp_path: Path) 
     )
     response = next(item for item in responses if item.get("id") == 2)
     assert "error" not in response, response
-    payload = json.loads(response["result"]["content"][0]["text"])
+    summary = json.loads(response["result"]["content"][0]["text"])
+    payload = response["result"]["structuredContent"]
 
+    assert summary["tool"] == "get_callees"
+    assert summary["status"] == "available"
+    assert len(response["result"]["content"][0]["text"].encode("utf-8")) < 300
     assert payload["tool"] == "get_callees"
     assert payload["status"] == "available"
     result = payload["result"]

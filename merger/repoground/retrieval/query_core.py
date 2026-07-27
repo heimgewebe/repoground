@@ -368,6 +368,72 @@ def _handle_semantic_encoding_failure(
     semantic_diagnostics["dimension_validation"] = _DIMENSION_VALIDATION_ERROR
 
 
+def _read_only_policy_path(
+    index_path: Path,
+    validated_source_path: Optional[Path],
+) -> Path:
+    if validated_source_path is None:
+        return index_path
+    if not validated_source_path.is_absolute():
+        raise ValueError(
+            "Invalid index path: expected an absolute validated source path."
+        )
+    if (
+        index_path.parent not in (Path("/proc/self/fd"), Path("/dev/fd"))
+        or not index_path.name.isdecimal()
+    ):
+        raise ValueError("Invalid index path: expected a verified descriptor path.")
+    return validated_source_path
+
+
+def validate_read_only_sqlite_source_path(index_path: Path) -> Path:
+    source_path = Path(index_path)
+    raw_source_path = str(source_path)
+    if "\x00" in raw_source_path:
+        raise ValueError("Invalid index path: NUL bytes are not allowed.")
+    if not source_path.is_absolute():
+        raise ValueError(
+            "Invalid index path: expected an absolute read-only index path."
+        )
+    if not source_path.name.endswith(_REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX):
+        raise ValueError("Invalid index path: expected canonical read-only index file.")
+    return source_path
+
+
+def _open_query_connection(
+    index_path: Path,
+    *,
+    read_only: bool,
+    validated_source_path: Optional[Path],
+) -> sqlite3.Connection:
+    raw_index_path = str(index_path)
+    if "\x00" in raw_index_path:
+        raise ValueError("Invalid index path: NUL bytes are not allowed.")
+    if validated_source_path is not None and not read_only:
+        raise ValueError(
+            "Invalid index path: a validated source requires read-only mode."
+        )
+    policy_index_path = _read_only_policy_path(index_path, validated_source_path)
+    if read_only:
+        validate_read_only_sqlite_source_path(policy_index_path)
+    if not read_only and not any(
+        index_path.name.endswith(suffix) for suffix in _ALLOWED_SQLITE_INDEX_SUFFIXES
+    ):
+        raise ValueError(
+            "Invalid index path: expected a SQLite index file "
+            f"ending with one of {_ALLOWED_SQLITE_INDEX_SUFFIXES!r}."
+        )
+    if not read_only:
+        return sqlite3.connect(str(index_path))
+    if not index_path.is_absolute():
+        raise ValueError(
+            "Invalid index path: expected an absolute read-only index path."
+        )
+    db_uri = f"{index_path.as_uri()}?mode=ro&immutable=1"
+    # Callers validate and confine the index path before read-only execution.
+    return sqlite3.connect(db_uri, uri=True)  # lgtm[py/path-injection] codeql-boundary:query-readonly-index
+
+
 def _score_results_with_cosine(
     results: List[Dict[str, Any]],
     cosine_scores: Any,
@@ -450,6 +516,7 @@ def execute_query(
     _prepared_fts_query: Optional[str] = None,
     _prepared_router_output: Optional[Dict[str, Any]] = None,
     read_only: bool = False,
+    _validated_read_only_source_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Executes a query against the SQLite index.
@@ -477,28 +544,17 @@ def execute_query(
 
     conn = None
     try:
-        raw_index_path = str(index_path)
-        if "\x00" in raw_index_path:
-            raise ValueError("Invalid index path: NUL bytes are not allowed.")
         resolved_index_path = Path(index_path)
-        if read_only and not resolved_index_path.name.endswith(_REQUIRED_READ_ONLY_SQLITE_INDEX_SUFFIX):
-            raise ValueError("Invalid index path: expected canonical read-only index file.")
-        if not read_only and not any(
-            resolved_index_path.name.endswith(suffix)
-            for suffix in _ALLOWED_SQLITE_INDEX_SUFFIXES
-        ):
-            raise ValueError(
-                "Invalid index path: expected a SQLite index file "
-                f"ending with one of {_ALLOWED_SQLITE_INDEX_SUFFIXES!r}."
-            )
-        if read_only:
-            if not resolved_index_path.is_absolute():
-                raise ValueError("Invalid index path: expected an absolute read-only index path.")
-            db_uri = f"{resolved_index_path.as_uri()}?mode=ro&immutable=1"
-            # Callers validate and confine the index path before read-only execution.
-            conn = sqlite3.connect(db_uri, uri=True)  # lgtm[py/path-injection] codeql-boundary:query-readonly-index
-        else:
-            conn = sqlite3.connect(str(resolved_index_path))
+        validated_source_path = (
+            Path(_validated_read_only_source_path)
+            if _validated_read_only_source_path is not None
+            else None
+        )
+        conn = _open_query_connection(
+            resolved_index_path,
+            read_only=read_only,
+            validated_source_path=validated_source_path,
+        )
         conn.row_factory = sqlite3.Row
 
         where_clauses = []

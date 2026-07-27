@@ -13,6 +13,10 @@ from merger.repoground.core.bundle_access import (
     get_callees,
     get_callers,
 )
+from merger.repoground.core.manifest_snapshot import (
+    capture_manifest_snapshot,
+    use_manifest_binding,
+)
 
 RUN_ID = "run-1"
 CANONICAL_SHA = "a" * 64
@@ -307,6 +311,59 @@ def _refresh_manifest_artifact(manifest: Path, role: str, artifact: Path) -> Non
     manifest.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _navigation_manifest_generations(
+    tmp_path: Path,
+) -> tuple[Path, bytes, bytes]:
+    publication = tmp_path / "publication"
+    generation_a = publication / "generation-a"
+    generation_b = publication / "generation-b"
+    generation_a.mkdir(parents=True)
+    generation_b.mkdir(parents=True)
+    manifest_a, _, _ = _write_bundle(generation_a)
+    manifest_b, call_graph_b, symbol_index_b = _write_bundle(generation_b)
+
+    call_payload = json.loads(call_graph_b.read_text(encoding="utf-8"))
+    call_payload["calls"][0]["simple_name"] = "generation_b_target"
+    call_payload["calls"][0]["callee_expression"] = "generation_b_target"
+    call_graph_b.write_text(json.dumps(call_payload), encoding="utf-8")
+    _refresh_manifest_artifact(
+        manifest_b,
+        "python_call_graph_json",
+        call_graph_b,
+    )
+
+    symbol_payload = json.loads(symbol_index_b.read_text(encoding="utf-8"))
+    selected_target = next(
+        item for item in symbol_payload["symbols"] if item["id"] == TARGET_ID
+    )
+    selected_target["name"] = "generation_b_target"
+    selected_target["qualified_name"] = "generation_b_target"
+    symbol_index_b.write_text(json.dumps(symbol_payload), encoding="utf-8")
+    _refresh_manifest_artifact(
+        manifest_b,
+        "python_symbol_index_json",
+        symbol_index_b,
+    )
+
+    def publication_bytes(source: Path, generation: str) -> bytes:
+        document = json.loads(source.read_text(encoding="utf-8"))
+        for artifact in document["artifacts"]:
+            artifact["path"] = f"{generation}/{artifact['path']}"
+        return json.dumps(document, sort_keys=True).encode("utf-8")
+
+    active_manifest = publication / "demo.bundle.manifest.json"
+    manifest_a_bytes = publication_bytes(manifest_a, generation_a.name)
+    manifest_b_bytes = publication_bytes(manifest_b, generation_b.name)
+    active_manifest.write_bytes(manifest_a_bytes)
+    return active_manifest, manifest_a_bytes, manifest_b_bytes
+
+
+def _replace_manifest_bytes(path: Path, raw: bytes, label: str) -> None:
+    replacement = path.with_name(f"{label}.bundle.manifest.json")
+    replacement.write_bytes(raw)
+    replacement.replace(path)
+
+
 def test_navigation_cache_reuses_validated_call_state(tmp_path, monkeypatch):
     manifest = _bundle(tmp_path)
     original = bundle_access._load_call_graph_source
@@ -325,6 +382,94 @@ def test_navigation_cache_reuses_validated_call_state(tmp_path, monkeypatch):
     assert cold == warm
     assert calls == 1
     assert len(bundle_access._CALL_NAVIGATION_CACHE) == 1
+
+
+def test_bound_manifest_excludes_warm_call_cache_from_other_generation(tmp_path):
+    manifest, manifest_a, manifest_b = _navigation_manifest_generations(tmp_path)
+    _replace_manifest_bytes(manifest, manifest_b, "warm-generation-b")
+    warmed_b = find_references(manifest, "target", k=10)
+    assert warmed_b["exact_match_count"] == 3
+
+    _replace_manifest_bytes(manifest, manifest_a, "select-generation-a")
+    binding_a = capture_manifest_snapshot(manifest).binding
+    with use_manifest_binding(binding_a):
+        _replace_manifest_bytes(manifest, manifest_b, "transient-generation-b")
+        try:
+            selected_a = find_references(manifest, "target", k=10)
+        finally:
+            _replace_manifest_bytes(manifest, manifest_a, "restore-generation-a")
+
+    assert selected_a["status"] == "available"
+    assert selected_a["exact_match_count"] == 4
+
+
+def test_bound_manifest_excludes_warm_symbol_cache_from_other_generation(tmp_path):
+    manifest, manifest_a, manifest_b = _navigation_manifest_generations(tmp_path)
+    _replace_manifest_bytes(manifest, manifest_b, "warm-generation-b")
+    warmed_b = get_callers(
+        manifest,
+        "generation_b_target",
+        path="pkg/target.py",
+        k=10,
+    )
+    assert warmed_b["status"] == "available"
+    assert warmed_b["target_symbol"]["name"] == "generation_b_target"
+
+    _replace_manifest_bytes(manifest, manifest_a, "select-generation-a")
+    binding_a = capture_manifest_snapshot(manifest).binding
+    with use_manifest_binding(binding_a):
+        _replace_manifest_bytes(manifest, manifest_b, "transient-generation-b")
+        try:
+            selected_a = get_callers(
+                manifest,
+                "target",
+                path="pkg/target.py",
+                k=10,
+            )
+        finally:
+            _replace_manifest_bytes(manifest, manifest_a, "restore-generation-a")
+
+    assert selected_a["status"] == "available"
+    assert selected_a["target_symbol"]["name"] == "target"
+
+
+def test_matching_bound_manifest_reuses_call_and_symbol_warm_caches(
+    tmp_path,
+    monkeypatch,
+):
+    manifest, manifest_a, manifest_b = _navigation_manifest_generations(tmp_path)
+    warmed_a = get_callers(
+        manifest,
+        "target",
+        path="pkg/target.py",
+        k=10,
+    )
+    assert warmed_a["status"] == "available"
+    binding_a = capture_manifest_snapshot(manifest).binding
+
+    def forbidden_reload(*_args, **_kwargs):
+        raise AssertionError(
+            "matching manifest binding must reuse warm navigation state"
+        )
+
+    monkeypatch.setattr(bundle_access, "_load_call_graph_source", forbidden_reload)
+    monkeypatch.setattr(bundle_access, "_load_symbol_index_source", forbidden_reload)
+    with use_manifest_binding(binding_a):
+        _replace_manifest_bytes(manifest, manifest_b, "transient-generation-b")
+        try:
+            references = find_references(manifest, "target", k=10)
+            callers = get_callers(
+                manifest,
+                "target",
+                path="pkg/target.py",
+                k=10,
+            )
+        finally:
+            _replace_manifest_bytes(manifest, manifest_a, "restore-generation-a")
+
+    assert references["status"] == "available"
+    assert references["exact_match_count"] == 4
+    assert callers == warmed_a
 
 
 def test_public_navigation_results_cannot_mutate_cached_state(tmp_path):
