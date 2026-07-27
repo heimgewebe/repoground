@@ -470,6 +470,26 @@ def test_eval_report_stdout_is_byte_stable(tmp_path, capsys):
     assert "timestamp" not in payload["diagnostics_report"]["metadata"]
 
 
+def test_json_input_parent_symlink_loop_returns_bounded_error(tmp_path, capsys):
+    loop = tmp_path / "loop"
+    loop.symlink_to("loop", target_is_directory=True)
+
+    code = main(
+        [
+            "diagnostics",
+            "history-lens",
+            "--records",
+            str(loop / "records.json"),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "input path cannot be resolved safely" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_json_inputs_reject_symbolic_links(tmp_path, capsys):
     target = _write_json(tmp_path / "records.json", [])
     link = tmp_path / "records-link.json"

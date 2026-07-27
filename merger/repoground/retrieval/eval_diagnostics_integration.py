@@ -77,6 +77,28 @@ def _validate_eval_detail_fields(
     return query_text, expected, is_relevant, found_count, top_results
 
 
+def _query_execution_error(
+    detail: Dict[str, Any],
+    *,
+    index: int,
+) -> Optional[str]:
+    prefix = f"retrieval_eval['details'][{index}]"
+    error = detail.get("error")
+    if error is not None:
+        if not isinstance(error, str) or not error.strip():
+            raise ValueError(f"Expected {prefix}['error'] to be a non-empty string.")
+
+    why_fail = detail.get("why_fail")
+    if why_fail is None and isinstance(detail.get("why"), dict):
+        why_fail = detail["why"].get("why_fail")
+    if why_fail is not None and not isinstance(why_fail, str):
+        raise ValueError(f"Expected {prefix}['why_fail'] to be a string.")
+
+    if why_fail == "query execution failed":
+        return error or why_fail
+    return None
+
+
 def integrate_diagnostics_with_eval_results(
     eval_results: Dict[str, Any],
     index_path: Optional[Path] = None,
@@ -173,6 +195,8 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
             top_results,
         ) = _validate_eval_detail_fields(detail, index=detail_idx)
 
+        query_error = _query_execution_error(detail, index=detail_idx)
+
         # Prefer configured eval k from metrics (e.g., recall@10), because top_results
         # may be shorter than k for low-hit queries.
         top_k = (
@@ -183,6 +207,21 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
 
         # For each expected target, create a miss record
         for expected_target in expected:
+            if query_error is not None:
+                misses.append(
+                    {
+                        "query_id": f"q{detail_idx}",
+                        "query_text": query_text,
+                        "expected_target": expected_target,
+                        "found_in_results": False,
+                        "rank_in_results": None,
+                        "top_k": top_k,
+                        "query_had_zero_hits": True,
+                        "query_error": query_error,
+                    }
+                )
+                continue
+
             # Try to determine if target was in results
             found_in_results = False
             rank_in_results = None

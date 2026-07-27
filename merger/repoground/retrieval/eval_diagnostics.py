@@ -15,6 +15,7 @@ the gold set. It answers "why" a miss occurred, enabling targeted remediation de
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 import re
@@ -101,6 +102,30 @@ def _required_chunk_identifier(
         return chunk_id
     assert legacy_id is not None
     return legacy_id
+
+
+_RFC3339_DATETIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
+
+
+def _validate_report_timestamp(timestamp: Any) -> Optional[str]:
+    if timestamp is None:
+        return None
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        raise ValueError("timestamp must be an RFC 3339 date-time when provided")
+    if _RFC3339_DATETIME.fullmatch(timestamp) is None:
+        raise ValueError("timestamp must be an RFC 3339 date-time when provided")
+    normalized = timestamp[:-1] + "+00:00" if timestamp.endswith("Z") else timestamp
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError(
+            "timestamp must be an RFC 3339 date-time when provided"
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must be an RFC 3339 date-time when provided")
+    return timestamp
 
 
 class RetrievalEvalDiagnosticsError(Exception):
@@ -642,6 +667,41 @@ class RetrievalEvalDiagnosticsCalibrator:
         # Keep symbol-like names (e.g., "iter_report_blocks", "Class.method") ambiguous.
         return bool(re.search(r"\.[A-Za-z0-9]{1,8}$", target))
 
+    def _diagnose_report_miss(self, miss: Dict[str, Any]) -> DiagnosticsRecord:
+        query_error = miss.get("query_error")
+        if query_error is not None:
+            if not isinstance(query_error, str) or not query_error.strip():
+                raise ValueError("query_error must be a non-empty string when provided")
+            return DiagnosticsRecord(
+                query_id=miss.get("query_id", ""),
+                query_text=miss.get("query_text", ""),
+                expected_target=miss.get("expected_target", ""),
+                primary_diagnosis="diagnostic_inconclusive",
+                diagnosis_details={
+                    "target_found_in_index": False,
+                    "target_found_in_canonical": False,
+                    "target_found_in_citation_map": False,
+                    "rank_in_results": None,
+                    "top_k": miss.get("top_k"),
+                    "query_had_zero_hits": True,
+                    "canonical_path_check": "unavailable",
+                    "possible_path_variants": [],
+                    "staleness_indicator": "none",
+                    "secondary_diagnoses": [],
+                    "confidence": "low",
+                    "instrumentation_notes": f"query execution failed: {query_error}",
+                },
+            )
+        return self.diagnose_miss(
+            query_id=miss.get("query_id", ""),
+            query_text=miss.get("query_text", ""),
+            expected_target=miss.get("expected_target", ""),
+            found_in_results=miss.get("found_in_results", False),
+            rank_in_results=miss.get("rank_in_results"),
+            top_k=miss.get("top_k"),
+            query_had_zero_hits=miss.get("query_had_zero_hits", False),
+        )
+
     def generate_report(
         self,
         misses: List[Dict[str, Any]],
@@ -666,9 +726,7 @@ class RetrievalEvalDiagnosticsCalibrator:
         Returns:
             Complete diagnostics report conforming to schema.
         """
-        if timestamp is not None:
-            if not isinstance(timestamp, str) or not timestamp.strip():
-                raise ValueError("timestamp must be a non-empty string when provided")
+        timestamp = _validate_report_timestamp(timestamp)
 
         # Load artifacts once
         self._load_artifacts()
@@ -687,15 +745,7 @@ class RetrievalEvalDiagnosticsCalibrator:
 
         for miss_index, miss in enumerate(misses):
             miss = _require_json_object(miss, source=f"misses[{miss_index}]")
-            record = self.diagnose_miss(
-                query_id=miss.get("query_id", ""),
-                query_text=miss.get("query_text", ""),
-                expected_target=miss.get("expected_target", ""),
-                found_in_results=miss.get("found_in_results", False),
-                rank_in_results=miss.get("rank_in_results"),
-                top_k=miss.get("top_k"),
-                query_had_zero_hits=miss.get("query_had_zero_hits", False),
-            )
+            record = self._diagnose_report_miss(miss)
 
             diagnostics_records.append(record.to_dict())
             breakdowns[record.primary_diagnosis] += 1

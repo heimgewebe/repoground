@@ -21,7 +21,13 @@ _MAX_JSON_BYTES = 8 * 1024 * 1024
 
 def _read_input_payload(path_value: str) -> tuple[Path, bytes]:
     requested_path = Path(path_value).expanduser()
-    path = requested_path.parent.resolve(strict=True) / requested_path.name
+    try:
+        anchored_parent = requested_path.parent.resolve(strict=True)
+    except RuntimeError as exc:
+        raise ValueError(
+            f"input path cannot be resolved safely: {requested_path}"
+        ) from exc
+    path = anchored_parent / requested_path.name
     before_open = path.lstat()
     if stat.S_ISLNK(before_open.st_mode):
         raise ValueError(f"refusing symbolic-link input: {path}")

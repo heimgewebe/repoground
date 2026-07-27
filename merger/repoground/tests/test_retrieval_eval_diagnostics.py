@@ -289,6 +289,38 @@ class TestIntegrationExtraction:
         assert misses[0]["rank_in_results"] == 2
         assert misses[0]["top_k"] == 1
 
+    def test_query_execution_error_is_diagnostic_inconclusive(
+        self, tmp_artifacts
+    ):
+        eval_results = {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "find merge",
+                    "expected": ["merger/repoground/core/merge.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                    "error": "backend unavailable",
+                    "why_fail": "query execution failed",
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        ).generate_report(misses)
+
+        assert misses[0]["query_error"] == "backend unavailable"
+        diagnosis = report["diagnostics"][0]
+        assert diagnosis["primary_diagnosis"] == "diagnostic_inconclusive"
+        assert diagnosis["primary_diagnosis"] != "target_exists_not_in_top_k"
+        assert diagnosis["diagnosis_details"]["confidence"] == "low"
+        assert "query execution failed" in diagnosis["diagnosis_details"][
+            "instrumentation_notes"
+        ]
+
     def test_extract_rejects_legacy_results_key(self):
         eval_results = {
             "metrics": {},
@@ -597,9 +629,16 @@ class TestRetrievalEvalDiagnosticsCalibrator:
             / "retrieval-eval-diagnostics.v1.schema.json"
         )
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        jsonschema.validate(instance=report, schema=schema)
+        jsonschema.validate(
+            instance=report,
+            schema=schema,
+            format_checker=jsonschema.FormatChecker(),
+        )
 
-    @pytest.mark.parametrize("timestamp", ["", "   ", 7])
+    @pytest.mark.parametrize(
+        "timestamp",
+        ["", "   ", 7, "not-a-date", "2026-05-26T12:00:00"],
+    )
     def test_report_rejects_invalid_optional_timestamp(
         self, tmp_artifacts, timestamp
     ):
@@ -609,7 +648,7 @@ class TestRetrievalEvalDiagnosticsCalibrator:
 
         with pytest.raises(
             ValueError,
-            match="timestamp must be a non-empty string when provided",
+            match="timestamp must be an RFC 3339 date-time when provided",
         ):
             calibrator.generate_report([], timestamp=timestamp)
 
