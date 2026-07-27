@@ -14,6 +14,7 @@ import jsonschema
 import pytest
 
 from scripts.release.build_release_candidate import (
+    RETIRED_RELEASE_CONTRACT_PATHS,
     build_release_candidate,
     safe_symlink_target,
 )
@@ -485,6 +486,41 @@ def test_release_contract_rejects_lock_python_mismatch(tmp_path: Path) -> None:
     codes = {item["code"] for item in report["findings"]}
     assert "WORKFLOW_LOCK_PYTHON_MISMATCH" in codes
 
+
+
+def test_retired_release_contract_paths_match_compatibility_exit() -> None:
+    exit_contract = json.loads(
+        (ROOT / "docs/contracts/repoground-compatibility-exit.v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    retired_paths = {
+        item["former_path"] for item in exit_contract["retired_contracts"]
+    }
+    assert retired_paths == set(RETIRED_RELEASE_CONTRACT_PATHS)
+
+
+@pytest.mark.parametrize(
+    "retired_path",
+    (
+        "merger/repoground/contracts/repobrief-release-candidate.v1.schema.json",
+        "merger/repoground/contracts/repobrief-semantic-platforms.v1.schema.json",
+    ),
+)
+def test_retired_repobrief_release_contract_is_rejected(
+    tmp_path: Path, retired_path: str
+) -> None:
+    repo = _repo(tmp_path)
+    path = repo / retired_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", retired_path)
+    _git(repo, "commit", "-qm", "add retired release contract")
+
+    with pytest.raises(
+        ValueError, match="retired RepoBrief release contracts are forbidden"
+    ):
+        build_release_candidate(repo, tmp_path / "candidate")
 
 
 def test_legacy_repobrief_release_identity_is_rejected(tmp_path: Path) -> None:

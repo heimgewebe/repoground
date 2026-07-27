@@ -31,6 +31,10 @@ SEMANTIC_CONSTRAINTS_PATH = (
     "requirements/repoground-semantic-linux-x86_64-py312.constraints.txt"
 )
 SEMANTIC_LOCK_PATH = "requirements/repoground-semantic-linux-x86_64-py312.lock.txt"
+RETIRED_RELEASE_CONTRACT_PATHS = (
+    "merger/repoground/contracts/repobrief-release-candidate.v1.schema.json",
+    "merger/repoground/contracts/repobrief-semantic-platforms.v1.schema.json",
+)
 DOES_NOT_ESTABLISH = (
     "official_release_status",
     "product_readiness",
@@ -136,6 +140,16 @@ def list_tree(repo: Path, commit: str) -> tuple[TreeEntry, ...]:
         entries.append(TreeEntry(mode, object_type, object_id, path))
     entries.sort(key=lambda item: item.path.encode("utf-8", errors="surrogateescape"))
     return tuple(entries)
+
+
+def _reject_retired_release_contracts(entries: Iterable[TreeEntry]) -> None:
+    retired = set(RETIRED_RELEASE_CONTRACT_PATHS)
+    present = sorted(entry.path for entry in entries if entry.path in retired)
+    if present:
+        raise ValueError(
+            "retired RepoBrief release contracts are forbidden in RepoGround "
+            "release candidates: " + ", ".join(present)
+        )
 
 
 def safe_symlink_target(path: str, target: str) -> bool:
@@ -277,6 +291,7 @@ def build_release_candidate(
         raise ValueError("LICENSE does not contain the Apache-2.0 license text")
 
     entries = list_tree(repo_path, commit)
+    _reject_retired_release_contracts(entries)
     candidate_id = f"{release_version}-g{commit[:12]}"
     prefix = f"repoground-{candidate_id}/"
     archive_name = f"repoground-{candidate_id}.tar.gz"

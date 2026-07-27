@@ -20,7 +20,29 @@
       "environment_fallback",
       "runtime_storage_fallback",
       "resource_scheme_alias",
-      "reader_compatibility"
+      "reader_compatibility",
+      "active_release_contract_support",
+      "release_archive_presence"
     ]
-  }
+  },
+  "retired_contracts": [
+    {
+      "former_path": "merger/repoground/contracts/repobrief-release-candidate.v1.schema.json",
+      "former_schema_id": "https://heimgewebe.local/schema/repobrief-release-candidate.v1.schema.json",
+      "former_kind": "repobrief.release_candidate",
+      "status": "unsupported",
+      "successor_path": "merger/repoground/contracts/repoground-release-candidate.v1.schema.json",
+      "current_tree_presence": "forbidden",
+      "release_archive_presence": "forbidden"
+    },
+    {
+      "former_path": "merger/repoground/contracts/repobrief-semantic-platforms.v1.schema.json",
+      "former_schema_id": "https://heimgewebe.local/schema/repobrief-semantic-platforms.v1.schema.json",
+      "former_kind": "repobrief.semantic_platforms",
+      "status": "unsupported",
+      "successor_path": "merger/repoground/contracts/repoground-semantic-platforms.v1.schema.json",
+      "current_tree_presence": "forbidden",
+      "release_archive_presence": "forbidden"
+    }
+  ]
 }
