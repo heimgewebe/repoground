@@ -178,6 +178,27 @@ class TestIntegrationExtraction:
 
         assert _extract_misses_from_eval(eval_results) == []
 
+    def test_extract_does_not_reverse_match_result_inside_expected_target(self):
+        eval_results = {
+            "metrics": {"recall@1": 0.0},
+            "details": [
+                {
+                    "query": "find exact module",
+                    "expected": ["src/foo.py.extra"],
+                    "is_relevant": False,
+                    "found_count": 1,
+                    "top_results": ["src/foo.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+
+        assert len(misses) == 1
+        assert misses[0]["expected_target"] == "src/foo.py.extra"
+        assert misses[0]["found_in_results"] is False
+        assert misses[0]["rank_in_results"] is None
+
     def test_extract_keeps_found_target_below_configured_top_k_as_miss(self):
         eval_results = {
             "metrics": {"recall@1": 0.0},

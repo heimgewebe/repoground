@@ -20,7 +20,8 @@ _MAX_JSON_BYTES = 8 * 1024 * 1024
 
 
 def _read_input_payload(path_value: str) -> tuple[Path, bytes]:
-    path = Path(path_value).expanduser()
+    requested_path = Path(path_value).expanduser()
+    path = requested_path.parent.resolve(strict=True) / requested_path.name
     before_open = path.lstat()
     if stat.S_ISLNK(before_open.st_mode):
         raise ValueError(f"refusing symbolic-link input: {path}")
@@ -56,11 +57,11 @@ def _read_input_payload(path_value: str) -> tuple[Path, bytes]:
     return path, payload
 
 
-def _read_json(
+def _read_json_with_path(
     path_value: str,
     *,
     expected_type: type | tuple[type, ...] | None = None,
-) -> Any:
+) -> tuple[Path, Any]:
     path, payload = _read_input_payload(path_value)
     value = strict_json_loads(payload.decode("utf-8"), source=f"input {path}")
     if expected_type is not None and not isinstance(value, expected_type):
@@ -70,7 +71,15 @@ def _read_json(
             else expected_type.__name__
         )
         raise ValueError(f"input must contain JSON {expected_name}: {path}")
-    return value
+    return path, value
+
+
+def _read_json(
+    path_value: str,
+    *,
+    expected_type: type | tuple[type, ...] | None = None,
+) -> Any:
+    return _read_json_with_path(path_value, expected_type=expected_type)[1]
 
 
 def _read_validated_citation_map_jsonl(
@@ -289,10 +298,13 @@ def _run_answer_delta(args: argparse.Namespace) -> dict[str, Any]:
         if args.new_citation_map
         else None
     )
-    manifest_data = _read_json(args.new_bundle_manifest, expected_type=dict)
+    manifest_path, manifest_data = _read_json_with_path(
+        args.new_bundle_manifest,
+        expected_type=dict,
+    )
     return check_answer_grounding_delta(
         declaration,
-        new_bundle_manifest=args.new_bundle_manifest,
+        new_bundle_manifest=manifest_path,
         new_bundle_manifest_data=manifest_data,
         new_citation_map=args.new_citation_map,
         new_citation_entries=citation_entries,

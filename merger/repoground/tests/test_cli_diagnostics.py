@@ -186,7 +186,11 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
     tmp_path, capsys, monkeypatch
 ):
     declaration = _write_json(tmp_path / "declaration.json", {"used_citations": []})
-    manifest = _write_bundle_manifest(tmp_path / "bundle.manifest.json")
+    bundle_dir = tmp_path / "bundle"
+    bundle_dir.mkdir()
+    manifest = _write_bundle_manifest(bundle_dir / "bundle.manifest.json")
+    bundle_link = tmp_path / "bundle-link"
+    bundle_link.symlink_to(bundle_dir, target_is_directory=True)
     citation_map = tmp_path / "citations.jsonl"
     citation_map.write_text(
         json.dumps({"citation_id": "cit_0000000000000001"}) + "\n",
@@ -198,9 +202,10 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
 
     def tracked_read_input_payload(path_value):
         nonlocal manifest_reads
-        if Path(path_value) == manifest:
+        anchored_path, payload = real_read_input_payload(path_value)
+        if anchored_path == manifest:
             manifest_reads += 1
-        return real_read_input_payload(path_value)
+        return anchored_path, payload
 
     def fake_check(
         value,
@@ -227,6 +232,7 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
         "_read_input_payload",
         tracked_read_input_payload,
     )
+    monkeypatch.chdir(tmp_path)
 
     code, result = _run(
         capsys,
@@ -235,7 +241,7 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
             "--old-declaration",
             str(declaration),
             "--new-bundle-manifest",
-            str(manifest),
+            str(Path(bundle_link.name) / manifest.name),
             "--new-citation-map",
             str(citation_map),
         ],
@@ -246,7 +252,7 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
     assert manifest_reads == 1
     assert seen == {
         "value": {"used_citations": []},
-        "manifest": str(manifest),
+        "manifest": manifest,
         "manifest_data": {
             "kind": "repolens.bundle.manifest",
             "version": "1.0",

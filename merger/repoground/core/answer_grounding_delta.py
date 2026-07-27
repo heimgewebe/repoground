@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from merger.repoground.core.answer_grounding import NON_CLAIMS
-from merger.repoground.core.range_resolver import resolve_range_ref
+from merger.repoground.core.availability import snapshot_freshness_model
 from merger.repoground.core.bundle_access import snapshot_status
+from merger.repoground.core.range_resolver import resolve_range_ref
 
 KIND = "repobrief.answer_grounding_delta_verdict"
 VERSION = "1.0"
@@ -102,6 +103,29 @@ def _load_citation_entries(
     return _copy_citation_entries(prevalidated_entries), []
 
 
+def _manifest_context(
+    manifest: str | Path,
+    prevalidated_data: Mapping[str, Any] | None,
+) -> tuple[Path, dict[str, Any] | None]:
+    path = Path(manifest).expanduser()
+    if prevalidated_data is None:
+        return path.resolve(), None
+    if not path.is_absolute():
+        path = path.absolute()
+    return path, deepcopy(dict(prevalidated_data))
+
+
+def _new_snapshot_freshness(
+    manifest_path: Path,
+    manifest_data: Mapping[str, Any] | None,
+) -> Mapping[str, Any] | None:
+    if manifest_data is not None:
+        return snapshot_freshness_model(manifest_data)
+    status = snapshot_status(manifest_path)
+    freshness = status.get("freshness") if isinstance(status, dict) else None
+    return freshness if isinstance(freshness, Mapping) else None
+
+
 def check_answer_grounding_delta(
     old_declaration: Mapping[str, Any],
     *,
@@ -117,11 +141,9 @@ def check_answer_grounding_delta(
     When ``new_citation_entries`` is supplied, the citation-map path is not reread.
     When ``new_bundle_manifest_data`` is supplied, the manifest path is not reread.
     """
-    manifest_path = Path(new_bundle_manifest).expanduser().resolve()
-    manifest_data = (
-        deepcopy(dict(new_bundle_manifest_data))
-        if new_bundle_manifest_data is not None
-        else None
+    manifest_path, manifest_data = _manifest_context(
+        new_bundle_manifest,
+        new_bundle_manifest_data,
     )
     entries, diagnostics = _load_citation_entries(new_citation_map, new_citation_entries)
     citation_checks: list[dict[str, Any]] = []
@@ -181,8 +203,7 @@ def check_answer_grounding_delta(
     else:
         status = "valid"
 
-    new_status = snapshot_status(manifest_path, manifest_data=manifest_data)
-    new_freshness = new_status.get("freshness") if isinstance(new_status, dict) else None
+    new_freshness = _new_snapshot_freshness(manifest_path, manifest_data)
     return {
         "kind": KIND,
         "version": VERSION,

@@ -185,7 +185,7 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
 
             # Check if target was found (substring match in results)
             for rank_idx, res_path in enumerate(top_results):
-                if expected_target in res_path or res_path in expected_target:
+                if expected_target in res_path:
                     found_in_results = True
                     rank_in_results = rank_idx + 1
                     break
