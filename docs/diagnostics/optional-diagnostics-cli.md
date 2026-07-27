@@ -12,6 +12,7 @@ The explicit CLI gives each module a real consumer while preserving its authorit
 - CLI-loaded JSON control inputs are bounded to 8 MiB and symbolic links are rejected;
 - nested list members and well-formed JSONL records are type-checked before dispatch;
 - retrieval-evaluation detail fields enforce string, boolean, non-negative integer and non-empty string-list contracts;
+- retrieval artifact records require non-empty paths and identities, preserve the legacy chunk `id` alias, reject duplicates and fail closed on invalid JSONL;
 - answer citation maps require valid JSONL objects with unique, non-empty string citation IDs;
 - a validated answer citation map is passed as parsed records and is not reread by path;
 - answer declarations require list-shaped citation and range collections with valid evidence members;

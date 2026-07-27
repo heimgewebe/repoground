@@ -340,3 +340,52 @@ Thirty fresh-process normal CLI starts were measured after the broad suite compl
 Observed median delta: `+2.011 ms` or approximately `+1.46%`. The path-member validation remains behind the lazy diagnostics parser and executes only for `diagnostics eval-report`. The normal-start delta is reported as measured and may include fresh-process noise.
 
 Rollback of this addendum is the revert of `f2c55552e69e47c3f98c0c74ae0957cb2199237a`. Current-head GitHub CI and a fresh Codex review remain separate post-push gates.
+
+
+## Sixth review-hardening addendum
+
+Codex reviewed PR head `55e4289e906dd6f17da4ce427b0d4bb4186b49e2` and identified a sixth P2 boundary issue. A chunk-index record with an empty `path` was formally a string and therefore passed the first type check, but the empty substring matched every expected target. The resulting diagnostic could falsely claim that a target existed in the index and even connect unrelated citations.
+
+The finding is addressed by revision `88060705b548e218e9751b557bc053591f9dc199`.
+
+- Parent head: `55e4289e906dd6f17da4ce427b0d4bb4186b49e2`
+- Artifact-identity-hardening diff bytes: `16595`
+- Artifact-identity-hardening diff SHA-256: `61f46025a4cca02e4a05425ceadd61d8efa9222fe04c3f2c4d89b798647ac3a9`
+
+The correction closes the reported universal-path bug and the same error class in the adjacent identity chain:
+
+- chunk-index `path` values are required non-empty strings;
+- each chunk record requires a non-empty `chunk_id` or the supported legacy alias `id`;
+- when both chunk identity fields are present, they must agree;
+- duplicate chunk identities are rejected across the index;
+- citation records require non-empty, unique `citation_id` values;
+- present citation `chunk_id` values must be non-empty strings;
+- syntactically invalid chunk-index and citation-map JSONL lines fail closed instead of disappearing from the diagnostic evidence set;
+- the valid legacy `id` form remains covered by a positive compatibility test.
+
+Regression coverage includes missing, empty, whitespace-only and wrong-type paths and identities, conflicting aliases, duplicate chunk and citation identities, non-object records and invalid JSONL syntax. These inputs return exit code 2 with empty stdout and no traceback.
+
+While this fix was being verified, `origin/main` advanced from `40dd1088a642370c5a7cc0dfd19dbd59e6395a35` to `9a8a21d7e6e9bd4c17c0f36696dd67f7586ccf03` through `fix(ci): guard current test stub namespace (#1107)`. That commit changes only the test-stub workflow, its guard script and its guard tests. It had no file overlap with the diagnostics change. The feature branch merged the new base conflict-free in `40468c66fc78a53c2c6b9532429091f7fcade168`, preserving all already published review-fix hashes.
+
+Verification:
+
+- focused CLI and retrieval-diagnostics tests before the base merge: `87 passed in 2.16s`;
+- relevant six-module tests before the base merge: `203 passed in 2.61s`;
+- relevant tests plus the new main guard after the base merge: `207 passed in 2.65s`;
+- broad suite on the merged current-main basis, excluding only the two documented host-blocked Bubblewrap files: `4924 passed, 2 skipped in 144.94s`;
+- durable broad-test task: `8ddf8b5a685e471a8411be7e`;
+- durable lifecycle receipt SHA-256: `67b6f612ea731dadc2db54475885d9b438c8add4757de6c76934aa93ef237aa8`;
+- Ruff changed-scope check: pass;
+- graph-maintainability ratchet: pass;
+- module reachability: `205 production modules, 0 unproven, 0 documentation-only, 0 test-only`.
+
+Thirty fresh-process normal CLI starts were measured after the current-main merge and broad suite:
+
+| Revision | Median | p90 | Minimum | Maximum |
+|---|---:|---:|---:|---:|
+| current `main` `9a8a21d7…` | 142.835 ms | 145.422 ms | 138.212 ms | 148.992 ms |
+| artifact-hardened merged branch | 144.927 ms | 147.752 ms | 139.866 ms | 149.182 ms |
+
+Observed median delta: `+2.092 ms` or approximately `+1.46%`. The artifact validators remain behind the lazy diagnostics parser and execute only for `diagnostics eval-report`. The normal-start delta is reported as measured and may include fresh-process noise.
+
+Rollback of the technical addendum is the revert of `88060705b548e218e9751b557bc053591f9dc199`. The merge commit `40468c66fc78a53c2c6b9532429091f7fcade168` should not be reverted merely to roll back this feature, because it carries the independent current-main CI guard. Current-head GitHub CI and a fresh Codex review remain separate post-push gates.
