@@ -20,6 +20,8 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timezone
 import re
 
+from .diagnostics_json import strict_json_loads
+
 
 # C1 L3 inference boundary for the retrieval-eval-diagnostics.v1 artifact
 # (resolves the C2.4-tracked deferral). A retrieval-miss diagnosis is a mechanical
@@ -208,7 +210,10 @@ class IndexInspector:
                     if not line.strip():
                         continue
                     try:
-                        chunk = json.loads(line)
+                        chunk = strict_json_loads(
+                            line,
+                            source=f"chunk index line {line_number}",
+                        )
                     except json.JSONDecodeError as exc:
                         raise ValueError(
                             f"chunk index line {line_number} must be valid JSON"
@@ -257,7 +262,10 @@ class IndexInspector:
                     if not line.strip():
                         continue
                     try:
-                        chunk = json.loads(line)
+                        chunk = strict_json_loads(
+                            line,
+                            source=f"chunk index line {line_number}",
+                        )
                     except json.JSONDecodeError as exc:
                         raise ValueError(
                             f"chunk index line {line_number} must be valid JSON"
@@ -371,7 +379,10 @@ class IndexInspector:
                     if not line.strip():
                         continue
                     try:
-                        record = json.loads(line)
+                        record = strict_json_loads(
+                            line,
+                            source=f"citation map line {line_number}",
+                        )
                     except json.JSONDecodeError as exc:
                         raise ValueError(
                             f"citation map line {line_number} must be valid JSON"

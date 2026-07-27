@@ -284,6 +284,51 @@ def test_json_inputs_reject_symbolic_links(tmp_path, capsys):
     assert "refusing symbolic-link input" in captured.err
 
 
+def test_json_inputs_reject_excessive_nesting_without_traceback(tmp_path, capsys):
+    records = tmp_path / "records.json"
+    records.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
+
+    code = main(
+        [
+            "diagnostics",
+            "history-lens",
+            "--records",
+            str(records),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "exceeds the supported JSON nesting depth" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_json_inputs_reject_non_finite_constants_without_traceback(
+    tmp_path,
+    capsys,
+    constant,
+):
+    records = tmp_path / "records.json"
+    records.write_text(f'[{{"diagnostic_value": {constant}}}]', encoding="utf-8")
+
+    code = main(
+        [
+            "diagnostics",
+            "history-lens",
+            "--records",
+            str(records),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert f"non-finite JSON constant {constant!r}" in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_history_lens_rejects_non_object_records_without_traceback(tmp_path, capsys):
     records = _write_json(tmp_path / "records.json", [1])
 
@@ -460,6 +505,53 @@ def test_answer_delta_rejects_invalid_citation_map_records_without_traceback(
         tmp_path / "declaration.json",
         {"used_citations": [{"citation_id": "cit_0000000000000001"}]},
     )
+    citation_map = tmp_path / "citations.jsonl"
+    citation_map.write_text(citation_line + "\n", encoding="utf-8")
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            "bundle.manifest.json",
+            "--new-citation-map",
+            str(citation_map),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("citation_line", "expected_error"),
+    [
+        (
+            '{"citation_id":"cit-1","diagnostic_value":NaN}',
+            "non-finite JSON constant 'NaN'",
+        ),
+        (
+            '{"citation_id":"cit-1","nested":'
+            + "[" * 2000
+            + "0"
+            + "]" * 2000
+            + "}",
+            "citation map line 1 exceeds the supported JSON nesting depth",
+        ),
+    ],
+)
+def test_answer_delta_rejects_strict_jsonl_violations_without_traceback(
+    tmp_path,
+    capsys,
+    citation_line,
+    expected_error,
+):
+    declaration = _write_json(tmp_path / "declaration.json", {"used_citations": []})
     citation_map = tmp_path / "citations.jsonl"
     citation_map.write_text(citation_line + "\n", encoding="utf-8")
 
@@ -861,4 +953,61 @@ def test_eval_report_rejects_invalid_jsonl_without_traceback(
     assert code == 2
     assert captured.out == ""
     assert expected_error in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("artifact_option", "filename"),
+    [
+        ("--index", "chunk-index.jsonl"),
+        ("--citation", "citation-map.jsonl"),
+    ],
+)
+def test_eval_report_rejects_non_finite_jsonl_constants_without_traceback(
+    tmp_path,
+    capsys,
+    artifact_option,
+    filename,
+):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "session authority",
+                    "expected": ["src/a.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        },
+    )
+    artifact = tmp_path / filename
+    args = ["eval-report", "--eval-results", str(eval_results)]
+    if artifact_option == "--index":
+        artifact.write_text(
+            '{"chunk_id":"c1","path":"src/a.py","diagnostic_value":NaN}\n',
+            encoding="utf-8",
+        )
+    else:
+        index = tmp_path / "chunk-index.jsonl"
+        index.write_text(
+            json.dumps({"chunk_id": "c1", "path": "src/a.py"}) + "\n",
+            encoding="utf-8",
+        )
+        artifact.write_text(
+            '{"citation_id":"cit-1","chunk_id":"c1","diagnostic_value":NaN}\n',
+            encoding="utf-8",
+        )
+        args.extend(["--index", str(index)])
+    args.extend([artifact_option, str(artifact)])
+
+    code = main(["diagnostics", *args])
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "non-finite JSON constant 'NaN'" in captured.err
     assert "Traceback" not in captured.err

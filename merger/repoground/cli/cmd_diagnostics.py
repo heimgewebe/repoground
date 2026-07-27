@@ -14,6 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from merger.repoground.retrieval.diagnostics_json import strict_json_loads
+
 _MAX_JSON_BYTES = 8 * 1024 * 1024
 
 
@@ -60,7 +62,7 @@ def _read_json(
     expected_type: type | tuple[type, ...] | None = None,
 ) -> Any:
     path, payload = _read_input_payload(path_value)
-    value = json.loads(payload.decode("utf-8"))
+    value = strict_json_loads(payload.decode("utf-8"), source=f"input {path}")
     if expected_type is not None and not isinstance(value, expected_type):
         expected_name = (
             ", ".join(item.__name__ for item in expected_type)
@@ -81,7 +83,10 @@ def _read_validated_citation_map_jsonl(
         if not line.strip():
             continue
         try:
-            record = json.loads(line)
+            record = strict_json_loads(
+                line,
+                source=f"citation map line {line_number}",
+            )
         except json.JSONDecodeError as exc:
             raise ValueError(
                 f"citation map line {line_number} must be valid JSON: {path}"
@@ -156,7 +161,15 @@ def _validate_answer_declaration(
 
 
 def _emit(value: Any) -> None:
-    print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+    )
 
 
 def _build_diagnostics_parser() -> argparse.ArgumentParser:
@@ -409,15 +422,16 @@ def run_diagnostics(args: argparse.Namespace) -> int:
     }
     try:
         result = handlers[operation_args.diagnostics_command](operation_args)
+        _emit(result)
     except (
         KeyError,
         OSError,
         UnicodeError,
         json.JSONDecodeError,
+        RecursionError,
         TypeError,
         ValueError,
     ) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    _emit(result)
     return 0
