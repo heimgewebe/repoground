@@ -3,11 +3,15 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from urllib.error import URLError
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
+import scripts.ci.check_contract_deletion_authorization as authorization
 from scripts.ci.check_contract_deletion_authorization import (
     authorization_present,
+    fetch_paginated_json,
     main,
     resolve_associated_pr,
 )
@@ -161,3 +165,169 @@ def test_cli_accepts_exact_comment(tmp_path) -> None:
         )
         == 0
     )
+
+
+class _FakeResponse:
+    def __init__(self, payload: object) -> None:
+        self.raw = json.dumps(payload).encode("utf-8")
+
+    def read(self, limit: int = -1) -> bytes:
+        return self.raw if limit < 0 else self.raw[:limit]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        return False
+
+
+def _paginated_opener(pages: dict[int, object]):
+    def opener(request, *, timeout: int):
+        assert timeout == authorization.HTTP_TIMEOUT_SECONDS
+        query = parse_qs(urlsplit(request.full_url).query)
+        assert query["per_page"] == [str(authorization.PAGE_SIZE)]
+        page = int(query["page"][0])
+        return _FakeResponse(pages.get(page, []))
+
+    return opener
+
+
+def test_paginated_fetch_reads_authorization_on_second_page() -> None:
+    first_page = [{"body": f"discussion-{index}"} for index in range(100)]
+    comments = fetch_paginated_json(
+        "https://api.github.com/repos/heimgewebe/repoground/issues/1110/comments",
+        token="secret",
+        opener=_paginated_opener({1: first_page, 2: [trusted_comment()]}),
+    )
+    assert len(comments) == 101
+    assert authorization_present(comments, marker=MARKER)
+
+
+def test_paginated_fetch_accepts_exact_cap_only_after_empty_sentinel() -> None:
+    comments = fetch_paginated_json(
+        "https://api.github.com/repos/heimgewebe/repoground/issues/1110/comments",
+        token="secret",
+        max_pages=1,
+        opener=_paginated_opener({1: [{} for _ in range(100)], 2: []}),
+    )
+    assert len(comments) == 100
+
+
+def test_paginated_fetch_fails_closed_beyond_cap() -> None:
+    with pytest.raises(ValueError, match="exceeds the 1-page limit"):
+        fetch_paginated_json(
+            "https://api.github.com/repos/heimgewebe/repoground/issues/1110/comments",
+            token="secret",
+            max_pages=1,
+            opener=_paginated_opener({1: [{} for _ in range(100)], 2: [{}]}),
+        )
+
+
+def test_paginated_fetch_rejects_non_github_api_url() -> None:
+    with pytest.raises(ValueError, match="https://api.github.com"):
+        fetch_paginated_json(
+            "https://example.invalid/comments",
+            token="secret",
+            opener=_paginated_opener({}),
+        )
+
+
+def test_paginated_fetch_fails_closed_on_request_error() -> None:
+    def failing_opener(request, *, timeout: int):
+        raise URLError("offline")
+
+    with pytest.raises(ValueError, match="page 1 could not be read"):
+        fetch_paginated_json(
+            "https://api.github.com/repos/heimgewebe/repoground/issues/1110/comments",
+            token="secret",
+            opener=failing_opener,
+        )
+
+
+def test_cli_accepts_authorization_from_second_comment_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "secret")
+    monkeypatch.setattr(
+        authorization,
+        "urlopen",
+        _paginated_opener(
+            {
+                1: [{"body": f"discussion-{index}"} for index in range(100)],
+                2: [trusted_comment()],
+            }
+        ),
+    )
+    assert (
+        main(
+            [
+                "verify-comments",
+                "--comments-url",
+                "https://api.github.com/repos/heimgewebe/repoground/issues/1110/comments",
+                "--marker",
+                MARKER,
+            ]
+        )
+        == 0
+    )
+
+
+def test_cli_resolves_associated_pr_from_second_page(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "secret")
+    target = {
+        "number": 1110,
+        "head": {"sha": COMMIT},
+        "base": {"sha": BASE},
+        "merge_commit_sha": None,
+    }
+    monkeypatch.setattr(
+        authorization,
+        "urlopen",
+        _paginated_opener({1: [{} for _ in range(100)], 2: [target]}),
+    )
+    assert (
+        main(
+            [
+                "resolve-push-pr",
+                "--pull-requests-url",
+                "https://api.github.com/repos/heimgewebe/repoground/commits/commit/pulls",
+                "--commit-sha",
+                COMMIT,
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.strip() == f"1110 {COMMIT} {BASE}"
+
+
+
+def test_paginated_fetch_rejects_oversized_item_page() -> None:
+    with pytest.raises(ValueError, match="page 1 exceeds the item limit"):
+        fetch_paginated_json(
+            "https://api.github.com/repos/heimgewebe/repoground/issues/1110/comments",
+            token="secret",
+            opener=_paginated_opener({1: [{} for _ in range(101)]}),
+        )
+
+
+def test_cli_url_source_requires_github_token(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert (
+        main(
+            [
+                "verify-comments",
+                "--comments-url",
+                "https://api.github.com/repos/heimgewebe/repoground/issues/1110/comments",
+                "--marker",
+                MARKER,
+            ]
+        )
+        == 2
+    )
+    assert "GitHub token is missing" in capsys.readouterr().err
