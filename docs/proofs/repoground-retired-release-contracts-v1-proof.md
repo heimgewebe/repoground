@@ -20,8 +20,9 @@ scope and remain unchanged.
 A repository-wide exact search after the change classifies every remaining former path,
 schema ID and `kind` occurrence as follows:
 
-- **Active enforcement:** the release builder's exact denylist and repository-hygiene
-  absence guard. They reject reintroduction; they do not consume either retired schema.
+- **Active enforcement:** the release builder and verifier share one exact retired-path
+  denylist; repository hygiene separately guards source-tree absence. They reject
+  reintroduction or archived presence; they do not consume either retired schema.
 - **Negative and parity tests:** release packaging injects each former path and proves
   fail-closed rejection; verifier coverage rejects `repobrief.release_candidate`; naming
   coverage binds both former identities and successors to the terminal exit contract;
@@ -33,14 +34,16 @@ schema ID and `kind` occurrence as follows:
 
 No production loader, schema resolver or release producer references either retired schema
 as a supported input. The release builder archives every tracked Git-tree entry, so the old
-schemas were still distributed before this change even though the current verifier already
-rejected the former release identity.
+schemas were still distributed before this change. The verifier rejected the former release
+identity but still accepted canonical RepoGround archives containing the retired paths.
 
 ## Implemented boundary
 
 - Both retired schema files are removed from the active contract directory.
 - The deterministic release builder rejects either retired path before archive bytes are
   written.
+- The verifier imports the same denylist and rejects either path immediately after safe
+  archive-member enumeration, both without and with repository source binding.
 - Repository hygiene requires both paths to stay absent.
 - The contracts deletion guard has no broad environment bypass. A protected deletion
   requires an exact pull-request comment by a trusted human repository collaborator,
@@ -50,15 +53,16 @@ rejected the former release identity.
 - `repoground-compatibility-exit.v1.json` records former paths, schema IDs and kinds as
   `unsupported`, binds the existing RepoGround successor schemas, and forbids current-tree
   and release-archive presence.
-- A parity test prevents the builder denylist and compatibility exit from drifting apart.
+- Builder and verifier share one denylist; a parity test prevents that denylist and the
+  compatibility exit from drifting apart.
 - The contract matrix distinguishes terminal historical identity from active schemas.
 - Historical proof, measurement and task-index files are not rewritten.
 
 ## Validation
 
 - `python3 -m pytest tests/test_repository_hygiene.py tests/test_naming_hard_cut.py merger/repoground/tests/test_release_packaging.py -q`
-  - Result: `33 passed`.
-- `python3 -m ruff check scripts/release/build_release_candidate.py merger/repoground/tests/test_release_packaging.py tests/test_repository_hygiene.py tests/test_naming_hard_cut.py`
+  - Result: `37 passed`.
+- `python3 -m ruff check scripts/release/build_release_candidate.py scripts/release/verify_release_candidate.py merger/repoground/tests/test_release_packaging.py tests/test_repository_hygiene.py tests/test_naming_hard_cut.py`
   - Result: `All checks passed`.
 - Full repository suite, durable task `7877711a0de741069643ed64`:
   - Result: `5086 passed, 12 skipped, 33 failed`.

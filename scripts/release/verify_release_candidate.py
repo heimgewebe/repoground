@@ -20,6 +20,7 @@ from scripts.release.build_release_candidate import (
     KIND,
     LICENSE_EXPRESSION,
     LOCK_PATHS,
+    RETIRED_RELEASE_CONTRACT_PATHS,
     SEMANTIC_CONSTRAINTS_PATH,
     SEMANTIC_INPUT_PATH,
     SEMANTIC_LOCK_PATH,
@@ -88,10 +89,15 @@ def _load_candidate(
 ) -> tuple[dict[str, object], Path, Path, Path]:
     manifests = sorted(candidate_dir.glob("*.release.json"))
     if len(manifests) != 1:
-        raise ValueError(f"expected exactly one release manifest, found {len(manifests)}")
+        raise ValueError(
+            f"expected exactly one release manifest, found {len(manifests)}"
+        )
     manifest_path = manifests[0]
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("kind") != contract.kind or manifest.get("version") != contract.version:
+    if (
+        manifest.get("kind") != contract.kind
+        or manifest.get("version") != contract.version
+    ):
         raise ValueError("release manifest kind/version mismatch")
     archive = manifest.get("archive")
     if not isinstance(archive, dict) or not isinstance(archive.get("path"), str):
@@ -108,10 +114,7 @@ def _load_candidate(
             "candidate directory file set mismatch: "
             f"expected={sorted(expected_names)!r} observed={sorted(observed_names)!r}"
         )
-    if any(
-        not item.is_file() or item.is_symlink()
-        for item in candidate_dir.iterdir()
-    ):
+    if any(not item.is_file() or item.is_symlink() for item in candidate_dir.iterdir()):
         raise ValueError("candidate directory may contain regular files only")
     return manifest, manifest_path, archive_path, sums_path
 
@@ -153,7 +156,11 @@ def _archive_members(
         raise ValueError("archive SHA-256 does not match manifest")
     if archive_path.stat().st_size != expected_bytes:
         raise ValueError("archive byte size does not match manifest")
-    if not isinstance(prefix, str) or not prefix.endswith("/") or not _safe_name(prefix):
+    if (
+        not isinstance(prefix, str)
+        or not prefix.endswith("/")
+        or not _safe_name(prefix)
+    ):
         raise ValueError("archive prefix is invalid")
     raw = archive_path.read_bytes()
     if len(raw) < 8 or int.from_bytes(raw[4:8], "little") != 0:
@@ -169,14 +176,18 @@ def _archive_members(
                 observed_order.append(member.name)
                 if not _safe_name(member.name):
                     raise ValueError(f"unsafe archive member: {member.name!r}")
-                if member.name != prefix.rstrip("/") and not member.name.startswith(prefix):
+                if member.name != prefix.rstrip("/") and not member.name.startswith(
+                    prefix
+                ):
                     raise ValueError(f"member outside archive prefix: {member.name!r}")
                 if member.uid != 0 or member.gid != 0 or member.mtime != 0:
                     raise ValueError(f"non-normalized metadata: {member.name!r}")
                 if not (member.isdir() or member.isfile() or member.issym()):
-                    raise ValueError(f"unsupported archive member type: {member.name!r}")
+                    raise ValueError(
+                        f"unsupported archive member type: {member.name!r}"
+                    )
                 if member.issym():
-                    relative_path = member.name[len(prefix):]
+                    relative_path = member.name[len(prefix) :]
                     if not safe_symlink_target(relative_path, member.linkname):
                         raise ValueError(
                             f"unsafe symlink target {member.linkname!r} "
@@ -202,6 +213,20 @@ def _archive_members(
     return members
 
 
+def _reject_retired_release_contract_members(
+    members: dict[str, tarfile.TarInfo],
+    prefix: str,
+) -> None:
+    present = sorted(
+        path for path in RETIRED_RELEASE_CONTRACT_PATHS if f"{prefix}{path}" in members
+    )
+    if present:
+        raise ValueError(
+            "retired RepoBrief release contracts are forbidden in RepoGround "
+            "release candidates: " + ", ".join(present)
+        )
+
+
 def _read_archive_member(archive_path: Path, name: str) -> bytes:
     with gzip.open(archive_path, "rb") as gz:
         with tarfile.open(fileobj=gz, mode="r:") as tar:
@@ -217,7 +242,6 @@ def _read_archive_member(archive_path: Path, name: str) -> bytes:
             return handle.read()
 
 
-
 def _verify_dependency_locks(
     manifest: dict[str, object],
     archive_path: Path,
@@ -225,7 +249,9 @@ def _verify_dependency_locks(
     contract: ReleaseContract,
 ) -> None:
     lock_records = manifest.get("dependency_locks")
-    if not isinstance(lock_records, list) or len(lock_records) != len(contract.lock_paths):
+    if not isinstance(lock_records, list) or len(lock_records) != len(
+        contract.lock_paths
+    ):
         raise ValueError("manifest dependency lock count mismatch")
     observed_paths: list[str] = []
     for record in lock_records:
@@ -268,7 +294,10 @@ def _verify_semantic_target(
     contract: ReleaseContract,
 ) -> None:
     if not isinstance(target, dict) or set(target) != {
-        "id", "input", "constraints", "lock"
+        "id",
+        "input",
+        "constraints",
+        "lock",
     }:
         raise ValueError("semantic extension target record is invalid")
     if target.get("id") != contract.semantic_target_id:
@@ -338,7 +367,9 @@ def _verify_manifest_contract(
         raise ValueError("manifest project name mismatch")
     if project.get("repository") != contract.repository:
         raise ValueError("manifest repository mismatch")
-    if not isinstance(release_version, str) or not VERSION_RE.fullmatch(release_version):
+    if not isinstance(release_version, str) or not VERSION_RE.fullmatch(
+        release_version
+    ):
         raise ValueError("manifest release version is invalid")
     if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
         raise ValueError("manifest commit is invalid")
@@ -378,8 +409,11 @@ def _verify_manifest_contract(
     _verify_semantic_extension(manifest, archive_path, expected_prefix, contract)
 
     nonclaims = manifest.get("does_not_establish")
-    if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(nonclaims):
+    if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(
+        nonclaims
+    ):
         raise ValueError("manifest does_not_establish boundary is incomplete")
+
 
 def _compare_with_repo(
     repo: Path,
@@ -455,6 +489,11 @@ def _verify_release_candidate(
         raise ValueError("distribution boundary mismatch")
 
     members = _archive_members(manifest, archive_path)
+    archive = manifest.get("archive")
+    assert isinstance(archive, dict)
+    prefix = archive.get("prefix")
+    assert isinstance(prefix, str)
+    _reject_retired_release_contract_members(members, prefix)
     _verify_manifest_contract(manifest, archive_path, contract)
     if repo is not None:
         _compare_with_repo(
@@ -484,7 +523,9 @@ def verify_release_candidate(
         raise ValueError(f"candidate directory is missing: {candidate_path}")
     manifests = sorted(candidate_path.glob("*.release.json"))
     if len(manifests) != 1:
-        raise ValueError(f"expected exactly one release manifest, found {len(manifests)}")
+        raise ValueError(
+            f"expected exactly one release manifest, found {len(manifests)}"
+        )
     preview = json.loads(manifests[0].read_text(encoding="utf-8"))
     if not isinstance(preview, dict):
         raise ValueError("release manifest must be a JSON object")
@@ -493,7 +534,9 @@ def verify_release_candidate(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify a RepoGround release candidate")
+    parser = argparse.ArgumentParser(
+        description="Verify a RepoGround release candidate"
+    )
     parser.add_argument("--candidate-dir", required=True)
     parser.add_argument("--repo")
     args = parser.parse_args()

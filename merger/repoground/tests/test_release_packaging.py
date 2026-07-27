@@ -22,7 +22,9 @@ from scripts.release.check_release_contract import scan
 from scripts.release.verify_release_candidate import verify_release_candidate
 
 ROOT = Path(__file__).resolve().parents[3]
-SCHEMA = ROOT / "merger/repoground/contracts/repoground-release-candidate.v1.schema.json"
+SCHEMA = (
+    ROOT / "merger/repoground/contracts/repoground-release-candidate.v1.schema.json"
+)
 LICENSE_EXPRESSION = "Apache-2.0"
 
 
@@ -84,7 +86,9 @@ def _repo(tmp_path: Path) -> Path:
     )
     semantic_schema.parent.mkdir(parents=True)
     semantic_schema.write_text(
-        json.dumps({"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"})
+        json.dumps(
+            {"$schema": "http://json-schema.org/draft-07/schema#", "type": "object"}
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -106,7 +110,6 @@ def _repo(tmp_path: Path) -> Path:
 
 def _files(path: Path) -> dict[str, bytes]:
     return {item.name: item.read_bytes() for item in sorted(path.iterdir())}
-
 
 
 def _rewrite_sums(candidate: Path) -> None:
@@ -222,8 +225,6 @@ def test_candidate_tampering_is_rejected(tmp_path: Path) -> None:
         verify_release_candidate(out)
 
 
-
-
 def test_noncanonical_archive_member_order_is_rejected(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     out = tmp_path / "candidate"
@@ -248,12 +249,12 @@ def test_manifest_lock_claim_must_match_archived_lock(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="dependency lock SHA-256 mismatch"):
         verify_release_candidate(out)
 
+
 def test_dirty_repository_is_rejected(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     (repo / "regular.txt").write_text("dirty\n", encoding="utf-8")
     with pytest.raises(ValueError, match="clean working tree"):
         build_release_candidate(repo, tmp_path / "candidate")
-
 
 
 def test_nonempty_output_directory_is_rejected(tmp_path: Path) -> None:
@@ -487,16 +488,13 @@ def test_release_contract_rejects_lock_python_mismatch(tmp_path: Path) -> None:
     assert "WORKFLOW_LOCK_PYTHON_MISMATCH" in codes
 
 
-
 def test_retired_release_contract_paths_match_compatibility_exit() -> None:
     exit_contract = json.loads(
         (ROOT / "docs/contracts/repoground-compatibility-exit.v1.json").read_text(
             encoding="utf-8"
         )
     )
-    retired_paths = {
-        item["former_path"] for item in exit_contract["retired_contracts"]
-    }
+    retired_paths = {item["former_path"] for item in exit_contract["retired_contracts"]}
     assert retired_paths == set(RETIRED_RELEASE_CONTRACT_PATHS)
 
 
@@ -521,6 +519,35 @@ def test_retired_repobrief_release_contract_is_rejected(
         ValueError, match="retired RepoBrief release contracts are forbidden"
     ):
         build_release_candidate(repo, tmp_path / "candidate")
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+@pytest.mark.parametrize("retired_path", RETIRED_RELEASE_CONTRACT_PATHS)
+def test_verifier_rejects_archived_retired_repobrief_release_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    retired_path: str,
+    source_bound: bool,
+) -> None:
+    repo = _repo(tmp_path)
+    path = repo / retired_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}\n", encoding="utf-8")
+    _git(repo, "add", retired_path)
+    _git(repo, "commit", "-qm", "add retired release contract")
+
+    monkeypatch.setattr(
+        "scripts.release.build_release_candidate._reject_retired_release_contracts",
+        lambda entries: None,
+    )
+    candidate = tmp_path / "candidate"
+    build_release_candidate(repo, candidate)
+
+    kwargs = {"repo": repo} if source_bound else {}
+    with pytest.raises(
+        ValueError, match="retired RepoBrief release contracts are forbidden"
+    ):
+        verify_release_candidate(candidate, **kwargs)
 
 
 def test_legacy_repobrief_release_identity_is_rejected(tmp_path: Path) -> None:
