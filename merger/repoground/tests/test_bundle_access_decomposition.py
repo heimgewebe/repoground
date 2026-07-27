@@ -10,9 +10,15 @@ import pytest
 from merger.repoground.core import bundle_access
 from merger.repoground.core.bounded_artifact_read import (
     MAX_REGISTERED_ARTIFACT_BYTES,
+    _descriptor_read_size,
     read_stable_regular_file_bytes,
 )
 from merger.repoground.core.manifest_snapshot import MAX_MANIFEST_BYTES
+
+
+def test_descriptor_read_size_tracks_observed_file_not_hard_cap() -> None:
+    assert _descriptor_read_size(128, 4 * 1024 * 1024) == 129
+    assert _descriptor_read_size(4 * 1024 * 1024, 4 * 1024 * 1024) == (4 * 1024 * 1024) + 1
 
 
 def _sha256(raw: bytes) -> str:
