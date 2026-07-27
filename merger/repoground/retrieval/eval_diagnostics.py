@@ -183,95 +183,45 @@ class IndexInspector:
         self._canonical_md_content: Optional[str] = None
         self._citation_map_cache: Optional[Dict[str, Any]] = None
 
-    def load_index_paths(self, force_reload: bool = False) -> set:
-        """
-        Load all unique paths from the index (chunk_index).
+    def _load_index_views(
+        self,
+        force_reload: bool = False,
+    ) -> Tuple[set, Dict[str, set]]:
+        """Load path and chunk-id views from one validated index generation."""
+        if (
+            self._index_paths_cache is not None
+            and self._path_to_chunk_ids_cache is not None
+            and not force_reload
+        ):
+            return self._index_paths_cache, self._path_to_chunk_ids_cache
 
-        Args:
-            force_reload: Force reload from disk.
-
-        Returns:
-            Set of all unique paths in the index.
-        """
-        if self._index_paths_cache is not None and not force_reload:
-            return self._index_paths_cache
-
-        if self.index_path is None:
-            return set()
-
-        if self.index_path.suffix != ".jsonl":
-            raise MissingArtifactError(f"Unsupported chunk index format: {self.index_path}")
-
-        paths = set()
-        try:
-            with open(self.index_path, "r", encoding="utf-8") as f:
-                for line_number, line in enumerate(f, start=1):
-                    if not line.strip():
-                        continue
-                    try:
-                        chunk = strict_json_loads(
-                            line,
-                            source=f"chunk index line {line_number}",
-                        )
-                    except json.JSONDecodeError as exc:
-                        raise ValueError(
-                            f"chunk index line {line_number} must be valid JSON"
-                        ) from exc
-                    source = f"chunk index line {line_number}"
-                    chunk = _require_json_object(chunk, source=source)
-                    path = _required_nonempty_string_field(
-                        chunk,
-                        field="path",
-                        source=source,
-                    )
-                    _required_chunk_identifier(chunk, source=source)
-                    paths.add(path)
-        except (IOError, OSError) as e:
-            raise MissingArtifactError(
-                f"Failed to read chunk index from {self.index_path}: {e}"
-            )
-        # For SQLite index, would need similar logic
-        # For now, assume JSONL format
-
-        self._index_paths_cache = paths
-        return paths
-
-    def load_path_to_chunk_ids(self, force_reload: bool = False) -> Dict[str, set]:
-        """
-        Load mapping of path -> set(chunk_id) from chunk index JSONL.
-
-        This is required to bridge path-based expectations to citation_map entries,
-        which are keyed by citation_id and reference chunk_id.
-        """
-        if self._path_to_chunk_ids_cache is not None and not force_reload:
-            return self._path_to_chunk_ids_cache
-
+        paths: set = set()
         mapping: Dict[str, set] = {}
-        seen_chunk_ids: set[str] = set()
         if self.index_path is None:
+            self._index_paths_cache = paths
             self._path_to_chunk_ids_cache = mapping
-            return mapping
+            return paths, mapping
 
         if self.index_path.suffix != ".jsonl":
-            raise MissingArtifactError(f"Unsupported chunk index format: {self.index_path}")
+            raise MissingArtifactError(
+                f"Unsupported chunk index format: {self.index_path}"
+            )
 
+        seen_chunk_ids: set[str] = set()
         try:
             with open(self.index_path, "r", encoding="utf-8") as f:
                 for line_number, line in enumerate(f, start=1):
                     if not line.strip():
                         continue
+                    source = f"chunk index line {line_number}"
                     try:
-                        chunk = strict_json_loads(
-                            line,
-                            source=f"chunk index line {line_number}",
-                        )
+                        chunk = strict_json_loads(line, source=source)
                     except json.JSONDecodeError as exc:
                         raise ValueError(
                             f"chunk index line {line_number} must be valid JSON"
                         ) from exc
-                    source = f"chunk index line {line_number}"
                     chunk = _require_json_object(chunk, source=source)
-                    path = _required_nonempty_string_field(
+                    indexed_path = _required_nonempty_string_field(
                         chunk,
                         field="path",
                         source=source,
@@ -282,13 +232,26 @@ class IndexInspector:
                             f"{source} duplicates chunk identifier {chunk_id!r}"
                         )
                     seen_chunk_ids.add(chunk_id)
-                    mapping.setdefault(path, set()).add(chunk_id)
-        except (IOError, OSError) as e:
+                    paths.add(indexed_path)
+                    mapping.setdefault(indexed_path, set()).add(chunk_id)
+        except (IOError, OSError) as exc:
             raise MissingArtifactError(
-                f"Failed to read chunk index from {self.index_path}: {e}"
-            )
+                f"Failed to read chunk index from {self.index_path}: {exc}"
+            ) from exc
 
+        # Replace both views only after the complete generation validated.
+        self._index_paths_cache = paths
         self._path_to_chunk_ids_cache = mapping
+        return paths, mapping
+
+    def load_index_paths(self, force_reload: bool = False) -> set:
+        """Load all unique paths from the index."""
+        paths, _mapping = self._load_index_views(force_reload=force_reload)
+        return paths
+
+    def load_path_to_chunk_ids(self, force_reload: bool = False) -> Dict[str, set]:
+        """Load the path-to-chunk-id mapping from the same index generation."""
+        _paths, mapping = self._load_index_views(force_reload=force_reload)
         return mapping
 
     @staticmethod

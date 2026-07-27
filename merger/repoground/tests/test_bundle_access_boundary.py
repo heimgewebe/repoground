@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 
 from merger.repoground.core import bundle_access
 
@@ -27,6 +28,69 @@ def _sqlite_sidecars(index_path):
         index_path.with_name(index_path.name + suffix)
         for suffix in ("-wal", "-shm", "-journal")
     }
+
+
+def test_snapshot_status_keeps_prevalidated_manifest_parent_after_symlink_swap(
+    tmp_path,
+):
+    original = tmp_path / "original"
+    replacement = tmp_path / "replacement"
+    original.mkdir()
+    replacement.mkdir()
+    original_artifact = original / "brief.md"
+    replacement_artifact = replacement / "brief.md"
+    original_artifact.write_text("original", encoding="utf-8")
+    replacement_artifact.write_text("replacement", encoding="utf-8")
+    manifest = original / "bundle.manifest.json"
+    replacement_manifest = replacement / "bundle.manifest.json"
+    artifacts = [{"role": "canonical_md", "path": "brief.md"}]
+    _write_manifest(manifest, artifacts)
+    _write_manifest(replacement_manifest, artifacts)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+
+    manifest.unlink()
+    manifest.symlink_to(replacement_manifest)
+    status = bundle_access.snapshot_status(manifest, manifest_data=manifest_data)
+
+    assert status["bundle_manifest"] == str(manifest.absolute())
+    assert status["artifacts"][0]["absolute_path"] == str(
+        original_artifact.resolve()
+    )
+    assert status["artifacts"][0]["absolute_path"] != str(
+        replacement_artifact.resolve()
+    )
+
+
+def test_snapshot_status_makes_relative_prevalidated_anchor_absolute_without_resolving(
+    monkeypatch, tmp_path
+):
+    original = tmp_path / "original"
+    replacement = tmp_path / "replacement"
+    original.mkdir()
+    replacement.mkdir()
+    (original / "brief.md").write_text("original", encoding="utf-8")
+    (replacement / "brief.md").write_text("replacement", encoding="utf-8")
+    manifest = original / "bundle.manifest.json"
+    replacement_manifest = replacement / "bundle.manifest.json"
+    artifacts = [{"role": "canonical_md", "path": "brief.md"}]
+    _write_manifest(manifest, artifacts)
+    _write_manifest(replacement_manifest, artifacts)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    manifest.unlink()
+    manifest.symlink_to(replacement_manifest)
+    monkeypatch.chdir(tmp_path)
+
+    relative_manifest = Path("original/bundle.manifest.json")
+    status = bundle_access.snapshot_status(
+        relative_manifest,
+        manifest_data=manifest_data,
+    )
+
+    assert status["bundle_manifest"] == str(relative_manifest.absolute())
+    assert status["bundle_manifest"] != str(relative_manifest.resolve())
+    assert status["artifacts"][0]["absolute_path"] == str(
+        (original / "brief.md").resolve()
+    )
 
 
 def test_range_get_reads_existing_artifact_without_mutation(tmp_path):

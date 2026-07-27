@@ -1,5 +1,6 @@
 """Tests for retrieval evaluation diagnostics calibrator."""
 
+import io
 import json
 from pathlib import Path
 
@@ -111,6 +112,73 @@ class TestIndexInspector:
         inspector = IndexInspector(tmp_artifacts["index"])
         mapping = inspector.load_path_to_chunk_ids()
         assert mapping["merger/repoground/core/merge.py"] == {"c1"}
+
+    def test_index_views_share_one_read_generation(self, monkeypatch, tmp_path):
+        index_path = tmp_path / "chunks.jsonl"
+        first_generation = (
+            json.dumps({"chunk_id": "c1", "path": "src/first.py"}) + "\n"
+        )
+        second_generation = (
+            json.dumps({"chunk_id": "c2", "path": "src/second.py"}) + "\n"
+        )
+        generations = [first_generation, second_generation]
+        open_count = 0
+        real_open = open
+
+        def generation_open(path, *args, **kwargs):
+            nonlocal open_count
+            if Path(path) == index_path:
+                payload = generations[min(open_count, len(generations) - 1)]
+                open_count += 1
+                return io.StringIO(payload)
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", generation_open)
+        calibrator = RetrievalEvalDiagnosticsCalibrator(index_path=index_path)
+
+        report = calibrator.generate_report([])
+
+        assert open_count == 1
+        assert calibrator._index_paths == {"src/first.py"}
+        assert calibrator._path_to_chunk_ids == {"src/first.py": {"c1"}}
+        assert report["metadata"]["index_stats"] == {
+            "total_chunks": 1,
+            "total_paths": 1,
+            "canonical_md_exists": False,
+            "citation_map_exists": False,
+        }
+
+    def test_force_reload_replaces_both_index_views_from_one_generation(
+        self, monkeypatch, tmp_path
+    ):
+        index_path = tmp_path / "chunks.jsonl"
+        generations = [
+            json.dumps({"chunk_id": "c1", "path": "src/first.py"}) + "\n",
+            json.dumps({"chunk_id": "c2", "path": "src/second.py"}) + "\n",
+        ]
+        open_count = 0
+        real_open = open
+
+        def generation_open(path, *args, **kwargs):
+            nonlocal open_count
+            if Path(path) == index_path:
+                payload = generations[min(open_count, len(generations) - 1)]
+                open_count += 1
+                return io.StringIO(payload)
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", generation_open)
+        inspector = IndexInspector(index_path)
+
+        assert inspector.load_index_paths() == {"src/first.py"}
+        assert inspector.load_path_to_chunk_ids() == {"src/first.py": {"c1"}}
+        assert open_count == 1
+
+        assert inspector.load_path_to_chunk_ids(force_reload=True) == {
+            "src/second.py": {"c2"}
+        }
+        assert inspector.load_index_paths() == {"src/second.py"}
+        assert open_count == 2
 
 
 class TestIntegrationExtraction:

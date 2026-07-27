@@ -162,12 +162,17 @@ def snapshot_status(
     Supplying ``manifest_data`` avoids rereading the manifest; the path remains
     the trusted base for resolving relative artifact paths.
     """
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    requested_manifest_path = Path(bundle_manifest).expanduser()
     if manifest_data is None:
+        manifest_path = requested_manifest_path.resolve()
         manifest = _read_json_object(manifest_path)
     else:
         if not isinstance(manifest_data, Mapping):
             raise ValueError("manifest_data must be a mapping")
+        # The caller already verified this manifest generation. Keep its lexical
+        # absolute path as the artifact-root anchor instead of following a later
+        # replacement symlink at the final manifest name.
+        manifest_path = requested_manifest_path.absolute()
         manifest = deepcopy(dict(manifest_data))
     artifacts = [_artifact_record(manifest_path, a) for a in _artifact_list(manifest)]
     roles = sorted(str(a["role"]) for a in artifacts if isinstance(a.get("role"), str))
