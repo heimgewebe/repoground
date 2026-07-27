@@ -548,3 +548,317 @@ def test_answer_delta_rejects_malformed_declaration_evidence_without_traceback(
     assert captured.out == ""
     assert expected_error in captured.err
     assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("index_record", "expected_error"),
+    [
+        ({"chunk_id": "c1"}, "chunk index line 1 field 'path' is required"),
+        (
+            {"chunk_id": "c1", "path": ""},
+            "chunk index line 1 field 'path' must be a non-empty string",
+        ),
+        (
+            {"chunk_id": "c1", "path": "   "},
+            "chunk index line 1 field 'path' must be a non-empty string",
+        ),
+        (
+            {"path": "src/a.py"},
+            "chunk index line 1 field 'chunk_id' or 'id' is required",
+        ),
+        (
+            {"chunk_id": "", "path": "src/a.py"},
+            "chunk index line 1 field 'chunk_id' must be a non-empty string",
+        ),
+        (
+            {"chunk_id": "   ", "path": "src/a.py"},
+            "chunk index line 1 field 'chunk_id' must be a non-empty string",
+        ),
+        (
+            {"id": "", "path": "src/a.py"},
+            "chunk index line 1 field 'id' must be a non-empty string",
+        ),
+        (
+            {"chunk_id": "c1", "id": "legacy-c1", "path": "src/a.py"},
+            "chunk index line 1 fields 'chunk_id' and 'id' must match",
+        ),
+        (
+            {"chunk_id": 7, "path": "src/a.py"},
+            "chunk index line 1 field 'chunk_id' must be a string",
+        ),
+        (
+            {"chunk_id": "c1", "path": 7},
+            "chunk index line 1 field 'path' must be a string",
+        ),
+    ],
+)
+def test_eval_report_rejects_invalid_index_identifiers_without_traceback(
+    tmp_path,
+    capsys,
+    index_record,
+    expected_error,
+):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "session authority",
+                    "expected": ["src/a.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        },
+    )
+    index = tmp_path / "chunk-index.jsonl"
+    index.write_text(json.dumps(index_record) + "\n", encoding="utf-8")
+
+    code = main(
+        [
+            "diagnostics",
+            "eval-report",
+            "--eval-results",
+            str(eval_results),
+            "--index",
+            str(index),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("citation_lines", "expected_error"),
+    [
+        ([[]], "citation map line 1 must be a JSON object"),
+        ([{}], "citation map line 1 field 'citation_id' is required"),
+        ([{"citation_id": 7}], "citation map line 1 field 'citation_id' must be a string"),
+        (
+            [{"citation_id": ""}],
+            "citation map line 1 field 'citation_id' must be a non-empty string",
+        ),
+        (
+            [{"citation_id": "   "}],
+            "citation map line 1 field 'citation_id' must be a non-empty string",
+        ),
+        (
+            [{"citation_id": "cit-1"}, {"citation_id": "cit-1"}],
+            "citation map line 2 duplicates citation_id 'cit-1'",
+        ),
+        (
+            [{"citation_id": "cit-1", "chunk_id": ""}],
+            "citation map line 1 field 'chunk_id' must be a non-empty string",
+        ),
+        (
+            [{"citation_id": "cit-1", "chunk_id": "   "}],
+            "citation map line 1 field 'chunk_id' must be a non-empty string",
+        ),
+        (
+            [{"citation_id": "cit-1", "chunk_id": 7}],
+            "citation map line 1 field 'chunk_id' must be a string",
+        ),
+    ],
+)
+def test_eval_report_rejects_invalid_citation_identifiers_without_traceback(
+    tmp_path,
+    capsys,
+    citation_lines,
+    expected_error,
+):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "session authority",
+                    "expected": ["src/a.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        },
+    )
+    index = tmp_path / "chunk-index.jsonl"
+    index.write_text(
+        json.dumps({"chunk_id": "c1", "path": "src/a.py"}) + "\n",
+        encoding="utf-8",
+    )
+    citation = tmp_path / "citation-map.jsonl"
+    citation.write_text(
+        "\n".join(json.dumps(record) for record in citation_lines) + "\n",
+        encoding="utf-8",
+    )
+
+    code = main(
+        [
+            "diagnostics",
+            "eval-report",
+            "--eval-results",
+            str(eval_results),
+            "--index",
+            str(index),
+            "--citation",
+            str(citation),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_eval_report_accepts_legacy_index_id(tmp_path, capsys):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "session authority",
+                    "expected": ["src/a.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        },
+    )
+    index = tmp_path / "chunk-index.jsonl"
+    index.write_text(
+        json.dumps({"id": "legacy-c1", "path": "src/a.py"}) + "\n",
+        encoding="utf-8",
+    )
+
+    code, report = _run(
+        capsys,
+        [
+            "eval-report",
+            "--eval-results",
+            str(eval_results),
+            "--index",
+            str(index),
+        ],
+    )
+
+    assert code == 0
+    assert (
+        report["diagnostics_report"]["diagnostics"][0]["primary_diagnosis"]
+        == "target_exists_not_in_top_k"
+    )
+
+
+def test_eval_report_rejects_duplicate_chunk_identifiers_without_traceback(
+    tmp_path, capsys
+):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "session authority",
+                    "expected": ["src/a.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        },
+    )
+    index = tmp_path / "chunk-index.jsonl"
+    index.write_text(
+        "\n".join(
+            [
+                json.dumps({"chunk_id": "c1", "path": "src/a.py"}),
+                json.dumps({"id": "c1", "path": "src/b.py"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    code = main(
+        [
+            "diagnostics",
+            "eval-report",
+            "--eval-results",
+            str(eval_results),
+            "--index",
+            str(index),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "chunk index line 2 duplicates chunk identifier 'c1'" in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("artifact_option", "filename", "valid_prefix", "expected_error"),
+    [
+        (
+            "--index",
+            "chunk-index.jsonl",
+            "",
+            "chunk index line 1 must be valid JSON",
+        ),
+        (
+            "--citation",
+            "citation-map.jsonl",
+            json.dumps({"chunk_id": "c1", "path": "src/a.py"}) + "\n",
+            "citation map line 1 must be valid JSON",
+        ),
+    ],
+)
+def test_eval_report_rejects_invalid_jsonl_without_traceback(
+    tmp_path,
+    capsys,
+    artifact_option,
+    filename,
+    valid_prefix,
+    expected_error,
+):
+    eval_results = _write_json(
+        tmp_path / "eval.json",
+        {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "session authority",
+                    "expected": ["src/a.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        },
+    )
+    artifact = tmp_path / filename
+    artifact.write_text("{\n", encoding="utf-8")
+    args = ["eval-report", "--eval-results", str(eval_results)]
+    if artifact_option == "--citation":
+        index = tmp_path / "chunk-index.jsonl"
+        index.write_text(valid_prefix, encoding="utf-8")
+        args.extend(["--index", str(index)])
+    args.extend([artifact_option, str(artifact)])
+
+    code = main(["diagnostics", *args])
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err

@@ -46,11 +46,60 @@ def _optional_string_field(
     *,
     field: str,
     source: str,
+    require_nonempty: bool = False,
 ) -> Optional[str]:
     value = record.get(field)
     if value is not None and not isinstance(value, str):
         raise ValueError(f"{source} field '{field}' must be a string")
+    if require_nonempty and isinstance(value, str) and not value.strip():
+        raise ValueError(f"{source} field '{field}' must be a non-empty string")
     return value
+
+
+def _required_nonempty_string_field(
+    record: Dict[str, Any],
+    *,
+    field: str,
+    source: str,
+) -> str:
+    value = _optional_string_field(
+        record,
+        field=field,
+        source=source,
+        require_nonempty=True,
+    )
+    if value is None:
+        raise ValueError(f"{source} field '{field}' is required")
+    return value
+
+
+def _required_chunk_identifier(
+    record: Dict[str, Any],
+    *,
+    source: str,
+) -> str:
+    chunk_id = _optional_string_field(
+        record,
+        field="chunk_id",
+        source=source,
+        require_nonempty=True,
+    )
+    legacy_id = _optional_string_field(
+        record,
+        field="id",
+        source=source,
+        require_nonempty=True,
+    )
+    if chunk_id is None and legacy_id is None:
+        raise ValueError(f"{source} field 'chunk_id' or 'id' is required")
+    if chunk_id is not None and legacy_id is not None and chunk_id != legacy_id:
+        raise ValueError(
+            f"{source} fields 'chunk_id' and 'id' must match when both are present"
+        )
+    if chunk_id is not None:
+        return chunk_id
+    assert legacy_id is not None
+    return legacy_id
 
 
 class RetrievalEvalDiagnosticsError(Exception):
@@ -160,13 +209,19 @@ class IndexInspector:
                         continue
                     try:
                         chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"chunk index line {line_number} must be valid JSON"
+                        ) from exc
                     source = f"chunk index line {line_number}"
                     chunk = _require_json_object(chunk, source=source)
-                    path = _optional_string_field(chunk, field="path", source=source)
-                    if path is not None:
-                        paths.add(path)
+                    path = _required_nonempty_string_field(
+                        chunk,
+                        field="path",
+                        source=source,
+                    )
+                    _required_chunk_identifier(chunk, source=source)
+                    paths.add(path)
         except (IOError, OSError) as e:
             raise MissingArtifactError(
                 f"Failed to read chunk index from {self.index_path}: {e}"
@@ -188,6 +243,7 @@ class IndexInspector:
             return self._path_to_chunk_ids_cache
 
         mapping: Dict[str, set] = {}
+        seen_chunk_ids: set[str] = set()
         if self.index_path is None:
             self._path_to_chunk_ids_cache = mapping
             return mapping
@@ -202,14 +258,24 @@ class IndexInspector:
                         continue
                     try:
                         chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"chunk index line {line_number} must be valid JSON"
+                        ) from exc
                     source = f"chunk index line {line_number}"
                     chunk = _require_json_object(chunk, source=source)
-                    path = _optional_string_field(chunk, field="path", source=source)
-                    chunk_id = _optional_string_field(chunk, field="chunk_id", source=source)
-                    if path is not None and chunk_id is not None:
-                        mapping.setdefault(path, set()).add(chunk_id)
+                    path = _required_nonempty_string_field(
+                        chunk,
+                        field="path",
+                        source=source,
+                    )
+                    chunk_id = _required_chunk_identifier(chunk, source=source)
+                    if chunk_id in seen_chunk_ids:
+                        raise ValueError(
+                            f"{source} duplicates chunk identifier {chunk_id!r}"
+                        )
+                    seen_chunk_ids.add(chunk_id)
+                    mapping.setdefault(path, set()).add(chunk_id)
         except (IOError, OSError) as e:
             raise MissingArtifactError(
                 f"Failed to read chunk index from {self.index_path}: {e}"
@@ -306,17 +372,28 @@ class IndexInspector:
                         continue
                     try:
                         record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"citation map line {line_number} must be valid JSON"
+                        ) from exc
                     source = f"citation map line {line_number}"
                     record = _require_json_object(record, source=source)
-                    citation_id = _optional_string_field(
+                    citation_id = _required_nonempty_string_field(
                         record,
                         field="citation_id",
                         source=source,
                     )
-                    if citation_id is not None:
-                        citation_map[citation_id] = record
+                    _optional_string_field(
+                        record,
+                        field="chunk_id",
+                        source=source,
+                        require_nonempty=True,
+                    )
+                    if citation_id in citation_map:
+                        raise ValueError(
+                            f"{source} duplicates citation_id {citation_id!r}"
+                        )
+                    citation_map[citation_id] = record
         except (IOError, OSError) as e:
             raise MissingArtifactError(
                 f"Failed to read citation_map from {citation_path}: {e}"
