@@ -289,6 +289,35 @@ class TestIntegrationExtraction:
         assert misses[0]["rank_in_results"] == 2
         assert misses[0]["top_k"] == 1
 
+    def test_extract_ignores_nonpositive_inferred_top_k(self, tmp_artifacts):
+        eval_results = {
+            "metrics": {"recall@0": 0.0},
+            "details": [
+                {
+                    "query": "find merge",
+                    "expected": ["merger/repoground/core/merge.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        ).generate_report(misses)
+        schema_path = (
+            Path(__file__).parents[1]
+            / "contracts"
+            / "retrieval-eval-diagnostics.v1.schema.json"
+        )
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        assert misses[0]["top_k"] is None
+        assert report["diagnostics"][0]["diagnosis_details"]["top_k"] is None
+        jsonschema.validate(instance=report, schema=schema)
+
     def test_index_matching_uses_evaluator_one_way_semantics(self, tmp_path):
         index_path = tmp_path / "chunks.jsonl"
         index_path.write_text(
@@ -351,6 +380,37 @@ class TestIntegrationExtraction:
         assert "query execution failed" in diagnosis["diagnosis_details"][
             "instrumentation_notes"
         ]
+
+    def test_query_execution_error_from_explain_is_diagnostic_inconclusive(
+        self, tmp_artifacts
+    ):
+        eval_results = {
+            "metrics": {"recall@10": 0.0},
+            "details": [
+                {
+                    "query": "find merge",
+                    "expected": ["merger/repoground/core/merge.py"],
+                    "is_relevant": False,
+                    "found_count": 0,
+                    "top_results": [],
+                    "error": "backend unavailable",
+                    "explain": {
+                        "filters": {},
+                        "why_fail": "query execution failed",
+                    },
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=tmp_artifacts["index"]
+        ).generate_report(misses)
+
+        assert misses[0]["query_error"] == "backend unavailable"
+        diagnosis = report["diagnostics"][0]
+        assert diagnosis["primary_diagnosis"] == "diagnostic_inconclusive"
+        assert diagnosis["primary_diagnosis"] != "target_exists_not_in_top_k"
 
     def test_extract_rejects_legacy_results_key(self):
         eval_results = {

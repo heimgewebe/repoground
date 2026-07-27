@@ -88,14 +88,29 @@ def _query_execution_error(
         if not isinstance(error, str) or not error.strip():
             raise ValueError(f"Expected {prefix}['error'] to be a non-empty string.")
 
-    why_fail = detail.get("why_fail")
-    if why_fail is None and isinstance(detail.get("why"), dict):
-        why_fail = detail["why"].get("why_fail")
-    if why_fail is not None and not isinstance(why_fail, str):
-        raise ValueError(f"Expected {prefix}['why_fail'] to be a string.")
+    why_fail_candidates = [
+        (f"{prefix}['why_fail']", detail.get("why_fail")),
+    ]
+    for section_name in ("why", "explain"):
+        section = detail.get(section_name)
+        if isinstance(section, dict):
+            why_fail_candidates.append(
+                (
+                    f"{prefix}['{section_name}']['why_fail']",
+                    section.get("why_fail"),
+                )
+            )
 
-    if why_fail == "query execution failed":
-        return error or why_fail
+    for marker_path, why_fail in why_fail_candidates:
+        if why_fail is not None and not isinstance(why_fail, str):
+            raise ValueError(f"Expected {marker_path} to be a string.")
+
+    has_query_execution_failure = any(
+        why_fail == "query execution failed"
+        for _, why_fail in why_fail_candidates
+    )
+    if has_query_execution_failure:
+        return error or "query execution failed"
     return None
 
 
@@ -269,8 +284,10 @@ def _infer_top_k_from_metrics(metrics: Any) -> Optional[int]:
         match = pattern.search(key)
         if match:
             try:
-                candidates.append(int(match.group(1)))
+                candidate = int(match.group(1))
             except ValueError:
                 continue
+            if candidate > 0:
+                candidates.append(candidate)
 
     return max(candidates) if candidates else None
