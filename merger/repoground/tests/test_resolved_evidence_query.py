@@ -72,7 +72,12 @@ def _build_resolved_bundle(tmp_path, with_citation_map=True):
             "bytes": len(content),
             "sha256": canonical_sha,
         },
-        {"role": "sqlite_index", "path": index_path.name},
+        {
+            "role": "sqlite_index",
+            "path": index_path.name,
+            "bytes": index_path.stat().st_size,
+            "sha256": _sha256(index_path),
+        },
     ]
     if with_citation_map:
         citation_map_path = tmp_path / "demo.citation_map.jsonl"

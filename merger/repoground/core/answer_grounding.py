@@ -5,6 +5,10 @@ import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from merger.repoground.core.manifest_snapshot import (
+    manifest_path_identity,
+    resolve_manifest_path,
+)
 from merger.repoground.core.range_resolver import resolve_range_ref
 from merger.repoground.core.required_reading import default_required_reading_protocol, resolve_required_reading
 
@@ -241,7 +245,8 @@ def verify_answer_grounding(
     range extraction to the existing range resolver. It performs no Git, shell, refresh,
     snapshot creation, patch, PR, test or merge operation.
     """
-    manifest_path = Path(bundle_manifest).expanduser().resolve()
+    selected_manifest_path = manifest_path_identity(bundle_manifest)
+    manifest_path = resolve_manifest_path(bundle_manifest)
     citation_map_path = Path(citation_map).expanduser().resolve() if citation_map is not None else None
 
     citation_checks: list[dict[str, Any]] = []
@@ -384,7 +389,7 @@ def verify_answer_grounding(
         "version": VERSION,
         "status": status,
         "checked_declaration": _declaration_ref(declaration),
-        "snapshot_ref": _snapshot_ref(declaration, manifest_path),
+        "snapshot_ref": _snapshot_ref(declaration, selected_manifest_path),
         "citation_checks": citation_checks,
         "range_checks": range_checks,
         "required_reading_checks": required_checks,

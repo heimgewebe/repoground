@@ -4,9 +4,11 @@ This module is not a protocol server. It provides deterministic tool handlers
 that a future MCP adapter can expose. Read-only RepoGround access helpers must
 not call these handlers as a fallback or side effect.
 """
+
 from __future__ import annotations
 
 import argparse
+import re
 import signal
 import threading
 from contextlib import contextmanager
@@ -107,13 +109,17 @@ def _path_is_within(child: Path, parent: Path) -> bool:
     return True
 
 
-def _resolve_output_dir(output_root: str | Path, output_subdir: str | None) -> tuple[Path, Path]:
+def _resolve_output_dir(
+    output_root: str | Path, output_subdir: str | None
+) -> tuple[Path, Path]:
     root = _guarded_path(output_root, label="output_root")
     if output_subdir is None or output_subdir == "":
         return root, root
     raw = Path(output_subdir)
     if raw.is_absolute() or ".." in raw.parts:
-        raise RepoGroundMcpToolError("output_subdir must be relative and must not contain '..'")
+        raise RepoGroundMcpToolError(
+            "output_subdir must be relative and must not contain '..'"
+        )
     out = (root / raw).resolve()
     if not _path_is_within(out, root):
         raise RepoGroundMcpToolError("output_subdir must remain inside output_root")
@@ -203,7 +209,9 @@ def snapshot_create(
         raise RepoGroundMcpToolError(f"repo is not a directory: {repo_path}")
     output_root_path, out_path = _resolve_output_dir(output_root, output_subdir)
     if out_path == repo_path or _path_is_within(out_path, repo_path):
-        raise RepoGroundMcpToolError("output directory must not be the repository or inside it")
+        raise RepoGroundMcpToolError(
+            "output directory must not be the repository or inside it"
+        )
     if profile not in profile_names():
         raise RepoGroundMcpToolError(f"unsupported profile: {profile}")
     if timeout_seconds > MAX_TIMEOUT_SECONDS:
@@ -251,6 +259,7 @@ def snapshot_create(
         "mutation_boundary": _mutation_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
+
 
 READ_ONLY_KIND = "repobrief.mcp.read_only_frontdoor"
 READ_ONLY_VERSION = "v1"
@@ -335,6 +344,285 @@ def ask_context(
     }
 
 
+def snapshot_status(
+    *,
+    bundle_manifest: str | Path,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Return one existing snapshot status with normalized availability semantics."""
+    from merger.repoground.core.ask_context import _availability_block, _freshness_block
+    from merger.repoground.core.bundle_access import (
+        snapshot_status as access_snapshot_status,
+    )
+    from merger.repoground.core.bundle_catalog import inspect_bundle_health
+
+    snapshot = access_snapshot_status(bundle_manifest)
+    availability = _availability_block(snapshot)
+    freshness = _freshness_block(snapshot)
+    health = inspect_bundle_health(bundle_manifest)
+    if availability["status"] != "available":
+        status = availability["status"]
+    elif health["health_status"] != "pass":
+        status = "unhealthy"
+    else:
+        status = "available"
+    return {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "snapshot_status",
+        "status": status,
+        "snapshot": snapshot
+        if verbose
+        else {
+            "bundle_manifest": snapshot.get("bundle_manifest"),
+            "bundle_run_id": snapshot.get("bundle_run_id"),
+            "profile": snapshot.get("profile"),
+            "artifact_count": snapshot.get("artifact_count"),
+            "roles": snapshot.get("roles"),
+            "health_status": health.get("health_status"),
+        },
+        "health": health,
+        "availability": availability,
+        "freshness": freshness,
+        "result_semantics": "repobrief.snapshot_status.v1",
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
+    }
+
+
+_SYMBOL_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SYMBOL_IN_BACKTICKS_RE = re.compile(r"`([A-Za-z_][A-Za-z0-9_]*)`")
+_SYMBOL_AFTER_KIND_RE = re.compile(
+    r"\b(?:function|class|method|funktion|klasse|methode)\s+([A-Za-z_][A-Za-z0-9_]*)",
+    re.IGNORECASE,
+)
+_SYMBOL_BEFORE_DEFINITION_RE = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_]*)\s+(?:defined|definiert)\b",
+    re.IGNORECASE,
+)
+_DEFINITION_INTENT_RE = re.compile(
+    r"\b(?:defined|definition|function|class|method|definiert|definition|funktion|klasse|methode)\b",
+    re.IGNORECASE,
+)
+
+
+def _symbol_definition_intent(query: str) -> str | None:
+    """Extract one conservative identifier from an explicit definition question."""
+    if not isinstance(query, str) or not _DEFINITION_INTENT_RE.search(query):
+        return None
+    for pattern in (
+        _SYMBOL_IN_BACKTICKS_RE,
+        _SYMBOL_AFTER_KIND_RE,
+        _SYMBOL_BEFORE_DEFINITION_RE,
+    ):
+        match = pattern.search(query)
+        if match and _SYMBOL_NAME_RE.fullmatch(match.group(1)):
+            return match.group(1)
+    return None
+
+
+def _compact_symbol_hits(
+    symbol_result: dict[str, Any], *, name: str, k: int
+) -> tuple[list[dict[str, Any]], int]:
+    inner = symbol_result.get("result") if isinstance(symbol_result, dict) else None
+    hits = inner.get("hits") if isinstance(inner, dict) else []
+    exact = []
+    for hit in hits if isinstance(hits, list) else []:
+        if not isinstance(hit, dict):
+            continue
+        qualified = hit.get("qualified_name")
+        if (
+            hit.get("name") != name
+            and qualified != name
+            and not (isinstance(qualified, str) and qualified.endswith(f".{name}"))
+        ):
+            continue
+        path = hit.get("path")
+        if not isinstance(path, str) or not path:
+            continue
+        exact.append(
+            {
+                "id": hit.get("id"),
+                "kind": hit.get("kind"),
+                "name": hit.get("name"),
+                "qualified_name": qualified,
+                "path": path,
+                "start_line": hit.get("start_line"),
+                "end_line": hit.get("end_line"),
+                "range_ref": hit.get("range_ref"),
+                "source_range": hit.get("source_range"),
+            }
+        )
+    exact.sort(
+        key=lambda hit: (
+            "/tests/" in str(hit["path"]) or str(hit["path"]).startswith("tests/"),
+            str(hit["path"]),
+            int(hit.get("start_line") or 0),
+            str(hit.get("qualified_name") or ""),
+        )
+    )
+    return exact[:k], len(exact)
+
+
+def _symbol_query_result(
+    *,
+    bundle_manifest: str | Path,
+    query: str,
+    symbol_name: str,
+    max_context_tokens: int,
+    k: int,
+    verbose: bool,
+) -> dict[str, Any] | None:
+    symbol_result = find_symbol(
+        bundle_manifest=bundle_manifest,
+        name=symbol_name,
+        k=max(k, 10),
+        verbose=verbose,
+    )
+    navigation_hits, exact_hit_count = _compact_symbol_hits(
+        symbol_result, name=symbol_name, k=k
+    )
+    if not navigation_hits:
+        return None
+    inner = symbol_result.get("result") if isinstance(symbol_result, dict) else {}
+    from merger.repoground.core.ask_context import (
+        _availability_block,
+        _freshness_block,
+    )
+
+    availability = _availability_block(
+        {"availability_model": inner.get("availability")}
+        if isinstance(inner, dict)
+        else {}
+    )
+    freshness = _freshness_block(
+        {"freshness": inner.get("freshness")} if isinstance(inner, dict) else {}
+    )
+    return {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "query_existing_index",
+        "status": "available",
+        "route": "symbol_definition",
+        "intent": {"kind": "symbol_definition", "symbol": symbol_name},
+        "retrieval": {
+            "raw_query": query,
+            "fts_query": None,
+            "strategy": "symbol_definition",
+            "match_count": len(navigation_hits),
+        },
+        "retrieval_hits": [
+            {
+                "artifact_role": "python_symbol_index_json",
+                "ref": str(hit.get("id") or hit.get("range_ref") or "symbol"),
+                "score": 0.0,
+                "purpose": "exact symbol-definition navigation candidate",
+            }
+            for hit in navigation_hits
+        ],
+        "navigation_hits": navigation_hits,
+        "resolved_ranges": [],
+        "budget": {
+            "max_context_tokens": max_context_tokens,
+            "approx_context_chars_used": 0,
+            "truncated": exact_hit_count > len(navigation_hits),
+            "does_not_establish_quality": True,
+        },
+        "availability": availability,
+        "freshness": freshness,
+        "answer_caveats": [
+            {
+                "kind": "navigation_only",
+                "detail": (
+                    "Symbol-index hits establish a snapshot path and source line range, "
+                    "not source semantics or runtime behavior."
+                ),
+            }
+        ],
+        "result_semantics": "repobrief.query_existing_index.agent_frontdoor.v1",
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
+    }
+
+
+def query_existing_index(
+    *,
+    bundle_manifest: str | Path,
+    query: str,
+    task_profile: str = "basic_repo_question",
+    max_context_tokens: int = 2000,
+    k: int = 5,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Query one existing index through the canonical ask retrieval strategy."""
+    from merger.repoground.core.ask_context import build_ask_context_pack
+
+    symbol_name = _symbol_definition_intent(query)
+    if symbol_name is not None:
+        routed = _symbol_query_result(
+            bundle_manifest=bundle_manifest,
+            query=query,
+            symbol_name=symbol_name,
+            max_context_tokens=max_context_tokens,
+            k=k,
+            verbose=verbose,
+        )
+        if routed is not None:
+            return routed
+
+    pack = build_ask_context_pack(
+        bundle_manifest,
+        query=query,
+        task_profile=task_profile,
+        max_context_tokens=max_context_tokens,
+        max_answer_tokens=1,
+        k=k,
+    )
+    result = {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "query_existing_index",
+        "status": "available",
+        "route": "text_retrieval",
+        "intent": {"kind": "text_retrieval"},
+        "retrieval": pack["retrieval"],
+        "retrieval_hits": pack["retrieval_hits"],
+        "resolved_ranges": pack["resolved_ranges"],
+        "budget": pack["budget"],
+        "availability": pack["availability"],
+        "freshness": pack["freshness"],
+        "answer_caveats": pack["answer_scaffold"]["caveats_to_surface"],
+        "result_semantics": "repobrief.query_existing_index.agent_frontdoor.v1",
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
+    }
+    if verbose:
+        result["context_pack"] = pack
+    return result
+
+
+def range_get(
+    *,
+    bundle_manifest: str | Path,
+    range_ref: dict[str, Any],
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Resolve one exact range from an existing bundle without live workspace reads."""
+    from merger.repoground.core.bundle_access import range_get as access_range_get
+
+    result = access_range_get(bundle_manifest, range_ref)
+    return {
+        "kind": READ_ONLY_KIND,
+        "version": READ_ONLY_VERSION,
+        "tool": "range_get",
+        "status": result.get("status", "invalid"),
+        "result": result,
+        "result_semantics": "repobrief.range_get.v1",
+        "mutation_boundary": _read_only_boundary(verbose=verbose),
+        "does_not_establish": _read_only_does_not_establish(verbose=verbose),
+    }
+
+
 def grounding_verify(
     *,
     declaration: dict[str, Any],
@@ -349,7 +637,9 @@ def grounding_verify(
     repeated mutation-boundary and non-claim envelope is projected to a
     compact reference by default.
     """
-    from merger.repoground.core.answer_grounding import verify_answer_grounding_for_task_profile
+    from merger.repoground.core.answer_grounding import (
+        verify_answer_grounding_for_task_profile,
+    )
 
     verdict = verify_answer_grounding_for_task_profile(
         declaration,
@@ -373,7 +663,9 @@ def grounding_verify(
 FIND_SYMBOL_KINDS = ("class", "function", "async_function")
 
 
-def _find_symbol_result(status: str, result: dict[str, Any], *, verbose: bool = False) -> dict[str, Any]:
+def _find_symbol_result(
+    status: str, result: dict[str, Any], *, verbose: bool = False
+) -> dict[str, Any]:
     return {
         "kind": READ_ONLY_KIND,
         "version": READ_ONLY_VERSION,
@@ -522,9 +814,7 @@ def get_callers(
         get_callers as access_get_callers,
     )
 
-    result = access_get_callers(
-        bundle_manifest, name, path=path, k=k, verbose=verbose
-    )
+    result = access_get_callers(bundle_manifest, name, path=path, k=k, verbose=verbose)
     return _call_navigation_result(
         "get_callers",
         result.get("status", "invalid"),
@@ -554,9 +844,7 @@ def get_callees(
         get_callees as access_get_callees,
     )
 
-    result = access_get_callees(
-        bundle_manifest, name, path=path, k=k, verbose=verbose
-    )
+    result = access_get_callees(bundle_manifest, name, path=path, k=k, verbose=verbose)
     return _call_navigation_result(
         "get_callees",
         result.get("status", "invalid"),
