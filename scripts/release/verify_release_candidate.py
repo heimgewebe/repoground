@@ -81,7 +81,15 @@ def _sha256(path: Path) -> str:
 
 def _safe_name(name: str) -> bool:
     path = Path(name)
-    return bool(name) and not path.is_absolute() and ".." not in path.parts
+    raw_parts = name.split("/")
+    if name.endswith("/"):
+        raw_parts = raw_parts[:-1]
+    return (
+        bool(name)
+        and not path.is_absolute()
+        and bool(raw_parts)
+        and all(part not in {"", ".", ".."} for part in raw_parts)
+    )
 
 
 def _load_candidate(
