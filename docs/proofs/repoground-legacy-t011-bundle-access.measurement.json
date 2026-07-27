@@ -1,0 +1,172 @@
+{
+  "kind": "repoground.bundle_access_decomposition_measurement",
+  "version": "1.0",
+  "task": "REPOGROUND-LEGACY-RECONCILIATION-V1-T004",
+  "slice": "T011",
+  "binding": {
+    "base_commit": "a029bbcd2779e7bed1ac41e936bdf720249f0538",
+    "base_tree": "0768606f5ea218b7a188c598be590ab2738bb583",
+    "worktree_dirty": true,
+    "commit_created": false,
+    "measurement_scope": "current isolated worktree source/config/test bytes; proof files are not included in source digests"
+  },
+  "source_size": {
+    "bundle_access_before": {
+      "lines": 3676,
+      "bytes": 134274,
+      "source": "git show HEAD:merger/repoground/core/bundle_access.py"
+    },
+    "bundle_access_after": {
+      "lines": 2618,
+      "bytes": 94004,
+      "line_reduction": 1058,
+      "line_reduction_percent": 28.78,
+      "byte_reduction": 40270,
+      "byte_reduction_percent": 29.99
+    },
+    "extracted_modules": [
+      {
+        "path": "merger/repoground/core/bounded_artifact_read.py",
+        "lines": 181
+      },
+      {
+        "path": "merger/repoground/core/bundle_roles.py",
+        "lines": 344
+      },
+      {
+        "path": "merger/repoground/core/call_graph_validation.py",
+        "lines": 335
+      },
+      {
+        "path": "merger/repoground/core/citation_projection.py",
+        "lines": 580
+      },
+      {
+        "path": "merger/repoground/core/sqlite_artifact_read.py",
+        "lines": 224
+      }
+    ],
+    "aggregate_product_lines_before": 3676,
+    "aggregate_product_lines_after": 4282,
+    "aggregate_line_reduction_claimed": false
+  },
+  "complexity": {
+    "measured_with": "python3 scripts/ci/check_graph_maintainability.py --root . --format json",
+    "before": {
+      "source_state": "clean base worktree before this slice",
+      "finding_count": 194,
+      "max_complexity": 138,
+      "excess_total": 2351,
+      "receipt_sha256": "f1c316403f57b2b5608ed6e58c081e73ee7c56e8865b2c5de997c177ee3c2cb9"
+    },
+    "after": {
+      "status": "pass",
+      "finding_count": 193,
+      "max_complexity": 138,
+      "excess_total": 2348,
+      "new_count": 0,
+      "resolved_count": 0,
+      "receipt_sha256": "d0a53b7b8aae5384a6ef4b1be424a0682343eed74aa5be9c7a1495c04479303f"
+    },
+    "delta": {
+      "finding_count": -1,
+      "max_complexity": 0,
+      "excess_total": -3
+    },
+    "budget_after": {
+      "finding_count_max": 193,
+      "max_complexity_max": 138,
+      "excess_total_max": 2348
+    },
+    "target_module_c901_findings_before": 1,
+    "target_module_c901_findings_after": 0,
+    "baseline_sync": {
+      "target_identity_removed": "merger/repoground/core/bundle_access.py::_citation_row_is_valid",
+      "preexisting_stale_identities_removed": 3,
+      "preexisting_lower_complexities_recorded": 2,
+      "budget_was_lowered": true
+    }
+  },
+  "bounds": {
+    "manifest_bytes_max": 4194304,
+    "registered_artifact_bytes_max": 268435456,
+    "sqlite_artifact_bytes_max": 268435456,
+    "legacy_integrity_metadata_policy": "both bytes and sha256 may be absent together; actual bounded bytes and sha256 are then pinned; partial or malformed metadata fails closed"
+  },
+  "verification": {
+    "targeted_regression": {
+      "result": "pass",
+      "passed": 319,
+      "skipped": 10
+    },
+    "new_adversarial_suite": {
+      "path": "merger/repoground/tests/test_bundle_access_decomposition.py",
+      "result": "pass",
+      "passed": 20
+    },
+    "ruff_changed_files": "pass",
+    "ruff_c901_changed_modules": "pass",
+    "graph_maintainability_gate": "pass",
+    "module_reachability_gate": {
+      "status": "pass",
+      "module_count": 214,
+      "unproven": 0,
+      "documentation_only": 0,
+      "receipt_sha256": "bd3d78998415c767295d805c8d03c45bb7d0067c31e67f8d14d3bf27699bcb44"
+    },
+    "frontend_parity_guard": "pass",
+    "targeted_regression_after_review": {
+      "result": "pass",
+      "passed": 57,
+      "scope": [
+        "legacy manifest facade",
+        "MCP read-only access",
+        "snapshot preflight",
+        "bundle access decomposition"
+      ]
+    },
+    "broad_suite_without_host_blocked_sidecar": {
+      "result": "pass",
+      "passed": 5072,
+      "skipped": 12,
+      "ignored": [
+        "tests/test_patch_evaluation_sidecar.py",
+        "tests/test_patch_evaluation_sidecar_host_readback.py"
+      ],
+      "reason": "host bubblewrap namespace creation is unavailable and separately tracked by OPERATOR-PC-HYGIENE-V1-T014",
+      "receipt_sha256": "a3601d63ff286d864280df268ae5994139113cc3a15e353b49ea0dc00fc19035"
+    },
+    "independent_review_hardening": {
+      "status": "pass",
+      "findings_fixed": [
+        "legacy JSON-object manifests were over-tightened by strict snapshot decoding",
+        "descriptor reader could follow a final symlink during a pathname race",
+        "existing weak-identity and atomic-replacement instrumentation contracts regressed"
+      ],
+      "final_race_and_adversarial_tests_passed": 23
+    }
+  },
+  "source_sha256": {
+    "config/repoground-c901-baseline.v1.json": "7a848e6b846f2dd8e85d3bf38b8fad5510571521dde580a58e0bab4a8328b7f3",
+    "config/repoground-graph-maintainability.v1.json": "ca0923a57b327b74ae3a401581bc9b9415f9e90001efb4d5430dd4fa59c9e927",
+    "merger/repoground/core/bounded_artifact_read.py": "f871fb39819b5c250b678ac42e6c192113ba3ae4e6cca29adde7afb0aeb9d94a",
+    "merger/repoground/core/bundle_access.py": "2d942bc8c4a065cfa873bd3d5b2595185c407d4e45f5844b32b71a1f9784762a",
+    "merger/repoground/core/bundle_roles.py": "ca07cc1982351f98631c6521f7f4bfd9f4ad123e6d1b09a5331f8ff4158238d8",
+    "merger/repoground/core/call_graph_validation.py": "eab8bd3557bf2020e4bdb3b4e6218da012aec267538e30e4135644badbe92930",
+    "merger/repoground/core/citation_projection.py": "8d4a9423c08ef3578f1307497dc1b531194f99558f6939dcfb91756e7672a5c2",
+    "merger/repoground/core/sqlite_artifact_read.py": "81a06a8123f38de4ee9672a1d405f9c51d94c9d740807d679f63795b3489d04b",
+    "merger/repoground/tests/test_bundle_access_decomposition.py": "487b9514657567050c282da94efa788a4414860fb0520352290bbab9c5e6e32f"
+  },
+  "tool_versions": {
+    "python": "3.10.12",
+    "ruff": "0.15.13"
+  },
+  "does_not_establish": [
+    "full repository test completeness",
+    "remote repository freshness",
+    "MCP transport or authentication availability",
+    "absence of maintainability debt below the C901 threshold",
+    "aggregate production line-count reduction",
+    "merge readiness"
+  ]
+}

@@ -1,10 +1,10 @@
 {
   "kind": "repoground.c901_baseline",
   "version": "1.0",
-  "observed_on": "2026-07-24",
+  "observed_on": "2026-07-27",
   "ruff_config": "ruff-ci.toml",
   "threshold": 10,
-  "finding_count": 197,
+  "finding_count": 193,
   "max_complexity": 138,
   "findings": [
     {
@@ -255,11 +255,6 @@
     {
       "path": "merger/repoground/core/availability.py",
       "qualified_name": "graph_availability_model",
-      "max_complexity": 13
-    },
-    {
-      "path": "merger/repoground/core/bundle_access.py",
-      "qualified_name": "_citation_row_is_valid",
       "max_complexity": 13
     },
     {
@@ -550,7 +545,7 @@
     {
       "path": "merger/repoground/core/range_resolver.py",
       "qualified_name": "resolve_range_ref",
-      "max_complexity": 57
+      "max_complexity": 56
     },
     {
       "path": "merger/repoground/core/readonly_adapter.py",
@@ -654,16 +649,6 @@
     },
     {
       "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "main_cli",
-      "max_complexity": 42
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "run_pre_pull_two_phase",
-      "max_complexity": 13
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
       "qualified_name": "validate_source_mode_request",
       "max_complexity": 11
     },
@@ -698,11 +683,6 @@
       "max_complexity": 11
     },
     {
-      "path": "merger/repoground/retrieval/eval_diagnostics_integration.py",
-      "qualified_name": "_extract_misses_from_eval",
-      "max_complexity": 13
-    },
-    {
       "path": "merger/repoground/retrieval/federation_query.py",
       "qualified_name": "_execute_federated_query_data",
       "max_complexity": 32
@@ -730,7 +710,7 @@
     {
       "path": "merger/repoground/retrieval/query_core.py",
       "qualified_name": "execute_query",
-      "max_complexity": 96
+      "max_complexity": 91
     },
     {
       "path": "merger/repoground/retrieval/query_range_coverage.py",

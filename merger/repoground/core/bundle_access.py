@@ -4,289 +4,122 @@ import hashlib
 import json
 import logging
 import os
-import re
-import stat
 import tempfile
 from collections import OrderedDict
 from contextlib import contextmanager
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
 from typing import Any, BinaryIO, Iterator, Mapping, Sequence
 
 from merger.repoground.architecture.call_graph_contract import (
-    MAX_SKIPPED_ERRORS as MAX_CALL_GRAPH_SKIPPED_ERRORS,
     PRODUCER_NONCLAIMS as CALL_GRAPH_PRODUCER_NONCLAIMS,
     REQUIRED_NONCLAIMS as CALL_GRAPH_REQUIRED_NONCLAIMS,
 )
+from merger.repoground.core import call_graph_validation as _call_graph_validation
 from merger.repoground.core.call_navigation_index import (
     CallNavigationIndex,
     SymbolNavigationIndex,
 )
+from merger.repoground.core.bundle_identity import is_bundle_manifest
+from merger.repoground.core.bounded_artifact_read import (
+    MAX_REGISTERED_ARTIFACT_BYTES,
+    ArtifactSourceFingerprint as _ArtifactSourceFingerprint,
+    LoadedArtifactSource as _LoadedArtifactSource,
+    declared_artifact_integrity,
+    file_identity as _file_identity,
+    read_stable_regular_file_bytes,
+)
+from merger.repoground.core import bundle_roles as _bundle_roles
+from merger.repoground.core import citation_projection as _citation_projection_module
+from merger.repoground.core import sqlite_artifact_read as _sqlite_artifact_read
+from merger.repoground.core.bundle_roles import (
+    DOES_NOT_ESTABLISH as _DOES_NOT_ESTABLISH,
+    read_json_object as _read_json_object,
+    read_only_mutation_boundary as _read_only_mutation_boundary,
+    resolve_unique_artifact as _resolve_unique_artifact,
+    safe_artifact_path as _safe_artifact_path,
+)
+from merger.repoground.core.citation_projection import (
+    CITATION_MAP_ROLE,
+    RESOLVED_EVIDENCE_KIND,
+    RESOLVED_EVIDENCE_VERSION,
+    citation_range_key as _citation_range_key,
+    citation_record as _citation_record,
+    citation_row_is_valid as _citation_row_is_valid,
+    enrich_resolved_hit_for_direct_use as _enrich_resolved_hit_for_direct_use,
+    is_int_not_bool as _is_int_not_bool,
+    is_non_empty_string as _is_non_empty_string,
+    project_source_citations as _project_source_citations,
+)
 from merger.repoground.core.manifest_snapshot import (
+    MAX_MANIFEST_BYTES,
     active_manifest_snapshot,
     resolve_manifest_path,
 )
 from merger.repoground.core.response_projection import project_read_result
 
-_DOES_NOT_ESTABLISH = (
-    "truth",
-    "correctness",
-    "completeness",
-    "runtime_behavior",
-    "test_sufficiency",
-    "regression_absence",
-    "repo_understood",
-    "claims_true",
-    "forensic_ready",
-    "freshness",
+available_roles = _bundle_roles.available_roles
+get_artifact = _bundle_roles.get_artifact
+list_artifacts = _bundle_roles.list_artifacts
+resolve_required_reading_for_bundle = (
+    _bundle_roles.resolve_required_reading_for_bundle
+)
+snapshot_check = _bundle_roles.snapshot_check
+snapshot_status = _bundle_roles.snapshot_status
+_artifact_list = _bundle_roles.artifact_list
+_artifact_record = _bundle_roles.artifact_record
+
+SOURCE_CITATION_PROJECTION_KIND = (
+    _citation_projection_module.SOURCE_CITATION_PROJECTION_KIND
+)
+SOURCE_CITATION_PROJECTION_VERSION = (
+    _citation_projection_module.SOURCE_CITATION_PROJECTION_VERSION
+)
+TEXT_EXCERPT_MAX_CHARS = _citation_projection_module.TEXT_EXCERPT_MAX_CHARS
+_artifact_availability = _citation_projection_module.artifact_availability
+_empty_source_citation_projection = (
+    _citation_projection_module.empty_source_citation_projection
+)
+_first_not_none = _citation_projection_module.first_not_none
+_has_range_identity = _citation_projection_module.has_range_identity
+_is_sha256 = _citation_projection_module.is_sha256
+_line_range = _citation_projection_module.line_range
+_range_ref_from_citation_row = (
+    _citation_projection_module.range_ref_from_citation_row
+)
+_range_ref_is_valid_for_citation_row = (
+    _citation_projection_module.range_ref_is_valid_for_citation_row
+)
+_source_range_projection = _citation_projection_module.source_range_projection
+_call_graph_error = _call_graph_validation.error
+_call_graph_identity_error = _call_graph_validation.identity_error
+_call_graph_parse_diagnostics = _call_graph_validation.parse_diagnostics
+_call_graph_model_error = _call_graph_validation.model_error
+_call_graph_records_error = _call_graph_validation.records_error
+_call_graph_counts_error = _call_graph_validation.counts_error
+_call_graph_manifest_binding_error = _call_graph_validation.manifest_binding_error
+_call_record_is_valid = _call_graph_validation.call_record_is_valid
+_SqliteArtifactValidationError = (
+    _sqlite_artifact_read.SqliteArtifactValidationError
+)
+_sqlite_file_identity = _sqlite_artifact_read.sqlite_file_identity
+_write_portable_sqlite_copy = _sqlite_artifact_read.write_portable_sqlite_copy
+_verify_portable_sqlite_copy = _sqlite_artifact_read.verify_portable_sqlite_copy
+_sqlite_integrity_contract = _sqlite_artifact_read.sqlite_integrity_contract
+_open_sqlite_artifact = _sqlite_artifact_read.open_sqlite_artifact
+_verify_sqlite_handle = _sqlite_artifact_read.verify_sqlite_handle
+_require_current_sqlite_path = (
+    _sqlite_artifact_read.require_current_sqlite_path
 )
 
-CITATION_MAP_ROLE = "citation_map_jsonl"
-RESOLVED_EVIDENCE_KIND = "repobrief.resolved_evidence"
-RESOLVED_EVIDENCE_VERSION = "v1"
-SOURCE_CITATION_PROJECTION_KIND = "repobrief.source_citation_projection"
-SOURCE_CITATION_PROJECTION_VERSION = "v1"
-TEXT_EXCERPT_MAX_CHARS = 1200
-_CITATION_ID_RE = re.compile(r"^cit_[a-f0-9]{16}$")
-_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
-_CITATION_RANGE_KEY_FIELDS = ("file_path", "start_byte", "end_byte")
 logger = logging.getLogger(__name__)
 
 
-def _read_json_object(path: Path) -> dict[str, Any]:
-    snapshot = active_manifest_snapshot(path)
-    if snapshot is not None:
-        return snapshot.json_object()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise ValueError(f"bundle manifest does not exist: {path}") from exc
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"bundle manifest is not valid JSON: {path}") from exc
-    if not isinstance(data, dict):
-        raise ValueError("bundle manifest must be a JSON object")
-    return data
-
-
-def _artifact_list(manifest: dict[str, Any]) -> list[dict[str, Any]]:
-    artifacts = manifest.get("artifacts", [])
-    if not isinstance(artifacts, list):
-        raise ValueError("bundle manifest artifacts must be an array")
-    return [a for a in artifacts if isinstance(a, dict)]
-
-
-def _safe_artifact_path(root: Path, raw_path: Any) -> Path | None:
-    if not isinstance(raw_path, str) or not raw_path:
-        return None
-    candidate = (root / raw_path).resolve()
-    try:
-        candidate.relative_to(root.resolve())
-    except ValueError:
-        return None
-    return candidate
-
-
-def _artifact_record(bundle_manifest: Path, artifact: dict[str, Any]) -> dict[str, Any]:
-    root = bundle_manifest.parent
-    artifact_path = _safe_artifact_path(root, artifact.get("path"))
-    file_exists = bool(artifact_path and artifact_path.exists())
-    return {
-        "role": artifact.get("role"),
-        "path": artifact.get("path"),
-        "absolute_path": str(artifact_path) if artifact_path else None,
-        "file_exists": file_exists,
-        "content_type": artifact.get("content_type"),
-        "bytes": artifact.get("bytes"),
-        "sha256": artifact.get("sha256"),
-        "authority": artifact.get("authority"),
-        "canonicality": artifact.get("canonicality"),
-        "risk_class": artifact.get("risk_class"),
-        "contract": artifact.get("contract"),
-        "interpretation": artifact.get("interpretation"),
-    }
-
-
-def available_roles(bundle_manifest: str | Path) -> list[str]:
-    manifest_path = resolve_manifest_path(bundle_manifest)
-    manifest = _read_json_object(manifest_path)
-    roles: set[str] = {"bundle_manifest"}
-    for artifact in _artifact_list(manifest):
-        role = artifact.get("role")
-        if isinstance(role, str) and role:
-            roles.add(role)
-    links = manifest.get("links")
-    if isinstance(links, dict):
-        linked_roles = {
-            "post_emit_health_path": "post_emit_health",
-            "bundle_surface_validation_path": "bundle_surface_validation",
-            "export_safety_report_path": "export_safety_report",
-        }
-        for key, role in linked_roles.items():
-            if links.get(key):
-                roles.add(role)
-    return sorted(roles)
-
-
-def resolve_required_reading_for_bundle(
-    bundle_manifest: str | Path,
-    task_profile: str,
-) -> dict[str, Any]:
-    from merger.repoground.core.required_reading import (
-        default_required_reading_protocol,
-        resolve_required_reading,
-    )
-
-    manifest_path = resolve_manifest_path(bundle_manifest)
-    roles = available_roles(manifest_path)
-    required = resolve_required_reading(
-        default_required_reading_protocol(),
-        set(roles),
-        task_profile,
-    )
-    return {
-        "kind": "repobrief.required_reading_resolution",
-        "version": "v1",
-        "status": required.get("status"),
-        "bundle_manifest": str(manifest_path),
-        "task_profile": task_profile,
-        "available_roles": roles,
-        "required_reading": required,
-        "mutation_boundary": {
-            "writes": [],
-            "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree", "brief_bundle_artifacts"],
-            "read_paths_do_not_refresh": True,
-        },
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
-    }
-
-
-def snapshot_status(
-    bundle_manifest: str | Path,
-    *,
-    manifest_data: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Project snapshot status without refreshing bundle state.
-
-    Supplying ``manifest_data`` avoids rereading the manifest; the path remains
-    the trusted base for resolving relative artifact paths.
-    """
-    requested_manifest_path = Path(bundle_manifest).expanduser()
-    if manifest_data is None:
-        manifest_path = resolve_manifest_path(requested_manifest_path)
-        manifest = _read_json_object(manifest_path)
-    else:
-        if not isinstance(manifest_data, Mapping):
-            raise ValueError("manifest_data must be a mapping")
-        # The caller already verified this manifest generation. Keep its lexical
-        # absolute path as the artifact-root anchor instead of following a later
-        # replacement symlink at the final manifest name.
-        manifest_path = requested_manifest_path.absolute()
-        manifest = deepcopy(dict(manifest_data))
-    artifacts = [_artifact_record(manifest_path, a) for a in _artifact_list(manifest)]
-    roles = sorted(str(a["role"]) for a in artifacts if isinstance(a.get("role"), str))
-    capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
-    from merger.repoground.core.availability import snapshot_availability_model
-
-    availability_model = snapshot_availability_model(
-        manifest_path,
-        manifest,
-        resolve_manifest_path=manifest_data is None,
-    )
-    return {
-        "kind": "repobrief.snapshot_status",
-        "version": "v1",
-        "status": "ok",
-        "bundle_manifest": str(manifest_path),
-        "bundle_run_id": manifest.get("run_id"),
-        "profile": capabilities.get("repobrief_profile"),
-        "profile_evaluation": capabilities.get("repobrief_profile_evaluation"),
-        "availability_model": availability_model,
-        "freshness": availability_model.get("freshness"),
-        "artifact_count": len(artifacts),
-        "roles": roles,
-        "artifacts": artifacts,
-        "mutation_boundary": {
-            "writes": [],
-            "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree", "brief_bundle_artifacts"],
-            "read_paths_do_not_refresh": True,
-        },
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
-    }
-
-
-def list_artifacts(bundle_manifest: str | Path) -> dict[str, Any]:
-    status = snapshot_status(bundle_manifest)
-    return {
-        "kind": "repobrief.artifact_list",
-        "version": "v1",
-        "status": status["status"],
-        "bundle_manifest": status["bundle_manifest"],
-        "bundle_run_id": status["bundle_run_id"],
-        "profile": status["profile"],
-        "artifact_count": status["artifact_count"],
-        "roles": status["roles"],
-        "artifacts": status["artifacts"],
-        "mutation_boundary": status["mutation_boundary"],
-        "does_not_establish": status["does_not_establish"],
-    }
-
-
-def get_artifact(bundle_manifest: str | Path, role: str) -> dict[str, Any]:
-    manifest_path = resolve_manifest_path(bundle_manifest)
-    manifest = _read_json_object(manifest_path)
-    matches = [a for a in _artifact_list(manifest) if a.get("role") == role]
-    if not matches:
-        return {
-            "kind": "repobrief.artifact_ref",
-            "version": "v1",
-            "status": "missing",
-            "bundle_manifest": str(manifest_path),
-            "role": role,
-            "artifact": None,
-            "mutation_boundary": {
-                "writes": [],
-                "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree", "brief_bundle_artifacts"],
-                "read_paths_do_not_refresh": True,
-            },
-            "does_not_establish": list(_DOES_NOT_ESTABLISH),
-        }
-    return {
-        "kind": "repobrief.artifact_ref",
-        "version": "v1",
-        "status": "available",
-        "bundle_manifest": str(manifest_path),
-        "role": role,
-        "artifact": _artifact_record(manifest_path, matches[0]),
-        "mutation_boundary": {
-            "writes": [],
-            "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree", "brief_bundle_artifacts"],
-            "read_paths_do_not_refresh": True,
-        },
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
-    }
-
-
 MAX_QUERY_EXISTING_INDEX_K = 100
-_SQLITE_HASH_CHUNK_BYTES = 1024 * 1024
+MAX_SQLITE_ARTIFACT_BYTES = _sqlite_artifact_read.MAX_SQLITE_ARTIFACT_BYTES
+_SQLITE_HASH_CHUNK_BYTES = _sqlite_artifact_read.SQLITE_HASH_CHUNK_BYTES
 _FILE_DESCRIPTOR_ROOTS = (Path("/proc/self/fd"), Path("/dev/fd"))
-
-
-class _SqliteArtifactValidationError(ValueError):
-    def __init__(self, error_code: str, message: str) -> None:
-        super().__init__(message)
-        self.error_code = error_code
-
-
-def _sqlite_file_identity(value: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (
-        value.st_dev,
-        value.st_ino,
-        value.st_size,
-        value.st_mtime_ns,
-        value.st_ctime_ns,
-    )
 
 
 def _query_path_for_descriptor(
@@ -305,95 +138,6 @@ def _query_path_for_descriptor(
         "sqlite_index_descriptor_unavailable",
         "sqlite_index cannot be pinned to a verified file descriptor",
     )
-
-
-def _portable_copy_flags(*, write: bool) -> int:
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL if write else os.O_RDONLY
-    flags |= getattr(os, "O_BINARY", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    return flags
-
-
-def _write_portable_sqlite_copy(
-    handle: BinaryIO,
-    destination: Path,
-    *,
-    expected_bytes: int,
-    expected_sha256: str,
-    expected_identity: tuple[int, int, int, int, int],
-) -> None:
-    digest = hashlib.sha256()
-    observed_bytes = 0
-    try:
-        handle.seek(0)
-        descriptor = os.open(destination, _portable_copy_flags(write=True), 0o600)
-        with os.fdopen(descriptor, "wb") as target:
-            for chunk in iter(
-                lambda: handle.read(_SQLITE_HASH_CHUNK_BYTES),
-                b"",
-            ):
-                observed_bytes += len(chunk)
-                digest.update(chunk)
-                target.write(chunk)
-            target.flush()
-            os.fsync(target.fileno())
-    except OSError as exc:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_portable_copy_failed",
-            f"sqlite_index verified copy could not be created: {exc}",
-        ) from exc
-
-    if (
-        observed_bytes != expected_bytes
-        or digest.hexdigest() != expected_sha256
-        or _sqlite_file_identity(os.fstat(handle.fileno())) != expected_identity
-    ):
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_mismatch",
-            "sqlite_index bytes changed while creating the verified copy",
-        )
-    try:
-        os.chmod(destination, stat.S_IRUSR)
-    except OSError as exc:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_portable_copy_failed",
-            f"sqlite_index verified copy could not be made read-only: {exc}",
-        ) from exc
-
-
-def _verify_portable_sqlite_copy(
-    path: Path,
-    *,
-    expected_bytes: int,
-    expected_sha256: str,
-) -> None:
-    try:
-        descriptor = os.open(path, _portable_copy_flags(write=False))
-        with os.fdopen(descriptor, "rb") as handle:
-            before = os.fstat(handle.fileno())
-            if stat.S_IMODE(before.st_mode) & 0o222:
-                raise _SqliteArtifactValidationError(
-                    "sqlite_index_integrity_mismatch",
-                    "sqlite_index verified copy is not read-only",
-                )
-            identity = _verify_sqlite_handle(
-                handle,
-                expected_bytes=expected_bytes,
-                expected_sha256=expected_sha256,
-            )
-        current = os.stat(path, follow_symlinks=False)
-    except _SqliteArtifactValidationError:
-        raise
-    except OSError as exc:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_mismatch",
-            f"sqlite_index verified copy is unavailable: {exc}",
-        ) from exc
-    if not stat.S_ISREG(current.st_mode) or _sqlite_file_identity(current) != identity:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_mismatch",
-            "sqlite_index verified copy changed while it was checked",
-        )
 
 
 @contextmanager
@@ -431,92 +175,6 @@ def _portable_verified_sqlite_copy(
             query_path,
             expected_bytes=expected_bytes,
             expected_sha256=expected_sha256,
-        )
-
-
-def _sqlite_integrity_contract(artifact: dict[str, Any]) -> tuple[int, str]:
-    expected_bytes = artifact.get("bytes")
-    expected_sha256 = artifact.get("sha256")
-    if (
-        not isinstance(expected_bytes, int)
-        or isinstance(expected_bytes, bool)
-        or expected_bytes < 0
-        or not _is_sha256(expected_sha256)
-    ):
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_unavailable",
-            "sqlite_index bytes/sha256 contract is missing or invalid in manifest",
-        )
-    return expected_bytes, expected_sha256
-
-
-def _open_sqlite_artifact(index_path: Path) -> BinaryIO:
-    try:
-        return index_path.open("rb")
-    except FileNotFoundError as exc:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_file_missing",
-            "sqlite_index artifact file does not exist",
-        ) from exc
-    except OSError as exc:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_unreadable",
-            f"sqlite_index artifact cannot be opened: {exc}",
-        ) from exc
-
-
-def _verify_sqlite_handle(
-    handle: BinaryIO,
-    *,
-    expected_bytes: int,
-    expected_sha256: str,
-) -> tuple[int, int, int, int, int]:
-    before = os.fstat(handle.fileno())
-    if not stat.S_ISREG(before.st_mode):
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_path_invalid",
-            "sqlite_index artifact is not a regular file",
-        )
-    if before.st_size != expected_bytes:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_mismatch",
-            "sqlite_index byte size does not match active manifest",
-        )
-
-    digest = hashlib.sha256()
-    observed_bytes = 0
-    for chunk in iter(lambda: handle.read(_SQLITE_HASH_CHUNK_BYTES), b""):
-        observed_bytes += len(chunk)
-        digest.update(chunk)
-    identity = _sqlite_file_identity(before)
-    stable_identity = _sqlite_file_identity(os.fstat(handle.fileno()))
-    if (
-        observed_bytes != expected_bytes
-        or digest.hexdigest() != expected_sha256
-        or stable_identity != identity
-    ):
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_mismatch",
-            "sqlite_index bytes do not match active manifest",
-        )
-    return identity
-
-
-def _require_current_sqlite_path(
-    index_path: Path,
-    expected_identity: tuple[int, int, int, int, int],
-) -> None:
-    try:
-        current_identity = _sqlite_file_identity(index_path.stat())
-    except OSError as exc:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_mismatch",
-            "sqlite_index path changed during manifest verification",
-        ) from exc
-    if current_identity != expected_identity:
-        raise _SqliteArtifactValidationError(
-            "sqlite_index_integrity_mismatch",
-            "sqlite_index path changed during manifest verification",
         )
 
 
@@ -578,20 +236,6 @@ def _verified_sqlite_query_path(
                 )
 
 
-def _read_only_mutation_boundary() -> dict[str, Any]:
-    return {
-        "writes": [],
-        "does_not_mutate": [
-            "git",
-            "pull_requests",
-            "patches",
-            "source_working_tree",
-            "brief_bundle_artifacts",
-        ],
-        "read_paths_do_not_refresh": True,
-    }
-
-
 def _invalid_read_result(
     *,
     kind: str,
@@ -628,6 +272,35 @@ def _range_error_code(exc: Exception) -> tuple[str, str]:
     if "schema" in message or "range_ref" in message or "artifact_role" in message:
         return "invalid", "range_ref_invalid"
     return "invalid", "range_resolution_failed"
+
+
+def _resolve_sqlite_artifact(
+    manifest_path: Path,
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    manifest = _read_json_object(manifest_path)
+    _payload, artifact, failure = _resolve_unique_artifact(
+        manifest_path,
+        manifest,
+        "sqlite_index",
+    )
+    errors = {
+        "missing": (
+            "sqlite_index_missing",
+            "sqlite_index artifact is not present in the bundle manifest",
+        ),
+        "role_ambiguous": (
+            "sqlite_index_role_ambiguous",
+            "bundle manifest contains multiple sqlite_index artifacts",
+        ),
+        "path_invalid": (
+            "sqlite_index_path_invalid",
+            "sqlite_index artifact path escapes the bundle root",
+        ),
+    }
+    if failure is None:
+        return artifact, None, None
+    error_code, error = errors[failure]
+    return artifact, error_code, error
 
 
 def range_get(
@@ -716,340 +389,78 @@ def _empty_citation_map_status(
     return result
 
 
-def _is_non_empty_string(value: Any) -> bool:
-    return isinstance(value, str) and bool(value)
-
-
-def _is_sha256(value: Any) -> bool:
-    return isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
-
-
-def _is_int_not_bool(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _citation_range_key(value: Any) -> tuple[Any, ...] | None:
-    if not isinstance(value, dict):
-        return None
-    file_path, start_byte, end_byte = (
-        value.get(field) for field in _CITATION_RANGE_KEY_FIELDS
-    )
-    content_sha256 = value.get("range_content_sha256") or value.get("content_sha256")
-    if not _is_non_empty_string(file_path):
-        return None
-    if not _is_int_not_bool(start_byte) or not _is_int_not_bool(end_byte):
-        return None
-    if start_byte < 0 or end_byte <= start_byte:
-        return None
-    if not _is_sha256(content_sha256):
-        return None
-    return (file_path, start_byte, end_byte, content_sha256)
-
-
-def _range_ref_from_citation_row(row: dict[str, Any]) -> dict[str, Any] | None:
-    citation_id = row.get("citation_id")
-    repo_id = row.get("repo_id")
-    canonical_range = row.get("canonical_range")
-    if not isinstance(canonical_range, dict) or not _is_non_empty_string(repo_id):
-        return None
-    result = {
-        "artifact_role": "canonical_md",
-        "repo_id": repo_id,
-        "file_path": canonical_range.get("file_path"),
-        "start_byte": canonical_range.get("start_byte"),
-        "end_byte": canonical_range.get("end_byte"),
-        "start_line": canonical_range.get("start_line"),
-        "end_line": canonical_range.get("end_line"),
-        "content_sha256": canonical_range.get("content_sha256"),
-    }
-    chunk_id = row.get("chunk_id")
-    if _is_non_empty_string(chunk_id):
-        result["chunk_id"] = chunk_id
-    # Preserve citation identity outside the strict range_ref itself; range-ref.v1
-    # does not allow citation_id as an additional property.
-    if not _is_non_empty_string(citation_id):
-        return None
-    return result
-
-
-def _range_ref_is_valid_for_citation_row(value: Any, row: dict[str, Any]) -> bool:
-    if not isinstance(value, dict):
-        return False
-    expected = _range_ref_from_citation_row(row)
-    if expected is None:
-        return False
-    for key, expected_value in expected.items():
-        if value.get(key) != expected_value:
-            return False
-    allowed_keys = set(expected) | {"chunk_id"}
-    if set(value) - allowed_keys:
-        return False
-    return True
-
-
-def _citation_row_is_valid(row: dict[str, Any]) -> bool:
-    citation_id = row.get("citation_id")
-    if not isinstance(citation_id, str) or _CITATION_ID_RE.fullmatch(citation_id) is None:
-        return False
-    if not _is_non_empty_string(row.get("repo_id")):
-        return False
-
-    snapshot = row.get("snapshot")
-    if not isinstance(snapshot, dict):
-        return False
-    if not _is_non_empty_string(snapshot.get("run_id")):
-        return False
-    if not _is_non_empty_string(snapshot.get("canonical_md_path")):
-        return False
-    if not _is_sha256(snapshot.get("canonical_md_sha256")):
-        return False
-
-    canonical_range = row.get("canonical_range")
-    if _citation_range_key(canonical_range) is None:
-        return False
-    if not isinstance(canonical_range, dict):
-        return False
-    start_line = canonical_range.get("start_line")
-    end_line = canonical_range.get("end_line")
-    if not _is_int_not_bool(start_line) or not _is_int_not_bool(end_line):
-        return False
-    if start_line < 1 or end_line < start_line:
-        return False
-
-    chunk_id = row.get("chunk_id")
-    if chunk_id is not None and not _is_non_empty_string(chunk_id):
-        return False
-    range_ref = row.get("range_ref")
-    if range_ref is not None and not _range_ref_is_valid_for_citation_row(range_ref, row):
-        return False
-    return True
-
 def _load_citation_lookup(
     manifest_path: Path,
 ) -> tuple[dict[str, dict[str, Any]], dict[tuple[Any, ...], dict[str, Any]], dict[str, Any]]:
-    artifact_result = get_artifact(manifest_path, CITATION_MAP_ROLE)
-    artifact = artifact_result.get("artifact") if isinstance(artifact_result, dict) else None
+    source, artifact, failure, detail = _read_registered_artifact_source(
+        manifest_path,
+        CITATION_MAP_ROLE,
+    )
     artifact_path_str = artifact.get("absolute_path") if isinstance(artifact, dict) else None
-    if not artifact_path_str:
+    if failure == "missing" and not artifact_path_str:
         return {}, {}, _empty_citation_map_status(
             status="missing",
             error_code="citation_map_jsonl_missing",
             artifact_path=None,
         )
-    artifact_path = Path(str(artifact_path_str))
-    if not artifact_path.exists():
+    if failure == "file_missing":
         return {}, {}, _empty_citation_map_status(
             status="missing",
             error_code="citation_map_jsonl_file_missing",
-            artifact_path=str(artifact_path),
+            artifact_path=artifact_path_str,
         )
+    failure_codes = {
+        "manifest_too_large": "bundle_manifest_too_large",
+        "manifest_invalid": "bundle_manifest_invalid",
+        "role_ambiguous": "citation_map_jsonl_role_ambiguous",
+        "path_invalid": "citation_map_jsonl_path_invalid",
+        "integrity_unavailable": "citation_map_jsonl_integrity_unavailable",
+        "too_large": "citation_map_jsonl_too_large",
+        "bytes_mismatch": "citation_map_jsonl_bytes_mismatch",
+        "sha256_mismatch": "citation_map_jsonl_sha256_mismatch",
+        "source_changed": "citation_map_jsonl_source_changed_during_load",
+        "unreadable": "citation_map_jsonl_unreadable",
+    }
+    if failure is not None:
+        return {}, {}, _empty_citation_map_status(
+            status="invalid",
+            error_code=failure_codes.get(failure, "citation_map_jsonl_unreadable"),
+            artifact_path=artifact_path_str,
+            error=detail,
+        )
+    assert source is not None
 
     by_chunk_id: dict[str, dict[str, Any]] = {}
     by_range: dict[tuple[Any, ...], dict[str, Any]] = {}
     row_count = 0
     invalid_row_count = 0
-    try:
-        with artifact_path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    invalid_row_count += 1
-                    continue
-                if not isinstance(row, dict) or not _citation_row_is_valid(row):
-                    invalid_row_count += 1
-                    continue
-                row_count += 1
-                chunk_id = row.get("chunk_id")
-                if isinstance(chunk_id, str) and chunk_id and chunk_id not in by_chunk_id:
-                    by_chunk_id[chunk_id] = row
-                range_key = _citation_range_key(row.get("canonical_range"))
-                if range_key is not None and range_key not in by_range:
-                    by_range[range_key] = row
-    except (OSError, UnicodeDecodeError) as exc:
-        return {}, {}, _empty_citation_map_status(
-            status="invalid",
-            error_code="citation_map_jsonl_unreadable",
-            artifact_path=str(artifact_path),
-            error=str(exc),
-        )
+    for line in source.raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            invalid_row_count += 1
+            continue
+        if not isinstance(row, dict) or not _citation_row_is_valid(row):
+            invalid_row_count += 1
+            continue
+        row_count += 1
+        chunk_id = row.get("chunk_id")
+        if isinstance(chunk_id, str) and chunk_id and chunk_id not in by_chunk_id:
+            by_chunk_id[chunk_id] = row
+        range_key = _citation_range_key(row.get("canonical_range"))
+        if range_key is not None and range_key not in by_range:
+            by_range[range_key] = row
 
     return by_chunk_id, by_range, {
         "status": "available",
         "error_code": None,
-        "artifact_path": str(artifact_path),
+        "artifact_path": artifact_path_str,
         "row_count": row_count,
         "invalid_row_count": invalid_row_count,
     }
-
-
-def _citation_record(row: dict[str, Any]) -> dict[str, Any]:
-    emitted_range_ref = row.get("range_ref")
-    range_ref = (
-        emitted_range_ref
-        if _range_ref_is_valid_for_citation_row(emitted_range_ref, row)
-        else _range_ref_from_citation_row(row)
-    )
-    return {
-        "citation_id": row.get("citation_id"),
-        "repo_id": row.get("repo_id"),
-        "chunk_id": row.get("chunk_id"),
-        "snapshot": row.get("snapshot"),
-        "canonical_range": row.get("canonical_range"),
-        "range_ref": range_ref,
-        "source_range": row.get("source_range") if isinstance(row.get("source_range"), dict) else None,
-        "live_repo_address": row.get("live_repo_address") if isinstance(row.get("live_repo_address"), dict) else None,
-        "produced_by": row.get("produced_by"),
-    }
-
-
-def _artifact_availability(availability_model: dict[str, Any] | None, role: str) -> dict[str, Any]:
-    if not isinstance(availability_model, dict):
-        return {
-            "role": role,
-            "availability": "unknown",
-            "requirement": None,
-            "reason": "availability_model_unavailable",
-        }
-    artifacts = availability_model.get("artifacts")
-    if isinstance(artifacts, list):
-        for artifact in artifacts:
-            if isinstance(artifact, dict) and artifact.get("role") == role:
-                return {
-                    "role": role,
-                    "availability": artifact.get("availability"),
-                    "requirement": artifact.get("requirement"),
-                    "reason": artifact.get("reason"),
-                }
-    return {
-        "role": role,
-        "availability": "missing",
-        "requirement": None,
-        "reason": "role_not_reported_in_availability_model",
-    }
-
-
-def _line_range(start_line: Any, end_line: Any) -> dict[str, Any] | None:
-    if not _is_int_not_bool(start_line) or not _is_int_not_bool(end_line):
-        return None
-    if start_line < 1 or end_line < start_line:
-        return None
-    return {
-        "start_line": start_line,
-        "end_line": end_line,
-        "display": f"{start_line}-{end_line}",
-    }
-
-
-def _enrich_resolved_hit_for_direct_use(
-    hit: dict[str, Any],
-    *,
-    availability_model: dict[str, Any] | None,
-) -> None:
-    range_value = hit.get("range")
-    text = range_value.get("text") if isinstance(range_value, dict) else None
-    raw_citation = hit.get("citation")
-    citation = raw_citation if isinstance(raw_citation, dict) else None
-    canonical_range = _source_range_projection(
-        citation.get("canonical_range") if citation else None
-    )
-    citation_source_range = _source_range_projection(
-        citation.get("source_range") if citation else None
-    )
-    live_repo_address = (
-        citation.get("live_repo_address")
-        if citation and isinstance(citation.get("live_repo_address"), dict)
-        else None
-    )
-    range_ref_projection = (
-        _source_range_projection(hit.get("range_ref"))
-        if hit.get("range_status") == "resolved"
-        else None
-    )
-    range_projection = _source_range_projection(range_value)
-    candidates = [citation_source_range, range_ref_projection, canonical_range, range_projection]
-    source_range = next(
-        (candidate for candidate in candidates if _has_range_identity(candidate)),
-        None,
-    )
-    if source_range is None:
-        source_range = next(
-            (candidate for candidate in candidates if isinstance(candidate, dict)),
-            None,
-        )
-
-    source_path = None
-    source_line_range = None
-    artifact_path = None
-    artifact_line_range = None
-    artifact_role = None
-    if isinstance(live_repo_address, dict):
-        source_path = live_repo_address.get("path")
-        source_line_range = _line_range(
-            live_repo_address.get("start_line"),
-            live_repo_address.get("end_line"),
-        )
-    if isinstance(source_range, dict):
-        source_path = _first_not_none(
-            source_path,
-            source_range.get("source_file_path"),
-            source_range.get("file_path"),
-            hit.get("path"),
-        )
-        source_line_range = source_line_range or _line_range(
-            _first_not_none(source_range.get("source_start_line"), source_range.get("start_line")),
-            _first_not_none(source_range.get("source_end_line"), source_range.get("end_line")),
-        )
-        artifact_path = _first_not_none(source_range.get("artifact_path"), source_range.get("file_path"))
-        artifact_line_range = _line_range(
-            _first_not_none(source_range.get("artifact_start_line"), source_range.get("start_line")),
-            _first_not_none(source_range.get("artifact_end_line"), source_range.get("end_line")),
-        )
-        artifact_role = source_range.get("artifact_role")
-    if source_path is None:
-        source_path = hit.get("path")
-
-    hit["text_excerpt"] = text[:TEXT_EXCERPT_MAX_CHARS] if isinstance(text, str) else None
-    hit["text_truncated"] = isinstance(text, str) and len(text) > TEXT_EXCERPT_MAX_CHARS
-    hit["source_path"] = source_path
-    hit["line_range"] = source_line_range or artifact_line_range
-    hit["source_line_range"] = source_line_range
-    hit["artifact_path"] = artifact_path
-    hit["artifact_role"] = artifact_role
-    hit["artifact_line_range"] = artifact_line_range
-    hit["canonical_authority"] = {
-        "authority": "canonical_brief_source",
-        "artifact_role": "canonical_md",
-        "range": canonical_range,
-        "citation_id": hit.get("citation_id"),
-    }
-    hit["live_repo_address"] = live_repo_address
-    hit["live_repo_address_status"] = (
-        live_repo_address.get("status")
-        if isinstance(live_repo_address, dict)
-        else "unavailable"
-    )
-    hit["range_ref_verified"] = hit.get("range_status") == "resolved"
-    hit["citation_verified"] = hit.get("citation_status") == "resolved" and isinstance(
-        hit.get("citation_id"),
-        str,
-    )
-    hit["availability"] = {
-        "snapshot_status": availability_model.get("status")
-        if isinstance(availability_model, dict)
-        else "unknown",
-        "artifact": _artifact_availability(
-            availability_model,
-            str(artifact_role or "canonical_md"),
-        ),
-        "index_artifact": _artifact_availability(availability_model, "sqlite_index"),
-    }
-    hit["freshness"] = (
-        availability_model.get("freshness") if isinstance(availability_model, dict) else None
-    )
 
 
 def _resolve_hit_evidence(
@@ -1182,223 +593,6 @@ def _resolve_query_evidence(
     }
 
 
-def _first_not_none(*values: Any) -> Any:
-    for value in values:
-        if value is not None:
-            return value
-    return None
-
-
-def _line_pair(value: Any) -> tuple[int | None, int | None]:
-    if not isinstance(value, list) or len(value) != 2:
-        return None, None
-    start, end = value
-    if isinstance(start, bool) or isinstance(end, bool):
-        return None, None
-    if not isinstance(start, int) or not isinstance(end, int):
-        return None, None
-    return start, end
-
-
-def _has_range_identity(value: Any) -> bool:
-    if not isinstance(value, dict):
-        return False
-    file_path = value.get("file_path")
-    start_byte = value.get("start_byte")
-    end_byte = value.get("end_byte")
-    if not _is_non_empty_string(file_path):
-        return False
-    if not _is_int_not_bool(start_byte) or not _is_int_not_bool(end_byte):
-        return False
-    return start_byte >= 0 and end_byte > start_byte
-
-
-def _source_range_projection(range_value: Any) -> dict[str, Any] | None:
-    if not isinstance(range_value, dict):
-        return None
-    provenance = range_value.get("provenance")
-    if not isinstance(provenance, dict):
-        provenance = {}
-    start_line, end_line = _line_pair(range_value.get("lines"))
-    artifact_path = _first_not_none(
-        range_value.get("artifact_path"),
-        range_value.get("file_path"),
-        range_value.get("path"),
-        provenance.get("artifact_path"),
-        provenance.get("file_path"),
-    )
-    artifact_start_byte = _first_not_none(
-        range_value.get("artifact_byte_start"),
-        range_value.get("start_byte"),
-        provenance.get("artifact_byte_start"),
-        provenance.get("start_byte"),
-    )
-    artifact_end_byte = _first_not_none(
-        range_value.get("artifact_byte_end"),
-        range_value.get("end_byte"),
-        provenance.get("artifact_byte_end"),
-        provenance.get("end_byte"),
-    )
-    artifact_start_line = _first_not_none(
-        range_value.get("artifact_line_start"),
-        range_value.get("start_line"),
-        start_line,
-    )
-    artifact_end_line = _first_not_none(
-        range_value.get("artifact_line_end"),
-        range_value.get("end_line"),
-        end_line,
-    )
-    source_file_path = _first_not_none(
-        range_value.get("source_file_path"),
-        provenance.get("source_file_path"),
-    )
-    source_start_line = _first_not_none(
-        range_value.get("source_line_start"),
-        provenance.get("source_line_start"),
-    )
-    source_end_line = _first_not_none(
-        range_value.get("source_line_end"),
-        provenance.get("source_line_end"),
-    )
-    has_source_axis = _is_non_empty_string(source_file_path)
-    return {
-        "artifact_role": _first_not_none(range_value.get("artifact_role"), provenance.get("artifact_role")),
-        "file_path": artifact_path,
-        "start_byte": artifact_start_byte,
-        "end_byte": artifact_end_byte,
-        "start_line": artifact_start_line,
-        "end_line": artifact_end_line,
-        "content_sha256": _first_not_none(range_value.get("range_content_sha256"), range_value.get("content_sha256"), range_value.get("sha256")),
-        "artifact_path": artifact_path,
-        "artifact_start_byte": artifact_start_byte,
-        "artifact_end_byte": artifact_end_byte,
-        "artifact_start_line": artifact_start_line,
-        "artifact_end_line": artifact_end_line,
-        "source_file_path": source_file_path,
-        "source_start_line": source_start_line,
-        "source_end_line": source_end_line,
-        "coordinate_basis": "artifact_bytes_with_source_lines" if has_source_axis else "artifact_bytes",
-    }
-
-
-def _empty_source_citation_projection(status: str = "unavailable") -> dict[str, Any]:
-    return {
-        "kind": SOURCE_CITATION_PROJECTION_KIND,
-        "version": SOURCE_CITATION_PROJECTION_VERSION,
-        "status": status,
-        "hit_count": 0,
-        "citation_count": 0,
-        "unresolved_count": 0,
-        "range_unresolved_count": 0,
-        "citation_unresolved_count": 0,
-        "text_excerpt_max_chars": TEXT_EXCERPT_MAX_CHARS,
-        "items": [],
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
-    }
-
-
-def _project_source_citations(resolved_evidence: Any) -> dict[str, Any]:
-    if not isinstance(resolved_evidence, dict):
-        return _empty_source_citation_projection()
-
-    hits = resolved_evidence.get("hits")
-    hit_list = [hit for hit in (hits if isinstance(hits, list) else []) if isinstance(hit, dict)]
-    items: list[dict[str, Any]] = []
-    citation_count = 0
-    unresolved_count = 0
-    range_unresolved_count = 0
-    citation_unresolved_count = 0
-    for ordinal, hit in enumerate(hit_list):
-        range_value = hit.get("range")
-        text = range_value.get("text") if isinstance(range_value, dict) else None
-        raw_citation = hit.get("citation")
-        citation = raw_citation if isinstance(raw_citation, dict) else None
-        citation_range = _source_range_projection(
-            citation.get("canonical_range") if citation else None
-        )
-        citation_source_range = _source_range_projection(
-            citation.get("source_range") if citation else None
-        )
-        live_repo_address = (
-            citation.get("live_repo_address")
-            if citation and isinstance(citation.get("live_repo_address"), dict)
-            else None
-        )
-        range_ref_projection = (
-            _source_range_projection(hit.get("range_ref"))
-            if hit.get("range_status") == "resolved"
-            else None
-        )
-        range_projection = _source_range_projection(range_value)
-        candidates = [citation_source_range, range_ref_projection, citation_range, range_projection]
-        source_range = next(
-            (candidate for candidate in candidates if _has_range_identity(candidate)),
-            None,
-        )
-        if source_range is None:
-            source_range = next(
-                (candidate for candidate in candidates if isinstance(candidate, dict)),
-                None,
-            )
-        range_status = hit.get("range_status")
-        citation_status = hit.get("citation_status")
-        citation_id = hit.get("citation_id")
-        if range_status != "resolved":
-            range_unresolved_count += 1
-        citation_resolved = (
-            citation_status == "resolved"
-            and isinstance(citation_id, str)
-            and _CITATION_ID_RE.fullmatch(citation_id) is not None
-        )
-        if citation_resolved:
-            citation_count += 1
-        else:
-            citation_unresolved_count += 1
-        if range_status != "resolved" or not citation_resolved:
-            unresolved_count += 1
-        items.append({
-            "ordinal": ordinal,
-            "chunk_id": hit.get("chunk_id"),
-            "path": hit.get("path"),
-            "range_status": range_status,
-            "range_ref_source": hit.get("range_ref_source"),
-            "source_range": source_range,
-            "text_excerpt": text[:TEXT_EXCERPT_MAX_CHARS] if isinstance(text, str) else None,
-            "text_truncated": isinstance(text, str) and len(text) > TEXT_EXCERPT_MAX_CHARS,
-            "citation_status": citation_status,
-            "citation_resolved": citation_resolved,
-            "citation_id": citation_id,
-            "citation_range": citation_range,
-            "citation_source_range": citation_source_range,
-            "live_repo_address": live_repo_address,
-            "live_repo_address_status": (
-                live_repo_address.get("status")
-                if isinstance(live_repo_address, dict)
-                else "unavailable"
-            ),
-            "canonical_authority": {
-                "authority": "canonical_brief_source",
-                "artifact_role": "canonical_md",
-                "range": citation_range,
-                "citation_id": citation_id,
-            },
-        })
-    return {
-        "kind": SOURCE_CITATION_PROJECTION_KIND,
-        "version": SOURCE_CITATION_PROJECTION_VERSION,
-        "status": "available",
-        "hit_count": len(items),
-        "citation_count": citation_count,
-        "unresolved_count": unresolved_count,
-        "range_unresolved_count": range_unresolved_count,
-        "citation_unresolved_count": citation_unresolved_count,
-        "text_excerpt_max_chars": TEXT_EXCERPT_MAX_CHARS,
-        "items": items,
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
-    }
-
-
 def query_existing_index(
     bundle_manifest: str | Path,
     query: str,
@@ -1456,18 +650,24 @@ def query_existing_index(
             verbose=verbose,
         )
 
-    artifact_result = get_artifact(manifest_path, "sqlite_index")
-    artifact = artifact_result.get("artifact") if isinstance(artifact_result, dict) else None
-    if not isinstance(artifact, dict) or not artifact.get("absolute_path"):
+    artifact, artifact_error_code, artifact_error = _resolve_sqlite_artifact(
+        manifest_path
+    )
+    if artifact_error_code is not None:
         return _invalid_read_result(
             kind="repobrief.query_existing_index",
             bundle_manifest=manifest_path,
-            status="missing",
-            error="sqlite_index artifact is not present in the bundle manifest",
-            error_code="sqlite_index_missing",
+            status=(
+                "missing"
+                if artifact_error_code == "sqlite_index_missing"
+                else "invalid"
+            ),
+            error=artifact_error or "sqlite_index artifact cannot be resolved",
+            error_code=artifact_error_code,
             extra={"query": query, "k": k, "query_result": None, "index_artifact": artifact},
             verbose=verbose,
         )
+    assert artifact is not None
 
     index_path = Path(str(artifact["absolute_path"]))
 
@@ -1566,6 +766,90 @@ SYMBOL_INDEX_ROLE = "python_symbol_index_json"
 SYMBOL_SEARCH_KIND = "repobrief.symbol_search"
 MAX_SYMBOL_SEARCH_K = 200
 
+_SYMBOL_SOURCE_ERRORS = {
+    "missing": (
+        "missing",
+        "python_symbol_index_json_missing",
+        "python_symbol_index_json artifact is not present in the bundle manifest",
+    ),
+    "file_missing": (
+        "missing",
+        "python_symbol_index_json_file_missing",
+        "python_symbol_index_json artifact file does not exist",
+    ),
+    "role_ambiguous": (
+        "invalid",
+        "python_symbol_index_json_role_ambiguous",
+        "bundle manifest contains multiple python_symbol_index_json artifacts",
+    ),
+    "path_invalid": (
+        "invalid",
+        "python_symbol_index_json_path_invalid",
+        "python_symbol_index_json artifact path escapes the bundle root",
+    ),
+    "manifest_too_large": (
+        "invalid",
+        "bundle_manifest_too_large",
+        "bundle manifest exceeds the bounded read limit",
+    ),
+    "manifest_invalid": (
+        "invalid",
+        "bundle_manifest_invalid",
+        "bundle manifest identity, run_id, or artifacts are invalid",
+    ),
+    "integrity_unavailable": (
+        "invalid",
+        "python_symbol_index_json_integrity_unavailable",
+        (
+            "python_symbol_index_json requires valid bytes and sha256 metadata "
+            "in the bundle manifest"
+        ),
+    ),
+    "too_large": (
+        "invalid",
+        "python_symbol_index_json_too_large",
+        "python_symbol_index_json exceeds the bounded read limit",
+    ),
+    "bytes_mismatch": (
+        "invalid",
+        "python_symbol_index_json_bytes_mismatch",
+        "python_symbol_index_json byte count does not match the bundle manifest",
+    ),
+    "sha256_mismatch": (
+        "invalid",
+        "python_symbol_index_json_sha256_mismatch",
+        "python_symbol_index_json content hash does not match the bundle manifest",
+    ),
+    "source_changed": (
+        "invalid",
+        "python_symbol_index_source_changed_during_load",
+        (
+            "python_symbol_index_json source changed while navigation state "
+            "was loading"
+        ),
+    ),
+    "unreadable": (
+        "invalid",
+        "python_symbol_index_json_unreadable",
+        "python_symbol_index_json could not be read",
+    ),
+}
+
+
+def _registered_source_error(
+    failure: str | None,
+    detail: str | None,
+    errors: dict[str, tuple[str, str, str]],
+) -> dict[str, Any] | None:
+    if failure is None:
+        return None
+    status, error_code, error = errors.get(failure, errors["unreadable"])
+    return {
+        "status": status,
+        "error_code": error_code,
+        "error": detail or error,
+    }
+
 
 def _symbol_source_range(symbol: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -1605,42 +889,14 @@ def _load_symbol_index_source(
     source, artifact, failure, detail = _read_registered_artifact_source(
         manifest_path, SYMBOL_INDEX_ROLE
     )
-    if failure == "missing":
-        return None, artifact, None, {
-            "status": "missing",
-            "error_code": "python_symbol_index_json_missing",
-            "error": "python_symbol_index_json artifact is not present in the bundle manifest",
-        }
-    if failure == "file_missing":
-        return None, artifact, None, {
-            "status": "missing",
-            "error_code": "python_symbol_index_json_file_missing",
-            "error": "python_symbol_index_json artifact file does not exist",
-        }
-    if failure == "bytes_mismatch":
-        return None, artifact, None, {
-            "status": "invalid",
-            "error_code": "python_symbol_index_json_bytes_mismatch",
-            "error": "python_symbol_index_json byte count does not match the bundle manifest",
-        }
-    if failure == "sha256_mismatch":
-        return None, artifact, None, {
-            "status": "invalid",
-            "error_code": "python_symbol_index_json_sha256_mismatch",
-            "error": "python_symbol_index_json content hash does not match the bundle manifest",
-        }
-    if failure == "source_changed":
-        return None, artifact, None, {
-            "status": "invalid",
-            "error_code": "python_symbol_index_source_changed_during_load",
-            "error": "python_symbol_index_json source changed while navigation state was loading",
-        }
-    if source is None:
-        return None, artifact, None, {
-            "status": "invalid",
-            "error_code": "python_symbol_index_json_unreadable",
-            "error": detail or "python_symbol_index_json could not be read",
-        }
+    source_error = _registered_source_error(
+        failure,
+        detail,
+        _SYMBOL_SOURCE_ERRORS,
+    )
+    if source_error is not None:
+        return None, artifact, None, source_error
+    assert source is not None
     try:
         data = json.loads(source.raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1799,16 +1055,15 @@ def _search_symbol_index_full(
 
 
 CALL_GRAPH_ROLE = "python_call_graph_json"
-CALL_GRAPH_KIND = "lenskit.python_call_graph"
-CALL_GRAPH_VERSION = "1.0"
+CALL_GRAPH_KIND = _call_graph_validation.CALL_GRAPH_KIND
+CALL_GRAPH_VERSION = _call_graph_validation.CALL_GRAPH_VERSION
 CALL_REFERENCES_KIND = "repobrief.call_reference_search"
 CALL_CALLERS_KIND = "repobrief.call_callers"
 CALL_CALLEES_KIND = "repobrief.call_callees"
 MAX_CALL_SEARCH_K = 200
-CALL_RESOLUTION_STATUSES = ("resolved", "candidate", "ambiguous", "unresolved")
-CALL_EVIDENCE_LEVELS = ("S0", "S1")
-CALL_RELATION_TYPES = ("calls", "constructs")
-_CALL_CALLER_KINDS = ("module", "class", "function", "async_function")
+CALL_RESOLUTION_STATUSES = _call_graph_validation.CALL_RESOLUTION_STATUSES
+CALL_EVIDENCE_LEVELS = _call_graph_validation.CALL_EVIDENCE_LEVELS
+CALL_RELATION_TYPES = _call_graph_validation.CALL_RELATION_TYPES
 _CALL_GRAPH_REQUIRED_NONCLAIMS = CALL_GRAPH_REQUIRED_NONCLAIMS
 _CALL_GRAPH_DOES_NOT_ESTABLISH = CALL_GRAPH_PRODUCER_NONCLAIMS
 
@@ -1819,33 +1074,6 @@ _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
 _CALL_NAVIGATION_CACHE_MAX_ENTRIES = 2
 _CALL_NAVIGATION_CACHE_VALIDATION_ENV = "REPOGROUND_CACHE_VALIDATION"
 _CALL_NAVIGATION_STRICT_SOURCE_HASH_ENV = "REPOGROUND_STRICT_CACHE_HASH"
-
-
-@dataclass(frozen=True, slots=True)
-class _ArtifactSourceFingerprint:
-    manifest_path: str
-    manifest_sha256: str
-    manifest_device: int
-    manifest_inode: int
-    manifest_size: int
-    manifest_mtime_ns: int
-    manifest_ctime_ns: int
-    role: str
-    absolute_path: str
-    artifact_sha256: str
-    device: int
-    inode: int
-    size: int
-    mtime_ns: int
-    ctime_ns: int
-
-
-@dataclass(frozen=True, slots=True)
-class _LoadedArtifactSource:
-    manifest: dict[str, Any]
-    artifact: dict[str, Any]
-    raw: bytes
-    fingerprint: _ArtifactSourceFingerprint
 
 
 @dataclass(frozen=True, slots=True)
@@ -1883,16 +1111,6 @@ def _clear_call_navigation_caches() -> None:
     with _CALL_NAVIGATION_CACHE_LOCK:
         _CALL_NAVIGATION_CACHE.clear()
         _SYMBOL_NAVIGATION_CACHE.clear()
-
-
-def _file_identity(stat_result: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (
-        stat_result.st_dev,
-        stat_result.st_ino,
-        stat_result.st_size,
-        stat_result.st_mtime_ns,
-        stat_result.st_ctime_ns,
-    )
 
 
 def _stat_identity_is_strong(stat_result: os.stat_result) -> bool:
@@ -1963,6 +1181,23 @@ def _fingerprint_matches_active_manifest_snapshot(
     if snapshot is None:
         return None
     return fingerprint.manifest_sha256 == snapshot.binding.sha256
+
+
+def _manifest_source_is_current(
+    fingerprint: _ArtifactSourceFingerprint,
+) -> bool:
+    active_match = _fingerprint_matches_active_manifest_snapshot(fingerprint)
+    if active_match is not None:
+        return active_match
+    raw, current, failure, _detail = _read_stable_regular_file_bytes(
+        Path(fingerprint.manifest_path)
+    )
+    if failure is not None or raw is None or current is None:
+        return False
+    return (
+        _manifest_stat_matches_fingerprint(fingerprint, current)
+        and hashlib.sha256(raw).hexdigest() == fingerprint.manifest_sha256
+    )
 
 
 def _artifact_bytes_match_fingerprint(
@@ -2123,30 +1358,18 @@ def _source_content_verification_required(
 def _read_stable_artifact_bytes(
     artifact_path: Path,
 ) -> tuple[bytes | None, os.stat_result | None, str | None, str | None]:
-    return _read_stable_regular_file_bytes(artifact_path)
+    return read_stable_regular_file_bytes(
+        artifact_path,
+        max_bytes=MAX_REGISTERED_ARTIFACT_BYTES,
+    )
 
 
 def _read_stable_regular_file_bytes(
     path: Path,
+    *,
+    max_bytes: int = MAX_MANIFEST_BYTES,
 ) -> tuple[bytes | None, os.stat_result | None, str | None, str | None]:
-    try:
-        with path.open("rb") as stream:
-            stat_before = os.fstat(stream.fileno())
-            raw = stream.read()
-            stat_after = os.fstat(stream.fileno())
-    except FileNotFoundError:
-        return None, None, "file_missing", None
-    except OSError as exc:
-        return None, None, "unreadable", str(exc)
-    if _file_identity(stat_before) != _file_identity(stat_after):
-        return None, None, "source_changed", None
-    try:
-        current_stat = path.stat()
-    except OSError as exc:
-        return None, None, "source_changed", str(exc)
-    if _file_identity(stat_after) != _file_identity(current_stat):
-        return None, None, "source_changed", None
-    return raw, stat_after, None, None
+    return read_stable_regular_file_bytes(path, max_bytes=max_bytes)
 
 
 def _read_artifact_manifest_source(
@@ -2168,7 +1391,11 @@ def _read_artifact_manifest_source(
             None,
             None,
         )
-    raw, manifest_stat, failure, detail = _read_stable_regular_file_bytes(manifest_path)
+    raw, manifest_stat, failure, detail = _read_stable_regular_file_bytes(
+        manifest_path
+    )
+    if failure == "too_large":
+        failure = "manifest_too_large"
     if failure is not None:
         return None, None, None, failure, detail
     assert raw is not None and manifest_stat is not None
@@ -2176,6 +1403,18 @@ def _read_artifact_manifest_source(
         manifest = json.loads(raw)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         return None, None, None, "unreadable", str(exc)
+    if (
+        not is_bundle_manifest(manifest)
+        or not _is_non_empty_string(manifest.get("run_id"))
+        or not isinstance(manifest.get("artifacts"), list)
+    ):
+        return (
+            None,
+            None,
+            None,
+            "manifest_invalid",
+            "bundle manifest identity, run_id, or artifacts are invalid",
+        )
     return raw, manifest, _file_identity(manifest_stat), None, None
 
 
@@ -2196,35 +1435,30 @@ def _read_registered_artifact_source(
     if not isinstance(manifest, dict):
         return None, None, "unreadable", "bundle manifest must be a JSON object"
     try:
-        artifacts = _artifact_list(manifest)
+        artifact_payload, artifact, resolution_failure = _resolve_unique_artifact(
+            manifest_path,
+            manifest,
+            role,
+        )
     except ValueError as exc:
         return None, None, "unreadable", str(exc)
-    artifact_payload = next(
-        (item for item in artifacts if item.get("role") == role),
-        None,
+    if resolution_failure is not None:
+        return None, artifact, resolution_failure, None
+    assert artifact_payload is not None and artifact is not None
+    artifact_path = Path(artifact["absolute_path"])
+    declared_bytes, declared_sha256, integrity_failure = (
+        declared_artifact_integrity(artifact_payload)
     )
-    if not isinstance(artifact_payload, dict):
-        return None, None, "missing", None
-    artifact = _artifact_record(manifest_path, artifact_payload)
-    artifact_path = _safe_artifact_path(
-        manifest_path.parent, artifact_payload.get("path")
-    )
-    if artifact_path is None:
-        return None, artifact, "missing", None
+    if integrity_failure is not None:
+        return None, artifact, integrity_failure, None
     raw, artifact_stat, failure, detail = _read_stable_artifact_bytes(artifact_path)
     if failure is not None:
         return None, artifact, failure, detail
     assert raw is not None and artifact_stat is not None
-    declared_bytes = artifact_payload.get("bytes")
-    if (
-        isinstance(declared_bytes, int)
-        and not isinstance(declared_bytes, bool)
-        and declared_bytes != len(raw)
-    ):
+    if declared_bytes is not None and declared_bytes != len(raw):
         return None, artifact, "bytes_mismatch", None
     actual_sha256 = hashlib.sha256(raw).hexdigest()
-    declared_sha256 = artifact_payload.get("sha256")
-    if _is_sha256(declared_sha256) and actual_sha256 != declared_sha256:
+    if declared_sha256 is not None and actual_sha256 != declared_sha256:
         return None, artifact, "sha256_mismatch", None
     fingerprint = _ArtifactSourceFingerprint(
         manifest_path=str(resolve_manifest_path(manifest_path)),
@@ -2243,6 +1477,8 @@ def _read_registered_artifact_source(
         mtime_ns=artifact_stat.st_mtime_ns,
         ctime_ns=artifact_stat.st_ctime_ns,
     )
+    if not _manifest_source_is_current(fingerprint):
+        return None, artifact, "source_changed", None
     return (
         _LoadedArtifactSource(
             manifest=manifest,
@@ -2402,113 +1638,74 @@ def _call_nav_does_not_establish() -> list[str]:
     return list(_CALL_NAV_DOES_NOT_ESTABLISH)
 
 
-def _string_list_valid(value: Any) -> bool:
-    return (
-        isinstance(value, list)
-        and len(value) == len(set(value))
-        and all(_is_non_empty_string(item) for item in value)
-    )
-
-
-def _call_position_fields_valid(row: dict[str, Any]) -> bool:
-    numeric_fields = (
-        ("start_line", 1),
-        ("start_col", 0),
-        ("end_line", 1),
-        ("end_col", 0),
-    )
-    if not all(
-        _is_int_not_bool(row.get(field)) and row[field] >= minimum
-        for field, minimum in numeric_fields
-    ):
-        return False
-    return (
-        row["end_line"] > row["start_line"]
-        or (
-            row["end_line"] == row["start_line"]
-            and row["end_col"] >= row["start_col"]
-        )
-    )
-
-
-def _call_caller_fields_valid(row: dict[str, Any]) -> bool:
-    caller_scope = row.get("caller_scope")
-    caller_kind = row.get("caller_kind")
-    caller_start = row.get("caller_start_line")
-    caller_end = row.get("caller_end_line")
-    if caller_kind not in _CALL_CALLER_KINDS:
-        return False
-    if caller_scope == "module":
-        return (
-            row.get("caller_symbol_id") is None
-            and row.get("caller_qualified_name") is None
-            and caller_kind == "module"
-            and caller_start is None
-            and caller_end is None
-        )
-    if caller_scope == "symbol":
-        return (
-            _is_non_empty_string(row.get("caller_symbol_id"))
-            and _is_non_empty_string(row.get("caller_qualified_name"))
-            and caller_kind != "module"
-            and _is_int_not_bool(caller_start)
-            and _is_int_not_bool(caller_end)
-            and caller_start >= 1
-            and caller_end >= caller_start
-            and caller_start <= row["start_line"] <= caller_end
-        )
-    return False
-
-
-def _call_resolution_fields_valid(row: dict[str, Any]) -> bool:
-    status = row.get("resolution_status")
-    evidence = row.get("evidence_level")
-    relation = row.get("relation_type")
-    resolved = row.get("resolved_target_ids")
-    candidates = row.get("candidate_target_ids")
-    if status not in CALL_RESOLUTION_STATUSES:
-        return False
-    if evidence not in CALL_EVIDENCE_LEVELS or relation not in CALL_RELATION_TYPES:
-        return False
-    if not _is_non_empty_string(row.get("resolution_reason")):
-        return False
-    if not _string_list_valid(resolved) or not _string_list_valid(candidates):
-        return False
-    if status == "resolved":
-        return evidence == "S1" and len(resolved) == 1 and not candidates
-    return evidence == "S0" and not resolved
-
-
-def _call_record_is_valid(row: Any) -> bool:
-    if not isinstance(row, dict) or not _is_non_empty_string(row.get("path")):
-        return False
-    if not _call_position_fields_valid(row):
-        return False
-    expected_range = f"file:{row['path']}#L{row['start_line']}-L{row['end_line']}"
-    return (
-        row.get("range_ref") == expected_range
-        and _is_non_empty_string(row.get("callee_expression"))
-        and (
-            row.get("simple_name") is None
-            or _is_non_empty_string(row.get("simple_name"))
-        )
-        and _call_caller_fields_valid(row)
-        and _call_resolution_fields_valid(row)
-    )
-
-
-def _count_map_valid(value: Any, keys: tuple[str, ...]) -> bool:
-    return (
-        isinstance(value, dict)
-        and set(value) == set(keys)
-        and all(_is_int_not_bool(item) and item >= 0 for item in value.values())
-    )
-
-
-def _call_graph_error(
-    error_code: str, error: str, *, status: str = "invalid"
-) -> dict[str, Any]:
-    return {"status": status, "error_code": error_code, "error": error}
+_CALL_GRAPH_SOURCE_ERRORS = {
+    "missing": (
+        "missing",
+        "python_call_graph_json_missing",
+        "python_call_graph_json artifact is not present in the bundle manifest",
+    ),
+    "file_missing": (
+        "missing",
+        "python_call_graph_json_file_missing",
+        "python_call_graph_json artifact file does not exist",
+    ),
+    "role_ambiguous": (
+        "invalid",
+        "python_call_graph_json_role_ambiguous",
+        "bundle manifest contains multiple python_call_graph_json artifacts",
+    ),
+    "path_invalid": (
+        "invalid",
+        "python_call_graph_json_path_invalid",
+        "python_call_graph_json artifact path escapes the bundle root",
+    ),
+    "manifest_too_large": (
+        "invalid",
+        "bundle_manifest_too_large",
+        "bundle manifest exceeds the bounded read limit",
+    ),
+    "manifest_invalid": (
+        "invalid",
+        "bundle_manifest_invalid",
+        "bundle manifest identity, run_id, or artifacts are invalid",
+    ),
+    "integrity_unavailable": (
+        "invalid",
+        "python_call_graph_json_integrity_unavailable",
+        (
+            "python_call_graph_json requires valid bytes and sha256 metadata "
+            "in the bundle manifest"
+        ),
+    ),
+    "too_large": (
+        "invalid",
+        "python_call_graph_json_too_large",
+        "python_call_graph_json exceeds the bounded read limit",
+    ),
+    "bytes_mismatch": (
+        "invalid",
+        "python_call_graph_json_bytes_mismatch",
+        "python_call_graph_json byte count does not match the bundle manifest",
+    ),
+    "sha256_mismatch": (
+        "invalid",
+        "python_call_graph_json_sha256_mismatch",
+        "python_call_graph_json content hash does not match the bundle manifest",
+    ),
+    "source_changed": (
+        "invalid",
+        "python_call_graph_source_changed_during_load",
+        (
+            "python_call_graph_json source changed while navigation state "
+            "was loading"
+        ),
+    ),
+    "unreadable": (
+        "invalid",
+        "python_call_graph_json_unreadable",
+        "python_call_graph_json could not be read",
+    ),
+}
 
 
 def _read_call_graph_source(
@@ -2522,38 +1719,14 @@ def _read_call_graph_source(
     source, artifact, failure, detail = _read_registered_artifact_source(
         manifest_path, CALL_GRAPH_ROLE
     )
-    if failure == "missing":
-        return None, artifact, None, _call_graph_error(
-            "python_call_graph_json_missing",
-            "python_call_graph_json artifact is not present in the bundle manifest",
-            status="missing",
-        )
-    if failure == "file_missing":
-        return None, artifact, None, _call_graph_error(
-            "python_call_graph_json_file_missing",
-            "python_call_graph_json artifact file does not exist",
-            status="missing",
-        )
-    if failure == "bytes_mismatch":
-        return None, artifact, None, _call_graph_error(
-            "python_call_graph_json_bytes_mismatch",
-            "python_call_graph_json byte count does not match the bundle manifest",
-        )
-    if failure == "sha256_mismatch":
-        return None, artifact, None, _call_graph_error(
-            "python_call_graph_json_sha256_mismatch",
-            "python_call_graph_json content hash does not match the bundle manifest",
-        )
-    if failure == "source_changed":
-        return None, artifact, None, _call_graph_error(
-            "python_call_graph_source_changed_during_load",
-            "python_call_graph_json source changed while navigation state was loading",
-        )
-    if source is None:
-        return None, artifact, None, _call_graph_error(
-            "python_call_graph_json_unreadable",
-            detail or "python_call_graph_json could not be read",
-        )
+    source_error = _registered_source_error(
+        failure,
+        detail,
+        _CALL_GRAPH_SOURCE_ERRORS,
+    )
+    if source_error is not None:
+        return None, artifact, None, source_error
+    assert source is not None
     try:
         data = json.loads(source.raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -2568,188 +1741,6 @@ def _read_call_graph_artifact(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     data, artifact, _source, error = _read_call_graph_source(manifest_path)
     return data, artifact, error
-
-
-def _call_graph_identity_error(data: Any) -> dict[str, Any] | None:
-    if not isinstance(data, dict) or data.get("kind") != CALL_GRAPH_KIND:
-        return _call_graph_error(
-            "python_call_graph_json_invalid_kind",
-            f"python_call_graph_json must be a {CALL_GRAPH_KIND} object",
-        )
-    if data.get("version") != CALL_GRAPH_VERSION:
-        return _call_graph_error(
-            "python_call_graph_json_version_unsupported",
-            f"python_call_graph_json version must be {CALL_GRAPH_VERSION}",
-        )
-    if not _is_non_empty_string(data.get("run_id")) or not _is_sha256(
-        data.get("canonical_dump_index_sha256")
-    ):
-        return _call_graph_error(
-            "python_call_graph_json_binding_invalid",
-            "python_call_graph_json must carry run_id and canonical_dump_index_sha256",
-        )
-    if data.get("language") != "python":
-        return _call_graph_error(
-            "python_call_graph_language_invalid",
-            "python_call_graph_json language must be python",
-        )
-    return None
-
-
-def _call_graph_parse_diagnostics(data: dict[str, Any]) -> dict[str, Any]:
-    """Project current and legacy parse diagnostics through one code path."""
-    skipped_files_count = data.get("skipped_files_count")
-    skipped_errors = data.get("skipped_errors")
-    skipped_errors_total_count = data.get(
-        "skipped_errors_total_count", skipped_files_count
-    )
-    skipped_errors_truncated = data.get(
-        "skipped_errors_truncated",
-        isinstance(skipped_errors, list)
-        and _is_int_not_bool(skipped_errors_total_count)
-        and skipped_errors_total_count > len(skipped_errors),
-    )
-    return {
-        "skipped_files_count": skipped_files_count,
-        "skipped_errors": list(skipped_errors) if isinstance(skipped_errors, list) else skipped_errors,
-        "skipped_errors_total_count": skipped_errors_total_count,
-        "skipped_errors_truncated": skipped_errors_truncated,
-    }
-
-
-def _call_graph_model_error(data: dict[str, Any]) -> dict[str, Any] | None:
-    if data.get("resolution_statuses") != list(CALL_RESOLUTION_STATUSES):
-        return _call_graph_error(
-            "python_call_graph_resolution_model_invalid",
-            "python_call_graph_json resolution_statuses are not the v1 model",
-        )
-    if data.get("relation_types") != list(CALL_RELATION_TYPES):
-        return _call_graph_error(
-            "python_call_graph_relation_model_invalid",
-            "python_call_graph_json relation_types are not the v1 model",
-        )
-    evidence_model = data.get("evidence_model")
-    if (
-        not isinstance(evidence_model, dict)
-        or set(evidence_model) != set(CALL_EVIDENCE_LEVELS)
-        or not all(_is_non_empty_string(value) for value in evidence_model.values())
-    ):
-        return _call_graph_error(
-            "python_call_graph_evidence_model_invalid",
-            "python_call_graph_json evidence_model must define non-empty S0 and S1 semantics",
-        )
-    diagnostics = _call_graph_parse_diagnostics(data)
-    skipped_files_count = diagnostics["skipped_files_count"]
-    skipped_errors = diagnostics["skipped_errors"]
-    skipped_errors_total_count = diagnostics["skipped_errors_total_count"]
-    skipped_errors_truncated = diagnostics["skipped_errors_truncated"]
-    diagnostics_valid = (
-        _is_int_not_bool(skipped_files_count)
-        and skipped_files_count >= 0
-        and isinstance(skipped_errors, list)
-        and len(skipped_errors) <= MAX_CALL_GRAPH_SKIPPED_ERRORS
-        and all(isinstance(item, str) for item in skipped_errors)
-        and _is_int_not_bool(skipped_errors_total_count)
-        and skipped_errors_total_count == skipped_files_count
-        and skipped_errors_total_count >= len(skipped_errors)
-        and isinstance(skipped_errors_truncated, bool)
-        and skipped_errors_truncated
-        == (skipped_errors_total_count > len(skipped_errors))
-    )
-    if not diagnostics_valid:
-        return _call_graph_error(
-            "python_call_graph_parse_diagnostics_invalid",
-            "python_call_graph_json parse diagnostics are invalid",
-        )
-    nonclaims = data.get("does_not_establish")
-    if (
-        not _string_list_valid(nonclaims)
-        or not set(_CALL_GRAPH_REQUIRED_NONCLAIMS).issubset(nonclaims)
-    ):
-        return _call_graph_error(
-            "python_call_graph_nonclaims_invalid",
-            "python_call_graph_json does_not_establish is incomplete",
-        )
-    return None
-
-
-def _call_graph_records_error(data: dict[str, Any]) -> dict[str, Any] | None:
-    calls = data.get("calls")
-    if not isinstance(calls, list):
-        return _call_graph_error(
-            "python_call_graph_calls_invalid",
-            "python_call_graph_json calls must be an array",
-        )
-    for position, row in enumerate(calls):
-        if not _call_record_is_valid(row):
-            return _call_graph_error(
-                "python_call_graph_call_record_invalid",
-                f"python_call_graph_json call record at index {position} is invalid",
-            )
-    if data.get("call_count") != len(calls):
-        return _call_graph_error(
-            "python_call_graph_call_count_invalid",
-            "python_call_graph_json call_count does not match calls",
-        )
-    return None
-
-
-def _call_graph_counts_error(data: dict[str, Any]) -> dict[str, Any] | None:
-    count_specs = (
-        ("resolution_counts", CALL_RESOLUTION_STATUSES, "resolution_status"),
-        ("evidence_counts", CALL_EVIDENCE_LEVELS, "evidence_level"),
-        ("relation_counts", CALL_RELATION_TYPES, "relation_type"),
-    )
-    calls = data["calls"]
-    for field, keys, row_field in count_specs:
-        counts = data.get(field)
-        if not _count_map_valid(counts, keys):
-            return _call_graph_error(
-                f"python_call_graph_{field}_invalid",
-                f"python_call_graph_json {field} is invalid",
-            )
-        actual = {key: 0 for key in keys}
-        for row in calls:
-            actual[row[row_field]] += 1
-        if counts != actual:
-            return _call_graph_error(
-                f"python_call_graph_{field}_mismatch",
-                f"python_call_graph_json {field} does not match calls",
-            )
-    return None
-
-
-def _call_graph_manifest_binding_error(
-    data: dict[str, Any],
-    manifest_path: Path,
-    *,
-    manifest: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
-    manifest_payload = manifest if manifest is not None else _read_json_object(manifest_path)
-    manifest_run_id = manifest_payload.get("run_id")
-    if _is_non_empty_string(manifest_run_id) and manifest_run_id != data["run_id"]:
-        return _call_graph_error(
-            "python_call_graph_json_run_id_mismatch",
-            "python_call_graph_json run_id does not match the bundle manifest run_id",
-        )
-    dump_index = next(
-        (
-            item
-            for item in _artifact_list(manifest_payload)
-            if item.get("role") == "dump_index_json"
-        ),
-        None,
-    )
-    if (
-        dump_index is not None
-        and _is_sha256(dump_index.get("sha256"))
-        and dump_index["sha256"] != data["canonical_dump_index_sha256"]
-    ):
-        return _call_graph_error(
-            "python_call_graph_json_canonical_binding_mismatch",
-            "python_call_graph_json canonical_dump_index_sha256 does not match the dump_index_json artifact",
-        )
-    return None
 
 
 def _load_call_graph_source(
@@ -3624,53 +2615,4 @@ def _get_callees_full(
         "unresolved_call_sites": unresolved_visible,
         "mutation_boundary": _read_only_mutation_boundary(),
         "does_not_establish": _call_nav_does_not_establish(),
-    }
-
-
-def snapshot_check(
-    bundle_manifest: str | Path,
-    task_profile: str = "basic_repo_question",
-) -> dict[str, Any]:
-    status = snapshot_status(bundle_manifest)
-    artifacts = list_artifacts(bundle_manifest)
-    required = resolve_required_reading_for_bundle(bundle_manifest, task_profile)
-    required_status = str(required.get("status", "unknown"))
-    profile_eval = status.get("profile_evaluation")
-    profile_status = None
-    if isinstance(profile_eval, dict):
-        raw_profile_status = profile_eval.get("status")
-        if isinstance(raw_profile_status, str):
-            profile_status = raw_profile_status
-
-    statuses = [required_status]
-    if profile_status:
-        statuses.append(profile_status)
-    if "fail" in statuses or "not_applicable" in statuses:
-        check_status = "fail"
-    elif "warn" in statuses:
-        check_status = "warn"
-    elif all(item == "pass" for item in statuses):
-        check_status = "pass"
-    else:
-        check_status = "unknown"
-    return {
-        "kind": "repobrief.snapshot_check",
-        "version": "v1",
-        "status": check_status,
-        "bundle_manifest": status["bundle_manifest"],
-        "bundle_run_id": status["bundle_run_id"],
-        "profile": status["profile"],
-        "profile_evaluation_status": profile_status,
-        "task_profile": task_profile,
-        "artifact_count": artifacts["artifact_count"],
-        "roles": artifacts["roles"],
-        "snapshot_status": status,
-        "artifact_list": artifacts,
-        "required_reading": required,
-        "mutation_boundary": {
-            "writes": [],
-            "does_not_mutate": ["git", "pull_requests", "patches", "source_working_tree", "brief_bundle_artifacts"],
-            "read_paths_do_not_refresh": True,
-        },
-        "does_not_establish": list(_DOES_NOT_ESTABLISH),
     }
