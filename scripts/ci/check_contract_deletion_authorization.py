@@ -5,11 +5,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+from urllib.error import URLError
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
 TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+GITHUB_API_HOST = "api.github.com"
+PAGE_SIZE = 100
+DEFAULT_MAX_PAGES = 20
+MAX_PAGE_BYTES = 8 * 1024 * 1024
+HTTP_TIMEOUT_SECONDS = 20
 
 
 def authorization_present(comments: Any, *, marker: str) -> bool:
@@ -92,8 +101,121 @@ def resolve_associated_pr(
     return next(iter(candidates))
 
 
+def _github_page_url(url: str, *, page: int) -> str:
+    parsed = urlsplit(url)
+    if parsed.scheme != "https" or parsed.netloc != GITHUB_API_HOST:
+        raise ValueError("GitHub API URL must use https://api.github.com")
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in {"page", "per_page"}
+    ]
+    query.extend((("per_page", str(PAGE_SIZE)), ("page", str(page))))
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment)
+    )
+
+
+def _read_github_json_page(
+    request: Request,
+    *,
+    page: int,
+    opener: Callable[..., Any],
+) -> list[Any]:
+    try:
+        with opener(request, timeout=HTTP_TIMEOUT_SECONDS) as response:
+            raw = response.read(MAX_PAGE_BYTES + 1)
+    except (OSError, URLError) as exc:
+        raise ValueError(f"GitHub API page {page} could not be read") from exc
+    if len(raw) > MAX_PAGE_BYTES:
+        raise ValueError(f"GitHub API page {page} exceeds the byte limit")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"GitHub API page {page} is not valid JSON") from exc
+    if not isinstance(payload, list):
+        raise ValueError(f"GitHub API page {page} must be a JSON array")
+    if len(payload) > PAGE_SIZE:
+        raise ValueError(f"GitHub API page {page} exceeds the item limit")
+    return payload
+
+
+def _github_request(url: str, *, page: int, token: str) -> Request:
+    return Request(
+        _github_page_url(url, page=page),
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+
+
+def fetch_paginated_json(
+    url: str,
+    *,
+    token: str,
+    max_pages: int = DEFAULT_MAX_PAGES,
+    opener: Callable[..., Any] | None = None,
+) -> list[Any]:
+    """Fetch every GitHub API page, failing closed at explicit bounds."""
+    if not token:
+        raise ValueError("GitHub token is missing")
+    if not 1 <= max_pages <= 100:
+        raise ValueError("max_pages must be between 1 and 100")
+    open_request = opener or urlopen
+    collected: list[Any] = []
+
+    for page in range(1, max_pages + 2):
+        payload = _read_github_json_page(
+            _github_request(url, page=page, token=token),
+            page=page,
+            opener=open_request,
+        )
+        if page > max_pages:
+            if payload:
+                raise ValueError(
+                    f"GitHub API pagination exceeds the {max_pages}-page limit"
+                )
+            break
+        collected.extend(payload)
+        if len(payload) < PAGE_SIZE:
+            break
+
+    return collected
+
+
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_evidence(
+    *,
+    path: Path | None,
+    url: str | None,
+    max_pages: int,
+) -> Any:
+    if path is not None:
+        return _load_json(path)
+    if url is None:
+        raise ValueError("evidence source is missing")
+    return fetch_paginated_json(
+        url,
+        token=os.environ.get("GITHUB_TOKEN", ""),
+        max_pages=max_pages,
+    )
+
+
+def _add_evidence_source(
+    parser: argparse.ArgumentParser,
+    *,
+    path_option: str,
+    url_option: str,
+) -> None:
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(path_option, type=Path)
+    source.add_argument(url_option)
+    parser.add_argument("--max-pages", type=int, default=DEFAULT_MAX_PAGES)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,11 +223,19 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     verify = subparsers.add_parser("verify-comments")
-    verify.add_argument("--comments", type=Path, required=True)
+    _add_evidence_source(
+        verify,
+        path_option="--comments",
+        url_option="--comments-url",
+    )
     verify.add_argument("--marker", required=True)
 
     resolve = subparsers.add_parser("resolve-push-pr")
-    resolve.add_argument("--pull-requests", type=Path, required=True)
+    _add_evidence_source(
+        resolve,
+        path_option="--pull-requests",
+        url_option="--pull-requests-url",
+    )
     resolve.add_argument("--commit-sha", required=True)
     return parser
 
@@ -114,7 +244,12 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "verify-comments":
-            if not authorization_present(_load_json(args.comments), marker=args.marker):
+            comments = _load_evidence(
+                path=args.comments,
+                url=args.comments_url,
+                max_pages=args.max_pages,
+            )
+            if not authorization_present(comments, marker=args.marker):
                 print(
                     "no exact trusted-human authorization comment found",
                     file=sys.stderr,
@@ -123,8 +258,13 @@ def main(argv: list[str] | None = None) -> int:
             print("exact trusted-human authorization comment verified")
             return 0
 
+        pull_requests = _load_evidence(
+            path=args.pull_requests,
+            url=args.pull_requests_url,
+            max_pages=args.max_pages,
+        )
         number, head_sha, base_sha = resolve_associated_pr(
-            _load_json(args.pull_requests),
+            pull_requests,
             commit_sha=args.commit_sha,
         )
         print(number, head_sha, base_sha)

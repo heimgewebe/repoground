@@ -172,39 +172,18 @@ jobs:
           pr_number="${GH_PR_NUMBER:-}"
           pr_head_sha="${GH_PR_HEAD_SHA:-}"
           pr_base_sha="${GH_PR_BASE_SHA:-}"
-          temporary_files=()
-          cleanup() {
-            if (( ${#temporary_files[@]} )); then
-              rm -f -- "${temporary_files[@]}"
-            fi
-          }
-          trap cleanup EXIT
-
           if [[ "${GH_EVENT_NAME:-}" == "push" ]]; then
-            associated_prs="$(mktemp)"
-            temporary_files+=("$associated_prs")
-            if curl --fail --silent --show-error \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "https://api.github.com/repos/${GH_REPOSITORY}/commits/${GH_COMMIT_SHA}/pulls?per_page=100" \
-              > "$associated_prs"
+            if subject="$(
+              python3 scripts/ci/check_contract_deletion_authorization.py \
+                resolve-push-pr \
+                --pull-requests-url \
+                  "https://api.github.com/repos/${GH_REPOSITORY}/commits/${GH_COMMIT_SHA}/pulls" \
+                --commit-sha "$GH_COMMIT_SHA"
+            )"
             then
-              if subject="$(
-                python3 scripts/ci/check_contract_deletion_authorization.py \
-                  resolve-push-pr \
-                  --pull-requests "$associated_prs" \
-                  --commit-sha "$GH_COMMIT_SHA"
-              )"
-              then
-                read -r pr_number pr_head_sha pr_base_sha <<< "$subject"
-              else
-                pr_number=""
-                pr_head_sha=""
-                pr_base_sha=""
-              fi
+              read -r pr_number pr_head_sha pr_base_sha <<< "$subject"
             else
-              echo "::warning::Could not resolve an associated pull request; failing closed"
+              echo "::warning::Could not resolve a complete associated pull-request set; failing closed"
               pr_number=""
               pr_head_sha=""
               pr_base_sha=""
@@ -272,24 +251,15 @@ jobs:
             authorized=0
 
             if [[ -n "$pr_number" && -n "$pr_head_sha" ]]; then
-              comments_json="$(mktemp)"
-              temporary_files+=("$comments_json")
-              if curl --fail --silent --show-error \
-                -H "Accept: application/vnd.github+json" \
-                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-                -H "X-GitHub-Api-Version: 2022-11-28" \
-                "https://api.github.com/repos/${GH_REPOSITORY}/issues/${pr_number}/comments?per_page=100" \
-                > "$comments_json"
+              if python3 scripts/ci/check_contract_deletion_authorization.py \
+                verify-comments \
+                --comments-url \
+                  "https://api.github.com/repos/${GH_REPOSITORY}/issues/${pr_number}/comments" \
+                --marker "$marker"
               then
-                if python3 scripts/ci/check_contract_deletion_authorization.py \
-                  verify-comments \
-                  --comments "$comments_json" \
-                  --marker "$marker"
-                then
-                  authorized=1
-                fi
+                authorized=1
               else
-                echo "::warning::Could not read PR authorization comments; failing closed"
+                echo "::warning::Could not verify the complete PR authorization comment set; failing closed"
               fi
             fi
 
