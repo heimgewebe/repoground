@@ -225,8 +225,8 @@ jobs:
 
           if [[ -z "$base" \
             && -n "${GH_PUSH_BEFORE:-}" \
-            && ! "${GH_PUSH_BEFORE}" =~ ^0{40}$ \
-            && git rev-parse --verify "${GH_PUSH_BEFORE}^{commit}" &>/dev/null ]]
+            && ! "${GH_PUSH_BEFORE}" =~ ^0{40}$ ]] \
+            && git rev-parse --verify "${GH_PUSH_BEFORE}^{commit}" &>/dev/null
           then
             base="$GH_PUSH_BEFORE"
             base_src="push_before"
