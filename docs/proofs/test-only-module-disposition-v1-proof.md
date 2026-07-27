@@ -305,3 +305,38 @@ Thirty fresh-process normal CLI starts were measured after the broad suite compl
 Observed median delta: `+1.944 ms` or approximately `+1.36%`. The declaration validator remains behind the lazy diagnostics parser and executes only for `diagnostics answer-delta`. The normal-start delta is reported as measured and may include fresh-process noise.
 
 Rollback of this addendum is the revert of `dcba932d00e074f685da26a703ebf777271d3a21`. Current-head GitHub CI and a fresh Codex review remain separate post-push gates.
+
+
+## Fifth review-hardening addendum
+
+Codex reviewed PR head `737538559d9064648019e7b2b7ae5a4a90dcf037` and identified a fifth P2 boundary issue. Empty strings in `expected` or `top_results` are valid Python strings but match every path during substring comparison, producing a false high-confidence `target_in_top_k` diagnosis.
+
+The finding is addressed by revision `f2c55552e69e47c3f98c0c74ae0957cb2199237a`.
+
+- Parent head: `737538559d9064648019e7b2b7ae5a4a90dcf037`
+- Path-hardening diff bytes: `2065`
+- Path-hardening diff SHA-256: `e9a4b7bb6050e6e8955a33d75928be517273008675ba1b28d5acfcae60563461`
+
+The existing string-list validator now requires every present `expected` and `top_results` member to contain non-whitespace text. Empty lists remain valid. Four regression cases cover empty and whitespace-only members in both fields.
+
+Verification on the exact path-hardening revision:
+
+- focused CLI and retrieval-diagnostics tests: `64 passed in 1.45s`;
+- relevant domain, CLI and retrieval-diagnostics tests: `180 passed in 1.80s`;
+- broad suite excluding only the two documented host-blocked Bubblewrap files: `4897 passed, 2 skipped in 149.84s`;
+- durable broad-test task: `4b602c2afd684d8486e930a6`;
+- durable lifecycle receipt SHA-256: `1a82112726764c2a383b418a8e5a500ace97405195b123f1887a81d7b89a0859`;
+- Ruff changed-scope check: pass;
+- graph-maintainability ratchet: pass;
+- module reachability: `205 production modules, 0 unproven, 0 documentation-only, 0 test-only`.
+
+Thirty fresh-process normal CLI starts were measured after the broad suite completed:
+
+| Revision | Median | p90 | Minimum | Maximum |
+|---|---:|---:|---:|---:|
+| base `main` | 137.554 ms | 139.092 ms | 135.129 ms | 142.155 ms |
+| path-hardened implementation | 139.565 ms | 143.065 ms | 135.950 ms | 146.168 ms |
+
+Observed median delta: `+2.011 ms` or approximately `+1.46%`. The path-member validation remains behind the lazy diagnostics parser and executes only for `diagnostics eval-report`. The normal-start delta is reported as measured and may include fresh-process noise.
+
+Rollback of this addendum is the revert of `f2c55552e69e47c3f98c0c74ae0957cb2199237a`. Current-head GitHub CI and a fresh Codex review remain separate post-push gates.
