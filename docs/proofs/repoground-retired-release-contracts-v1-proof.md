@@ -64,16 +64,16 @@ identity but still accepted canonical RepoGround archives containing the retired
   - Result: `37 passed`.
 - `python3 -m ruff check scripts/release/build_release_candidate.py scripts/release/verify_release_candidate.py merger/repoground/tests/test_release_packaging.py tests/test_repository_hygiene.py tests/test_naming_hard_cut.py`
   - Result: `All checks passed`.
-- Full repository suite, durable task `7877711a0de741069643ed64`:
-  - Result: `5086 passed, 12 skipped, 33 failed`.
+- Full repository suite, durable task `2929a8340b4e43c0aee35d68`:
+  - Result: `5102 passed, 12 skipped, 33 failed`.
   - Every failure is confined to `test_patch_evaluation_sidecar*` and reports the same
     host-level Bubblewrap failure: `Creating new namespace failed: Resource temporarily
     unavailable`.
   - No changed-path test failed.
   - Lifecycle receipt SHA-256:
-    `d0ca4b5aeb7c9cebff56261beab3d88e8c2584430005d2f691aaf214f89c1bdf`.
+    `deb0f53d97506688a614bb8f11ff7d6fb43fb0c612700ff7e5a53cc725a68a76`.
   - Terminalization SHA-256:
-    `cfc90c18f0a983e657cc47a5212f99acd655aa3ef87a54fdc175e6d3922726fc`.
+    `878474940d80da5c985ce72b8157b3cf78b1edc162553c69b78215c900da42f4`.
 - `git diff --check` passes against the rebased `main` baseline.
 
 ## Non-claims
