@@ -27,7 +27,7 @@
     "extracted_modules": [
       {
         "path": "merger/repoground/core/bounded_artifact_read.py",
-        "lines": 181
+        "lines": 186
       },
       {
         "path": "merger/repoground/core/bundle_roles.py",
@@ -47,7 +47,7 @@
       }
     ],
     "aggregate_product_lines_before": 3676,
-    "aggregate_product_lines_after": 4282,
+    "aggregate_product_lines_after": 4287,
     "aggregate_line_reduction_claimed": false
   },
   "complexity": {
@@ -102,7 +102,7 @@
     "new_adversarial_suite": {
       "path": "merger/repoground/tests/test_bundle_access_decomposition.py",
       "result": "pass",
-      "passed": 20
+      "passed": 21
     },
     "ruff_changed_files": "pass",
     "ruff_c901_changed_modules": "pass",
@@ -149,13 +149,13 @@
   "source_sha256": {
     "config/repoground-c901-baseline.v1.json": "7a848e6b846f2dd8e85d3bf38b8fad5510571521dde580a58e0bab4a8328b7f3",
     "config/repoground-graph-maintainability.v1.json": "ca0923a57b327b74ae3a401581bc9b9415f9e90001efb4d5430dd4fa59c9e927",
-    "merger/repoground/core/bounded_artifact_read.py": "f871fb39819b5c250b678ac42e6c192113ba3ae4e6cca29adde7afb0aeb9d94a",
+    "merger/repoground/core/bounded_artifact_read.py": "ddc3ca7992ab89be8c94c7bd2ccc57c5902dd39601272e159e2959decd7037de",
     "merger/repoground/core/bundle_access.py": "2d942bc8c4a065cfa873bd3d5b2595185c407d4e45f5844b32b71a1f9784762a",
     "merger/repoground/core/bundle_roles.py": "ca07cc1982351f98631c6521f7f4bfd9f4ad123e6d1b09a5331f8ff4158238d8",
     "merger/repoground/core/call_graph_validation.py": "eab8bd3557bf2020e4bdb3b4e6218da012aec267538e30e4135644badbe92930",
     "merger/repoground/core/citation_projection.py": "8d4a9423c08ef3578f1307497dc1b531194f99558f6939dcfb91756e7672a5c2",
     "merger/repoground/core/sqlite_artifact_read.py": "81a06a8123f38de4ee9672a1d405f9c51d94c9d740807d679f63795b3489d04b",
-    "merger/repoground/tests/test_bundle_access_decomposition.py": "487b9514657567050c282da94efa788a4414860fb0520352290bbab9c5e6e32f"
+    "merger/repoground/tests/test_bundle_access_decomposition.py": "2110df07f352ee9344521864244d41431902e7e32bb4b868bd1ca752f2699b88"
   },
   "tool_versions": {
     "python": "3.10.12",
@@ -168,5 +168,70 @@
     "absence of maintainability debt below the C901 threshold",
     "aggregate production line-count reduction",
     "merge readiness"
-  ]
+  ],
+  "performance": {
+    "benchmark": {
+      "script_path": "/tmp/repoground_t011_read_benchmark.py",
+      "script_sha256": "7157a27fcb3203f5921fbe9558b36c7ccf1369968d9a81553fba2b1009c1a51e",
+      "host": "heim-pc",
+      "python": "3.10.12",
+      "loops": 150,
+      "samples": 9,
+      "fixture": {
+        "artifact_count": 12,
+        "artifact_bytes_each": 32768
+      },
+      "timing_method": "median nanoseconds per call across nine samples; import excluded; ten warmups",
+      "memory_method": "separate tracemalloc run over 150 combined sequences",
+      "acceptance_thresholds": {
+        "median_regression_percent_max": 10.0,
+        "peak_memory_regression_percent_max": 10.0
+      }
+    },
+    "base": {
+      "revision": "a029bbcd2779e7bed1ac41e936bdf720249f0538",
+      "timings_median_ns": {
+        "available_roles": 102763.96666666666,
+        "list_artifacts": 1654240.5133333334,
+        "get_artifact": 111288.62,
+        "combined": 1878055.2266666666
+      },
+      "peak_bytes": 33920
+    },
+    "merged_pre_fix": {
+      "revision": "d11f3e04c26738252755bc7332808f03589001be",
+      "timings_median_ns": {
+        "available_roles": 99086.40666666666,
+        "list_artifacts": 1632971.4466666668,
+        "get_artifact": 137310.24,
+        "combined": 1885488.94
+      },
+      "peak_bytes": 4206990,
+      "verdict": "fail",
+      "finding": "small manifests requested max_bytes+1 from the buffered reader and caused a 4 MiB transient allocation"
+    },
+    "corrected": {
+      "implementation_revision": "38ec6fe335a7c4b1b291f332f599abd7e82a205a",
+      "timings_median_ns": {
+        "available_roles": 75654.73333333334,
+        "list_artifacts": 1743917.3333333333,
+        "get_artifact": 119477.67333333334,
+        "combined": 1789284.68
+      },
+      "peak_bytes": 33909,
+      "delta_percent_vs_base": {
+        "available_roles": -26.38,
+        "list_artifacts": 5.421,
+        "get_artifact": 7.358,
+        "combined": -4.727,
+        "peak_memory": -0.032
+      },
+      "verdict": "pass"
+    },
+    "does_not_establish": [
+      "cross-host comparability",
+      "performance of SQLite queries or large call-graph navigation",
+      "absence of regressions outside the measured read facade"
+    ]
+  }
 }
