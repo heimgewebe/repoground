@@ -36,6 +36,32 @@ def authorization_present(comments: Any, *, marker: str) -> bool:
     return False
 
 
+def _candidate_for_pull_request(
+    pull_request: Any,
+    *,
+    commit_sha: str,
+) -> tuple[int, str, str] | None:
+    if not isinstance(pull_request, dict):
+        return None
+    number = pull_request.get("number")
+    head = pull_request.get("head")
+    base = pull_request.get("base")
+    if not isinstance(number, int) or number < 1:
+        return None
+    if not isinstance(head, dict) or not isinstance(base, dict):
+        return None
+
+    head_sha = head.get("sha")
+    base_sha = base.get("sha")
+    if not isinstance(head_sha, str) or len(head_sha) != 40:
+        return None
+    if not isinstance(base_sha, str) or len(base_sha) != 40:
+        return None
+    if head_sha != commit_sha and pull_request.get("merge_commit_sha") != commit_sha:
+        return None
+    return number, head_sha, base_sha
+
+
 def resolve_associated_pr(
     pull_requests: Any,
     *,
@@ -47,34 +73,23 @@ def resolve_associated_pr(
     if len(commit_sha) != 40:
         raise ValueError("commit SHA must contain 40 characters")
 
-    candidates: list[tuple[int, str, str]] = []
-    for pull_request in pull_requests:
-        if not isinstance(pull_request, dict):
-            continue
-        number = pull_request.get("number")
-        head = pull_request.get("head")
-        base = pull_request.get("base")
-        merge_commit_sha = pull_request.get("merge_commit_sha")
-        if not isinstance(number, int) or number < 1:
-            continue
-        if not isinstance(head, dict) or not isinstance(base, dict):
-            continue
-        head_sha = head.get("sha")
-        base_sha = base.get("sha")
-        if not isinstance(head_sha, str) or len(head_sha) != 40:
-            continue
-        if not isinstance(base_sha, str) or len(base_sha) != 40:
-            continue
-        if head_sha == commit_sha or merge_commit_sha == commit_sha:
-            candidates.append((number, head_sha, base_sha))
-
-    unique = sorted(set(candidates))
-    if len(unique) != 1:
+    candidates = {
+        candidate
+        for pull_request in pull_requests
+        if (
+            candidate := _candidate_for_pull_request(
+                pull_request,
+                commit_sha=commit_sha,
+            )
+        )
+        is not None
+    }
+    if len(candidates) != 1:
         raise ValueError(
             "expected exactly one associated pull request for commit, "
-            f"found {len(unique)}"
+            f"found {len(candidates)}"
         )
-    return unique[0]
+    return next(iter(candidates))
 
 
 def _load_json(path: Path) -> Any:
