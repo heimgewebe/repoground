@@ -1,7 +1,16 @@
 diff --git a/docs/proofs/repoground-legacy-t011-bundle-access-v1-proof.md b/docs/proofs/repoground-legacy-t011-bundle-access-v1-proof.md
-index f98a10fb5..8cdfffe35 100644
+index f98a10fb5..4ae52e2b6 100644
 --- a/docs/proofs/repoground-legacy-t011-bundle-access-v1-proof.md
 +++ b/docs/proofs/repoground-legacy-t011-bundle-access-v1-proof.md
+@@ -80,7 +80,7 @@ path, size, hash or metadata failure invalidates the citation-map source.
+ production modules are 181–580 lines each.
+ 
+ This is a decomposition and hardening slice, not an aggregate-LOC reduction:
+-the six production files together contain 4,282 lines. The measurement records
++the six production files together contain 4,287 lines. The measurement records
+ that explicitly rather than treating moved or expanded validation code as
+ deleted code.
+ 
 @@ -121,11 +121,38 @@ reading, and preserves weak-filesystem identity handling through content-hash
  verification. Existing atomic-replacement and weak-identity tests and the new
  symlink test all pass.
