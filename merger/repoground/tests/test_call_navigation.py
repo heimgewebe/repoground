@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from merger.repoground.core import bundle_access, mcp_tools
+from merger.repoground.core import bounded_artifact_read, bundle_access, mcp_tools
 from merger.repoground.core.bundle_access import (
     find_references,
     get_callees,
@@ -1210,17 +1210,20 @@ def test_descriptor_pinned_read_rejects_atomic_path_replacement(
     replacement = tmp_path / "replacement.json"
     artifact.write_bytes(b"original")
     replacement.write_bytes(b"replaced")
-    original_stat = Path.stat
+    original_lstat = os.lstat
+    artifact_lstat_calls = 0
     replaced = False
 
-    def replacing_stat(path, *args, **kwargs):
-        nonlocal replaced
-        if path == artifact and not replaced:
-            replaced = True
-            os.replace(replacement, artifact)
-        return original_stat(path, *args, **kwargs)
+    def replacing_lstat(path, *args, **kwargs):
+        nonlocal artifact_lstat_calls, replaced
+        if Path(path) == artifact:
+            artifact_lstat_calls += 1
+            if artifact_lstat_calls == 2:
+                replaced = True
+                os.replace(replacement, artifact)
+        return original_lstat(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "stat", replacing_stat)
+    monkeypatch.setattr(os, "lstat", replacing_lstat)
 
     raw, stat_result, failure, _detail = (
         bundle_access._read_stable_artifact_bytes(artifact)
@@ -1315,10 +1318,14 @@ def test_weak_file_identity_automatically_uses_content_hash(
             return getattr(self._source, name)
 
     original_fstat = os.fstat
+    original_lstat = os.lstat
     original_path_stat = Path.stat
 
     def weak_fstat(descriptor):
         return WeakStat(original_fstat(descriptor))
+
+    def weak_lstat(path, *args, **kwargs):
+        return WeakStat(original_lstat(path, *args, **kwargs))
 
     def weak_path_stat(path, *args, **kwargs):
         return WeakStat(original_path_stat(path, *args, **kwargs))
@@ -1333,6 +1340,7 @@ def test_weak_file_identity_automatically_uses_content_hash(
     monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
     monkeypatch.delenv("REPOGROUND_STRICT_CACHE_HASH", raising=False)
     monkeypatch.setattr(os, "fstat", weak_fstat)
+    monkeypatch.setattr(os, "lstat", weak_lstat)
     monkeypatch.setattr(Path, "stat", weak_path_stat)
     monkeypatch.setattr(
         bundle_access,
@@ -1430,18 +1438,22 @@ def test_atomic_pathname_exchange_during_stable_read_is_rejected(tmp_path, monke
     replacement = tmp_path / "replacement.json"
     artifact.write_text('{"version": 1}\n', encoding="utf-8")
     replacement.write_text('{"version": 2}\n', encoding="utf-8")
-    original_open = Path.open
+    original_reader = bounded_artifact_read._read_descriptor_bytes
     replaced = False
 
-    def replacing_open(path, *args, **kwargs):
+    def replacing_reader(path, max_bytes):
         nonlocal replaced
-        handle = original_open(path, *args, **kwargs)
-        if Path(path).resolve() == artifact.resolve() and not replaced:
+        result = original_reader(path, max_bytes)
+        if Path(path) == artifact and not replaced:
             os.replace(replacement, artifact)
             replaced = True
-        return handle
+        return result
 
-    monkeypatch.setattr(Path, "open", replacing_open)
+    monkeypatch.setattr(
+        bounded_artifact_read,
+        "_read_descriptor_bytes",
+        replacing_reader,
+    )
 
     raw, stat_result, failure, detail = bundle_access._read_stable_artifact_bytes(
         artifact
