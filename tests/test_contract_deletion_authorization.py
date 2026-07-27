@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -26,6 +28,31 @@ def trusted_comment(*, body: str = MARKER) -> dict[str, object]:
         "body": body,
         "user": {"login": "alexdermohr", "type": "User"},
     }
+
+
+def _guard_shell_script() -> str:
+    workflow = Path(".github/workflows/contracts-validate.yml").read_text(
+        encoding="utf-8"
+    )
+    marker = "      - name: Enforce guard policy\n        run: |\n"
+    start = workflow.index(marker) + len(marker)
+    lines: list[str] = []
+    for line in workflow[start:].splitlines():
+        if line and not line.startswith("          "):
+            break
+        lines.append(line[10:] if line else "")
+    return "\n".join(lines) + "\n"
+
+
+def test_guard_embedded_shell_is_valid_bash() -> None:
+    result = subprocess.run(
+        ["bash", "-n"],
+        input=_guard_shell_script(),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_authorization_requires_exact_trusted_human_marker() -> None:
