@@ -110,3 +110,26 @@ def test_answer_grounding_delta_uses_prevalidated_entries_without_rereading_map(
     assert verdict["status"] == "valid"
     assert verdict["citation_checks"][0]["status"] == "valid"
     assert verdict["diagnostics"] == []
+
+
+def test_answer_grounding_delta_uses_prevalidated_manifest_after_file_removal(
+    tmp_path,
+):
+    manifest, citation_map, range_ref = _bundle(tmp_path)
+    declaration = _declaration(range_ref)
+    manifest_data = json.loads(manifest.read_text(encoding="utf-8"))
+    record = json.loads(citation_map.read_text(encoding="utf-8").splitlines()[0])
+    entries = {record["citation_id"]: record}
+    manifest.unlink()
+
+    verdict = check_answer_grounding_delta(
+        declaration,
+        new_bundle_manifest=manifest,
+        new_bundle_manifest_data=manifest_data,
+        new_citation_map=citation_map,
+        new_citation_entries=entries,
+    )
+
+    assert verdict["status"] == "valid"
+    assert verdict["citation_checks"][0]["status"] == "valid"
+    assert verdict["range_checks"][0]["status"] == "valid"

@@ -279,14 +279,21 @@ def _run_answer_delta(args: argparse.Namespace) -> dict[str, Any]:
     declaration = _validate_answer_declaration(
         _read_json(args.old_declaration, expected_type=dict)
     )
+    if declaration.get("used_citations") and not args.new_citation_map:
+        raise ValueError(
+            "--new-citation-map is required when old declaration "
+            "used_citations is non-empty"
+        )
     citation_entries = (
         _read_validated_citation_map_jsonl(args.new_citation_map)
         if args.new_citation_map
         else None
     )
+    manifest_data = _read_json(args.new_bundle_manifest, expected_type=dict)
     return check_answer_grounding_delta(
         declaration,
         new_bundle_manifest=args.new_bundle_manifest,
+        new_bundle_manifest_data=manifest_data,
         new_citation_map=args.new_citation_map,
         new_citation_entries=citation_entries,
     )

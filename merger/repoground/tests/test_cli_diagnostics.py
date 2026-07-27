@@ -5,14 +5,29 @@ from pathlib import Path
 
 import pytest
 
-from merger.repoground.core import answer_grounding_delta
+from merger.repoground.cli import cmd_diagnostics
 from merger.repoground.cli.main import main
+from merger.repoground.core import answer_grounding_delta
 from merger.repoground.retrieval import diagnostics_json, eval_diagnostics_integration
 
 
 def _write_json(path: Path, value: object) -> Path:
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+def _write_bundle_manifest(path: Path) -> Path:
+    return _write_json(
+        path,
+        {
+            "kind": "repolens.bundle.manifest",
+            "version": "1.0",
+            "run_id": "diagnostics-test",
+            "artifacts": [],
+            "links": {},
+            "capabilities": {},
+        },
+    )
 
 
 def _run(capsys, args: list[str]) -> tuple[int, dict]:
@@ -171,23 +186,34 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
     tmp_path, capsys, monkeypatch
 ):
     declaration = _write_json(tmp_path / "declaration.json", {"used_citations": []})
+    manifest = _write_bundle_manifest(tmp_path / "bundle.manifest.json")
     citation_map = tmp_path / "citations.jsonl"
     citation_map.write_text(
         json.dumps({"citation_id": "cit_0000000000000001"}) + "\n",
         encoding="utf-8",
     )
     seen = {}
+    manifest_reads = 0
+    real_read_input_payload = cmd_diagnostics._read_input_payload
+
+    def tracked_read_input_payload(path_value):
+        nonlocal manifest_reads
+        if Path(path_value) == manifest:
+            manifest_reads += 1
+        return real_read_input_payload(path_value)
 
     def fake_check(
         value,
         *,
         new_bundle_manifest,
+        new_bundle_manifest_data,
         new_citation_map,
         new_citation_entries,
     ):
         seen.update(
             value=value,
             manifest=new_bundle_manifest,
+            manifest_data=new_bundle_manifest_data,
             citation_map=new_citation_map,
             citation_entries=new_citation_entries,
         )
@@ -195,6 +221,11 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
 
     monkeypatch.setattr(
         answer_grounding_delta, "check_answer_grounding_delta", fake_check
+    )
+    monkeypatch.setattr(
+        cmd_diagnostics,
+        "_read_input_payload",
+        tracked_read_input_payload,
     )
 
     code, result = _run(
@@ -204,7 +235,7 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
             "--old-declaration",
             str(declaration),
             "--new-bundle-manifest",
-            "bundle.manifest.json",
+            str(manifest),
             "--new-citation-map",
             str(citation_map),
         ],
@@ -212,14 +243,159 @@ def test_answer_delta_cli_delegates_to_read_only_domain_surface(
 
     assert code == 0
     assert result["status"] == "valid"
+    assert manifest_reads == 1
     assert seen == {
         "value": {"used_citations": []},
-        "manifest": "bundle.manifest.json",
+        "manifest": str(manifest),
+        "manifest_data": {
+            "kind": "repolens.bundle.manifest",
+            "version": "1.0",
+            "run_id": "diagnostics-test",
+            "artifacts": [],
+            "links": {},
+            "capabilities": {},
+        },
         "citation_map": str(citation_map),
         "citation_entries": {
             "cit_0000000000000001": {"citation_id": "cit_0000000000000001"}
         },
     }
+
+
+def test_answer_delta_requires_citation_map_for_declared_citations(
+    tmp_path,
+    capsys,
+):
+    declaration = _write_json(
+        tmp_path / "declaration.json",
+        {"used_citations": [{"citation_id": "cit_0000000000000001"}]},
+    )
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            "not-read.bundle.manifest.json",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert (
+        "--new-citation-map is required when old declaration "
+        "used_citations is non-empty"
+    ) in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize("declaration", [{}, {"used_citations": []}])
+def test_answer_delta_allows_empty_or_missing_citations_without_map(
+    tmp_path,
+    capsys,
+    declaration,
+):
+    declaration_path = _write_json(tmp_path / "declaration.json", declaration)
+    manifest = _write_bundle_manifest(tmp_path / "bundle.manifest.json")
+
+    code, result = _run(
+        capsys,
+        [
+            "answer-delta",
+            "--old-declaration",
+            str(declaration_path),
+            "--new-bundle-manifest",
+            str(manifest),
+        ],
+    )
+
+    assert code == 0
+    assert result["status"] == "not_comparable"
+
+
+def test_answer_delta_manifest_rejects_symbolic_link_without_traceback(
+    tmp_path,
+    capsys,
+):
+    declaration = _write_json(tmp_path / "declaration.json", {})
+    target = _write_bundle_manifest(tmp_path / "bundle.manifest.json")
+    link = tmp_path / "bundle-link.manifest.json"
+    link.symlink_to(target)
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            str(link),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "refusing symbolic-link input" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_answer_delta_manifest_rejects_non_finite_json_without_traceback(
+    tmp_path,
+    capsys,
+):
+    declaration = _write_json(tmp_path / "declaration.json", {})
+    manifest = tmp_path / "bundle.manifest.json"
+    manifest.write_text(
+        '{"kind":"repolens.bundle.manifest","diagnostic_value":NaN}',
+        encoding="utf-8",
+    )
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            str(manifest),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "non-finite JSON constant 'NaN'" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_answer_delta_manifest_rejects_oversized_input_without_traceback(
+    tmp_path,
+    capsys,
+):
+    declaration = _write_json(tmp_path / "declaration.json", {})
+    manifest = tmp_path / "bundle.manifest.json"
+    manifest.write_bytes(b"x" * (cmd_diagnostics._MAX_JSON_BYTES + 1))
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            str(manifest),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert f"input exceeds {cmd_diagnostics._MAX_JSON_BYTES} bytes" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_eval_report_cli_delegates_without_changing_metrics(

@@ -1,8 +1,9 @@
 import json
 import hashlib
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Mapping, Optional
 
 try:
     import jsonschema
@@ -173,16 +174,26 @@ def build_derived_range_ref_v2(
     }
 
 
-def resolve_range_ref(manifest_path: Path, ref: Dict[str, Any]) -> Dict[str, Any]:
+def resolve_range_ref(
+    manifest_path: Path,
+    ref: Dict[str, Any],
+    *,
+    manifest_data: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
     """
     Resolves a range_ref against a bundle.manifest.json or dump_index.json to extract
-    exact bytes and verify content_sha256.
+    exact bytes and verify content_sha256. When ``manifest_data`` is supplied, the
+    manifest path is used only as the trusted base for relative artifact paths.
     """
-    if not manifest_path.exists():
-        raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-
-    with manifest_path.open("r", encoding="utf-8") as f:
-        manifest = json.load(f)
+    if manifest_data is None:
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+        with manifest_path.open("r", encoding="utf-8") as f:
+            manifest = json.load(f)
+    else:
+        if not isinstance(manifest_data, Mapping):
+            raise ValueError("manifest_data must be a mapping")
+        manifest = deepcopy(dict(manifest_data))
 
     is_v2 = ref.get("range_ref_version") == "2"
     schema_path = _RANGE_REF_V2_SCHEMA_PATH if is_v2 else _RANGE_REF_V1_SCHEMA_PATH

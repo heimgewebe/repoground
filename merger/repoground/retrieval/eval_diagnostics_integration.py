@@ -138,7 +138,7 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
             {
                 "query": "...",
                 "expected": ["path1", "path2"],
-                "is_relevant": false,  # Miss if false
+                "is_relevant": false,
                 "found_count": 0,  # Number of results found
                 ...
             }
@@ -164,14 +164,11 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
         (
             query_text,
             expected,
-            is_relevant,
+            _is_relevant,
             found_count,
             top_results,
         ) = _validate_eval_detail_fields(detail, index=detail_idx)
 
-        # Only process misses (is_relevant=false)
-        if is_relevant:
-            continue
         # Prefer configured eval k from metrics (e.g., recall@10), because top_results
         # may be shorter than k for low-hit queries.
         top_k = (
@@ -188,12 +185,18 @@ def _extract_misses_from_eval(eval_results: Dict[str, Any]) -> List[Dict[str, An
 
             # Check if target was found (substring match in results)
             for rank_idx, res_path in enumerate(top_results):
-                if isinstance(res_path, str) and (
-                    expected_target in res_path or res_path in expected_target
-                ):
+                if expected_target in res_path or res_path in expected_target:
                     found_in_results = True
                     rank_in_results = rank_idx + 1
                     break
+
+            # Query-level is_relevant cannot identify which target matched. A target
+            # observed within the effective k is not a miss; an over-fetched target
+            # below k remains diagnostic input with its observed rank preserved.
+            if rank_in_results is not None and (
+                top_k is None or rank_in_results <= top_k
+            ):
+                continue
 
             miss = {
                 "query_id": f"q{detail_idx}",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -55,9 +56,13 @@ def _range_ref_from_citation(entry: Mapping[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _check_range(manifest: Path, range_ref: dict[str, Any]) -> tuple[str, str]:
+def _check_range(
+    manifest: Path,
+    range_ref: dict[str, Any],
+    manifest_data: Mapping[str, Any] | None,
+) -> tuple[str, str]:
     try:
-        resolve_range_ref(manifest, range_ref)
+        resolve_range_ref(manifest, range_ref, manifest_data=manifest_data)
     except Exception as exc:
         detail = str(exc)
         if "hash mismatch" in detail.lower():
@@ -101,6 +106,7 @@ def check_answer_grounding_delta(
     old_declaration: Mapping[str, Any],
     *,
     new_bundle_manifest: str | Path,
+    new_bundle_manifest_data: Mapping[str, Any] | None = None,
     new_citation_map: str | Path | None = None,
     new_citation_entries: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -109,8 +115,14 @@ def check_answer_grounding_delta(
     Read-only: this function reads explicitly supplied existing files only. It does not
     create snapshots, fetch Git state, refresh bundles, or normalize freshness statuses.
     When ``new_citation_entries`` is supplied, the citation-map path is not reread.
+    When ``new_bundle_manifest_data`` is supplied, the manifest path is not reread.
     """
     manifest_path = Path(new_bundle_manifest).expanduser().resolve()
+    manifest_data = (
+        deepcopy(dict(new_bundle_manifest_data))
+        if new_bundle_manifest_data is not None
+        else None
+    )
     entries, diagnostics = _load_citation_entries(new_citation_map, new_citation_entries)
     citation_checks: list[dict[str, Any]] = []
     range_checks: list[dict[str, Any]] = []
@@ -137,7 +149,7 @@ def check_answer_grounding_delta(
                 "detail": "New citation entry has no comparable range reference.",
             })
             continue
-        status, detail = _check_range(manifest_path, range_ref)
+        status, detail = _check_range(manifest_path, range_ref, manifest_data)
         citation_checks.append({"citation_id": citation_id, "status": status, "detail": detail})
 
     for idx, item in enumerate(old_declaration.get("used_ranges") or [], start=1):
@@ -148,7 +160,11 @@ def check_answer_grounding_delta(
                 "detail": "Old declaration range is missing range_ref.",
             })
             continue
-        status, detail = _check_range(manifest_path, dict(item["range_ref"]))
+        status, detail = _check_range(
+            manifest_path,
+            dict(item["range_ref"]),
+            manifest_data,
+        )
         range_checks.append({
             "range_id": str(item.get("claim_ref") or f"declared-range-{idx}"),
             "status": status,
@@ -165,7 +181,7 @@ def check_answer_grounding_delta(
     else:
         status = "valid"
 
-    new_status = snapshot_status(manifest_path)
+    new_status = snapshot_status(manifest_path, manifest_data=manifest_data)
     new_freshness = new_status.get("freshness") if isinstance(new_status, dict) else None
     return {
         "kind": KIND,

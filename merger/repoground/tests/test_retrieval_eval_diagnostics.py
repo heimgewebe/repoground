@@ -114,7 +114,7 @@ class TestIndexInspector:
 
 
 class TestIntegrationExtraction:
-    def test_extract_uses_details_structure(self):
+    def test_extracts_only_unmatched_expected_targets_per_query(self):
         eval_results = {
             "metrics": {"total_queries": 2},
             "details": [
@@ -136,10 +136,69 @@ class TestIntegrationExtraction:
         }
 
         misses = _extract_misses_from_eval(eval_results)
-        assert len(misses) == 2
+        assert len(misses) == 1
         assert misses[0]["query_id"] == "q0"
+        assert misses[0]["expected_target"] == "iter_report_blocks"
         assert misses[0]["query_had_zero_hits"] is False
         assert misses[0]["top_k"] == 2
+
+    def test_extracts_partial_hit_even_when_query_is_relevant(self):
+        eval_results = {
+            "metrics": {"recall@2": 50.0},
+            "details": [
+                {
+                    "query": "find both modules",
+                    "expected": ["src/a.py", "src/b.py"],
+                    "is_relevant": True,
+                    "found_count": 1,
+                    "top_results": ["src/a.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+
+        assert [miss["expected_target"] for miss in misses] == ["src/b.py"]
+        assert misses[0]["found_in_results"] is False
+        assert misses[0]["rank_in_results"] is None
+
+    def test_extract_skips_complete_hits_within_top_k(self):
+        eval_results = {
+            "metrics": {"recall@2": 100.0},
+            "details": [
+                {
+                    "query": "find both modules",
+                    "expected": ["src/a.py", "src/b.py"],
+                    "is_relevant": False,
+                    "found_count": 2,
+                    "top_results": ["src/a.py", "src/b.py"],
+                }
+            ],
+        }
+
+        assert _extract_misses_from_eval(eval_results) == []
+
+    def test_extract_keeps_found_target_below_configured_top_k_as_miss(self):
+        eval_results = {
+            "metrics": {"recall@1": 0.0},
+            "details": [
+                {
+                    "query": "find target",
+                    "expected": ["src/target.py"],
+                    "is_relevant": True,
+                    "found_count": 2,
+                    "top_results": ["src/noise.py", "src/target.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+
+        assert len(misses) == 1
+        assert misses[0]["expected_target"] == "src/target.py"
+        assert misses[0]["found_in_results"] is True
+        assert misses[0]["rank_in_results"] == 2
+        assert misses[0]["top_k"] == 1
 
     def test_extract_rejects_legacy_results_key(self):
         eval_results = {

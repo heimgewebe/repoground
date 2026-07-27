@@ -6,6 +6,7 @@ import logging
 import os
 import re
 from collections import OrderedDict
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
@@ -151,9 +152,23 @@ def resolve_required_reading_for_bundle(
     }
 
 
-def snapshot_status(bundle_manifest: str | Path) -> dict[str, Any]:
+def snapshot_status(
+    bundle_manifest: str | Path,
+    *,
+    manifest_data: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Project snapshot status without refreshing bundle state.
+
+    Supplying ``manifest_data`` avoids rereading the manifest; the path remains
+    the trusted base for resolving relative artifact paths.
+    """
     manifest_path = Path(bundle_manifest).expanduser().resolve()
-    manifest = _read_json_object(manifest_path)
+    if manifest_data is None:
+        manifest = _read_json_object(manifest_path)
+    else:
+        if not isinstance(manifest_data, Mapping):
+            raise ValueError("manifest_data must be a mapping")
+        manifest = deepcopy(dict(manifest_data))
     artifacts = [_artifact_record(manifest_path, a) for a in _artifact_list(manifest)]
     roles = sorted(str(a["role"]) for a in artifacts if isinstance(a.get("role"), str))
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
