@@ -45,6 +45,22 @@ def _load_schema(schema_path: Path) -> Dict[str, Any]:
     with schema_path.open("r", encoding="utf-8") as f:
         return json.load(f)
 
+
+def _load_manifest(
+    manifest_path: Path,
+    manifest_data: Mapping[str, Any] | None,
+) -> Any:
+    if manifest_data is None:
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
+        with manifest_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+
+    if not isinstance(manifest_data, Mapping):
+        raise ValueError("manifest_data must be a mapping")
+    return deepcopy(dict(manifest_data))
+
+
 def build_explicit_range_ref(
     artifact_role: str,
     repo_id: str,
@@ -185,15 +201,7 @@ def resolve_range_ref(
     exact bytes and verify content_sha256. When ``manifest_data`` is supplied, the
     manifest path is used only as the trusted base for relative artifact paths.
     """
-    if manifest_data is None:
-        if not manifest_path.exists():
-            raise FileNotFoundError(f"Manifest not found: {manifest_path}")
-        with manifest_path.open("r", encoding="utf-8") as f:
-            manifest = json.load(f)
-    else:
-        if not isinstance(manifest_data, Mapping):
-            raise ValueError("manifest_data must be a mapping")
-        manifest = deepcopy(dict(manifest_data))
+    manifest = _load_manifest(manifest_path, manifest_data)
 
     is_v2 = ref.get("range_ref_version") == "2"
     schema_path = _RANGE_REF_V2_SCHEMA_PATH if is_v2 else _RANGE_REF_V1_SCHEMA_PATH
