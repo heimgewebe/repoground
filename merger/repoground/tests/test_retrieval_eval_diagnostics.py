@@ -289,6 +289,37 @@ class TestIntegrationExtraction:
         assert misses[0]["rank_in_results"] == 2
         assert misses[0]["top_k"] == 1
 
+    def test_index_matching_uses_evaluator_one_way_semantics(self, tmp_path):
+        index_path = tmp_path / "chunks.jsonl"
+        index_path.write_text(
+            json.dumps({"chunk_id": "c1", "path": "src/foo.py"}) + "\n",
+            encoding="utf-8",
+        )
+        eval_results = {
+            "metrics": {"recall@1": 0.0},
+            "details": [
+                {
+                    "query": "find extended target",
+                    "expected": ["src/foo.py.extra"],
+                    "is_relevant": False,
+                    "found_count": 1,
+                    "top_results": ["src/foo.py"],
+                }
+            ],
+        }
+
+        misses = _extract_misses_from_eval(eval_results)
+        report = RetrievalEvalDiagnosticsCalibrator(
+            index_path=index_path
+        ).generate_report(misses)
+
+        assert report["diagnostics"][0]["primary_diagnosis"] == (
+            "target_missing_from_index"
+        )
+        assert report["diagnostics"][0]["diagnosis_details"][
+            "target_found_in_index"
+        ] is False
+
     def test_query_execution_error_is_diagnostic_inconclusive(
         self, tmp_artifacts
     ):

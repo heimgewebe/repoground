@@ -179,7 +179,11 @@ def snapshot_status(
     capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
     from merger.repoground.core.availability import snapshot_availability_model
 
-    availability_model = snapshot_availability_model(manifest_path, manifest)
+    availability_model = snapshot_availability_model(
+        manifest_path,
+        manifest,
+        resolve_manifest_path=manifest_data is None,
+    )
     return {
         "kind": "repobrief.snapshot_status",
         "version": "v1",

@@ -59,6 +59,19 @@ def test_snapshot_status_keeps_prevalidated_manifest_parent_after_symlink_swap(
     assert status["artifacts"][0]["absolute_path"] != str(
         replacement_artifact.resolve()
     )
+    assert status["availability_model"]["bundle_manifest"] == str(
+        manifest.absolute()
+    )
+    canonical = next(
+        item
+        for item in status["availability_model"]["artifacts"]
+        if item["role"] == "canonical_md"
+    )
+    assert canonical["file_exists"] is True
+    assert status["availability_model"]["graph_availability"]["status"] in {
+        "not_generated",
+        "profile_excluded",
+    }
 
 
 def test_snapshot_status_makes_relative_prevalidated_anchor_absolute_without_resolving(

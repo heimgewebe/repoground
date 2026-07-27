@@ -284,7 +284,7 @@ class IndexInspector:
         """Return index paths that contain the expected target as substring."""
         if not isinstance(expected_target, str) or not expected_target:
             return []
-        return sorted([p for p in index_paths if expected_target in p or p in expected_target])
+        return sorted([p for p in index_paths if expected_target in p])
 
     def load_canonical_md(self, canonical_path: Path) -> str:
         """
