@@ -118,6 +118,43 @@ def _require_list_items(
     return value
 
 
+def _validate_answer_declaration(
+    declaration: dict[str, Any],
+) -> dict[str, Any]:
+    used_citations = declaration.get("used_citations", [])
+    if not isinstance(used_citations, list):
+        raise ValueError("old declaration field 'used_citations' must be a JSON list")
+    _require_list_items(
+        used_citations,
+        item_type=dict,
+        label="old declaration used_citations",
+    )
+    for index, item in enumerate(used_citations):
+        citation_id = item.get("citation_id")
+        if not isinstance(citation_id, str) or not citation_id:
+            raise ValueError(
+                "old declaration used_citations"
+                f"[{index}] field 'citation_id' must be a non-empty string"
+            )
+
+    used_ranges = declaration.get("used_ranges", [])
+    if not isinstance(used_ranges, list):
+        raise ValueError("old declaration field 'used_ranges' must be a JSON list")
+    _require_list_items(
+        used_ranges,
+        item_type=dict,
+        label="old declaration used_ranges",
+    )
+    for index, item in enumerate(used_ranges):
+        if not isinstance(item.get("range_ref"), dict):
+            raise ValueError(
+                "old declaration used_ranges"
+                f"[{index}] field 'range_ref' must be a JSON object"
+            )
+
+    return declaration
+
+
 def _emit(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
@@ -226,7 +263,9 @@ def _run_answer_delta(args: argparse.Namespace) -> dict[str, Any]:
         check_answer_grounding_delta,
     )
 
-    declaration = _read_json(args.old_declaration, expected_type=dict)
+    declaration = _validate_answer_declaration(
+        _read_json(args.old_declaration, expected_type=dict)
+    )
     citation_entries = (
         _read_validated_citation_map_jsonl(args.new_citation_map)
         if args.new_citation_map

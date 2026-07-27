@@ -477,3 +477,70 @@ def test_answer_delta_rejects_invalid_citation_map_records_without_traceback(
     assert captured.out == ""
     assert expected_error in captured.err
     assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("declaration", "expected_error"),
+    [
+        (
+            {"used_citations": {}, "used_ranges": [{"range_ref": {}}]},
+            "old declaration field 'used_citations' must be a JSON list",
+        ),
+        (
+            {"used_ranges": {}},
+            "old declaration field 'used_ranges' must be a JSON list",
+        ),
+        (
+            {"used_citations": [1]},
+            "old declaration used_citations[0] must be JSON dict, got int",
+        ),
+        (
+            {"used_ranges": [1]},
+            "old declaration used_ranges[0] must be JSON dict, got int",
+        ),
+        (
+            {"used_citations": [{}]},
+            "old declaration used_citations[0] field 'citation_id' must be a non-empty string",
+        ),
+        (
+            {"used_citations": [{"citation_id": 7}]},
+            "old declaration used_citations[0] field 'citation_id' must be a non-empty string",
+        ),
+        (
+            {"used_citations": [{"citation_id": ""}]},
+            "old declaration used_citations[0] field 'citation_id' must be a non-empty string",
+        ),
+        (
+            {"used_ranges": [{}]},
+            "old declaration used_ranges[0] field 'range_ref' must be a JSON object",
+        ),
+        (
+            {"used_ranges": [{"range_ref": []}]},
+            "old declaration used_ranges[0] field 'range_ref' must be a JSON object",
+        ),
+    ],
+)
+def test_answer_delta_rejects_malformed_declaration_evidence_without_traceback(
+    tmp_path,
+    capsys,
+    declaration,
+    expected_error,
+):
+    declaration_path = _write_json(tmp_path / "declaration.json", declaration)
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration_path),
+            "--new-bundle-manifest",
+            "bundle.manifest.json",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert expected_error in captured.err
+    assert "Traceback" not in captured.err
