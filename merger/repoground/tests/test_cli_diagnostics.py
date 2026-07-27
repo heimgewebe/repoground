@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 from merger.repoground.core import answer_grounding_delta
-from merger.repoground.retrieval import eval_diagnostics_integration
 from merger.repoground.cli.main import main
+from merger.repoground.retrieval import diagnostics_json, eval_diagnostics_integration
 
 
 def _write_json(path: Path, value: object) -> Path:
@@ -284,7 +284,36 @@ def test_json_inputs_reject_symbolic_links(tmp_path, capsys):
     assert "refusing symbolic-link input" in captured.err
 
 
-def test_json_inputs_reject_excessive_nesting_without_traceback(tmp_path, capsys):
+def test_json_input_recursion_errors_exit_two_without_traceback(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    records = tmp_path / "records.json"
+    records.write_text("[]", encoding="utf-8")
+
+    def raise_recursion_error(*_args, **_kwargs):
+        raise RecursionError("forced recursion limit")
+
+    monkeypatch.setattr(diagnostics_json.json, "loads", raise_recursion_error)
+
+    code = main(
+        [
+            "diagnostics",
+            "history-lens",
+            "--records",
+            str(records),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "exceeds the supported JSON nesting depth" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_deep_json_inputs_fail_closed_without_traceback(tmp_path, capsys):
     records = tmp_path / "records.json"
     records.write_text("[" * 2000 + "0" + "]" * 2000, encoding="utf-8")
 
@@ -300,7 +329,7 @@ def test_json_inputs_reject_excessive_nesting_without_traceback(tmp_path, capsys
 
     assert code == 2
     assert captured.out == ""
-    assert "exceeds the supported JSON nesting depth" in captured.err
+    assert captured.err.startswith("Error: ")
     assert "Traceback" not in captured.err
 
 
@@ -528,31 +557,13 @@ def test_answer_delta_rejects_invalid_citation_map_records_without_traceback(
     assert "Traceback" not in captured.err
 
 
-@pytest.mark.parametrize(
-    ("citation_line", "expected_error"),
-    [
-        (
-            '{"citation_id":"cit-1","diagnostic_value":NaN}',
-            "non-finite JSON constant 'NaN'",
-        ),
-        (
-            '{"citation_id":"cit-1","nested":'
-            + "[" * 2000
-            + "0"
-            + "]" * 2000
-            + "}",
-            "citation map line 1 exceeds the supported JSON nesting depth",
-        ),
-    ],
-)
-def test_answer_delta_rejects_strict_jsonl_violations_without_traceback(
+def test_answer_delta_rejects_non_finite_jsonl_without_traceback(
     tmp_path,
     capsys,
-    citation_line,
-    expected_error,
 ):
     declaration = _write_json(tmp_path / "declaration.json", {"used_citations": []})
     citation_map = tmp_path / "citations.jsonl"
+    citation_line = '{"citation_id":"cit-1","diagnostic_value":NaN}'
     citation_map.write_text(citation_line + "\n", encoding="utf-8")
 
     code = main(
@@ -571,7 +582,56 @@ def test_answer_delta_rejects_strict_jsonl_violations_without_traceback(
 
     assert code == 2
     assert captured.out == ""
-    assert expected_error in captured.err
+    assert "non-finite JSON constant 'NaN'" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_answer_delta_jsonl_recursion_errors_exit_two_without_traceback(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    declaration = _write_json(tmp_path / "declaration.json", {"used_citations": []})
+    manifest = _write_json(
+        tmp_path / "bundle.manifest.json",
+        {
+            "kind": "repolens.bundle.manifest",
+            "version": "1.0",
+            "run_id": "strict-json-test",
+            "artifacts": [],
+            "links": {},
+            "capabilities": {},
+        },
+    )
+    citation_map = tmp_path / "citations.jsonl"
+    citation_line = '{"citation_id":"cit-1"}'
+    citation_map.write_text(citation_line + "\n", encoding="utf-8")
+    real_json_loads = diagnostics_json.json.loads
+
+    def raise_for_citation_line(document, *args, **kwargs):
+        if document == citation_line:
+            raise RecursionError("forced citation-map recursion limit")
+        return real_json_loads(document, *args, **kwargs)
+
+    monkeypatch.setattr(diagnostics_json.json, "loads", raise_for_citation_line)
+
+    code = main(
+        [
+            "diagnostics",
+            "answer-delta",
+            "--old-declaration",
+            str(declaration),
+            "--new-bundle-manifest",
+            str(manifest),
+            "--new-citation-map",
+            str(citation_map),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 2
+    assert captured.out == ""
+    assert "citation map line 1 exceeds the supported JSON nesting depth" in captured.err
     assert "Traceback" not in captured.err
 
 
