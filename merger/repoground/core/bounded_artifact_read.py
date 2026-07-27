@@ -85,6 +85,11 @@ def declared_artifact_integrity(
     return declared_bytes, declared_sha256, None
 
 
+def _descriptor_read_size(file_size: int, max_bytes: int) -> int:
+    """Read one byte beyond the observed file, never beyond the hard cap."""
+    return min(file_size, max_bytes) + 1
+
+
 def _read_descriptor_bytes(
     path: Path,
     max_bytes: int,
@@ -133,7 +138,7 @@ def _read_descriptor_bytes(
                 return None, None, None, "source_changed", None
             if stat_before.st_size > max_bytes:
                 return None, None, None, "too_large", None
-            raw = stream.read(max_bytes + 1)
+            raw = stream.read(_descriptor_read_size(stat_before.st_size, max_bytes))
             stat_after = os.fstat(stream.fileno())
     except FileNotFoundError:
         return None, None, None, "file_missing", None

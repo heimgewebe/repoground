@@ -80,7 +80,7 @@ path, size, hash or metadata failure invalidates the citation-map source.
 production modules are 181–580 lines each.
 
 This is a decomposition and hardening slice, not an aggregate-LOC reduction:
-the six production files together contain 4,282 lines. The measurement records
+the six production files together contain 4,287 lines. The measurement records
 that explicitly rather than treating moved or expanded validation code as
 deleted code.
 
@@ -121,11 +121,38 @@ reading, and preserves weak-filesystem identity handling through content-hash
 verification. Existing atomic-replacement and weak-identity tests and the new
 symlink test all pass.
 
+## Same-host performance and allocation closeout
+
+The first acceptance benchmark found a real peak-allocation regression after the
+initial merge: a small manifest read requested `MAX_MANIFEST_BYTES + 1` from the
+buffered stream and transiently allocated about 4.2 MiB instead of about 34 KiB.
+Corrective implementation `38ec6fe335a7c4b1b291f332f599abd7e82a205a` sizes the read from the already
+validated descriptor file size plus one byte, while preserving the hard cap and
+growth detection. A regression test binds the requested read size to the observed
+file rather than the maximum allowance.
+
+The same immutable benchmark script (`SHA-256
+7157a27fcb3203f5921fbe9558b36c7ccf1369968d9a81553fba2b1009c1a51e`) ran on
+`heim-pc`, Python 3.10.12, with nine timing samples and a separate `tracemalloc`
+run. Relative to base `a029bbcd2779e7bed1ac41e936bdf720249f0538`:
+
+| Path | Median delta |
+| --- | ---: |
+| `available_roles` | -26.380% |
+| `list_artifacts` | +5.421% |
+| `get_artifact` | +7.358% |
+| combined sequence | -4.727% |
+| peak traced memory | -0.032% |
+
+All measured final regressions remain below the predeclared 10% threshold; the
+combined path improves and peak allocation returns to base level. The benchmark
+does not claim SQLite-query or large-call-graph performance.
+
 ## Verification
 
 - focused bundle/catalog/freshness/evidence/symbol/call/MCP/adapter/
   maintainability regression: **332 passed, 10 skipped**;
-- new adversarial suite: **20 passed**;
+- new adversarial suite after allocation regression coverage: **21 passed**;
 - changed-file Ruff: **pass**;
 - C901 on all changed production modules: **pass**;
 - graph-maintainability gate: **pass** at 193 findings, max 138, excess 2,348,
