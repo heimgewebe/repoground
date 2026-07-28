@@ -795,6 +795,31 @@ def test_verifier_binds_sums_to_the_manifest_bytes_that_were_parsed(
         verify_release_candidate(candidate)
 
 
+def test_verifier_rejects_manifest_replaced_after_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-manifest-final-readback"
+    build_release_candidate(repo, candidate)
+    original_contract = verifier_module._contract_for_manifest
+
+    def replace_manifest_after_parsing(preview):
+        contract = original_contract(preview)
+        manifest_path = next(candidate.glob("*.release.json"))
+        replacement = manifest_path.with_suffix(".replacement")
+        replacement.write_bytes(manifest_path.read_bytes() + b"\n")
+        replacement.replace(manifest_path)
+        return contract
+
+    monkeypatch.setattr(
+        verifier_module,
+        "_contract_for_manifest",
+        replace_manifest_after_parsing,
+    )
+    with pytest.raises(ValueError, match="release manifest changed during verification"):
+        verify_release_candidate(candidate)
+
+
 def test_verifier_rejects_oversized_sums_before_line_processing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

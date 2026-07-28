@@ -864,6 +864,7 @@ def _verify_release_candidate(
     contract: ReleaseContract,
     manifest: dict[str, object],
     manifest_path: Path,
+    manifest_bytes: bytes,
     manifest_sha256: str,
     repo: str | Path | None,
 ) -> dict[str, object]:
@@ -903,6 +904,15 @@ def _verify_release_candidate(
             _compare_with_repo(
                 Path(repo).expanduser().resolve(), manifest, tar_path, members
             )
+
+    current_manifest_bytes = _read_bounded_regular_file(
+        manifest_path,
+        label="release manifest",
+        max_bytes=MAX_MANIFEST_BYTES,
+    )
+    if current_manifest_bytes != manifest_bytes:
+        raise ValueError("release manifest changed during verification")
+
     project = manifest.get("project")
     assert isinstance(project, dict)
     return {
@@ -941,6 +951,7 @@ def verify_release_candidate(
         contract=contract,
         manifest=preview,
         manifest_path=manifest_path,
+        manifest_bytes=manifest_bytes,
         manifest_sha256=manifest_sha256,
         repo=repo,
     )
