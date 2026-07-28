@@ -31,7 +31,8 @@ once, so PAX and GNU extension payloads count before `tarfile` can turn them int
 logical members without multiplying decompression or parsing work. Later content checks
 use validated Tar offsets directly. Member count, member and aggregate limits are
 rejected before member payloads are read. Source-bound comparison uses one size batch
-and one persistent content batch for all immutable Git blobs.
+and one persistent content process, reading and discarding exactly one immutable Git
+blob at a time after validating the corresponding archive member shape.
 
 ## Validation
 

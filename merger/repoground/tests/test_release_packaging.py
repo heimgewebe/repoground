@@ -796,6 +796,30 @@ def test_source_bound_verifier_batches_blob_content_reads(
     assert batch_calls == 1
 
 
+def test_source_bound_verifier_streams_one_blob_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-streamed-blobs"
+    build_release_candidate(repo, candidate)
+    original = verifier_module._read_repository_blob_batch
+    live_blobs = 0
+    peak_live_blobs = 0
+
+    def counted_read(process, entry, expected_size):
+        nonlocal live_blobs, peak_live_blobs
+        live_blobs += 1
+        peak_live_blobs = max(peak_live_blobs, live_blobs)
+        try:
+            return original(process, entry, expected_size)
+        finally:
+            live_blobs -= 1
+
+    monkeypatch.setattr(verifier_module, "_read_repository_blob_batch", counted_read)
+    assert verify_release_candidate(candidate, repo=repo)["status"] == "pass"
+    assert peak_live_blobs == 1
+
+
 def test_source_bound_verifier_checks_blob_size_before_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

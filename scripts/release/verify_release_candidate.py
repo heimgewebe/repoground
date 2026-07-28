@@ -628,11 +628,8 @@ def _repository_blob_sizes(
     return sizes
 
 
-def _repository_blobs(
-    repo: Path,
-    entries: tuple[TreeEntry, ...],
-    expected_sizes: dict[str, int],
-) -> dict[str, bytes]:
+@contextmanager
+def _open_repository_blob_batch(repo: Path) -> Iterator[subprocess.Popen[bytes]]:
     process = subprocess.Popen(
         ["git", "cat-file", "--batch"],
         cwd=repo,
@@ -644,35 +641,80 @@ def _repository_blobs(
         process.kill()
         process.wait()
         raise ValueError("git cat-file --batch pipes are unavailable")
-    blobs: dict[str, bytes] = {}
     try:
-        for entry in entries:
-            process.stdin.write(f"{entry.object_id}\n".encode("ascii"))
-            process.stdin.flush()
-            header = process.stdout.readline().decode("ascii").strip()
-            object_id, object_type, raw_size = header.split(" ")
-            expected_size = expected_sizes[entry.path]
-            if (
-                object_id != entry.object_id
-                or object_type != "blob"
-                or not raw_size.isdigit()
-                or int(raw_size) != expected_size
-            ):
-                raise ValueError(f"invalid Git blob content response: {entry.path}")
-            blob = process.stdout.read(expected_size)
-            if len(blob) != expected_size or process.stdout.read(1) != b"\n":
-                raise ValueError(f"repository blob byte size mismatch: {entry.path}")
-            blobs[entry.path] = blob
+        yield process
         process.stdin.close()
         returncode = process.wait()
         if returncode != 0:
             detail = process.stderr.read().decode("utf-8", errors="replace").strip()
             raise ValueError(f"git cat-file --batch failed: {detail}")
-        return blobs
     except Exception:
-        process.kill()
-        process.wait()
+        if process.poll() is None:
+            process.kill()
+            process.wait()
         raise
+
+
+def _read_exact_batch_bytes(handle: object, size: int, *, path: str) -> bytes:
+    read = getattr(handle, "read", None)
+    if not callable(read):
+        raise ValueError("git cat-file --batch output is unavailable")
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining:
+        chunk = read(min(READ_CHUNK_BYTES, remaining))
+        if not chunk:
+            raise ValueError(f"repository blob byte size mismatch: {path}")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_repository_blob_batch(
+    process: subprocess.Popen[bytes],
+    entry: TreeEntry,
+    expected_size: int,
+) -> bytes:
+    if process.stdin is None or process.stdout is None:
+        raise ValueError("git cat-file --batch pipes are unavailable")
+    process.stdin.write(f"{entry.object_id}\n".encode("ascii"))
+    process.stdin.flush()
+    header = process.stdout.readline(256)
+    if not header or len(header) >= 256:
+        raise ValueError(f"invalid Git blob content response: {entry.path}")
+    fields = header.decode("ascii", errors="strict").strip().split(" ")
+    if len(fields) != 3:
+        raise ValueError(f"invalid Git blob content response: {entry.path}")
+    object_id, object_type, raw_size = fields
+    if (
+        object_id != entry.object_id
+        or object_type != "blob"
+        or not raw_size.isdigit()
+        or int(raw_size) != expected_size
+    ):
+        raise ValueError(f"invalid Git blob content response: {entry.path}")
+    blob = _read_exact_batch_bytes(process.stdout, expected_size, path=entry.path)
+    if process.stdout.read(1) != b"\n":
+        raise ValueError(f"repository blob byte size mismatch: {entry.path}")
+    return blob
+
+
+def _validate_archive_entry_shape(
+    member: tarfile.TarInfo,
+    *,
+    entry_path: str,
+    entry_mode: str,
+    expected_size: int,
+) -> None:
+    if entry_mode == "120000":
+        if not member.issym():
+            raise ValueError(f"symlink mismatch: {entry_path}")
+        return
+    expected_mode = 0o755 if entry_mode == "100755" else 0o644
+    if not member.isfile() or member.mode != expected_mode:
+        raise ValueError(f"mode/type mismatch: {entry_path}")
+    if member.size != expected_size:
+        raise ValueError(f"content byte size mismatch: {entry_path}")
 
 
 def _compare_archive_entry(
@@ -686,16 +728,9 @@ def _compare_archive_entry(
 ) -> None:
     if entry_mode == "120000":
         target = blob.decode("utf-8", errors="surrogateescape")
-        if not member.issym() or member.linkname != target:
+        if member.linkname != target:
             raise ValueError(f"symlink mismatch: {entry_path}")
         return
-    expected_mode = 0o755 if entry_mode == "100755" else 0o644
-    if not member.isfile() or member.mode != expected_mode:
-        raise ValueError(f"mode/type mismatch: {entry_path}")
-    if len(blob) > MAX_ARCHIVE_MEMBER_BYTES:
-        raise ValueError(f"repository blob exceeds byte limit: {entry_path}")
-    if member.size != len(blob):
-        raise ValueError(f"content byte size mismatch: {entry_path}")
     content = _read_archive_member(
         tar_path,
         members,
@@ -728,22 +763,30 @@ def _compare_with_repo(
 
     expected_entries = list_tree(repo, commit)
     blob_sizes = _repository_blob_sizes(repo, expected_entries)
-    blobs = _repository_blobs(repo, expected_entries, blob_sizes)
     expected_names = {f"{prefix}{entry.path}" for entry in expected_entries}
     observed_names = {name for name in members if name != prefix.rstrip("/")}
     if observed_names != expected_names:
         raise ValueError("archive path set does not match Git tree")
 
-    for entry in expected_entries:
-        member = members[f"{prefix}{entry.path}"]
-        _compare_archive_entry(
-            archive_path,
-            members,
-            member,
-            entry_path=entry.path,
-            entry_mode=entry.mode,
-            blob=blobs[entry.path],
-        )
+    with _open_repository_blob_batch(repo) as process:
+        for entry in expected_entries:
+            member = members[f"{prefix}{entry.path}"]
+            expected_size = blob_sizes[entry.path]
+            _validate_archive_entry_shape(
+                member,
+                entry_path=entry.path,
+                entry_mode=entry.mode,
+                expected_size=expected_size,
+            )
+            blob = _read_repository_blob_batch(process, entry, expected_size)
+            _compare_archive_entry(
+                archive_path,
+                members,
+                member,
+                entry_path=entry.path,
+                entry_mode=entry.mode,
+                blob=blob,
+            )
 
 
 def _contract_for_manifest(manifest: dict[str, object]) -> ReleaseContract:
