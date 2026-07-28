@@ -123,6 +123,13 @@ def _rewrite_sums(candidate: Path) -> None:
     )
 
 
+def _replace_with_external_symlink(path: Path, tmp_path: Path) -> None:
+    target = tmp_path / f"{path.name}.target"
+    target.write_bytes(path.read_bytes())
+    path.unlink()
+    os.symlink(target, path)
+
+
 def _reverse_archive_members(candidate: Path) -> None:
     archive_path = next(candidate.glob("*.tar.gz"))
     members: list[tuple[tarfile.TarInfo, bytes | None]] = []
@@ -735,6 +742,63 @@ def test_verifier_rejects_oversized_archive_member_before_read(
         verify_release_candidate(candidate, **kwargs)
 
 
+def test_verifier_rejects_oversized_manifest_before_json_parsing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-manifest-limit"
+    build_release_candidate(repo, candidate)
+    manifest_path = next(candidate.glob("*.release.json"))
+    monkeypatch.setattr(
+        verifier_module, "MAX_MANIFEST_BYTES", manifest_path.stat().st_size - 1
+    )
+    monkeypatch.setattr(
+        verifier_module.json,
+        "loads",
+        lambda *args, **kwargs: pytest.fail("manifest parsed before size rejection"),
+    )
+    with pytest.raises(ValueError, match="release manifest exceeds byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_symlinked_manifest_before_read(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-manifest-symlink"
+    build_release_candidate(repo, candidate)
+    manifest_path = next(candidate.glob("*.release.json"))
+    _replace_with_external_symlink(manifest_path, tmp_path)
+    with pytest.raises(ValueError, match="release manifest must be a regular non-symlink"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_oversized_sums_before_line_processing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-sums-limit"
+    build_release_candidate(repo, candidate)
+    sums_path = candidate / "SHA256SUMS"
+    monkeypatch.setattr(
+        verifier_module, "MAX_SHA256SUMS_BYTES", sums_path.stat().st_size - 1
+    )
+    monkeypatch.setattr(
+        verifier_module.re,
+        "fullmatch",
+        lambda *args, **kwargs: pytest.fail("SHA256SUMS processed before size rejection"),
+    )
+    with pytest.raises(ValueError, match="SHA256SUMS exceeds byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_symlinked_sums_before_read(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-sums-symlink"
+    build_release_candidate(repo, candidate)
+    _replace_with_external_symlink(candidate / "SHA256SUMS", tmp_path)
+    with pytest.raises(ValueError, match="candidate directory may contain regular files only"):
+        verify_release_candidate(candidate)
+
+
 def test_verifier_rejects_compressed_archive_over_limit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -836,6 +900,24 @@ def test_source_bound_verifier_checks_blob_size_before_read(
 
     monkeypatch.setattr(verifier_module.subprocess, "Popen", reject_content_batch)
     with pytest.raises(ValueError, match="repository blob exceeds byte limit"):
+        verify_release_candidate(candidate, repo=repo)
+
+
+def test_source_bound_verifier_rejects_total_blob_bytes_before_content_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-repository-total-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_REPOSITORY_TOTAL_BYTES", 1)
+    monkeypatch.setattr(
+        verifier_module,
+        "_open_repository_blob_batch",
+        lambda *args, **kwargs: pytest.fail(
+            "repository content batch started before total-size rejection"
+        ),
+    )
+    with pytest.raises(ValueError, match="repository blobs exceed total byte limit"):
         verify_release_candidate(candidate, repo=repo)
 
 
