@@ -5,8 +5,12 @@ import gzip
 import hashlib
 import json
 import re
+import subprocess
 import sys
+import tempfile
 import tarfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,9 +31,9 @@ from scripts.release.build_release_candidate import (
     SEMANTIC_PLATFORM_CONTRACT_PATH,
     SEMANTIC_TARGET_ID,
     SCHEMA_URI,
+    TreeEntry,
     VERSION_RE,
     list_tree,
-    read_blob,
     resolve_tree,
     safe_symlink_target,
 )
@@ -70,6 +74,22 @@ CANONICAL_CONTRACT = ReleaseContract(
     compatibility_mode="canonical_repoground_v1",
 )
 
+MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_STREAM_BYTES = 160 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 200
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_REPOSITORY_BLOB_BYTES = MAX_ARCHIVE_MEMBER_BYTES
+MAX_LICENSE_BYTES = 1024 * 1024
+READ_CHUNK_BYTES = 1024 * 1024
+
+
+@contextmanager
+def _open_bounded_tar(tar_path: Path) -> Iterator[tarfile.TarFile]:
+    with tarfile.open(tar_path, mode="r:") as tar:
+        yield tar
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -77,6 +97,49 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _compressed_archive_size(archive_path: Path) -> int:
+    actual_bytes = archive_path.stat().st_size
+    if actual_bytes > MAX_ARCHIVE_BYTES:
+        raise ValueError(
+            f"archive exceeds compressed byte limit: {actual_bytes} > {MAX_ARCHIVE_BYTES}"
+        )
+    return actual_bytes
+
+
+@contextmanager
+def _materialized_bounded_tar(archive_path: Path) -> Iterator[Path]:
+    compressed_bytes = _compressed_archive_size(archive_path)
+    with tempfile.TemporaryDirectory(
+        prefix="repoground-release-verifier-"
+    ) as temporary:
+        tar_path = Path(temporary) / "candidate.tar"
+        observed = 0
+        with gzip.open(archive_path, "rb") as source, tar_path.open("wb") as target:
+            while observed <= MAX_ARCHIVE_STREAM_BYTES:
+                chunk = source.read(
+                    min(
+                        READ_CHUNK_BYTES,
+                        MAX_ARCHIVE_STREAM_BYTES + 1 - observed,
+                    )
+                )
+                if not chunk:
+                    break
+                target.write(chunk)
+                observed += len(chunk)
+        if observed > MAX_ARCHIVE_STREAM_BYTES:
+            raise ValueError(
+                "archive exceeds uncompressed stream byte limit: "
+                f"{observed} > {MAX_ARCHIVE_STREAM_BYTES}"
+            )
+        if observed > compressed_bytes * MAX_ARCHIVE_COMPRESSION_RATIO:
+            ratio = observed / compressed_bytes
+            raise ValueError(
+                "archive exceeds compression ratio limit: "
+                f"{ratio:.1f} > {MAX_ARCHIVE_COMPRESSION_RATIO}"
+            )
+        yield tar_path
 
 
 def _safe_name(name: str) -> bool:
@@ -147,18 +210,82 @@ def _verify_sums(
         raise ValueError("SHA256SUMS does not match candidate files")
 
 
+def _validate_archive_member(member: tarfile.TarInfo, *, prefix: str) -> None:
+    if not _safe_name(member.name):
+        raise ValueError(f"unsafe archive member: {member.name!r}")
+    root_name = prefix.rstrip("/")
+    if member.name != root_name and not member.name.startswith(prefix):
+        raise ValueError(f"member outside archive prefix: {member.name!r}")
+    if member.uid != 0 or member.gid != 0 or member.mtime != 0:
+        raise ValueError(f"non-normalized metadata: {member.name!r}")
+    if not (member.isdir() or member.isfile() or member.issym()):
+        raise ValueError(f"unsupported archive member type: {member.name!r}")
+    if member.issym():
+        relative_path = member.name[len(prefix):]
+        if not safe_symlink_target(relative_path, member.linkname):
+            raise ValueError(
+                f"unsafe symlink target {member.linkname!r} at {member.name!r}"
+            )
+
+
+def _expected_archive_member_count(archive: dict[str, object]) -> int:
+    expected_count = archive.get("tracked_entry_count")
+    if not isinstance(expected_count, int) or isinstance(expected_count, bool):
+        raise ValueError("archive tracked-entry count is invalid")
+    if expected_count < 0 or expected_count + 1 > MAX_ARCHIVE_MEMBERS:
+        raise ValueError(
+            "archive exceeds member count limit: "
+            f"{expected_count + 1} > {MAX_ARCHIVE_MEMBERS}"
+        )
+    return expected_count
+
+
+def _ensure_archive_member_capacity(member_count: int) -> None:
+    if member_count >= MAX_ARCHIVE_MEMBERS:
+        raise ValueError(
+            f"archive exceeds member count limit: more than {MAX_ARCHIVE_MEMBERS}"
+        )
+
+
+def _account_archive_member(member: tarfile.TarInfo, total_file_bytes: int) -> int:
+    padded_size = ((member.size + 511) // 512) * 512
+    stream_end = member.offset_data + padded_size
+    if member.offset < 0 or member.offset_data < 0 or stream_end > MAX_ARCHIVE_STREAM_BYTES:
+        raise ValueError(
+            "archive exceeds uncompressed stream byte limit: "
+            f"{stream_end} > {MAX_ARCHIVE_STREAM_BYTES}"
+        )
+    if not member.isfile():
+        return total_file_bytes
+    if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
+        raise ValueError(
+            f"archive member exceeds byte limit: {member.name}: "
+            f"{member.size} > {MAX_ARCHIVE_MEMBER_BYTES}"
+        )
+    updated_total = total_file_bytes + member.size
+    if updated_total > MAX_ARCHIVE_TOTAL_BYTES:
+        raise ValueError(
+            "archive exceeds total uncompressed byte limit: "
+            f"{updated_total} > {MAX_ARCHIVE_TOTAL_BYTES}"
+        )
+    return updated_total
+
+
 def _archive_members(
     manifest: dict[str, object],
     archive_path: Path,
+    tar_path: Path,
 ) -> dict[str, tarfile.TarInfo]:
     archive = manifest["archive"]
     assert isinstance(archive, dict)
     expected_sha = archive.get("sha256")
     expected_bytes = archive.get("bytes")
     prefix = archive.get("prefix")
+    expected_count = _expected_archive_member_count(archive)
+    actual_bytes = _compressed_archive_size(archive_path)
     if _sha256(archive_path) != expected_sha:
         raise ValueError("archive SHA-256 does not match manifest")
-    if archive_path.stat().st_size != expected_bytes:
+    if actual_bytes != expected_bytes:
         raise ValueError("archive byte size does not match manifest")
     if (
         not isinstance(prefix, str)
@@ -166,35 +293,29 @@ def _archive_members(
         or not _safe_name(prefix[:-1])
     ):
         raise ValueError("archive prefix is invalid")
-    raw = archive_path.read_bytes()
+    with archive_path.open("rb") as handle:
+        raw = handle.read(8)
     if len(raw) < 8 or int.from_bytes(raw[4:8], "little") != 0:
         raise ValueError("gzip timestamp is not normalized to zero")
 
     members: dict[str, tarfile.TarInfo] = {}
     observed_order: list[str] = []
-    with gzip.open(archive_path, "rb") as gz:
-        with tarfile.open(fileobj=gz, mode="r:") as tar:
-            for member in tar.getmembers():
-                if member.name in members:
-                    raise ValueError(f"duplicate archive member: {member.name}")
-                observed_order.append(member.name)
-                if not _safe_name(member.name):
-                    raise ValueError(f"unsafe archive member: {member.name!r}")
-                if member.name != prefix.rstrip("/") and not member.name.startswith(prefix):
-                    raise ValueError(f"member outside archive prefix: {member.name!r}")
-                if member.uid != 0 or member.gid != 0 or member.mtime != 0:
-                    raise ValueError(f"non-normalized metadata: {member.name!r}")
-                if not (member.isdir() or member.isfile() or member.issym()):
-                    raise ValueError(f"unsupported archive member type: {member.name!r}")
-                if member.issym():
-                    relative_path = member.name[len(prefix):]
-                    if not safe_symlink_target(relative_path, member.linkname):
-                        raise ValueError(
-                            f"unsafe symlink target {member.linkname!r} "
-                            f"at {member.name!r}"
-                        )
-                members[member.name] = member
-    expected_count = archive.get("tracked_entry_count")
+    total_file_bytes = 0
+    with _open_bounded_tar(tar_path) as tar:
+        for member in tar:
+            _ensure_archive_member_capacity(len(members))
+            if member.name in members:
+                raise ValueError(f"duplicate archive member: {member.name}")
+            _validate_archive_member(member, prefix=prefix)
+            total_file_bytes = _account_archive_member(member, total_file_bytes)
+            observed_order.append(member.name)
+            members[member.name] = member
+    compression_ratio = total_file_bytes / actual_bytes
+    if compression_ratio > MAX_ARCHIVE_COMPRESSION_RATIO:
+        raise ValueError(
+            "archive exceeds compression ratio limit: "
+            f"{compression_ratio:.1f} > {MAX_ARCHIVE_COMPRESSION_RATIO}"
+        )
     if len(members) != expected_count + 1:
         raise ValueError("archive member count does not match manifest")
     root_name = prefix.rstrip("/")
@@ -229,25 +350,52 @@ def _reject_retired_release_contract_members(
         )
 
 
-def _read_archive_member(archive_path: Path, name: str) -> bytes:
-    with gzip.open(archive_path, "rb") as gz:
-        with tarfile.open(fileobj=gz, mode="r:") as tar:
-            try:
-                member = tar.getmember(name)
-            except KeyError as exc:
-                raise ValueError(f"required archive member is missing: {name}") from exc
-            if not member.isfile():
-                raise ValueError(f"required archive member is not a file: {name}")
-            handle = tar.extractfile(member)
-            if handle is None:
-                raise ValueError(f"cannot read required archive member: {name}")
-            return handle.read()
+def _read_limited(handle: object, *, name: str, max_bytes: int) -> bytes:
+    read = getattr(handle, "read", None)
+    if not callable(read):
+        raise ValueError(f"cannot read required archive member: {name}")
+    chunks: list[bytes] = []
+    observed = 0
+    while observed <= max_bytes:
+        chunk = read(min(READ_CHUNK_BYTES, max_bytes + 1 - observed))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        observed += len(chunk)
+    if observed > max_bytes:
+        raise ValueError(f"archive member exceeds read limit: {name}")
+    return b"".join(chunks)
+
+
+def _read_archive_member(
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
+    name: str,
+    *,
+    max_bytes: int = MAX_ARCHIVE_MEMBER_BYTES,
+) -> bytes:
+    member = members.get(name)
+    if member is None:
+        raise ValueError(f"required archive member is missing: {name}")
+    if not member.isfile():
+        raise ValueError(f"required archive member is not a file: {name}")
+    if member.size > max_bytes:
+        raise ValueError(
+            f"archive member exceeds byte limit: {name}: {member.size} > {max_bytes}"
+        )
+    with tar_path.open("rb") as handle:
+        handle.seek(member.offset_data)
+        content = handle.read(member.size)
+    if len(content) != member.size:
+        raise ValueError(f"archive member byte size mismatch: {name}")
+    return content
 
 
 
 def _verify_dependency_locks(
     manifest: dict[str, object],
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     contract: ReleaseContract,
 ) -> None:
@@ -262,8 +410,21 @@ def _verify_dependency_locks(
         if not isinstance(path, str):
             raise ValueError("manifest dependency lock path is invalid")
         observed_paths.append(path)
-        content = _read_archive_member(archive_path, f"{expected_prefix}{path}")
-        if record.get("bytes") != len(content):
+        expected_size = record.get("bytes")
+        if (
+            not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 0
+            or expected_size > MAX_ARCHIVE_MEMBER_BYTES
+        ):
+            raise ValueError(f"dependency lock byte size is invalid: {path}")
+        content = _read_archive_member(
+            tar_path,
+            members,
+            f"{expected_prefix}{path}",
+            max_bytes=expected_size,
+        )
+        if expected_size != len(content):
             raise ValueError(f"dependency lock byte size mismatch: {path}")
         if record.get("sha256") != hashlib.sha256(content).hexdigest():
             raise ValueError(f"dependency lock SHA-256 mismatch: {path}")
@@ -272,7 +433,8 @@ def _verify_dependency_locks(
 
 
 def _verify_semantic_record(
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     record: object,
     expected_path: str,
@@ -281,15 +443,29 @@ def _verify_semantic_record(
         raise ValueError(f"semantic extension record is invalid: {expected_path}")
     if record.get("path") != expected_path:
         raise ValueError(f"semantic extension path mismatch: {expected_path}")
-    content = _read_archive_member(archive_path, f"{expected_prefix}{expected_path}")
-    if record.get("bytes") != len(content):
+    expected_size = record.get("bytes")
+    if (
+        not isinstance(expected_size, int)
+        or isinstance(expected_size, bool)
+        or expected_size < 0
+        or expected_size > MAX_ARCHIVE_MEMBER_BYTES
+    ):
+        raise ValueError(f"semantic extension byte size is invalid: {expected_path}")
+    content = _read_archive_member(
+        tar_path,
+        members,
+        f"{expected_prefix}{expected_path}",
+        max_bytes=expected_size,
+    )
+    if expected_size != len(content):
         raise ValueError(f"semantic extension byte size mismatch: {expected_path}")
     if record.get("sha256") != hashlib.sha256(content).hexdigest():
         raise ValueError(f"semantic extension SHA-256 mismatch: {expected_path}")
 
 
 def _verify_semantic_target(
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     target: object,
     contract: ReleaseContract,
@@ -301,22 +477,24 @@ def _verify_semantic_target(
     if target.get("id") != contract.semantic_target_id:
         raise ValueError("semantic extension target identity mismatch")
     _verify_semantic_record(
-        archive_path, expected_prefix, target.get("input"), contract.semantic_input_path
+        tar_path, members, expected_prefix, target.get("input"), contract.semantic_input_path
     )
     _verify_semantic_record(
-        archive_path,
+        tar_path,
+        members,
         expected_prefix,
         target.get("constraints"),
         contract.semantic_constraints_path,
     )
     _verify_semantic_record(
-        archive_path, expected_prefix, target.get("lock"), contract.semantic_lock_path
+        tar_path, members, expected_prefix, target.get("lock"), contract.semantic_lock_path
     )
 
 
 def _verify_semantic_extension(
     manifest: dict[str, object],
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     contract: ReleaseContract,
 ) -> None:
@@ -330,7 +508,8 @@ def _verify_semantic_extension(
     if semantic.get("unsupported_target_policy") != "fail_closed":
         raise ValueError("semantic extension unsupported-target policy mismatch")
     _verify_semantic_record(
-        archive_path,
+        tar_path,
+        members,
         expected_prefix,
         semantic.get("platform_contract"),
         contract.semantic_platform_contract_path,
@@ -338,12 +517,13 @@ def _verify_semantic_extension(
     targets = semantic.get("targets")
     if not isinstance(targets, list) or len(targets) != 1:
         raise ValueError("semantic extension target count mismatch")
-    _verify_semantic_target(archive_path, expected_prefix, targets[0], contract)
+    _verify_semantic_target(tar_path, members, expected_prefix, targets[0], contract)
 
 
 def _verify_manifest_contract(
     manifest: dict[str, object],
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     contract: ReleaseContract,
 ) -> None:
     if manifest.get("$schema") != contract.schema_uri:
@@ -394,19 +574,172 @@ def _verify_manifest_contract(
     }:
         raise ValueError("manifest archive normalization mismatch")
 
-    _verify_dependency_locks(manifest, archive_path, expected_prefix, contract)
+    _verify_dependency_locks(manifest, tar_path, members, expected_prefix, contract)
 
     license_content = _read_archive_member(
-        archive_path, f"{expected_prefix}LICENSE"
+        tar_path,
+        members,
+        f"{expected_prefix}LICENSE",
+        max_bytes=MAX_LICENSE_BYTES,
     ).decode("utf-8")
     if "Apache License" not in license_content or "Version 2.0" not in license_content:
         raise ValueError("archived LICENSE does not contain Apache-2.0")
 
-    _verify_semantic_extension(manifest, archive_path, expected_prefix, contract)
+    _verify_semantic_extension(manifest, tar_path, members, expected_prefix, contract)
 
     nonclaims = manifest.get("does_not_establish")
     if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(nonclaims):
         raise ValueError("manifest does_not_establish boundary is incomplete")
+
+def _repository_blob_sizes(
+    repo: Path, entries: tuple[TreeEntry, ...]
+) -> dict[str, int]:
+    object_ids = [entry.object_id for entry in entries]
+    completed = subprocess.run(
+        [
+            "git",
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        ],
+        cwd=repo,
+        input=("\n".join(object_ids) + "\n").encode("ascii"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(f"git cat-file --batch-check failed: {detail}")
+    lines = completed.stdout.decode("ascii").splitlines()
+    if len(lines) != len(entries):
+        raise ValueError("git blob size response count mismatch")
+    sizes: dict[str, int] = {}
+    for entry, line in zip(entries, lines, strict=True):
+        object_id, object_type, raw_size = line.split(" ")
+        if object_id != entry.object_id or object_type != "blob" or not raw_size.isdigit():
+            raise ValueError(f"invalid Git blob size response: {entry.path}")
+        size = int(raw_size)
+        if size > MAX_REPOSITORY_BLOB_BYTES:
+            raise ValueError(
+                f"repository blob exceeds byte limit: {entry.path}: "
+                f"{size} > {MAX_REPOSITORY_BLOB_BYTES}"
+            )
+        sizes[entry.path] = size
+    return sizes
+
+
+@contextmanager
+def _open_repository_blob_batch(repo: Path) -> Iterator[subprocess.Popen[bytes]]:
+    process = subprocess.Popen(
+        ["git", "cat-file", "--batch"],
+        cwd=repo,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if process.stdin is None or process.stdout is None or process.stderr is None:
+        process.kill()
+        process.wait()
+        raise ValueError("git cat-file --batch pipes are unavailable")
+    try:
+        yield process
+        process.stdin.close()
+        returncode = process.wait()
+        if returncode != 0:
+            detail = process.stderr.read().decode("utf-8", errors="replace").strip()
+            raise ValueError(f"git cat-file --batch failed: {detail}")
+    except Exception:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        raise
+
+
+def _read_exact_batch_bytes(handle: object, size: int, *, path: str) -> bytes:
+    read = getattr(handle, "read", None)
+    if not callable(read):
+        raise ValueError("git cat-file --batch output is unavailable")
+    chunks: list[bytes] = []
+    remaining = size
+    while remaining:
+        chunk = read(min(READ_CHUNK_BYTES, remaining))
+        if not chunk:
+            raise ValueError(f"repository blob byte size mismatch: {path}")
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_repository_blob_batch(
+    process: subprocess.Popen[bytes],
+    entry: TreeEntry,
+    expected_size: int,
+) -> bytes:
+    if process.stdin is None or process.stdout is None:
+        raise ValueError("git cat-file --batch pipes are unavailable")
+    process.stdin.write(f"{entry.object_id}\n".encode("ascii"))
+    process.stdin.flush()
+    header = process.stdout.readline(256)
+    if not header or len(header) >= 256:
+        raise ValueError(f"invalid Git blob content response: {entry.path}")
+    fields = header.decode("ascii", errors="strict").strip().split(" ")
+    if len(fields) != 3:
+        raise ValueError(f"invalid Git blob content response: {entry.path}")
+    object_id, object_type, raw_size = fields
+    if (
+        object_id != entry.object_id
+        or object_type != "blob"
+        or not raw_size.isdigit()
+        or int(raw_size) != expected_size
+    ):
+        raise ValueError(f"invalid Git blob content response: {entry.path}")
+    blob = _read_exact_batch_bytes(process.stdout, expected_size, path=entry.path)
+    if process.stdout.read(1) != b"\n":
+        raise ValueError(f"repository blob byte size mismatch: {entry.path}")
+    return blob
+
+
+def _validate_archive_entry_shape(
+    member: tarfile.TarInfo,
+    *,
+    entry_path: str,
+    entry_mode: str,
+    expected_size: int,
+) -> None:
+    if entry_mode == "120000":
+        if not member.issym():
+            raise ValueError(f"symlink mismatch: {entry_path}")
+        return
+    expected_mode = 0o755 if entry_mode == "100755" else 0o644
+    if not member.isfile() or member.mode != expected_mode:
+        raise ValueError(f"mode/type mismatch: {entry_path}")
+    if member.size != expected_size:
+        raise ValueError(f"content byte size mismatch: {entry_path}")
+
+
+def _compare_archive_entry(
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
+    member: tarfile.TarInfo,
+    *,
+    entry_path: str,
+    entry_mode: str,
+    blob: bytes,
+) -> None:
+    if entry_mode == "120000":
+        target = blob.decode("utf-8", errors="surrogateescape")
+        if member.linkname != target:
+            raise ValueError(f"symlink mismatch: {entry_path}")
+        return
+    content = _read_archive_member(
+        tar_path,
+        members,
+        member.name,
+        max_bytes=len(blob),
+    )
+    if content != blob:
+        raise ValueError(f"content mismatch: {entry_path}")
+
 
 def _compare_with_repo(
     repo: Path,
@@ -429,27 +762,31 @@ def _compare_with_repo(
         raise ValueError("manifest prefix is invalid")
 
     expected_entries = list_tree(repo, commit)
+    blob_sizes = _repository_blob_sizes(repo, expected_entries)
     expected_names = {f"{prefix}{entry.path}" for entry in expected_entries}
     observed_names = {name for name in members if name != prefix.rstrip("/")}
     if observed_names != expected_names:
         raise ValueError("archive path set does not match Git tree")
 
-    with gzip.open(archive_path, "rb") as gz:
-        with tarfile.open(fileobj=gz, mode="r:") as tar:
-            for entry in expected_entries:
-                member = tar.getmember(f"{prefix}{entry.path}")
-                blob = read_blob(repo, commit, entry.path)
-                if entry.mode == "120000":
-                    target = blob.decode("utf-8", errors="surrogateescape")
-                    if not member.issym() or member.linkname != target:
-                        raise ValueError(f"symlink mismatch: {entry.path}")
-                    continue
-                expected_mode = 0o755 if entry.mode == "100755" else 0o644
-                if not member.isfile() or member.mode != expected_mode:
-                    raise ValueError(f"mode/type mismatch: {entry.path}")
-                handle = tar.extractfile(member)
-                if handle is None or handle.read() != blob:
-                    raise ValueError(f"content mismatch: {entry.path}")
+    with _open_repository_blob_batch(repo) as process:
+        for entry in expected_entries:
+            member = members[f"{prefix}{entry.path}"]
+            expected_size = blob_sizes[entry.path]
+            _validate_archive_entry_shape(
+                member,
+                entry_path=entry.path,
+                entry_mode=entry.mode,
+                expected_size=expected_size,
+            )
+            blob = _read_repository_blob_batch(process, entry, expected_size)
+            _compare_archive_entry(
+                archive_path,
+                members,
+                member,
+                entry_path=entry.path,
+                entry_mode=entry.mode,
+                blob=blob,
+            )
 
 
 def _contract_for_manifest(manifest: dict[str, object]) -> ReleaseContract:
@@ -471,6 +808,7 @@ def _verify_release_candidate(
     )
     if not archive_path.is_file():
         raise ValueError("candidate archive is missing")
+    _compressed_archive_size(archive_path)
     _verify_sums(manifest_path, archive_path, sums_path)
 
     license_data = manifest.get("license")
@@ -481,17 +819,18 @@ def _verify_release_candidate(
     if license_data.get("distribution_status") != DISTRIBUTION_STATUS:
         raise ValueError("distribution boundary mismatch")
 
-    members = _archive_members(manifest, archive_path)
-    archive = manifest.get("archive")
-    assert isinstance(archive, dict)
-    prefix = archive.get("prefix")
-    assert isinstance(prefix, str)
-    _reject_retired_release_contract_members(members, prefix)
-    _verify_manifest_contract(manifest, archive_path, contract)
-    if repo is not None:
-        _compare_with_repo(
-            Path(repo).expanduser().resolve(), manifest, archive_path, members
-        )
+    with _materialized_bounded_tar(archive_path) as tar_path:
+        members = _archive_members(manifest, archive_path, tar_path)
+        archive = manifest.get("archive")
+        assert isinstance(archive, dict)
+        prefix = archive.get("prefix")
+        assert isinstance(prefix, str)
+        _reject_retired_release_contract_members(members, prefix)
+        _verify_manifest_contract(manifest, tar_path, members, contract)
+        if repo is not None:
+            _compare_with_repo(
+                Path(repo).expanduser().resolve(), manifest, tar_path, members
+            )
     project = manifest.get("project")
     assert isinstance(project, dict)
     return {

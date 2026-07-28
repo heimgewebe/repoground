@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tarfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import jsonschema
@@ -19,6 +20,7 @@ from scripts.release.build_release_candidate import (
     safe_symlink_target,
 )
 from scripts.release.check_release_contract import scan
+import scripts.release.verify_release_candidate as verifier_module
 from scripts.release.verify_release_candidate import verify_release_candidate
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -205,6 +207,82 @@ def _rename_archive_member(
     )
     _rewrite_sums(candidate)
 
+
+def _replace_archive_member_payload(
+    candidate: Path, target_relative: str, payload: bytes
+) -> None:
+    archive_path = next(candidate.glob("*.tar.gz"))
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prefix = manifest["archive"]["prefix"]
+    target_name = f"{prefix}{target_relative}"
+    members: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    replaced = False
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        for member in tar.getmembers():
+            handle = tar.extractfile(member) if member.isfile() else None
+            content = handle.read() if handle is not None else None
+            if member.name == target_name:
+                content = payload
+                member.size = len(payload)
+                replaced = True
+            members.append((member, content))
+    assert replaced
+
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for member, content in members:
+            tar.addfile(member, io.BytesIO(content) if content is not None else None)
+    compressed = io.BytesIO()
+    with gzip.GzipFile(
+        filename="", mode="wb", fileobj=compressed, compresslevel=9, mtime=0
+    ) as gz:
+        gz.write(tar_buffer.getvalue())
+    archive_path.write_bytes(compressed.getvalue())
+    manifest["archive"]["bytes"] = archive_path.stat().st_size
+    manifest["archive"]["sha256"] = hashlib.sha256(
+        archive_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(candidate)
+
+
+
+def _add_global_pax_header(candidate: Path, payload_bytes: int) -> None:
+    archive_path = next(candidate.glob("*.tar.gz"))
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    members: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        for member in tar.getmembers():
+            handle = tar.extractfile(member) if member.isfile() else None
+            members.append((member, handle.read() if handle is not None else None))
+
+    tar_buffer = io.BytesIO()
+    with tarfile.open(
+        fileobj=tar_buffer,
+        mode="w",
+        format=tarfile.PAX_FORMAT,
+        pax_headers={"comment": "0" * payload_bytes},
+    ) as tar:
+        for member, content in members:
+            tar.addfile(member, io.BytesIO(content) if content is not None else None)
+    compressed = io.BytesIO()
+    with gzip.GzipFile(
+        filename="", mode="wb", fileobj=compressed, compresslevel=9, mtime=0
+    ) as gz:
+        gz.write(tar_buffer.getvalue())
+    archive_path.write_bytes(compressed.getvalue())
+    manifest["archive"]["bytes"] = archive_path.stat().st_size
+    manifest["archive"]["sha256"] = hashlib.sha256(
+        archive_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(candidate)
 
 def test_candidate_build_is_byte_reproducible_and_source_bound(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
@@ -634,6 +712,215 @@ def test_verifier_rejects_noncanonical_alias_for_retired_release_contract(
     kwargs = {"repo": repo} if source_bound else {}
     with pytest.raises(ValueError, match="unsafe archive member"):
         verify_release_candidate(candidate, **kwargs)
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+def test_verifier_rejects_oversized_archive_member_before_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_bound: bool,
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-oversized-member"
+    build_release_candidate(repo, candidate)
+    limit = 1024
+    _replace_archive_member_payload(
+        candidate,
+        "LICENSE",
+        b"Apache License\nVersion 2.0\n" + b"0" * limit,
+    )
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_MEMBER_BYTES", limit)
+    kwargs = {"repo": repo} if source_bound else {}
+    with pytest.raises(ValueError, match="exceeds byte limit: .*LICENSE"):
+        verify_release_candidate(candidate, **kwargs)
+
+
+def test_verifier_rejects_compressed_archive_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-compressed-limit"
+    build_release_candidate(repo, candidate)
+    archive_path = next(candidate.glob("*.tar.gz"))
+    monkeypatch.setattr(
+        verifier_module, "MAX_ARCHIVE_BYTES", archive_path.stat().st_size - 1
+    )
+    monkeypatch.setattr(
+        verifier_module,
+        "_sha256",
+        lambda path: pytest.fail(f"archive hashed before size rejection: {path}"),
+    )
+    with pytest.raises(ValueError, match="compressed byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_total_uncompressed_bytes_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-total-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_TOTAL_BYTES", 1)
+    with pytest.raises(ValueError, match="total uncompressed byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_archive_stream_bytes_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-stream-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_STREAM_BYTES", 1)
+    with pytest.raises(ValueError, match="uncompressed stream byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_source_bound_verifier_batches_blob_content_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-batched-blobs"
+    build_release_candidate(repo, candidate)
+    original = verifier_module.subprocess.Popen
+    batch_calls = 0
+
+    def counted_popen(argv, *args, **kwargs):
+        nonlocal batch_calls
+        if argv[:3] == ["git", "cat-file", "--batch"]:
+            batch_calls += 1
+        return original(argv, *args, **kwargs)
+
+    monkeypatch.setattr(verifier_module.subprocess, "Popen", counted_popen)
+    assert verify_release_candidate(candidate, repo=repo)["status"] == "pass"
+    assert batch_calls == 1
+
+
+def test_source_bound_verifier_streams_one_blob_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-streamed-blobs"
+    build_release_candidate(repo, candidate)
+    original = verifier_module._read_repository_blob_batch
+    live_blobs = 0
+    peak_live_blobs = 0
+
+    def counted_read(process, entry, expected_size):
+        nonlocal live_blobs, peak_live_blobs
+        live_blobs += 1
+        peak_live_blobs = max(peak_live_blobs, live_blobs)
+        try:
+            return original(process, entry, expected_size)
+        finally:
+            live_blobs -= 1
+
+    monkeypatch.setattr(verifier_module, "_read_repository_blob_batch", counted_read)
+    assert verify_release_candidate(candidate, repo=repo)["status"] == "pass"
+    assert peak_live_blobs == 1
+
+
+def test_source_bound_verifier_checks_blob_size_before_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-repository-blob-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_REPOSITORY_BLOB_BYTES", 1)
+    original_popen = verifier_module.subprocess.Popen
+
+    def reject_content_batch(argv, *args, **kwargs):
+        if argv[:3] == ["git", "cat-file", "--batch"]:
+            pytest.fail("repository content batch started before size rejection")
+        return original_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(verifier_module.subprocess, "Popen", reject_content_batch)
+    with pytest.raises(ValueError, match="repository blob exceeds byte limit"):
+        verify_release_candidate(candidate, repo=repo)
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+def test_verifier_materializes_archive_once_per_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_bound: bool,
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-single-materialization"
+    build_release_candidate(repo, candidate)
+    original_materialize = verifier_module._materialized_bounded_tar
+    original_tar_open = verifier_module.tarfile.open
+    materializations = 0
+    tar_opens = 0
+
+    @contextmanager
+    def counted_materialization(archive_path: Path):
+        nonlocal materializations
+        materializations += 1
+        with original_materialize(archive_path) as tar_path:
+            yield tar_path
+
+    def counted_tar_open(*args, **kwargs):
+        nonlocal tar_opens
+        tar_opens += 1
+        return original_tar_open(*args, **kwargs)
+
+    monkeypatch.setattr(
+        verifier_module, "_materialized_bounded_tar", counted_materialization
+    )
+    monkeypatch.setattr(verifier_module.tarfile, "open", counted_tar_open)
+    kwargs = {"repo": repo} if source_bound else {}
+    assert verify_release_candidate(candidate, **kwargs)["status"] == "pass"
+    assert materializations == 1
+    assert tar_opens == 1
+
+
+def test_verifier_bounds_global_pax_metadata_before_first_member(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-pax-metadata-limit"
+    build_release_candidate(repo, candidate)
+    _add_global_pax_header(candidate, payload_bytes=4096)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_STREAM_BYTES", 1024)
+    monkeypatch.setattr(
+        verifier_module,
+        "_validate_archive_member",
+        lambda *args, **kwargs: pytest.fail(
+            "logical archive member yielded before PAX metadata limit"
+        ),
+    )
+    with pytest.raises(ValueError, match="uncompressed stream byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_excessive_compression_ratio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-ratio-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_COMPRESSION_RATIO", 1)
+    with pytest.raises(ValueError, match="compression ratio limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_archive_member_count_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-member-count-limit"
+    build_release_candidate(repo, candidate)
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["archive"]["tracked_entry_count"] = 1
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_MEMBERS", 2)
+    with pytest.raises(ValueError, match="member count limit"):
+        verify_release_candidate(candidate)
 
 
 def test_legacy_repobrief_release_identity_is_rejected(tmp_path: Path) -> None:
