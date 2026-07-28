@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import hashlib
 import json
 import re
@@ -154,6 +153,41 @@ def _verify_sums(
         raise ValueError("SHA256SUMS does not match candidate files")
 
 
+def _validate_archive_member(member: tarfile.TarInfo, *, prefix: str) -> None:
+    if not _safe_name(member.name):
+        raise ValueError(f"unsafe archive member: {member.name!r}")
+    root_name = prefix.rstrip("/")
+    if member.name != root_name and not member.name.startswith(prefix):
+        raise ValueError(f"member outside archive prefix: {member.name!r}")
+    if member.uid != 0 or member.gid != 0 or member.mtime != 0:
+        raise ValueError(f"non-normalized metadata: {member.name!r}")
+    if not (member.isdir() or member.isfile() or member.issym()):
+        raise ValueError(f"unsupported archive member type: {member.name!r}")
+    if member.issym():
+        relative_path = member.name[len(prefix):]
+        if not safe_symlink_target(relative_path, member.linkname):
+            raise ValueError(
+                f"unsafe symlink target {member.linkname!r} at {member.name!r}"
+            )
+
+
+def _account_archive_member(member: tarfile.TarInfo, total_file_bytes: int) -> int:
+    if not member.isfile():
+        return total_file_bytes
+    if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
+        raise ValueError(
+            f"archive member exceeds byte limit: {member.name}: "
+            f"{member.size} > {MAX_ARCHIVE_MEMBER_BYTES}"
+        )
+    updated_total = total_file_bytes + member.size
+    if updated_total > MAX_ARCHIVE_TOTAL_BYTES:
+        raise ValueError(
+            "archive exceeds total uncompressed byte limit: "
+            f"{updated_total} > {MAX_ARCHIVE_TOTAL_BYTES}"
+        )
+    return updated_total
+
+
 def _archive_members(
     manifest: dict[str, object],
     archive_path: Path,
@@ -190,34 +224,9 @@ def _archive_members(
         for member in tar:
             if member.name in members:
                 raise ValueError(f"duplicate archive member: {member.name}")
+            _validate_archive_member(member, prefix=prefix)
+            total_file_bytes = _account_archive_member(member, total_file_bytes)
             observed_order.append(member.name)
-            if not _safe_name(member.name):
-                raise ValueError(f"unsafe archive member: {member.name!r}")
-            if member.name != prefix.rstrip("/") and not member.name.startswith(prefix):
-                raise ValueError(f"member outside archive prefix: {member.name!r}")
-            if member.uid != 0 or member.gid != 0 or member.mtime != 0:
-                raise ValueError(f"non-normalized metadata: {member.name!r}")
-            if not (member.isdir() or member.isfile() or member.issym()):
-                raise ValueError(f"unsupported archive member type: {member.name!r}")
-            if member.isfile():
-                if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
-                    raise ValueError(
-                        f"archive member exceeds byte limit: {member.name}: "
-                        f"{member.size} > {MAX_ARCHIVE_MEMBER_BYTES}"
-                    )
-                total_file_bytes += member.size
-                if total_file_bytes > MAX_ARCHIVE_TOTAL_BYTES:
-                    raise ValueError(
-                        "archive exceeds total uncompressed byte limit: "
-                        f"{total_file_bytes} > {MAX_ARCHIVE_TOTAL_BYTES}"
-                    )
-            if member.issym():
-                relative_path = member.name[len(prefix):]
-                if not safe_symlink_target(relative_path, member.linkname):
-                    raise ValueError(
-                        f"unsafe symlink target {member.linkname!r} "
-                        f"at {member.name!r}"
-                    )
             members[member.name] = member
     compression_ratio = total_file_bytes / actual_bytes
     if compression_ratio > MAX_ARCHIVE_COMPRESSION_RATIO:
@@ -491,6 +500,34 @@ def _verify_manifest_contract(
     if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(nonclaims):
         raise ValueError("manifest does_not_establish boundary is incomplete")
 
+def _compare_archive_entry(
+    tar: tarfile.TarFile,
+    member: tarfile.TarInfo,
+    *,
+    entry_path: str,
+    entry_mode: str,
+    blob: bytes,
+) -> None:
+    if entry_mode == "120000":
+        target = blob.decode("utf-8", errors="surrogateescape")
+        if not member.issym() or member.linkname != target:
+            raise ValueError(f"symlink mismatch: {entry_path}")
+        return
+    expected_mode = 0o755 if entry_mode == "100755" else 0o644
+    if not member.isfile() or member.mode != expected_mode:
+        raise ValueError(f"mode/type mismatch: {entry_path}")
+    if len(blob) > MAX_ARCHIVE_MEMBER_BYTES:
+        raise ValueError(f"repository blob exceeds byte limit: {entry_path}")
+    if member.size != len(blob):
+        raise ValueError(f"content byte size mismatch: {entry_path}")
+    handle = tar.extractfile(member)
+    if handle is None:
+        raise ValueError(f"cannot read archive member: {entry_path}")
+    content = _read_limited(handle, name=entry_path, max_bytes=len(blob))
+    if content != blob:
+        raise ValueError(f"content mismatch: {entry_path}")
+
+
 def _compare_with_repo(
     repo: Path,
     manifest: dict[str, object],
@@ -517,31 +554,16 @@ def _compare_with_repo(
     if observed_names != expected_names:
         raise ValueError("archive path set does not match Git tree")
 
-    with gzip.open(archive_path, "rb") as gz:
-        with tarfile.open(fileobj=gz, mode="r:") as tar:
-            for entry in expected_entries:
-                member = tar.getmember(f"{prefix}{entry.path}")
-                blob = read_blob(repo, commit, entry.path)
-                if entry.mode == "120000":
-                    target = blob.decode("utf-8", errors="surrogateescape")
-                    if not member.issym() or member.linkname != target:
-                        raise ValueError(f"symlink mismatch: {entry.path}")
-                    continue
-                expected_mode = 0o755 if entry.mode == "100755" else 0o644
-                if not member.isfile() or member.mode != expected_mode:
-                    raise ValueError(f"mode/type mismatch: {entry.path}")
-                if len(blob) > MAX_ARCHIVE_MEMBER_BYTES:
-                    raise ValueError(f"repository blob exceeds byte limit: {entry.path}")
-                if member.size != len(blob):
-                    raise ValueError(f"content byte size mismatch: {entry.path}")
-                handle = tar.extractfile(member)
-                if handle is None:
-                    raise ValueError(f"cannot read archive member: {entry.path}")
-                content = _read_limited(
-                    handle, name=entry.path, max_bytes=len(blob)
-                )
-                if content != blob:
-                    raise ValueError(f"content mismatch: {entry.path}")
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        for entry in expected_entries:
+            member = tar.getmember(f"{prefix}{entry.path}")
+            _compare_archive_entry(
+                tar,
+                member,
+                entry_path=entry.path,
+                entry_mode=entry.mode,
+                blob=read_blob(repo, commit, entry.path),
+            )
 
 
 def _contract_for_manifest(manifest: dict[str, object]) -> ReleaseContract:
