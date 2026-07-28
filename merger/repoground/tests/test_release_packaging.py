@@ -709,6 +709,11 @@ def test_verifier_rejects_compressed_archive_over_limit(
     monkeypatch.setattr(
         verifier_module, "MAX_ARCHIVE_BYTES", archive_path.stat().st_size - 1
     )
+    monkeypatch.setattr(
+        verifier_module,
+        "_sha256",
+        lambda path: pytest.fail(f"archive hashed before size rejection: {path}"),
+    )
     with pytest.raises(ValueError, match="compressed byte limit"):
         verify_release_candidate(candidate)
 
@@ -722,6 +727,33 @@ def test_verifier_rejects_total_uncompressed_bytes_over_limit(
     monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_TOTAL_BYTES", 1)
     with pytest.raises(ValueError, match="total uncompressed byte limit"):
         verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_archive_stream_bytes_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-stream-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_STREAM_BYTES", 1)
+    with pytest.raises(ValueError, match="uncompressed stream byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_source_bound_verifier_checks_blob_size_before_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-repository-blob-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_REPOSITORY_BLOB_BYTES", 1)
+    monkeypatch.setattr(
+        verifier_module,
+        "read_blob",
+        lambda *args: pytest.fail("repository blob read before size rejection"),
+    )
+    with pytest.raises(ValueError, match="repository blob exceeds byte limit"):
+        verify_release_candidate(candidate, repo=repo)
 
 
 def test_verifier_rejects_excessive_compression_ratio(

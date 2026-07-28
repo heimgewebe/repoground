@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import tarfile
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from scripts.release.build_release_candidate import (
     SEMANTIC_PLATFORM_CONTRACT_PATH,
     SEMANTIC_TARGET_ID,
     SCHEMA_URI,
+    TreeEntry,
     VERSION_RE,
     list_tree,
     read_blob,
@@ -72,8 +74,10 @@ CANONICAL_CONTRACT = ReleaseContract(
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_STREAM_BYTES = 160 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 200
 MAX_ARCHIVE_MEMBERS = 10_000
+MAX_REPOSITORY_BLOB_BYTES = MAX_ARCHIVE_MEMBER_BYTES
 MAX_LICENSE_BYTES = 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
@@ -84,6 +88,15 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _compressed_archive_size(archive_path: Path) -> int:
+    actual_bytes = archive_path.stat().st_size
+    if actual_bytes > MAX_ARCHIVE_BYTES:
+        raise ValueError(
+            f"archive exceeds compressed byte limit: {actual_bytes} > {MAX_ARCHIVE_BYTES}"
+        )
+    return actual_bytes
 
 
 def _safe_name(name: str) -> bool:
@@ -192,6 +205,13 @@ def _ensure_archive_member_capacity(member_count: int) -> None:
 
 
 def _account_archive_member(member: tarfile.TarInfo, total_file_bytes: int) -> int:
+    padded_size = ((member.size + 511) // 512) * 512
+    stream_end = member.offset_data + padded_size
+    if member.offset < 0 or member.offset_data < 0 or stream_end > MAX_ARCHIVE_STREAM_BYTES:
+        raise ValueError(
+            "archive exceeds uncompressed stream byte limit: "
+            f"{stream_end} > {MAX_ARCHIVE_STREAM_BYTES}"
+        )
     if not member.isfile():
         return total_file_bytes
     if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
@@ -218,15 +238,11 @@ def _archive_members(
     expected_bytes = archive.get("bytes")
     prefix = archive.get("prefix")
     expected_count = _expected_archive_member_count(archive)
-    actual_bytes = archive_path.stat().st_size
+    actual_bytes = _compressed_archive_size(archive_path)
     if _sha256(archive_path) != expected_sha:
         raise ValueError("archive SHA-256 does not match manifest")
     if actual_bytes != expected_bytes:
         raise ValueError("archive byte size does not match manifest")
-    if actual_bytes > MAX_ARCHIVE_BYTES:
-        raise ValueError(
-            f"archive exceeds compressed byte limit: {actual_bytes} > {MAX_ARCHIVE_BYTES}"
-        )
     if (
         not isinstance(prefix, str)
         or not prefix.endswith("/")
@@ -521,6 +537,52 @@ def _verify_manifest_contract(
     if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(nonclaims):
         raise ValueError("manifest does_not_establish boundary is incomplete")
 
+def _repository_blob_sizes(
+    repo: Path, entries: tuple[TreeEntry, ...]
+) -> dict[str, int]:
+    object_ids = [entry.object_id for entry in entries]
+    completed = subprocess.run(
+        [
+            "git",
+            "cat-file",
+            "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        ],
+        cwd=repo,
+        input=("\n".join(object_ids) + "\n").encode("ascii"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if completed.returncode != 0:
+        detail = completed.stderr.decode("utf-8", errors="replace").strip()
+        raise ValueError(f"git cat-file --batch-check failed: {detail}")
+    lines = completed.stdout.decode("ascii").splitlines()
+    if len(lines) != len(entries):
+        raise ValueError("git blob size response count mismatch")
+    sizes: dict[str, int] = {}
+    for entry, line in zip(entries, lines, strict=True):
+        object_id, object_type, raw_size = line.split(" ")
+        if object_id != entry.object_id or object_type != "blob" or not raw_size.isdigit():
+            raise ValueError(f"invalid Git blob size response: {entry.path}")
+        size = int(raw_size)
+        if size > MAX_REPOSITORY_BLOB_BYTES:
+            raise ValueError(
+                f"repository blob exceeds byte limit: {entry.path}: "
+                f"{size} > {MAX_REPOSITORY_BLOB_BYTES}"
+            )
+        sizes[entry.path] = size
+    return sizes
+
+
+def _read_repository_blob(
+    repo: Path, commit: str, entry: TreeEntry, expected_size: int
+) -> bytes:
+    blob = read_blob(repo, commit, entry.path)
+    if len(blob) != expected_size:
+        raise ValueError(f"repository blob byte size mismatch: {entry.path}")
+    return blob
+
+
 def _compare_archive_entry(
     tar: tarfile.TarFile,
     member: tarfile.TarInfo,
@@ -570,6 +632,7 @@ def _compare_with_repo(
         raise ValueError("manifest prefix is invalid")
 
     expected_entries = list_tree(repo, commit)
+    blob_sizes = _repository_blob_sizes(repo, expected_entries)
     expected_names = {f"{prefix}{entry.path}" for entry in expected_entries}
     observed_names = {name for name in members if name != prefix.rstrip("/")}
     if observed_names != expected_names:
@@ -583,7 +646,9 @@ def _compare_with_repo(
                 member,
                 entry_path=entry.path,
                 entry_mode=entry.mode,
-                blob=read_blob(repo, commit, entry.path),
+                blob=_read_repository_blob(
+                    repo, commit, entry, blob_sizes[entry.path]
+                ),
             )
 
 
@@ -606,6 +671,7 @@ def _verify_release_candidate(
     )
     if not archive_path.is_file():
         raise ValueError("candidate archive is missing")
+    _compressed_archive_size(archive_path)
     _verify_sums(manifest_path, archive_path, sums_path)
 
     license_data = manifest.get("license")

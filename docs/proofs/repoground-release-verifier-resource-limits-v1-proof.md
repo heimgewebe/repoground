@@ -14,6 +14,8 @@ format, builder output, licensing decision, distribution status or product runti
 - compressed archive: 64 MiB
 - one regular archive member: 16 MiB
 - total regular-file bytes: 128 MiB
+- uncompressed tar stream including metadata: 160 MiB
+- source-bound Git blob: 16 MiB
 - expansion ratio: 200:1
 - archive members including the root entry: 10,000
 - archived LICENSE read: 1 MiB
@@ -23,9 +25,11 @@ so these limits retain substantial headroom.
 
 ## Enforcement
 
-Tar metadata is inspected incrementally. Oversized members and aggregate limits are
-rejected before member payloads are read. Required member reads are chunked and
-bounded; source-bound content comparison checks declared size before reading.
+The compressed archive size is rejected before checksum hashing. Tar metadata is
+inspected incrementally; member count, metadata stream, member and aggregate limits
+are rejected before member payloads are read. Required member reads are chunked and
+bounded; source-bound content comparison batch-queries immutable Git object sizes
+before reading blobs.
 
 ## Validation
 
