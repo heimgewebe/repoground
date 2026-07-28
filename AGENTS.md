@@ -35,8 +35,21 @@ They are not (yet) a service-runtime gate inside the RepoGround service; do not 
 
 Do not modify generated docs (`docs/_generated/*`) or commit local runtime artifacts. Changes to generated files are only permitted via the owning generator. For doc-freshness, the generator is: `python -m merger.repoground.cli.main doc-freshness update --write`
 
+## Agent Operating Flow
+
+For coding, review, or repository-maintenance work, use this order:
+
+1. **Bind live state:** read the current Git head, dirty state, open PRs, CI, and active worktree/lease ownership.
+2. **Choose a task profile:** select the smallest RepoGround profile that matches the question or change boundary.
+3. **Read RepoGround evidence:** use bounded RepoGround context and citations for navigation; `canonical_md` remains the only content truth.
+4. **Plan in the agent:** the coding agent decides the change and states what it will and will not mutate. RepoGround does not produce review verdicts or autonomous patch decisions.
+5. **Execute through Grabowski:** perform writes in an owner-bound isolated checkout. Never reset or reuse foreign dirty work, leases, or processes.
+6. **Read back reality:** re-read Git, CI, and relevant runtime state. A failed or ambiguous mutation is not treated as completed until authoritative readback proves it.
+
+Stop without mutation when the current revision, task/claim, lease ownership, or required evidence cannot be established. A RepoGround context pass does not establish correctness, test sufficiency, merge readiness, runtime health, or permission to deploy.
+
 ## RepoGround CLI Client vs Service Launcher
 
 `merger/repoground/cli/serve.py` is the RepoGround service entry point / launcher.
 
-A planned RepoGround CLI client must be treated separately and is described in `docs/blueprints/repoground-cli-client-blueprint.md`. Agents must not silently reinterpret the launcher as an HTTP client. Before implementing CLI functionality, read the roadmap and blueprint.
+The active module-CLI, service launcher, and HTTP service-client boundaries are documented in `docs/blueprints/repoground-cli-operational-blueprint.md`. Agents must not silently reinterpret the launcher as an HTTP client. The older implementation history remains in `docs/blueprints/rlens-cli-client-blueprint.md` and is not the active naming contract. Before changing CLI functionality, read the roadmap and the active operational blueprint.

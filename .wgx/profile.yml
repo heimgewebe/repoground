@@ -1,15 +1,13 @@
 ---
-# WGX Profil für heimgewebe/repoground
-profile: lenskit
-description: "RepoLens Merger & Scanner (epistemischer Kern) plus Metrics-/Host-Hilfsskripte"
+# WGX profile for heimgewebe/repoground
+profile: repoground
+description: "RepoGround Knowledge Compiler & Evidence Runtime"
 
-# Semantische Version des hauski-/WGX-Profils (nicht dasselbe wie wgx CLI-Version)
+# Semantic version of the repository WGX profile (not the wgx CLI version).
 wgx-version: ">=1.0.0"
 
-# Fleet-Klasse dieses Repos – dient als Oberflächen-Typ für Tools.
-# Hinweis: Klassenwert stammt aus dem tools-Template; ob eine Python-Klasse
-# existiert, klärt TASK-REPO-FULL-AUDIT-001-Folgearbeit (docs/tasks/board.md).
-class: bash-tooling
+# Primary product surface for fleet tools; implementation languages are listed below.
+class: knowledge-compiler
 
 wgx:
   apiVersion: v1
@@ -23,10 +21,10 @@ meta:
   repo: heimgewebe/repoground
   maintainer: alexdermohr@gmail.com
   tags:
-    - lenskit
-    - merger
-    - scanner
-    - metrics
+    - repoground
+    - knowledge-compiler
+    - evidence-runtime
+    - repository-analysis
     - wgx
   ci: true
 
@@ -35,7 +33,7 @@ env:
 
 tasks:
   smoke: |
-    echo "[wgx.smoke] lenskit – schneller Grundcheck"
+    echo "[wgx.smoke] repoground – schneller Grundcheck"
     if [ -f scripts/wgx-metrics-snapshot.sh ]; then
       bash scripts/wgx-metrics-snapshot.sh --json || echo "[wgx.smoke] metrics-snapshot optional fehlgeschlagen"
     else
@@ -44,7 +42,7 @@ tasks:
 
   guard: |
     set -euo pipefail
-    echo "[wgx.guard] lenskit – Shell-Skripte prüfen…"
+    echo "[wgx.guard] repoground – aktive Skript- und Metadatenflächen prüfen…"
     if [ -f scripts/wgx-metrics-snapshot.sh ]; then
       bash -n scripts/wgx-metrics-snapshot.sh
       if command -v shellcheck >/dev/null 2>&1; then
@@ -57,7 +55,7 @@ tasks:
     fi
 
   metrics: |
-    echo "[wgx.metrics] lenskit – metrics-Snapshot (best effort)…"
+    echo "[wgx.metrics] repoground – metrics-Snapshot (best effort)…"
     if [ -f scripts/wgx-metrics-snapshot.sh ]; then
       bash scripts/wgx-metrics-snapshot.sh --json || echo "[wgx.metrics] metrics-snapshot fehlgeschlagen."
     else
@@ -65,7 +63,7 @@ tasks:
     fi
 
   snapshot: |
-    echo "[wgx.snapshot] lenskit – Snapshot (best effort)…"
+    echo "[wgx.snapshot] repoground – Snapshot (best effort)…"
     if [ -f scripts/wgx-metrics-snapshot.sh ]; then
       bash scripts/wgx-metrics-snapshot.sh --json || true
     fi
