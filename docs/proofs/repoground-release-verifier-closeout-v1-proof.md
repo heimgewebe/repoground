@@ -6,8 +6,11 @@ This proof is bound to `REPOGROUND-LEGACY-RECONCILIATION-V1-T019` and starts
 from merge commit `37a83704695532f8c8d17a532709e3de92cafb38`.
 
 PR #1113 established the archive, member, decompressed-stream, compression-ratio,
-member-count and single-blob content-processing limits. This closeout does not
-restate that implementation as new work. It closes two remaining input surfaces.
+member-count and single-blob content-processing limits. The original closeout does
+not restate that implementation as new work; it closed two remaining input surfaces.
+This final increment is additionally bound to Bureau candidate
+`candidate-9248b3c145824dd946f1614a`, event `1583`, and source commit
+`5318daaad4eceed60cd752eacd057ec74bbd9e49`.
 
 ## Candidate metadata limits
 
@@ -37,6 +40,14 @@ now also rejects the aggregate Git-tree content above 128 MiB before the persist
 The existing content path still reads, validates and discards at most one bounded
 blob at a time.
 
+## Source-bound Tar reader
+
+The source-bound repository comparison opens the already materialized Tar content
+once and reuses that binary reader for every regular Git-tree entry. Each read seeks
+to the `TarInfo.offset_data` position that was previously validated by the bounded
+archive scan. Existing path-set, type, mode, size, symlink and byte-content checks
+remain unchanged, and the reader is closed when the comparison scope ends.
+
 ## Adversarial regressions
 
 The release packaging suite covers:
@@ -47,6 +58,8 @@ The release packaging suite covers:
 - oversized `SHA256SUMS` rejected before line processing;
 - symlinked `SHA256SUMS` rejected before reading;
 - aggregate Git-blob overflow rejected before the content batch starts;
+- all source-bound entry comparisons reuse one open materialized-Tar reader and close
+  it after the comparison;
 - the archive, PAX/GNU, member-count, compression and single-blob protections from
   PR #1113.
 
