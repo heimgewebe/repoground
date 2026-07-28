@@ -7,6 +7,7 @@ project:
   role: merger_scanner_epistemic_core
   primary_language: python
   visibility: internal
+  visibility_semantics: "Repository- und Operator-Zielgruppe; keine Zugriffskontrolle, Veröffentlichungsfreigabe oder Geheimhaltungszusage."
 
 heimgewebe:
   axis: [Motorik]
@@ -30,6 +31,8 @@ dependencies:
   external:
     - name: python
       version: ">=3.11"
+      support_semantics: minimum_supported
+      ci_certified_versions: ["3.12"]
     - name: fastapi
     - name: pydantic
     - name: jsonschema
