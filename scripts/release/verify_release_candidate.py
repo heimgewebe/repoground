@@ -87,10 +87,9 @@ READ_CHUNK_BYTES = 1024 * 1024
 
 
 @contextmanager
-def _open_bounded_tar(archive_path: Path) -> Iterator[tarfile.TarFile]:
-    with _materialized_bounded_tar(archive_path) as tar_path:
-        with tarfile.open(tar_path, mode="r:") as tar:
-            yield tar
+def _open_bounded_tar(tar_path: Path) -> Iterator[tarfile.TarFile]:
+    with tarfile.open(tar_path, mode="r:") as tar:
+        yield tar
 
 
 def _sha256(path: Path) -> str:
@@ -276,6 +275,7 @@ def _account_archive_member(member: tarfile.TarInfo, total_file_bytes: int) -> i
 def _archive_members(
     manifest: dict[str, object],
     archive_path: Path,
+    tar_path: Path,
 ) -> dict[str, tarfile.TarInfo]:
     archive = manifest["archive"]
     assert isinstance(archive, dict)
@@ -302,7 +302,7 @@ def _archive_members(
     members: dict[str, tarfile.TarInfo] = {}
     observed_order: list[str] = []
     total_file_bytes = 0
-    with _open_bounded_tar(archive_path) as tar:
+    with _open_bounded_tar(tar_path) as tar:
         for member in tar:
             _ensure_archive_member_capacity(len(members))
             if member.name in members:
@@ -737,17 +737,18 @@ def _verify_release_candidate(
     if license_data.get("distribution_status") != DISTRIBUTION_STATUS:
         raise ValueError("distribution boundary mismatch")
 
-    members = _archive_members(manifest, archive_path)
-    archive = manifest.get("archive")
-    assert isinstance(archive, dict)
-    prefix = archive.get("prefix")
-    assert isinstance(prefix, str)
-    _reject_retired_release_contract_members(members, prefix)
-    _verify_manifest_contract(manifest, archive_path, contract)
-    if repo is not None:
-        _compare_with_repo(
-            Path(repo).expanduser().resolve(), manifest, archive_path, members
-        )
+    with _materialized_bounded_tar(archive_path) as tar_path:
+        members = _archive_members(manifest, archive_path, tar_path)
+        archive = manifest.get("archive")
+        assert isinstance(archive, dict)
+        prefix = archive.get("prefix")
+        assert isinstance(prefix, str)
+        _reject_retired_release_contract_members(members, prefix)
+        _verify_manifest_contract(manifest, tar_path, contract)
+        if repo is not None:
+            _compare_with_repo(
+                Path(repo).expanduser().resolve(), manifest, tar_path, members
+            )
     project = manifest.get("project")
     assert isinstance(project, dict)
     return {

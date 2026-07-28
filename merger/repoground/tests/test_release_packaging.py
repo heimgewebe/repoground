@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import tarfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import jsonschema
@@ -789,6 +790,33 @@ def test_source_bound_verifier_checks_blob_size_before_read(
     )
     with pytest.raises(ValueError, match="repository blob exceeds byte limit"):
         verify_release_candidate(candidate, repo=repo)
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+def test_verifier_materializes_archive_once_per_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_bound: bool,
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-single-materialization"
+    build_release_candidate(repo, candidate)
+    original = verifier_module._materialized_bounded_tar
+    calls = 0
+
+    @contextmanager
+    def counted_materialization(archive_path: Path):
+        nonlocal calls
+        calls += 1
+        with original(archive_path) as tar_path:
+            yield tar_path
+
+    monkeypatch.setattr(
+        verifier_module, "_materialized_bounded_tar", counted_materialization
+    )
+    kwargs = {"repo": repo} if source_bound else {}
+    assert verify_release_candidate(candidate, **kwargs)["status"] == "pass"
+    assert calls == 1
 
 
 def test_verifier_bounds_global_pax_metadata_before_first_member(
