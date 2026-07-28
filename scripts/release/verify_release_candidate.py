@@ -73,6 +73,7 @@ MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
 MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 200
+MAX_ARCHIVE_MEMBERS = 10_000
 MAX_LICENSE_BYTES = 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
@@ -171,6 +172,25 @@ def _validate_archive_member(member: tarfile.TarInfo, *, prefix: str) -> None:
             )
 
 
+def _expected_archive_member_count(archive: dict[str, object]) -> int:
+    expected_count = archive.get("tracked_entry_count")
+    if not isinstance(expected_count, int) or isinstance(expected_count, bool):
+        raise ValueError("archive tracked-entry count is invalid")
+    if expected_count < 0 or expected_count + 1 > MAX_ARCHIVE_MEMBERS:
+        raise ValueError(
+            "archive exceeds member count limit: "
+            f"{expected_count + 1} > {MAX_ARCHIVE_MEMBERS}"
+        )
+    return expected_count
+
+
+def _ensure_archive_member_capacity(member_count: int) -> None:
+    if member_count >= MAX_ARCHIVE_MEMBERS:
+        raise ValueError(
+            f"archive exceeds member count limit: more than {MAX_ARCHIVE_MEMBERS}"
+        )
+
+
 def _account_archive_member(member: tarfile.TarInfo, total_file_bytes: int) -> int:
     if not member.isfile():
         return total_file_bytes
@@ -197,6 +217,7 @@ def _archive_members(
     expected_sha = archive.get("sha256")
     expected_bytes = archive.get("bytes")
     prefix = archive.get("prefix")
+    expected_count = _expected_archive_member_count(archive)
     actual_bytes = archive_path.stat().st_size
     if _sha256(archive_path) != expected_sha:
         raise ValueError("archive SHA-256 does not match manifest")
@@ -222,6 +243,7 @@ def _archive_members(
     total_file_bytes = 0
     with tarfile.open(archive_path, mode="r:gz") as tar:
         for member in tar:
+            _ensure_archive_member_capacity(len(members))
             if member.name in members:
                 raise ValueError(f"duplicate archive member: {member.name}")
             _validate_archive_member(member, prefix=prefix)
@@ -234,7 +256,6 @@ def _archive_members(
             "archive exceeds compression ratio limit: "
             f"{compression_ratio:.1f} > {MAX_ARCHIVE_COMPRESSION_RATIO}"
         )
-    expected_count = archive.get("tracked_entry_count")
     if len(members) != expected_count + 1:
         raise ValueError("archive member count does not match manifest")
     root_name = prefix.rstrip("/")

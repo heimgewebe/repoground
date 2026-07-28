@@ -735,6 +735,24 @@ def test_verifier_rejects_excessive_compression_ratio(
         verify_release_candidate(candidate)
 
 
+def test_verifier_rejects_archive_member_count_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-member-count-limit"
+    build_release_candidate(repo, candidate)
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["archive"]["tracked_entry_count"] = 1
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_MEMBERS", 2)
+    with pytest.raises(ValueError, match="member count limit"):
+        verify_release_candidate(candidate)
+
+
 def test_legacy_repobrief_release_identity_is_rejected(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     candidate = tmp_path / "candidate"

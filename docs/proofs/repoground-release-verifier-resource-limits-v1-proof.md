@@ -15,6 +15,7 @@ format, builder output, licensing decision, distribution status or product runti
 - one regular archive member: 16 MiB
 - total regular-file bytes: 128 MiB
 - expansion ratio: 200:1
+- archive members including the root entry: 10,000
 - archived LICENSE read: 1 MiB
 
 The current tracked tree is about 13.1 MiB and its largest file is below 0.31 MiB,
