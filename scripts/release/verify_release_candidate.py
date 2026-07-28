@@ -236,6 +236,7 @@ def _load_candidate(
 
 def _verify_sums(
     manifest_path: Path,
+    manifest_sha256: str,
     archive_path: Path,
     sums_path: Path,
 ) -> None:
@@ -243,7 +244,7 @@ def _verify_sums(
         raise ValueError("SHA256SUMS is missing")
     expected = {
         archive_path.name: _sha256(archive_path),
-        manifest_path.name: _sha256(manifest_path),
+        manifest_path.name: manifest_sha256,
     }
     sums_text = _read_bounded_regular_file(
         sums_path,
@@ -863,6 +864,7 @@ def _verify_release_candidate(
     contract: ReleaseContract,
     manifest: dict[str, object],
     manifest_path: Path,
+    manifest_sha256: str,
     repo: str | Path | None,
 ) -> dict[str, object]:
     manifest, manifest_path, archive_path, sums_path = _load_candidate(
@@ -874,7 +876,12 @@ def _verify_release_candidate(
     if not archive_path.is_file():
         raise ValueError("candidate archive is missing")
     _compressed_archive_size(archive_path)
-    _verify_sums(manifest_path, archive_path, sums_path)
+    _verify_sums(
+        manifest_path,
+        manifest_sha256,
+        archive_path,
+        sums_path,
+    )
 
     license_data = manifest.get("license")
     if not isinstance(license_data, dict):
@@ -902,7 +909,7 @@ def _verify_release_candidate(
         "status": "pass",
         "candidate_id": project["candidate_id"],
         "archive_sha256": _sha256(archive_path),
-        "manifest_sha256": _sha256(manifest_path),
+        "manifest_sha256": manifest_sha256,
         "member_count": len(members),
         "source_bound": repo is not None,
         "distribution_status": DISTRIBUTION_STATUS,
@@ -919,13 +926,13 @@ def verify_release_candidate(
     if not candidate_path.is_dir():
         raise ValueError(f"candidate directory is missing: {candidate_path}")
     manifest_path = _candidate_manifest_path(candidate_path)
-    preview = json.loads(
-        _read_bounded_regular_file(
-            manifest_path,
-            label="release manifest",
-            max_bytes=MAX_MANIFEST_BYTES,
-        ).decode("utf-8")
+    manifest_bytes = _read_bounded_regular_file(
+        manifest_path,
+        label="release manifest",
+        max_bytes=MAX_MANIFEST_BYTES,
     )
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    preview = json.loads(manifest_bytes.decode("utf-8"))
     if not isinstance(preview, dict):
         raise ValueError("release manifest must be a JSON object")
     contract = _contract_for_manifest(preview)
@@ -934,6 +941,7 @@ def verify_release_candidate(
         contract=contract,
         manifest=preview,
         manifest_path=manifest_path,
+        manifest_sha256=manifest_sha256,
         repo=repo,
     )
 

@@ -23,8 +23,10 @@ matches the pre-open `lstat` result. A read of one additional byte detects growt
 past the declared limit.
 
 The release manifest is parsed once and the same parsed object is carried into the
-full verification path. This avoids a second unbound manifest read between contract
-selection and candidate validation.
+full verification path. Its digest is computed from those captured bytes and reused
+for `SHA256SUMS` verification and the final report, so a later pathname replacement
+cannot authenticate different bytes. This also avoids a second unbound manifest read
+between contract selection and candidate validation.
 
 ## Source-bound repository limit
 
@@ -41,6 +43,7 @@ The release packaging suite covers:
 
 - oversized manifest rejected before JSON parsing;
 - symlinked manifest rejected before reading;
+- post-parse manifest replacement rejected because checksums remain bound to the captured bytes;
 - oversized `SHA256SUMS` rejected before line processing;
 - symlinked `SHA256SUMS` rejected before reading;
 - aggregate Git-blob overflow rejected before the content batch starts;

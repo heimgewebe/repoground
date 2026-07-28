@@ -771,6 +771,30 @@ def test_verifier_rejects_symlinked_manifest_before_read(tmp_path: Path) -> None
         verify_release_candidate(candidate)
 
 
+def test_verifier_binds_sums_to_the_manifest_bytes_that_were_parsed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-manifest-byte-binding"
+    build_release_candidate(repo, candidate)
+    original_contract = verifier_module._contract_for_manifest
+
+    def replace_manifest_after_parsing(preview):
+        contract = original_contract(preview)
+        manifest_path = next(candidate.glob("*.release.json"))
+        manifest_path.write_bytes(manifest_path.read_bytes() + b"\n")
+        _rewrite_sums(candidate)
+        return contract
+
+    monkeypatch.setattr(
+        verifier_module,
+        "_contract_for_manifest",
+        replace_manifest_after_parsing,
+    )
+    with pytest.raises(ValueError, match="SHA256SUMS does not match"):
+        verify_release_candidate(candidate)
+
+
 def test_verifier_rejects_oversized_sums_before_line_processing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
