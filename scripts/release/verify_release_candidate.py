@@ -70,6 +70,13 @@ CANONICAL_CONTRACT = ReleaseContract(
     compatibility_mode="canonical_repoground_v1",
 )
 
+MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+MAX_ARCHIVE_MEMBER_BYTES = 16 * 1024 * 1024
+MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_ARCHIVE_COMPRESSION_RATIO = 200
+MAX_LICENSE_BYTES = 1024 * 1024
+READ_CHUNK_BYTES = 1024 * 1024
+
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -156,44 +163,68 @@ def _archive_members(
     expected_sha = archive.get("sha256")
     expected_bytes = archive.get("bytes")
     prefix = archive.get("prefix")
+    actual_bytes = archive_path.stat().st_size
     if _sha256(archive_path) != expected_sha:
         raise ValueError("archive SHA-256 does not match manifest")
-    if archive_path.stat().st_size != expected_bytes:
+    if actual_bytes != expected_bytes:
         raise ValueError("archive byte size does not match manifest")
+    if actual_bytes > MAX_ARCHIVE_BYTES:
+        raise ValueError(
+            f"archive exceeds compressed byte limit: {actual_bytes} > {MAX_ARCHIVE_BYTES}"
+        )
     if (
         not isinstance(prefix, str)
         or not prefix.endswith("/")
         or not _safe_name(prefix[:-1])
     ):
         raise ValueError("archive prefix is invalid")
-    raw = archive_path.read_bytes()
+    with archive_path.open("rb") as handle:
+        raw = handle.read(8)
     if len(raw) < 8 or int.from_bytes(raw[4:8], "little") != 0:
         raise ValueError("gzip timestamp is not normalized to zero")
 
     members: dict[str, tarfile.TarInfo] = {}
     observed_order: list[str] = []
-    with gzip.open(archive_path, "rb") as gz:
-        with tarfile.open(fileobj=gz, mode="r:") as tar:
-            for member in tar.getmembers():
-                if member.name in members:
-                    raise ValueError(f"duplicate archive member: {member.name}")
-                observed_order.append(member.name)
-                if not _safe_name(member.name):
-                    raise ValueError(f"unsafe archive member: {member.name!r}")
-                if member.name != prefix.rstrip("/") and not member.name.startswith(prefix):
-                    raise ValueError(f"member outside archive prefix: {member.name!r}")
-                if member.uid != 0 or member.gid != 0 or member.mtime != 0:
-                    raise ValueError(f"non-normalized metadata: {member.name!r}")
-                if not (member.isdir() or member.isfile() or member.issym()):
-                    raise ValueError(f"unsupported archive member type: {member.name!r}")
-                if member.issym():
-                    relative_path = member.name[len(prefix):]
-                    if not safe_symlink_target(relative_path, member.linkname):
-                        raise ValueError(
-                            f"unsafe symlink target {member.linkname!r} "
-                            f"at {member.name!r}"
-                        )
-                members[member.name] = member
+    total_file_bytes = 0
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        for member in tar:
+            if member.name in members:
+                raise ValueError(f"duplicate archive member: {member.name}")
+            observed_order.append(member.name)
+            if not _safe_name(member.name):
+                raise ValueError(f"unsafe archive member: {member.name!r}")
+            if member.name != prefix.rstrip("/") and not member.name.startswith(prefix):
+                raise ValueError(f"member outside archive prefix: {member.name!r}")
+            if member.uid != 0 or member.gid != 0 or member.mtime != 0:
+                raise ValueError(f"non-normalized metadata: {member.name!r}")
+            if not (member.isdir() or member.isfile() or member.issym()):
+                raise ValueError(f"unsupported archive member type: {member.name!r}")
+            if member.isfile():
+                if member.size < 0 or member.size > MAX_ARCHIVE_MEMBER_BYTES:
+                    raise ValueError(
+                        f"archive member exceeds byte limit: {member.name}: "
+                        f"{member.size} > {MAX_ARCHIVE_MEMBER_BYTES}"
+                    )
+                total_file_bytes += member.size
+                if total_file_bytes > MAX_ARCHIVE_TOTAL_BYTES:
+                    raise ValueError(
+                        "archive exceeds total uncompressed byte limit: "
+                        f"{total_file_bytes} > {MAX_ARCHIVE_TOTAL_BYTES}"
+                    )
+            if member.issym():
+                relative_path = member.name[len(prefix):]
+                if not safe_symlink_target(relative_path, member.linkname):
+                    raise ValueError(
+                        f"unsafe symlink target {member.linkname!r} "
+                        f"at {member.name!r}"
+                    )
+            members[member.name] = member
+    compression_ratio = total_file_bytes / actual_bytes
+    if compression_ratio > MAX_ARCHIVE_COMPRESSION_RATIO:
+        raise ValueError(
+            "archive exceeds compression ratio limit: "
+            f"{compression_ratio:.1f} > {MAX_ARCHIVE_COMPRESSION_RATIO}"
+        )
     expected_count = archive.get("tracked_entry_count")
     if len(members) != expected_count + 1:
         raise ValueError("archive member count does not match manifest")
@@ -229,19 +260,47 @@ def _reject_retired_release_contract_members(
         )
 
 
-def _read_archive_member(archive_path: Path, name: str) -> bytes:
-    with gzip.open(archive_path, "rb") as gz:
-        with tarfile.open(fileobj=gz, mode="r:") as tar:
-            try:
-                member = tar.getmember(name)
-            except KeyError as exc:
-                raise ValueError(f"required archive member is missing: {name}") from exc
-            if not member.isfile():
-                raise ValueError(f"required archive member is not a file: {name}")
-            handle = tar.extractfile(member)
-            if handle is None:
-                raise ValueError(f"cannot read required archive member: {name}")
-            return handle.read()
+def _read_limited(handle: object, *, name: str, max_bytes: int) -> bytes:
+    read = getattr(handle, "read", None)
+    if not callable(read):
+        raise ValueError(f"cannot read required archive member: {name}")
+    chunks: list[bytes] = []
+    observed = 0
+    while observed <= max_bytes:
+        chunk = read(min(READ_CHUNK_BYTES, max_bytes + 1 - observed))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        observed += len(chunk)
+    if observed > max_bytes:
+        raise ValueError(f"archive member exceeds read limit: {name}")
+    return b"".join(chunks)
+
+
+def _read_archive_member(
+    archive_path: Path,
+    name: str,
+    *,
+    max_bytes: int = MAX_ARCHIVE_MEMBER_BYTES,
+) -> bytes:
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        try:
+            member = tar.getmember(name)
+        except KeyError as exc:
+            raise ValueError(f"required archive member is missing: {name}") from exc
+        if not member.isfile():
+            raise ValueError(f"required archive member is not a file: {name}")
+        if member.size > max_bytes:
+            raise ValueError(
+                f"archive member exceeds byte limit: {name}: {member.size} > {max_bytes}"
+            )
+        handle = tar.extractfile(member)
+        if handle is None:
+            raise ValueError(f"cannot read required archive member: {name}")
+        content = _read_limited(handle, name=name, max_bytes=max_bytes)
+        if len(content) != member.size:
+            raise ValueError(f"archive member byte size mismatch: {name}")
+        return content
 
 
 
@@ -262,8 +321,18 @@ def _verify_dependency_locks(
         if not isinstance(path, str):
             raise ValueError("manifest dependency lock path is invalid")
         observed_paths.append(path)
-        content = _read_archive_member(archive_path, f"{expected_prefix}{path}")
-        if record.get("bytes") != len(content):
+        expected_size = record.get("bytes")
+        if (
+            not isinstance(expected_size, int)
+            or isinstance(expected_size, bool)
+            or expected_size < 0
+            or expected_size > MAX_ARCHIVE_MEMBER_BYTES
+        ):
+            raise ValueError(f"dependency lock byte size is invalid: {path}")
+        content = _read_archive_member(
+            archive_path, f"{expected_prefix}{path}", max_bytes=expected_size
+        )
+        if expected_size != len(content):
             raise ValueError(f"dependency lock byte size mismatch: {path}")
         if record.get("sha256") != hashlib.sha256(content).hexdigest():
             raise ValueError(f"dependency lock SHA-256 mismatch: {path}")
@@ -281,8 +350,20 @@ def _verify_semantic_record(
         raise ValueError(f"semantic extension record is invalid: {expected_path}")
     if record.get("path") != expected_path:
         raise ValueError(f"semantic extension path mismatch: {expected_path}")
-    content = _read_archive_member(archive_path, f"{expected_prefix}{expected_path}")
-    if record.get("bytes") != len(content):
+    expected_size = record.get("bytes")
+    if (
+        not isinstance(expected_size, int)
+        or isinstance(expected_size, bool)
+        or expected_size < 0
+        or expected_size > MAX_ARCHIVE_MEMBER_BYTES
+    ):
+        raise ValueError(f"semantic extension byte size is invalid: {expected_path}")
+    content = _read_archive_member(
+        archive_path,
+        f"{expected_prefix}{expected_path}",
+        max_bytes=expected_size,
+    )
+    if expected_size != len(content):
         raise ValueError(f"semantic extension byte size mismatch: {expected_path}")
     if record.get("sha256") != hashlib.sha256(content).hexdigest():
         raise ValueError(f"semantic extension SHA-256 mismatch: {expected_path}")
@@ -397,7 +478,9 @@ def _verify_manifest_contract(
     _verify_dependency_locks(manifest, archive_path, expected_prefix, contract)
 
     license_content = _read_archive_member(
-        archive_path, f"{expected_prefix}LICENSE"
+        archive_path,
+        f"{expected_prefix}LICENSE",
+        max_bytes=MAX_LICENSE_BYTES,
     ).decode("utf-8")
     if "Apache License" not in license_content or "Version 2.0" not in license_content:
         raise ValueError("archived LICENSE does not contain Apache-2.0")
@@ -447,8 +530,17 @@ def _compare_with_repo(
                 expected_mode = 0o755 if entry.mode == "100755" else 0o644
                 if not member.isfile() or member.mode != expected_mode:
                     raise ValueError(f"mode/type mismatch: {entry.path}")
+                if len(blob) > MAX_ARCHIVE_MEMBER_BYTES:
+                    raise ValueError(f"repository blob exceeds byte limit: {entry.path}")
+                if member.size != len(blob):
+                    raise ValueError(f"content byte size mismatch: {entry.path}")
                 handle = tar.extractfile(member)
-                if handle is None or handle.read() != blob:
+                if handle is None:
+                    raise ValueError(f"cannot read archive member: {entry.path}")
+                content = _read_limited(
+                    handle, name=entry.path, max_bytes=len(blob)
+                )
+                if content != blob:
                     raise ValueError(f"content mismatch: {entry.path}")
 
 

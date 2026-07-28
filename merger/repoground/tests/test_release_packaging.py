@@ -19,6 +19,7 @@ from scripts.release.build_release_candidate import (
     safe_symlink_target,
 )
 from scripts.release.check_release_contract import scan
+import scripts.release.verify_release_candidate as verifier_module
 from scripts.release.verify_release_candidate import verify_release_candidate
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -196,6 +197,47 @@ def _rename_archive_member(
         gz.write(tar_buffer.getvalue())
     archive_path.write_bytes(compressed.getvalue())
 
+    manifest["archive"]["bytes"] = archive_path.stat().st_size
+    manifest["archive"]["sha256"] = hashlib.sha256(
+        archive_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(candidate)
+
+
+def _replace_archive_member_payload(
+    candidate: Path, target_relative: str, payload: bytes
+) -> None:
+    archive_path = next(candidate.glob("*.tar.gz"))
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    prefix = manifest["archive"]["prefix"]
+    target_name = f"{prefix}{target_relative}"
+    members: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    replaced = False
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        for member in tar.getmembers():
+            handle = tar.extractfile(member) if member.isfile() else None
+            content = handle.read() if handle is not None else None
+            if member.name == target_name:
+                content = payload
+                member.size = len(payload)
+                replaced = True
+            members.append((member, content))
+    assert replaced
+
+    tar_buffer = io.BytesIO()
+    with tarfile.open(fileobj=tar_buffer, mode="w", format=tarfile.GNU_FORMAT) as tar:
+        for member, content in members:
+            tar.addfile(member, io.BytesIO(content) if content is not None else None)
+    compressed = io.BytesIO()
+    with gzip.GzipFile(
+        filename="", mode="wb", fileobj=compressed, compresslevel=9, mtime=0
+    ) as gz:
+        gz.write(tar_buffer.getvalue())
+    archive_path.write_bytes(compressed.getvalue())
     manifest["archive"]["bytes"] = archive_path.stat().st_size
     manifest["archive"]["sha256"] = hashlib.sha256(
         archive_path.read_bytes()
@@ -634,6 +676,63 @@ def test_verifier_rejects_noncanonical_alias_for_retired_release_contract(
     kwargs = {"repo": repo} if source_bound else {}
     with pytest.raises(ValueError, match="unsafe archive member"):
         verify_release_candidate(candidate, **kwargs)
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+def test_verifier_rejects_oversized_archive_member_before_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source_bound: bool,
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-oversized-member"
+    build_release_candidate(repo, candidate)
+    limit = 1024
+    _replace_archive_member_payload(
+        candidate,
+        "LICENSE",
+        b"Apache License\nVersion 2.0\n" + b"0" * limit,
+    )
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_MEMBER_BYTES", limit)
+    kwargs = {"repo": repo} if source_bound else {}
+    with pytest.raises(ValueError, match="exceeds byte limit: .*LICENSE"):
+        verify_release_candidate(candidate, **kwargs)
+
+
+def test_verifier_rejects_compressed_archive_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-compressed-limit"
+    build_release_candidate(repo, candidate)
+    archive_path = next(candidate.glob("*.tar.gz"))
+    monkeypatch.setattr(
+        verifier_module, "MAX_ARCHIVE_BYTES", archive_path.stat().st_size - 1
+    )
+    with pytest.raises(ValueError, match="compressed byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_total_uncompressed_bytes_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-total-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_TOTAL_BYTES", 1)
+    with pytest.raises(ValueError, match="total uncompressed byte limit"):
+        verify_release_candidate(candidate)
+
+
+def test_verifier_rejects_excessive_compression_ratio(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-ratio-limit"
+    build_release_candidate(repo, candidate)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_COMPRESSION_RATIO", 1)
+    with pytest.raises(ValueError, match="compression ratio limit"):
+        verify_release_candidate(candidate)
 
 
 def test_legacy_repobrief_release_identity_is_rejected(tmp_path: Path) -> None:
