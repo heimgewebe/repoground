@@ -4,8 +4,10 @@ import argparse
 import gzip
 import hashlib
 import json
+import os
 import re
 import subprocess
+import stat
 import sys
 import tempfile
 import tarfile
@@ -80,7 +82,10 @@ MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
 MAX_ARCHIVE_STREAM_BYTES = 160 * 1024 * 1024
 MAX_ARCHIVE_COMPRESSION_RATIO = 200
 MAX_ARCHIVE_MEMBERS = 10_000
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_SHA256SUMS_BYTES = 64 * 1024
 MAX_REPOSITORY_BLOB_BYTES = MAX_ARCHIVE_MEMBER_BYTES
+MAX_REPOSITORY_TOTAL_BYTES = MAX_ARCHIVE_TOTAL_BYTES
 MAX_LICENSE_BYTES = 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
@@ -142,6 +147,51 @@ def _materialized_bounded_tar(archive_path: Path) -> Iterator[Path]:
         yield tar_path
 
 
+def _read_bounded_regular_file(
+    path: Path,
+    *,
+    label: str,
+    max_bytes: int,
+) -> bytes:
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{label} must be a regular non-symlink file") from exc
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError(f"{label} must be a regular non-symlink file")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(f"{label} must be a regular non-symlink file") from exc
+    with os.fdopen(descriptor, "rb") as handle:
+        opened = os.fstat(handle.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (
+            opened.st_dev,
+            opened.st_ino,
+        ) != (before.st_dev, before.st_ino):
+            raise ValueError(f"{label} changed before it could be read safely")
+        if opened.st_size > max_bytes:
+            raise ValueError(
+                f"{label} exceeds byte limit: {opened.st_size} > {max_bytes}"
+            )
+        content = handle.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        raise ValueError(f"{label} exceeds read limit: {max_bytes}")
+    return content
+
+
+def _candidate_manifest_path(candidate_dir: Path) -> Path:
+    manifests = sorted(
+        item
+        for item in candidate_dir.iterdir()
+        if item.name.endswith(".release.json")
+    )
+    if len(manifests) != 1:
+        raise ValueError(f"expected exactly one release manifest, found {len(manifests)}")
+    return manifests[0]
+
+
 def _safe_name(name: str) -> bool:
     path = Path(name)
     raw_parts = name.split("/")
@@ -154,13 +204,11 @@ def _safe_name(name: str) -> bool:
 
 
 def _load_candidate(
-    candidate_dir: Path, contract: ReleaseContract
+    candidate_dir: Path,
+    contract: ReleaseContract,
+    manifest: dict[str, object],
+    manifest_path: Path,
 ) -> tuple[dict[str, object], Path, Path, Path]:
-    manifests = sorted(candidate_dir.glob("*.release.json"))
-    if len(manifests) != 1:
-        raise ValueError(f"expected exactly one release manifest, found {len(manifests)}")
-    manifest_path = manifests[0]
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("kind") != contract.kind or manifest.get("version") != contract.version:
         raise ValueError("release manifest kind/version mismatch")
     archive = manifest.get("archive")
@@ -188,6 +236,7 @@ def _load_candidate(
 
 def _verify_sums(
     manifest_path: Path,
+    manifest_sha256: str,
     archive_path: Path,
     sums_path: Path,
 ) -> None:
@@ -195,10 +244,15 @@ def _verify_sums(
         raise ValueError("SHA256SUMS is missing")
     expected = {
         archive_path.name: _sha256(archive_path),
-        manifest_path.name: _sha256(manifest_path),
+        manifest_path.name: manifest_sha256,
     }
+    sums_text = _read_bounded_regular_file(
+        sums_path,
+        label="SHA256SUMS",
+        max_bytes=MAX_SHA256SUMS_BYTES,
+    ).decode("utf-8")
     observed: dict[str, str] = {}
-    for line in sums_path.read_text(encoding="utf-8").splitlines():
+    for line in sums_text.splitlines():
         match = re.fullmatch(r"([0-9a-f]{64})  ([^/]+)", line)
         if not match:
             raise ValueError(f"invalid SHA256SUMS line: {line!r}")
@@ -614,6 +668,7 @@ def _repository_blob_sizes(
     if len(lines) != len(entries):
         raise ValueError("git blob size response count mismatch")
     sizes: dict[str, int] = {}
+    total_bytes = 0
     for entry, line in zip(entries, lines, strict=True):
         object_id, object_type, raw_size = line.split(" ")
         if object_id != entry.object_id or object_type != "blob" or not raw_size.isdigit():
@@ -623,6 +678,12 @@ def _repository_blob_sizes(
             raise ValueError(
                 f"repository blob exceeds byte limit: {entry.path}: "
                 f"{size} > {MAX_REPOSITORY_BLOB_BYTES}"
+            )
+        total_bytes += size
+        if total_bytes > MAX_REPOSITORY_TOTAL_BYTES:
+            raise ValueError(
+                "repository blobs exceed total byte limit: "
+                f"{total_bytes} > {MAX_REPOSITORY_TOTAL_BYTES}"
             )
         sizes[entry.path] = size
     return sizes
@@ -801,15 +862,26 @@ def _verify_release_candidate(
     candidate_path: Path,
     *,
     contract: ReleaseContract,
+    manifest: dict[str, object],
+    manifest_path: Path,
+    manifest_sha256: str,
     repo: str | Path | None,
 ) -> dict[str, object]:
     manifest, manifest_path, archive_path, sums_path = _load_candidate(
-        candidate_path, contract
+        candidate_path,
+        contract,
+        manifest,
+        manifest_path,
     )
     if not archive_path.is_file():
         raise ValueError("candidate archive is missing")
     _compressed_archive_size(archive_path)
-    _verify_sums(manifest_path, archive_path, sums_path)
+    _verify_sums(
+        manifest_path,
+        manifest_sha256,
+        archive_path,
+        sums_path,
+    )
 
     license_data = manifest.get("license")
     if not isinstance(license_data, dict):
@@ -837,7 +909,7 @@ def _verify_release_candidate(
         "status": "pass",
         "candidate_id": project["candidate_id"],
         "archive_sha256": _sha256(archive_path),
-        "manifest_sha256": _sha256(manifest_path),
+        "manifest_sha256": manifest_sha256,
         "member_count": len(members),
         "source_bound": repo is not None,
         "distribution_status": DISTRIBUTION_STATUS,
@@ -853,14 +925,25 @@ def verify_release_candidate(
     candidate_path = Path(candidate_dir).expanduser().resolve()
     if not candidate_path.is_dir():
         raise ValueError(f"candidate directory is missing: {candidate_path}")
-    manifests = sorted(candidate_path.glob("*.release.json"))
-    if len(manifests) != 1:
-        raise ValueError(f"expected exactly one release manifest, found {len(manifests)}")
-    preview = json.loads(manifests[0].read_text(encoding="utf-8"))
+    manifest_path = _candidate_manifest_path(candidate_path)
+    manifest_bytes = _read_bounded_regular_file(
+        manifest_path,
+        label="release manifest",
+        max_bytes=MAX_MANIFEST_BYTES,
+    )
+    manifest_sha256 = hashlib.sha256(manifest_bytes).hexdigest()
+    preview = json.loads(manifest_bytes.decode("utf-8"))
     if not isinstance(preview, dict):
         raise ValueError("release manifest must be a JSON object")
     contract = _contract_for_manifest(preview)
-    return _verify_release_candidate(candidate_path, contract=contract, repo=repo)
+    return _verify_release_candidate(
+        candidate_path,
+        contract=contract,
+        manifest=preview,
+        manifest_path=manifest_path,
+        manifest_sha256=manifest_sha256,
+        repo=repo,
+    )
 
 
 def main() -> int:
