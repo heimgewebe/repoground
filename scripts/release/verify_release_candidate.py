@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import re
 import subprocess
 import sys
+import tempfile
 import tarfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,6 +86,13 @@ MAX_LICENSE_BYTES = 1024 * 1024
 READ_CHUNK_BYTES = 1024 * 1024
 
 
+@contextmanager
+def _open_bounded_tar(archive_path: Path) -> Iterator[tarfile.TarFile]:
+    with _materialized_bounded_tar(archive_path) as tar_path:
+        with tarfile.open(tar_path, mode="r:") as tar:
+            yield tar
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -97,6 +108,40 @@ def _compressed_archive_size(archive_path: Path) -> int:
             f"archive exceeds compressed byte limit: {actual_bytes} > {MAX_ARCHIVE_BYTES}"
         )
     return actual_bytes
+
+
+@contextmanager
+def _materialized_bounded_tar(archive_path: Path) -> Iterator[Path]:
+    compressed_bytes = _compressed_archive_size(archive_path)
+    with tempfile.TemporaryDirectory(
+        prefix="repoground-release-verifier-"
+    ) as temporary:
+        tar_path = Path(temporary) / "candidate.tar"
+        observed = 0
+        with gzip.open(archive_path, "rb") as source, tar_path.open("wb") as target:
+            while observed <= MAX_ARCHIVE_STREAM_BYTES:
+                chunk = source.read(
+                    min(
+                        READ_CHUNK_BYTES,
+                        MAX_ARCHIVE_STREAM_BYTES + 1 - observed,
+                    )
+                )
+                if not chunk:
+                    break
+                target.write(chunk)
+                observed += len(chunk)
+        if observed > MAX_ARCHIVE_STREAM_BYTES:
+            raise ValueError(
+                "archive exceeds uncompressed stream byte limit: "
+                f"{observed} > {MAX_ARCHIVE_STREAM_BYTES}"
+            )
+        if observed > compressed_bytes * MAX_ARCHIVE_COMPRESSION_RATIO:
+            ratio = observed / compressed_bytes
+            raise ValueError(
+                "archive exceeds compression ratio limit: "
+                f"{ratio:.1f} > {MAX_ARCHIVE_COMPRESSION_RATIO}"
+            )
+        yield tar_path
 
 
 def _safe_name(name: str) -> bool:
@@ -257,7 +302,7 @@ def _archive_members(
     members: dict[str, tarfile.TarInfo] = {}
     observed_order: list[str] = []
     total_file_bytes = 0
-    with tarfile.open(archive_path, mode="r:gz") as tar:
+    with _open_bounded_tar(archive_path) as tar:
         for member in tar:
             _ensure_archive_member_capacity(len(members))
             if member.name in members:
@@ -329,24 +374,25 @@ def _read_archive_member(
     *,
     max_bytes: int = MAX_ARCHIVE_MEMBER_BYTES,
 ) -> bytes:
-    with tarfile.open(archive_path, mode="r:gz") as tar:
-        try:
-            member = tar.getmember(name)
-        except KeyError as exc:
-            raise ValueError(f"required archive member is missing: {name}") from exc
-        if not member.isfile():
-            raise ValueError(f"required archive member is not a file: {name}")
-        if member.size > max_bytes:
-            raise ValueError(
-                f"archive member exceeds byte limit: {name}: {member.size} > {max_bytes}"
-            )
-        handle = tar.extractfile(member)
-        if handle is None:
-            raise ValueError(f"cannot read required archive member: {name}")
-        content = _read_limited(handle, name=name, max_bytes=max_bytes)
-        if len(content) != member.size:
-            raise ValueError(f"archive member byte size mismatch: {name}")
-        return content
+    with _open_bounded_tar(archive_path) as tar:
+        for member in tar:
+            if member.name != name:
+                continue
+            if not member.isfile():
+                raise ValueError(f"required archive member is not a file: {name}")
+            if member.size > max_bytes:
+                raise ValueError(
+                    f"archive member exceeds byte limit: {name}: "
+                    f"{member.size} > {max_bytes}"
+                )
+            handle = tar.extractfile(member)
+            if handle is None:
+                raise ValueError(f"cannot read required archive member: {name}")
+            content = _read_limited(handle, name=name, max_bytes=max_bytes)
+            if len(content) != member.size:
+                raise ValueError(f"archive member byte size mismatch: {name}")
+            return content
+    raise ValueError(f"required archive member is missing: {name}")
 
 
 
@@ -638,9 +684,16 @@ def _compare_with_repo(
     if observed_names != expected_names:
         raise ValueError("archive path set does not match Git tree")
 
-    with tarfile.open(archive_path, mode="r:gz") as tar:
+    with _open_bounded_tar(archive_path) as tar:
+        iterator = iter(tar)
+        root_member = next(iterator, None)
+        if root_member is None or root_member.name != prefix.rstrip("/"):
+            raise ValueError("archive root member is missing or out of order")
         for entry in expected_entries:
-            member = tar.getmember(f"{prefix}{entry.path}")
+            member = next(iterator, None)
+            expected_name = f"{prefix}{entry.path}"
+            if member is None or member.name != expected_name:
+                raise ValueError(f"archive member order mismatch: {entry.path}")
             _compare_archive_entry(
                 tar,
                 member,
@@ -650,6 +703,8 @@ def _compare_with_repo(
                     repo, commit, entry, blob_sizes[entry.path]
                 ),
             )
+        if next(iterator, None) is not None:
+            raise ValueError("archive contains unexpected trailing members")
 
 
 def _contract_for_manifest(manifest: dict[str, object]) -> ReleaseContract:

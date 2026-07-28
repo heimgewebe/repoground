@@ -248,6 +248,41 @@ def _replace_archive_member_payload(
     _rewrite_sums(candidate)
 
 
+
+def _add_global_pax_header(candidate: Path, payload_bytes: int) -> None:
+    archive_path = next(candidate.glob("*.tar.gz"))
+    manifest_path = next(candidate.glob("*.release.json"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    members: list[tuple[tarfile.TarInfo, bytes | None]] = []
+    with tarfile.open(archive_path, mode="r:gz") as tar:
+        for member in tar.getmembers():
+            handle = tar.extractfile(member) if member.isfile() else None
+            members.append((member, handle.read() if handle is not None else None))
+
+    tar_buffer = io.BytesIO()
+    with tarfile.open(
+        fileobj=tar_buffer,
+        mode="w",
+        format=tarfile.PAX_FORMAT,
+        pax_headers={"comment": "0" * payload_bytes},
+    ) as tar:
+        for member, content in members:
+            tar.addfile(member, io.BytesIO(content) if content is not None else None)
+    compressed = io.BytesIO()
+    with gzip.GzipFile(
+        filename="", mode="wb", fileobj=compressed, compresslevel=9, mtime=0
+    ) as gz:
+        gz.write(tar_buffer.getvalue())
+    archive_path.write_bytes(compressed.getvalue())
+    manifest["archive"]["bytes"] = archive_path.stat().st_size
+    manifest["archive"]["sha256"] = hashlib.sha256(
+        archive_path.read_bytes()
+    ).hexdigest()
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _rewrite_sums(candidate)
+
 def test_candidate_build_is_byte_reproducible_and_source_bound(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     first = tmp_path / "first"
@@ -754,6 +789,25 @@ def test_source_bound_verifier_checks_blob_size_before_read(
     )
     with pytest.raises(ValueError, match="repository blob exceeds byte limit"):
         verify_release_candidate(candidate, repo=repo)
+
+
+def test_verifier_bounds_global_pax_metadata_before_first_member(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-pax-metadata-limit"
+    build_release_candidate(repo, candidate)
+    _add_global_pax_header(candidate, payload_bytes=4096)
+    monkeypatch.setattr(verifier_module, "MAX_ARCHIVE_STREAM_BYTES", 1024)
+    monkeypatch.setattr(
+        verifier_module,
+        "_validate_archive_member",
+        lambda *args, **kwargs: pytest.fail(
+            "logical archive member yielded before PAX metadata limit"
+        ),
+    )
+    with pytest.raises(ValueError, match="uncompressed stream byte limit"):
+        verify_release_candidate(candidate)
 
 
 def test_verifier_rejects_excessive_compression_ratio(
