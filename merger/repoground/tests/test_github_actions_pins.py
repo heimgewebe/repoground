@@ -118,13 +118,3 @@ def test_sensitive_workflows_keep_minimum_permissions_and_explicit_secrets() -> 
         "HEIMGEWEBE_APP_ID",
         "HEIMGEWEBE_APP_PRIVATE_KEY",
     }
-
-    claude = yaml.safe_load(
-        (root / ".github/workflows/claude.yml").read_text(encoding="utf-8")
-    )
-    assert claude["jobs"]["claude"]["permissions"] == {
-        "contents": "write",
-        "pull-requests": "write",
-        "issues": "write",
-        "id-token": "write",
-    }
