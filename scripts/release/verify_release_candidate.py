@@ -34,7 +34,6 @@ from scripts.release.build_release_candidate import (
     TreeEntry,
     VERSION_RE,
     list_tree,
-    read_blob,
     resolve_tree,
     safe_symlink_target,
 )
@@ -369,36 +368,34 @@ def _read_limited(handle: object, *, name: str, max_bytes: int) -> bytes:
 
 
 def _read_archive_member(
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     name: str,
     *,
     max_bytes: int = MAX_ARCHIVE_MEMBER_BYTES,
 ) -> bytes:
-    with _open_bounded_tar(archive_path) as tar:
-        for member in tar:
-            if member.name != name:
-                continue
-            if not member.isfile():
-                raise ValueError(f"required archive member is not a file: {name}")
-            if member.size > max_bytes:
-                raise ValueError(
-                    f"archive member exceeds byte limit: {name}: "
-                    f"{member.size} > {max_bytes}"
-                )
-            handle = tar.extractfile(member)
-            if handle is None:
-                raise ValueError(f"cannot read required archive member: {name}")
-            content = _read_limited(handle, name=name, max_bytes=max_bytes)
-            if len(content) != member.size:
-                raise ValueError(f"archive member byte size mismatch: {name}")
-            return content
-    raise ValueError(f"required archive member is missing: {name}")
+    member = members.get(name)
+    if member is None:
+        raise ValueError(f"required archive member is missing: {name}")
+    if not member.isfile():
+        raise ValueError(f"required archive member is not a file: {name}")
+    if member.size > max_bytes:
+        raise ValueError(
+            f"archive member exceeds byte limit: {name}: {member.size} > {max_bytes}"
+        )
+    with tar_path.open("rb") as handle:
+        handle.seek(member.offset_data)
+        content = handle.read(member.size)
+    if len(content) != member.size:
+        raise ValueError(f"archive member byte size mismatch: {name}")
+    return content
 
 
 
 def _verify_dependency_locks(
     manifest: dict[str, object],
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     contract: ReleaseContract,
 ) -> None:
@@ -422,7 +419,10 @@ def _verify_dependency_locks(
         ):
             raise ValueError(f"dependency lock byte size is invalid: {path}")
         content = _read_archive_member(
-            archive_path, f"{expected_prefix}{path}", max_bytes=expected_size
+            tar_path,
+            members,
+            f"{expected_prefix}{path}",
+            max_bytes=expected_size,
         )
         if expected_size != len(content):
             raise ValueError(f"dependency lock byte size mismatch: {path}")
@@ -433,7 +433,8 @@ def _verify_dependency_locks(
 
 
 def _verify_semantic_record(
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     record: object,
     expected_path: str,
@@ -451,7 +452,8 @@ def _verify_semantic_record(
     ):
         raise ValueError(f"semantic extension byte size is invalid: {expected_path}")
     content = _read_archive_member(
-        archive_path,
+        tar_path,
+        members,
         f"{expected_prefix}{expected_path}",
         max_bytes=expected_size,
     )
@@ -462,7 +464,8 @@ def _verify_semantic_record(
 
 
 def _verify_semantic_target(
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     target: object,
     contract: ReleaseContract,
@@ -474,22 +477,24 @@ def _verify_semantic_target(
     if target.get("id") != contract.semantic_target_id:
         raise ValueError("semantic extension target identity mismatch")
     _verify_semantic_record(
-        archive_path, expected_prefix, target.get("input"), contract.semantic_input_path
+        tar_path, members, expected_prefix, target.get("input"), contract.semantic_input_path
     )
     _verify_semantic_record(
-        archive_path,
+        tar_path,
+        members,
         expected_prefix,
         target.get("constraints"),
         contract.semantic_constraints_path,
     )
     _verify_semantic_record(
-        archive_path, expected_prefix, target.get("lock"), contract.semantic_lock_path
+        tar_path, members, expected_prefix, target.get("lock"), contract.semantic_lock_path
     )
 
 
 def _verify_semantic_extension(
     manifest: dict[str, object],
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     expected_prefix: str,
     contract: ReleaseContract,
 ) -> None:
@@ -503,7 +508,8 @@ def _verify_semantic_extension(
     if semantic.get("unsupported_target_policy") != "fail_closed":
         raise ValueError("semantic extension unsupported-target policy mismatch")
     _verify_semantic_record(
-        archive_path,
+        tar_path,
+        members,
         expected_prefix,
         semantic.get("platform_contract"),
         contract.semantic_platform_contract_path,
@@ -511,12 +517,13 @@ def _verify_semantic_extension(
     targets = semantic.get("targets")
     if not isinstance(targets, list) or len(targets) != 1:
         raise ValueError("semantic extension target count mismatch")
-    _verify_semantic_target(archive_path, expected_prefix, targets[0], contract)
+    _verify_semantic_target(tar_path, members, expected_prefix, targets[0], contract)
 
 
 def _verify_manifest_contract(
     manifest: dict[str, object],
-    archive_path: Path,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     contract: ReleaseContract,
 ) -> None:
     if manifest.get("$schema") != contract.schema_uri:
@@ -567,17 +574,18 @@ def _verify_manifest_contract(
     }:
         raise ValueError("manifest archive normalization mismatch")
 
-    _verify_dependency_locks(manifest, archive_path, expected_prefix, contract)
+    _verify_dependency_locks(manifest, tar_path, members, expected_prefix, contract)
 
     license_content = _read_archive_member(
-        archive_path,
+        tar_path,
+        members,
         f"{expected_prefix}LICENSE",
         max_bytes=MAX_LICENSE_BYTES,
     ).decode("utf-8")
     if "Apache License" not in license_content or "Version 2.0" not in license_content:
         raise ValueError("archived LICENSE does not contain Apache-2.0")
 
-    _verify_semantic_extension(manifest, archive_path, expected_prefix, contract)
+    _verify_semantic_extension(manifest, tar_path, members, expected_prefix, contract)
 
     nonclaims = manifest.get("does_not_establish")
     if not isinstance(nonclaims, list) or not set(DOES_NOT_ESTABLISH).issubset(nonclaims):
@@ -620,17 +628,56 @@ def _repository_blob_sizes(
     return sizes
 
 
-def _read_repository_blob(
-    repo: Path, commit: str, entry: TreeEntry, expected_size: int
-) -> bytes:
-    blob = read_blob(repo, commit, entry.path)
-    if len(blob) != expected_size:
-        raise ValueError(f"repository blob byte size mismatch: {entry.path}")
-    return blob
+def _repository_blobs(
+    repo: Path,
+    entries: tuple[TreeEntry, ...],
+    expected_sizes: dict[str, int],
+) -> dict[str, bytes]:
+    process = subprocess.Popen(
+        ["git", "cat-file", "--batch"],
+        cwd=repo,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if process.stdin is None or process.stdout is None or process.stderr is None:
+        process.kill()
+        process.wait()
+        raise ValueError("git cat-file --batch pipes are unavailable")
+    blobs: dict[str, bytes] = {}
+    try:
+        for entry in entries:
+            process.stdin.write(f"{entry.object_id}\n".encode("ascii"))
+            process.stdin.flush()
+            header = process.stdout.readline().decode("ascii").strip()
+            object_id, object_type, raw_size = header.split(" ")
+            expected_size = expected_sizes[entry.path]
+            if (
+                object_id != entry.object_id
+                or object_type != "blob"
+                or not raw_size.isdigit()
+                or int(raw_size) != expected_size
+            ):
+                raise ValueError(f"invalid Git blob content response: {entry.path}")
+            blob = process.stdout.read(expected_size)
+            if len(blob) != expected_size or process.stdout.read(1) != b"\n":
+                raise ValueError(f"repository blob byte size mismatch: {entry.path}")
+            blobs[entry.path] = blob
+        process.stdin.close()
+        returncode = process.wait()
+        if returncode != 0:
+            detail = process.stderr.read().decode("utf-8", errors="replace").strip()
+            raise ValueError(f"git cat-file --batch failed: {detail}")
+        return blobs
+    except Exception:
+        process.kill()
+        process.wait()
+        raise
 
 
 def _compare_archive_entry(
-    tar: tarfile.TarFile,
+    tar_path: Path,
+    members: dict[str, tarfile.TarInfo],
     member: tarfile.TarInfo,
     *,
     entry_path: str,
@@ -649,10 +696,12 @@ def _compare_archive_entry(
         raise ValueError(f"repository blob exceeds byte limit: {entry_path}")
     if member.size != len(blob):
         raise ValueError(f"content byte size mismatch: {entry_path}")
-    handle = tar.extractfile(member)
-    if handle is None:
-        raise ValueError(f"cannot read archive member: {entry_path}")
-    content = _read_limited(handle, name=entry_path, max_bytes=len(blob))
+    content = _read_archive_member(
+        tar_path,
+        members,
+        member.name,
+        max_bytes=len(blob),
+    )
     if content != blob:
         raise ValueError(f"content mismatch: {entry_path}")
 
@@ -679,32 +728,22 @@ def _compare_with_repo(
 
     expected_entries = list_tree(repo, commit)
     blob_sizes = _repository_blob_sizes(repo, expected_entries)
+    blobs = _repository_blobs(repo, expected_entries, blob_sizes)
     expected_names = {f"{prefix}{entry.path}" for entry in expected_entries}
     observed_names = {name for name in members if name != prefix.rstrip("/")}
     if observed_names != expected_names:
         raise ValueError("archive path set does not match Git tree")
 
-    with _open_bounded_tar(archive_path) as tar:
-        iterator = iter(tar)
-        root_member = next(iterator, None)
-        if root_member is None or root_member.name != prefix.rstrip("/"):
-            raise ValueError("archive root member is missing or out of order")
-        for entry in expected_entries:
-            member = next(iterator, None)
-            expected_name = f"{prefix}{entry.path}"
-            if member is None or member.name != expected_name:
-                raise ValueError(f"archive member order mismatch: {entry.path}")
-            _compare_archive_entry(
-                tar,
-                member,
-                entry_path=entry.path,
-                entry_mode=entry.mode,
-                blob=_read_repository_blob(
-                    repo, commit, entry, blob_sizes[entry.path]
-                ),
-            )
-        if next(iterator, None) is not None:
-            raise ValueError("archive contains unexpected trailing members")
+    for entry in expected_entries:
+        member = members[f"{prefix}{entry.path}"]
+        _compare_archive_entry(
+            archive_path,
+            members,
+            member,
+            entry_path=entry.path,
+            entry_mode=entry.mode,
+            blob=blobs[entry.path],
+        )
 
 
 def _contract_for_manifest(manifest: dict[str, object]) -> ReleaseContract:
@@ -744,7 +783,7 @@ def _verify_release_candidate(
         prefix = archive.get("prefix")
         assert isinstance(prefix, str)
         _reject_retired_release_contract_members(members, prefix)
-        _verify_manifest_contract(manifest, tar_path, contract)
+        _verify_manifest_contract(manifest, tar_path, members, contract)
         if repo is not None:
             _compare_with_repo(
                 Path(repo).expanduser().resolve(), manifest, tar_path, members

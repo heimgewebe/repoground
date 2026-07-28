@@ -26,12 +26,12 @@ so these limits retain substantial headroom.
 ## Enforcement
 
 The compressed archive size is rejected before checksum hashing. Each verification
-materializes one bounded decompression stream and reuses the resulting Tar path for all
-checks, so PAX and GNU extension payloads count before `tarfile` can turn them into
-logical members without multiplying decompression work. Member count, member and
-aggregate limits are rejected before member payloads are read. Required member reads
-are chunked and bounded; source-bound content comparison batch-queries immutable Git
-object sizes before reading blobs.
+materializes one bounded decompression stream and parses the resulting Tar exactly
+once, so PAX and GNU extension payloads count before `tarfile` can turn them into
+logical members without multiplying decompression or parsing work. Later content checks
+use validated Tar offsets directly. Member count, member and aggregate limits are
+rejected before member payloads are read. Source-bound comparison uses one size batch
+and one persistent content batch for all immutable Git blobs.
 
 ## Validation
 

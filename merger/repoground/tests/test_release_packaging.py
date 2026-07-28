@@ -776,6 +776,26 @@ def test_verifier_rejects_archive_stream_bytes_over_limit(
         verify_release_candidate(candidate)
 
 
+def test_source_bound_verifier_batches_blob_content_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-batched-blobs"
+    build_release_candidate(repo, candidate)
+    original = verifier_module.subprocess.Popen
+    batch_calls = 0
+
+    def counted_popen(argv, *args, **kwargs):
+        nonlocal batch_calls
+        if argv[:3] == ["git", "cat-file", "--batch"]:
+            batch_calls += 1
+        return original(argv, *args, **kwargs)
+
+    monkeypatch.setattr(verifier_module.subprocess, "Popen", counted_popen)
+    assert verify_release_candidate(candidate, repo=repo)["status"] == "pass"
+    assert batch_calls == 1
+
+
 def test_source_bound_verifier_checks_blob_size_before_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -783,11 +803,14 @@ def test_source_bound_verifier_checks_blob_size_before_read(
     candidate = tmp_path / "candidate-repository-blob-limit"
     build_release_candidate(repo, candidate)
     monkeypatch.setattr(verifier_module, "MAX_REPOSITORY_BLOB_BYTES", 1)
-    monkeypatch.setattr(
-        verifier_module,
-        "read_blob",
-        lambda *args: pytest.fail("repository blob read before size rejection"),
-    )
+    original_popen = verifier_module.subprocess.Popen
+
+    def reject_content_batch(argv, *args, **kwargs):
+        if argv[:3] == ["git", "cat-file", "--batch"]:
+            pytest.fail("repository content batch started before size rejection")
+        return original_popen(argv, *args, **kwargs)
+
+    monkeypatch.setattr(verifier_module.subprocess, "Popen", reject_content_batch)
     with pytest.raises(ValueError, match="repository blob exceeds byte limit"):
         verify_release_candidate(candidate, repo=repo)
 
@@ -801,22 +824,31 @@ def test_verifier_materializes_archive_once_per_verification(
     repo = _repo(tmp_path)
     candidate = tmp_path / "candidate-single-materialization"
     build_release_candidate(repo, candidate)
-    original = verifier_module._materialized_bounded_tar
-    calls = 0
+    original_materialize = verifier_module._materialized_bounded_tar
+    original_tar_open = verifier_module.tarfile.open
+    materializations = 0
+    tar_opens = 0
 
     @contextmanager
     def counted_materialization(archive_path: Path):
-        nonlocal calls
-        calls += 1
-        with original(archive_path) as tar_path:
+        nonlocal materializations
+        materializations += 1
+        with original_materialize(archive_path) as tar_path:
             yield tar_path
+
+    def counted_tar_open(*args, **kwargs):
+        nonlocal tar_opens
+        tar_opens += 1
+        return original_tar_open(*args, **kwargs)
 
     monkeypatch.setattr(
         verifier_module, "_materialized_bounded_tar", counted_materialization
     )
+    monkeypatch.setattr(verifier_module.tarfile, "open", counted_tar_open)
     kwargs = {"repo": repo} if source_bound else {}
     assert verify_release_candidate(candidate, **kwargs)["status"] == "pass"
-    assert calls == 1
+    assert materializations == 1
+    assert tar_opens == 1
 
 
 def test_verifier_bounds_global_pax_metadata_before_first_member(
