@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -779,8 +780,7 @@ def _validate_archive_entry_shape(
 
 
 def _compare_archive_entry(
-    tar_path: Path,
-    members: dict[str, tarfile.TarInfo],
+    tar_handle: BinaryIO,
     member: tarfile.TarInfo,
     *,
     entry_path: str,
@@ -792,12 +792,10 @@ def _compare_archive_entry(
         if member.linkname != target:
             raise ValueError(f"symlink mismatch: {entry_path}")
         return
-    content = _read_archive_member(
-        tar_path,
-        members,
-        member.name,
-        max_bytes=len(blob),
-    )
+    tar_handle.seek(member.offset_data)
+    content = tar_handle.read(member.size)
+    if len(content) != member.size:
+        raise ValueError(f"archive member byte size mismatch: {member.name}")
     if content != blob:
         raise ValueError(f"content mismatch: {entry_path}")
 
@@ -829,7 +827,10 @@ def _compare_with_repo(
     if observed_names != expected_names:
         raise ValueError("archive path set does not match Git tree")
 
-    with _open_repository_blob_batch(repo) as process:
+    with (
+        archive_path.open("rb") as tar_handle,
+        _open_repository_blob_batch(repo) as process,
+    ):
         for entry in expected_entries:
             member = members[f"{prefix}{entry.path}"]
             expected_size = blob_sizes[entry.path]
@@ -841,8 +842,7 @@ def _compare_with_repo(
             )
             blob = _read_repository_blob_batch(process, entry, expected_size)
             _compare_archive_entry(
-                archive_path,
-                members,
+                tar_handle,
                 member,
                 entry_path=entry.path,
                 entry_mode=entry.mode,

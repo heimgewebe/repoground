@@ -970,6 +970,27 @@ def test_source_bound_verifier_rejects_total_blob_bytes_before_content_batch(
         verify_release_candidate(candidate, repo=repo)
 
 
+def test_source_bound_verifier_reuses_one_materialized_tar_reader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-single-tar-reader"
+    build_release_candidate(repo, candidate)
+    original = verifier_module._compare_archive_entry
+    observed_handles: list[object] = []
+
+    def counted_compare(tar_handle, member, **kwargs):
+        assert not tar_handle.closed
+        observed_handles.append(tar_handle)
+        return original(tar_handle, member, **kwargs)
+
+    monkeypatch.setattr(verifier_module, "_compare_archive_entry", counted_compare)
+    assert verify_release_candidate(candidate, repo=repo)["status"] == "pass"
+    assert len(observed_handles) > 1
+    assert all(handle is observed_handles[0] for handle in observed_handles)
+    assert observed_handles[0].closed
+
+
 @pytest.mark.parametrize("source_bound", (False, True))
 def test_verifier_materializes_archive_once_per_verification(
     tmp_path: Path,
