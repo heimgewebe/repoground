@@ -20,7 +20,7 @@ class MergerUIPrescanMixin:
         """
         Shows the Prescan UI (Tree View) for the selected repository.
         Currently limited to single repo selection for simplicity.
-        
+
         ARCHITECTURE:
         - Prescan → Selection Pool (modify only, never triggers merge)
         - Merge → Explicit action from main view via Run Merge button
@@ -214,13 +214,13 @@ class MergerUIPrescanMixin:
         selection_state = {
             'mode': 'partial'  # 'all', 'partial', or 'none'
         }
-        
+
         # Initialize selection mode based on current selection
         # Check if existing pool entry is in ALL state (both raw and compressed are None)
-        is_all = (isinstance(existing_pool_entry, dict) and 
-                  existing_pool_entry.get("raw") is None and 
+        is_all = (isinstance(existing_pool_entry, dict) and
+                  existing_pool_entry.get("raw") is None and
                   existing_pool_entry.get("compressed") is None)
-        
+
         if is_all:
             selection_state['mode'] = 'all'
         elif not any(item["selected"] for item in flat_items):
@@ -297,14 +297,14 @@ class MergerUIPrescanMixin:
                 # Toggle logic
                 item = flat_items[row]
                 new_state = not item["selected"]
-                
+
                 # Handle ALL state transition
                 if selection_state['mode'] == 'all' and not new_state:
                     # Deselecting from ALL state - switch to partial selection mode
                     selection_state['mode'] = 'partial'
-                
+
                 self._set_selected_recursive(item, new_state)
-                
+
                 # Update selection mode after change
                 if all(i["selected"] for i in flat_items):
                     selection_state['mode'] = 'all'
@@ -312,7 +312,7 @@ class MergerUIPrescanMixin:
                     selection_state['mode'] = 'none'
                 else:
                     selection_state['mode'] = 'partial'
-                
+
                 tv.reload_data()
 
             def _set_selected_recursive(self, item, state):
@@ -335,7 +335,7 @@ class MergerUIPrescanMixin:
 
         # Bottom Bar: Remove / Cancel / Replace / Append
         bar_y = sheet.height - 50
-        
+
         # Shared pool update logic
         def _pool_update(mode):
             """
@@ -349,7 +349,7 @@ class MergerUIPrescanMixin:
             # FIX 1: Materialize raw paths correctly (DFS).
             # If a directory is selected, ALL its descendants must be in raw_paths.
             # We cannot rely solely on flat_items["selected"] for files if the user only clicked the folder.
-            
+
             materialized_raw = []
             compressed_paths = []
 
@@ -385,7 +385,7 @@ class MergerUIPrescanMixin:
             # Normalize and deduplicate
             raw_paths = sorted(list(set(normalize_path(p) for p in materialized_raw)))
             compressed_paths = sorted(list(set(normalize_path(p) for p in compressed_paths)))
-            
+
             # Handle different modes
             if mode == 'remove':
                 # Remove from pool
@@ -397,13 +397,13 @@ class MergerUIPrescanMixin:
                 reset_guard()
                 sheet.close()
                 return
-            
+
             # Get current selection mode
             current_mode = selection_state['mode']
-            
+
             # Check if we have an existing selection for this repo
             existing = self.saved_prescan_selections.get(root_name)
-            
+
             if mode == 'replace':
                 # Replace mode: overwrite existing selection
                 if current_mode == 'all':
@@ -424,11 +424,11 @@ class MergerUIPrescanMixin:
                         # Empty selection - remove from pool
                         if root_name in self.saved_prescan_selections:
                             del self.saved_prescan_selections[root_name]
-                
+
                 self.save_last_state()
                 if console:
                     console.hud_alert(f"Replaced selection pool for {root_name}", "success", 1.5)
-                
+
             elif mode == 'append':
                 # Append mode: union with existing selection
                 if current_mode == 'none':
@@ -436,7 +436,7 @@ class MergerUIPrescanMixin:
                     if console:
                         console.hud_alert("No changes: no items selected in append mode", "error", 2.0)
                     return # Don't close dialog
-                
+
                 if current_mode == 'all':
                     # ALL selected - ALL overrides everything
                     self.saved_prescan_selections[root_name] = {"raw": None, "compressed": None}
@@ -544,15 +544,15 @@ class MergerUIPrescanMixin:
                         # Empty result -> remove
                         if root_name in self.saved_prescan_selections:
                             del self.saved_prescan_selections[root_name]
-                
+
                 self.save_last_state()
                 if console:
                     console.hud_alert(f"Appended to selection pool for {root_name}", "success", 1.5)
-            
+
             reset_guard()
             sheet.close()
             # No auto-merge!
-        
+
         # Remove button (left side)
         btn_remove = ui.Button(title="Remove")
         btn_remove.frame = (10, bar_y, 80, 40)
@@ -562,7 +562,7 @@ class MergerUIPrescanMixin:
         btn_remove.corner_radius = 6
         btn_remove.action = lambda s: _pool_update('remove')
         sheet.add_subview(btn_remove)
-        
+
         # Cancel button (right side)
         btn_cancel = ui.Button(title="Cancel")
         btn_cancel.frame = (sheet.width - 310, bar_y, 70, 40)
@@ -572,7 +572,7 @@ class MergerUIPrescanMixin:
         btn_cancel.corner_radius = 6
         btn_cancel.action = lambda s: (reset_guard(), sheet.close())
         sheet.add_subview(btn_cancel)
-        
+
         # Replace button (right side)
         # "Store to Pool (Replace)" - abbreviated for mobile UI if needed, but clarity is prioritized
         btn_replace = ui.Button(title="Store (Replace)")
@@ -583,7 +583,7 @@ class MergerUIPrescanMixin:
         btn_replace.corner_radius = 6
         btn_replace.action = lambda s: _pool_update('replace')
         sheet.add_subview(btn_replace)
-        
+
         # Append button (right side)
         # "Store to Pool (Append)"
         btn_append = ui.Button(title="Store (Append)")
