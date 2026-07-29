@@ -65,6 +65,7 @@ def test_task_count_uses_each_thread_real_uid_and_ignores_proc_races(
     _write_task_status(tmp_path, "200", "200", 1000)
     (tmp_path / "not-a-pid").mkdir()
     (tmp_path / "300" / "task" / "300").mkdir(parents=True)
+    (tmp_path / "400").mkdir()  # process vanished before its task directory opened
 
     assert process_budget._count_real_uid_tasks(proc_root=tmp_path, real_uid=1000) == 3
 
