@@ -268,6 +268,12 @@ def _build_diagnostics_parser() -> argparse.ArgumentParser:
     eval_report.add_argument("--canonical")
     eval_report.add_argument("--citation")
 
+    routing_gates = operations.add_parser(
+        "routing-gates",
+        help="Evaluate revision-bound retrieval evidence per task profile",
+    )
+    routing_gates.add_argument("--evidence", required=True)
+
     return parser
 
 
@@ -433,6 +439,13 @@ def _run_eval_report(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _run_routing_gates(args: argparse.Namespace) -> dict[str, Any]:
+    from merger.repoground.retrieval.task_profile_routing import evaluate_evidence
+
+    evidence = _read_json(args.evidence, expected_type=dict)
+    return evaluate_evidence(evidence)
+
+
 def run_diagnostics(args: argparse.Namespace) -> int:
     raw_args = ["--help"] if args.diagnostics_help else args.diagnostics_args
     operation_args = _build_diagnostics_parser().parse_args(raw_args)
@@ -444,6 +457,7 @@ def run_diagnostics(args: argparse.Namespace) -> int:
         "audit-plan": _run_audit_plan,
         "audit-findings": _run_audit_findings,
         "eval-report": _run_eval_report,
+        "routing-gates": _run_routing_gates,
     }
     try:
         result = handlers[operation_args.diagnostics_command](operation_args)

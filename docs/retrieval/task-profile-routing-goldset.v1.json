@@ -1,0 +1,174 @@
+{
+  "does_not_establish": [
+    "uniform measurement completeness for every profile",
+    "paired current-main A/B comparability",
+    "routing mutation authority",
+    "answer correctness",
+    "review completeness",
+    "global retrieval completeness",
+    "default promotion"
+  ],
+  "id": "repoground-task-profile-routing-goldset-v1",
+  "kind": "repoground.retrieval_task_profile_goldset",
+  "measurement_coverage": {
+    "citation_health": [
+      "retrieval-v2-review-intent-20260708"
+    ],
+    "context_bytes": [
+      "agent-impact-live-rerun-20260713"
+    ],
+    "expected_target_recall": [
+      "canonical-review-retrieval-20260711",
+      "retrieval-v2-review-intent-20260708",
+      "agent-impact-live-rerun-20260713"
+    ],
+    "miss_taxonomy": [
+      "canonical-review-retrieval-20260711",
+      "retrieval-v2-review-intent-20260708",
+      "agent-impact-live-rerun-20260713"
+    ],
+    "mrr": [
+      "canonical-review-retrieval-20260711",
+      "retrieval-v2-review-intent-20260708"
+    ],
+    "range_health": [
+      "retrieval-v2-review-intent-20260708"
+    ],
+    "recall_at_k": [
+      "canonical-review-retrieval-20260711",
+      "retrieval-v2-review-intent-20260708",
+      "agent-impact-live-rerun-20260713"
+    ],
+    "tool_calls": [
+      "agent-impact-live-rerun-20260713"
+    ]
+  },
+  "repositories": [
+    {
+      "commit": "dff582f9c4e8b5511d4ce436db81e3e245f725ec",
+      "id": "lenskit",
+      "repository": "heimgewebe/repoground",
+      "snapshot_profile": "agent-portable"
+    },
+    {
+      "commit": "f6eed48752fd2cf32f070dc69b2112e2498872cb",
+      "id": "grabowski",
+      "repository": "heimgewebe/grabowski",
+      "snapshot_profile": "agent-portable"
+    },
+    {
+      "commit": "e095903bb71c937d861fa64d7e8a6b593062ca6f",
+      "id": "weltgewebe",
+      "repository": "heimgewebe/weltgewebe",
+      "snapshot_profile": "agent-portable"
+    }
+  ],
+  "required_metrics": [
+    "recall_at_k",
+    "mrr",
+    "expected_target_recall",
+    "citation_health",
+    "range_health",
+    "miss_taxonomy",
+    "context_bytes",
+    "tool_calls"
+  ],
+  "source_commit": "271076c8b5e625a079d68e8d92ce3489b9ef15ad",
+  "source_sets": {
+    "agent_benchmark_v1": {
+      "case_ids_by_category": {
+        "grounding_freshness": [
+          "grounding-clean-freshness",
+          "grounding-head-mismatch",
+          "grounding-dirty-working-tree",
+          "grounding-no-repo-root",
+          "grounding-missing-provenance",
+          "grounding-invalid-citation",
+          "grounding-valid-boundary-citation",
+          "grounding-test-sufficiency-abstention"
+        ],
+        "navigation": [
+          "nav-lenskit-mcp-startup",
+          "nav-lenskit-live-freshness",
+          "nav-lenskit-agent-impact-core",
+          "nav-lenskit-agent-impact-adapter",
+          "nav-grabowski-job-finalizer-test",
+          "nav-grabowski-runtime-entrypoint",
+          "nav-weltgewebe-review-impact-test",
+          "nav-weltgewebe-docmeta-contract"
+        ],
+        "structural": [
+          "struct-lenskit-mcp-boundary",
+          "struct-lenskit-agent-impact-evidence",
+          "struct-lenskit-snapshot-write-boundary",
+          "struct-grabowski-finalizer-context",
+          "struct-grabowski-consumer-surface",
+          "struct-weltgewebe-review-impact-context",
+          "struct-weltgewebe-docmeta-system",
+          "struct-no-complete-call-graph"
+        ]
+      },
+      "path": "docs/retrieval/repobrief_agent_benchmark_taskset.v1.json",
+      "scope": "24 paired-agent cases across navigation, structural and grounding/freshness classes",
+      "sha256": "2d8a4ca3c32f8f5ab592387b5f645db8e8527cb624238c20a1da64a5e7221887"
+    },
+    "agent_impact_live_rerun_v1": {
+      "path": "docs/retrieval/repobrief_agent_impact_live_goldset.rerun.v1.json",
+      "scope": "three-repository change-impact and related-test cases",
+      "sha256": "3171733edaee8257b50ae9b05c2fb5b0f58d074f821c016adeb63ea85c092272"
+    },
+    "review_queries_v1": {
+      "path": "docs/retrieval/review_queries.v1.json",
+      "scope": "single-repository review retrieval questions",
+      "sha256": "47f562e6c5b5b63205930e92186d406d33029f7330796312ca5844a177fc3f77"
+    }
+  },
+  "task_profiles": {
+    "basic_repo_question": {
+      "agent_benchmark_categories": [
+        "navigation"
+      ],
+      "source_sets": [
+        "review_queries_v1",
+        "agent_benchmark_v1"
+      ]
+    },
+    "change_impact": {
+      "agent_benchmark_categories": [
+        "structural"
+      ],
+      "source_sets": [
+        "agent_impact_live_rerun_v1",
+        "agent_benchmark_v1"
+      ]
+    },
+    "find_relevant_tests": {
+      "agent_benchmark_categories": [
+        "navigation",
+        "structural"
+      ],
+      "source_sets": [
+        "agent_impact_live_rerun_v1",
+        "agent_benchmark_v1"
+      ]
+    },
+    "ground_claim": {
+      "agent_benchmark_categories": [
+        "grounding_freshness"
+      ],
+      "source_sets": [
+        "agent_benchmark_v1"
+      ]
+    },
+    "review": {
+      "agent_benchmark_categories": [
+        "structural"
+      ],
+      "source_sets": [
+        "review_queries_v1",
+        "agent_benchmark_v1"
+      ]
+    }
+  },
+  "version": "1.0"
+}
