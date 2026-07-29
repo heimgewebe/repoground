@@ -279,6 +279,63 @@ def test_extract_git_archive_classifies_temporary_archive_read_failure(
     assert "archive read failed" in stderr
 
 
+def test_extract_git_archive_classifies_member_stream_seek_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    class MemberSeekFailure(io.BytesIO):
+        def __init__(self, data: bytes):
+            super().__init__(data)
+            self._header_read = False
+            io.BytesIO.seek(self, 0, 2)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+            return False
+
+        def read(self, *args, **kwargs):
+            chunk = super().read(*args, **kwargs)
+            if chunk:
+                self._header_read = True
+            return chunk
+
+        def seek(self, offset, whence=0):
+            if self._header_read and whence == 0 and offset == tarfile.BLOCKSIZE:
+                raise OSError("archive member seek failed")
+            return super().seek(offset, whence)
+
+    monkeypatch.setattr(
+        sa.tempfile,
+        "TemporaryFile",
+        lambda **_kwargs: MemberSeekFailure(_tar_with_member("file.txt")),
+    )
+    monkeypatch.setattr(
+        sa,
+        "_run_git_binary_to_file",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["git", "archive"], returncode=0, stdout=b"", stderr=b""
+        ),
+    )
+
+    result = sa._extract_git_archive(
+        cache_git_dir=tmp_path / "cache.git",
+        commit="a" * 40,
+        base_dir=tmp_path,
+        snapshot_dir=tmp_path / "snapshot",
+        repo_name="repo",
+        timeout_seconds=10,
+    )
+
+    assert result is not None
+    status, message, stderr = result
+    assert status == SourceStatus.ARCHIVE_FAILED
+    assert message == "could not read git archive for repo"
+    assert "temporary Git archive seek failed" in stderr
+    assert "archive member seek failed" in stderr
+
+
 def test_extract_git_archive_keeps_target_write_failure_as_extract_failure(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ):
