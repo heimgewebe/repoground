@@ -1,11 +1,12 @@
 """Loaded-host process-budget overlay for the patch evaluation sidecar.
 
-Linux ``RLIMIT_NPROC`` is counted against the real user ID, not against one
-subprocess tree.  An absolute value such as 256 therefore prevents a sandbox
-from starting when the operator user already owns at least 256 processes.
+Linux ``RLIMIT_NPROC`` is counted against the real user ID and, more precisely,
+counts threads rather than only process leaders.  An absolute value such as 256
+therefore prevents a sandbox from starting when the operator user already owns
+at least 256 tasks.
 
 This overlay keeps the same configured command budget, but translates it to an
-absolute limit at launch time: current real-UID process count plus the bounded
+absolute limit at launch time: current real-UID task count plus the bounded
 incremental budget.  The value is clamped to the inherited hard limit.  This is
 fail-closed under concurrent host growth and deliberately does not claim a
 strict per-command kernel quota, which RLIMIT_NPROC cannot provide.
@@ -42,41 +43,55 @@ def _evaluation_error(message: str) -> Exception:
     return error_type(message)
 
 
-def _count_real_uid_processes(
+def _status_real_uid(status_path: Path) -> int | None:
+    try:
+        status = status_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in status.splitlines():
+        if not line.startswith("Uid:"):
+            continue
+        fields = line.split()
+        if len(fields) < 2:
+            return None
+        try:
+            return int(fields[1])
+        except ValueError:
+            return None
+    return None
+
+
+def _count_real_uid_tasks(
     *, proc_root: Path = Path("/proc"), real_uid: int | None = None
 ) -> int:
-    """Count visible processes whose real UID matches the current real UID.
+    """Count visible Linux tasks whose real UID matches ``real_uid``.
 
-    ``/proc`` changes while it is scanned.  Vanished or unreadable entries are
-    ignored; under-counting only reduces the computed headroom and therefore
-    fails closed when the process table is heavily contended.
+    ``RLIMIT_NPROC`` accounts threads.  Therefore each ``/proc/<pid>/task/<tid>``
+    entry is inspected rather than counting only top-level process directories.
+    ``/proc`` changes while it is scanned; vanished or unreadable entries are
+    ignored.  Any resulting undercount lowers the computed absolute limit and
+    can only consume sidecar headroom, so the race remains fail-closed.
     """
 
     uid = os.getuid() if real_uid is None else real_uid
     count = 0
     try:
-        entries = proc_root.iterdir()
+        processes = proc_root.iterdir()
     except OSError as exc:
         raise _evaluation_error(f"could not inspect process table: {exc}") from exc
 
-    for entry in entries:
-        if not entry.name.isdigit():
+    for process in processes:
+        if not process.name.isdigit():
             continue
         try:
-            status = (entry / "status").read_text(encoding="utf-8", errors="replace")
+            tasks = (process / "task").iterdir()
         except OSError:
             continue
-        for line in status.splitlines():
-            if not line.startswith("Uid:"):
+        for task in tasks:
+            if not task.name.isdigit():
                 continue
-            fields = line.split()
-            if len(fields) >= 2:
-                try:
-                    if int(fields[1]) == uid:
-                        count += 1
-                except ValueError:
-                    pass
-            break
+            if _status_real_uid(task / "status") == uid:
+                count += 1
     return count
 
 
@@ -94,7 +109,7 @@ def _effective_nproc_limit(
 ) -> dict[str, int | None]:
     """Return the absolute RLIMIT_NPROC derived from current host load.
 
-    The configured value remains an incremental budget.  A finite inherited
+    The configured value remains an incremental task budget.  A finite inherited
     hard limit may reduce that budget, but it is never raised or bypassed.
     """
 
@@ -106,7 +121,7 @@ def _effective_nproc_limit(
     if configured_budget <= 0:
         raise _evaluation_error("configured command process budget must be positive")
 
-    baseline = _count_real_uid_processes(proc_root=proc_root, real_uid=real_uid)
+    baseline = _count_real_uid_tasks(proc_root=proc_root, real_uid=real_uid)
     inherited_hard = _inherited_nproc_hard_limit()
     requested_limit = baseline + configured_budget
     absolute_limit = (
@@ -118,12 +133,12 @@ def _effective_nproc_limit(
     if effective_budget <= 0:
         hard_label = "unlimited" if inherited_hard is None else str(inherited_hard)
         raise _evaluation_error(
-            "no process headroom remains for the sandbox "
-            f"(real_uid_processes={baseline}, inherited_hard_limit={hard_label})"
+            "no task headroom remains for the sandbox "
+            f"(real_uid_tasks={baseline}, inherited_hard_limit={hard_label})"
         )
 
     return {
-        "real_uid_processes": baseline,
+        "real_uid_tasks": baseline,
         "configured_incremental_budget": configured_budget,
         "effective_incremental_budget": effective_budget,
         "absolute_limit": absolute_limit,
