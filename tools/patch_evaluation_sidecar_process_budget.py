@@ -76,7 +76,7 @@ def _count_real_uid_tasks(
     uid = os.getuid() if real_uid is None else real_uid
     count = 0
     try:
-        processes = proc_root.iterdir()
+        processes = list(proc_root.iterdir())
     except OSError as exc:
         raise _evaluation_error(f"could not inspect process table: {exc}") from exc
 
@@ -84,7 +84,7 @@ def _count_real_uid_tasks(
         if not process.name.isdigit():
             continue
         try:
-            tasks = (process / "task").iterdir()
+            tasks = list((process / "task").iterdir())
         except OSError:
             continue
         for task in tasks:
@@ -119,7 +119,7 @@ def _effective_nproc_limit(
 
     configured_budget = int(hardening._MAX_COMMAND_PROCESSES)
     if configured_budget <= 0:
-        raise _evaluation_error("configured command process budget must be positive")
+        raise _evaluation_error("configured command task budget must be positive")
 
     baseline = _count_real_uid_tasks(proc_root=proc_root, real_uid=real_uid)
     inherited_hard = _inherited_nproc_hard_limit()
