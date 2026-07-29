@@ -46,37 +46,40 @@ def _install(*, configured_budget: int = 256):
     return legacy, hardening
 
 
-def test_process_count_uses_real_uid_and_ignores_proc_races(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def _write_task_status(proc_root: Path, pid: str, tid: str, uid: int) -> None:
+    directory = proc_root / pid / "task" / tid
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "status").write_text(
+        f"Name:\ttest\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n",
+        encoding="utf-8",
+    )
+
+
+def test_task_count_uses_each_thread_real_uid_and_ignores_proc_races(
+    tmp_path: Path,
 ) -> None:
     _install()
-    for pid, uid in (("100", 1000), ("101", 1001), ("102", 1000)):
-        directory = tmp_path / pid
-        directory.mkdir()
-        (directory / "status").write_text(
-            f"Name:\ttest\nUid:\t{uid}\t{uid}\t{uid}\t{uid}\n",
-            encoding="utf-8",
-        )
+    _write_task_status(tmp_path, "100", "100", 1000)
+    _write_task_status(tmp_path, "100", "101", 1000)
+    _write_task_status(tmp_path, "100", "102", 1001)
+    _write_task_status(tmp_path, "200", "200", 1000)
     (tmp_path / "not-a-pid").mkdir()
-    (tmp_path / "103").mkdir()  # vanished/unreadable status race
+    (tmp_path / "300" / "task" / "300").mkdir(parents=True)
 
-    assert (
-        process_budget._count_real_uid_processes(proc_root=tmp_path, real_uid=1000)
-        == 2
-    )
+    assert process_budget._count_real_uid_tasks(proc_root=tmp_path, real_uid=1000) == 3
 
 
 def test_loaded_host_limit_is_baseline_plus_incremental_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install(configured_budget=256)
-    monkeypatch.setattr(process_budget, "_count_real_uid_processes", lambda **_: 270)
+    monkeypatch.setattr(process_budget, "_count_real_uid_tasks", lambda **_: 270)
     monkeypatch.setattr(process_budget, "_inherited_nproc_hard_limit", lambda: 31422)
 
     snapshot = process_budget._effective_nproc_limit()
 
     assert snapshot == {
-        "real_uid_processes": 270,
+        "real_uid_tasks": 270,
         "configured_incremental_budget": 256,
         "effective_incremental_budget": 256,
         "absolute_limit": 526,
@@ -88,7 +91,7 @@ def test_finite_inherited_hard_limit_only_reduces_headroom(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install(configured_budget=256)
-    monkeypatch.setattr(process_budget, "_count_real_uid_processes", lambda **_: 270)
+    monkeypatch.setattr(process_budget, "_count_real_uid_tasks", lambda **_: 270)
     monkeypatch.setattr(process_budget, "_inherited_nproc_hard_limit", lambda: 300)
 
     snapshot = process_budget._effective_nproc_limit()
@@ -97,14 +100,14 @@ def test_finite_inherited_hard_limit_only_reduces_headroom(
     assert snapshot["effective_incremental_budget"] == 30
 
 
-def test_no_inherited_process_headroom_fails_closed(
+def test_no_inherited_task_headroom_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install(configured_budget=256)
-    monkeypatch.setattr(process_budget, "_count_real_uid_processes", lambda **_: 270)
+    monkeypatch.setattr(process_budget, "_count_real_uid_tasks", lambda **_: 270)
     monkeypatch.setattr(process_budget, "_inherited_nproc_hard_limit", lambda: 270)
 
-    with pytest.raises(RuntimeError, match="no process headroom remains"):
+    with pytest.raises(RuntimeError, match="no task headroom remains"):
         process_budget._effective_nproc_limit()
 
 
@@ -112,7 +115,7 @@ def test_prlimit_argv_no_longer_uses_absolute_legacy_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install(configured_budget=256)
-    monkeypatch.setattr(process_budget, "_count_real_uid_processes", lambda **_: 270)
+    monkeypatch.setattr(process_budget, "_count_real_uid_tasks", lambda **_: 270)
     monkeypatch.setattr(process_budget, "_inherited_nproc_hard_limit", lambda: 31422)
 
     argv = process_budget._limited_sandbox_argv(["/usr/bin/true"], 10)
@@ -124,9 +127,7 @@ def test_prlimit_argv_no_longer_uses_absolute_legacy_ceiling(
 
 @pytest.mark.skipif(sys.platform != "linux", reason="RLIMIT_NPROC is Linux-specific")
 @pytest.mark.skipif(os.getuid() == 0, reason="Linux does not enforce RLIMIT_NPROC for root")
-def test_small_incremental_budget_rejects_fork_storm(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_small_incremental_budget_rejects_fork_storm() -> None:
     _install(configured_budget=6)
     script = (
         "import subprocess,sys; children=[]; stopped=False\n"
