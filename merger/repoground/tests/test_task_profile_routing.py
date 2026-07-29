@@ -129,6 +129,37 @@ def test_complete_profile_can_only_promote_with_explicit_profile_authority() -> 
     assert evaluate_evidence(evidence)["profile_decisions"][1]["decision"] == "promote"
 
 
+def test_malformed_threshold_fails_closed_in_semantic_evaluator() -> None:
+    evidence = load_evidence(EVIDENCE)
+    profile = next(item for item in evidence["profiles"] if item["task_profile"] == "review")
+    profile["thresholds"]["minimum_recall_at_k"] = "disabled"
+    errors = validate_evidence(evidence)
+    assert any("thresholds.minimum_recall_at_k must be a number from 0 to 1" in error for error in errors)
+    with pytest.raises(ValueError, match="thresholds.minimum_recall_at_k"):
+        evaluate_evidence(evidence)
+
+
+def test_partial_measurement_never_promotes_even_with_complete_metrics_and_authority() -> None:
+    evidence = load_evidence(EVIDENCE)
+    profile = next(item for item in evidence["profiles"] if item["task_profile"] == "review")
+    measurement = profile["measurements"][-1]
+    measurement["status"] = "partial"
+    measurement["metrics"] = {
+        "recall_at_k": 0.95,
+        "mrr": 0.5,
+        "expected_target_recall": 0.5,
+        "citation_health": 1.0,
+        "range_health": 1.0,
+        "miss_taxonomy": {"target_exists_not_in_top_k": 1},
+        "context_bytes": 4096,
+        "tool_calls": 4,
+    }
+    profile["promotion_authority"] = "explicit_profile_decision"
+    decision = evaluate_evidence(evidence)["profile_decisions"][1]
+    assert decision["decision"] == "keep_opt_in"
+    assert decision["reasons"] == ["partial_measurement"]
+
+
 def test_measured_status_rejects_null_metrics() -> None:
     evidence = load_evidence(EVIDENCE)
     profile = evidence["profiles"][0]

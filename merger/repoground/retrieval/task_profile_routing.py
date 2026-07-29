@@ -31,6 +31,13 @@ METRIC_KEYS = (
     "tool_calls",
 )
 DECISIONS = {"promote", "keep_opt_in", "blocked"}
+THRESHOLD_KEYS = (
+    "minimum_recall_at_k",
+    "minimum_mrr",
+    "minimum_expected_target_recall",
+    "minimum_citation_health",
+    "minimum_range_health",
+)
 
 
 def sha256_file(path: str | Path) -> str:
@@ -78,8 +85,7 @@ def _validate_binding(binding: object, label: str, errors: list[str]) -> None:
         errors.append(f"{label}.reason is required when unavailable")
 
 
-def validate_evidence(evidence: Mapping[str, Any]) -> list[str]:
-    errors: list[str] = []
+def _validate_evidence_header(evidence: Mapping[str, Any], errors: list[str]) -> None:
     if evidence.get("kind") != KIND:
         errors.append(f"kind must be {KIND}")
     if evidence.get("version") != VERSION:
@@ -92,189 +98,315 @@ def validate_evidence(evidence: Mapping[str, Any]) -> list[str]:
         errors.append("task_id is required")
     if not _is_commit(evidence.get("source_commit")):
         errors.append("source_commit must be a 40-character commit")
-    if not isinstance(evidence.get("does_not_establish"), list) or not evidence.get("does_not_establish"):
+    if not isinstance(evidence.get("does_not_establish"), list) or not evidence.get(
+        "does_not_establish"
+    ):
         errors.append("does_not_establish must be non-empty")
 
-    goldset = evidence.get("goldset")
+
+def _validate_goldset(goldset: object, errors: list[str]) -> None:
     _validate_binding(goldset, "goldset", errors)
-    if isinstance(goldset, Mapping):
-        repositories = goldset.get("repositories")
-        profiles = goldset.get("task_profiles")
-        if not isinstance(repositories, list) or len(set(repositories)) < 2:
-            errors.append("goldset must bind at least two repositories")
-        if sorted(profiles or []) != sorted(TASK_PROFILES):
-            errors.append("goldset task_profiles must cover the five canonical profiles")
-        coverage = goldset.get("measurement_coverage")
-        if not isinstance(coverage, Mapping):
-            errors.append("goldset.measurement_coverage must be an object")
-        elif sorted(coverage) != sorted(METRIC_KEYS):
-            errors.append("goldset.measurement_coverage must cover all canonical metrics")
+    if not isinstance(goldset, Mapping):
+        return
+    repositories = goldset.get("repositories")
+    if not isinstance(repositories, list) or len(set(repositories)) < 2:
+        errors.append("goldset must bind at least two repositories")
+    if sorted(goldset.get("task_profiles") or []) != sorted(TASK_PROFILES):
+        errors.append("goldset task_profiles must cover the five canonical profiles")
+    coverage = goldset.get("measurement_coverage")
+    if not isinstance(coverage, Mapping):
+        errors.append("goldset.measurement_coverage must be an object")
+    elif sorted(coverage) != sorted(METRIC_KEYS):
+        errors.append("goldset.measurement_coverage must cover all canonical metrics")
 
-    raw_profiles = evidence.get("profiles")
-    if not isinstance(raw_profiles, list):
-        return errors + ["profiles must be an array"]
-    profile_names = [item.get("task_profile") for item in raw_profiles if isinstance(item, Mapping)]
-    if sorted(profile_names) != sorted(TASK_PROFILES):
-        errors.append("profiles must contain each canonical task profile exactly once")
 
-    for profile in raw_profiles:
-        if not isinstance(profile, Mapping):
-            errors.append("profile entries must be objects")
+def _validate_available_routes(
+    profile: Mapping[str, Any], name: object, errors: list[str]
+) -> list[str]:
+    routes = profile.get("available_routes")
+    valid = (
+        isinstance(routes, list)
+        and bool(routes)
+        and all(isinstance(route, str) and bool(route) for route in routes)
+        and len(set(routes)) == len(routes)
+    )
+    if not valid:
+        errors.append(f"{name}.available_routes must contain unique non-empty strings")
+        return []
+    return routes
+
+
+def _validate_thresholds(
+    profile: Mapping[str, Any], name: object, errors: list[str]
+) -> None:
+    thresholds = profile.get("thresholds")
+    if not isinstance(thresholds, Mapping):
+        errors.append(f"{name}.thresholds must be an object")
+        return
+    unknown = sorted(set(thresholds) - set(THRESHOLD_KEYS))
+    if unknown:
+        errors.append(f"{name}.thresholds contains unknown keys: {', '.join(unknown)}")
+    for key, value in thresholds.items():
+        if key not in THRESHOLD_KEYS:
             continue
-        name = profile.get("task_profile", "<unknown>")
-        available_routes = profile.get("available_routes")
         if (
-            not isinstance(available_routes, list)
-            or not available_routes
-            or any(not isinstance(route, str) or not route for route in available_routes)
-            or len(set(available_routes)) != len(available_routes)
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0 <= value <= 1
         ):
-            errors.append(f"{name}.available_routes must contain unique non-empty strings")
-            available_routes = []
-        current_default = profile.get("current_default")
-        if current_default not in available_routes:
-            errors.append(f"{name}.current_default must be an available route")
-        candidate_route = profile.get("candidate_route")
-        if candidate_route is not None and candidate_route not in available_routes:
-            errors.append(f"{name}.candidate_route must be null or an available route")
-        candidate_measurement_id = profile.get("candidate_measurement_id")
-        if candidate_route is not None and (
-            not isinstance(candidate_measurement_id, str) or not candidate_measurement_id
-        ):
-            errors.append(f"{name}.candidate_measurement_id is required for a candidate route")
-        if not isinstance(profile.get("fallback"), str) or profile.get("fallback") not in available_routes:
-            errors.append(f"{name}.fallback must be an available route")
-        if not isinstance(profile.get("non_claims"), list) or not profile.get("non_claims"):
-            errors.append(f"{name}.non_claims must be non-empty")
-        measurements = profile.get("measurements")
-        if not isinstance(measurements, list) or not measurements:
-            errors.append(f"{name}.measurements must be non-empty")
-            continue
-        for index, measurement in enumerate(measurements):
-            label = f"{name}.measurements[{index}]"
-            if not isinstance(measurement, Mapping):
-                errors.append(f"{label} must be an object")
-                continue
-            if not isinstance(measurement.get("id"), str) or not measurement.get("id"):
-                errors.append(f"{label}.id is required")
-            if measurement.get("status") not in {"measured", "partial", "not_measured"}:
-                errors.append(f"{label}.status is invalid")
-            if measurement.get("route") not in available_routes:
-                errors.append(f"{label}.route must be an available route")
-            if not isinstance(measurement.get("repository"), str) or not measurement.get("repository"):
-                errors.append(f"{label}.repository is required")
-            if not isinstance(measurement.get("comparison_group"), str) or not measurement.get("comparison_group"):
-                errors.append(f"{label}.comparison_group is required")
-            if (
-                not isinstance(measurement.get("limitations"), list)
-                or not measurement.get("limitations")
-                or any(not isinstance(item, str) or not item for item in measurement.get("limitations", []))
-            ):
-                errors.append(f"{label}.limitations must be non-empty strings")
-            if not _is_commit(measurement.get("repository_commit")):
-                errors.append(f"{label}.repository_commit must be a 40-character commit")
-            for binding_name in ("dataset", "bundle_manifest", "index", "source_artifact"):
-                _validate_binding(measurement.get(binding_name), f"{label}.{binding_name}", errors)
-            evaluator = measurement.get("evaluator")
-            if not isinstance(evaluator, Mapping):
-                errors.append(f"{label}.evaluator must be an object")
-            else:
-                if not isinstance(evaluator.get("version"), str) or not evaluator.get("version"):
-                    errors.append(f"{label}.evaluator.version is required")
-                if not isinstance(evaluator.get("path"), str) or not evaluator.get("path"):
-                    errors.append(f"{label}.evaluator.path is required")
-                if not _is_sha256(evaluator.get("sha256")):
-                    errors.append(f"{label}.evaluator.sha256 must be a SHA-256")
-            metrics = measurement.get("metrics")
-            if not isinstance(metrics, Mapping):
-                errors.append(f"{label}.metrics must be an object")
-                continue
-            missing = sorted(set(METRIC_KEYS) - set(metrics))
-            extra = sorted(set(metrics) - set(METRIC_KEYS))
-            if missing:
-                errors.append(f"{label}.metrics missing: {', '.join(missing)}")
-            if extra:
-                errors.append(f"{label}.metrics contains unknown keys: {', '.join(extra)}")
-            for key in (
-                "recall_at_k",
-                "mrr",
-                "expected_target_recall",
-                "citation_health",
-                "range_health",
-            ):
-                value = metrics.get(key)
-                if value is not None and (
-                    isinstance(value, bool)
-                    or not isinstance(value, (int, float))
-                    or not 0 <= value <= 1
-                ):
-                    errors.append(f"{label}.metrics.{key} must be null or a number from 0 to 1")
-            for key in ("context_bytes", "tool_calls"):
-                value = metrics.get(key)
-                if value is not None and (
-                    isinstance(value, bool) or not isinstance(value, int) or value < 0
-                ):
-                    errors.append(f"{label}.metrics.{key} must be null or a non-negative integer")
-            miss_taxonomy = metrics.get("miss_taxonomy")
-            if miss_taxonomy is not None and (
-                not isinstance(miss_taxonomy, Mapping)
-                or any(
-                    not isinstance(key, str)
-                    or not key
-                    or isinstance(value, bool)
-                    or not isinstance(value, int)
-                    or value < 0
-                    for key, value in miss_taxonomy.items()
-                )
-            ):
-                errors.append(
-                    f"{label}.metrics.miss_taxonomy must be null or non-negative integer counts"
-                )
-            if measurement.get("status") == "measured" and any(
-                metrics.get(key) is None for key in METRIC_KEYS
-            ):
-                errors.append(f"{label} is measured but has null metrics")
+            errors.append(f"{name}.thresholds.{key} must be a number from 0 to 1")
 
-        candidate_matches = [
-            measurement
-            for measurement in measurements
-            if isinstance(measurement, Mapping)
-            and measurement.get("id") == candidate_measurement_id
-        ]
-        if candidate_route is not None:
-            if len(candidate_matches) != 1:
-                errors.append(f"{name}.candidate_measurement_id must identify exactly one measurement")
-            elif candidate_matches[0].get("route") != candidate_route:
-                errors.append(f"{name}.candidate_measurement_id must use candidate_route")
-    measurement_by_id: dict[str, Mapping[str, Any]] = {}
+
+def _validate_profile_metadata(
+    profile: Mapping[str, Any], name: object, routes: list[str], errors: list[str]
+) -> str | None:
+    if profile.get("current_default") not in routes:
+        errors.append(f"{name}.current_default must be an available route")
+    candidate_route = profile.get("candidate_route")
+    if candidate_route is not None and candidate_route not in routes:
+        errors.append(f"{name}.candidate_route must be null or an available route")
+    candidate_id = profile.get("candidate_measurement_id")
+    if candidate_route is not None and (
+        not isinstance(candidate_id, str) or not candidate_id
+    ):
+        errors.append(f"{name}.candidate_measurement_id is required for a candidate route")
+    if not isinstance(profile.get("fallback"), str) or profile.get("fallback") not in routes:
+        errors.append(f"{name}.fallback must be an available route")
+    if not isinstance(profile.get("non_claims"), list) or not profile.get("non_claims"):
+        errors.append(f"{name}.non_claims must be non-empty")
+    return candidate_id if isinstance(candidate_id, str) else None
+
+
+def _validate_measurement_bindings(
+    measurement: Mapping[str, Any], label: str, errors: list[str]
+) -> None:
+    for binding_name in ("dataset", "bundle_manifest", "index", "source_artifact"):
+        _validate_binding(measurement.get(binding_name), f"{label}.{binding_name}", errors)
+    evaluator = measurement.get("evaluator")
+    if not isinstance(evaluator, Mapping):
+        errors.append(f"{label}.evaluator must be an object")
+        return
+    if not isinstance(evaluator.get("version"), str) or not evaluator.get("version"):
+        errors.append(f"{label}.evaluator.version is required")
+    if not isinstance(evaluator.get("path"), str) or not evaluator.get("path"):
+        errors.append(f"{label}.evaluator.path is required")
+    if not _is_sha256(evaluator.get("sha256")):
+        errors.append(f"{label}.evaluator.sha256 must be a SHA-256")
+
+
+def _validate_numeric_metrics(
+    metrics: Mapping[str, Any], label: str, errors: list[str]
+) -> None:
+    for key in (
+        "recall_at_k",
+        "mrr",
+        "expected_target_recall",
+        "citation_health",
+        "range_health",
+    ):
+        value = metrics.get(key)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not 0 <= value <= 1
+        ):
+            errors.append(f"{label}.metrics.{key} must be null or a number from 0 to 1")
+    for key in ("context_bytes", "tool_calls"):
+        value = metrics.get(key)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+        ):
+            errors.append(f"{label}.metrics.{key} must be null or a non-negative integer")
+
+
+def _validate_miss_taxonomy(
+    metrics: Mapping[str, Any], label: str, errors: list[str]
+) -> None:
+    taxonomy = metrics.get("miss_taxonomy")
+    if taxonomy is None:
+        return
+    valid = isinstance(taxonomy, Mapping) and all(
+        isinstance(key, str)
+        and bool(key)
+        and not isinstance(value, bool)
+        and isinstance(value, int)
+        and value >= 0
+        for key, value in taxonomy.items()
+    )
+    if not valid:
+        errors.append(
+            f"{label}.metrics.miss_taxonomy must be null or non-negative integer counts"
+        )
+
+
+def _validate_measurement_metrics(
+    measurement: Mapping[str, Any], label: str, errors: list[str]
+) -> None:
+    metrics = measurement.get("metrics")
+    if not isinstance(metrics, Mapping):
+        errors.append(f"{label}.metrics must be an object")
+        return
+    missing = sorted(set(METRIC_KEYS) - set(metrics))
+    extra = sorted(set(metrics) - set(METRIC_KEYS))
+    if missing:
+        errors.append(f"{label}.metrics missing: {', '.join(missing)}")
+    if extra:
+        errors.append(f"{label}.metrics contains unknown keys: {', '.join(extra)}")
+    _validate_numeric_metrics(metrics, label, errors)
+    _validate_miss_taxonomy(metrics, label, errors)
+    if measurement.get("status") == "measured" and any(
+        metrics.get(key) is None for key in METRIC_KEYS
+    ):
+        errors.append(f"{label} is measured but has null metrics")
+
+
+def _validate_measurement(
+    measurement: object,
+    label: str,
+    routes: list[str],
+    errors: list[str],
+) -> None:
+    if not isinstance(measurement, Mapping):
+        errors.append(f"{label} must be an object")
+        return
+    if not isinstance(measurement.get("id"), str) or not measurement.get("id"):
+        errors.append(f"{label}.id is required")
+    if measurement.get("status") not in {"measured", "partial", "not_measured"}:
+        errors.append(f"{label}.status is invalid")
+    if measurement.get("route") not in routes:
+        errors.append(f"{label}.route must be an available route")
+    if not isinstance(measurement.get("repository"), str) or not measurement.get(
+        "repository"
+    ):
+        errors.append(f"{label}.repository is required")
+    if not isinstance(measurement.get("comparison_group"), str) or not measurement.get(
+        "comparison_group"
+    ):
+        errors.append(f"{label}.comparison_group is required")
+    limitations = measurement.get("limitations")
+    if not isinstance(limitations, list) or not limitations or any(
+        not isinstance(item, str) or not item for item in limitations
+    ):
+        errors.append(f"{label}.limitations must be non-empty strings")
+    if not _is_commit(measurement.get("repository_commit")):
+        errors.append(f"{label}.repository_commit must be a 40-character commit")
+    _validate_measurement_bindings(measurement, label, errors)
+    _validate_measurement_metrics(measurement, label, errors)
+
+
+def _validate_candidate_measurement(
+    profile: Mapping[str, Any],
+    name: object,
+    measurements: list[object],
+    candidate_id: str | None,
+    errors: list[str],
+) -> None:
+    candidate_route = profile.get("candidate_route")
+    if candidate_route is None:
+        return
+    matches = [
+        measurement
+        for measurement in measurements
+        if isinstance(measurement, Mapping) and measurement.get("id") == candidate_id
+    ]
+    if len(matches) != 1:
+        errors.append(f"{name}.candidate_measurement_id must identify exactly one measurement")
+    elif matches[0].get("route") != candidate_route:
+        errors.append(f"{name}.candidate_measurement_id must use candidate_route")
+
+
+def _validate_profile(profile: object, errors: list[str]) -> None:
+    if not isinstance(profile, Mapping):
+        errors.append("profile entries must be objects")
+        return
+    name = profile.get("task_profile", "<unknown>")
+    routes = _validate_available_routes(profile, name, errors)
+    _validate_thresholds(profile, name, errors)
+    candidate_id = _validate_profile_metadata(profile, name, routes, errors)
+    measurements = profile.get("measurements")
+    if not isinstance(measurements, list) or not measurements:
+        errors.append(f"{name}.measurements must be non-empty")
+        return
+    for index, measurement in enumerate(measurements):
+        _validate_measurement(measurement, f"{name}.measurements[{index}]", routes, errors)
+    _validate_candidate_measurement(profile, name, measurements, candidate_id, errors)
+
+
+def _measurement_index(
+    raw_profiles: list[object], errors: list[str]
+) -> dict[str, Mapping[str, Any]]:
+    result: dict[str, Mapping[str, Any]] = {}
     for profile in raw_profiles:
         if not isinstance(profile, Mapping):
             continue
         for measurement in profile.get("measurements") or []:
-            if isinstance(measurement, Mapping) and isinstance(measurement.get("id"), str):
-                existing = measurement_by_id.get(measurement["id"])
-                if existing is not None and existing != measurement:
-                    errors.append(f"measurement id {measurement['id']} has conflicting definitions")
-                measurement_by_id[measurement["id"]] = measurement
-
-    if isinstance(goldset, Mapping) and isinstance(goldset.get("measurement_coverage"), Mapping):
-        for metric_key in METRIC_KEYS:
-            references = goldset["measurement_coverage"].get(metric_key)
-            if not isinstance(references, list) or not references:
-                errors.append(f"goldset.measurement_coverage.{metric_key} must be non-empty")
+            if not isinstance(measurement, Mapping) or not isinstance(
+                measurement.get("id"), str
+            ):
                 continue
-            for measurement_id in references:
-                measurement = measurement_by_id.get(measurement_id)
-                if measurement is None:
-                    errors.append(
-                        f"goldset.measurement_coverage.{metric_key} references unknown measurement {measurement_id}"
-                    )
-                    continue
-                metrics = measurement.get("metrics")
-                if not isinstance(metrics, Mapping) or metrics.get(metric_key) is None:
-                    errors.append(
-                        f"goldset.measurement_coverage.{metric_key} references an unmeasured value in {measurement_id}"
-                    )
+            measurement_id = measurement["id"]
+            if measurement_id in result and result[measurement_id] != measurement:
+                errors.append(f"measurement id {measurement_id} has conflicting definitions")
+            result[measurement_id] = measurement
+    return result
+
+
+def _validate_metric_references(
+    metric_key: str,
+    references: object,
+    measurements: Mapping[str, Mapping[str, Any]],
+    errors: list[str],
+) -> None:
+    if not isinstance(references, list) or not references:
+        errors.append(f"goldset.measurement_coverage.{metric_key} must be non-empty")
+        return
+    for measurement_id in references:
+        measurement = measurements.get(measurement_id)
+        if measurement is None:
+            errors.append(
+                f"goldset.measurement_coverage.{metric_key} references unknown measurement {measurement_id}"
+            )
+            continue
+        metrics = measurement.get("metrics")
+        if not isinstance(metrics, Mapping) or metrics.get(metric_key) is None:
+            errors.append(
+                f"goldset.measurement_coverage.{metric_key} references an unmeasured value in {measurement_id}"
+            )
+
+
+def _validate_goldset_coverage(
+    goldset: object,
+    measurements: Mapping[str, Mapping[str, Any]],
+    errors: list[str],
+) -> None:
+    if not isinstance(goldset, Mapping):
+        return
+    coverage = goldset.get("measurement_coverage")
+    if not isinstance(coverage, Mapping):
+        return
+    for metric_key in METRIC_KEYS:
+        _validate_metric_references(
+            metric_key, coverage.get(metric_key), measurements, errors
+        )
+
+
+def validate_evidence(evidence: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    _validate_evidence_header(evidence, errors)
+    goldset = evidence.get("goldset")
+    _validate_goldset(goldset, errors)
+    raw_profiles = evidence.get("profiles")
+    if not isinstance(raw_profiles, list):
+        return errors + ["profiles must be an array"]
+    profile_names = [
+        item.get("task_profile") for item in raw_profiles if isinstance(item, Mapping)
+    ]
+    if sorted(profile_names) != sorted(TASK_PROFILES):
+        errors.append("profiles must contain each canonical task profile exactly once")
+    for profile in raw_profiles:
+        _validate_profile(profile, errors)
+    measurements = _measurement_index(raw_profiles, errors)
+    _validate_goldset_coverage(goldset, measurements, errors)
     return errors
 
 
@@ -305,58 +437,64 @@ def _core_quality_passes(metrics: Mapping[str, Any], thresholds: Mapping[str, An
     return observed >= 2
 
 
+def _evaluate_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+    thresholds = profile.get("thresholds") or {}
+    candidate_route = profile.get("candidate_route")
+    candidate_measurement_id = profile.get("candidate_measurement_id")
+    candidates = [
+        measurement
+        for measurement in profile["measurements"]
+        if measurement.get("id") == candidate_measurement_id
+    ]
+    reasons: list[str] = []
+    decision = "blocked"
+    missing_metrics: list[str] = []
+    if not candidate_route:
+        reasons.append("candidate_route_missing")
+    elif not candidates:
+        reasons.append("candidate_measurement_missing")
+    else:
+        candidate = candidates[0]
+        metrics = candidate["metrics"]
+        missing_metrics = [key for key in METRIC_KEYS if metrics.get(key) is None]
+        if candidate["status"] == "not_measured":
+            reasons.append("candidate_not_measured")
+        elif not _core_quality_passes(metrics, thresholds):
+            reasons.append("profile_quality_gate_not_met")
+        elif candidate["status"] == "partial":
+            decision = "keep_opt_in"
+            reasons.append("partial_measurement")
+            if missing_metrics:
+                reasons.append("partial_metric_lineage")
+            if profile.get("promotion_authority") != "explicit_profile_decision":
+                reasons.append("explicit_profile_promotion_not_authorized")
+        elif missing_metrics:
+            decision = "keep_opt_in"
+            reasons.extend(("partial_metric_lineage", "explicit_profile_promotion_not_authorized"))
+        elif profile.get("promotion_authority") != "explicit_profile_decision":
+            decision = "keep_opt_in"
+            reasons.append("explicit_profile_promotion_not_authorized")
+        else:
+            decision = "promote"
+            reasons.append("complete_profile_gate_passed")
+    return {
+        "task_profile": profile["task_profile"],
+        "candidate_route": candidate_route,
+        "decision": decision,
+        "reasons": reasons,
+        "missing_metrics": missing_metrics,
+        "current_default": profile.get("current_default"),
+        "fallback": profile["fallback"],
+        "does_not_establish": list(profile["non_claims"]),
+    }
+
+
 def evaluate_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
     errors = validate_evidence(evidence)
     if errors:
         raise ValueError("invalid routing evidence: " + "; ".join(errors))
 
-    decisions: list[dict[str, Any]] = []
-    for profile in evidence["profiles"]:
-        thresholds = profile.get("thresholds") or {}
-        candidate_route = profile.get("candidate_route")
-        candidate_measurement_id = profile.get("candidate_measurement_id")
-        candidates = [
-            measurement
-            for measurement in profile["measurements"]
-            if measurement.get("id") == candidate_measurement_id
-        ]
-        reasons: list[str] = []
-        decision = "blocked"
-        missing_metrics: list[str] = []
-        if not candidate_route:
-            reasons.append("candidate_route_missing")
-        elif not candidates:
-            reasons.append("candidate_measurement_missing")
-        else:
-            candidate = candidates[0]
-            metrics = candidate["metrics"]
-            missing_metrics = [key for key in METRIC_KEYS if metrics.get(key) is None]
-            if candidate["status"] == "not_measured":
-                reasons.append("candidate_not_measured")
-            elif not _core_quality_passes(metrics, thresholds):
-                reasons.append("profile_quality_gate_not_met")
-            elif missing_metrics:
-                decision = "keep_opt_in"
-                reasons.extend(("partial_metric_lineage", "explicit_profile_promotion_not_authorized"))
-            elif profile.get("promotion_authority") != "explicit_profile_decision":
-                decision = "keep_opt_in"
-                reasons.append("explicit_profile_promotion_not_authorized")
-            else:
-                decision = "promote"
-                reasons.append("complete_profile_gate_passed")
-        decisions.append(
-            {
-                "task_profile": profile["task_profile"],
-                "candidate_route": candidate_route,
-                "decision": decision,
-                "reasons": reasons,
-                "missing_metrics": missing_metrics,
-                "current_default": profile.get("current_default"),
-                "fallback": profile["fallback"],
-                "does_not_establish": list(profile["non_claims"]),
-            }
-        )
-
+    decisions = [_evaluate_profile(profile) for profile in evidence["profiles"]]
     return {
         "kind": "repoground.retrieval_task_profile_routing_decision",
         "version": VERSION,
