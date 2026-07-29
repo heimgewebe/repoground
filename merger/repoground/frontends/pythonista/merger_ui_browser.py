@@ -6,7 +6,32 @@ Behavior is unchanged; methods remain bound via Mixin inheritance.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import datetime
+import json
+import re
+import sys
+from pathlib import Path
+from typing import Optional
+
+
+BUILD_GLOBAL_NAMES = (
+    "BUNDLE_FILENAME",
+    "ExtrasConfig",
+    "PRSchauDataSource",
+    "PR_SCHAU_DIR",
+    "_flatten_meta",
+    "_load_repoground_extractor_module",
+    "_notify",
+    "console",
+    "editor",
+    "force_close_files",
+    "get_merges_dir",
+    "load_pr_schau_bundle",
+    "quicklook",
+    "scan_repo",
+    "ui",
+    "write_reports_v2",
+)
 
 
 class MergerUIBrowserMixin:

@@ -25,9 +25,6 @@ Rationale:
 import sys
 import os
 import json
-import re
-import traceback
-import datetime
 from pathlib import Path
 from typing import List, Any, Dict, Optional
 
@@ -1783,47 +1780,65 @@ class MergerUI(MergerUIPrescanMixin, MergerUIBrowserMixin, MergerUIMergeRunMixin
 
 
 def _wire_pythonista_mixin_globals() -> None:
-    """Bind build-module symbols into extracted MergerUI mixins.
+    """Bind only declared build-module dependencies into MergerUI mixins.
 
-    Mixins load during build.py import. After this module finished defining
-    helpers/constants (and optional Pythonista ui), copy those names into the
-    mixin modules so method bodies keep their historical free-variable lookup.
+    The extracted methods preserve their historical global lookups, but each
+    mixin now declares the exact names it consumes. Missing declarations fail
+    during import instead of silently inheriting the entire build module.
     """
     import sys
 
-    package = __package__ or ""
-    module_names = (
-        f"{package}.merger_ui_prescan" if package else "merger_ui_prescan",
-        f"{package}.merger_ui_merge_run" if package else "merger_ui_merge_run",
-        f"{package}.merger_ui_browser" if package else "merger_ui_browser",
-    )
-    skip = {
-        "__name__",
-        "__file__",
-        "__package__",
-        "__cached__",
-        "__builtins__",
-        "__spec__",
-        "__loader__",
-        "__doc__",
-        "__all__",
-        "MergerUI",
-        "MergerUIPrescanMixin",
-        "MergerUIBrowserMixin",
-        "MergerUIMergeRunMixin",
-        "_wire_pythonista_mixin_globals",
+    available = {
+        "BUNDLE_FILENAME": BUNDLE_FILENAME,
+        "DEFAULT_EXTRAS": DEFAULT_EXTRAS,
+        "DEFAULT_LEVEL": DEFAULT_LEVEL,
+        "DEFAULT_MAX_FILE_BYTES": DEFAULT_MAX_FILE_BYTES,
+        "DEFAULT_META_DENSITY": DEFAULT_META_DENSITY,
+        "DEFAULT_MODE": DEFAULT_MODE,
+        "DEFAULT_SPLIT_SIZE": DEFAULT_SPLIT_SIZE,
+        "ExtrasConfig": ExtrasConfig,
+        "PRSchauDataSource": PRSchauDataSource,
+        "PR_SCHAU_DIR": PR_SCHAU_DIR,
+        "_flatten_meta": _flatten_meta,
+        "_load_repoground_extractor_module": _load_repoground_extractor_module,
+        "_normalize_ext_list": _normalize_ext_list,
+        "_notify": _notify,
+        "_pick_primary_artifact": _pick_primary_artifact,
+        "console": console,
+        "editor": editor,
+        "force_close_files": force_close_files,
+        "get_merges_dir": get_merges_dir,
+        "load_pr_schau_bundle": load_pr_schau_bundle,
+        "normalize_path": normalize_path,
+        "normalize_repo_id": normalize_repo_id,
+        "parse_human_size": parse_human_size,
+        "quicklook": quicklook,
+        "resolve_effective_pre_pull": resolve_effective_pre_pull,
+        "resolve_pool_include_paths": resolve_pool_include_paths,
+        "resolve_pre_pull_switch_value": resolve_pre_pull_switch_value,
+        "run_pre_pull_two_phase": run_pre_pull_two_phase,
+        "scan_repo": scan_repo,
+        "ui": ui,
+        "write_reports_v2": write_reports_v2,
     }
-    payload = {
-        name: value
-        for name, value in globals().items()
-        if name not in skip and not name.startswith("__")
-    }
-    for module_name in module_names:
-        module = sys.modules.get(module_name)
+    for mixin in (
+        MergerUIPrescanMixin,
+        MergerUIBrowserMixin,
+        MergerUIMergeRunMixin,
+    ):
+        module = sys.modules.get(mixin.__module__)
         if module is None:
-            continue
-        for name, value in payload.items():
-            setattr(module, name, value)
+            raise RuntimeError(f"MergerUI mixin module not loaded: {mixin.__module__}")
+        required = tuple(getattr(module, "BUILD_GLOBAL_NAMES", ()))
+        if not required:
+            raise RuntimeError(f"MergerUI mixin has no dependency contract: {mixin.__module__}")
+        missing = sorted(name for name in required if name not in available)
+        if missing:
+            raise RuntimeError(
+                f"MergerUI mixin dependencies missing for {mixin.__module__}: {missing}"
+            )
+        for name in required:
+            setattr(module, name, available[name])
 
 
 _wire_pythonista_mixin_globals()

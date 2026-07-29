@@ -1,10 +1,10 @@
 {
   "kind": "repoground.c901_baseline",
   "version": "1.0",
-  "observed_on": "2026-07-27",
+  "observed_on": "2026-07-29",
   "ruff_config": "ruff-ci.toml",
   "threshold": 10,
-  "finding_count": 193,
+  "finding_count": 191,
   "max_complexity": 138,
   "findings": [
     {
@@ -594,58 +594,8 @@
     },
     {
       "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI._present_prescan_ui",
-      "max_complexity": 86
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI._present_prescan_ui._pool_update",
-      "max_complexity": 44
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI._run_merge_inner",
-      "max_complexity": 64
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI.merge_pr_schau_bundles",
-      "max_complexity": 22
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI.reset_merge_form_to_defaults_after_success",
-      "max_complexity": 21
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
       "qualified_name": "MergerUI.restore_last_state",
       "max_complexity": 22
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI.run_delta_from_last_import",
-      "max_complexity": 40
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI.show_pool_viewer",
-      "max_complexity": 24
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI.show_pr_schau_browser",
-      "max_complexity": 33
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI.show_pr_schau_browser.action_open",
-      "max_complexity": 15
-    },
-    {
-      "path": "merger/repoground/frontends/pythonista/build.py",
-      "qualified_name": "MergerUI.show_prescan_sheet",
-      "max_complexity": 11
     },
     {
       "path": "merger/repoground/frontends/pythonista/build.py",
@@ -656,6 +606,56 @@
       "path": "merger/repoground/frontends/pythonista/ipad_fs_scan.py",
       "qualified_name": "iPadFSScanner._scan_recursive",
       "max_complexity": 12
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_browser.py",
+      "qualified_name": "MergerUIBrowserMixin.merge_pr_schau_bundles",
+      "max_complexity": 22
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_browser.py",
+      "qualified_name": "MergerUIBrowserMixin.run_delta_from_last_import",
+      "max_complexity": 40
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_browser.py",
+      "qualified_name": "MergerUIBrowserMixin.show_pr_schau_browser",
+      "max_complexity": 33
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_browser.py",
+      "qualified_name": "MergerUIBrowserMixin.show_pr_schau_browser.action_open",
+      "max_complexity": 15
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_merge_run.py",
+      "qualified_name": "MergerUIMergeRunMixin._run_merge_inner",
+      "max_complexity": 64
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_merge_run.py",
+      "qualified_name": "MergerUIMergeRunMixin.reset_merge_form_to_defaults_after_success",
+      "max_complexity": 21
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_prescan.py",
+      "qualified_name": "MergerUIPrescanMixin._present_prescan_ui",
+      "max_complexity": 86
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_prescan.py",
+      "qualified_name": "MergerUIPrescanMixin._present_prescan_ui._pool_update",
+      "max_complexity": 44
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_prescan.py",
+      "qualified_name": "MergerUIPrescanMixin.show_pool_viewer",
+      "max_complexity": 24
+    },
+    {
+      "path": "merger/repoground/frontends/pythonista/merger_ui_prescan.py",
+      "qualified_name": "MergerUIPrescanMixin.show_prescan_sheet",
+      "max_complexity": 11
     },
     {
       "path": "merger/repoground/frontends/pythonista/pathfinder.py",
@@ -815,7 +815,7 @@
     {
       "path": "merger/repoground/service/source_acquisition.py",
       "qualified_name": "materialize_remote_snapshot",
-      "max_complexity": 29
+      "max_complexity": 27
     },
     {
       "path": "merger/repoground/service/source_acquisition.py",
@@ -950,16 +950,6 @@
     {
       "path": "scripts/release/check_release_contract.py",
       "qualified_name": "scan",
-      "max_complexity": 11
-    },
-    {
-      "path": "scripts/release/verify_release_candidate.py",
-      "qualified_name": "_archive_members",
-      "max_complexity": 15
-    },
-    {
-      "path": "scripts/release/verify_release_candidate.py",
-      "qualified_name": "_compare_with_repo",
       "max_complexity": 11
     },
     {

@@ -6,7 +6,36 @@ Behavior is unchanged; methods remain bound via Mixin inheritance.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import datetime
+import json
+import sys
+import traceback
+from typing import List
+
+
+BUILD_GLOBAL_NAMES = (
+    "DEFAULT_EXTRAS",
+    "DEFAULT_LEVEL",
+    "DEFAULT_MAX_FILE_BYTES",
+    "DEFAULT_META_DENSITY",
+    "DEFAULT_MODE",
+    "DEFAULT_SPLIT_SIZE",
+    "ExtrasConfig",
+    "_load_repoground_extractor_module",
+    "_normalize_ext_list",
+    "_pick_primary_artifact",
+    "console",
+    "force_close_files",
+    "get_merges_dir",
+    "normalize_repo_id",
+    "parse_human_size",
+    "resolve_effective_pre_pull",
+    "resolve_pool_include_paths",
+    "resolve_pre_pull_switch_value",
+    "run_pre_pull_two_phase",
+    "scan_repo",
+    "write_reports_v2",
+)
 
 
 class MergerUIMergeRunMixin:
