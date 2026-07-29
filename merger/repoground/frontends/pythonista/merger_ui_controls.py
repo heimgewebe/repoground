@@ -6,7 +6,17 @@ Behavior is unchanged; methods remain bound via Mixin inheritance.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import List
+
+BUILD_GLOBAL_NAMES = (
+    "PROFILE_DESCRIPTIONS",
+    "PROFILE_PRESETS",
+    "_clear_active_merger_view",
+    "_dismiss_view_best_effort",
+    "parse_human_size",
+    "sys",
+    "ui",
+)
 
 
 class MergerUIControlsMixin:
@@ -114,7 +124,6 @@ class MergerUIControlsMixin:
 
     def close_view(self, sender=None) -> None:
         """Schließt den Merger-Screen in Pythonista."""
-        global _ACTIVE_MERGER_VIEW
         try:
             # dismiss() ist bei präsentierten Views zuverlässiger als close()
             _dismiss_view_best_effort(self.view)
@@ -122,12 +131,7 @@ class MergerUIControlsMixin:
             # im Zweifel lieber still scheitern, statt iOS-Alert zu nerven, aber loggen
             sys.stderr.write(f"Warning: Failed to close view: {e}\n")
         finally:
-            # If this instance is the active one, clear the pointer.
-            try:
-                if _ACTIVE_MERGER_VIEW is self.view:
-                    _ACTIVE_MERGER_VIEW = None
-            except Exception:
-                pass
+            _clear_active_merger_view(self.view)
 
     def show_extras_sheet(self, sender):
         """Zeigt ein Sheet zur Konfiguration der Extras."""

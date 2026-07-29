@@ -6,7 +6,24 @@ Behavior is unchanged; methods remain bound via Mixin inheritance.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
+
+BUILD_GLOBAL_NAMES = (
+    "DEFAULT_EXTRAS",
+    "DEFAULT_LEVEL",
+    "DEFAULT_MAX_FILE_BYTES",
+    "DEFAULT_MODE",
+    "DEFAULT_SPLIT_SIZE",
+    "ExtrasConfig",
+    "LAST_STATE_FILENAME",
+    "TF_BORDER_NONE",
+    "_load_repoground_extractor_module",
+    "_notify",
+    "find_repos_in_hub",
+    "parse_human_size",
+    "sys",
+    "ui",
+)
 
 
 class MergerUIInitMixin:

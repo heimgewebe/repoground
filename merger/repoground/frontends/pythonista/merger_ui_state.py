@@ -6,7 +6,14 @@ Behavior is unchanged; methods remain bound via Mixin inheritance.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
+
+BUILD_GLOBAL_NAMES = (
+    "console",
+    "deserialize_prescan_pool",
+    "json",
+    "sys",
+)
 
 
 class MergerUIStateMixin:

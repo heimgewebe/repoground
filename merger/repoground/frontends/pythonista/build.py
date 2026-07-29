@@ -642,6 +642,13 @@ def _dismiss_view_best_effort(v) -> None:
         pass
 
 
+def _clear_active_merger_view(view) -> None:
+    """Clear the shared active-view pointer only for the matching view."""
+    global _ACTIVE_MERGER_VIEW
+    if _ACTIVE_MERGER_VIEW is view:
+        _ACTIVE_MERGER_VIEW = None
+
+
 def run_ui(hub: Path) -> int:
     """Starte den Merger im Vollbild-UI-Modus ohne Pythonista-Titlebar."""
     global _ACTIVE_MERGER_VIEW
@@ -692,17 +699,26 @@ def _wire_pythonista_mixin_globals() -> None:
         "DEFAULT_MODE": DEFAULT_MODE,
         "DEFAULT_SPLIT_SIZE": DEFAULT_SPLIT_SIZE,
         "ExtrasConfig": ExtrasConfig,
+        "LAST_STATE_FILENAME": LAST_STATE_FILENAME,
+        "PROFILE_DESCRIPTIONS": PROFILE_DESCRIPTIONS,
+        "PROFILE_PRESETS": PROFILE_PRESETS,
         "PRSchauDataSource": PRSchauDataSource,
         "PR_SCHAU_DIR": PR_SCHAU_DIR,
+        "TF_BORDER_NONE": TF_BORDER_NONE,
+        "_clear_active_merger_view": _clear_active_merger_view,
+        "_dismiss_view_best_effort": _dismiss_view_best_effort,
         "_flatten_meta": _flatten_meta,
         "_load_repoground_extractor_module": _load_repoground_extractor_module,
         "_normalize_ext_list": _normalize_ext_list,
         "_notify": _notify,
         "_pick_primary_artifact": _pick_primary_artifact,
         "console": console,
+        "deserialize_prescan_pool": deserialize_prescan_pool,
         "editor": editor,
+        "find_repos_in_hub": find_repos_in_hub,
         "force_close_files": force_close_files,
         "get_merges_dir": get_merges_dir,
+        "json": json,
         "load_pr_schau_bundle": load_pr_schau_bundle,
         "normalize_path": normalize_path,
         "normalize_repo_id": normalize_repo_id,
@@ -713,10 +729,14 @@ def _wire_pythonista_mixin_globals() -> None:
         "resolve_pre_pull_switch_value": resolve_pre_pull_switch_value,
         "run_pre_pull_two_phase": run_pre_pull_two_phase,
         "scan_repo": scan_repo,
+        "sys": sys,
         "ui": ui,
         "write_reports_v2": write_reports_v2,
     }
     for mixin in (
+        MergerUIInitMixin,
+        MergerUIControlsMixin,
+        MergerUIStateMixin,
         MergerUIPrescanMixin,
         MergerUIBrowserMixin,
         MergerUIMergeRunMixin,
