@@ -97,6 +97,10 @@ All surfaces enforce:
 * `GIT_TERMINAL_PROMPT=0` for all git calls;
 * git subprocess output decoded `encoding="utf-8", errors="surrogateescape"`;
 * remote URLs, stderr, exceptions and reports are credential-redacted;
+* `git archive` stdout is written directly to a job-local seekable temporary
+  file instead of accumulating in Python memory, and tar inputs above 2 GiB are
+  rejected before extraction; processed `TarInfo` metadata is discarded after
+  each member instead of accumulating for the full archive;
 * snapshot extraction is hardened by a manual writer (never `tarfile.extract`):
   it extracts only regular files and ordinary directories and **rejects** every
   symlink, hardlink, FIFO and device member, plus absolute paths, `..` traversal
@@ -143,7 +147,11 @@ For `remote_snapshot`:
    This avoids
    credential-at-rest leakage in `<cache_git_dir>/config` and `FETCH_HEAD`.
 4. `rev-parse` the resolved ref to a commit.
-5. `git --git-dir … archive --format=tar <commit>` and extract safely in Python.
+5. `git --git-dir … archive --format=tar <commit>` writes directly into a
+   seekable temporary file below the validated job directory. Archive bytes do
+   not accumulate in Python memory; tar input above 2 GiB is rejected before
+   parsing, and the same stream is passed to the hardened extractor. The
+   temporary file is removed when materialization ends.
 
 Safe extraction is a hand-rolled writer: it extracts only regular files and
 ordinary directories, and rejects absolute paths, `..` traversal, any write
@@ -195,6 +203,7 @@ effective pre-pull). Active identical jobs are still reused.
   redaction gates with tests; this reduces leakage, it is not an absolute
   guarantee that credentials can *never* appear.
 * Snapshot retention is operational cache hygiene, not evidence retention; active jobs are protected, while terminal snapshots can be removed by count, age or size limits.
+* During materialization, disk use can temporarily include both the temporary archive file and the extracted snapshot; archive size no longer scales Python resident memory.
 
 ## Non-goals
 

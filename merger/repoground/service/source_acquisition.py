@@ -32,10 +32,11 @@ import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Sequence
+from typing import BinaryIO, Iterator, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ SNAPSHOT_DIR_NAME = ".repoground-source-snapshots"
 DEFAULT_SNAPSHOT_RETENTION_COUNT = 3
 DEFAULT_SNAPSHOT_MAX_AGE_HOURS = 24
 DEFAULT_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024 * 1024
+DEFAULT_SNAPSHOT_ARCHIVE_MAX_BYTES = DEFAULT_SNAPSHOT_MAX_BYTES
 
 # Report warning codes (v1 known limits).
 WARN_SUBMODULES_NOT_EXPANDED = "submodules_not_expanded"
@@ -336,15 +338,18 @@ def _run_git(
         return subprocess.CompletedProcess(cmd, 127, stdout="", stderr=str(exc))
 
 
-def _run_git_binary(
+def _run_git_binary_to_file(
     args: Sequence[str],
+    output: BinaryIO,
     *,
     git_dir: Optional[Path] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
 ) -> "subprocess.CompletedProcess[bytes]":
-    """Run a git command that emits binary stdout (e.g. ``archive``).
+    """Run a binary-output git command with stdout redirected to ``output``.
 
-    stderr is decoded with surrogateescape for safe redaction; stdout stays bytes.
+    Redirecting stdout keeps ``git archive`` bytes out of ``CompletedProcess`` and
+    therefore out of one unbounded Python allocation. The caller owns the seekable
+    output stream and applies the accepted-byte ceiling before parsing it.
     """
     cmd: List[str] = ["git"]
     if git_dir is not None:
@@ -353,16 +358,29 @@ def _run_git_binary(
     try:
         proc = subprocess.run(
             cmd,
-            capture_output=True,
+            stdout=output,
+            stderr=subprocess.PIPE,
             timeout=timeout,
             env=_git_env(),
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(cmd, 124, stdout=b"", stderr=f"git timed out after {timeout}s".encode())
+        return subprocess.CompletedProcess(
+            cmd,
+            124,
+            stdout=b"",
+            stderr=f"git timed out after {timeout}s".encode(),
+        )
     except OSError as exc:
-        return subprocess.CompletedProcess(cmd, 127, stdout=b"", stderr=str(exc).encode())
-    return proc
+        return subprocess.CompletedProcess(
+            cmd, 127, stdout=b"", stderr=str(exc).encode()
+        )
+    return subprocess.CompletedProcess(
+        proc.args,
+        proc.returncode,
+        stdout=b"",
+        stderr=proc.stderr,
+    )
 
 
 @dataclass
@@ -732,6 +750,73 @@ def _resolve_default_branch(remote_url: str, timeout: int) -> Optional[str]:
     return None
 
 
+def _extract_git_archive(
+    *,
+    cache_git_dir: Path,
+    commit: str,
+    base_dir: Path,
+    snapshot_dir: Path,
+    repo_name: str,
+    timeout_seconds: int,
+) -> Optional[tuple[str, str, str]]:
+    """Write one Git archive to disk, bound its size, and extract the same stream."""
+    try:
+        with tempfile.TemporaryFile(
+            mode="w+b",
+            dir=base_dir,
+            prefix=f".{repo_name}-archive-",
+        ) as archive_stream:
+            archive = _run_git_binary_to_file(
+                ["archive", "--format=tar", commit],
+                archive_stream,
+                git_dir=cache_git_dir,
+                timeout=timeout_seconds,
+            )
+            if archive.returncode != 0:
+                stderr = (
+                    archive.stderr.decode("utf-8", errors="surrogateescape")
+                    if isinstance(archive.stderr, bytes)
+                    else str(archive.stderr or "")
+                )
+                return (
+                    SourceStatus.ARCHIVE_FAILED,
+                    f"git archive failed for {repo_name}",
+                    stderr,
+                )
+
+            archive_stream.flush()
+            archive_bytes = archive_stream.tell()
+            if archive_bytes > DEFAULT_SNAPSHOT_ARCHIVE_MAX_BYTES:
+                return (
+                    SourceStatus.ARCHIVE_FAILED,
+                    f"git archive exceeds byte limit for {repo_name}",
+                    f"archive bytes {archive_bytes} exceed limit "
+                    f"{DEFAULT_SNAPSHOT_ARCHIVE_MAX_BYTES}",
+                )
+            archive_stream.seek(0)
+            try:
+                safe_extract_tar(archive_stream, snapshot_dir)
+            except SnapshotExtractionError as exc:
+                return (
+                    SourceStatus.EXTRACT_FAILED,
+                    f"unsafe tar member while extracting {repo_name} snapshot: {exc}",
+                    str(exc),
+                )
+            except (tarfile.TarError, OSError) as exc:
+                return (
+                    SourceStatus.EXTRACT_FAILED,
+                    f"failed to extract {repo_name} snapshot",
+                    str(exc),
+                )
+    except OSError as exc:
+        return (
+            SourceStatus.ARCHIVE_FAILED,
+            f"could not create or finalize git archive for {repo_name}",
+            str(exc),
+        )
+    return None
+
+
 def materialize_remote_snapshot(
     repo_path: Path,
     *,
@@ -894,20 +979,17 @@ def materialize_remote_snapshot(
     commit = rev.stdout.strip()
     resolution.resolved_commit = commit
 
-    archive = _run_git_binary(["archive", "--format=tar", commit], git_dir=cache_git_dir, timeout=timeout_seconds)
-    if archive.returncode != 0:
-        stderr_txt = archive.stderr.decode("utf-8", errors="surrogateescape") if isinstance(archive.stderr, bytes) else archive.stderr
-        return make(SourceStatus.ARCHIVE_FAILED, f"git archive failed for {repo_name}",
-                    resolution=resolution, stderr=stderr_txt)
-
-    try:
-        safe_extract_tar(archive.stdout, snapshot_dir)
-    except SnapshotExtractionError as exc:
-        return make(SourceStatus.EXTRACT_FAILED, f"unsafe tar member while extracting {repo_name} snapshot: {exc}",
-                    resolution=resolution, stderr=str(exc))
-    except (tarfile.TarError, OSError) as exc:
-        return make(SourceStatus.EXTRACT_FAILED, f"failed to extract {repo_name} snapshot",
-                    resolution=resolution, stderr=str(exc))
+    archive_failure = _extract_git_archive(
+        cache_git_dir=cache_git_dir,
+        commit=commit,
+        base_dir=base_resolved,
+        snapshot_dir=snapshot_dir,
+        repo_name=repo_name,
+        timeout_seconds=timeout_seconds,
+    )
+    if archive_failure is not None:
+        status, message, stderr = archive_failure
+        return make(status, message, resolution=resolution, stderr=stderr)
 
     warnings = _detect_snapshot_warnings(snapshot_dir)
     return make(
@@ -923,8 +1005,28 @@ class SnapshotExtractionError(Exception):
     """Raised when a tar member would escape the snapshot directory."""
 
 
-def safe_extract_tar(data: bytes, dest: Path) -> None:
-    """Extract a tar byte stream into ``dest`` with a hardened, manual writer.
+def _seekable_tar_source(data: bytes | BinaryIO) -> BinaryIO:
+    source: BinaryIO = io.BytesIO(data) if isinstance(data, bytes) else data
+    try:
+        source.seek(0)
+    except (AttributeError, OSError) as exc:
+        raise SnapshotExtractionError("tar source must be seekable") from exc
+    return source
+
+
+def _iter_tar_members_without_retention(
+    tar: tarfile.TarFile,
+) -> Iterator[tarfile.TarInfo]:
+    """Yield one member at a time and discard processed metadata immediately."""
+    for member in tar:
+        try:
+            yield member
+        finally:
+            tar.members.clear()
+
+
+def safe_extract_tar(data: bytes | BinaryIO, dest: Path) -> None:
+    """Extract bytes or one seekable tar stream with a hardened manual writer.
 
     v1 policy — security before convenience (see the source-acquisition blueprint):
 
@@ -976,8 +1078,8 @@ def safe_extract_tar(data: bytes, dest: Path) -> None:
             if cur.is_symlink():
                 raise SnapshotExtractionError(f"symlink in target path: {cur}")
 
-    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as tar:
-        for member in tar.getmembers():
+    with tarfile.open(fileobj=_seekable_tar_source(data), mode="r:*") as tar:
+        for member in _iter_tar_members_without_retention(tar):
             name = member.name
 
             if member.issym() or member.islnk():

@@ -139,6 +139,117 @@ def test_effective_source_mode_rejects_explicit_contradictions():
 
 # --- 1. default_branch on a no-upstream local branch -----------------------
 
+def test_remote_snapshot_passes_seekable_archive_stream_to_extractor(
+    remote_and_local, monkeypatch: pytest.MonkeyPatch
+):
+    original_extract = sa.safe_extract_tar
+    observed = {}
+
+    def capture_stream(data, dest):
+        observed["is_bytes"] = isinstance(data, bytes)
+        observed["has_seek"] = callable(getattr(data, "seek", None))
+        observed["has_tell"] = callable(getattr(data, "tell", None))
+        observed["position"] = data.tell()
+        return original_extract(data, dest)
+
+    monkeypatch.setattr(sa, "safe_extract_tar", capture_stream)
+    result = materialize_remote_snapshot(
+        remote_and_local["local"],
+        remote_ref=None,
+        remote_ref_policy="default_branch",
+        cache_root=remote_and_local["cache"],
+        job_id="job-streamed-archive",
+    )
+
+    assert result.status == SourceStatus.SNAPSHOT_CREATED, result.stderr
+    assert observed == {
+        "is_bytes": False,
+        "has_seek": True,
+        "has_tell": True,
+        "position": 0,
+    }
+
+
+def test_extract_git_archive_classifies_tempfile_creation_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    def fail_tempfile(**_kwargs):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(sa.tempfile, "TemporaryFile", fail_tempfile)
+    result = sa._extract_git_archive(
+        cache_git_dir=tmp_path / "cache.git",
+        commit="a" * 40,
+        base_dir=tmp_path,
+        snapshot_dir=tmp_path / "snapshot",
+        repo_name="repo",
+        timeout_seconds=10,
+    )
+
+    assert result is not None
+    status, message, stderr = result
+    assert status == SourceStatus.ARCHIVE_FAILED
+    assert "create or finalize git archive" in message
+    assert stderr == "disk unavailable"
+
+
+def test_extract_git_archive_classifies_flush_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    class FlushFailure(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            io.BytesIO.close(self)
+            return False
+
+        def flush(self):
+            raise OSError("disk full")
+
+    monkeypatch.setattr(sa.tempfile, "TemporaryFile", lambda **_kwargs: FlushFailure())
+    monkeypatch.setattr(
+        sa,
+        "_run_git_binary_to_file",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["git", "archive"], returncode=0, stdout=b"", stderr=b""
+        ),
+    )
+    result = sa._extract_git_archive(
+        cache_git_dir=tmp_path / "cache.git",
+        commit="a" * 40,
+        base_dir=tmp_path,
+        snapshot_dir=tmp_path / "snapshot",
+        repo_name="repo",
+        timeout_seconds=10,
+    )
+
+    assert result is not None
+    status, message, stderr = result
+    assert status == SourceStatus.ARCHIVE_FAILED
+    assert "create or finalize git archive" in message
+    assert stderr == "disk full"
+
+
+def test_remote_snapshot_rejects_archive_over_byte_limit(
+    remote_and_local, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(sa, "DEFAULT_SNAPSHOT_ARCHIVE_MAX_BYTES", 1)
+
+    result = materialize_remote_snapshot(
+        remote_and_local["local"],
+        remote_ref=None,
+        remote_ref_policy="default_branch",
+        cache_root=remote_and_local["cache"],
+        job_id="job-archive-limit",
+    )
+
+    assert result.status == SourceStatus.ARCHIVE_FAILED
+    assert result.snapshot_path is None
+    assert "exceeds byte limit" in result.message
+    assert "exceed limit 1" in (result.stderr or "")
+
+
 def test_remote_snapshot_default_branch_no_upstream(remote_and_local):
     local = remote_and_local["local"]
     assert _has_no_upstream(local), "precondition: local branch has no upstream"
@@ -300,6 +411,44 @@ def _tar_with_member(name: str, *, linkname: str = None, typeflag=tarfile.REGTYP
             return buf2
         tar.addfile(info)
     return buf.getvalue()
+
+
+def test_safe_tar_extraction_discards_processed_member_metadata(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    payload = io.BytesIO()
+    with tarfile.open(fileobj=payload, mode="w") as archive:
+        for index in range(32):
+            data = b"x"
+            member = tarfile.TarInfo(f"file-{index}.txt")
+            member.size = len(data)
+            archive.addfile(member, io.BytesIO(data))
+    raw = payload.getvalue()
+
+    original_open = sa.tarfile.open
+    observed_archives = []
+
+    def tracked_open(*args, **kwargs):
+        archive = original_open(*args, **kwargs)
+        observed_archives.append(archive)
+        return archive
+
+    monkeypatch.setattr(sa.tarfile, "open", tracked_open)
+    dest = tmp_path / "metadata-bounded"
+    safe_extract_tar(raw, dest)
+
+    assert len(observed_archives) == 1
+    assert observed_archives[0].members == []
+    assert len(list(dest.glob("*.txt"))) == 32
+
+
+def test_safe_tar_extraction_accepts_seekable_stream(tmp_path):
+    dest = tmp_path / "stream-out"
+    stream = io.BytesIO(_tar_with_member("streamed.txt"))
+
+    safe_extract_tar(stream, dest)
+
+    assert (dest / "streamed.txt").read_text() == "hello"
 
 
 def test_safe_tar_extraction_rejects_path_traversal(tmp_path):
