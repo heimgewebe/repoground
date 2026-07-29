@@ -1,0 +1,553 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://heimgewebe.org/contracts/repoground/retrieval-task-profile-routing.v1.schema.json",
+  "title": "RepoGround retrieval task-profile routing evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "evaluator_version",
+    "task_id",
+    "source_commit",
+    "goldset",
+    "profiles",
+    "global_default_promoted",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repoground.retrieval_task_profile_routing_evidence"
+    },
+    "version": {
+      "const": "1.0"
+    },
+    "evaluator_version": {
+      "const": "1.0"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "global_default_promoted": {
+      "const": false
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "goldset": {
+      "$ref": "#/$defs/goldset"
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "binding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "path",
+            "sha256"
+          ],
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "locator",
+            "sha256"
+          ],
+          "properties": {
+            "status": {
+              "const": "digest_bound"
+            },
+            "locator": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "goldset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "path",
+        "sha256",
+        "repositories",
+        "task_profiles",
+        "measurement_coverage"
+      ],
+      "properties": {
+        "status": {
+          "const": "available"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repositories": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "task_profiles": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "basic_repo_question",
+              "review",
+              "change_impact",
+              "find_relevant_tests",
+              "ground_claim"
+            ]
+          }
+        },
+        "measurement_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "recall_at_k",
+            "mrr",
+            "expected_target_recall",
+            "citation_health",
+            "range_health",
+            "miss_taxonomy",
+            "context_bytes",
+            "tool_calls"
+          ],
+          "properties": {
+            "recall_at_k": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "mrr": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "expected_target_recall": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "citation_health": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "range_health": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "miss_taxonomy": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "context_bytes": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "tool_calls": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recall_at_k",
+        "mrr",
+        "expected_target_recall",
+        "citation_health",
+        "range_health",
+        "miss_taxonomy",
+        "context_bytes",
+        "tool_calls"
+      ],
+      "properties": {
+        "recall_at_k": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "mrr": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "expected_target_recall": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "citation_health": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "range_health": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "miss_taxonomy": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "context_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "status",
+        "route",
+        "repository",
+        "repository_commit",
+        "dataset",
+        "bundle_manifest",
+        "index",
+        "evaluator",
+        "source_artifact",
+        "metrics",
+        "comparison_group",
+        "limitations"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "measured",
+            "partial",
+            "not_measured"
+          ]
+        },
+        "route": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repository_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "dataset": {
+          "$ref": "#/$defs/binding"
+        },
+        "bundle_manifest": {
+          "$ref": "#/$defs/binding"
+        },
+        "index": {
+          "$ref": "#/$defs/binding"
+        },
+        "source_artifact": {
+          "$ref": "#/$defs/binding"
+        },
+        "evaluator": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256",
+            "version"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "metrics": {
+          "$ref": "#/$defs/metrics"
+        },
+        "comparison_group": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limitations": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minimum_recall_at_k": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_mrr": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_expected_target_recall": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_citation_health": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "minimum_range_health": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_profile",
+        "available_routes",
+        "current_default",
+        "candidate_route",
+        "candidate_measurement_id",
+        "fallback",
+        "promotion_authority",
+        "thresholds",
+        "measurements",
+        "non_claims"
+      ],
+      "properties": {
+        "task_profile": {
+          "enum": [
+            "basic_repo_question",
+            "review",
+            "change_impact",
+            "find_relevant_tests",
+            "ground_claim"
+          ]
+        },
+        "available_routes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "current_default": {
+          "type": "string",
+          "minLength": 1
+        },
+        "candidate_route": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "candidate_measurement_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "fallback": {
+          "type": "string",
+          "minLength": 1
+        },
+        "promotion_authority": {
+          "enum": [
+            "none",
+            "explicit_profile_decision"
+          ]
+        },
+        "thresholds": {
+          "$ref": "#/$defs/thresholds"
+        },
+        "measurements": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/measurement"
+          }
+        },
+        "non_claims": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,493 @@
+{
+  "does_not_establish": [
+    "routing mutation authority",
+    "paid benchmark authorization",
+    "answer correctness",
+    "review completeness",
+    "global retrieval completeness",
+    "runtime correctness",
+    "merge readiness"
+  ],
+  "evaluator_version": "1.0",
+  "global_default_promoted": false,
+  "goldset": {
+    "measurement_coverage": {
+      "citation_health": [
+        "retrieval-v2-review-intent-20260708"
+      ],
+      "context_bytes": [
+        "agent-impact-live-rerun-20260713"
+      ],
+      "expected_target_recall": [
+        "canonical-review-retrieval-20260711",
+        "retrieval-v2-review-intent-20260708",
+        "agent-impact-live-rerun-20260713"
+      ],
+      "miss_taxonomy": [
+        "canonical-review-retrieval-20260711",
+        "retrieval-v2-review-intent-20260708",
+        "agent-impact-live-rerun-20260713"
+      ],
+      "mrr": [
+        "canonical-review-retrieval-20260711",
+        "retrieval-v2-review-intent-20260708"
+      ],
+      "range_health": [
+        "retrieval-v2-review-intent-20260708"
+      ],
+      "recall_at_k": [
+        "canonical-review-retrieval-20260711",
+        "retrieval-v2-review-intent-20260708",
+        "agent-impact-live-rerun-20260713"
+      ],
+      "tool_calls": [
+        "agent-impact-live-rerun-20260713"
+      ]
+    },
+    "path": "docs/retrieval/task-profile-routing-goldset.v1.json",
+    "repositories": [
+      "heimgewebe/repoground",
+      "heimgewebe/grabowski",
+      "heimgewebe/weltgewebe"
+    ],
+    "sha256": "f732187ed172d8f0a5783db9e54b15e7dc92ae9c1e1cc3df6af94f163ea6b7c7",
+    "status": "available",
+    "task_profiles": [
+      "basic_repo_question",
+      "review",
+      "change_impact",
+      "find_relevant_tests",
+      "ground_claim"
+    ]
+  },
+  "kind": "repoground.retrieval_task_profile_routing_evidence",
+  "profiles": [
+    {
+      "available_routes": [
+        "default_lexical",
+        "grep_read_fallback"
+      ],
+      "candidate_measurement_id": "canonical-review-retrieval-20260711",
+      "candidate_route": "default_lexical",
+      "current_default": "default_lexical",
+      "fallback": "grep_read_fallback",
+      "measurements": [
+        {
+          "bundle_manifest": {
+            "locator": "temporary canonical snapshot manifest",
+            "sha256": "e918b8ef013083d0159743f8f1f6919580cb386722b27bb57e25dcc631860549",
+            "status": "digest_bound"
+          },
+          "comparison_group": "review-goldset-v1-default-lexical-20260711",
+          "dataset": {
+            "path": "docs/retrieval/review_queries.v1.json",
+            "sha256": "47f562e6c5b5b63205930e92186d406d33029f7330796312ca5844a177fc3f77",
+            "status": "available"
+          },
+          "evaluator": {
+            "path": "merger/repoground/retrieval/review_eval.py",
+            "sha256": "d82843f99b42b246a853b319202434cd1d45504cb43ae14d6e26cc0dfa2c665e",
+            "version": "review-eval.v1"
+          },
+          "id": "canonical-review-retrieval-20260711",
+          "index": {
+            "reason": "the compact committed diagnostic binds the retrieval report but does not retain the temporary index digest",
+            "status": "unavailable"
+          },
+          "limitations": [
+            "context bytes and tool calls were not recorded",
+            "citation and range health were not quantified in the compact diagnostic"
+          ],
+          "metrics": {
+            "citation_health": null,
+            "context_bytes": null,
+            "expected_target_recall": 0.01666667,
+            "miss_taxonomy": {
+              "query_target_ambiguous": 10,
+              "target_exists_not_in_top_k": 48,
+              "target_missing_from_index": 1
+            },
+            "mrr": 0.05,
+            "range_health": null,
+            "recall_at_k": 0.05,
+            "tool_calls": null
+          },
+          "repository": "heimgewebe/repoground",
+          "repository_commit": "8f24c2ab55a86a315b5066b4f399c3a1a9fd10f3",
+          "route": "default_lexical",
+          "source_artifact": {
+            "path": "docs/diagnostics/repobrief-canonical-retrieval-measurement-20260711.json",
+            "sha256": "7b84f339353e861f74c8498638359b2b16ee23eb190be63f8a90cd6bea5b7eca",
+            "status": "available"
+          },
+          "status": "partial"
+        }
+      ],
+      "non_claims": [
+        "answer correctness",
+        "review completeness",
+        "global retrieval completeness",
+        "default routing authority"
+      ],
+      "promotion_authority": "none",
+      "task_profile": "basic_repo_question",
+      "thresholds": {
+        "minimum_expected_target_recall": 0.5,
+        "minimum_mrr": 0.3,
+        "minimum_recall_at_k": 0.8
+      }
+    },
+    {
+      "available_routes": [
+        "default_lexical",
+        "review_intent_v1",
+        "grep_read_fallback"
+      ],
+      "candidate_measurement_id": "retrieval-v2-review-intent-20260708",
+      "candidate_route": "review_intent_v1",
+      "current_default": "default_lexical",
+      "fallback": "default_lexical",
+      "measurements": [
+        {
+          "bundle_manifest": {
+            "locator": "temporary canonical snapshot manifest",
+            "sha256": "e918b8ef013083d0159743f8f1f6919580cb386722b27bb57e25dcc631860549",
+            "status": "digest_bound"
+          },
+          "comparison_group": "review-goldset-v1-default-lexical-20260711",
+          "dataset": {
+            "path": "docs/retrieval/review_queries.v1.json",
+            "sha256": "47f562e6c5b5b63205930e92186d406d33029f7330796312ca5844a177fc3f77",
+            "status": "available"
+          },
+          "evaluator": {
+            "path": "merger/repoground/retrieval/review_eval.py",
+            "sha256": "d82843f99b42b246a853b319202434cd1d45504cb43ae14d6e26cc0dfa2c665e",
+            "version": "review-eval.v1"
+          },
+          "id": "canonical-review-retrieval-20260711",
+          "index": {
+            "reason": "the compact committed diagnostic binds the retrieval report but does not retain the temporary index digest",
+            "status": "unavailable"
+          },
+          "limitations": [
+            "context bytes and tool calls were not recorded",
+            "citation and range health were not quantified in the compact diagnostic"
+          ],
+          "metrics": {
+            "citation_health": null,
+            "context_bytes": null,
+            "expected_target_recall": 0.01666667,
+            "miss_taxonomy": {
+              "query_target_ambiguous": 10,
+              "target_exists_not_in_top_k": 48,
+              "target_missing_from_index": 1
+            },
+            "mrr": 0.05,
+            "range_health": null,
+            "recall_at_k": 0.05,
+            "tool_calls": null
+          },
+          "repository": "heimgewebe/repoground",
+          "repository_commit": "8f24c2ab55a86a315b5066b4f399c3a1a9fd10f3",
+          "route": "default_lexical",
+          "source_artifact": {
+            "path": "docs/diagnostics/repobrief-canonical-retrieval-measurement-20260711.json",
+            "sha256": "7b84f339353e861f74c8498638359b2b16ee23eb190be63f8a90cd6bea5b7eca",
+            "status": "available"
+          },
+          "status": "partial"
+        },
+        {
+          "bundle_manifest": {
+            "locator": "heimgewebe__lenskit__main-max-260708-1525_merge.bundle.manifest.json",
+            "sha256": "a07b01f410e0b295ed993eea65fc11ba78a7963b622d9e19366f0a073f399f8b",
+            "status": "digest_bound"
+          },
+          "comparison_group": "review-goldset-v1-review-intent-20260708",
+          "dataset": {
+            "path": "docs/retrieval/review_queries.v1.json",
+            "sha256": "47f562e6c5b5b63205930e92186d406d33029f7330796312ca5844a177fc3f77",
+            "status": "available"
+          },
+          "evaluator": {
+            "path": "merger/repoground/retrieval/retrieval_promotion_gate.py",
+            "sha256": "8f0a439ab6ce31efef21ea11619471445ff89a92dbe135810d63c47eaf52a4c2",
+            "version": "retrieval-promotion-gate.v1"
+          },
+          "id": "retrieval-v2-review-intent-20260708",
+          "index": {
+            "locator": "heimgewebe__lenskit__main-max-260708-1525_merge.chunk_index.index.sqlite",
+            "sha256": "556c44ae4c2c7ca9fcbf533e95cc1cfb395ffc8ecfc350733cb301d6d98844c2",
+            "status": "digest_bound"
+          },
+          "limitations": [
+            "citation_health and range_health normalize the single passed range_citation_health_ok_if_supplied gate to 1.0; they are not independent continuous scores",
+            "context bytes and tool calls were not recorded",
+            "the 95 percent value is query recall for review-intent on a different commit and route than the 5 percent canonical default measurement"
+          ],
+          "metrics": {
+            "citation_health": 1.0,
+            "context_bytes": null,
+            "expected_target_recall": 0.45,
+            "miss_taxonomy": {
+              "expected_target_misses": 33
+            },
+            "mrr": 0.3751190476190477,
+            "range_health": 1.0,
+            "recall_at_k": 0.95,
+            "tool_calls": null
+          },
+          "repository": "heimgewebe/repoground",
+          "repository_commit": "43d97b2b7cd26d7cc1d5ce2cc53df8a4f2eb8912",
+          "route": "review_intent_v1",
+          "source_artifact": {
+            "path": "docs/diagnostics/retrieval-v2-default-promotion-decision-20260708T152502Z.json",
+            "sha256": "3af0571fc2822cf09e6d879aa3ea9d0956c07c478287105dde7927084b9955ea",
+            "status": "available"
+          },
+          "status": "partial"
+        }
+      ],
+      "non_claims": [
+        "answer correctness",
+        "review completeness",
+        "global retrieval completeness",
+        "default routing authority"
+      ],
+      "promotion_authority": "none",
+      "task_profile": "review",
+      "thresholds": {
+        "minimum_citation_health": 1.0,
+        "minimum_expected_target_recall": 0.4,
+        "minimum_mrr": 0.3,
+        "minimum_range_health": 1.0,
+        "minimum_recall_at_k": 0.9
+      }
+    },
+    {
+      "available_routes": [
+        "default_lexical",
+        "agent_impact_context_v1",
+        "grep_read_fallback"
+      ],
+      "candidate_measurement_id": "agent-impact-live-rerun-20260713",
+      "candidate_route": "agent_impact_context_v1",
+      "current_default": "default_lexical",
+      "fallback": "default_lexical",
+      "measurements": [
+        {
+          "bundle_manifest": {
+            "locator": "GitHub Actions artifact 8273035636",
+            "sha256": "9cca7f74c3c46913f664bde5e069cb76bdac9f2e4e9cdca9d0f38ddd0945b7d4",
+            "status": "digest_bound"
+          },
+          "comparison_group": "agent-impact-live-fixed-three-repository-rerun",
+          "dataset": {
+            "path": "docs/retrieval/repobrief_agent_impact_live_goldset.rerun.v1.json",
+            "sha256": "3171733edaee8257b50ae9b05c2fb5b0f58d074f821c016adeb63ea85c092272",
+            "status": "available"
+          },
+          "evaluator": {
+            "path": "merger/repoground/core/agent_impact_eval.py",
+            "sha256": "f30d162c692238c9c4caab6d88a27614acafd6ab3467308f75398c156ef56f0e",
+            "version": "agent-impact-eval.v1"
+          },
+          "id": "agent-impact-live-rerun-20260713",
+          "index": {
+            "locator": "fixed three-repository raw observations",
+            "sha256": "8853366f1f09c167cb5708dc8075ba7b97b6fcdd0083016541c922eced261661",
+            "status": "digest_bound"
+          },
+          "limitations": [
+            "context_bytes is the 711-byte compact UTF-8 JSON projection of the three emitted impact path lists; tool_calls counts the two deterministic impact invocations for each of three cases",
+            "MRR, citation health and range health were not quantified",
+            "the route is opt-in and establishes neither complete blast radius nor test sufficiency"
+          ],
+          "metrics": {
+            "citation_health": null,
+            "context_bytes": 711,
+            "expected_target_recall": 1.0,
+            "miss_taxonomy": {},
+            "mrr": null,
+            "range_health": null,
+            "recall_at_k": 1.0,
+            "tool_calls": 6
+          },
+          "repository": "multi:heimgewebe/repoground,heimgewebe/grabowski,heimgewebe/weltgewebe",
+          "repository_commit": "38e779e1391d49655368766f86e02e4ceae30847",
+          "route": "agent_impact_context_v1",
+          "source_artifact": {
+            "path": "docs/diagnostics/repobrief-agent-impact-live-rerun-v1.json",
+            "sha256": "7ae707404d0149d521284e28c31052b1f8689594f4a0ee022e19ecdb9847c222",
+            "status": "available"
+          },
+          "status": "partial"
+        }
+      ],
+      "non_claims": [
+        "answer correctness",
+        "review completeness",
+        "global retrieval completeness",
+        "default routing authority",
+        "complete blast radius"
+      ],
+      "promotion_authority": "none",
+      "task_profile": "change_impact",
+      "thresholds": {
+        "minimum_expected_target_recall": 0.9,
+        "minimum_recall_at_k": 0.9
+      }
+    },
+    {
+      "available_routes": [
+        "default_lexical",
+        "agent_impact_context_v1",
+        "grep_read_fallback"
+      ],
+      "candidate_measurement_id": "agent-impact-live-rerun-20260713",
+      "candidate_route": "agent_impact_context_v1",
+      "current_default": "default_lexical",
+      "fallback": "grep_read_fallback",
+      "measurements": [
+        {
+          "bundle_manifest": {
+            "locator": "GitHub Actions artifact 8273035636",
+            "sha256": "9cca7f74c3c46913f664bde5e069cb76bdac9f2e4e9cdca9d0f38ddd0945b7d4",
+            "status": "digest_bound"
+          },
+          "comparison_group": "agent-impact-live-fixed-three-repository-rerun",
+          "dataset": {
+            "path": "docs/retrieval/repobrief_agent_impact_live_goldset.rerun.v1.json",
+            "sha256": "3171733edaee8257b50ae9b05c2fb5b0f58d074f821c016adeb63ea85c092272",
+            "status": "available"
+          },
+          "evaluator": {
+            "path": "merger/repoground/core/agent_impact_eval.py",
+            "sha256": "f30d162c692238c9c4caab6d88a27614acafd6ab3467308f75398c156ef56f0e",
+            "version": "agent-impact-eval.v1"
+          },
+          "id": "agent-impact-live-rerun-20260713",
+          "index": {
+            "locator": "fixed three-repository raw observations",
+            "sha256": "8853366f1f09c167cb5708dc8075ba7b97b6fcdd0083016541c922eced261661",
+            "status": "digest_bound"
+          },
+          "limitations": [
+            "context_bytes is the 711-byte compact UTF-8 JSON projection of the three emitted impact path lists; tool_calls counts the two deterministic impact invocations for each of three cases",
+            "MRR, citation health and range health were not quantified",
+            "the route is opt-in and establishes neither complete blast radius nor test sufficiency"
+          ],
+          "metrics": {
+            "citation_health": null,
+            "context_bytes": 711,
+            "expected_target_recall": 1.0,
+            "miss_taxonomy": {},
+            "mrr": null,
+            "range_health": null,
+            "recall_at_k": 1.0,
+            "tool_calls": 6
+          },
+          "repository": "multi:heimgewebe/repoground,heimgewebe/grabowski,heimgewebe/weltgewebe",
+          "repository_commit": "38e779e1391d49655368766f86e02e4ceae30847",
+          "route": "agent_impact_context_v1",
+          "source_artifact": {
+            "path": "docs/diagnostics/repobrief-agent-impact-live-rerun-v1.json",
+            "sha256": "7ae707404d0149d521284e28c31052b1f8689594f4a0ee022e19ecdb9847c222",
+            "status": "available"
+          },
+          "status": "partial"
+        }
+      ],
+      "non_claims": [
+        "answer correctness",
+        "review completeness",
+        "global retrieval completeness",
+        "default routing authority",
+        "test sufficiency"
+      ],
+      "promotion_authority": "none",
+      "task_profile": "find_relevant_tests",
+      "thresholds": {
+        "minimum_expected_target_recall": 0.9,
+        "minimum_recall_at_k": 0.9
+      }
+    },
+    {
+      "available_routes": [
+        "agent_benchmark_grounding",
+        "read_and_verify_fallback"
+      ],
+      "candidate_measurement_id": "agent-benchmark-grounding-unexecuted",
+      "candidate_route": "agent_benchmark_grounding",
+      "current_default": "read_and_verify_fallback",
+      "fallback": "read_and_verify_fallback",
+      "measurements": [
+        {
+          "bundle_manifest": {
+            "reason": "no committed paired agent benchmark run exists for this task profile",
+            "status": "unavailable"
+          },
+          "comparison_group": "agent-benchmark-grounding-cases-unexecuted",
+          "dataset": {
+            "path": "docs/retrieval/repobrief_agent_benchmark_taskset.v1.json",
+            "sha256": "2d8a4ca3c32f8f5ab592387b5f645db8e8527cb624238c20a1da64a5e7221887",
+            "status": "available"
+          },
+          "evaluator": {
+            "path": "merger/repoground/core/agent_benchmark_evaluation.py",
+            "sha256": "297230d3b91489ca69d70146e7d7b204097eb60c8af5144dd6300e554040ea58",
+            "version": "agent-benchmark-evaluation.v1"
+          },
+          "id": "agent-benchmark-grounding-unexecuted",
+          "index": {
+            "reason": "no committed paired agent benchmark run exists for this task profile",
+            "status": "unavailable"
+          },
+          "limitations": [
+            "the committed taskset defines grounding and freshness cases but no cost-free committed run receipts exist",
+            "absence of metrics blocks promotion and does not authorize a paid benchmark"
+          ],
+          "metrics": {
+            "citation_health": null,
+            "context_bytes": null,
+            "expected_target_recall": null,
+            "miss_taxonomy": null,
+            "mrr": null,
+            "range_health": null,
+            "recall_at_k": null,
+            "tool_calls": null
+          },
+          "repository": "heimgewebe/repoground",
+          "repository_commit": "271076c8b5e625a079d68e8d92ce3489b9ef15ad",
+          "route": "agent_benchmark_grounding",
+          "source_artifact": {
+            "path": "docs/retrieval/repobrief_agent_benchmark_taskset.v1.json",
+            "sha256": "2d8a4ca3c32f8f5ab592387b5f645db8e8527cb624238c20a1da64a5e7221887",
+            "status": "available"
+          },
+          "status": "not_measured"
+        }
+      ],
+      "non_claims": [
+        "answer correctness",
+        "review completeness",
+        "global retrieval completeness",
+        "default routing authority",
+        "claim truth outside cited evidence"
+      ],
+      "promotion_authority": "none",
+      "task_profile": "ground_claim",
+      "thresholds": {
+        "minimum_citation_health": 1.0,
+        "minimum_expected_target_recall": 0.9,
+        "minimum_mrr": 0.3,
+        "minimum_range_health": 1.0,
+        "minimum_recall_at_k": 0.9
+      }
+    }
+  ],
+  "source_commit": "271076c8b5e625a079d68e8d92ce3489b9ef15ad",
+  "task_id": "REPOGROUND-AGENT-UTILITY-V1-T013",
+  "version": "1.0"
+}
