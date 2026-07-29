@@ -7,6 +7,9 @@ from pathlib import Path
 
 
 MIXIN_MODULES = (
+    "merger.repoground.frontends.pythonista.merger_ui_init",
+    "merger.repoground.frontends.pythonista.merger_ui_controls",
+    "merger.repoground.frontends.pythonista.merger_ui_state",
     "merger.repoground.frontends.pythonista.merger_ui_prescan",
     "merger.repoground.frontends.pythonista.merger_ui_browser",
     "merger.repoground.frontends.pythonista.merger_ui_merge_run",
@@ -49,3 +52,16 @@ def test_build_wires_declared_mixin_globals() -> None:
         module = importlib.import_module(module_name)
         for name in module.BUILD_GLOBAL_NAMES:
             assert getattr(module, name) is getattr(build, name)
+
+
+def test_clear_active_merger_view_only_clears_matching_view() -> None:
+    build = importlib.import_module("merger.repoground.frontends.pythonista.build")
+    active_view = object()
+    other_view = object()
+    build._ACTIVE_MERGER_VIEW = active_view
+
+    build._clear_active_merger_view(other_view)
+    assert build._ACTIVE_MERGER_VIEW is active_view
+
+    build._clear_active_merger_view(active_view)
+    assert build._ACTIVE_MERGER_VIEW is None
