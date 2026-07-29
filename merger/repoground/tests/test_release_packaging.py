@@ -860,11 +860,60 @@ def test_verifier_rejects_compressed_archive_over_limit(
     )
     monkeypatch.setattr(
         verifier_module,
-        "_sha256",
-        lambda path: pytest.fail(f"archive hashed before size rejection: {path}"),
+        "_hash_open_archive",
+        lambda handle: pytest.fail("archive hashed before size rejection"),
     )
     with pytest.raises(ValueError, match="compressed byte limit"):
         verify_release_candidate(candidate)
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+def test_verifier_opens_archive_once_for_hash_and_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_bound: bool
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-single-archive-open"
+    build_release_candidate(repo, candidate)
+    archive_path = next(candidate.glob("*.tar.gz"))
+    original_open = verifier_module.os.open
+    archive_opens = 0
+
+    def counted_open(path, flags, *args, **kwargs):
+        nonlocal archive_opens
+        if Path(path) == archive_path:
+            archive_opens += 1
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(verifier_module.os, "open", counted_open)
+    kwargs = {"repo": repo} if source_bound else {}
+    assert verify_release_candidate(candidate, **kwargs)["status"] == "pass"
+    assert archive_opens == 1
+
+
+@pytest.mark.parametrize("source_bound", (False, True))
+def test_verifier_rejects_archive_path_replacement_after_hash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_bound: bool
+) -> None:
+    repo = _repo(tmp_path)
+    candidate = tmp_path / "candidate-archive-replacement"
+    build_release_candidate(repo, candidate)
+    archive_path = next(candidate.glob("*.tar.gz"))
+    replacement = tmp_path / "replacement.tar.gz"
+    replacement.write_bytes(archive_path.read_bytes())
+    original_materialize = verifier_module._materialized_bounded_tar
+
+    @contextmanager
+    def replace_after_hash(opened_archive):
+        replacement.replace(archive_path)
+        with original_materialize(opened_archive) as tar_path:
+            yield tar_path
+
+    monkeypatch.setattr(
+        verifier_module, "_materialized_bounded_tar", replace_after_hash
+    )
+    kwargs = {"repo": repo} if source_bound else {}
+    with pytest.raises(ValueError, match="candidate archive changed during verification"):
+        verify_release_candidate(candidate, **kwargs)
 
 
 def test_verifier_rejects_total_uncompressed_bytes_over_limit(
@@ -1006,10 +1055,10 @@ def test_verifier_materializes_archive_once_per_verification(
     tar_opens = 0
 
     @contextmanager
-    def counted_materialization(archive_path: Path):
+    def counted_materialization(opened_archive):
         nonlocal materializations
         materializations += 1
-        with original_materialize(archive_path) as tar_path:
+        with original_materialize(opened_archive) as tar_path:
             yield tar_path
 
     def counted_tar_open(*args, **kwargs):

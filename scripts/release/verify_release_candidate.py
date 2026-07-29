@@ -60,6 +60,19 @@ class ReleaseContract:
     compatibility_mode: str
 
 
+ArchiveIdentity = tuple[int, int, int, int, int, int, int, int, int]
+
+
+@dataclass(frozen=True)
+class OpenedArchive:
+    path: Path
+    handle: BinaryIO
+    identity: ArchiveIdentity
+    compressed_bytes: int
+    sha256: str
+    header: bytes
+
+
 CANONICAL_CONTRACT = ReleaseContract(
     kind=KIND,
     version=CONTRACT_VERSION,
@@ -97,32 +110,117 @@ def _open_bounded_tar(tar_path: Path) -> Iterator[tarfile.TarFile]:
         yield tar
 
 
-def _sha256(path: Path) -> str:
+def _archive_identity(metadata: os.stat_result) -> ArchiveIdentity:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_uid,
+        metadata.st_gid,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _hash_open_archive(handle: BinaryIO) -> tuple[str, bytes]:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def _compressed_archive_size(archive_path: Path) -> int:
-    actual_bytes = archive_path.stat().st_size
-    if actual_bytes > MAX_ARCHIVE_BYTES:
+    header = b""
+    observed = 0
+    handle.seek(0)
+    while observed <= MAX_ARCHIVE_BYTES:
+        chunk = handle.read(min(READ_CHUNK_BYTES, MAX_ARCHIVE_BYTES + 1 - observed))
+        if not chunk:
+            break
+        if len(header) < 8:
+            header += chunk[: 8 - len(header)]
+        digest.update(chunk)
+        observed += len(chunk)
+    if observed > MAX_ARCHIVE_BYTES:
         raise ValueError(
-            f"archive exceeds compressed byte limit: {actual_bytes} > {MAX_ARCHIVE_BYTES}"
+            f"archive exceeds compressed byte limit: {observed} > {MAX_ARCHIVE_BYTES}"
         )
-    return actual_bytes
+    handle.seek(0)
+    return digest.hexdigest(), header
+
+
+def _assert_opened_archive_unchanged(archive: OpenedArchive) -> None:
+    try:
+        opened = os.fstat(archive.handle.fileno())
+        linked = archive.path.lstat()
+    except OSError as exc:
+        raise ValueError("candidate archive changed during verification") from exc
+    if (
+        not stat.S_ISREG(opened.st_mode)
+        or not stat.S_ISREG(linked.st_mode)
+        or archive.path.is_symlink()
+        or _archive_identity(opened) != archive.identity
+        or _archive_identity(linked) != archive.identity
+    ):
+        raise ValueError("candidate archive changed during verification")
 
 
 @contextmanager
-def _materialized_bounded_tar(archive_path: Path) -> Iterator[Path]:
-    compressed_bytes = _compressed_archive_size(archive_path)
+def _open_candidate_archive(archive_path: Path) -> Iterator[OpenedArchive]:
+    try:
+        linked = archive_path.lstat()
+    except OSError as exc:
+        raise ValueError("candidate archive must be a regular non-symlink file") from exc
+    if not stat.S_ISREG(linked.st_mode) or archive_path.is_symlink():
+        raise ValueError("candidate archive must be a regular non-symlink file")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("candidate archive no-follow open is unavailable")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(archive_path, flags)
+    except OSError as exc:
+        raise ValueError("candidate archive must be a regular non-symlink file") from exc
+    handle = os.fdopen(descriptor, "rb")
+    try:
+        opened = os.fstat(handle.fileno())
+        identity = _archive_identity(opened)
+        if not stat.S_ISREG(opened.st_mode) or identity != _archive_identity(linked):
+            raise ValueError("candidate archive changed before it could be opened safely")
+        compressed_bytes = opened.st_size
+        if compressed_bytes > MAX_ARCHIVE_BYTES:
+            raise ValueError(
+                "archive exceeds compressed byte limit: "
+                f"{compressed_bytes} > {MAX_ARCHIVE_BYTES}"
+            )
+        archive_sha256, header = _hash_open_archive(handle)
+        archive = OpenedArchive(
+            path=archive_path,
+            handle=handle,
+            identity=identity,
+            compressed_bytes=compressed_bytes,
+            sha256=archive_sha256,
+            header=header,
+        )
+        _assert_opened_archive_unchanged(archive)
+        try:
+            yield archive
+        except BaseException:
+            raise
+        else:
+            _assert_opened_archive_unchanged(archive)
+    finally:
+        handle.close()
+
+
+@contextmanager
+def _materialized_bounded_tar(archive: OpenedArchive) -> Iterator[Path]:
+    _assert_opened_archive_unchanged(archive)
+    archive.handle.seek(0)
     with tempfile.TemporaryDirectory(
         prefix="repoground-release-verifier-"
     ) as temporary:
         tar_path = Path(temporary) / "candidate.tar"
         observed = 0
-        with gzip.open(archive_path, "rb") as source, tar_path.open("wb") as target:
+        with (
+            gzip.GzipFile(fileobj=archive.handle, mode="rb") as source,
+            tar_path.open("wb") as target,
+        ):
             while observed <= MAX_ARCHIVE_STREAM_BYTES:
                 chunk = source.read(
                     min(
@@ -134,13 +232,14 @@ def _materialized_bounded_tar(archive_path: Path) -> Iterator[Path]:
                     break
                 target.write(chunk)
                 observed += len(chunk)
+        _assert_opened_archive_unchanged(archive)
         if observed > MAX_ARCHIVE_STREAM_BYTES:
             raise ValueError(
                 "archive exceeds uncompressed stream byte limit: "
                 f"{observed} > {MAX_ARCHIVE_STREAM_BYTES}"
             )
-        if observed > compressed_bytes * MAX_ARCHIVE_COMPRESSION_RATIO:
-            ratio = observed / compressed_bytes
+        if observed > archive.compressed_bytes * MAX_ARCHIVE_COMPRESSION_RATIO:
+            ratio = observed / archive.compressed_bytes
             raise ValueError(
                 "archive exceeds compression ratio limit: "
                 f"{ratio:.1f} > {MAX_ARCHIVE_COMPRESSION_RATIO}"
@@ -239,12 +338,13 @@ def _verify_sums(
     manifest_path: Path,
     manifest_sha256: str,
     archive_path: Path,
+    archive_sha256: str,
     sums_path: Path,
 ) -> None:
     if not sums_path.is_file():
         raise ValueError("SHA256SUMS is missing")
     expected = {
-        archive_path.name: _sha256(archive_path),
+        archive_path.name: archive_sha256,
         manifest_path.name: manifest_sha256,
     }
     sums_text = _read_bounded_regular_file(
@@ -328,7 +428,7 @@ def _account_archive_member(member: tarfile.TarInfo, total_file_bytes: int) -> i
 
 def _archive_members(
     manifest: dict[str, object],
-    archive_path: Path,
+    opened_archive: OpenedArchive,
     tar_path: Path,
 ) -> dict[str, tarfile.TarInfo]:
     archive = manifest["archive"]
@@ -337,8 +437,8 @@ def _archive_members(
     expected_bytes = archive.get("bytes")
     prefix = archive.get("prefix")
     expected_count = _expected_archive_member_count(archive)
-    actual_bytes = _compressed_archive_size(archive_path)
-    if _sha256(archive_path) != expected_sha:
+    actual_bytes = opened_archive.compressed_bytes
+    if opened_archive.sha256 != expected_sha:
         raise ValueError("archive SHA-256 does not match manifest")
     if actual_bytes != expected_bytes:
         raise ValueError("archive byte size does not match manifest")
@@ -348,9 +448,10 @@ def _archive_members(
         or not _safe_name(prefix[:-1])
     ):
         raise ValueError("archive prefix is invalid")
-    with archive_path.open("rb") as handle:
-        raw = handle.read(8)
-    if len(raw) < 8 or int.from_bytes(raw[4:8], "little") != 0:
+    if (
+        len(opened_archive.header) < 8
+        or int.from_bytes(opened_archive.header[4:8], "little") != 0
+    ):
         raise ValueError("gzip timestamp is not normalized to zero")
 
     members: dict[str, tarfile.TarInfo] = {}
@@ -876,55 +977,58 @@ def _verify_release_candidate(
     )
     if not archive_path.is_file():
         raise ValueError("candidate archive is missing")
-    _compressed_archive_size(archive_path)
-    _verify_sums(
-        manifest_path,
-        manifest_sha256,
-        archive_path,
-        sums_path,
-    )
 
-    license_data = manifest.get("license")
-    if not isinstance(license_data, dict):
-        raise ValueError("license object is missing")
-    if license_data.get("expression") != contract.license_expression:
-        raise ValueError("license expression mismatch")
-    if license_data.get("distribution_status") != DISTRIBUTION_STATUS:
-        raise ValueError("distribution boundary mismatch")
+    with _open_candidate_archive(archive_path) as opened_archive:
+        _verify_sums(
+            manifest_path,
+            manifest_sha256,
+            archive_path,
+            opened_archive.sha256,
+            sums_path,
+        )
 
-    with _materialized_bounded_tar(archive_path) as tar_path:
-        members = _archive_members(manifest, archive_path, tar_path)
-        archive = manifest.get("archive")
-        assert isinstance(archive, dict)
-        prefix = archive.get("prefix")
-        assert isinstance(prefix, str)
-        _reject_retired_release_contract_members(members, prefix)
-        _verify_manifest_contract(manifest, tar_path, members, contract)
-        if repo is not None:
-            _compare_with_repo(
-                Path(repo).expanduser().resolve(), manifest, tar_path, members
-            )
+        license_data = manifest.get("license")
+        if not isinstance(license_data, dict):
+            raise ValueError("license object is missing")
+        if license_data.get("expression") != contract.license_expression:
+            raise ValueError("license expression mismatch")
+        if license_data.get("distribution_status") != DISTRIBUTION_STATUS:
+            raise ValueError("distribution boundary mismatch")
 
-    current_manifest_bytes = _read_bounded_regular_file(
-        manifest_path,
-        label="release manifest",
-        max_bytes=MAX_MANIFEST_BYTES,
-    )
-    if current_manifest_bytes != manifest_bytes:
-        raise ValueError("release manifest changed during verification")
+        with _materialized_bounded_tar(opened_archive) as tar_path:
+            members = _archive_members(manifest, opened_archive, tar_path)
+            archive = manifest.get("archive")
+            assert isinstance(archive, dict)
+            prefix = archive.get("prefix")
+            assert isinstance(prefix, str)
+            _reject_retired_release_contract_members(members, prefix)
+            _verify_manifest_contract(manifest, tar_path, members, contract)
+            if repo is not None:
+                _compare_with_repo(
+                    Path(repo).expanduser().resolve(), manifest, tar_path, members
+                )
 
-    project = manifest.get("project")
-    assert isinstance(project, dict)
-    return {
-        "status": "pass",
-        "candidate_id": project["candidate_id"],
-        "archive_sha256": _sha256(archive_path),
-        "manifest_sha256": manifest_sha256,
-        "member_count": len(members),
-        "source_bound": repo is not None,
-        "distribution_status": DISTRIBUTION_STATUS,
-        "compatibility_mode": contract.compatibility_mode,
-    }
+        current_manifest_bytes = _read_bounded_regular_file(
+            manifest_path,
+            label="release manifest",
+            max_bytes=MAX_MANIFEST_BYTES,
+        )
+        if current_manifest_bytes != manifest_bytes:
+            raise ValueError("release manifest changed during verification")
+
+        project = manifest.get("project")
+        assert isinstance(project, dict)
+        report = {
+            "status": "pass",
+            "candidate_id": project["candidate_id"],
+            "archive_sha256": opened_archive.sha256,
+            "manifest_sha256": manifest_sha256,
+            "member_count": len(members),
+            "source_bound": repo is not None,
+            "distribution_status": DISTRIBUTION_STATUS,
+            "compatibility_mode": contract.compatibility_mode,
+        }
+    return report
 
 
 def verify_release_candidate(
