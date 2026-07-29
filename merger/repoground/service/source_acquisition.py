@@ -795,11 +795,17 @@ def _extract_git_archive(
                 )
             archive_stream.seek(0)
             try:
-                safe_extract_tar(archive_stream, snapshot_dir)
+                safe_extract_tar(_ArchiveReadGuard(archive_stream), snapshot_dir)
+            except SnapshotArchiveReadError as exc:
+                return (
+                    SourceStatus.ARCHIVE_FAILED,
+                    f"could not read git archive for {repo_name}",
+                    str(exc),
+                )
             except SnapshotExtractionError as exc:
                 return (
                     SourceStatus.EXTRACT_FAILED,
-                    f"unsafe tar member while extracting {repo_name} snapshot: {exc}",
+                    f"snapshot extraction failed for {repo_name}: {exc}",
                     str(exc),
                 )
             except (tarfile.TarError, OSError) as exc:
@@ -1002,7 +1008,38 @@ def materialize_remote_snapshot(
 
 
 class SnapshotExtractionError(Exception):
-    """Raised when a tar member would escape the snapshot directory."""
+    """Raised when snapshot extraction is unsafe or cannot write its target."""
+
+
+class SnapshotArchiveReadError(Exception):
+    """Raised when the job-local temporary Git archive cannot be read."""
+
+
+class _ArchiveReadGuard:
+    """Translate temporary-archive read operations into one typed failure."""
+
+    def __init__(self, source: BinaryIO) -> None:
+        self._source = source
+
+    def _read_operation(self, operation: str, *args, **kwargs):
+        try:
+            return getattr(self._source, operation)(*args, **kwargs)
+        except OSError as exc:
+            raise SnapshotArchiveReadError(
+                f"temporary Git archive {operation} failed: {exc}"
+            ) from exc
+
+    def read(self, *args, **kwargs):
+        return self._read_operation("read", *args, **kwargs)
+
+    def seek(self, *args, **kwargs):
+        return self._read_operation("seek", *args, **kwargs)
+
+    def tell(self, *args, **kwargs):
+        return self._read_operation("tell", *args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._source, name)
 
 
 def _seekable_tar_source(data: bytes | BinaryIO) -> BinaryIO:

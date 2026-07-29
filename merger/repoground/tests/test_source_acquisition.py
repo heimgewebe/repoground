@@ -231,6 +231,105 @@ def test_extract_git_archive_classifies_flush_failure(
     assert stderr == "disk full"
 
 
+def test_extract_git_archive_classifies_temporary_archive_read_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    class ReadFailure(io.BytesIO):
+        def __init__(self, data: bytes):
+            super().__init__(data)
+            io.BytesIO.seek(self, 0, 2)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+            return False
+
+        def read(self, *_args, **_kwargs):
+            raise OSError("archive read failed")
+
+    monkeypatch.setattr(
+        sa.tempfile,
+        "TemporaryFile",
+        lambda **_kwargs: ReadFailure(_tar_with_member("file.txt")),
+    )
+    monkeypatch.setattr(
+        sa,
+        "_run_git_binary_to_file",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["git", "archive"], returncode=0, stdout=b"", stderr=b""
+        ),
+    )
+
+    result = sa._extract_git_archive(
+        cache_git_dir=tmp_path / "cache.git",
+        commit="a" * 40,
+        base_dir=tmp_path,
+        snapshot_dir=tmp_path / "snapshot",
+        repo_name="repo",
+        timeout_seconds=10,
+    )
+
+    assert result is not None
+    status, message, stderr = result
+    assert status == SourceStatus.ARCHIVE_FAILED
+    assert message == "could not read git archive for repo"
+    assert "temporary Git archive read failed" in stderr
+    assert "archive read failed" in stderr
+
+
+def test_extract_git_archive_keeps_target_write_failure_as_extract_failure(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+):
+    class ArchiveStream(io.BytesIO):
+        def __init__(self, data: bytes):
+            super().__init__(data)
+            io.BytesIO.seek(self, 0, 2)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+            return False
+
+    monkeypatch.setattr(
+        sa.tempfile,
+        "TemporaryFile",
+        lambda **_kwargs: ArchiveStream(_tar_with_member("file.txt")),
+    )
+    monkeypatch.setattr(
+        sa,
+        "_run_git_binary_to_file",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["git", "archive"], returncode=0, stdout=b"", stderr=b""
+        ),
+    )
+    original_open = open
+
+    def fail_target_write(path, mode="r", *args, **kwargs):
+        if mode == "wb" and Path(path).name == "file.txt":
+            raise OSError("snapshot disk full")
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", fail_target_write)
+    result = sa._extract_git_archive(
+        cache_git_dir=tmp_path / "cache.git",
+        commit="a" * 40,
+        base_dir=tmp_path,
+        snapshot_dir=tmp_path / "snapshot",
+        repo_name="repo",
+        timeout_seconds=10,
+    )
+
+    assert result is not None
+    status, message, stderr = result
+    assert status == SourceStatus.EXTRACT_FAILED
+    assert message.startswith("snapshot extraction failed for repo")
+    assert "snapshot disk full" in stderr
+
+
 def test_remote_snapshot_rejects_archive_over_byte_limit(
     remote_and_local, monkeypatch: pytest.MonkeyPatch
 ):
