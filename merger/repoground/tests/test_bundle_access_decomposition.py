@@ -4,17 +4,25 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import typing
 
 import pytest
 
 from merger.repoground.core import artifact_source_access
 from merger.repoground.core import bundle_access
+from merger.repoground.core import symbol_index_access
 from merger.repoground.core.bounded_artifact_read import (
     MAX_REGISTERED_ARTIFACT_BYTES,
     _descriptor_read_size,
     read_stable_regular_file_bytes,
 )
 from merger.repoground.core.manifest_snapshot import MAX_MANIFEST_BYTES
+
+
+def test_symbol_index_source_type_hints_resolve() -> None:
+    hints = typing.get_type_hints(symbol_index_access._load_symbol_index_source)
+
+    assert "return" in hints
 
 
 def test_descriptor_read_size_tracks_observed_file_not_hard_cap() -> None:

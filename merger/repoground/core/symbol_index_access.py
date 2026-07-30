@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from merger.repoground.core import artifact_source_access as _artifact_source_access
+from merger.repoground.core.bounded_artifact_read import (
+    LoadedArtifactSource as _LoadedArtifactSource,
+)
 from merger.repoground.core.bundle_roles import (
     DOES_NOT_ESTABLISH as _DOES_NOT_ESTABLISH,
     read_only_mutation_boundary as _read_only_mutation_boundary,
