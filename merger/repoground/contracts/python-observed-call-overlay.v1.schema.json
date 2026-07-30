@@ -1,0 +1,280 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lenskit/schema/python-observed-call-overlay.v1.schema.json",
+  "title": "Observed Call Overlay v1 (S2)",
+  "description": "Run-bound observed Python call relations. A separate overlay next to the static Python Call Graph v1: S2 records never enter the static calls array and never upgrade an S0 candidate to an S1 resolution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "run_id",
+    "canonical_dump_index_sha256",
+    "language",
+    "evidence_model",
+    "relation_types",
+    "binding_statuses",
+    "observation",
+    "execution_outcome",
+    "relation_count",
+    "observed_call_total",
+    "callee_binding_counts",
+    "fully_bound_relation_count",
+    "relations",
+    "relations_truncated",
+    "observed_relation_total_count",
+    "skipped_files_count",
+    "skipped_errors",
+    "skipped_errors_total_count",
+    "skipped_errors_truncated",
+    "absence_semantics",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "lenskit.python_observed_call_overlay"},
+    "version": {"const": "1.0"},
+    "run_id": {"type": "string", "minLength": 1},
+    "canonical_dump_index_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "language": {"const": "python"},
+    "evidence_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["S2"],
+      "properties": {"S2": {"type": "string", "minLength": 1}}
+    },
+    "relation_types": {"const": ["observed_calls"]},
+    "binding_statuses": {"const": ["bound", "module_scope", "unbound"]},
+    "observation": {"$ref": "#/$defs/observation"},
+    "execution_outcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exit_status", "exit_code", "observed_frame_event_count"],
+      "properties": {
+        "exit_status": {"enum": ["completed", "exited", "failed"]},
+        "exit_code": {"type": ["integer", "null"]},
+        "observed_frame_event_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "relation_count": {"type": "integer", "minimum": 0},
+    "observed_call_total": {"type": "integer", "minimum": 0},
+    "callee_binding_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bound", "module_scope", "unbound"],
+      "properties": {
+        "bound": {"type": "integer", "minimum": 0},
+        "module_scope": {"type": "integer", "minimum": 0},
+        "unbound": {"type": "integer", "minimum": 0}
+      }
+    },
+    "fully_bound_relation_count": {"type": "integer", "minimum": 0},
+    "relations": {"type": "array", "items": {"$ref": "#/$defs/relation"}},
+    "relations_truncated": {"type": "boolean"},
+    "observed_relation_total_count": {"type": "integer", "minimum": 0},
+    "skipped_files_count": {"type": "integer", "minimum": 0},
+    "skipped_errors": {
+      "type": "array",
+      "items": {"type": "string"},
+      "maxItems": 20
+    },
+    "skipped_errors_total_count": {"type": "integer", "minimum": 0},
+    "skipped_errors_truncated": {"type": "boolean"},
+    "absence_semantics": {"type": "string", "minLength": 1},
+    "does_not_establish": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1},
+      "allOf": [
+        {"contains": {"const": "complete_call_graph"}},
+        {"contains": {"const": "runtime_reachability"}},
+        {"contains": {"const": "dead_code"}},
+        {"contains": {"const": "unreachable_code"}},
+        {"contains": {"const": "static_resolution_upgrade"}},
+        {"contains": {"const": "dynamic_dispatch_resolution"}},
+        {"contains": {"const": "coverage_sufficiency"}},
+        {"contains": {"const": "test_sufficiency"}},
+        {"contains": {"const": "review_completeness"}},
+        {"contains": {"const": "merge_readiness"}}
+      ]
+    }
+  },
+  "$defs": {
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_run_id",
+        "observed_at",
+        "command",
+        "command_string",
+        "environment",
+        "source_revision",
+        "observation_fingerprint_sha256"
+      ],
+      "properties": {
+        "observation_run_id": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "minLength": 1},
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "command_string": {"type": "string", "minLength": 1},
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "python_version",
+            "python_implementation",
+            "platform",
+            "executable",
+            "hash_randomization_seed"
+          ],
+          "properties": {
+            "python_version": {"type": "string", "minLength": 1},
+            "python_implementation": {"type": "string", "minLength": 1},
+            "platform": {"type": "string", "minLength": 1},
+            "executable": {"type": "string", "minLength": 1},
+            "hash_randomization_seed": {"type": ["string", "null"]}
+          }
+        },
+        "source_revision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["vcs", "commit", "dirty", "status"],
+          "properties": {
+            "vcs": {"const": "git"},
+            "commit": {"type": "string", "pattern": "^[a-f0-9]{40}$"},
+            "dirty": {"type": "boolean"},
+            "status": {"enum": ["clean", "dirty"]}
+          }
+        },
+        "observation_fingerprint_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "endpoint": {
+      "binding_status": {"enum": ["bound", "module_scope", "unbound"]},
+      "binding_reason": {
+        "enum": [
+          "unique_symbol_containment",
+          "module_frame",
+          "no_matching_symbol",
+          "ambiguous_symbol_containment",
+          "path_outside_repository"
+        ]
+      }
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relation_type",
+        "evidence_level",
+        "observation_run_id",
+        "observed_call_count",
+        "call_site_line",
+        "call_site_range_ref",
+        "caller_path",
+        "caller_runtime_name",
+        "caller_runtime_first_line",
+        "caller_symbol_id",
+        "caller_qualified_name",
+        "caller_kind",
+        "caller_start_line",
+        "caller_end_line",
+        "caller_binding_status",
+        "caller_binding_reason",
+        "callee_path",
+        "callee_runtime_name",
+        "callee_runtime_first_line",
+        "callee_symbol_id",
+        "callee_qualified_name",
+        "callee_kind",
+        "callee_start_line",
+        "callee_end_line",
+        "callee_binding_status",
+        "callee_binding_reason"
+      ],
+      "properties": {
+        "relation_type": {"const": "observed_calls"},
+        "evidence_level": {"const": "S2"},
+        "observation_run_id": {"type": "string", "minLength": 1},
+        "observed_call_count": {"type": "integer", "minimum": 1},
+        "call_site_line": {"type": ["integer", "null"], "minimum": 1},
+        "call_site_range_ref": {
+          "type": ["string", "null"],
+          "pattern": "^file:.+#L[1-9][0-9]*-L[1-9][0-9]*$"
+        },
+        "caller_path": {"type": ["string", "null"], "minLength": 1},
+        "caller_runtime_name": {"type": "string", "minLength": 1},
+        "caller_runtime_first_line": {"type": "integer", "minimum": 0},
+        "caller_symbol_id": {"type": ["string", "null"], "minLength": 1},
+        "caller_qualified_name": {"type": ["string", "null"], "minLength": 1},
+        "caller_kind": {
+          "type": ["string", "null"],
+          "enum": ["module", "class", "function", "async_function", null]
+        },
+        "caller_start_line": {"type": ["integer", "null"], "minimum": 1},
+        "caller_end_line": {"type": ["integer", "null"], "minimum": 1},
+        "caller_binding_status": {"$ref": "#/$defs/endpoint/binding_status"},
+        "caller_binding_reason": {"$ref": "#/$defs/endpoint/binding_reason"},
+        "callee_path": {"type": "string", "minLength": 1},
+        "callee_runtime_name": {"type": "string", "minLength": 1},
+        "callee_runtime_first_line": {"type": "integer", "minimum": 0},
+        "callee_symbol_id": {"type": ["string", "null"], "minLength": 1},
+        "callee_qualified_name": {"type": ["string", "null"], "minLength": 1},
+        "callee_kind": {
+          "type": ["string", "null"],
+          "enum": ["module", "class", "function", "async_function", null]
+        },
+        "callee_start_line": {"type": ["integer", "null"], "minimum": 1},
+        "callee_end_line": {"type": ["integer", "null"], "minimum": 1},
+        "callee_binding_status": {"$ref": "#/$defs/endpoint/binding_status"},
+        "callee_binding_reason": {"$ref": "#/$defs/endpoint/binding_reason"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"caller_binding_status": {"const": "bound"}}},
+          "then": {
+            "properties": {
+              "caller_symbol_id": {"type": "string"},
+              "caller_qualified_name": {"type": "string"},
+              "caller_kind": {"enum": ["class", "function", "async_function"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"caller_binding_status": {"enum": ["module_scope", "unbound"]}}},
+          "then": {
+            "properties": {
+              "caller_symbol_id": {"type": "null"},
+              "caller_qualified_name": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"callee_binding_status": {"const": "bound"}}},
+          "then": {
+            "properties": {
+              "callee_symbol_id": {"type": "string"},
+              "callee_qualified_name": {"type": "string"},
+              "callee_kind": {"enum": ["class", "function", "async_function"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"callee_binding_status": {"enum": ["module_scope", "unbound"]}}},
+          "then": {
+            "properties": {
+              "callee_symbol_id": {"type": "null"},
+              "callee_qualified_name": {"type": "null"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}
