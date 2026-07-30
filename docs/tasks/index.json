@@ -1644,5 +1644,15 @@
         "Completion establishes public distribution only for the project-controlled source scope documented by the decision and source-distribution review; it does not clear bundled third-party binaries, wheels, containers, model weights or datasets."
       ]
     }
-  ]
+  ],
+  "_authority": {
+    "canonical_task_lifecycle": "bureau",
+    "this_file": "repo_local_historical_projection",
+    "see": "docs/tasks/AUTHORITY.md",
+    "does_not_establish": [
+      "Bureau closeout",
+      "Merge or deploy authority",
+      "Override of REPOGROUND-LEGACY-* registry state"
+    ]
+  }
 }
