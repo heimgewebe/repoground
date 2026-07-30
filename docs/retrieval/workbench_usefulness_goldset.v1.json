@@ -32,7 +32,7 @@
       "query": "query an existing SQLite index without mutation",
       "symbol_query": "query_existing_index",
       "symbol_kind": "function",
-      "expected_paths": ["merger/repoground/core/bundle_access.py"],
+      "expected_paths": ["merger/repoground/core/query_index_access.py"],
       "expected_symbols": ["query_existing_index"]
     },
     {
