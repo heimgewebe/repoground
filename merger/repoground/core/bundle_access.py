@@ -1117,3 +1117,7 @@ _find_references_full = _call_graph_navigation._find_references_full
 _get_callers_full = _call_graph_navigation._get_callers_full
 _get_callees_full = _call_graph_navigation._get_callees_full
 
+_CALL_GRAPH_REQUIRED_NONCLAIMS = _call_graph_navigation._CALL_GRAPH_REQUIRED_NONCLAIMS
+_CALL_GRAPH_DOES_NOT_ESTABLISH = _call_graph_navigation._CALL_GRAPH_DOES_NOT_ESTABLISH
+_CALL_NAV_DOES_NOT_ESTABLISH = _call_graph_navigation._CALL_NAV_DOES_NOT_ESTABLISH
+
