@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from merger.repoground.core import artifact_source_access
 from merger.repoground.core import bounded_artifact_read, bundle_access, mcp_tools
 from merger.repoground.core.bundle_access import (
     find_references,
@@ -31,10 +32,14 @@ OTHER_CALLER_ID = "py:pkg:c.py:function:other_caller"
 @pytest.fixture(autouse=True)
 def _reset_call_navigation_caches():
     bundle_access._clear_call_navigation_caches()
-    bundle_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
+    artifact_source_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
+    if hasattr(bundle_access, "_WARNED_INVALID_CACHE_VALIDATION_VALUES"):
+        bundle_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
     yield
     bundle_access._clear_call_navigation_caches()
-    bundle_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
+    artifact_source_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
+    if hasattr(bundle_access, "_WARNED_INVALID_CACHE_VALIDATION_VALUES"):
+        bundle_access._WARNED_INVALID_CACHE_VALIDATION_VALUES.clear()
 
 
 def _sha(path: Path) -> str:
@@ -1189,12 +1194,12 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
     monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
     monkeypatch.delenv("REPOGROUND_STRICT_CACHE_HASH", raising=False)
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_regular_file_bytes",
         forbidden_stable_read,
     )
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_artifact_bytes",
         forbidden_stable_read,
     )
@@ -1253,7 +1258,7 @@ def test_strict_navigation_cache_hash_uses_descriptor_pinned_read(
 
     monkeypatch.setenv("REPOGROUND_CACHE_VALIDATION", "strict")
     monkeypatch.setattr(
-        bundle_access, "_read_stable_artifact_bytes", counting_reader
+        artifact_source_access, "_read_stable_artifact_bytes", counting_reader
     )
 
     result = get_callers(manifest, "target", path="pkg/target.py")
@@ -1279,7 +1284,7 @@ def test_invalid_cache_validation_mode_falls_back_to_strict(
 
     monkeypatch.setenv("REPOGROUND_CACHE_VALIDATION", "typo")
     monkeypatch.setattr(
-        bundle_access, "_read_stable_artifact_bytes", counting_reader
+        artifact_source_access, "_read_stable_artifact_bytes", counting_reader
     )
 
     caplog.set_level("WARNING")
@@ -1343,7 +1348,7 @@ def test_weak_file_identity_automatically_uses_content_hash(
     monkeypatch.setattr(os, "lstat", weak_lstat)
     monkeypatch.setattr(Path, "stat", weak_path_stat)
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_artifact_bytes",
         weak_identity_reader,
     )
@@ -1385,7 +1390,7 @@ def test_weak_manifest_identity_automatically_uses_content_hash(
     monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
     monkeypatch.delenv("REPOGROUND_STRICT_CACHE_HASH", raising=False)
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_regular_file_bytes",
         weak_manifest_reader,
     )
@@ -1422,7 +1427,7 @@ def test_strict_warm_validation_rejects_tampered_bytes_with_same_identity(
         return bytes(tampered), stat_result, failure, detail
 
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_artifact_bytes",
         tampered_reader,
     )
@@ -1484,7 +1489,7 @@ def test_manifest_change_during_full_verification_is_rejected(tmp_path, monkeypa
 
     monkeypatch.setenv("REPOGROUND_CACHE_VALIDATION", "strict")
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_artifact_bytes",
         mutating_artifact_reader,
     )
@@ -1509,7 +1514,7 @@ def test_legacy_strict_hash_switch_remains_supported(tmp_path, monkeypatch):
     monkeypatch.delenv("REPOGROUND_CACHE_VALIDATION", raising=False)
     monkeypatch.setenv("REPOGROUND_STRICT_CACHE_HASH", "1")
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_artifact_bytes",
         counting_reader,
     )
