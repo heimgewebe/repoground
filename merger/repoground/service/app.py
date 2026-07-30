@@ -704,7 +704,7 @@ from .atlas_router import build_router as build_atlas_router
 from .health_router import build_router as build_health_router
 from .job_router import build_router as build_job_router
 from .query_router import build_router as build_query_router
-from .path_helpers import is_safe_filename as _is_safe_filename, resolve_request_path as _resolve_request_path
+from .path_helpers import resolve_request_path as _resolve_request_path
 
 
 def _service_app_provider():

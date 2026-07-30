@@ -13,7 +13,6 @@ from .models import FederationQueryRequest, QueryRequest
 from .router_support import AttributeProxy
 from .path_helpers import is_safe_filename as _is_safe_filename, resolve_request_path as _resolve_request_path
 from merger.repoground.core.merge import get_merges_dir
-from merger.repoground.core.path_security import resolve_secure_path
 
 router = APIRouter()
 
