@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from merger.repoground.core import artifact_source_access
 from merger.repoground.core import bundle_access
 from merger.repoground.core.bounded_artifact_read import (
     MAX_REGISTERED_ARTIFACT_BYTES,
@@ -131,7 +132,7 @@ def test_declared_oversize_is_rejected_before_artifact_open(
         raise AssertionError("oversized declared artifact must not be opened")
 
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_artifact_bytes",
         forbidden_read,
     )
@@ -339,8 +340,8 @@ def test_manifest_hash_is_rechecked_after_artifact_read_when_metadata_is_spoofed
         [_call_graph_record(artifact.name, raw=raw)],
     )
     original_manifest_stat = manifest.stat()
-    original_manifest_reader = bundle_access._read_stable_regular_file_bytes
-    original_artifact_reader = bundle_access._read_stable_artifact_bytes
+    original_manifest_reader = artifact_source_access._read_stable_regular_file_bytes
+    original_artifact_reader = artifact_source_access._read_stable_artifact_bytes
     original_path_stat = Path.stat
     changed = False
 
@@ -364,12 +365,12 @@ def test_manifest_hash_is_rechecked_after_artifact_read_when_metadata_is_spoofed
         return original_path_stat(path, *args, **kwargs)
 
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_artifact_bytes",
         changing_artifact_reader,
     )
     monkeypatch.setattr(
-        bundle_access,
+        artifact_source_access,
         "_read_stable_regular_file_bytes",
         spoofed_manifest_reader,
     )
