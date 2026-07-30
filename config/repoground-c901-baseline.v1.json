@@ -4,7 +4,7 @@
   "observed_on": "2026-07-29",
   "ruff_config": "ruff-ci.toml",
   "threshold": 10,
-  "finding_count": 191,
+  "finding_count": 189,
   "max_complexity": 138,
   "findings": [
     {
@@ -743,52 +743,42 @@
       "max_complexity": 12
     },
     {
-      "path": "merger/repoground/service/app.py",
-      "qualified_name": "api_federation_query",
-      "max_complexity": 19
-    },
-    {
-      "path": "merger/repoground/service/app.py",
-      "qualified_name": "api_query",
-      "max_complexity": 26
-    },
-    {
-      "path": "merger/repoground/service/app.py",
+      "path": "merger/repoground/service/atlas_router.py",
       "qualified_name": "create_atlas",
       "max_complexity": 22
     },
     {
-      "path": "merger/repoground/service/app.py",
-      "qualified_name": "create_job",
-      "max_complexity": 12
-    },
-    {
-      "path": "merger/repoground/service/app.py",
+      "path": "merger/repoground/service/atlas_router.py",
       "qualified_name": "download_atlas",
       "max_complexity": 12
     },
     {
-      "path": "merger/repoground/service/app.py",
+      "path": "merger/repoground/service/atlas_router.py",
       "qualified_name": "get_latest_atlas",
       "max_complexity": 13
     },
     {
-      "path": "merger/repoground/service/app.py",
+      "path": "merger/repoground/service/atlas_router.py",
       "qualified_name": "list_atlas",
       "max_complexity": 14
     },
     {
-      "path": "merger/repoground/service/app.py",
+      "path": "merger/repoground/service/atlas_router.py",
       "qualified_name": "resolve_atlas_root",
       "max_complexity": 13
     },
     {
-      "path": "merger/repoground/service/app.py",
+      "path": "merger/repoground/service/job_router.py",
+      "qualified_name": "create_job",
+      "max_complexity": 12
+    },
+    {
+      "path": "merger/repoground/service/job_router.py",
       "qualified_name": "stream_logs",
       "max_complexity": 17
     },
     {
-      "path": "merger/repoground/service/app.py",
+      "path": "merger/repoground/service/job_router.py",
       "qualified_name": "stream_logs.log_generator",
       "max_complexity": 12
     },
