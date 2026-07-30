@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from merger.repoground.core import artifact_source_access
-from merger.repoground.core import bounded_artifact_read, bundle_access, mcp_tools
+from merger.repoground.core import bounded_artifact_read, bundle_access, call_graph_navigation, mcp_tools
 from merger.repoground.core.bundle_access import (
     find_references,
     get_callees,
@@ -371,7 +371,7 @@ def _replace_manifest_bytes(path: Path, raw: bytes, label: str) -> None:
 
 def test_navigation_cache_reuses_validated_call_state(tmp_path, monkeypatch):
     manifest = _bundle(tmp_path)
-    original = bundle_access._load_call_graph_source
+    original = call_graph_navigation._load_call_graph_source
     calls = 0
 
     def counted(manifest_path):
@@ -379,14 +379,14 @@ def test_navigation_cache_reuses_validated_call_state(tmp_path, monkeypatch):
         calls += 1
         return original(manifest_path)
 
-    monkeypatch.setattr(bundle_access, "_load_call_graph_source", counted)
+    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", counted)
 
     cold = find_references(manifest, "target", k=10)
     warm = find_references(manifest, "target", k=10)
 
     assert cold == warm
     assert calls == 1
-    assert len(bundle_access._CALL_NAVIGATION_CACHE) == 1
+    assert len(call_graph_navigation._CALL_NAVIGATION_CACHE) == 1
 
 
 def test_bound_manifest_excludes_warm_call_cache_from_other_generation(tmp_path):
@@ -457,7 +457,7 @@ def test_matching_bound_manifest_reuses_call_and_symbol_warm_caches(
             "matching manifest binding must reuse warm navigation state"
         )
 
-    monkeypatch.setattr(bundle_access, "_load_call_graph_source", forbidden_reload)
+    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", forbidden_reload)
     monkeypatch.setattr(bundle_access, "_load_symbol_index_source", forbidden_reload)
     with use_manifest_binding(binding_a):
         _replace_manifest_bytes(manifest, manifest_b, "transient-generation-b")
@@ -560,7 +560,7 @@ def test_cache_detects_same_size_change_with_restored_mtime(tmp_path):
 
 def test_call_graph_change_invalidates_cached_navigation_state(tmp_path, monkeypatch):
     manifest, call_graph, _ = _write_bundle(tmp_path)
-    original = bundle_access._load_call_graph_source
+    original = call_graph_navigation._load_call_graph_source
     loads = 0
 
     def counted(manifest_path):
@@ -568,7 +568,7 @@ def test_call_graph_change_invalidates_cached_navigation_state(tmp_path, monkeyp
         loads += 1
         return original(manifest_path)
 
-    monkeypatch.setattr(bundle_access, "_load_call_graph_source", counted)
+    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", counted)
     before = find_references(manifest, "target", k=10)
 
     payload = json.loads(call_graph.read_text(encoding="utf-8"))
@@ -616,10 +616,10 @@ def test_stale_call_generation_is_evicted_with_dependent_symbol_state(tmp_path):
     assert get_callers(
         manifest, "target", path="pkg/target.py", k=10
     )["status"] == "available"
-    stale_call_fingerprint = next(iter(bundle_access._CALL_NAVIGATION_CACHE))
+    stale_call_fingerprint = next(iter(call_graph_navigation._CALL_NAVIGATION_CACHE))
     assert any(
         cache_key[0] == stale_call_fingerprint
-        for cache_key in bundle_access._SYMBOL_NAVIGATION_CACHE
+        for cache_key in call_graph_navigation._SYMBOL_NAVIGATION_CACHE
     )
 
     payload = json.loads(call_graph.read_text(encoding="utf-8"))
@@ -631,13 +631,13 @@ def test_stale_call_generation_is_evicted_with_dependent_symbol_state(tmp_path):
     result = get_callers(manifest, "target", path="pkg/target.py", k=10)
 
     assert result["status"] == "available"
-    assert stale_call_fingerprint not in bundle_access._CALL_NAVIGATION_CACHE
+    assert stale_call_fingerprint not in call_graph_navigation._CALL_NAVIGATION_CACHE
     assert not any(
         cache_key[0] == stale_call_fingerprint
-        for cache_key in bundle_access._SYMBOL_NAVIGATION_CACHE
+        for cache_key in call_graph_navigation._SYMBOL_NAVIGATION_CACHE
     )
-    assert len(bundle_access._CALL_NAVIGATION_CACHE) == 1
-    assert len(bundle_access._SYMBOL_NAVIGATION_CACHE) == 1
+    assert len(call_graph_navigation._CALL_NAVIGATION_CACHE) == 1
+    assert len(call_graph_navigation._SYMBOL_NAVIGATION_CACHE) == 1
 
 
 def test_stale_symbol_generation_is_evicted_before_replacement(tmp_path):
@@ -645,7 +645,7 @@ def test_stale_symbol_generation_is_evicted_before_replacement(tmp_path):
     assert get_callers(
         manifest, "target", path="pkg/target.py", k=10
     )["status"] == "available"
-    stale_symbol_key = next(iter(bundle_access._SYMBOL_NAVIGATION_CACHE))
+    stale_symbol_key = next(iter(call_graph_navigation._SYMBOL_NAVIGATION_CACHE))
 
     payload = json.loads(symbol_index.read_text(encoding="utf-8"))
     target = next(item for item in payload["symbols"] if item["id"] == TARGET_ID)
@@ -656,8 +656,8 @@ def test_stale_symbol_generation_is_evicted_before_replacement(tmp_path):
     result = get_callers(manifest, "target", path="pkg/target.py", k=10)
 
     assert result["status"] == "available"
-    assert stale_symbol_key not in bundle_access._SYMBOL_NAVIGATION_CACHE
-    assert len(bundle_access._SYMBOL_NAVIGATION_CACHE) == 1
+    assert stale_symbol_key not in call_graph_navigation._SYMBOL_NAVIGATION_CACHE
+    assert len(call_graph_navigation._SYMBOL_NAVIGATION_CACHE) == 1
 
 
 def test_cold_and_warm_navigation_results_are_byte_equivalent(tmp_path):
@@ -685,20 +685,20 @@ def test_cold_and_warm_navigation_results_are_byte_equivalent(tmp_path):
 
 def test_navigation_cache_is_lru_bounded(tmp_path):
     manifests = []
-    for index in range(bundle_access._CALL_NAVIGATION_CACHE_MAX_ENTRIES + 1):
+    for index in range(call_graph_navigation._CALL_NAVIGATION_CACHE_MAX_ENTRIES + 1):
         bundle_dir = tmp_path / f"bundle-{index}"
         bundle_dir.mkdir()
         manifest = _bundle(bundle_dir)
         manifests.append(str(manifest.resolve()))
         assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
 
-    assert len(bundle_access._CALL_NAVIGATION_CACHE) == 2
-    assert not any(k.manifest_path == manifests[0] for k in bundle_access._CALL_NAVIGATION_CACHE)
+    assert len(call_graph_navigation._CALL_NAVIGATION_CACHE) == 2
+    assert not any(k.manifest_path == manifests[0] for k in call_graph_navigation._CALL_NAVIGATION_CACHE)
     assert not any(
         key[0].manifest_path == manifests[0]
-        for key in bundle_access._SYMBOL_NAVIGATION_CACHE
+        for key in call_graph_navigation._SYMBOL_NAVIGATION_CACHE
     )
-    assert any(k.manifest_path == manifests[-1] for k in bundle_access._CALL_NAVIGATION_CACHE)
+    assert any(k.manifest_path == manifests[-1] for k in call_graph_navigation._CALL_NAVIGATION_CACHE)
 
 
 def test_find_references_returns_bounded_s0_and_s1_evidence(tmp_path):
@@ -803,7 +803,7 @@ def test_invalid_navigation_name_fails_before_artifact_io(tmp_path, monkeypatch,
     def fail_if_loaded(_manifest_path):
         raise AssertionError("invalid primitive input must not load the call graph")
 
-    monkeypatch.setattr(bundle_access, "_load_call_graph_source", fail_if_loaded)
+    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", fail_if_loaded)
 
     result = reader(tmp_path / "missing.bundle.manifest.json", "")
 
@@ -1109,7 +1109,7 @@ def test_call_graph_loader_swap_fails_closed_even_when_original_is_restored(
     record["bytes"] = len(alternate_graph)
     record["sha256"] = hashlib.sha256(alternate_graph).hexdigest()
     alternate_manifest_bytes = json.dumps(alternate_manifest).encode("utf-8")
-    original_loader = bundle_access._load_call_graph_source
+    original_loader = call_graph_navigation._load_call_graph_source
 
     def swapped_loader(manifest_path):
         call_graph.write_bytes(alternate_graph)
@@ -1119,7 +1119,7 @@ def test_call_graph_loader_swap_fails_closed_even_when_original_is_restored(
         manifest.write_bytes(original_manifest)
         return loaded
 
-    monkeypatch.setattr(bundle_access, "_load_call_graph_source", swapped_loader)
+    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", swapped_loader)
 
     result = find_references(manifest, "target")
 
@@ -1150,9 +1150,9 @@ def test_navigation_uses_actual_hash_when_manifest_omits_bytes_and_sha256(tmp_pa
     assert after["status"] == "available"
     assert after["total_match_count"] == 3
     assert after_callers["status"] == "available"
-    assert len(bundle_access._CALL_NAVIGATION_CACHE) == 1
+    assert len(call_graph_navigation._CALL_NAVIGATION_CACHE) == 1
     assert {
-        key.artifact_sha256 for key in bundle_access._CALL_NAVIGATION_CACHE
+        key.artifact_sha256 for key in call_graph_navigation._CALL_NAVIGATION_CACHE
     } == {_sha(call_graph)}
 
 
@@ -1178,7 +1178,7 @@ def test_parallel_navigation_is_isolated_for_same_and_different_bundles(tmp_path
     assert all(result["status"] == "available" for result in results)
     assert all(result["total_caller_count"] == 1 for result in results)
     assert {
-        key.manifest_path for key in bundle_access._CALL_NAVIGATION_CACHE
+        key.manifest_path for key in call_graph_navigation._CALL_NAVIGATION_CACHE
     } == {str(first.resolve()), str(second.resolve())}
 
 
@@ -1413,7 +1413,7 @@ def test_strict_warm_validation_rejects_tampered_bytes_with_same_identity(
 
     fingerprint = next(
         key
-        for key in bundle_access._CALL_NAVIGATION_CACHE
+        for key in call_graph_navigation._CALL_NAVIGATION_CACHE
         if key.absolute_path == str(call_graph.resolve())
     )
     original_reader = bundle_access._read_stable_artifact_bytes
@@ -1473,7 +1473,7 @@ def test_atomic_pathname_exchange_during_stable_read_is_rejected(tmp_path, monke
 def test_manifest_change_during_full_verification_is_rejected(tmp_path, monkeypatch):
     manifest, call_graph, _ = _write_bundle(tmp_path)
     assert find_references(manifest, "target")["status"] == "available"
-    fingerprint = next(iter(bundle_access._CALL_NAVIGATION_CACHE))
+    fingerprint = next(iter(call_graph_navigation._CALL_NAVIGATION_CACHE))
     original_reader = bundle_access._read_stable_artifact_bytes
     changed = False
 
