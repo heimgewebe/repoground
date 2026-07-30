@@ -147,8 +147,8 @@ async def create_atlas(request: AtlasRequest, background_tasks: BackgroundTasks)
                 if ex not in effective_excludes:
                     effective_excludes.append(ex)
 
-    except HTTPException as e:
-         raise e
+    except HTTPException:
+        raise
 
     # Generate ID
     scan_id = f"atlas-{int(time.time())}"

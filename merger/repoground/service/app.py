@@ -605,8 +605,6 @@ def api_extras_refresh_all(payload: Dict[str, Any] = Body(default_factory=dict))
     return result
 
 
-
-
 @app.get("/api/admin/capabilities", dependencies=[Depends(verify_token)])
 def admin_capabilities():
     return {
@@ -697,64 +695,6 @@ def api_prescan(request: PrescanRequest):
         raise HTTPException(status_code=500, detail="Prescan failed") from exc
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Runtime artifact metadata helpers (shared by artifact_lookup / trace_lookup /
-# context_lookup).  Keeping the field tuple and copy helper in one place means
-# all three endpoints update automatically when the metadata schema changes.
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Atlas API
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Domain routers. The provider resolves this module lazily so historical
 # test and embedding hooks that replace app-level collaborators keep working.
 import sys
@@ -764,6 +704,7 @@ from .atlas_router import build_router as build_atlas_router
 from .health_router import build_router as build_health_router
 from .job_router import build_router as build_job_router
 from .query_router import build_router as build_query_router
+from .path_helpers import is_safe_filename as _is_safe_filename, resolve_request_path as _resolve_request_path
 
 
 def _service_app_provider():
@@ -773,8 +714,6 @@ def _service_app_provider():
 (health_router, api_version, health) = build_health_router(_service_app_provider)
 (
     query_router,
-    _is_safe_filename,
-    _resolve_request_path,
     _extract_projected_context_bundle,
     api_federation_query,
     api_query,
@@ -858,7 +797,7 @@ def serve_ui_index(request: Request):
 def serve_index(request: Request):
     content = get_raw_index_template()
     if not content:
-         return HTMLResponse("<h1>RepoGround UI not found</h1>", status_code=404)
+        return HTMLResponse("<h1>RepoGround UI not found</h1>", status_code=404)
 
     # Dynamic Asset Base calculation
     # e.g. /prefix or ""

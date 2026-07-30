@@ -25,3 +25,22 @@ extracting domain routers:
 - Foreign dirty worktree `repoground-t004-chatgpt-20260729` was used only as a
   read-only reference and was not modified.
 - Does not close parent T004; T010/T011/T013/T014 remain separate.
+
+## Review hardening (post-PR review)
+
+Addressed review and CI failures on PR #1124:
+
+- shared `path_helpers.py` for `_resolve_request_path` / `_is_safe_filename` used by
+  `api_prescan` and query routers (no private cross-router coupling)
+- CodeQL suppression inventory updated for moved path-injection sites
+- C901 baseline paths updated for moved atlas/job handlers; query helpers that fell
+  under threshold were allowed to resolve
+- job GC/SSE knobs resolve live from the app module
+- dead runtime-metadata comment banner removed from `app.py`
+- bare `raise` for rethrown HTTPException in atlas router
+
+Local validation after hardening:
+
+- `scripts/ci/check_codeql_suppressions.py`: pass
+- `scripts/ci/check_graph_maintainability.py`: pass
+- focused pytest (`service or api_query or codeql`): 268 passed, 1 skipped

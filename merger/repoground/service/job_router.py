@@ -59,7 +59,7 @@ def create_job(request: JobRequest):
     content_hash = calculate_job_hash(request, resolved_hub_str, SPEC_VERSION)
 
     # Lazy GC
-    state.job_store.cleanup_jobs(max_jobs=GC_MAX_JOBS, max_age_hours=GC_MAX_AGE_HOURS)
+    state.job_store.cleanup_jobs(max_jobs=_get_gc_max_jobs(), max_age_hours=_get_gc_max_age_hours())
     _cleanup_source_snapshots_after_gc()
 
     existing = state.job_store.find_job_by_hash(content_hash)
@@ -205,7 +205,7 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
                 # Wait for next event instead of polling, but wake periodically
                 # to detect client disconnects if no events are arriving.
                 try:
-                    await asyncio.wait_for(event.wait(), timeout=SSE_IDLE_RECHECK_SEC)
+                    await asyncio.wait_for(event.wait(), timeout=_get_sse_idle_recheck_sec())
                 except asyncio.TimeoutError:
                     pass
         finally:
@@ -215,13 +215,18 @@ async def stream_logs(request: Request, job_id: str, last_id: Optional[int] = Qu
 
 
 def build_router(app_provider: Callable[[], ModuleType]):
-    global state, logger, GC_MAX_AGE_HOURS, GC_MAX_JOBS, SSE_IDLE_RECHECK_SEC
+    global state, logger, _get_gc_max_age_hours, _get_gc_max_jobs, _get_sse_idle_recheck_sec
     state = AttributeProxy(app_provider, 'state')
     logger = AttributeProxy(app_provider, 'logger')
-    app_module = app_provider()
-    GC_MAX_AGE_HOURS = app_module.GC_MAX_AGE_HOURS
-    GC_MAX_JOBS = app_module.GC_MAX_JOBS
-    SSE_IDLE_RECHECK_SEC = app_module.SSE_IDLE_RECHECK_SEC
+    # Resolve GC/SSE knobs on every access so monkeypatches on app remain effective.
+    def _attr(name: str):
+        def read():
+            return getattr(app_provider(), name)
+        return read
+
+    _get_gc_max_age_hours = _attr('GC_MAX_AGE_HOURS')
+    _get_gc_max_jobs = _attr('GC_MAX_JOBS')
+    _get_sse_idle_recheck_sec = _attr('SSE_IDLE_RECHECK_SEC')
     return (
         router,
         _cleanup_source_snapshots_after_gc,

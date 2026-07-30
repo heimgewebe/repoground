@@ -11,27 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from .auth import verify_token
 from .models import FederationQueryRequest, QueryRequest
 from .router_support import AttributeProxy
+from .path_helpers import is_safe_filename as _is_safe_filename, resolve_request_path as _resolve_request_path
 from merger.repoground.core.merge import get_merges_dir
 from merger.repoground.core.path_security import resolve_secure_path
 
 router = APIRouter()
-
-
-def _is_safe_filename(name: str) -> bool:
-    if not name or name in {".", ".."}:
-        return False
-    if "/" in name or "\\" in name or ":" in name:
-        return False
-    path = Path(name)
-    return path.name == name and not path.is_absolute()
-
-
-def _resolve_request_path(root: Path, relative_path: str, *, label: str) -> Path:
-    """Resolve one API-controlled path beneath an established service root."""
-    try:
-        return resolve_secure_path(root, relative_path)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid {label} path") from exc
 
 
 def _extract_projected_context_bundle(projected: Any) -> Optional[Dict[str, Any]]:
@@ -411,8 +395,6 @@ def build_router(app_provider: Callable[[], ModuleType]):
     logger = AttributeProxy(app_provider, "logger")
     return (
         router,
-        _is_safe_filename,
-        _resolve_request_path,
         _extract_projected_context_bundle,
         api_federation_query,
         api_query,

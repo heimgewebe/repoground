@@ -329,7 +329,8 @@
       "authority": "Remote API filenames are reduced to normalized relative names and resolved beneath established Hub, merges, or artifact directories.",
       "expected_occurrences": 4,
       "files": [
-        "merger/repoground/service/app.py"
+        "merger/repoground/service/app.py",
+        "merger/repoground/service/query_router.py"
       ],
       "sites": [
         {
@@ -338,19 +339,19 @@
           "statement": "if not repo_root.exists() or not repo_root.is_dir():"
         },
         {
-          "path": "merger/repoground/service/app.py",
-          "scope": "api_federation_query",
-          "statement": "if not fed_index_path.exists():"
-        },
-        {
-          "path": "merger/repoground/service/app.py",
-          "scope": "api_query",
+          "path": "merger/repoground/service/query_router.py",
+          "scope": "_resolve_federation_index",
           "statement": "if not index_path.exists():"
         },
         {
-          "path": "merger/repoground/service/app.py",
-          "scope": "api_query",
-          "statement": "if not graph_index_path.exists():"
+          "path": "merger/repoground/service/query_router.py",
+          "scope": "_resolve_query_index",
+          "statement": "if not index_path.exists():"
+        },
+        {
+          "path": "merger/repoground/service/query_router.py",
+          "scope": "_resolve_graph_index",
+          "statement": "if not graph_path.exists():"
         }
       ],
       "tests": [
