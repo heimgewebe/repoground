@@ -98,9 +98,16 @@ preventing order-dependent state leakage into later service tests.
 
 ## API parity
 
-The new test ratchets all 33 API method/path pairs and verifies that every
-extracted route is owned by its intended domain-router module.  The benchmark
-independently imports the archived before and after revisions and compares:
+A bounded fresh Python interpreter ratchets all 33 API method/path pairs,
+the owning endpoint module, each route's `verify_token` binding, and the
+normalized OpenAPI fingerprint.  The subprocess is rooted at the exact
+repository, has a 30-second timeout, emits canonical JSON, and fails closed on
+nonzero exit, timeout, malformed JSON, or malformed shape.  This prevents
+previous tests that mutate the process-global FastAPI app from producing a
+false failure or false pass.  A regression test deliberately reduces the
+in-process app to two routes and confirms that the fresh snapshot still returns
+the complete 33-route contract.  The benchmark independently imports the
+archived before and after revisions and compares:
 
 | Observation | Before | After | Result |
 | --- | --- | --- | --- |
@@ -121,7 +128,7 @@ The closeout test and existing focused tests explicitly cover these boundaries:
 
 | Boundary | Evidence |
 | --- | --- |
-| Authentication stays attached after router extraction | `test_all_non_health_api_routes_keep_auth_dependency` checks `verify_token` on all 31 protected API method/path pairs; only the historically public Health/Version pair is exempt |
+| Authentication stays attached after router extraction | `test_all_non_health_api_routes_keep_auth_dependency` checks the fresh-interpreter snapshot for `verify_token` on all 31 protected API method/path pairs; only the historically public Health/Version pair is exempt |
 | Auth rejects missing/invalid credentials | isolated readback returns 401; `test_service_auth_hardening.py` also covers constant-time comparison and bearer/query-token compatibility |
 | Broad filesystem access is conjunctive | `test_sensitive_filesystem_access_requires_loopback_and_auth` proves root access is refused for loopback without a token and non-loopback with a token, and enabled only for loopback plus token |
 | Request/file paths remain confined | `test_code_scanning_security.py`, `test_service_artifact_security.py`, and `test_service_hardening.py` cover traversal, symlink escape, allowlist, and safe artifact-GC paths |
@@ -186,7 +193,7 @@ Results for the exact T012 parent/squash-merge pair:
 | RSS import delta median | 30,360 KiB | 31,120 KiB | +760 KiB |
 | RSS after requests median | 56,188 KiB | 56,840 KiB | +652 KiB |
 
-These are honest small before/after observations, not an improvement claim or
+These are bounded before/after observations, not an improvement claim or
 a performance verdict.  The task contract defines no threshold, so the
 benchmark is evidence rather than a pass/fail gate.  `TestClient` measures
 in-process ASGI dispatch only: it does not measure TCP or Uvicorn, nor proxy or
@@ -199,11 +206,18 @@ later changes.
 
 ## Validation
 
-Focused runtime/security set:
+Fresh-process closeout ratchet:
 
 ```text
-python3 -m pytest -q \
-  merger/repoground/tests/test_service_router_closeout.py \
+python3 -m pytest -q -p no:cacheprovider \
+  merger/repoground/tests/test_service_router_closeout.py
+8 passed
+```
+
+Adjacent runtime/security set:
+
+```text
+python3 -m pytest -q -p no:cacheprovider \
   merger/repoground/tests/test_service_health.py \
   merger/repoground/tests/test_service_auth_hardening.py \
   merger/repoground/tests/test_service_artifact_security.py \
@@ -213,20 +227,20 @@ python3 -m pytest -q \
   merger/repoground/tests/test_api_query.py \
   merger/repoground/tests/test_code_scanning_security.py \
   merger/repoground/tests/test_atlas_system.py
-101 passed
+94 passed
 ```
 
-Broader historical T012 selector:
+Exact GitHub `pytest-full` selection, repeated locally after the
+fresh-interpreter correction:
 
 ```text
-python3 -m pytest -q merger/repoground/tests \
-  -k 'service or api_query or codeql'
-275 passed, 1 skipped, 4775 deselected
+python3 -m pytest -q -m 'not browser and not doc_freshness_live'
+5208 passed, 12 skipped, 13 deselected
 ```
 
-The single skip is the explicitly opt-in
-`test_service_integration.py::TestServiceIntegration::test_e2e_health_endpoint_real`
-(`LENSKIT_E2E` disabled); the hermetic service readback above is not skipped.
+This full-order run is the regression proof for the original PR #1130 failure:
+earlier tests may mutate the process-global FastAPI app, while the closeout
+ratchet now reads the canonical service contract from a fresh interpreter.
 
 Relevant CI/readback guards:
 
@@ -259,8 +273,8 @@ pass
 ## Closeout boundaries
 
 - No service production code or API semantics are changed by this closeout.
-- No Bureau file, Bureau registry state, foreign worktree, deployment, push, or
-  PR is mutated.
+- No Bureau file, Bureau registry state, foreign worktree, deployment, product
+  runtime, or service production code is mutated by this PR.
 - The committed measurement is host- and dependency-bound and is not a
   performance SLO.
 - Performance observations compare only the exact T012 parent and squash

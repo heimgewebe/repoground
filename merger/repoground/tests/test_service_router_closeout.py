@@ -3,6 +3,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,6 +31,8 @@ SERVICE_STATE_FIELDS = (
     "log_provider",
     "host",
 )
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SNAPSHOT_TIMEOUT_SECONDS = 30
 
 EXPECTED_API_METHOD_PATHS = {
     ("GET", "/api/admin/capabilities"),
@@ -127,6 +132,109 @@ def _method_paths(route) -> set[tuple[str, str]]:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _service_contract_snapshot() -> dict[str, object]:
+    routes: list[dict[str, object]] = []
+    for route in _api_routes():
+        dependencies = {
+            dependency.call
+            for dependency in getattr(route, "dependant").dependencies
+        }
+        for method, path in _method_paths(route):
+            routes.append(
+                {
+                    "auth_required": verify_token in dependencies,
+                    "endpoint_module": route.endpoint.__module__,
+                    "method": method,
+                    "path": path,
+                }
+            )
+
+    openapi = copy.deepcopy(service_app.app.openapi())
+    openapi["info"]["version"] = "t012-benchmark"
+    canonical = json.dumps(
+        openapi,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    app_path = Path(service_app.__file__).resolve()
+    return {
+        "source_app": str(app_path.relative_to(REPO_ROOT)),
+        "openapi_sha256": hashlib.sha256(canonical).hexdigest(),
+        "routes": sorted(
+            routes,
+            key=lambda row: (str(row["method"]), str(row["path"])),
+        ),
+    }
+
+
+def _fresh_service_contract_snapshot() -> dict[str, object]:
+    env = dict(os.environ)
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = os.pathsep.join(
+        part for part in (str(REPO_ROOT), existing_pythonpath) if part
+    )
+    env.update(
+        {
+            "PYTHONHASHSEED": "0",
+            "REPOGROUND_BUILD_ID": "t012-benchmark",
+            "REPOGROUND_VERSION": "t012-benchmark",
+        }
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--service-snapshot"],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=SNAPSHOT_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        pytest.fail(
+            f"fresh service snapshot exceeded {SNAPSHOT_TIMEOUT_SECONDS}s: {exc}"
+        )
+
+    if completed.returncode != 0:
+        pytest.fail(
+            "fresh service snapshot failed "
+            f"with exit {completed.returncode}; "
+            f"stdout_tail={completed.stdout[-2000:]!r}; "
+            f"stderr_tail={completed.stderr[-2000:]!r}"
+        )
+    try:
+        snapshot = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        pytest.fail(
+            "fresh service snapshot emitted invalid JSON; "
+            f"stdout_tail={completed.stdout[-1000:]!r}; "
+            f"stderr_tail={completed.stderr[-1000:]!r}; error={exc}"
+        )
+    if not isinstance(snapshot, dict):
+        pytest.fail(f"fresh service snapshot must be an object: {snapshot!r}")
+    routes = snapshot.get("routes")
+    if not isinstance(routes, list) or not all(
+        isinstance(route, dict) for route in routes
+    ):
+        pytest.fail(f"fresh service snapshot routes must be objects: {snapshot!r}")
+    if snapshot.get("source_app") != "merger/repoground/service/app.py":
+        pytest.fail(
+            "fresh service snapshot resolved outside the requested checkout: "
+            f"{snapshot.get('source_app')!r}"
+        )
+    if not isinstance(snapshot.get("openapi_sha256"), str):
+        pytest.fail(
+            f"fresh service snapshot OpenAPI hash must be a string: {snapshot!r}"
+        )
+    return snapshot
+
+
+@pytest.fixture(scope="module")
+def fresh_service_contract_snapshot() -> dict[str, object]:
+    return _fresh_service_contract_snapshot()
 
 
 def _preserve_init_service_globals(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -249,49 +357,81 @@ def isolated_service(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         yield client, database
 
 
-def test_current_api_surface_matches_pre_split_contract() -> None:
-    actual_method_paths = set()
-    route_by_method_path = {}
-    for route in _api_routes():
-        for key in _method_paths(route):
-            actual_method_paths.add(key)
-            route_by_method_path[key] = route
+def test_current_api_surface_matches_pre_split_contract(
+    fresh_service_contract_snapshot: dict[str, object],
+) -> None:
+    routes = fresh_service_contract_snapshot["routes"]
+    assert isinstance(routes, list)
+    actual_method_paths = {
+        (str(route["method"]), str(route["path"]))
+        for route in routes
+        if isinstance(route, dict)
+    }
+    route_by_method_path = {
+        (str(route["method"]), str(route["path"])): route
+        for route in routes
+        if isinstance(route, dict)
+    }
 
     assert actual_method_paths == EXPECTED_API_METHOD_PATHS
     assert len(actual_method_paths) == len(EXPECTED_API_METHOD_PATHS) == 33
 
     for key, expected_module in EXTRACTED_ROUTE_MODULES.items():
-        assert route_by_method_path[key].endpoint.__module__ == expected_module
+        assert route_by_method_path[key]["endpoint_module"] == expected_module
 
-    # Normalize only the build identity.  The remaining OpenAPI document is the
-    # exact pre-split contract captured from PRE_SPLIT_REVISION with the same
-    # deterministic "t012-benchmark" version label.
-    openapi = copy.deepcopy(service_app.app.openapi())
-    openapi["info"]["version"] = "t012-benchmark"
-    canonical = json.dumps(
-        openapi,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
-    assert hashlib.sha256(canonical).hexdigest() == PRE_SPLIT_OPENAPI_SHA256
+    assert (
+        fresh_service_contract_snapshot["openapi_sha256"]
+        == PRE_SPLIT_OPENAPI_SHA256
+    )
 
 
-def test_all_non_health_api_routes_keep_auth_dependency() -> None:
+def test_all_non_health_api_routes_keep_auth_dependency(
+    fresh_service_contract_snapshot: dict[str, object],
+) -> None:
+    routes = fresh_service_contract_snapshot["routes"]
+    assert isinstance(routes, list)
+    actual_method_paths = {
+        (str(route["method"]), str(route["path"]))
+        for route in routes
+        if isinstance(route, dict)
+    }
+    assert actual_method_paths == EXPECTED_API_METHOD_PATHS
+    assert len(actual_method_paths) == len(EXPECTED_API_METHOD_PATHS) == 33
+
     public_routes = {
         ("GET", "/api/health"),
         ("GET", "/api/version"),
     }
-    for route in _api_routes():
-        dependencies = {
-            dependency.call
-            for dependency in getattr(route, "dependant").dependencies
-        }
-        for key in _method_paths(route):
-            if key in public_routes:
-                assert verify_token not in dependencies
-            else:
-                assert verify_token in dependencies, f"{key} lost verify_token"
+    for route in routes:
+        assert isinstance(route, dict)
+        key = (str(route["method"]), str(route["path"]))
+        if key in public_routes:
+            assert route["auth_required"] is False
+        else:
+            assert route["auth_required"] is True, f"{key} lost verify_token"
+
+
+def test_fresh_snapshot_ignores_mutated_in_process_app() -> None:
+    routes = service_app.app.routes
+    original_routes = list(routes)
+    reduced_routes = [
+        route
+        for route in original_routes
+        if getattr(route, "path", "") in {"/api/health", "/api/version"}
+    ]
+    routes[:] = reduced_routes
+    try:
+        assert len(_api_routes()) == 2
+
+        snapshot = _fresh_service_contract_snapshot()
+        snapshot_routes = snapshot["routes"]
+        assert isinstance(snapshot_routes, list)
+        assert len(snapshot_routes) == 33
+        assert snapshot["openapi_sha256"] == PRE_SPLIT_OPENAPI_SHA256
+    finally:
+        routes[:] = original_routes
+
+    assert service_app.app.routes == original_routes
 
 
 def test_isolated_service_readback_covers_health_auth_jobs_and_query(
@@ -441,3 +581,23 @@ def test_sensitive_filesystem_access_requires_loopback_and_auth(
 
     assert security.sensitive_fs_access is sensitive_access_expected
     assert (Path("/") in security.allowlist_roots) is sensitive_access_expected
+
+
+def _snapshot_main() -> int:
+    if sys.argv[1:] != ["--service-snapshot"]:
+        raise SystemExit(
+            "usage: test_service_router_closeout.py --service-snapshot"
+        )
+    print(
+        json.dumps(
+            _service_contract_snapshot(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_snapshot_main())
