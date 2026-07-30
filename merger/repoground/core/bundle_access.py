@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 import tempfile
@@ -18,16 +17,6 @@ from merger.repoground.core.bundle_roles import (
     read_only_mutation_boundary as _read_only_mutation_boundary,
     resolve_unique_artifact as _resolve_unique_artifact,
     safe_artifact_path as _safe_artifact_path,
-)
-from merger.repoground.core.citation_projection import (
-    CITATION_MAP_ROLE,
-    RESOLVED_EVIDENCE_KIND,
-    RESOLVED_EVIDENCE_VERSION,
-    citation_range_key as _citation_range_key,
-    citation_record as _citation_record,
-    citation_row_is_valid as _citation_row_is_valid,
-    enrich_resolved_hit_for_direct_use as _enrich_resolved_hit_for_direct_use,
-    project_source_citations as _project_source_citations,
 )
 from merger.repoground.core.manifest_snapshot import (
     resolve_manifest_path,
@@ -51,7 +40,17 @@ SOURCE_CITATION_PROJECTION_KIND = (
 SOURCE_CITATION_PROJECTION_VERSION = (
     _citation_projection_module.SOURCE_CITATION_PROJECTION_VERSION
 )
+CITATION_MAP_ROLE = _citation_projection_module.CITATION_MAP_ROLE
+RESOLVED_EVIDENCE_KIND = _citation_projection_module.RESOLVED_EVIDENCE_KIND
+RESOLVED_EVIDENCE_VERSION = _citation_projection_module.RESOLVED_EVIDENCE_VERSION
 TEXT_EXCERPT_MAX_CHARS = _citation_projection_module.TEXT_EXCERPT_MAX_CHARS
+_citation_range_key = _citation_projection_module.citation_range_key
+_citation_record = _citation_projection_module.citation_record
+_citation_row_is_valid = _citation_projection_module.citation_row_is_valid
+_enrich_resolved_hit_for_direct_use = (
+    _citation_projection_module.enrich_resolved_hit_for_direct_use
+)
+_project_source_citations = _citation_projection_module.project_source_citations
 _artifact_availability = _citation_projection_module.artifact_availability
 _empty_source_citation_projection = (
     _citation_projection_module.empty_source_citation_projection
