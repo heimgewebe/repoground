@@ -115,11 +115,28 @@ EXTRACTED_ROUTE_MODULES = {
 
 
 def _api_routes():
-    return [
-        route
-        for route in service_app.app.routes
-        if getattr(route, "path", "").startswith("/api")
-    ]
+    api_routes = []
+    pending = list(service_app.app.routes)
+    seen_collections: set[int] = set()
+    while pending:
+        route = pending.pop(0)
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if isinstance(path, str) and path.startswith("/api") and methods:
+            api_routes.append(route)
+
+        nested_collections = [getattr(route, "routes", None)]
+        original_router = getattr(route, "original_router", None)
+        nested_collections.append(getattr(original_router, "routes", None))
+        for nested_routes in nested_collections:
+            if nested_routes is None:
+                continue
+            collection_id = id(nested_routes)
+            if collection_id in seen_collections:
+                continue
+            seen_collections.add(collection_id)
+            pending.extend(nested_routes)
+    return api_routes
 
 
 def _method_paths(route) -> set[tuple[str, str]]:
@@ -132,6 +149,27 @@ def _method_paths(route) -> set[tuple[str, str]]:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _normalized_openapi(openapi: dict[str, object]) -> dict[str, object]:
+    normalized = copy.deepcopy(openapi)
+    info = normalized.get("info")
+    if isinstance(info, dict):
+        info["version"] = "t012-benchmark"
+    components = normalized.get("components")
+    schemas = components.get("schemas") if isinstance(components, dict) else None
+    validation_error = (
+        schemas.get("ValidationError") if isinstance(schemas, dict) else None
+    )
+    properties = (
+        validation_error.get("properties")
+        if isinstance(validation_error, dict)
+        else None
+    )
+    if isinstance(properties, dict):
+        properties.pop("ctx", None)
+        properties.pop("input", None)
+    return normalized
 
 
 def _service_contract_snapshot() -> dict[str, object]:
@@ -151,8 +189,7 @@ def _service_contract_snapshot() -> dict[str, object]:
                 }
             )
 
-    openapi = copy.deepcopy(service_app.app.openapi())
-    openapi["info"]["version"] = "t012-benchmark"
+    openapi = _normalized_openapi(service_app.app.openapi())
     canonical = json.dumps(
         openapi,
         sort_keys=True,
@@ -185,7 +222,12 @@ def _fresh_service_contract_snapshot() -> dict[str, object]:
     )
     try:
         completed = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), "--service-snapshot"],
+            [
+                sys.executable,
+                "-m",
+                "merger.repoground.tests.test_service_router_closeout",
+                "--service-snapshot",
+            ],
             cwd=REPO_ROOT,
             env=env,
             capture_output=True,
@@ -414,14 +456,9 @@ def test_all_non_health_api_routes_keep_auth_dependency(
 def test_fresh_snapshot_ignores_mutated_in_process_app() -> None:
     routes = service_app.app.routes
     original_routes = list(routes)
-    reduced_routes = [
-        route
-        for route in original_routes
-        if getattr(route, "path", "") in {"/api/health", "/api/version"}
-    ]
-    routes[:] = reduced_routes
+    routes[:] = []
     try:
-        assert len(_api_routes()) == 2
+        assert _api_routes() == []
 
         snapshot = _fresh_service_contract_snapshot()
         snapshot_routes = snapshot["routes"]

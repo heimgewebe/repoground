@@ -52,6 +52,27 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _normalized_openapi(openapi: dict[str, Any]) -> dict[str, Any]:
+    normalized = json.loads(json.dumps(openapi))
+    info = normalized.get("info")
+    if isinstance(info, dict):
+        info["version"] = "t012-benchmark"
+    components = normalized.get("components")
+    schemas = components.get("schemas") if isinstance(components, dict) else None
+    validation_error = (
+        schemas.get("ValidationError") if isinstance(schemas, dict) else None
+    )
+    properties = (
+        validation_error.get("properties")
+        if isinstance(validation_error, dict)
+        else None
+    )
+    if isinstance(properties, dict):
+        properties.pop("ctx", None)
+        properties.pop("input", None)
+    return normalized
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -137,31 +158,45 @@ def _peak_rss_kib() -> int:
 
 def _route_inventory(app: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for route in app.routes:
-        path = getattr(route, "path", "")
-        if not path.startswith("/api"):
-            continue
-        methods = sorted(
-            method
-            for method in getattr(route, "methods", ())
-            if method not in {"HEAD", "OPTIONS"}
-        )
-        response_model = getattr(route, "response_model", None)
-        rows.append(
-            {
-                "include_in_schema": bool(
-                    getattr(route, "include_in_schema", False)
-                ),
-                "methods": methods,
-                "name": str(getattr(route, "name", "")),
-                "path": path,
-                "response_model": (
-                    getattr(response_model, "__name__", str(response_model))
-                    if response_model is not None
-                    else None
-                ),
-            }
-        )
+    pending = list(app.routes)
+    seen_collections: set[int] = set()
+    while pending:
+        route = pending.pop(0)
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None)
+        if isinstance(path, str) and path.startswith("/api") and methods:
+            response_model = getattr(route, "response_model", None)
+            rows.append(
+                {
+                    "include_in_schema": bool(
+                        getattr(route, "include_in_schema", False)
+                    ),
+                    "methods": sorted(
+                        method
+                        for method in methods
+                        if method not in {"HEAD", "OPTIONS"}
+                    ),
+                    "name": str(getattr(route, "name", "")),
+                    "path": path,
+                    "response_model": (
+                        getattr(response_model, "__name__", str(response_model))
+                        if response_model is not None
+                        else None
+                    ),
+                }
+            )
+
+        nested_collections = [getattr(route, "routes", None)]
+        original_router = getattr(route, "original_router", None)
+        nested_collections.append(getattr(original_router, "routes", None))
+        for nested_routes in nested_collections:
+            if nested_routes is None:
+                continue
+            collection_id = id(nested_routes)
+            if collection_id in seen_collections:
+                continue
+            seen_collections.add(collection_id)
+            pending.extend(nested_routes)
     return sorted(
         rows,
         key=lambda row: (
@@ -190,7 +225,7 @@ def _worker_measurement(
     rss_after_import_kib = _rss_kib()
     peak_rss_after_import_kib = _peak_rss_kib()
 
-    openapi = app_module.app.openapi()
+    openapi = _normalized_openapi(app_module.app.openapi())
     route_inventory = _route_inventory(app_module.app)
     openapi_sha256 = _sha256_bytes(_canonical_json(openapi))
     route_inventory_sha256 = _sha256_bytes(_canonical_json(route_inventory))
@@ -549,7 +584,7 @@ def run_comparison(args: argparse.Namespace) -> dict[str, Any]:
             "import_start": "perf_counter_ns around fresh-process import of merger.repoground.service.app; app construction occurs during import",
             "request_latency": "FastAPI TestClient GET /api/health after per-process warmups",
             "memory": "current and peak resident set size in KiB; RSS after import is the primary comparison",
-            "api_parity": "canonical JSON SHA-256 of FastAPI OpenAPI plus normalized /api route inventory",
+            "api_parity": "canonical JSON SHA-256 of OpenAPI after removing only FastAPI/Pydantic ValidationError ctx/input diagnostics, plus normalized /api route inventory",
             "ordering": "alternating before/after order to limit systematic shared-host drift",
         },
         "api_parity": parity,

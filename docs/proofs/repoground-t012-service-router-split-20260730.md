@@ -104,10 +104,18 @@ normalized OpenAPI fingerprint.  The subprocess is rooted at the exact
 repository, has a 30-second timeout, emits canonical JSON, and fails closed on
 nonzero exit, timeout, malformed JSON, or malformed shape.  This prevents
 previous tests that mutate the process-global FastAPI app from producing a
-false failure or false pass.  A regression test deliberately reduces the
-in-process app to two routes and confirms that the fresh snapshot still returns
-the complete 33-route contract.  The benchmark independently imports the
-archived before and after revisions and compares:
+false failure or false pass.  A regression test deliberately empties the
+in-process route table and confirms that the fresh snapshot still returns the
+complete 33-route contract.  The helper is started as the package module
+`python -m merger.repoground.tests.test_service_router_closeout`, not as a bare
+file path, so its import contract matches the service under Python 3.10 and
+Python 3.12.  The inventory resolves both historical flat route lists and
+included-router containers exposing `original_router`, as used by FastAPI 0.139
+/ Starlette 1.3.  OpenAPI comparison removes only the
+framework-generated `ValidationError.ctx` and `.input` diagnostics that differ
+between the supported FastAPI/Pydantic dependency sets; product paths, methods,
+status and response schemas remain in the hashed contract.  The benchmark
+independently imports the archived before and after revisions and compares:
 
 | Observation | Before | After | Result |
 | --- | --- | --- | --- |
@@ -175,9 +183,10 @@ Method:
 
 Environment:
 
-- CPython 3.10.12, Linux 7.0.11 x86-64, glibc 2.35
+- CPython 3.12.12, Linux 7.0.11 x86-64, glibc 2.35
 - AMD Ryzen 9 5900XT, 32 logical CPUs
-- FastAPI 0.125.0, Starlette 0.50.0, Pydantic 2.12.5, HTTPX 0.28.1
+- the exact hashed CI development lock: FastAPI 0.139.0, Starlette 1.3.1,
+  Pydantic 2.13.4, HTTPX 0.28.1
 - load averages at start/end and all raw timing/memory samples are retained in
   the measurement JSON
 
@@ -185,16 +194,19 @@ Results for the exact T012 parent/squash-merge pair:
 
 | Metric | Before `b7a807db` | After `20b9fa60` | Observed change |
 | --- | ---: | ---: | ---: |
-| import/app construction median | 268.343918 ms | 286.854323 ms | +6.898% |
-| import/app construction min–max | 264.562442–325.263352 ms | 283.867342–2,304.573017 ms | observational; one after-process import outlier is retained |
-| Health request p50 | 0.855495 ms | 0.856675 ms | +0.138% |
-| Health request p95 | 1.026847 ms | 0.984106 ms | after is slightly lower |
-| RSS after import median | 50,216 KiB | 50,988 KiB | +772 KiB / +1.537% |
-| RSS import delta median | 30,360 KiB | 31,120 KiB | +760 KiB |
-| RSS after requests median | 56,188 KiB | 56,840 KiB | +652 KiB |
+| import/app construction median | 899.300174 ms | 896.443606 ms | −0.318% |
+| import/app construction min–max | 830.738855–1,613.522272 ms | 840.962010–2,205.408185 ms | observational; both maxima remain in the raw samples |
+| Health request p50 | 0.698045 ms | 0.700074 ms | +0.291% |
+| Health request p95 | 1.355929 ms | 1.508810 ms | observational |
+| RSS after import median | 67,624 KiB | 67,660 KiB | +36 KiB / +0.053% |
+| RSS import delta median | 44,980 KiB | 45,052 KiB | +72 KiB |
+| RSS after requests median | 73,164 KiB | 73,320 KiB | +156 KiB |
 
 These are bounded before/after observations, not an improvement claim or
-a performance verdict.  The task contract defines no threshold, so the
+a performance verdict.  The shared-host load increased materially during this
+run, and both revisions contain high import maxima; medians and all raw samples
+remain visible rather than trimming outliers.  The task contract defines no
+threshold, so the
 benchmark is evidence rather than a pass/fail gate.  `TestClient` measures
 in-process ASGI dispatch only: it does not measure TCP or Uvicorn, nor proxy or
 TLS costs.  Small differences do not establish statistical significance or an
