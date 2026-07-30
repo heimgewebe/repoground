@@ -74,3 +74,7 @@ contains no old copy or that historical documentation has no archival value.
 
 The product boundary is therefore operational rather than revisionist: active runtime and
 package surfaces are made coherent, while historical proof artifacts are left intact.
+
+## Related control-plane layers
+
+See [`control-planes.md`](control-planes.md) for the T005 separation of architecture, Bureau task truth, proofs, diagnostics and CI classes.

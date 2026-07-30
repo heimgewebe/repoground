@@ -1,0 +1,176 @@
+{
+  "kind": "repoground.workflow_control_plane",
+  "schema_version": 1,
+  "task": "REPOGROUND-LEGACY-RECONCILIATION-V1-T005",
+  "revision_binding": {
+    "base_revision": "fe1e82dd12e102838b38f63fed59750b6d81a759",
+    "observed_at": "2026-07-30T06:21:44Z"
+  },
+  "class_semantics": {
+    "required_protection": "Must stay green on protected paths; primary merge-safety surface.",
+    "fast_feedback": "Narrow specialist gates for fast PR signal; not historical ballast.",
+    "diagnostic": "Provides diagnostics or ratchet reports; may be non-blocking or soft-fail without becoming product truth.",
+    "operator_command": "Operator/PR command automation; not a required content gate.",
+    "historical_ballast": "Reserved: no-op or superseded workflows pending removal (none in this inventory)."
+  },
+  "does_not_establish": [
+    "That every diagnostic workflow is free to delete.",
+    "That dual parity workflows are identical.",
+    "That classification alone changes required GitHub branch protection."
+  ],
+  "workflows": [
+    {
+      "path": ".github/workflows/ai-context-guard.yml",
+      "class": "required_protection",
+      "rationale": "Blocks unsafe AI-context / instruction drift.",
+      "sha256": "1786b00c649f86abe228fe57e803cdd3ae65cade0dbda2797158586987abade0",
+      "bytes": 2701
+    },
+    {
+      "path": ".github/workflows/anti-hallucination-lint.yml",
+      "class": "fast_feedback",
+      "rationale": "Focused contract lint for anti-hallucination rules.",
+      "sha256": "9786a221ca7c80199912fa8c65a352dcc63e302556b9b27a5a8798a887153c56",
+      "bytes": 2429
+    },
+    {
+      "path": ".github/workflows/codeql.yml",
+      "class": "required_protection",
+      "rationale": "Security analysis gate for Python.",
+      "sha256": "bebf50989d33d07b5880e0ece7f130097ae182a0eb13d6a92858e74b4b464866",
+      "bytes": 1931
+    },
+    {
+      "path": ".github/workflows/contracts-validate.yml",
+      "class": "required_protection",
+      "rationale": "Contract/schema/fixture integrity.",
+      "sha256": "af0b9f7544a8694221d4e729cf547ed347ea8b2d9171fbe170daea90a5d1de78",
+      "bytes": 10556
+    },
+    {
+      "path": ".github/workflows/doc-freshness.yml",
+      "class": "diagnostic",
+      "rationale": "Documentation freshness diagnostic (non-authoritative product truth).",
+      "sha256": "acb2c4f3e9ea0f039df3db00127aaf74e214fcc365029de4c04d8fdeb45bdd0d",
+      "bytes": 4017
+    },
+    {
+      "path": ".github/workflows/forensic-preflight-canary.yml",
+      "class": "diagnostic",
+      "rationale": "Forensic preflight canary; not full forensic promotion.",
+      "sha256": "5bcd6e47fd87414ffdaf2ab993e405fa64ac273f77fea05c165e320428f16a0b",
+      "bytes": 4701
+    },
+    {
+      "path": ".github/workflows/graph-bundle-sources.yml",
+      "class": "fast_feedback",
+      "rationale": "Graph bundle source contract.",
+      "sha256": "dd936420c963badfd234518afb7370d32d9c8d0320e21d7774e375ca45ba0fbf",
+      "bytes": 4502
+    },
+    {
+      "path": ".github/workflows/graph-model.yml",
+      "class": "diagnostic",
+      "rationale": "Graph model suite (broader than single contract).",
+      "sha256": "f02a19dcb16a249734a70315e39afd257e2873d3f42d952133647fa6f355faf7",
+      "bytes": 6430
+    },
+    {
+      "path": ".github/workflows/graph-quality-goldset.yml",
+      "class": "diagnostic",
+      "rationale": "Graph quality goldset evaluation.",
+      "sha256": "f2aa1a3bb94b77fb3db35ba71d9924f60751912bb7877038bf3d9a1145afc83a",
+      "bytes": 2816
+    },
+    {
+      "path": ".github/workflows/graph-source-roots.yml",
+      "class": "fast_feedback",
+      "rationale": "Graph source-root contract.",
+      "sha256": "e1caffb741c64cc85ca6ae01c65896ec2b3f45fafe8dea5b72ff7dd3e9f4bd3e",
+      "bytes": 2092
+    },
+    {
+      "path": ".github/workflows/lens-model.yml",
+      "class": "diagnostic",
+      "rationale": "Lens model suite.",
+      "sha256": "e1b0e3a0ebdce1add078612d2df981994a91ed8be7e6f22c9e5e2287005f526a",
+      "bytes": 16858
+    },
+    {
+      "path": ".github/workflows/lint.yml",
+      "class": "required_protection",
+      "rationale": "Ruff plus maintainability/reachability ratchets.",
+      "sha256": "1802a7f50ed8548f92c58e26cd1523ddaaa925aca46b372916996c6e0bd9eba7",
+      "bytes": 1383
+    },
+    {
+      "path": ".github/workflows/metrics.yml",
+      "class": "diagnostic",
+      "rationale": "Metrics snapshot/validation; scheduled/diagnostic posture.",
+      "sha256": "331c1e430de6d477c2c105c7afe319cfbe688cdf4b75cc6bfa6a7347924ed3c7",
+      "bytes": 2069
+    },
+    {
+      "path": ".github/workflows/parity-gate.yml",
+      "class": "fast_feedback",
+      "rationale": "Content vs diagnostic parity gate.",
+      "sha256": "b8b6f47c7a0151570a12a23d38f9c206057a20286f7535c8875013aa7fe906e7",
+      "bytes": 3137
+    },
+    {
+      "path": ".github/workflows/parity_check.yml",
+      "class": "fast_feedback",
+      "rationale": "Frontend parity guard (surface parity).",
+      "sha256": "12b73bc06de33ee269d92b20ba57cdb681d2b665ff59b59037a421ae273d24dc",
+      "bytes": 1632
+    },
+    {
+      "path": ".github/workflows/pr-heimgewebe-commands.yml",
+      "class": "operator_command",
+      "rationale": "PR comment command surface; not a merge gate.",
+      "sha256": "c802df6c42dbf0643fbb727366db743fb1f5b691a9e00d956e39465b5d42b71c",
+      "bytes": 563
+    },
+    {
+      "path": ".github/workflows/python-call-graph-goldset.yml",
+      "class": "diagnostic",
+      "rationale": "Call-graph goldset evaluation.",
+      "sha256": "7b3c2553fab8e05aefcce5d554fd3f5ece0512c393b6a4d31c840d0c7aafb4fd",
+      "bytes": 3900
+    },
+    {
+      "path": ".github/workflows/semantic-lock.yml",
+      "class": "required_protection",
+      "rationale": "Semantic identity / lock surface.",
+      "sha256": "68c31d6ebce296f15cb5693a5c5583281651371d8a0412375d8501359aa7b4b6",
+      "bytes": 3559
+    },
+    {
+      "path": ".github/workflows/task-index.yml",
+      "class": "diagnostic",
+      "rationale": "Planning registration / task-index ratchet (repo-local projection).",
+      "sha256": "9ce27d7b3cbce97a78c0d4a9b20cdf81e541e8718e3bf28e54ffc7d2ac205e3c",
+      "bytes": 5092
+    },
+    {
+      "path": ".github/workflows/test-suite.yml",
+      "class": "required_protection",
+      "rationale": "Primary pytest and browser gate surface.",
+      "sha256": "53f3aae139356cb1f69ef0831eec3ae6db0e84ffeb4b37ec754e89f4d3433ec0",
+      "bytes": 5315
+    },
+    {
+      "path": ".github/workflows/wgx-guard.yml",
+      "class": "required_protection",
+      "rationale": "wgx profile guard.",
+      "sha256": "6908956802b270bcb9f37066daa29c979ef4d4afa97d3ec914fa4ffc78469e66",
+      "bytes": 576
+    }
+  ],
+  "counts_by_class": {
+    "diagnostic": 8,
+    "fast_feedback": 5,
+    "operator_command": 1,
+    "required_protection": 7
+  }
+}

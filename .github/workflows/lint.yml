@@ -35,3 +35,9 @@ jobs:
 
       - name: Check production module reachability evidence
         run: python scripts/ci/check_module_reachability.py --root . --format json
+
+      - name: Check workflow control-plane inventory
+        run: python scripts/ci/check_workflow_control_plane.py --root . --format json
+
+      - name: Check entry-document links
+        run: python scripts/ci/check_entry_doc_links.py --root . --format json

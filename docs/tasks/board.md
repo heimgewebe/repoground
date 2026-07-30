@@ -6,7 +6,9 @@
 - `partial` – ein begrenzter Kern existiert, aber der deklarierte Task-Scope ist nicht vollständig erfüllt
 - `done` – der deklarierte Task-Scope ist abgeschlossen und belegt; separate Folgetasks oder Grenzen dürfen offen bleiben
 
-`done` bedeutet weder automatisch, dass eine Phase oder das Gesamtsystem vollständig ist, noch dass Produkt- oder Release-Reife erreicht wurde. Kanonische Taskstatus stehen in `docs/tasks/index.json`; dieses Board ist die menschenlesbare Projektion.
+`done` bedeutet weder automatisch, dass eine Phase oder das Gesamtsystem vollständig ist, noch dass Produkt- oder Release-Reife erreicht wurde.
+
+**Aufgabenwahrheit:** Für Bureau-Initiativen (z. B. `REPOGROUND-LEGACY-RECONCILIATION-V1-*`) ist **Bureau** kanonisch. `docs/tasks/index.json` und dieses Board sind eine **repo-lokale historische Projektion** und Ratchet-Fläche, keine zweite Lifecycle-Wahrheit. Siehe `docs/tasks/AUTHORITY.md` und `docs/architecture/control-planes.md`.
 
 ## Aktive Tasks
 
