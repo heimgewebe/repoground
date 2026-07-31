@@ -20,7 +20,9 @@ The lint is marker-gated and opt-in: it fires only on code carrying explicit,
 lint-only governance markers. It performs no type inference and is not a runtime
 annotation (C4 remains open). Non-blocking; not wired into CI gates.
 """
+
 import json
+import typing
 from pathlib import Path
 
 import pytest
@@ -28,6 +30,7 @@ import pytest
 from merger.repoground.core.anti_hallucination_ast_lint import (
     RULES_COVERED,
     RULES_OUT_OF_SCOPE,
+    AstLintFinding,
     AstLintReport,
     lint_default_tree,
     lint_source,
@@ -35,6 +38,7 @@ from merger.repoground.core.anti_hallucination_ast_lint import (
 from merger.repoground.core.authority_upgrade_registry import (
     AUTHORITY_UPGRADE_REGISTRY,
     AuthorityUpgrade,
+    DeclaredUpgrade,
     classify_findings,
     match_upgrade,
     validate_registry,
@@ -43,6 +47,21 @@ from merger.repoground.core.authority_upgrade_registry import (
 
 def _rules(findings):
     return [f.rule for f in findings]
+
+
+def test_authority_upgrade_registry_type_hints_resolve():
+    targets = (
+        AuthorityUpgrade.matches,
+        DeclaredUpgrade,
+        match_upgrade,
+        classify_findings,
+    )
+
+    for target in targets:
+        assert typing.get_type_hints(target)
+
+    assert typing.get_type_hints(AuthorityUpgrade.matches)["finding"] is AstLintFinding
+    assert typing.get_type_hints(DeclaredUpgrade)["finding"] is AstLintFinding
 
 
 def _pilot_merge_annotation_line() -> int:
@@ -195,10 +214,7 @@ def test_canonical_source_into_canonical_sink_is_not_flagged():
 
 
 def test_unmarked_identical_shape_is_not_flagged():
-    src = (
-        "content = reading_pack_top_chunks()\n"
-        "verify_as_canonical(content)\n"
-    )
+    src = "content = reading_pack_top_chunks()\nverify_as_canonical(content)\n"
     assert lint_source(src, filename="t.py") == []
 
 
@@ -268,7 +284,9 @@ def test_report_self_declares_diagnostic_authority_and_disclaimers():
     assert "C4" in d["rules_out_of_scope"]
     assert any("does_not_prove_code_is_authority_safe" in m for m in d["does_not_mean"])
     # C2.9: a declared upgrade is reviewed intent, not a runtime-safety proof.
-    assert any("declared_authority_upgrade_is_reviewed_intent" in m for m in d["does_not_mean"])
+    assert any(
+        "declared_authority_upgrade_is_reviewed_intent" in m for m in d["does_not_mean"]
+    )
     # The full declared policy is always surfaced (machine-readable, not suppressed).
     assert isinstance(d["declared_upgrades"], list)
     assert isinstance(d["authority_upgrade_registry"], list)
@@ -510,7 +528,9 @@ def test_same_sink_outside_merge_file_is_not_declared_upgrade():
         ({"symbol": "  "}, "symbol"),
     ],
 )
-def test_invalid_registry_entry_is_rejected_not_silently_accepted(overrides, expect_problem):
+def test_invalid_registry_entry_is_rejected_not_silently_accepted(
+    overrides, expect_problem
+):
     bad = _valid_upgrade(**overrides)
     problems = bad.validation_errors()
     assert problems, f"expected {overrides} to be rejected"
