@@ -21,6 +21,7 @@ lint-only governance markers. It performs no type inference and is not a runtime
 annotation (C4 remains open). Non-blocking; not wired into CI gates.
 """
 import json
+import typing
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,7 @@ import pytest
 from merger.repoground.core.anti_hallucination_ast_lint import (
     RULES_COVERED,
     RULES_OUT_OF_SCOPE,
+    AstLintFinding,
     AstLintReport,
     lint_default_tree,
     lint_source,
@@ -35,6 +37,7 @@ from merger.repoground.core.anti_hallucination_ast_lint import (
 from merger.repoground.core.authority_upgrade_registry import (
     AUTHORITY_UPGRADE_REGISTRY,
     AuthorityUpgrade,
+    DeclaredUpgrade,
     classify_findings,
     match_upgrade,
     validate_registry,
@@ -43,6 +46,23 @@ from merger.repoground.core.authority_upgrade_registry import (
 
 def _rules(findings):
     return [f.rule for f in findings]
+
+
+def test_authority_upgrade_registry_type_hints_resolve():
+    targets = (
+        AuthorityUpgrade.matches,
+        DeclaredUpgrade,
+        match_upgrade,
+        classify_findings,
+    )
+
+    for target in targets:
+        assert typing.get_type_hints(target)
+
+    matches_hints = typing.get_type_hints(AuthorityUpgrade.matches)
+    declared_hints = typing.get_type_hints(DeclaredUpgrade)
+    assert matches_hints["finding"] is AstLintFinding
+    assert declared_hints["finding"] is AstLintFinding
 
 
 def _pilot_merge_annotation_line() -> int:

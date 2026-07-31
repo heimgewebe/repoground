@@ -41,7 +41,7 @@ prove the upgrade is runtime-correct.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import Iterable, Sequence
 
 from .anti_hallucination_ast_lint import (
     CANONICAL_AUTHORITY,
@@ -49,10 +49,8 @@ from .anti_hallucination_ast_lint import (
     L1_GATING_AUTHORITIES,
     NAVIGATION_LIKE_AUTHORITIES,
     RULES_COVERED,
+    AstLintFinding,
 )
-
-if TYPE_CHECKING:  # pragma: no cover - typing only, no runtime import cycle
-    from .anti_hallucination_ast_lint import AstLintFinding
 
 # Which low-authority classes can legitimately produce each AST-lint rule. A
 # declaration whose (rule, source_authority) pair is impossible can never match a
