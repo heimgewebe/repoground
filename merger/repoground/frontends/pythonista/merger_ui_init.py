@@ -6,6 +6,7 @@ Behavior is unchanged; methods remain bound via Mixin inheritance.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Dict, List, Optional
 
 BUILD_GLOBAL_NAMES = (
