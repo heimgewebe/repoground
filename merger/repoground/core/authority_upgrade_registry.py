@@ -38,7 +38,6 @@ no type inference, no dataflow/alias analysis, no contract/schema mutation, no n
 blocking CI gate. A declared upgrade records *reviewed intent*; it does **not**
 prove the upgrade is runtime-correct.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass
