@@ -151,3 +151,27 @@ Remove the pin with `unpin --record <record-path>`. Orphaned or malformed pin me
 The existing fleet publisher already computes a scoped content identity and skips unchanged successful publications. The policy module supplies the stronger durable reservation, anchor selection, pin, TTL and evidence/payload separation contract.
 
 RBV1-T026 is merged. This policy remains a separate control module and is not silently wired into the live fleet publisher by this change. Any production integration requires its own exact dry-run, payload-candidate binding and rollout evidence; this implementation performs no live retention by itself.
+
+## Daily fleet context profile
+
+Normal daily fleet publication uses `fleet-context` with `dual` output. The
+profile preserves canonical Markdown, the bundle manifest, the agent reading
+pack, citation map, chunk index, output and post-emit health, bundle-surface
+validation, and the export-safety report.
+
+The SQLite retrieval index, Python symbol index, and Python call graph are
+`profile_excluded`. The dual renderer creates the citation and chunk surfaces;
+profile finalization then removes those three heavy, regenerable indexes before
+publication. They remain available through the explicit `full-max` diagnostic
+profile, but are not duplicated in every daily fleet generation.
+The retrieval evaluation remains recommended rather than canonical truth.
+
+`vault-gewebe` remains on `agent-portable` with `dual` output. This exception
+prevents the daily migration from silently narrowing its existing security and
+agent contract.
+
+The migration changes only newly generated fleet payloads. Existing generations
+continue to follow the retention, pin, transaction, and crash-recovery contract
+above. Missing or stale citation, chunk, or health evidence remains a profile
+failure; the compact profile does not establish repository understanding,
+runtime causality, test sufficiency, or future consumer compatibility.

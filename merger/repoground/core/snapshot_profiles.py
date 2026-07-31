@@ -21,6 +21,7 @@ VALID_REQUIREMENTS = (REQ_REQUIRED, REQ_RECOMMENDED, REQ_OPTIONAL, REQ_NA, REQ_E
 PROFILE_LEVELS = {
     "local-private": "dev",
     "agent-portable": "max",
+    "fleet-context": "max",
     "full-max": "max",
     "pr-review": "dev",
     "security-export-review": "max",
@@ -41,6 +42,14 @@ PROFILE_EXPORT_SEMANTICS = {
         "exportable": True,
     },
     "agent-portable": {
+        "agent_facing": True,
+        "public_facing": False,
+        "redaction_required": True,
+        "post_emit_health_required": True,
+        "agent_export_gate_required": True,
+        "exportable": True,
+    },
+    "fleet-context": {
         "agent_facing": True,
         "public_facing": False,
         "redaction_required": True,
@@ -142,6 +151,14 @@ PROFILE_ARTIFACT_RULES = {
         "retrieval_eval_json": REQ_RECOMMENDED,
         "python_symbol_index_json": REQ_RECOMMENDED,
         "python_call_graph_json": REQ_RECOMMENDED,
+    },
+    "fleet-context": {
+        **BASE_RULES,
+        "sqlite_index": REQ_EXCLUDED,
+        "export_safety_report": REQ_REQUIRED,
+        "retrieval_eval_json": REQ_RECOMMENDED,
+        "python_symbol_index_json": REQ_EXCLUDED,
+        "python_call_graph_json": REQ_EXCLUDED,
     },
     "full-max": {
         **BASE_RULES,
@@ -303,6 +320,10 @@ PROFILE_DEFAULT_OUTPUT_MODES = {
     "public-share": "archive",
 }
 
+PROFILE_POST_EMIT_DROPPABLE_ROLES = {
+    "fleet-context": frozenset({"sqlite_index"}),
+}
+
 OUTPUT_MODE_ARTIFACT_ROLES = {
     "archive": frozenset(),
     "retrieval": frozenset({"sqlite_index"}),
@@ -320,18 +341,23 @@ def profile_output_mode_conflicts(profile: str, output_mode: str) -> tuple[str, 
         raise ValueError(f"unknown RepoGround output mode: {output_mode}")
     excluded = set(profile_excluded_roles(profile))
     produced = set(OUTPUT_MODE_ARTIFACT_ROLES[output_mode])
-    return tuple(sorted(excluded & produced))
+    droppable = set(PROFILE_POST_EMIT_DROPPABLE_ROLES.get(profile, ()))
+    return tuple(sorted((excluded & produced) - droppable))
 
 
 def profile_output_mode_plan(profile: str, requested_output_mode: str | None = None) -> dict[str, Any]:
     selected_output_mode = requested_output_mode or profile_default_output_mode(profile)
     conflicts = profile_output_mode_conflicts(profile, selected_output_mode)
+    excluded_roles = set(profile_excluded_roles(profile))
+    produced_roles = set(OUTPUT_MODE_ARTIFACT_ROLES[selected_output_mode])
+    droppable_roles = set(PROFILE_POST_EMIT_DROPPABLE_ROLES.get(profile, ()))
     return {
         "profile": profile,
         "requested_output_mode": requested_output_mode,
         "selected_output_mode": selected_output_mode,
         "defaulted": requested_output_mode is None,
         "conflicts": list(conflicts),
-        "excluded_roles": list(profile_excluded_roles(profile)),
-        "conflict_candidate_roles": sorted(OUTPUT_MODE_ARTIFACT_ROLES[selected_output_mode]),
+        "excluded_roles": [role for role in ARTIFACT_ORDER if role in excluded_roles],
+        "conflict_candidate_roles": sorted(produced_roles),
+        "post_emit_dropped_roles": sorted(excluded_roles & produced_roles & droppable_roles),
     }

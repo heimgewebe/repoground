@@ -396,8 +396,9 @@ def safe_segment(raw: str) -> str:
 
 
 def publication_config(entry: RepoEntry) -> PublicationConfig:
-    profile = "agent-portable" if entry.repo == "vault-gewebe" else "full-max"
-    return PublicationConfig(profile=profile)
+    if entry.repo == "vault-gewebe":
+        return PublicationConfig(profile="agent-portable")
+    return PublicationConfig(profile="fleet-context")
 
 
 def publication_repository(entry: RepoEntry) -> str:
