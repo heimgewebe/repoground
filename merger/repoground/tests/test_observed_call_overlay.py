@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import jsonschema
@@ -647,6 +648,22 @@ def test_keyboard_interrupt_aborts_instead_of_being_recorded(fixture_repo: Path)
 
     # The profile hooks are still handed back on the way out.
     assert sys.getprofile() is None
+
+
+def test_trace_restores_existing_thread_profile(fixture_repo: Path) -> None:
+    """Tracing must not erase a process-wide profile hook owned by its caller."""
+
+    previous = threading.getprofile()
+
+    def sentinel(frame, event, arg):
+        del frame, event, arg
+
+    threading.setprofile(sentinel)
+    try:
+        trace_command(fixture_repo, ["-m", "callobs.main"])
+        assert threading.getprofile() is sentinel
+    finally:
+        threading.setprofile(previous)
 
 
 def test_calls_in_worker_threads_are_observed(fixture_repo: Path) -> None:

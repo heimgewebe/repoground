@@ -169,12 +169,13 @@ def _profiling(observer: _CallObserver) -> Iterator[None]:
     """
 
     previous = sys.getprofile()
+    previous_threading = threading.getprofile()
     sys.setprofile(observer)
     threading.setprofile(observer)
     try:
         yield
     finally:
-        threading.setprofile(None)
+        threading.setprofile(previous_threading)
         sys.setprofile(previous)
 
 
