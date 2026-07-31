@@ -15,6 +15,7 @@ def test_all_profiles_are_machine_readable_and_complete():
     assert set(profile_names()) == {
         "local-private",
         "agent-portable",
+        "fleet-context",
         "full-max",
         "pr-review",
         "security-export-review",
@@ -99,6 +100,48 @@ def test_profile_rules_match_expected_high_signal_requirements():
     assert PROFILE_ARTIFACT_RULES["local-private"]["citation_map_jsonl"] == "optional"
 
 
+def test_fleet_context_preserves_citation_truth_without_heavy_indexes():
+    rules = PROFILE_ARTIFACT_RULES["fleet-context"]
+
+    assert rules["citation_map_jsonl"] == "required"
+    assert rules["chunk_index_jsonl"] == "required"
+    assert rules["export_safety_report"] == "required"
+    assert rules["retrieval_eval_json"] == "recommended"
+    assert rules["sqlite_index"] == "profile_excluded"
+    assert rules["python_symbol_index_json"] == "profile_excluded"
+    assert rules["python_call_graph_json"] == "profile_excluded"
+
+
+def test_fleet_context_accepts_the_compact_surface_and_rejects_heavy_indexes():
+    compact_roles = {
+        "canonical_md",
+        "bundle_manifest",
+        "agent_reading_pack",
+        "citation_map_jsonl",
+        "chunk_index_jsonl",
+        "output_health",
+        "post_emit_health",
+        "bundle_surface_validation",
+        "export_safety_report",
+        "snapshot_plan_json",
+        "retrieval_eval_json",
+    }
+
+    compact = evaluate_profile("fleet-context", compact_roles)
+    assert compact["status"] == "pass"
+    assert compact["missing_required"] == []
+    assert compact["profile_excluded_present"] == []
+
+    for role in (
+        "sqlite_index",
+        "python_symbol_index_json",
+        "python_call_graph_json",
+    ):
+        invalid = evaluate_profile("fleet-context", compact_roles | {role})
+        assert invalid["status"] == "fail"
+        assert invalid["profile_excluded_present"] == [role]
+
+
 def test_profile_output_mode_plan_is_machine_readable():
     public_default = profile_output_mode_plan("public-share")
     assert public_default["selected_output_mode"] == "archive"
@@ -114,6 +157,23 @@ def test_profile_output_mode_plan_is_machine_readable():
     assert public_dual["selected_output_mode"] == "dual"
     assert public_dual["defaulted"] is False
     assert public_dual["conflicts"] == ["sqlite_index"]
+
+    fleet_default = profile_output_mode_plan("fleet-context")
+    assert fleet_default["selected_output_mode"] == "dual"
+    assert fleet_default["defaulted"] is True
+    assert fleet_default["conflicts"] == []
+    assert fleet_default["excluded_roles"] == [
+        "sqlite_index",
+        "python_symbol_index_json",
+        "python_call_graph_json",
+    ]
+    assert fleet_default["post_emit_dropped_roles"] == ["sqlite_index"]
+
+    fleet_archive = profile_output_mode_plan("fleet-context", "archive")
+    assert fleet_archive["selected_output_mode"] == "archive"
+    assert fleet_archive["defaulted"] is False
+    assert fleet_archive["conflicts"] == []
+    assert fleet_archive["post_emit_dropped_roles"] == []
 
     agent_default = profile_output_mode_plan("agent-portable")
     assert agent_default["selected_output_mode"] == "dual"

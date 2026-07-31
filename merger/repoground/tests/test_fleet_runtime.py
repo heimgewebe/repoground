@@ -44,6 +44,31 @@ def load_publisher() -> ModuleType:
     return module
 
 
+def test_publication_config_uses_compact_daily_profile(tmp_path: Path) -> None:
+    module = load_publisher()
+    default = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=tmp_path / "demo",
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    vault = module.RepoEntry(
+        key="heimgewebe/vault-gewebe",
+        owner="heimgewebe",
+        repo="vault-gewebe",
+        path=tmp_path / "vault-gewebe",
+        remote="git@github.com:heimgewebe/vault-gewebe.git",
+    )
+
+    assert module.publication_config(default) == module.PublicationConfig(
+        profile="fleet-context"
+    )
+    assert module.publication_config(vault) == module.PublicationConfig(
+        profile="agent-portable"
+    )
+
+
 def allow_no_active_managed_build_leases(
     module: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
