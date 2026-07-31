@@ -10,6 +10,15 @@ RepoGround does not execute target code as part of bundle generation. This
 module is an explicitly operator-invoked producer: it runs only when somebody
 asks for a trace of a named command, and its output is a separate artifact that
 never enters the static bundle pipeline.
+
+Tracing is necessarily in-process, because ``sys.setprofile`` only observes the
+interpreter it is installed in. The traced command therefore runs with this
+interpreter's side effects: the working directory, ``sys.argv`` and ``sys.path``
+are restored afterwards, but whatever the command imported stays in
+``sys.modules``, and whatever it wrote stays written. A second trace in the same
+process would see cached modules instead of re-executing their bodies, so each
+overlay should be produced by a fresh ``repoground observed-calls produce``
+invocation.
 """
 
 from __future__ import annotations
@@ -21,10 +30,12 @@ import platform
 import runpy
 import subprocess
 import sys
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any, Iterator, Sequence
 
 from .observed_call_overlay_contract import MAX_SKIPPED_ERRORS
@@ -92,12 +103,16 @@ class _CallObserver:
     """``sys.setprofile`` callback that aggregates repo-local call edges.
 
     CPython disables profiling while the profile callback itself runs, so the
-    work done here never observes itself and never recurses.
+    work done here never observes itself and never recurses within a thread.
+    Threads started by the traced command run the same callback concurrently,
+    so the aggregation is guarded: the read-modify-write of an edge counter is
+    not atomic under the GIL and would otherwise undercount.
     """
 
     def __init__(self, repo_root: Path) -> None:
         self._repo_root = repo_root
         self._path_cache: dict[str, str | None] = {}
+        self._lock = Lock()
         self.edges: dict[ObservedEdgeKey, int] = {}
         self.frame_event_count = 0
 
@@ -112,10 +127,10 @@ class _CallObserver:
         if event != "call":
             return
         callee_code = frame.f_code
-        callee_path = self._relative(callee_code.co_filename)
+        with self._lock:
+            callee_path = self._relative(callee_code.co_filename)
         if callee_path is None:
             return
-        self.frame_event_count += 1
         caller_frame = frame.f_back
         if caller_frame is None:
             caller_path: str | None = None
@@ -124,7 +139,8 @@ class _CallObserver:
             call_line = 0
         else:
             caller_code = caller_frame.f_code
-            caller_path = self._relative(caller_code.co_filename)
+            with self._lock:
+                caller_path = self._relative(caller_code.co_filename)
             caller_name = caller_code.co_name
             caller_first_line = caller_code.co_firstlineno
             call_line = caller_frame.f_lineno
@@ -137,16 +153,28 @@ class _CallObserver:
             callee_name=callee_code.co_name,
             callee_first_line=callee_code.co_firstlineno,
         )
-        self.edges[key] = self.edges.get(key, 0) + 1
+        with self._lock:
+            self.frame_event_count += 1
+            self.edges[key] = self.edges.get(key, 0) + 1
 
 
 @contextmanager
 def _profiling(observer: _CallObserver) -> Iterator[None]:
+    """Profile this thread and every thread the traced command starts.
+
+    ``threading.setprofile`` only reaches threads created *after* it is
+    installed. Threads that were already running when the trace began, and
+    frames executed inside native extensions, stay unobserved; both limits are
+    named in the overlay's non-claims.
+    """
+
     previous = sys.getprofile()
     sys.setprofile(observer)
+    threading.setprofile(observer)
     try:
         yield
     finally:
+        threading.setprofile(None)
         sys.setprofile(previous)
 
 
@@ -157,7 +185,8 @@ def _process_context(repo_root: Path, argv: Sequence[str]) -> Iterator[None]:
     previous_path = list(sys.path)
     os.chdir(repo_root)
     sys.argv = list(argv)
-    sys.path.insert(0, str(repo_root))
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
     try:
         yield
     finally:
@@ -199,7 +228,9 @@ def _run_command(repo_root: Path, command: Sequence[str]) -> tuple[str, int | No
             if isinstance(code, int):
                 return "exited", code, None
             return "exited", 1, f"SystemExit: {code}"
-        except BaseException as exc:  # noqa: BLE001 - reported, never swallowed
+        except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+            # KeyboardInterrupt and GeneratorExit deliberately propagate: an
+            # operator aborting a long trace must abort it, not record it.
             return "failed", None, f"{type(exc).__name__}: {exc}"
     return "completed", 0, None
 

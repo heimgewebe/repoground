@@ -31,6 +31,13 @@ def register_observed_calls_commands(subparsers) -> None:
     produce_parser = observed_subparsers.add_parser(
         "produce",
         help="Trace one command and emit its Observed Call Overlay v1 (S2)",
+        description=(
+            "Runs the given command in THIS interpreter and records the calls it "
+            "performs. The command's own side effects happen for real, and the "
+            "modules it imports stay loaded, so produce one overlay per process. "
+            "Threads started by the command are observed; threads already running "
+            "and native frames are not."
+        ),
     )
     produce_parser.add_argument(
         "--repo-root", default=".", help="Repository to observe"
@@ -78,6 +85,18 @@ def register_observed_calls_commands(subparsers) -> None:
         )
 
 
+def run_observed_calls(args: argparse.Namespace) -> int:
+    """Dispatch the observed-call subcommands.
+
+    Kept here rather than in ``main``: the top-level dispatcher is already at
+    its complexity ceiling, and this sub-dispatch belongs with its commands.
+    """
+
+    if args.observed_calls_cmd == "produce":
+        return run_observed_calls_produce(args)
+    return run_observed_calls_read(args, args.observed_calls_cmd)
+
+
 def run_observed_calls_produce(args: argparse.Namespace) -> int:
     from merger.repoground.architecture.observed_call_overlay import (
         generate_observed_call_overlay_document,
@@ -86,7 +105,11 @@ def run_observed_calls_produce(args: argparse.Namespace) -> int:
         validate_observed_call_overlay,
     )
 
-    command = [item for item in args.traced_command if item != "--"]
+    # Strip only argparse's own separator. A traced command may legitimately
+    # contain further '--' tokens, and removing those would change what runs.
+    command = list(args.traced_command)
+    if command and command[0] == "--":
+        command = command[1:]
     if not command:
         print("error: no command to trace was given after '--'", file=sys.stderr)
         return 2

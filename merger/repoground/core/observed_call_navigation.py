@@ -151,9 +151,19 @@ def _correspondence(
 
 
 def _matches_name(value: Any, query: str) -> bool:
-    return isinstance(value, str) and (
-        value.casefold() == query
-        or value.casefold().rsplit(".", 1)[-1] == query
+    """Match a qualified name exactly, by simple name, or by dotted suffix.
+
+    The suffix form lets ``targets.leaf`` select ``callobs.targets.leaf``
+    without matching an unrelated ``other_targets.leaf``.
+    """
+
+    if not isinstance(value, str):
+        return False
+    folded = value.casefold()
+    return (
+        folded == query
+        or folded.rsplit(".", 1)[-1] == query
+        or folded.endswith(f".{query}")
     )
 
 

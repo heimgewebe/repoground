@@ -58,8 +58,8 @@ rather than guessed:
 ## Measured run
 
 One command traced against this repository at `merger/repoground/tests/test_python_call_graph.py`
-(`-m pytest … -q -p no:randomly`, 47 passed / 10 skipped, ~4.4 s including
-tracing):
+(`-m pytest … -q -p no:randomly`, 47 passed / 10 skipped, ~1.3 s including
+tracing and overlay assembly):
 
 | Measure | Value |
 | :--- | ---: |
@@ -77,6 +77,17 @@ All 120 unbound callees are `<genexpr>`, `<dictcomp>`, `<listcomp>`,
 `<setcomp>` and `<lambda>` frames. They are kept rather than filtered, because
 they are real observed calls; consumers that want definition-level edges filter
 on `callee_binding_status == "bound"` or read `fully_bound_relation_count`.
+
+Anchors are parsed only for the files the trace actually touched, so overlay
+assembly costs `O(observed files)` rather than `O(repository)`. The parse
+diagnostics therefore describe exactly the files the overlay's bindings depend
+on. Where more than 20 files fail to parse, `skipped_errors` keeps the first 20
+while `skipped_files_count` and `skipped_errors_total_count` stay uncapped.
+
+When a trace produces more than `MAX_RELATIONS` distinct edges, relations are
+*selected* by observed call count and *emitted* in structural order: truncation
+drops cold edges rather than whichever ones sorted last, and the emitted order
+stays deterministic.
 
 ## Separation from S0/S1
 
@@ -109,28 +120,57 @@ this revision. `does_not_establish` additionally names `dead_code`,
 `environment_equivalence`. The read surface repeats the same list.
 
 An overlay is a record of one run. A second run of the same command may observe
-a different set of edges, and the overlay does not claim otherwise.
+a different set of edges, and the overlay does not claim otherwise. The
+observation fingerprint covers `observed_at`, so two traces of the same command,
+environment and revision are still two distinct observations with distinct run
+identities — by design.
+
+### Observation scope
+
+The profile hook reaches this thread and every thread the traced command starts
+after the hook is installed. It does **not** reach threads that were already
+running when the trace began, and it does not see frames executed inside native
+extensions. `does_not_establish` names both as `concurrent_thread_completeness`
+and `native_frame_completeness`. Counting is lock-guarded, because the
+read-modify-write of an edge counter is not atomic under the GIL.
 
 ## Validation scope
 
-`merger/repoground/tests/test_observed_call_overlay.py` (30 tests) traces a
+`merger/repoground/tests/test_observed_call_overlay.py` (45 tests) traces a
 fixture package inside a real temporary git checkout and covers: repo-local
 edge recording; JSON Schema conformance; full observation identity and the
 five ways an incomplete identity is refused; relations bound to a foreign
 observation; refusal of a checkout without a revision, at producer and CLI
 level; decorated-definition anchoring; module-scope callers; foreign callers
-without a citable call site; counter drift; both directions of static-evidence
-contamination; the dynamically dispatched call that is observed while staying
-S0 statically; the statically resolved edge the trace never took; navigation
-correspondence with and without a static graph; invalid queries and invalid
-overlays; and a command that raises, whose partial observations are kept with
-the failure recorded in `execution_outcome` and `skipped_errors`.
+without a citable call site, and refusal of a call-site line that has no file;
+counter drift; both directions of static-evidence contamination; agreement
+between JSON Schema and validator on unbound endpoints; the dynamically
+dispatched call that is observed while staying S0 statically; the statically
+resolved edge the trace never took; navigation correspondence with and without
+a static graph; exact, simple and dotted-suffix name matching; invalid queries
+and invalid overlays; and a command that raises, whose partial observations are
+kept with the failure recorded in `execution_outcome` and `skipped_errors`.
+
+Behaviours added after review are covered too: a traced command keeps its own
+`--` tokens; `KeyboardInterrupt` aborts the trace instead of being recorded as
+a failed run, and the profile hooks are handed back on the way out; a call in a
+worker thread is observed; truncation keeps the most-observed relations while
+emitting them in structural order; a syntax error in a file the trace never
+touched cannot enter the overlay's diagnostics; and the uncapped failure count
+survives the capped error list.
 
 ## What this does not establish
 
 The overlay does not establish coverage sufficiency, test adequacy, runtime
 correctness, reproducibility across runs or environments, completeness of the
-call graph, or merge readiness. Tracing runs the target command in-process:
-that is a deliberate operator action with the operator's own side effects, and
-RepoGround does not review, sandbox or vouch for the command it was asked to
-observe.
+call graph, or merge readiness.
+
+Tracing runs the target command **in the current interpreter**, because
+`sys.setprofile` cannot observe another process. That is a deliberate operator
+action with the operator's own side effects: the command's writes happen for
+real, and the modules it imports stay in `sys.modules`. Working directory,
+`sys.argv` and `sys.path` are restored; the module cache is not, so a second
+trace in the same process would see cached modules instead of re-executing
+their bodies. Produce one overlay per `repoground observed-calls produce`
+invocation. RepoGround does not review, sandbox or vouch for the command it was
+asked to observe.

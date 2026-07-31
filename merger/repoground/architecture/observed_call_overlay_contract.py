@@ -67,9 +67,15 @@ REQUIRED_NONCLAIMS = (
 )
 
 #: The producer additionally denies claims that only an executing tracer could
-#: be misread as making.
+#: be misread as making. ``concurrent_thread_completeness`` and
+#: ``native_frame_completeness`` are the recorder's own blind spots: the
+#: profile hook reaches this thread and every thread started after it was
+#: installed, but not threads that were already running, and not frames
+#: executed inside native extensions.
 PRODUCER_NONCLAIMS = (
     *REQUIRED_NONCLAIMS,
     "deterministic_reproduction",
     "environment_equivalence",
+    "concurrent_thread_completeness",
+    "native_frame_completeness",
 )

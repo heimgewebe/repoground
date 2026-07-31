@@ -22,7 +22,9 @@ datums- und Track-basiert. Roadmap-Phasen/Tracks: siehe
   carrying S2 evidence, and the document states that absence from a trace
   establishes neither dead code nor unreachable behaviour.
   Producing an overlay is the only RepoGround entry point that executes target
-  code; bundle generation remains non-executing.
+  code; bundle generation remains non-executing. Threads started by the traced
+  command are observed; threads already running and native frames are named as
+  non-claims.
 
 ## [3.0.0] - 2026-07-17
 

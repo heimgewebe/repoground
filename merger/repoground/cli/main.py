@@ -216,19 +216,6 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "atlas":
         from .cmd_atlas import handle_atlas_command
         return handle_atlas_command(parsed_args)
-    elif parsed_args.command == "observed-calls":
-        from .cmd_observed_calls import (
-            run_observed_calls_produce,
-            run_observed_calls_read,
-        )
-        if parsed_args.observed_calls_cmd == "produce":
-            return run_observed_calls_produce(parsed_args)
-        if parsed_args.observed_calls_cmd in ("callers", "callees"):
-            return run_observed_calls_read(
-                parsed_args, parsed_args.observed_calls_cmd
-            )
-        parser.parse_args(["observed-calls", "--help"])
-        return 0
     elif parsed_args.command == "citation":
         from .cmd_citation import run_citation_produce, run_citation_validate
         if parsed_args.citation_cmd == "validate":
@@ -316,10 +303,11 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)
-    elif parsed_args.command in {"token-budget", "evidence-query", "retrieval-snapshot", "diagnostics"}:
+    elif parsed_args.command in {"token-budget", "evidence-query", "retrieval-snapshot", "diagnostics", "observed-calls"}:
         from .cmd_diagnostics import run_diagnostics
         from .cmd_evidence_query import run_evidence_query
         from .cmd_incremental_snapshot import run_incremental_snapshot
+        from .cmd_observed_calls import run_observed_calls
         from .cmd_token_budget import run_token_budget
 
         handlers = {
@@ -327,6 +315,7 @@ def main(args: Optional[List[str]] = None) -> int:
             "evidence-query": run_evidence_query,
             "retrieval-snapshot": run_incremental_snapshot,
             "diagnostics": run_diagnostics,
+            "observed-calls": run_observed_calls,
         }
         return handlers[parsed_args.command](parsed_args)
     elif parsed_args.command == "artifact":

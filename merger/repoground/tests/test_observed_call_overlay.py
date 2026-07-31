@@ -31,6 +31,7 @@ import pytest
 
 from merger.repoground.architecture.call_graph import generate_call_graph_document
 from merger.repoground.architecture.observed_call_overlay import (
+    build_observed_call_overlay_document,
     build_symbol_anchors,
     generate_observed_call_overlay_document,
 )
@@ -39,11 +40,14 @@ from merger.repoground.architecture.observed_call_overlay_contract import (
     REQUIRED_NONCLAIMS,
 )
 from merger.repoground.architecture.observed_call_trace import (
+    ObservedEdgeKey,
+    TraceResult,
     environment_identity,
     source_revision,
     trace_command,
 )
 from merger.repoground.core.observed_call_navigation import (
+    _matches_name,
     get_observed_callees,
     get_observed_callers,
 )
@@ -93,6 +97,30 @@ def dynamic(name, value):
 
 def never_exercised(value):
     return leaf(value) + 1000
+''',
+    "callobs/threaded.py": '''import threading
+
+from .targets import leaf
+
+
+def in_worker(value):
+    return leaf(value)
+
+
+def spawn(value):
+    result = []
+
+    def collect():
+        result.append(in_worker(value))
+
+    worker = threading.Thread(target=collect)
+    worker.start()
+    worker.join()
+    return result
+
+
+if __name__ == "__main__":
+    spawn(7)
 ''',
     "callobs/main.py": '''from .consumer import decorated, dynamic, run
 
@@ -395,10 +423,14 @@ def test_counts_track_the_relations(fixture_repo: Path) -> None:
     assert failure["error_code"] == "observed_call_overlay_observed_call_total_mismatch"
 
 
-def _write_artifacts(tmp_path: Path, fixture_repo: Path) -> tuple[Path, Path]:
+def _write_artifacts(
+    tmp_path: Path, fixture_repo: Path, command=("-m", "callobs.main")
+) -> tuple[Path, Path]:
     overlay_path = tmp_path / "overlay.json"
     graph_path = tmp_path / "call-graph.json"
-    overlay_path.write_text(json.dumps(_overlay(fixture_repo)), encoding="utf-8")
+    overlay_path.write_text(
+        json.dumps(_overlay(fixture_repo, command=command)), encoding="utf-8"
+    )
     graph_path.write_text(
         json.dumps(generate_call_graph_document(fixture_repo, RUN_ID, CANONICAL_SHA)),
         encoding="utf-8",
@@ -568,3 +600,196 @@ def test_failed_command_still_reports_what_it_observed(fixture_repo: Path) -> No
     assert overlay["skipped_errors"]
     assert "RuntimeError" in overlay["skipped_errors"][0]
     assert _relation(overlay, "go", "run") is not None
+
+
+def test_inner_separator_tokens_survive_the_cli(
+    tmp_path: Path, fixture_repo: Path, monkeypatch
+) -> None:
+    """Only argparse's own '--' is stripped; the traced command keeps its own."""
+
+    seen: dict[str, list[str]] = {}
+
+    def _capture(repo_root, command):
+        seen["command"] = list(command)
+        return trace_command(repo_root, ["-m", "callobs.main"])
+
+    monkeypatch.setattr(
+        "merger.repoground.architecture.observed_call_trace.trace_command",
+        _capture,
+    )
+    exit_code = cli_main(
+        _produce_argv(
+            fixture_repo,
+            tmp_path / "overlay.json",
+            "--",
+            "-m",
+            "callobs.main",
+            "--",
+            "-k",
+            "selected",
+        )
+    )
+
+    assert exit_code == 0
+    assert seen["command"] == ["-m", "callobs.main", "--", "-k", "selected"]
+
+
+def test_keyboard_interrupt_aborts_instead_of_being_recorded(fixture_repo: Path) -> None:
+    """An operator aborting a long trace must abort it, not get a 'failed' run."""
+
+    (fixture_repo / "callobs" / "aborted.py").write_text(
+        "from .consumer import run\n\nrun(1)\nraise KeyboardInterrupt\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        trace_command(fixture_repo, ["-m", "callobs.aborted"])
+
+    # The profile hooks are still handed back on the way out.
+    assert sys.getprofile() is None
+
+
+def test_calls_in_worker_threads_are_observed(fixture_repo: Path) -> None:
+    """threading.setprofile reaches threads the traced command starts."""
+
+    overlay = _overlay(fixture_repo, command=("-m", "callobs.threaded"))
+
+    assert _relation(overlay, "spawn.collect", "in_worker") is not None
+    assert _relation(overlay, "in_worker", "leaf") is not None
+    assert "concurrent_thread_completeness" in overlay["does_not_establish"]
+    assert "native_frame_completeness" in overlay["does_not_establish"]
+
+
+def test_truncation_keeps_the_most_observed_relations(
+    fixture_repo: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        "merger.repoground.architecture.observed_call_overlay.MAX_RELATIONS", 3
+    )
+
+    overlay = _overlay(fixture_repo)
+
+    assert overlay["relations_truncated"] is True
+    assert overlay["relation_count"] == 3
+    assert overlay["observed_relation_total_count"] > 3
+    # Emission stays in structural order even though selection ranked by count.
+    emitted = [
+        (row["callee_path"], row["callee_runtime_first_line"], row["callee_runtime_name"])
+        for row in overlay["relations"]
+    ]
+    assert emitted == sorted(emitted)
+    assert counts_error(overlay) is None
+
+
+def test_anchors_are_built_only_for_observed_files(fixture_repo: Path) -> None:
+    """A syntax error in an untouched file cannot poison the overlay."""
+
+    (fixture_repo / "callobs" / "broken.py").write_text("def (\n", encoding="utf-8")
+
+    overlay = _overlay(fixture_repo)
+
+    assert overlay["skipped_files_count"] == 0
+    assert overlay["skipped_errors"] == []
+    assert build_symbol_anchors(fixture_repo)[1] == 1
+
+
+def test_skipped_error_total_is_not_capped_by_the_retained_list(
+    fixture_repo: Path,
+) -> None:
+    """The retained diagnostics are capped; the count of failures is not."""
+
+    broken = []
+    for index in range(25):
+        name = f"callobs/broken_{index}.py"
+        (fixture_repo / name).write_text("def (\n", encoding="utf-8")
+        broken.append(name)
+    trace = TraceResult(
+        edges={
+            ObservedEdgeKey(
+                caller_path=None,
+                caller_name="<module>",
+                caller_first_line=0,
+                call_line=0,
+                callee_path=name,
+                callee_name="missing",
+                callee_first_line=1,
+            ): 1
+            for name in broken
+        },
+        command=["-m", "callobs.main"],
+        exit_status="completed",
+        exit_code=0,
+        frame_event_count=25,
+        skipped_errors=(),
+        skipped_errors_total_count=0,
+    )
+    document = build_observed_call_overlay_document(
+        repo_root=fixture_repo,
+        run_id=RUN_ID,
+        canonical_dump_index_sha256=CANONICAL_SHA,
+        observation=_overlay(fixture_repo)["observation"],
+        trace=trace,
+    )
+
+    assert len(document["skipped_errors"]) == 20
+    assert document["skipped_files_count"] == 25
+    assert document["skipped_errors_total_count"] == 25
+    assert document["skipped_errors_truncated"] is True
+    assert validate_observed_call_overlay(document) is None
+
+
+def test_a_call_site_without_a_caller_path_is_refused(fixture_repo: Path) -> None:
+    overlay = _overlay(fixture_repo)
+    foreign = next(row for row in overlay["relations"] if row["caller_path"] is None)
+    foreign["call_site_line"] = 5
+
+    assert records_error(overlay) is not None
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(overlay, _schema())
+
+
+def test_schema_and_validator_agree_on_unbound_endpoints(fixture_repo: Path) -> None:
+    """An unbound endpoint may not carry a symbol kind."""
+
+    overlay = _overlay(fixture_repo)
+    foreign = next(row for row in overlay["relations"] if row["caller_path"] is None)
+    foreign["caller_kind"] = "function"
+
+    assert records_error(overlay) is not None
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(overlay, _schema())
+
+
+@pytest.mark.parametrize(
+    "value, query, expected",
+    [
+        ("Runner.go", "runner.go", True),
+        ("Runner.go", "go", True),
+        ("Outer.Runner.go", "runner.go", True),
+        ("Outer.Runner.go", "unner.go", False),
+        ("OtherRunner.go", "runner.go", False),
+        (None, "go", False),
+    ],
+)
+def test_name_matching_accepts_exact_simple_and_dotted_suffix(
+    value, query: str, expected: bool
+) -> None:
+    """A dotted query selects a whole segment boundary, never a partial word."""
+
+    assert _matches_name(value, query) is expected
+
+
+def test_navigation_matches_a_nested_qualified_name(
+    tmp_path: Path, fixture_repo: Path
+) -> None:
+    overlay_path, _ = _write_artifacts(
+        tmp_path, fixture_repo, command=("-m", "callobs.threaded")
+    )
+
+    nested = get_observed_callees(overlay_path, "spawn.collect")
+
+    assert nested["hit_count"] >= 1
+    assert all(
+        row["caller_qualified_name"] == "spawn.collect"
+        for row in nested["observed_callees"]
+    )

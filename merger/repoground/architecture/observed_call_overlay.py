@@ -108,33 +108,60 @@ class _AnchorVisitor(ast.NodeVisitor):
         self._visit_scoped(node, node.name, "async_function")
 
 
+def _observed_paths(edges: Iterable[ObservedEdgeKey]) -> set[str]:
+    """Return the repo-relative files the trace actually touched."""
+
+    paths: set[str] = set()
+    for key in edges:
+        paths.add(key.callee_path)
+        if key.caller_path is not None:
+            paths.add(key.caller_path)
+    return paths
+
+
+def _repository_python_files(repo_root: Path) -> list[str]:
+    files: list[str] = []
+    for root, dirs, names in os.walk(repo_root, topdown=True):
+        dirs[:] = sorted(item for item in dirs if item not in EXCLUDED_DIRS)
+        for file_name in sorted(names):
+            if file_name.endswith(".py"):
+                files.append((Path(root) / file_name).relative_to(repo_root).as_posix())
+    return files
+
+
 def build_symbol_anchors(
     repo_root: Path,
+    observed_paths: Iterable[str] | None = None,
 ) -> tuple[dict[str, dict[tuple[str, int], list[dict[str, Any]]]], int, list[str]]:
-    """Return per-file runtime anchors for every parsable Python file."""
+    """Return per-file runtime anchors for the files that need one.
 
+    ``observed_paths`` restricts parsing to the files a trace actually touched.
+    A trace over three files in a large repository has no reason to parse the
+    whole tree, and the parse diagnostics then describe exactly the files whose
+    anchors the overlay depends on. Passing ``None`` parses every Python file.
+    """
+
+    if observed_paths is None:
+        candidates = _repository_python_files(repo_root)
+    else:
+        candidates = sorted(observed_paths)
     anchors: dict[str, dict[tuple[str, int], list[dict[str, Any]]]] = {}
     skipped_files_count = 0
     skipped_errors: list[str] = []
-    for root, dirs, files in os.walk(repo_root, topdown=True):
-        dirs[:] = sorted(item for item in dirs if item not in EXCLUDED_DIRS)
-        for file_name in sorted(files):
-            if not file_name.endswith(".py"):
-                continue
-            path = Path(root) / file_name
-            rel_path = path.relative_to(repo_root).as_posix()
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            except (OSError, SyntaxError, UnicodeDecodeError) as exc:
-                skipped_files_count += 1
-                if len(skipped_errors) < MAX_SKIPPED_ERRORS:
-                    skipped_errors.append(
-                        f"Failed to parse {rel_path}: {type(exc).__name__} - {exc}"
-                    )
-                continue
-            visitor = _AnchorVisitor(rel_path)
-            visitor.visit(tree)
-            anchors[rel_path] = visitor.anchors
+    for rel_path in candidates:
+        path = repo_root / rel_path
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError) as exc:
+            skipped_files_count += 1
+            if len(skipped_errors) < MAX_SKIPPED_ERRORS:
+                skipped_errors.append(
+                    f"Failed to parse {rel_path}: {type(exc).__name__} - {exc}"
+                )
+            continue
+        visitor = _AnchorVisitor(rel_path)
+        visitor.visit(tree)
+        anchors[rel_path] = visitor.anchors
     return anchors, skipped_files_count, skipped_errors
 
 
@@ -229,21 +256,25 @@ def _relation(
 
 
 def _counts(relations: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Derive every counter in one pass over the relations."""
+
     binding_counts = {status: 0 for status in BINDING_STATUSES}
+    observed_call_total = 0
+    fully_bound_relation_count = 0
     for relation in relations:
-        binding_counts[relation["callee_binding_status"]] += 1
+        callee_status = relation["callee_binding_status"]
+        binding_counts[callee_status] += 1
+        observed_call_total += int(relation["observed_call_count"])
+        if callee_status == "bound" and relation["caller_binding_status"] in (
+            "bound",
+            "module_scope",
+        ):
+            fully_bound_relation_count += 1
     return {
         "relation_count": len(relations),
-        "observed_call_total": sum(
-            int(relation["observed_call_count"]) for relation in relations
-        ),
+        "observed_call_total": observed_call_total,
         "callee_binding_counts": binding_counts,
-        "fully_bound_relation_count": sum(
-            1
-            for relation in relations
-            if relation["callee_binding_status"] == "bound"
-            and relation["caller_binding_status"] in ("bound", "module_scope")
-        ),
+        "fully_bound_relation_count": fully_bound_relation_count,
     }
 
 
@@ -258,15 +289,25 @@ def build_observed_call_overlay_document(
     """Assemble one Observed Call Overlay v1 document from one trace."""
 
     repo_root = repo_root.resolve()
-    anchors, skipped_files_count, anchor_errors = build_symbol_anchors(repo_root)
+    anchors, skipped_files_count, anchor_errors = build_symbol_anchors(
+        repo_root, _observed_paths(trace.edges)
+    )
     observation_run_id = observation["observation_run_id"]
-    ordered_keys = sorted(trace.edges, key=ObservedEdgeKey.sort_key)
+    # Select by frequency, emit in structural order: truncation must not drop
+    # the hot edges an agent is most likely to be asking about, and the emitted
+    # order must stay deterministic regardless of counts.
+    selected = sorted(
+        trace.edges,
+        key=lambda key: (-trace.edges[key], key.sort_key()),
+    )[:MAX_RELATIONS]
     relations = [
         _relation(key, trace.edges[key], anchors, observation_run_id)
-        for key in ordered_keys[:MAX_RELATIONS]
+        for key in sorted(selected, key=ObservedEdgeKey.sort_key)
     ]
     skipped_errors = [*trace.skipped_errors, *anchor_errors][:MAX_SKIPPED_ERRORS]
-    skipped_errors_total_count = trace.skipped_errors_total_count + len(anchor_errors)
+    # ``anchor_errors`` is capped; ``skipped_files_count`` is not. Using the
+    # capped list here would understate how many files failed to parse.
+    skipped_errors_total_count = trace.skipped_errors_total_count + skipped_files_count
     return {
         "kind": OVERLAY_KIND,
         "version": OVERLAY_VERSION,
@@ -289,8 +330,8 @@ def build_observed_call_overlay_document(
         },
         **_counts(relations),
         "relations": relations,
-        "relations_truncated": len(ordered_keys) > MAX_RELATIONS,
-        "observed_relation_total_count": len(ordered_keys),
+        "relations_truncated": len(trace.edges) > MAX_RELATIONS,
+        "observed_relation_total_count": len(trace.edges),
         "skipped_files_count": skipped_files_count,
         "skipped_errors": skipped_errors,
         "skipped_errors_total_count": skipped_errors_total_count,

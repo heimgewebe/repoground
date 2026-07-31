@@ -211,10 +211,13 @@ def model_error(data: Mapping[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _endpoint_valid(row: Mapping[str, Any], prefix: str, *, optional_path: bool) -> bool:
+def _endpoint_runtime_valid(
+    row: Mapping[str, Any], prefix: str, *, optional_path: bool
+) -> bool:
+    """Check the raw runtime coordinates every endpoint carries."""
+
     status = row.get(f"{prefix}_binding_status")
     reason = row.get(f"{prefix}_binding_reason")
-    path = row.get(f"{prefix}_path")
     if status not in BINDING_STATUSES or reason not in BINDING_REASONS:
         return False
     if not is_non_empty_string(row.get(f"{prefix}_runtime_name")):
@@ -222,11 +225,17 @@ def _endpoint_valid(row: Mapping[str, Any], prefix: str, *, optional_path: bool)
     first_line = row.get(f"{prefix}_runtime_first_line")
     if not is_int_not_bool(first_line) or first_line < 0:
         return False
+    path = row.get(f"{prefix}_path")
     if path is None:
-        if not optional_path or status != "unbound":
-            return False
-    elif not is_non_empty_string(path):
-        return False
+        # Only a caller may lack a path, and only because it is not repo-local.
+        return optional_path and status == "unbound"
+    return is_non_empty_string(path)
+
+
+def _endpoint_symbol_valid(row: Mapping[str, Any], prefix: str) -> bool:
+    """Check that symbol identity is present exactly when the endpoint bound."""
+
+    status = row.get(f"{prefix}_binding_status")
     symbol_id = row.get(f"{prefix}_symbol_id")
     qualified_name = row.get(f"{prefix}_qualified_name")
     kind = row.get(f"{prefix}_kind")
@@ -247,8 +256,14 @@ def _endpoint_valid(row: Mapping[str, Any], prefix: str, *, optional_path: bool)
     if start is not None or end is not None:
         return False
     if status == "module_scope":
-        return kind == "module" and reason == "module_frame"
+        return kind == "module" and row.get(f"{prefix}_binding_reason") == "module_frame"
     return kind is None
+
+
+def _endpoint_valid(row: Mapping[str, Any], prefix: str, *, optional_path: bool) -> bool:
+    return _endpoint_runtime_valid(
+        row, prefix, optional_path=optional_path
+    ) and _endpoint_symbol_valid(row, prefix)
 
 
 def relation_record_is_valid(row: Any) -> bool:
@@ -266,24 +281,27 @@ def relation_record_is_valid(row: Any) -> bool:
     count = row.get("observed_call_count")
     if not is_int_not_bool(count) or count < 1:
         return False
+    if not _call_site_valid(row):
+        return False
+    return _endpoint_valid(row, "caller", optional_path=True) and _endpoint_valid(
+        row, "callee", optional_path=False
+    )
+
+
+def _call_site_valid(row: Mapping[str, Any]) -> bool:
+    """A call site is citable only when the calling frame has a repository path."""
+
     call_site_line = row.get("call_site_line")
     call_site_range_ref = row.get("call_site_range_ref")
     caller_path = row.get("caller_path")
     if call_site_line is None:
-        if call_site_range_ref is not None:
-            return False
-    else:
-        if not is_int_not_bool(call_site_line) or call_site_line < 1:
-            return False
-        expected = f"file:{caller_path}#L{call_site_line}-L{call_site_line}"
-        if caller_path is None:
-            if call_site_range_ref is not None:
-                return False
-        elif call_site_range_ref != expected:
-            return False
-    return _endpoint_valid(row, "caller", optional_path=True) and _endpoint_valid(
-        row, "callee", optional_path=False
-    )
+        return call_site_range_ref is None
+    if not is_int_not_bool(call_site_line) or call_site_line < 1:
+        return False
+    if caller_path is None:
+        # A line number without a file is not addressable evidence.
+        return False
+    return call_site_range_ref == f"file:{caller_path}#L{call_site_line}-L{call_site_line}"
 
 
 def records_error(data: Mapping[str, Any]) -> dict[str, Any] | None:
