@@ -2840,3 +2840,111 @@ def test_idempotent_second_run_does_not_publish_or_create_bundle(
     assert second["publication_dir"] == first["publication_dir"]
     assert second["provenance"]["freshness"]["status"] == "fresh"
     assert second["provenance"]["freshness"]["live_recheck_required"] is False
+
+def _fake_systemctl_environment(tmp_path: Path, home: Path) -> tuple[dict[str, str], Path]:
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    log = tmp_path / "systemctl.log"
+    systemctl = fake_bin / "systemctl"
+    systemctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$*\" >> \"$SYSTEMCTL_LOG\"\n",
+        encoding="utf-8",
+    )
+    systemctl.chmod(0o755)
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "HOME": str(home),
+            "PATH": f"{fake_bin}:{environment['PATH']}",
+            "SYSTEMCTL_LOG": str(log),
+        }
+    )
+    return environment, log
+
+
+def test_runtime_installer_migrates_publication_policy_state_and_removes_wrapper(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    old_root = home / ".local/state/repobrief-publication-policy"
+    new_root = home / ".local/state/repoground-publication-policy"
+    old_root.mkdir(parents=True)
+    record = old_root / "records/example.json"
+    record.parent.mkdir()
+    original = b'{"schema":"repobrief.publication-record.v1","lenskit_version":"3.0.0"}\n'
+    record.write_bytes(original)
+
+    bin_dir = home / ".local/bin"
+    bin_dir.mkdir(parents=True)
+    legacy = bin_dir / "rb-publication-policy"
+    legacy.write_text(
+        "#!/usr/bin/env python3\n"
+        'print("rb-publication-policy is deprecated; use repoground-publication-policy")\n',
+        encoding="utf-8",
+    )
+    legacy.chmod(0o755)
+    environment, _ = _fake_systemctl_environment(tmp_path, home)
+
+    completed = subprocess.run(
+        [str(INSTALLER)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=environment,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert not old_root.exists()
+    assert (new_root / "records/example.json").read_bytes() == original
+    assert new_root.stat().st_mode & 0o777 == 0o700
+    assert (bin_dir / "repoground-publication-policy").is_file()
+    assert not legacy.exists()
+
+
+def test_runtime_installer_rejects_dual_publication_policy_state_roots(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    (home / ".local/state/repobrief-publication-policy").mkdir(parents=True)
+    (home / ".local/state/repoground-publication-policy").mkdir(parents=True)
+    environment, systemctl_log = _fake_systemctl_environment(tmp_path, home)
+
+    completed = subprocess.run(
+        [str(INSTALLER)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=environment,
+    )
+
+    assert completed.returncode == 1
+    assert "refusing dual truth" in completed.stderr
+    assert not systemctl_log.exists()
+
+
+def test_runtime_installer_rejects_unknown_legacy_publication_command(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    legacy = home / ".local/bin/rb-publication-policy"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("#!/bin/sh\necho unrelated\n", encoding="utf-8")
+    legacy.chmod(0o755)
+    environment, systemctl_log = _fake_systemctl_environment(tmp_path, home)
+
+    completed = subprocess.run(
+        [str(INSTALLER)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=environment,
+    )
+
+    assert completed.returncode == 1
+    assert "unknown file at legacy publication-policy command path" in completed.stderr
+    assert legacy.is_file()
+    assert not systemctl_log.exists()

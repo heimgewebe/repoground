@@ -108,6 +108,33 @@ def test_new_fleet_context_proof_uses_current_product_name() -> None:
     assert "RepoBrief" not in proof
 
 
+def test_publication_policy_current_surface_uses_repoground_names() -> None:
+    current = ROOT / "docs/operations/repoground-publication-policy.md"
+    former = ROOT / "docs/operations/repobrief-publication-policy.md"
+
+    assert current.is_file()
+    assert not former.exists()
+    assert not (ROOT / "scripts/ops/rb-publication-policy").exists()
+    text = current.read_text(encoding="utf-8")
+    for expected in (
+        "repoground-publication-policy",
+        "REPOGROUND_PUBLICATION_EVIDENCE_ROOT",
+        "REPOGROUND_PUBLICATION_PAYLOAD_ROOT",
+        "--repoground-version",
+        "~/.local/state/repoground-publication-policy",
+    ):
+        assert expected in text
+    for former_name in (
+        "`rb-publication-policy`",
+        "RB_PUBLICATION_",
+        "--lenskit-version",
+        "~/.local/state/repobrief-publication-policy",
+    ):
+        assert former_name not in text
+    assert "`repobrief.*` schema identities" in text
+    assert "`lenskit_version` field" in text
+
+
 def test_protected_compatibility_contract_is_terminal_only() -> None:
     path = ROOT / "docs/contracts/repoground-compatibility-exit.v1.json"
     data = json.loads(path.read_text(encoding="utf-8"))

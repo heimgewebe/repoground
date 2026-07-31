@@ -31,7 +31,7 @@ SOURCE_SUFFIXES = {".py", ".sh", ".js", ".html"}
 # intentionally not scanned here: retired names remain valid evidence there.
 ACTIVE_GUIDANCE_PATHS: tuple[str, ...] = (
     "docs/operations/repobrief-fleet-retention.md",
-    "docs/operations/repobrief-publication-policy.md",
+    "docs/operations/repoground-publication-policy.md",
     "docs/sync/metarepo-sync.md",
     "docs/architecture/heimgewebe-infra-role.md",
     "docs/adr/001-secure-fs-navigation.md",
@@ -132,6 +132,7 @@ def _external_alias_patterns() -> dict[str, tuple[str, ...]]:
             "repo" + "brief-mcp-stdio.py",
             "r" + "lens-client",
             "r" + "lens-launcher.sh",
+            "r" + "b-publication-policy",
         ),
         "former-resource-scheme": ("repo" + "brief://",),
         "former-environment": (
@@ -149,6 +150,7 @@ def _external_alias_patterns() -> dict[str, tuple[str, ...]]:
             ".repo" + "Lens-state.json",
             ".repo" + "lens/pr-schau",
             "/.local/state/" + "repobrief-publish/",
+            "/.local/state/" + "repobrief-publication-policy",
             "/logs/" + "repobrief-publish",
             "." + "rb-prune-quarantine",
         ),
@@ -195,6 +197,7 @@ def _is_prompt_process(argv: list[str]) -> bool:
 def _matched_process_aliases(argv: list[str]) -> list[str]:
     matches: set[str] = set()
     former_command = "repo" + "brief"
+    former_publication_command = "r" + "b-publication-policy"
     prompt_process = _is_prompt_process(argv)
     skip_next_as_prompt = False
     for token in argv:
@@ -213,11 +216,11 @@ def _matched_process_aliases(argv: list[str]) -> list[str]:
         # or path token and therefore must not block a live cutover.
         if prompt_process and any(character.isspace() for character in token):
             continue
-        if token == former_command:
+        if token in {former_command, former_publication_command}:
             matches.add("former-command-alias")
         matches.update(_matched_external_aliases(token))
         basename = Path(token).name
-        if basename == former_command:
+        if basename in {former_command, former_publication_command}:
             matches.add("former-command-alias")
         matches.update(_matched_external_aliases(basename))
     return sorted(matches)

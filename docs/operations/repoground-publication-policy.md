@@ -1,6 +1,6 @@
 # RepoGround publication policy
 
-`rb-publication-policy` manages the durable identity and retention contract for RepoGround publications. It does not generate RepoGround bundles itself. The publisher reserves a generation before writing payload data, completes the durable record after validating the bundle manifest, and runs retention through an explicit dry-run/apply cycle.
+`repoground-publication-policy` manages the durable identity and retention contract for RepoGround publications. It does not generate RepoGround bundles itself. The publisher reserves a generation before writing payload data, completes the durable record after validating the bundle manifest, and runs retention through an explicit dry-run/apply cycle.
 
 ## Storage separation
 
@@ -14,13 +14,15 @@ The policy refuses nested or identical roots. Retention removes only a validated
 Default roots:
 
 ```text
-Evidence: ~/.local/state/repobrief-publication-policy
+Evidence: ~/.local/state/repoground-publication-policy
 Payload:  ~/repos/manifest-publications
 ```
 
-Override them with `--evidence-root`, `--payload-root`, `RB_PUBLICATION_EVIDENCE_ROOT` or `RB_PUBLICATION_PAYLOAD_ROOT`.
+Override them with `--evidence-root`, `--payload-root`, `REPOGROUND_PUBLICATION_EVIDENCE_ROOT` or `REPOGROUND_PUBLICATION_PAYLOAD_ROOT`.
 
 ## Canonical identity
+
+Persisted v1 publication records intentionally retain their historical `repobrief.*` schema identities and the `lenskit_version` field. These are versioned data contracts, not active product aliases. New commands, environment variables, documentation paths, and default state locations use RepoGround terminology; existing record bytes are not rewritten by this naming migration.
 
 A publication identity contains:
 
@@ -38,13 +40,13 @@ The canonical JSON representation is hashed with SHA-256. `begin` is serialized 
 Compute an identity:
 
 ```bash
-scripts/ops/rb-publication-policy identity \
-  --repository heimgewebe__lenskit \
+scripts/ops/repoground-publication-policy identity \
+  --repository heimgewebe__repoground \
   --lane main \
   --repository-commit "$COMMIT" \
   --profile full-max \
   --configuration-sha256 "$CONFIG_SHA256" \
-  --lenskit-version "$LENSKIT_VERSION" \
+  --repoground-version "$REPOGROUND_VERSION" \
   --bundle-schema repobrief.bundle.v1 \
   --generator-inputs-sha256 "$GENERATOR_SHA256"
 ```
@@ -54,9 +56,9 @@ scripts/ops/rb-publication-policy identity \
 Reserve the intended payload path before generation:
 
 ```bash
-scripts/ops/rb-publication-policy begin \
+scripts/ops/repoground-publication-policy begin \
   [identity arguments] \
-  --payload /managed/payload/root/heimgewebe__lenskit/main/<generation>
+  --payload /managed/payload/root/heimgewebe__repoground/main/<generation>
 ```
 
 The result is one of:
@@ -68,7 +70,7 @@ The result is one of:
 After generation and bundle validation, complete the record:
 
 ```bash
-scripts/ops/rb-publication-policy complete \
+scripts/ops/repoground-publication-policy complete \
   --record <record-path> \
   --manifest <payload-path>/<bundle-manifest>
 ```
@@ -90,8 +92,8 @@ The values 3/7/8 and 48 hours are minimums, not merely defaults: CLI input and e
 Create a dry-run plan:
 
 ```bash
-scripts/ops/rb-publication-policy plan \
-  --repository heimgewebe__lenskit \
+scripts/ops/repoground-publication-policy plan \
+  --repository heimgewebe__repoground \
   --lane main \
   --output /safe/path/retention-plan.json
 ```
@@ -107,7 +109,7 @@ The plan binds every candidate to:
 Review the plan, then apply exactly its embedded hash:
 
 ```bash
-scripts/ops/rb-publication-policy apply \
+scripts/ops/repoground-publication-policy apply \
   --plan /safe/path/retention-plan.json \
   --expected-plan-sha256 <plan-sha256>
 ```
@@ -121,8 +123,8 @@ Apply journals each candidate before moving it. The payload is atomically rename
 Interrupted transactions are recovered with:
 
 ```bash
-scripts/ops/rb-publication-policy reconcile \
-  --repository heimgewebe__lenskit \
+scripts/ops/repoground-publication-policy reconcile \
+  --repository heimgewebe__repoground \
   --lane main
 ```
 
@@ -139,7 +141,7 @@ Reconciliation is idempotent:
 Pin a record with an explicit reason:
 
 ```bash
-scripts/ops/rb-publication-policy pin \
+scripts/ops/repoground-publication-policy pin \
   --record <record-path> \
   --reason "release comparison baseline"
 ```

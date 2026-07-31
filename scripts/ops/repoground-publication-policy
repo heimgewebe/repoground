@@ -34,7 +34,7 @@ from merger.repoground.core.publication_policy import (  # noqa: E402
 
 DEFAULT_EVIDENCE_ROOT = _env_path(
     "REPOGROUND_PUBLICATION_EVIDENCE_ROOT",
-    Path.home() / ".local" / "state" / "repobrief-publication-policy",
+    Path.home() / ".local" / "state" / "repoground-publication-policy",
 )
 DEFAULT_PAYLOAD_ROOT = _env_path(
     "REPOGROUND_PUBLICATION_PAYLOAD_ROOT",
