@@ -7,6 +7,25 @@ Das Projekt führt (noch) **keine** formalen Versions-Tags; Einträge sind daher
 datums- und Track-basiert. Roadmap-Phasen/Tracks: siehe
 [`docs/roadmap/repoground-master-roadmap.md`](docs/roadmap/repoground-master-roadmap.md).
 
+## [Unreleased]
+
+### Added
+
+- Observed Call Overlay v1 (`RPU-V1-T026`): `repoground observed-calls produce`
+  traces one explicitly named command and emits run-bound S2 call evidence
+  (`lenskit.python_observed_call_overlay` / `1.0`), bound to that command, its
+  environment, its observation run identity and its Git source revision.
+  `repoground observed-calls callers|callees` read the overlay back and can
+  annotate each relation with its correspondence to the static call graph.
+- The overlay is a separate artifact, not a bundle role: producer and validator
+  refuse an overlay carrying static S0/S1 evidence and a static call graph
+  carrying S2 evidence, and the document states that absence from a trace
+  establishes neither dead code nor unreachable behaviour.
+  Producing an overlay is the only RepoGround entry point that executes target
+  code; bundle generation remains non-executing. Threads started by the traced
+  command are observed; threads already running and native frames are named as
+  non-claims.
+
 ## [3.0.0] - 2026-07-17
 
 ### Changed
