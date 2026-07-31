@@ -1,4 +1,4 @@
-# RepoBrief Fleet Context Profile v1 Proof
+# RepoGround Fleet Context Profile v1 Proof
 
 ## Binding
 
@@ -17,7 +17,7 @@ The implementation was produced in the Bureau-created isolated RepoGround worktr
 The pre-implementation inventory was bound to immutable consumer revisions:
 
 - `heimgewebe/grabowski` at `fdc9266016a07c27c86925976a4b56c17b0483c6`: the normal context-pack path binds manifest identity, freshness, health, cited query results, and bounded ranges. It does not require the raw canonical dump, SQLite index, Python symbol index, or Python call graph in the normal context path.
-- `heimgewebe/systemkatalog` at `f7c6ecd0ada80194a57e2bf84d46823ab20559b7`: no active direct reader of individual RepoBrief bundle sidecars was found.
+- `heimgewebe/systemkatalog` at `f7c6ecd0ada80194a57e2bf84d46823ab20559b7`: no active direct reader of individual RepoGround bundle sidecars was found.
 
 These observations are revision-bound. They do not establish future compatibility after either consumer changes.
 

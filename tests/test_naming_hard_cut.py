@@ -97,6 +97,16 @@ def test_active_repository_has_no_runtime_aliases() -> None:
     assert scan_repository(ROOT) == []
 
 
+def test_new_fleet_context_proof_uses_current_product_name() -> None:
+    current = ROOT / "docs/proofs/repoground-fleet-context-profile-v1-proof.md"
+    former = ROOT / "docs/proofs/repobrief-fleet-context-profile-v1-proof.md"
+
+    assert current.is_file()
+    assert not former.exists()
+    proof = current.read_text(encoding="utf-8")
+    assert proof.startswith("# RepoGround Fleet Context Profile v1 Proof\n")
+    assert "RepoBrief" not in proof
+
 
 def test_protected_compatibility_contract_is_terminal_only() -> None:
     path = ROOT / "docs/contracts/repoground-compatibility-exit.v1.json"
