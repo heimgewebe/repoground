@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime as dt
 import json
+import runpy
 import shutil
 import subprocess
 from pathlib import Path
@@ -768,6 +769,93 @@ def test_orphan_pin_fails_closed(tmp_path: Path) -> None:
             policy=RetentionPolicy(),
             now=now,
         )
+
+
+def test_cli_defaults_use_repoground_state_root_and_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = (
+        Path(__file__).resolve().parents[3]
+        / "scripts"
+        / "ops"
+        / "repoground-publication-policy"
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv(
+        "RB_PUBLICATION_EVIDENCE_ROOT", str(tmp_path / "ignored-legacy-evidence")
+    )
+    monkeypatch.setenv(
+        "RB_PUBLICATION_PAYLOAD_ROOT", str(tmp_path / "ignored-legacy-payload")
+    )
+    values = runpy.run_path(str(script), run_name="repoground_policy_defaults_test")
+
+    assert values["DEFAULT_EVIDENCE_ROOT"] == (
+        tmp_path / ".local/state/repoground-publication-policy"
+    )
+    assert values["DEFAULT_PAYLOAD_ROOT"] == tmp_path / "repos/manifest-publications"
+
+    canonical_evidence = tmp_path / "canonical-evidence"
+    canonical_payload = tmp_path / "canonical-payload"
+    monkeypatch.setenv(
+        "REPOGROUND_PUBLICATION_EVIDENCE_ROOT", str(canonical_evidence)
+    )
+    monkeypatch.setenv("REPOGROUND_PUBLICATION_PAYLOAD_ROOT", str(canonical_payload))
+    overridden = runpy.run_path(
+        str(script), run_name="repoground_policy_overrides_test"
+    )
+    assert overridden["DEFAULT_EVIDENCE_ROOT"] == canonical_evidence
+    assert overridden["DEFAULT_PAYLOAD_ROOT"] == canonical_payload
+
+
+def test_cli_rejects_former_lenskit_version_option(tmp_path: Path) -> None:
+    script = (
+        Path(__file__).resolve().parents[3]
+        / "scripts"
+        / "ops"
+        / "repoground-publication-policy"
+    )
+    common = [
+        "identity",
+        "--repository",
+        "heimgewebe__repoground",
+        "--lane",
+        "main",
+        "--repository-commit",
+        "1" * 40,
+        "--profile",
+        "full-max",
+        "--configuration-sha256",
+        "2" * 64,
+        "--repoground-version",
+        "3.0.0",
+        "--bundle-schema",
+        "repobrief.bundle.v1",
+        "--generator-inputs-sha256",
+        "3" * 64,
+    ]
+    rejected = subprocess.run(
+        [str(script), *common, "--lenskit-version", "3.0.0"],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env={"HOME": str(tmp_path)},
+    )
+    assert rejected.returncode == 2
+    assert "--lenskit-version" in rejected.stderr
+
+    accepted = subprocess.run(
+        [str(script), *common],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env={"HOME": str(tmp_path)},
+    )
+    assert accepted.returncode == 0
+    payload = json.loads(accepted.stdout)
+    assert payload["identity"]["lenskit_version"] == "3.0.0"
+    assert payload["identity"]["bundle_schema"] == "repobrief.bundle.v1"
 
 
 def test_cli_round_trip_enforces_identity_noop(tmp_path: Path) -> None:

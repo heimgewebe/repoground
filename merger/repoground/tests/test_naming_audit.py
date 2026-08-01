@@ -170,6 +170,43 @@ def test_process_audit_detects_former_fleet_env_and_storage(tmp_path: Path) -> N
     ]
 
 
+def test_process_audit_detects_retired_publication_policy_surface(
+    tmp_path: Path,
+) -> None:
+    proc = tmp_path / "proc"
+    old_command = "r" + "b-publication-policy"
+    old_state = "/home/alex/.local/state/" + "repobrief-publication-policy"
+    _write_process(proc, 123, f"/home/alex/.local/bin/{old_command}", old_state)
+
+    finding = scan_processes(proc)[0]
+
+    assert finding["matched_aliases"] == [
+        "former-command-alias",
+        "former-runtime-storage",
+    ]
+    assert finding["matched_names"] == [_former_product()]
+
+
+def test_config_audit_detects_retired_publication_policy_surface(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "publication.json"
+    old_command = "r" + "b-publication-policy"
+    old_state = "/home/alex/.local/state/" + "repobrief-publication-policy"
+    config.write_text(
+        json.dumps({"command": old_command, "root": old_state}),
+        encoding="utf-8",
+    )
+
+    finding = scan_configs([config])[0]
+
+    assert finding["matched_aliases"] == [
+        "former-command-alias",
+        "former-runtime-storage",
+    ]
+    assert finding["matched_names"] == [_former_product()]
+
+
 def test_config_audit_is_hash_only_for_concrete_aliases(tmp_path: Path) -> None:
     config = tmp_path / "config.json"
     config.write_text(
