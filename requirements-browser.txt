@@ -1,6 +1,6 @@
 # Browser-gate top-level pins. The Playwright package version must match the
 # digest-pinned official container in .github/workflows/test-suite.yml.
-pytest==9.0.3
+pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-playwright==0.8.0
 playwright==1.61.0
