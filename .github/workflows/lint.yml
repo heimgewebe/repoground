@@ -30,6 +30,15 @@ jobs:
       - name: Check pinned Ruff scope
         run: ruff check --config ruff-ci.toml .
 
+      - name: Check scoped call-navigation formatting
+        run: |
+          ruff format --check \
+            merger/repoground/core/call_navigation_index.py \
+            merger/repoground/scripts/bench_call_navigation.py \
+            merger/repoground/tests/test_bench_call_navigation.py \
+            merger/repoground/tests/test_call_navigation_index.py \
+            merger/repoground/tests/test_call_navigation.py
+
       - name: Check graph and complexity maintainability ratchets
         run: python scripts/ci/check_graph_maintainability.py --root . --format json
 

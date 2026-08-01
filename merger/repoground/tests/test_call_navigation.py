@@ -1,4 +1,5 @@
 """Bounded read-only RepoBrief call navigation over coherent v1 artifacts."""
+
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
@@ -8,7 +9,12 @@ from pathlib import Path
 import pytest
 
 from merger.repoground.core import artifact_source_access
-from merger.repoground.core import bounded_artifact_read, bundle_access, call_graph_navigation, mcp_tools
+from merger.repoground.core import (
+    bounded_artifact_read,
+    bundle_access,
+    call_graph_navigation,
+    mcp_tools,
+)
 from merger.repoground.core.bundle_access import (
     find_references,
     get_callees,
@@ -68,8 +74,7 @@ def _symbol(
         "start_line": line,
         "end_line": end_line if end_line is not None else line + 2,
         "range_ref": (
-            f"file:{path}#L{line}-L"
-            f"{end_line if end_line is not None else line + 2}"
+            f"file:{path}#L{line}-L{end_line if end_line is not None else line + 2}"
         ),
     }
 
@@ -195,12 +200,8 @@ def _write_bundle(tmp_path: Path) -> tuple[Path, Path, Path]:
         _symbol(TARGET_ID, name="target", path="pkg/target.py", line=1),
         _symbol(OTHER_TARGET_ID, name="target", path="pkg/other_target.py", line=1),
         _symbol(HELPER_ID, name="helper", path="pkg/helper.py", line=1),
-        _symbol(
-            CALLER_ONE_ID, name="caller_one", path="pkg/a.py", line=1, end_line=45
-        ),
-        _symbol(
-            CALLER_TWO_ID, name="caller_two", path="pkg/b.py", line=1, end_line=45
-        ),
+        _symbol(CALLER_ONE_ID, name="caller_one", path="pkg/a.py", line=1, end_line=45),
+        _symbol(CALLER_TWO_ID, name="caller_two", path="pkg/b.py", line=1, end_line=45),
         _symbol(
             OTHER_CALLER_ID, name="other_caller", path="pkg/c.py", line=1, end_line=45
         ),
@@ -251,9 +252,7 @@ def _write_bundle(tmp_path: Path) -> tuple[Path, Path, Path]:
                     "resolution_status",
                     ("resolved", "candidate", "ambiguous", "unresolved"),
                 ),
-                "evidence_counts": _count(
-                    calls, "evidence_level", ("S0", "S1")
-                ),
+                "evidence_counts": _count(calls, "evidence_level", ("S0", "S1")),
                 "relation_counts": _count(
                     calls, "relation_type", ("calls", "constructs")
                 ),
@@ -457,7 +456,9 @@ def test_matching_bound_manifest_reuses_call_and_symbol_warm_caches(
             "matching manifest binding must reuse warm navigation state"
         )
 
-    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", forbidden_reload)
+    monkeypatch.setattr(
+        call_graph_navigation, "_load_call_graph_source", forbidden_reload
+    )
     monkeypatch.setattr(bundle_access, "_load_symbol_index_source", forbidden_reload)
     with use_manifest_binding(binding_a):
         _replace_manifest_bytes(manifest, manifest_b, "transient-generation-b")
@@ -499,6 +500,7 @@ def test_public_navigation_results_cannot_mutate_cached_state(tmp_path):
 
     assert second == expected
 
+
 def test_call_graph_content_must_match_manifest_hash(tmp_path):
     manifest, call_graph, _ = _write_bundle(tmp_path)
     assert find_references(manifest, "target")["status"] == "available"
@@ -519,9 +521,9 @@ def test_call_graph_content_must_match_manifest_hash(tmp_path):
 
 def test_symbol_index_content_must_match_manifest_hash(tmp_path):
     manifest, _, symbol_index = _write_bundle(tmp_path)
-    assert get_callers(
-        manifest, "target", path="pkg/target.py"
-    )["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
     bundle_access._clear_call_navigation_caches()
 
     payload = json.loads(symbol_index.read_text(encoding="utf-8"))
@@ -613,9 +615,10 @@ def test_symbol_change_invalidates_cached_symbol_state(tmp_path, monkeypatch):
 
 def test_stale_call_generation_is_evicted_with_dependent_symbol_state(tmp_path):
     manifest, call_graph, _ = _write_bundle(tmp_path)
-    assert get_callers(
-        manifest, "target", path="pkg/target.py", k=10
-    )["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py", k=10)["status"]
+        == "available"
+    )
     stale_call_fingerprint = next(iter(call_graph_navigation._CALL_NAVIGATION_CACHE))
     assert any(
         cache_key[0] == stale_call_fingerprint
@@ -642,9 +645,10 @@ def test_stale_call_generation_is_evicted_with_dependent_symbol_state(tmp_path):
 
 def test_stale_symbol_generation_is_evicted_before_replacement(tmp_path):
     manifest, _, symbol_index = _write_bundle(tmp_path)
-    assert get_callers(
-        manifest, "target", path="pkg/target.py", k=10
-    )["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py", k=10)["status"]
+        == "available"
+    )
     stale_symbol_key = next(iter(call_graph_navigation._SYMBOL_NAVIGATION_CACHE))
 
     payload = json.loads(symbol_index.read_text(encoding="utf-8"))
@@ -678,8 +682,12 @@ def test_cold_and_warm_navigation_results_are_byte_equivalent(tmp_path):
 
     for reader, args, kwargs in queries:
         bundle_access._clear_call_navigation_caches()
-        cold = json.dumps(reader(*args, **kwargs), sort_keys=True, separators=(",", ":"))
-        warm = json.dumps(reader(*args, **kwargs), sort_keys=True, separators=(",", ":"))
+        cold = json.dumps(
+            reader(*args, **kwargs), sort_keys=True, separators=(",", ":")
+        )
+        warm = json.dumps(
+            reader(*args, **kwargs), sort_keys=True, separators=(",", ":")
+        )
         assert cold == warm
 
 
@@ -690,15 +698,24 @@ def test_navigation_cache_is_lru_bounded(tmp_path):
         bundle_dir.mkdir()
         manifest = _bundle(bundle_dir)
         manifests.append(str(manifest.resolve()))
-        assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+        assert (
+            get_callers(manifest, "target", path="pkg/target.py")["status"]
+            == "available"
+        )
 
     assert len(call_graph_navigation._CALL_NAVIGATION_CACHE) == 2
-    assert not any(k.manifest_path == manifests[0] for k in call_graph_navigation._CALL_NAVIGATION_CACHE)
+    assert not any(
+        k.manifest_path == manifests[0]
+        for k in call_graph_navigation._CALL_NAVIGATION_CACHE
+    )
     assert not any(
         key[0].manifest_path == manifests[0]
         for key in call_graph_navigation._SYMBOL_NAVIGATION_CACHE
     )
-    assert any(k.manifest_path == manifests[-1] for k in call_graph_navigation._CALL_NAVIGATION_CACHE)
+    assert any(
+        k.manifest_path == manifests[-1]
+        for k in call_graph_navigation._CALL_NAVIGATION_CACHE
+    )
 
 
 def test_find_references_returns_bounded_s0_and_s1_evidence(tmp_path):
@@ -734,9 +751,7 @@ def test_get_callers_fails_closed_when_target_name_is_ambiguous(tmp_path):
 
 
 def test_get_callers_uses_target_identity_and_separates_textual_matches(tmp_path):
-    result = get_callers(
-        _bundle(tmp_path), "target", path="pkg/target.py", k=10
-    )
+    result = get_callers(_bundle(tmp_path), "target", path="pkg/target.py", k=10)
     assert result["status"] == "available"
     assert result["target_symbol"]["id"] == TARGET_ID
     assert result["total_caller_count"] == 1
@@ -747,8 +762,7 @@ def test_get_callers_uses_target_identity_and_separates_textual_matches(tmp_path
     assert result["callers"][0]["call_site_count"] == 2
     assert result["unresolved_reference_count"] == 2
     assert {
-        item["relation_to_selected_target"]
-        for item in result["unresolved_references"]
+        item["relation_to_selected_target"] for item in result["unresolved_references"]
     } == {"textual_name_only"}
     assert {item["path"] for item in result["unresolved_references"]} == {
         "pkg/b.py",
@@ -757,9 +771,7 @@ def test_get_callers_uses_target_identity_and_separates_textual_matches(tmp_path
 
 
 def test_get_callees_returns_resolved_targets_and_unresolved_sites(tmp_path):
-    result = get_callees(
-        _bundle(tmp_path), "caller_one", path="pkg/a.py", k=10
-    )
+    result = get_callees(_bundle(tmp_path), "caller_one", path="pkg/a.py", k=10)
     assert result["status"] == "available"
     assert result["caller_symbol"]["id"] == CALLER_ONE_ID
     assert result["total_callee_count"] == 2
@@ -794,16 +806,23 @@ def test_invalid_navigation_payloads_preserve_filters_and_full_shape(tmp_path):
     assert wrapped["result"]["status"] == access_result["status"]
     assert wrapped["result"]["filters"] == access_result["filters"]
     assert wrapped["result"]["hits"] == access_result["hits"]
-    assert wrapped["result"]["mutation_boundary"]["ref"] == "repobrief.mutation_boundary.read_only_frontdoor.v1"
+    assert (
+        wrapped["result"]["mutation_boundary"]["ref"]
+        == "repobrief.mutation_boundary.read_only_frontdoor.v1"
+    )
     assert access_result["mutation_boundary"]["read_paths_do_not_refresh"] is True
 
 
 @pytest.mark.parametrize("reader", [find_references, get_callers, get_callees])
-def test_invalid_navigation_name_fails_before_artifact_io(tmp_path, monkeypatch, reader):
+def test_invalid_navigation_name_fails_before_artifact_io(
+    tmp_path, monkeypatch, reader
+):
     def fail_if_loaded(_manifest_path):
         raise AssertionError("invalid primitive input must not load the call graph")
 
-    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", fail_if_loaded)
+    monkeypatch.setattr(
+        call_graph_navigation, "_load_call_graph_source", fail_if_loaded
+    )
 
     result = reader(tmp_path / "missing.bundle.manifest.json", "")
 
@@ -829,9 +848,7 @@ def test_navigation_rejects_mismatched_symbol_binding(tmp_path):
     symbol_index.write_text(json.dumps(payload), encoding="utf-8")
     _refresh_manifest_artifact(manifest, "python_symbol_index_json", symbol_index)
 
-    result = get_callers(
-        manifest, "target", path="pkg/target.py", k=10
-    )
+    result = get_callers(manifest, "target", path="pkg/target.py", k=10)
     assert result["status"] == "invalid"
     assert result["error_code"] == "call_symbol_run_id_mismatch"
     assert result["callers"] == []
@@ -887,9 +904,7 @@ def test_navigation_rejects_invalid_aggregate_counts(tmp_path):
 
 def test_mcp_tools_wrap_read_only_results(tmp_path):
     manifest = str(_bundle(tmp_path))
-    references = mcp_tools.find_references(
-        bundle_manifest=manifest, name="target", k=1
-    )
+    references = mcp_tools.find_references(bundle_manifest=manifest, name="target", k=1)
     callers = mcp_tools.get_callers(
         bundle_manifest=manifest,
         name="target",
@@ -929,7 +944,9 @@ def test_call_navigation_reports_missing_artifact(tmp_path):
 def test_unrelated_duplicate_symbol_id_does_not_invalidate_target_navigation(tmp_path):
     manifest, _, symbol_index = _write_bundle(tmp_path)
     payload = json.loads(symbol_index.read_text(encoding="utf-8"))
-    duplicate = dict(next(item for item in payload["symbols"] if item["id"] == HELPER_ID))
+    duplicate = dict(
+        next(item for item in payload["symbols"] if item["id"] == HELPER_ID)
+    )
     duplicate["start_line"] = 50
     duplicate["end_line"] = 52
     duplicate["range_ref"] = "file:pkg/helper.py#L50-L52"
@@ -937,9 +954,7 @@ def test_unrelated_duplicate_symbol_id_does_not_invalidate_target_navigation(tmp
     symbol_index.write_text(json.dumps(payload), encoding="utf-8")
     _refresh_manifest_artifact(manifest, "python_symbol_index_json", symbol_index)
 
-    result = get_callers(
-        manifest, "target", path="pkg/target.py", k=10
-    )
+    result = get_callers(manifest, "target", path="pkg/target.py", k=10)
     assert result["status"] == "available"
     assert result["target_symbol"]["id"] == TARGET_ID
     assert result["total_caller_count"] == 1
@@ -983,9 +998,7 @@ def test_get_callers_keeps_duplicate_definition_ranges_separate(tmp_path):
         "resolution_status",
         ("resolved", "candidate", "ambiguous", "unresolved"),
     )
-    graph_payload["evidence_counts"] = _count(
-        calls, "evidence_level", ("S0", "S1")
-    )
+    graph_payload["evidence_counts"] = _count(calls, "evidence_level", ("S0", "S1"))
     graph_payload["relation_counts"] = _count(
         calls, "relation_type", ("calls", "constructs")
     )
@@ -1015,6 +1028,7 @@ def test_navigation_rejects_call_range_that_disagrees_with_source_fields(tmp_pat
 
     assert result["status"] == "invalid"
     assert result["error_code"] == "python_call_graph_call_record_invalid"
+
 
 def test_call_graph_change_during_index_build_fails_closed(tmp_path, monkeypatch):
     manifest, call_graph, _ = _write_bundle(tmp_path)
@@ -1077,7 +1091,9 @@ def test_call_graph_change_during_symbol_index_build_fails_closed(
 
 def test_warm_navigation_cache_does_not_reload_artifact_json(tmp_path, monkeypatch):
     manifest = _bundle(tmp_path)
-    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
 
     def forbidden_source_load(*_args, **_kwargs):
         raise AssertionError("warm navigation cache must not reload artifact JSON")
@@ -1087,7 +1103,9 @@ def test_warm_navigation_cache_does_not_reload_artifact_json(tmp_path, monkeypat
     )
 
     assert find_references(manifest, "target")["status"] == "available"
-    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
 
 
 def test_call_graph_loader_swap_fails_closed_even_when_original_is_restored(
@@ -1119,7 +1137,9 @@ def test_call_graph_loader_swap_fails_closed_even_when_original_is_restored(
         manifest.write_bytes(original_manifest)
         return loaded
 
-    monkeypatch.setattr(call_graph_navigation, "_load_call_graph_source", swapped_loader)
+    monkeypatch.setattr(
+        call_graph_navigation, "_load_call_graph_source", swapped_loader
+    )
 
     result = find_references(manifest, "target")
 
@@ -1168,9 +1188,7 @@ def test_parallel_navigation_is_isolated_for_same_and_different_bundles(tmp_path
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = list(
             executor.map(
-                lambda item: get_callers(
-                    item, "target", path="pkg/target.py", k=10
-                ),
+                lambda item: get_callers(item, "target", path="pkg/target.py", k=10),
                 manifests,
             )
         )
@@ -1186,7 +1204,9 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
     tmp_path, monkeypatch
 ):
     manifest, call_graph, _ = _write_bundle(tmp_path)
-    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
 
     def forbidden_stable_read(path):
         raise AssertionError(f"default warm cache hit must not read bytes: {path}")
@@ -1208,9 +1228,7 @@ def test_warm_navigation_fast_path_does_not_reread_call_graph_bytes(
     assert result["status"] == "available"
 
 
-def test_descriptor_pinned_read_rejects_atomic_path_replacement(
-    tmp_path, monkeypatch
-):
+def test_descriptor_pinned_read_rejects_atomic_path_replacement(tmp_path, monkeypatch):
     artifact = tmp_path / "artifact.json"
     replacement = tmp_path / "replacement.json"
     artifact.write_bytes(b"original")
@@ -1230,8 +1248,8 @@ def test_descriptor_pinned_read_rejects_atomic_path_replacement(
 
     monkeypatch.setattr(os, "lstat", replacing_lstat)
 
-    raw, stat_result, failure, _detail = (
-        bundle_access._read_stable_artifact_bytes(artifact)
+    raw, stat_result, failure, _detail = bundle_access._read_stable_artifact_bytes(
+        artifact
     )
 
     assert replaced is True
@@ -1244,7 +1262,9 @@ def test_strict_navigation_cache_hash_uses_descriptor_pinned_read(
     tmp_path, monkeypatch
 ):
     manifest, call_graph, _ = _write_bundle(tmp_path)
-    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
 
     original_reader = bundle_access._read_stable_artifact_bytes
     call_graph_path = call_graph.resolve()
@@ -1270,7 +1290,9 @@ def test_invalid_cache_validation_mode_falls_back_to_strict(
     tmp_path, monkeypatch, caplog
 ):
     manifest, call_graph, _ = _write_bundle(tmp_path)
-    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
 
     original_reader = bundle_access._read_stable_artifact_bytes
     call_graph_path = call_graph.resolve()
@@ -1302,9 +1324,7 @@ def test_invalid_cache_validation_mode_falls_back_to_strict(
     assert len(warnings) == 1
 
 
-def test_weak_file_identity_automatically_uses_content_hash(
-    tmp_path, monkeypatch
-):
+def test_weak_file_identity_automatically_uses_content_hash(tmp_path, monkeypatch):
     manifest, call_graph, _ = _write_bundle(tmp_path)
     original_reader = bundle_access._read_stable_artifact_bytes
     call_graph_path = call_graph.resolve()
@@ -1363,9 +1383,7 @@ def test_weak_file_identity_automatically_uses_content_hash(
     assert call_graph_reads > reads_after_cold_load
 
 
-def test_weak_manifest_identity_automatically_uses_content_hash(
-    tmp_path, monkeypatch
-):
+def test_weak_manifest_identity_automatically_uses_content_hash(tmp_path, monkeypatch):
     manifest, _, _ = _write_bundle(tmp_path)
     original_reader = bundle_access._read_stable_regular_file_bytes
     manifest_path = manifest.resolve()
@@ -1409,7 +1427,9 @@ def test_strict_warm_validation_rejects_tampered_bytes_with_same_identity(
     tmp_path, monkeypatch
 ):
     manifest, call_graph, _ = _write_bundle(tmp_path)
-    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
 
     fingerprint = next(
         key
@@ -1499,7 +1519,9 @@ def test_manifest_change_during_full_verification_is_rejected(tmp_path, monkeypa
 
 def test_legacy_strict_hash_switch_remains_supported(tmp_path, monkeypatch):
     manifest, call_graph, _ = _write_bundle(tmp_path)
-    assert get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    assert (
+        get_callers(manifest, "target", path="pkg/target.py")["status"] == "available"
+    )
 
     original_reader = bundle_access._read_stable_artifact_bytes
     call_graph_path = call_graph.resolve()
