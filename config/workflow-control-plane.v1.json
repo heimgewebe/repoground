@@ -100,8 +100,8 @@
       "path": ".github/workflows/lint.yml",
       "class": "required_protection",
       "rationale": "Ruff plus maintainability/reachability ratchets.",
-      "sha256": "1802a7f50ed8548f92c58e26cd1523ddaaa925aca46b372916996c6e0bd9eba7",
-      "bytes": 1383
+      "sha256": "ab95a80831cf4fc066258d342bbac484ba57f1ffc35fe52185ec57797163b26d",
+      "bytes": 1808
     },
     {
       "path": ".github/workflows/metrics.yml",
