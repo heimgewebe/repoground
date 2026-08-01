@@ -51,6 +51,18 @@ class _ScopeFrame:
     type_alias_name: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _RawCall:
+    """Immutable handoff from AST collection to deterministic resolution."""
+
+    start_line: int
+    start_col: int
+    end_line: int
+    end_col: int
+    func: ast.expr
+    stack: tuple[_ScopeFrame, ...]
+
+
 class _ModuleState:
     """Per-module definitions, imports, bindings and unresolved raw calls."""
 
@@ -65,7 +77,7 @@ class _ModuleState:
         self.module_aliases: dict[str, str] = {}
         self.imported_module_names: set[str] = set()
         self.binding_sources: dict[str, set[str]] = {}
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[_RawCall] = []
 
     def add_binding(self, name: str, source: str) -> None:
         self.binding_sources.setdefault(name, set()).add(source)
@@ -1205,15 +1217,15 @@ class _CallGraphVisitor(ast.NodeVisitor):
             if end_line == start_line and end_col < start_col:
                 end_col = start_col
             self.state.calls.append(
-                {
-                    "start_line": start_line,
-                    "start_col": start_col,
-                    "end_line": end_line,
-                    "end_col": end_col,
-                    "func": node.func,
+                _RawCall(
+                    start_line=start_line,
+                    start_col=start_col,
+                    end_line=end_line,
+                    end_col=end_col,
+                    func=node.func,
                     # The stack list changes while traversing; its frozen frames do not.
-                    "stack": tuple(self.stack),
-                }
+                    stack=tuple(self.stack),
+                )
             )
         self.generic_visit(node)
         return None
@@ -1618,9 +1630,9 @@ class _Resolver:
             return self._resolve_receiver_dotted(state, parts, stack)
         return self._resolve_module_dotted(state, parts, stack)
 
-    def resolve(self, state: _ModuleState, raw_call: dict[str, Any]) -> dict[str, Any]:
-        func = raw_call["func"]
-        stack = raw_call["stack"]
+    def resolve(self, state: _ModuleState, raw_call: _RawCall) -> dict[str, Any]:
+        func = raw_call.func
+        stack = raw_call.stack
         if isinstance(func, ast.Name):
             simple_name: str | None = func.id
             verdict = self._resolve_name(state, func.id, stack)
@@ -1634,13 +1646,11 @@ class _Resolver:
                 verdict = _verdict("unresolved", "dynamic_callee_expression")
         record = {
             "path": state.path,
-            "start_line": raw_call["start_line"],
-            "start_col": raw_call["start_col"],
-            "end_line": raw_call["end_line"],
-            "end_col": raw_call["end_col"],
-            "range_ref": _range_ref(
-                state.path, raw_call["start_line"], raw_call["end_line"]
-            ),
+            "start_line": raw_call.start_line,
+            "start_col": raw_call.start_col,
+            "end_line": raw_call.end_line,
+            "end_col": raw_call.end_col,
+            "range_ref": _range_ref(state.path, raw_call.start_line, raw_call.end_line),
             "callee_expression": ast.unparse(func),
             "simple_name": simple_name,
         }

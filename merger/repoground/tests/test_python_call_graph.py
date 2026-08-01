@@ -8,6 +8,7 @@ outcomes (ambiguous, dynamic, foreign, module scope, parse errors).
 
 import ast
 import json
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import jsonschema
@@ -17,6 +18,7 @@ from merger.repoground.architecture.call_graph import (
     DOES_NOT_ESTABLISH,
     MAX_SKIPPED_ERRORS,
     _CallGraphVisitor,
+    _RawCall,
     _Resolver,
     extract_python_calls,
     generate_call_graph_document,
@@ -2149,6 +2151,21 @@ def test_call_graph_schema_matches_shared_diagnostic_limit():
     assert set(DOES_NOT_ESTABLISH) <= set(
         schema["properties"]["does_not_establish"]["items"]["enum"]
     )
+
+
+def test_pending_call_handoff_is_typed_and_immutable():
+    tree = ast.parse("def caller():\n    return target()\n")
+    visitor = _CallGraphVisitor("sample.py", is_package=False)
+    visitor.visit(tree)
+
+    raw_call = visitor.state.calls[0]
+
+    assert isinstance(raw_call, _RawCall)
+    assert isinstance(raw_call.func, ast.Name)
+    assert isinstance(raw_call.stack, tuple)
+    assert raw_call.start_line == raw_call.end_line == 2
+    with pytest.raises(FrozenInstanceError):
+        raw_call.start_line = 99
 
 
 def test_missing_ast_end_position_is_normalized_to_valid_range():
