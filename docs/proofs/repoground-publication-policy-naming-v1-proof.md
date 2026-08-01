@@ -77,9 +77,11 @@ Neither inventory proves that no unknown future or external consumer exists.
   before stopping units. It rejects symlinks, non-directories, and dual truth.
 - A sole historical publication-policy directory is moved to the RepoGround
   path without rewriting its contents. The target is created with mode `0700`.
-- The canonical command is installed before the known retirement delegate is
-  removed. An unknown file, symlink, or non-regular object at the legacy command
-  path fails closed before any service effect.
+- The canonical command is installed before the retirement delegate is
+  removed. Removal requires the exact pre-cutover SHA-256
+  `64278d6fe48b95931f7c75386004694ef3cf9c02aa4bef7f5e18b035cf90f68c`;
+  the marker text alone is insufficient. An unknown file, marker-spoofing file,
+  symlink, or non-regular object fails closed before any service effect.
 - Naming audits now detect the retired command and state-root surface in live
   process and configuration inventories.
 
@@ -96,7 +98,8 @@ active.
 Repository tests separately cover the old-root-only migration and prove byte
 preservation for a persisted record containing
 `repobrief.publication-record.v1` and `lenskit_version`. They also cover dual
-roots and an unknown legacy command as pre-effect failures.
+roots, an unknown legacy command, and a marker-spoofing file as pre-effect
+failures.
 
 ## Persisted identity boundary
 
@@ -115,18 +118,19 @@ Predecessor-run focused verification on implementation commit `507c48ff`:
 - finalization receipt SHA-256:
   `67d535d7b8817c26df7996ace7a3083013d40ec65a896738a9811f44d9beeb99`
 
-Current-run verification on the proof-bearing working tree:
+Current-run verification after the digest-bound wrapper hardening:
 
-- affected suite: `168 passed in 16.15s`;
+- focused wrapper identity tests: `4 passed, 85 deselected`;
+- affected suite: `169 passed in 15.84s`;
 - Ruff: `All checks passed!`;
 - staged-diff whitespace check: passed;
-- installer shell syntax job: `grabowski-job-6f03e32b7935`, succeeded with
+- installer shell syntax job: `grabowski-job-a4cf9ed6ac29`, succeeded with
   finalization receipt SHA-256
-  `2d005d29be7f9c46bc2c184bc466be473e2a5b9dcfa3f0c45f41c3080677b5e9`;
-- full suite job: `grabowski-job-63a15bf9a87b`;
-- full suite result: `5282 passed, 12 skipped in 195.72s`;
+  `fcde9501b7459c50ad6b73b189555bacf68b972b383c89aae244636f6d8b5d35`;
+- full suite job: `grabowski-job-f71a24724fb0`;
+- full suite result: `5283 passed, 12 skipped in 196.45s`;
 - full-suite finalization receipt SHA-256:
-  `f48440a94354b11039ba848bf7f0253c90588a50482d7badba53b2882a25020a`.
+  `b9f49b048a4cae9e098efdf1ec5c77b5723ef7d97bf1f5f17773ea6f81fe6983`.
 
 GitHub CI, merge and live installation remain separate revision-bound gates and
 are not predeclared successful here.

@@ -11,6 +11,7 @@ OLD_POLICY_STATE_ROOT=${HOME}/.local/state/repobrief-publication-policy
 POLICY_STATE_ROOT=${HOME}/.local/state/repoground-publication-policy
 LEGACY_POLICY_COMMAND=${BIN_DIR}/rb-publication-policy
 LEGACY_POLICY_MARKER='rb-publication-policy is deprecated; use repoground-publication-policy'
+LEGACY_POLICY_SHA256='64278d6fe48b95931f7c75386004694ef3cf9c02aa4bef7f5e18b035cf90f68c'
 LOG_ROOT=${HOME}/logs/repoground-publish
 
 if [[ ${1:-} == "--enable" ]]; then
@@ -78,9 +79,13 @@ if [[ -e $LEGACY_POLICY_COMMAND && ! -f $LEGACY_POLICY_COMMAND ]]; then
   echo "legacy publication-policy command is not a regular file: $LEGACY_POLICY_COMMAND" >&2
   exit 1
 fi
-if [[ -f $LEGACY_POLICY_COMMAND ]] && ! grep -Fq -- "$LEGACY_POLICY_MARKER" "$LEGACY_POLICY_COMMAND"; then
-  echo "unknown file at legacy publication-policy command path: $LEGACY_POLICY_COMMAND" >&2
-  exit 1
+if [[ -f $LEGACY_POLICY_COMMAND ]]; then
+  read -r legacy_policy_observed_sha256 _ < <(sha256sum -- "$LEGACY_POLICY_COMMAND")
+  if [[ $legacy_policy_observed_sha256 != "$LEGACY_POLICY_SHA256" ]] ||
+    ! grep -Fq -- "$LEGACY_POLICY_MARKER" "$LEGACY_POLICY_COMMAND"; then
+    echo "unknown file at legacy publication-policy command path: $LEGACY_POLICY_COMMAND" >&2
+    exit 1
+  fi
 fi
 
 install -d -m 0755 "$BIN_DIR" "$UNIT_DIR"

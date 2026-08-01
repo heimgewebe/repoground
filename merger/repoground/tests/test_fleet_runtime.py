@@ -31,6 +31,32 @@ LEGACY_SYSTEMKATALOG_WATCH = (
     ROOT / "scripts/ops/repobrief-publish-systemkatalog-main-if-changed"
 )
 UNIT_DIR = ROOT / "ops/systemd/repoground-fleet"
+LEGACY_PUBLICATION_POLICY_WRAPPER = '''#!/usr/bin/env python3
+"""Deprecated RepoBrief publication-policy entry point.
+
+Use ``repoground-publication-policy``. This delegate remains during RepoGround
+3.x so existing automation continues to execute the same implementation.
+"""
+
+from __future__ import annotations
+
+import runpy
+import sys
+from pathlib import Path
+
+
+def main() -> None:
+    target = Path(__file__).with_name("repoground-publication-policy")
+    print(
+        "rb-publication-policy is deprecated; use repoground-publication-policy",
+        file=sys.stderr,
+    )
+    runpy.run_path(str(target), run_name="__main__")
+
+
+if __name__ == "__main__":
+    main()
+'''
 
 
 def load_publisher() -> ModuleType:
@@ -2878,11 +2904,7 @@ def test_runtime_installer_migrates_publication_policy_state_and_removes_wrapper
     bin_dir = home / ".local/bin"
     bin_dir.mkdir(parents=True)
     legacy = bin_dir / "rb-publication-policy"
-    legacy.write_text(
-        "#!/usr/bin/env python3\n"
-        'print("rb-publication-policy is deprecated; use repoground-publication-policy")\n',
-        encoding="utf-8",
-    )
+    legacy.write_text(LEGACY_PUBLICATION_POLICY_WRAPPER, encoding="utf-8")
     legacy.chmod(0o755)
     environment, _ = _fake_systemctl_environment(tmp_path, home)
 
@@ -2932,6 +2954,35 @@ def test_runtime_installer_rejects_unknown_legacy_publication_command(
     legacy = home / ".local/bin/rb-publication-policy"
     legacy.parent.mkdir(parents=True)
     legacy.write_text("#!/bin/sh\necho unrelated\n", encoding="utf-8")
+    legacy.chmod(0o755)
+    environment, systemctl_log = _fake_systemctl_environment(tmp_path, home)
+
+    completed = subprocess.run(
+        [str(INSTALLER)],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+        env=environment,
+    )
+
+    assert completed.returncode == 1
+    assert "unknown file at legacy publication-policy command path" in completed.stderr
+    assert legacy.is_file()
+    assert not systemctl_log.exists()
+
+def test_runtime_installer_rejects_legacy_publication_marker_spoof(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    legacy = home / ".local/bin/rb-publication-policy"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        "#!/bin/sh\n"
+        "# rb-publication-policy is deprecated; use repoground-publication-policy\n"
+        "echo unrelated\n",
+        encoding="utf-8",
+    )
     legacy.chmod(0o755)
     environment, systemctl_log = _fake_systemctl_environment(tmp_path, home)
 
