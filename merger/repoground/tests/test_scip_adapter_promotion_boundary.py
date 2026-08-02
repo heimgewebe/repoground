@@ -75,7 +75,7 @@ def test_degraded_artifact_cannot_become_review_eligible():
     assert report["status"] == "warn"
     assert report["per_language"]["go"]["precision"] == 1.0
     assert report["per_language"]["go"]["recall"] == 1.0
-    assert report["eligible_languages"] == ["go"]
+    assert report["eligible_languages"] == []
     assert report["consumer_enablement"] == {
         "eligible_for_review": False,
         "default_promoted": False,
