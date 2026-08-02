@@ -111,6 +111,14 @@ _CALL_GRAPH_DOES_NOT_ESTABLISH = CALL_GRAPH_PRODUCER_NONCLAIMS
 _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
     dict.fromkeys([*_DOES_NOT_ESTABLISH, *_CALL_GRAPH_DOES_NOT_ESTABLISH])
 )
+# A caller or callee list is bounded by the resolved share of the call graph.
+# These are the claims a partial graph cannot support even when the returned
+# rows themselves are correct.
+_CALL_GRAPH_COVERAGE_DOES_NOT_ESTABLISH = (
+    "caller_completeness",
+    "callee_completeness",
+    "unresolved_edges_are_irrelevant",
+)
 _CALL_NAVIGATION_CACHE_MAX_ENTRIES = 2
 
 
@@ -524,6 +532,56 @@ def _detached_record(value: Any) -> dict[str, Any] | None:
     return _detached_json_value(value) if isinstance(value, dict) else None
 
 
+def _call_graph_coverage(data: dict[str, Any]) -> dict[str, Any]:
+    """State how much of the call graph actually resolved.
+
+    Only `resolved` edges can produce callers or callees. Every other status is
+    an edge the resolver saw but could not bind, so a caller or callee list is
+    complete only relative to the resolved share. Reporting that share beside
+    the results keeps a partial answer from reading as an exhaustive one.
+    """
+    raw = data.get("resolution_counts")
+    if not isinstance(raw, Mapping):
+        return {
+            "completeness": "unknown",
+            "reason": "call_graph_resolution_counts_unavailable",
+            "resolved_call_edges": None,
+            "total_call_edges": None,
+            "resolved_ratio": None,
+            "unresolved_by_status": {},
+            "does_not_establish": list(_CALL_GRAPH_COVERAGE_DOES_NOT_ESTABLISH),
+        }
+
+    counts = {
+        status: int(raw.get(status) or 0) for status in CALL_RESOLUTION_STATUSES
+    }
+    resolved = counts.get("resolved", 0)
+    total = sum(counts.values())
+    unresolved_by_status = {
+        status: value
+        for status, value in counts.items()
+        if status != "resolved" and value
+    }
+    if total <= 0:
+        completeness = "unknown"
+        ratio = None
+    elif not unresolved_by_status:
+        completeness = "complete"
+        ratio = 1.0
+    else:
+        completeness = "partial"
+        ratio = round(resolved / total, 6)
+    return {
+        "completeness": completeness,
+        "reason": None,
+        "resolved_call_edges": resolved,
+        "total_call_edges": total,
+        "resolved_ratio": ratio,
+        "unresolved_by_status": unresolved_by_status,
+        "does_not_establish": list(_CALL_GRAPH_COVERAGE_DOES_NOT_ESTABLISH),
+    }
+
+
 def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
     return {
         "run_id": data.get("run_id"),
@@ -532,6 +590,7 @@ def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
         "resolution_counts": _detached_record(data.get("resolution_counts")),
         "evidence_counts": _detached_record(data.get("evidence_counts")),
         "relation_counts": _detached_record(data.get("relation_counts")),
+        "coverage": _call_graph_coverage(data),
         **_call_graph_parse_diagnostics(data),
     }
 
@@ -919,6 +978,7 @@ def _find_references_full(
         "filters": {"path": path},
         "call_graph": _detached_record(artifact),
         "call_graph_metadata": _call_graph_metadata(data),
+        "call_graph_coverage": _call_graph_coverage(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
         "total_match_count": len(matched),
@@ -1067,6 +1127,7 @@ def _get_callers_full(
         "call_graph": _detached_record(artifact),
         "symbol_index": _detached_record(symbol_artifact),
         "call_graph_metadata": _call_graph_metadata(data),
+        "call_graph_coverage": _call_graph_coverage(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
         "total_caller_count": len(groups),
@@ -1214,6 +1275,7 @@ def _get_callees_full(
         "call_graph": _detached_record(artifact),
         "symbol_index": _detached_record(symbol_artifact),
         "call_graph_metadata": _call_graph_metadata(data),
+        "call_graph_coverage": _call_graph_coverage(data),
         "availability": availability,
         "freshness": availability.get("freshness") if isinstance(availability, dict) else None,
         "total_callee_count": len(groups),
