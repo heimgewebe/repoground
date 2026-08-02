@@ -188,13 +188,14 @@ def evaluate_scip_adapter(
     artifact_status = _artifact_status(artifact)
     precision_threshold = _threshold(minimum_precision, field="minimum_precision")
     recall_threshold = _threshold(minimum_recall, field="minimum_recall")
-    per_language, eligible, unbenchmarked, failed = _evaluate_languages(
+    per_language, metric_passed, unbenchmarked, failed = _evaluate_languages(
         _actual_benchmark_sets(artifact),
         _expected_benchmark_sets(expected_by_language),
         precision_threshold=precision_threshold,
         recall_threshold=recall_threshold,
     )
     status = _benchmark_status(artifact_status, failed, unbenchmarked)
+    eligible = metric_passed if artifact_status == "available" else []
     source = artifact.get("source")
     source = source if isinstance(source, Mapping) else {}
     return {
