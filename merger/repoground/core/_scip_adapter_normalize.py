@@ -12,6 +12,8 @@ from merger.repoground.core._scip_adapter_common import (
     VERSION,
     _commit,
     _degradation,
+    _field,
+    _normalized_path,
     _sha256,
     _source_metadata,
 )
@@ -22,6 +24,50 @@ from merger.repoground.core._scip_adapter_records import (
     _ordered_records,
     _record_external_symbol_degradation,
 )
+
+
+def _sanitize_source_scalars(
+    source: dict[str, Any], degradations: list[dict[str, Any]]
+) -> None:
+    for field in ("protocol_version", "text_document_encoding"):
+        value = source.get(field)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            degradations.append(
+                _degradation(
+                    f"{field}_invalid",
+                    f"SCIP {field} is not a string, integer, or null",
+                )
+            )
+            source[field] = None
+
+
+def _reject_boolean_position_encodings(
+    raw_documents: list[Any], degradations: list[dict[str, Any]]
+) -> list[Any]:
+    accepted: list[Any] = []
+    for raw_document in raw_documents:
+        if not isinstance(raw_document, Mapping):
+            accepted.append(raw_document)
+            continue
+        position_encoding = _field(
+            raw_document, "positionEncoding", "position_encoding"
+        )
+        if not isinstance(position_encoding, bool):
+            accepted.append(raw_document)
+            continue
+        path = _normalized_path(
+            _field(raw_document, "relativePath", "relative_path")
+        )
+        degradations.append(
+            _degradation(
+                "position_encoding_unsupported",
+                "SCIP document position encoding must not be boolean",
+                document=path,
+            )
+        )
+    return accepted
 
 
 def normalize_scip_index(
@@ -40,12 +86,14 @@ def normalize_scip_index(
         repository_commit=_commit(repository_commit),
         degradations=degradations,
     )
+    _sanitize_source_scalars(source, degradations)
     raw_documents = index.get("documents")
     if not isinstance(raw_documents, list):
         degradations.append(
             _degradation("documents_missing", "SCIP documents is not a list")
         )
         raw_documents = []
+    raw_documents = _reject_boolean_position_encodings(raw_documents, degradations)
     contexts, records, definitions, languages = _collect_occurrences(
         raw_documents, degradations
     )
