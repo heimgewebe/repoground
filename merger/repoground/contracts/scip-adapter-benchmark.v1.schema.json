@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://repoground.merger/schemas/scip-adapter-benchmark.v1.json",
+  "title": "RepoGround SCIP adapter benchmark v1",
+  "description": "Fixed per-language precision and navigation recall evaluation for a digest-bound SCIP adapter artifact. Passing marks languages only as eligible for review; default promotion remains false.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "artifact_source",
+    "thresholds",
+    "per_language",
+    "eligible_languages",
+    "unbenchmarked_languages",
+    "failed_languages",
+    "consumer_enablement",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "repoground.scip_adapter_benchmark"},
+    "version": {"const": "1.0"},
+    "status": {"enum": ["pass", "warn", "fail"]},
+    "artifact_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["index_sha256", "repository_commit"],
+      "properties": {
+        "index_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+        "repository_commit": {"type": ["string", "null"], "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"}
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum_precision", "minimum_recall"],
+      "properties": {
+        "minimum_precision": {"type": "number", "minimum": 0, "maximum": 1},
+        "minimum_recall": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "per_language": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/definitions/language_result"}
+    },
+    "eligible_languages": {"$ref": "#/definitions/languages"},
+    "unbenchmarked_languages": {"$ref": "#/definitions/languages"},
+    "failed_languages": {"$ref": "#/definitions/languages"},
+    "consumer_enablement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible_for_review", "default_promoted"],
+      "properties": {
+        "eligible_for_review": {"type": "boolean"},
+        "default_promoted": {"const": false}
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "definitions": {
+    "languages": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "language_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "true_positive",
+        "false_positive",
+        "false_negative",
+        "precision",
+        "recall",
+        "passed"
+      ],
+      "properties": {
+        "status": {"enum": ["pass", "fail", "unbenchmarked"]},
+        "true_positive": {"type": "integer", "minimum": 0},
+        "false_positive": {"type": "integer", "minimum": 0},
+        "false_negative": {"type": "integer", "minimum": 0},
+        "precision": {"type": "number", "minimum": 0, "maximum": 1},
+        "recall": {"type": "number", "minimum": 0, "maximum": 1},
+        "passed": {"type": "boolean"}
+      }
+    }
+  }
+}
