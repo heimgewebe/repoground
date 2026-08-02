@@ -115,3 +115,69 @@ def test_relationship_never_borrows_definition_from_another_document():
         and item["symbol"] == SYMBOL
         for item in artifact["degradations"]
     )
+
+
+def _relationship_only_index(symbol_information):
+    return {
+        "metadata": _metadata(),
+        "documents": [
+            {
+                "relativePath": "src/main.py",
+                "language": "python",
+                "positionEncoding": "UTF32CodeUnitOffsetFromLineStart",
+                "occurrences": [],
+                "symbols": [symbol_information],
+            }
+        ],
+    }
+
+
+def test_missing_or_empty_relationships_do_not_require_source_definition():
+    for symbol_information in (
+        {"symbol": SYMBOL},
+        {"symbol": SYMBOL, "relationships": []},
+    ):
+        artifact = _normalize(_relationship_only_index(symbol_information))
+
+        assert artifact["status"] == "available"
+        assert artifact["languages"] == ["python"]
+        assert artifact["record_count"] == 0
+        assert artifact["records"] == []
+        assert artifact["degradations"] == []
+        assert artifact["consumer_enablement"] == {
+            "requires_language_benchmark": True,
+            "eligible_for_review": False,
+            "default_promoted": False,
+        }
+
+
+def test_malformed_relationships_remain_fail_closed_without_definition_lookup():
+    artifact = _normalize(
+        _relationship_only_index({"symbol": SYMBOL, "relationships": {}})
+    )
+
+    assert artifact["status"] == "degraded"
+    assert artifact["record_count"] == 0
+    assert [item["code"] for item in artifact["degradations"]] == [
+        "relationships_invalid"
+    ]
+
+
+def test_nonempty_relationships_still_require_exact_source_definition():
+    artifact = _normalize(
+        _relationship_only_index(
+            {
+                "symbol": SYMBOL,
+                "relationships": [
+                    {"symbol": TARGET, "isImplementation": True}
+                ],
+            }
+        )
+    )
+
+    assert artifact["status"] == "degraded"
+    assert artifact["record_count"] == 0
+    assert any(
+        item["code"] == "relationship_source_definition_missing"
+        for item in artifact["degradations"]
+    )
