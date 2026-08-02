@@ -1544,3 +1544,130 @@ def test_legacy_strict_hash_switch_remains_supported(tmp_path, monkeypatch):
     result = get_callers(manifest, "target", path="pkg/target.py")
     assert result["status"] == "available"
     assert call_graph_reads >= 1
+
+
+def _recount(graph_payload: dict) -> None:
+    calls = graph_payload["calls"]
+    graph_payload["call_count"] = len(calls)
+    graph_payload["resolution_counts"] = _count(
+        calls, "resolution_status", ("resolved", "candidate", "ambiguous", "unresolved")
+    )
+    graph_payload["evidence_counts"] = _count(calls, "evidence_level", ("S0", "S1"))
+    graph_payload["relation_counts"] = _count(
+        calls, "relation_type", ("calls", "constructs")
+    )
+
+
+def _rewrite_graph(call_graph: Path, manifest: Path, graph_payload: dict) -> None:
+    _recount(graph_payload)
+    call_graph.write_text(json.dumps(graph_payload), encoding="utf-8")
+    _refresh_manifest_artifact(manifest, "python_call_graph_json", call_graph)
+
+
+def _unresolved_call(line: int, status: str) -> dict:
+    """One extra call row the resolver saw but could not bind to a target.
+
+    This is the module-qualified shape (`mod.target(...)`) that the resolver
+    routinely fails to bind, which is why coverage has to be reported.
+    """
+    return _call(
+        "pkg/c.py",
+        line,
+        caller_id=OTHER_CALLER_ID,
+        caller="other_caller",
+        expression="mod.target",
+        simple_name="target",
+        status=status,
+        reason="module_qualified_name",
+        candidate_ids=[TARGET_ID] if status == "candidate" else None,
+        caller_start_line=1,
+        caller_end_line=45,
+    )
+
+
+def test_call_graph_coverage_marks_a_partially_resolved_graph(tmp_path):
+    """A partial graph must not read as an exhaustive caller list."""
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    graph_payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    baseline = _count(
+        graph_payload["calls"],
+        "resolution_status",
+        ("resolved", "candidate", "ambiguous", "unresolved"),
+    )
+    graph_payload["calls"].extend(
+        [
+            _unresolved_call(30, "candidate"),
+            _unresolved_call(31, "ambiguous"),
+            _unresolved_call(32, "unresolved"),
+        ]
+    )
+    _rewrite_graph(call_graph, manifest, graph_payload)
+
+    result = get_callers(manifest, "target", path="pkg/target.py", k=10)
+
+    assert result["status"] == "available"
+    coverage = result["call_graph_coverage"]
+    assert "coverage" not in result["call_graph_metadata"]
+    assert coverage["scope"] == "observed_call_edges"
+    assert coverage["completeness"] == "partial"
+    assert coverage["total_call_edges"] == len(graph_payload["calls"])
+    assert coverage["resolved_call_edges"] == baseline["resolved"]
+    assert coverage["unresolved_by_status"] == {
+        "candidate": baseline["candidate"] + 1,
+        "ambiguous": baseline["ambiguous"] + 1,
+        "unresolved": baseline["unresolved"] + 1,
+    }
+    assert coverage["resolved_ratio"] == round(
+        coverage["resolved_call_edges"] / coverage["total_call_edges"], 6
+    )
+    assert coverage["resolved_ratio"] < 1.0
+    assert "complete_call_graph" in coverage["does_not_establish"]
+    assert "caller_completeness" in coverage["does_not_establish"]
+
+
+def test_call_graph_coverage_marks_a_fully_resolved_graph(tmp_path):
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    graph_payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    graph_payload["calls"] = [
+        call
+        for call in graph_payload["calls"]
+        if call["resolution_status"] == "resolved"
+    ]
+    _rewrite_graph(call_graph, manifest, graph_payload)
+
+    coverage = get_callers(manifest, "target", path="pkg/target.py", k=10)[
+        "call_graph_coverage"
+    ]
+    assert coverage["completeness"] == "complete"
+    assert coverage["resolved_ratio"] == 1.0
+    assert coverage["unresolved_by_status"] == {}
+
+
+def test_call_graph_coverage_is_unknown_without_resolution_counts(tmp_path):
+    """A graph that never reported counts must not be read as complete."""
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    data = json.loads(call_graph.read_text(encoding="utf-8"))
+    data.pop("resolution_counts", None)
+
+    coverage = call_graph_navigation._call_graph_coverage(data)
+
+    assert coverage["completeness"] == "unknown"
+    assert coverage["reason"] == "call_graph_resolution_counts_unavailable"
+    assert coverage["resolved_ratio"] is None
+    assert "caller_completeness" in coverage["does_not_establish"]
+
+
+def test_call_graph_coverage_is_reported_by_callees_and_references(tmp_path):
+    """All three call-graph tools share one coverage verdict."""
+    manifest, call_graph, _ = _write_bundle(tmp_path)
+    graph_payload = json.loads(call_graph.read_text(encoding="utf-8"))
+    graph_payload["calls"].append(_unresolved_call(33, "candidate"))
+    _rewrite_graph(call_graph, manifest, graph_payload)
+
+    callees = get_callees(manifest, "caller_one", path="pkg/a.py", k=10)
+    references = find_references(manifest, "target", k=10)
+
+    for result in (callees, references):
+        assert result["status"] == "available"
+        assert result["call_graph_coverage"]["completeness"] == "partial"
+        assert result["call_graph_coverage"] == callees["call_graph_coverage"]

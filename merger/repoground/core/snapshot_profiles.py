@@ -152,13 +152,20 @@ PROFILE_ARTIFACT_RULES = {
         "python_symbol_index_json": REQ_RECOMMENDED,
         "python_call_graph_json": REQ_RECOMMENDED,
     },
+    # The daily fleet publication is the bundle the agent-facing call-navigation
+    # tools resolve against. Excluding the Python symbol index and call graph
+    # here removes `find_symbol`, `find_references`, `get_callers`, and
+    # `get_callees` from that surface entirely, so they stay part of the compact
+    # profile. `sqlite_index` remains excluded: it carries the bulk of the storage
+    # cost and no
+    # agent-facing read path consumes it.
     "fleet-context": {
         **BASE_RULES,
         "sqlite_index": REQ_EXCLUDED,
         "export_safety_report": REQ_REQUIRED,
         "retrieval_eval_json": REQ_RECOMMENDED,
-        "python_symbol_index_json": REQ_EXCLUDED,
-        "python_call_graph_json": REQ_EXCLUDED,
+        "python_symbol_index_json": REQ_RECOMMENDED,
+        "python_call_graph_json": REQ_RECOMMENDED,
     },
     "full-max": {
         **BASE_RULES,

@@ -108,8 +108,18 @@ def test_fleet_context_preserves_citation_truth_without_heavy_indexes():
     assert rules["export_safety_report"] == "required"
     assert rules["retrieval_eval_json"] == "recommended"
     assert rules["sqlite_index"] == "profile_excluded"
-    assert rules["python_symbol_index_json"] == "profile_excluded"
-    assert rules["python_call_graph_json"] == "profile_excluded"
+
+
+def test_fleet_context_keeps_the_call_navigation_indexes():
+    """The daily fleet bundle backs find_symbol/get_callers/get_callees.
+
+    Excluding these two artifacts silently removed all three tools from the
+    agent-facing surface, so the compact profile must keep carrying them.
+    """
+    rules = PROFILE_ARTIFACT_RULES["fleet-context"]
+
+    assert rules["python_symbol_index_json"] == "recommended"
+    assert rules["python_call_graph_json"] == "recommended"
 
 
 def test_fleet_context_accepts_the_compact_surface_and_rejects_heavy_indexes():
@@ -125,6 +135,8 @@ def test_fleet_context_accepts_the_compact_surface_and_rejects_heavy_indexes():
         "export_safety_report",
         "snapshot_plan_json",
         "retrieval_eval_json",
+        "python_symbol_index_json",
+        "python_call_graph_json",
     }
 
     compact = evaluate_profile("fleet-context", compact_roles)
@@ -132,14 +144,9 @@ def test_fleet_context_accepts_the_compact_surface_and_rejects_heavy_indexes():
     assert compact["missing_required"] == []
     assert compact["profile_excluded_present"] == []
 
-    for role in (
-        "sqlite_index",
-        "python_symbol_index_json",
-        "python_call_graph_json",
-    ):
-        invalid = evaluate_profile("fleet-context", compact_roles | {role})
-        assert invalid["status"] == "fail"
-        assert invalid["profile_excluded_present"] == [role]
+    invalid = evaluate_profile("fleet-context", compact_roles | {"sqlite_index"})
+    assert invalid["status"] == "fail"
+    assert invalid["profile_excluded_present"] == ["sqlite_index"]
 
 
 def test_profile_output_mode_plan_is_machine_readable():
@@ -162,11 +169,7 @@ def test_profile_output_mode_plan_is_machine_readable():
     assert fleet_default["selected_output_mode"] == "dual"
     assert fleet_default["defaulted"] is True
     assert fleet_default["conflicts"] == []
-    assert fleet_default["excluded_roles"] == [
-        "sqlite_index",
-        "python_symbol_index_json",
-        "python_call_graph_json",
-    ]
+    assert fleet_default["excluded_roles"] == ["sqlite_index"]
     assert fleet_default["post_emit_dropped_roles"] == ["sqlite_index"]
 
     fleet_archive = profile_output_mode_plan("fleet-context", "archive")
