@@ -1607,6 +1607,8 @@ def test_call_graph_coverage_marks_a_partially_resolved_graph(tmp_path):
 
     assert result["status"] == "available"
     coverage = result["call_graph_coverage"]
+    assert "coverage" not in result["call_graph_metadata"]
+    assert coverage["scope"] == "observed_call_edges"
     assert coverage["completeness"] == "partial"
     assert coverage["total_call_edges"] == len(graph_payload["calls"])
     assert coverage["resolved_call_edges"] == baseline["resolved"]
@@ -1619,6 +1621,7 @@ def test_call_graph_coverage_marks_a_partially_resolved_graph(tmp_path):
         coverage["resolved_call_edges"] / coverage["total_call_edges"], 6
     )
     assert coverage["resolved_ratio"] < 1.0
+    assert "complete_call_graph" in coverage["does_not_establish"]
     assert "caller_completeness" in coverage["does_not_establish"]
 
 

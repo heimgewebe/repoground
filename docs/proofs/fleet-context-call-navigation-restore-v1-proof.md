@@ -13,18 +13,19 @@ The daily fleet publication resolves to the `fleet-context` profile
 `python_symbol_index_json` and `python_call_graph_json` to `profile_excluded`, so the
 published bundle carried neither artifact.
 
-All three agent-facing call-navigation tools failed closed against the live
+All four agent-facing call-navigation tools failed closed against the live
 publication `heimgewebe__repoground__main-max-260802-0701`:
 
 | Tool | Status | Error code |
 |---|---|---|
 | `find_symbol` | `missing` | `python_symbol_index_json_missing` |
+| `find_references` | `missing` | `python_call_graph_json_missing` |
 | `get_callers` | `missing` | `python_call_graph_json_missing` |
 | `get_callees` | `missing` | `python_call_graph_json_missing` |
 
 The bundle itself reported `freshness: fresh_exact` and `post_emit_health: pass`, and the
 profile evaluation reported `status: pass` with no excluded role present. Every existing
-gate was green while three tools were unreachable. No GitHub issue tracked it.
+gate was green while four tools were unreachable. No GitHub issue tracked it.
 
 `context_compose` degraded honestly over the same bundle (`status: degraded`, gap
 `source_unavailable/python_symbol_index_json`, skipped lanes `symbol_navigation` and
@@ -38,9 +39,9 @@ consumer "does not require the raw canonical dump, SQLite index, Python symbol i
 Python call graph **in the normal context path**".
 
 That statement is accurate and insufficient. The same consumer also exposes `find_symbol`,
-`get_callers`, and `get_callees`, which read exactly the two excluded artifacts. The
-inventory covered the context-pack path only, so the exclusion silently removed a second
-consumer path that was never inspected.
+`find_references`, `get_callers`, and `get_callees`, which read exactly the two
+excluded artifacts. The inventory covered the context-pack path only, so the exclusion
+silently removed a second consumer path that was never inspected.
 
 ## Decision
 
@@ -70,14 +71,15 @@ For context, the same `fleet-context` bundle for `heimgewebe__repoground` alread
 
 Only `resolved` call edges can produce callers or callees. Every other resolution status is
 an edge the resolver saw but could not bind, so any caller or callee list is complete only
-relative to the resolved share. The three call-graph tools now report
+relative to the resolved share. The three call-graph-backed navigation tools now report
 `call_graph_coverage` at the top level of the response:
 
-- `completeness`: `complete`, `partial`, or `unknown`
+- `scope`: `observed_call_edges` (never the repository-wide call graph)
+- `completeness`: `complete`, `partial`, or `unknown` within that scope
 - `resolved_call_edges` / `total_call_edges` / `resolved_ratio`
 - `unresolved_by_status` (per `candidate`, `ambiguous`, `unresolved`)
-- `does_not_establish`: `caller_completeness`, `callee_completeness`,
-  `unresolved_edges_are_irrelevant`
+- `does_not_establish`: `complete_call_graph`, `caller_completeness`,
+  `callee_completeness`, `unresolved_edges_are_irrelevant`
 
 `unknown` is reported when the graph carries no `resolution_counts`, so a graph that never
 declared coverage is not read as a complete one.
@@ -91,22 +93,24 @@ routinely unbound. Results looked exhaustive and were not.
 `merger/repoground/tests/test_publication_surface_smoke.py` emits a real publication through
 the same CLI path the fleet publisher uses
 (`merger.repoground.cli.ground external-manifest refresh --profile fleet-context`), then
-calls `find_symbol`, `get_callers`, and `get_callees` against the emitted manifest.
+calls the MCP frontdoors `find_symbol`, `find_references`, `get_callers`, and
+`get_callees` against the emitted manifest.
 
 The existing profile tests are assertions about the rule tables and stayed green throughout
 the regression. This test reads the shipped artifact back through the agent-facing surface,
 which is the only level at which the failure was observable.
 
-Verified to catch the regression: with the `profile_excluded` values restored, all four
-tests in the file fail (`assert 'missing' == 'available'`). With the fix in place, all four
+Verified to catch the regression: with the `profile_excluded` values restored, all five
+tests in the file fail (`assert 'missing' == 'available'`). With the fix in place, all five
 pass.
 
 ## Verification
 
-- `python3 -m pytest` → 5346 passed, 12 skipped
+- `python3 -m pytest` → 5347 passed, 12 skipped
 - `ruff check --config ruff-ci.toml .` → All checks passed
 - Live re-read after the fix, against a real `fleet-context` publication:
   `find_symbol` → `available`, 1 hit (`target`, `pkg/core.py`);
+  `find_references` → `available`, non-empty call-site list;
   `get_callers` → `available`, caller `pkg/caller.py`, coverage `complete` (ratio `1.0`);
   `get_callees` → `available`, non-empty callee list.
 - Publication report: `profile_evaluation.status: pass`,

@@ -154,9 +154,10 @@ PROFILE_ARTIFACT_RULES = {
     },
     # The daily fleet publication is the bundle the agent-facing call-navigation
     # tools resolve against. Excluding the Python symbol index and call graph
-    # here removes `find_symbol`, `get_callers`, and `get_callees` from that
-    # surface entirely, so they stay part of the compact profile. `sqlite_index`
-    # remains excluded: it carries the bulk of the storage cost and no
+    # here removes `find_symbol`, `find_references`, `get_callers`, and
+    # `get_callees` from that surface entirely, so they stay part of the compact
+    # profile. `sqlite_index` remains excluded: it carries the bulk of the storage
+    # cost and no
     # agent-facing read path consumes it.
     "fleet-context": {
         **BASE_RULES,

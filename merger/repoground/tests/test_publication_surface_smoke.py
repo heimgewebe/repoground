@@ -3,32 +3,32 @@
 The profile rules in `snapshot_profiles` and the tests around them only describe
 what a publication *should* contain. They stayed green when `fleet-context`
 started excluding `python_symbol_index_json` and `python_call_graph_json`, which
-silently removed `find_symbol`, `get_callers`, and `get_callees` from the
-agent-facing surface for two days without a single failing test.
+silently removed `find_symbol`, `find_references`, `get_callers`, and
+`get_callees` from the agent-facing surface for two days without a single
+failing test.
 
 This test closes that gap from the other end: it emits a real publication
-through the same CLI path the daily fleet publisher uses, then calls all three
+through the same CLI path the daily fleet publisher uses, then calls all four
 tools against the emitted manifest. It fails if the shipped bundle cannot answer
 them, regardless of what the profile tables claim.
 """
 
 from __future__ import annotations
 
+import importlib.machinery
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
-from merger.repoground.core.bundle_access import get_callees, get_callers
-from merger.repoground.core.mcp_tools import find_symbol
-
-# The profile the fleet publisher selects for ordinary daily publications.
-# Keep this in sync with `publication_config` in scripts/ops/repoground-publish-fleet.
-DAILY_FLEET_PROFILE = "fleet-context"
+from merger.repoground.core import mcp_tools
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+PUBLISHER = REPO_ROOT / "scripts/ops/repoground-publish-fleet"
 
 CORE_MODULE = """\
 def helper(value):
@@ -46,6 +46,29 @@ from pkg.core import target
 def run_once(value):
     return target(value)
 """
+
+
+def _load_publisher() -> ModuleType:
+    module_name = "repoground_publish_fleet_surface_test"
+    loader = importlib.machinery.SourceFileLoader(module_name, str(PUBLISHER))
+    spec = importlib.util.spec_from_loader(module_name, loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    loader.exec_module(module)
+    return module
+
+
+def _daily_fleet_config(repo: Path):
+    publisher = _load_publisher()
+    entry = publisher.RepoEntry(
+        key="demo/demo",
+        owner="demo",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:demo/demo.git",
+    )
+    return publisher.publication_config(entry)
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -79,38 +102,41 @@ def _source_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _publish(tmp_path: Path, repo: Path) -> dict:
+def _publish(tmp_path: Path, repo: Path) -> tuple[dict, dict[str, object]]:
     publication_root = tmp_path / "pub"
     out_dir = publication_root / "gen"
     out_dir.mkdir(parents=True)
+    config = _daily_fleet_config(repo)
+    argv = [
+        sys.executable,
+        "-B",
+        "-m",
+        "merger.repoground.cli.ground",
+        "external-manifest",
+        "refresh",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out_dir),
+        "--publication-root",
+        str(publication_root),
+        "--repository",
+        "demo__demo",
+        "--ref",
+        "main",
+        "--profile",
+        config.profile,
+        "--output-mode",
+        config.output_mode,
+        "--max-bytes",
+        str(config.max_bytes),
+        "--split-size",
+        config.split_size,
+    ]
+    if config.redact_secrets:
+        argv.append("--redact-secrets")
     completed = subprocess.run(
-        [
-            sys.executable,
-            "-B",
-            "-m",
-            "merger.repoground.cli.ground",
-            "external-manifest",
-            "refresh",
-            "--repo",
-            str(repo),
-            "--out",
-            str(out_dir),
-            "--publication-root",
-            str(publication_root),
-            "--repository",
-            "demo__demo",
-            "--ref",
-            "main",
-            "--profile",
-            DAILY_FLEET_PROFILE,
-            "--output-mode",
-            "dual",
-            "--max-bytes",
-            "0",
-            "--split-size",
-            "25MB",
-            "--redact-secrets",
-        ],
+        argv,
         cwd=REPO_ROOT,
         check=False,
         capture_output=True,
@@ -120,7 +146,7 @@ def _publish(tmp_path: Path, repo: Path) -> dict:
         f"publication failed ({completed.returncode}):\n{completed.stdout[-4000:]}\n"
         f"{completed.stderr[-4000:]}"
     )
-    return json.loads(completed.stdout)
+    return json.loads(completed.stdout), config.as_dict()
 
 
 def _published_manifest(tmp_path: Path) -> Path:
@@ -131,23 +157,32 @@ def _published_manifest(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(scope="module")
-def published_bundle(tmp_path_factory) -> tuple[Path, dict]:
+def published_bundle(tmp_path_factory) -> tuple[Path, dict, dict[str, object]]:
     tmp_path = tmp_path_factory.mktemp("publication_surface")
     repo = _source_repo(tmp_path)
-    report = _publish(tmp_path, repo)
-    return _published_manifest(tmp_path), report
+    report, config = _publish(tmp_path, repo)
+    return _published_manifest(tmp_path), report, config
+
+
+def _available_mcp_result(response: dict, tool: str) -> dict:
+    assert response["tool"] == tool
+    assert response["status"] == "available"
+    result = response["result"]
+    assert result["status"] == "available", result.get("error")
+    assert result["projection"] == "repobrief.read_response.compact.v1"
+    return result
 
 
 @pytest.mark.publication_surface
 def test_daily_profile_publishes_the_call_navigation_artifacts(published_bundle):
-    manifest_path, report = published_bundle
+    manifest_path, report, config = published_bundle
     snapshot = report["snapshot"]
 
     assert report["status"] == "ok"
     assert snapshot["status"] == "ok"
-    assert snapshot["profile"] == DAILY_FLEET_PROFILE
+    assert snapshot["profile"] == config["profile"]
     evaluation = snapshot["profile_evaluation"]
-    assert evaluation["profile"] == DAILY_FLEET_PROFILE
+    assert evaluation["profile"] == config["profile"]
     assert evaluation["status"] == "pass"
     assert evaluation["profile_excluded_present"] == []
 
@@ -156,7 +191,7 @@ def test_daily_profile_publishes_the_call_navigation_artifacts(published_bundle)
     for role in ("python_symbol_index_json", "python_call_graph_json"):
         assert rules[role] != "profile_excluded", (
             f"{role} is excluded from the daily publication; "
-            "find_symbol/get_callers/get_callees cannot be served"
+            "find_symbol/find_references/get_callers/get_callees cannot be served"
         )
 
     # The storage intent of the compact profile is still honoured.
@@ -168,33 +203,59 @@ def test_daily_profile_publishes_the_call_navigation_artifacts(published_bundle)
 
 @pytest.mark.publication_surface
 def test_find_symbol_answers_against_the_published_bundle(published_bundle):
-    manifest_path, _ = published_bundle
+    manifest_path, _, _ = published_bundle
 
-    result = find_symbol(bundle_manifest=manifest_path, name="target", k=10)["result"]
+    result = _available_mcp_result(
+        mcp_tools.find_symbol(bundle_manifest=manifest_path, name="target", k=10),
+        "find_symbol",
+    )
 
-    assert result["status"] == "available", result.get("error")
     assert [(hit["name"], hit["path"]) for hit in result["hits"]] == [
         ("target", "pkg/core.py")
     ]
 
 
 @pytest.mark.publication_surface
+def test_find_references_answers_against_the_published_bundle(published_bundle):
+    manifest_path, _, _ = published_bundle
+
+    result = _available_mcp_result(
+        mcp_tools.find_references(bundle_manifest=manifest_path, name="target", k=10),
+        "find_references",
+    )
+
+    assert [(hit["simple_name"], hit["path"]) for hit in result["hits"]] == [
+        ("target", "pkg/caller.py")
+    ]
+    assert result["call_graph_coverage"]["scope"] == "observed_call_edges"
+    assert result["call_graph_coverage"]["completeness"] in {"complete", "partial"}
+
+
+@pytest.mark.publication_surface
 def test_get_callers_answers_against_the_published_bundle(published_bundle):
-    manifest_path, _ = published_bundle
+    manifest_path, _, _ = published_bundle
 
-    result = get_callers(manifest_path, "target", k=10)
+    result = _available_mcp_result(
+        mcp_tools.get_callers(bundle_manifest=manifest_path, name="target", k=10),
+        "get_callers",
+    )
 
-    assert result["status"] == "available", result.get("error")
     assert [caller["path"] for caller in result["callers"]] == ["pkg/caller.py"]
     assert result["call_graph_coverage"]["completeness"] in {"complete", "partial"}
 
 
 @pytest.mark.publication_surface
 def test_get_callees_answers_against_the_published_bundle(published_bundle):
-    manifest_path, _ = published_bundle
+    manifest_path, _, _ = published_bundle
 
-    result = get_callees(manifest_path, "run_once", k=10)
+    result = _available_mcp_result(
+        mcp_tools.get_callees(bundle_manifest=manifest_path, name="run_once", k=10),
+        "get_callees",
+    )
 
-    assert result["status"] == "available", result.get("error")
-    assert result["callees"], "run_once calls target; the callee list must not be empty"
+    assert [
+        (callee["callee_symbol"]["name"], callee["callee_symbol"]["path"])
+        for callee in result["callees"]
+    ] == [("target", "pkg/core.py")]
+    assert result["call_graph_coverage"]["scope"] == "observed_call_edges"
     assert result["call_graph_coverage"]["completeness"] in {"complete", "partial"}

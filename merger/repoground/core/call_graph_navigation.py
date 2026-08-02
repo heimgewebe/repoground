@@ -115,6 +115,7 @@ _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
 # These are the claims a partial graph cannot support even when the returned
 # rows themselves are correct.
 _CALL_GRAPH_COVERAGE_DOES_NOT_ESTABLISH = (
+    "complete_call_graph",
     "caller_completeness",
     "callee_completeness",
     "unresolved_edges_are_irrelevant",
@@ -543,6 +544,7 @@ def _call_graph_coverage(data: dict[str, Any]) -> dict[str, Any]:
     raw = data.get("resolution_counts")
     if not isinstance(raw, Mapping):
         return {
+            "scope": "observed_call_edges",
             "completeness": "unknown",
             "reason": "call_graph_resolution_counts_unavailable",
             "resolved_call_edges": None,
@@ -572,6 +574,7 @@ def _call_graph_coverage(data: dict[str, Any]) -> dict[str, Any]:
         completeness = "partial"
         ratio = round(resolved / total, 6)
     return {
+        "scope": "observed_call_edges",
         "completeness": completeness,
         "reason": None,
         "resolved_call_edges": resolved,
@@ -590,7 +593,6 @@ def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:
         "resolution_counts": _detached_record(data.get("resolution_counts")),
         "evidence_counts": _detached_record(data.get("evidence_counts")),
         "relation_counts": _detached_record(data.get("relation_counts")),
-        "coverage": _call_graph_coverage(data),
         **_call_graph_parse_diagnostics(data),
     }
 
