@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from merger.repoground.core.lens_facets import _normalize_path
