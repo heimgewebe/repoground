@@ -4,7 +4,9 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from merger.repoground import core as core_api
 from merger.repoground.core.scip_adapter import (
+    ScipAdapterError,
     benchmark_identity,
     evaluate_scip_adapter,
     normalize_scip_index,
@@ -63,6 +65,19 @@ def _artifact(**kwargs):
 
 def _goldset(artifact):
     return {"go": [benchmark_identity(artifact["records"][0])]}
+
+
+def test_public_core_api_exports_the_scip_adapter_without_promotion():
+    assert core_api.ScipAdapterError is ScipAdapterError
+    assert core_api.normalize_scip_index is normalize_scip_index
+    assert core_api.evaluate_scip_adapter is evaluate_scip_adapter
+    assert core_api.benchmark_identity is benchmark_identity
+    assert {
+        "ScipAdapterError",
+        "normalize_scip_index",
+        "evaluate_scip_adapter",
+        "benchmark_identity",
+    } <= set(core_api.__all__)
 
 
 def test_degraded_artifact_cannot_become_review_eligible():
