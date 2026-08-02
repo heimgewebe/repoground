@@ -2,13 +2,14 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://repoground.merger/schemas/scip-adapter-benchmark.v1.json",
   "title": "RepoGround SCIP adapter benchmark v1",
-  "description": "Fixed per-language precision and navigation recall evaluation for a digest-bound SCIP adapter artifact. Passing marks languages only as eligible for review; default promotion remains false.",
+  "description": "Fixed per-language precision and navigation recall evaluation for a digest-bound SCIP adapter artifact. Passing marks languages only as eligible for review when the source artifact is available; default promotion remains false.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "kind",
     "version",
     "status",
+    "artifact_status",
     "artifact_source",
     "thresholds",
     "per_language",
@@ -22,6 +23,7 @@
     "kind": {"const": "repoground.scip_adapter_benchmark"},
     "version": {"const": "1.0"},
     "status": {"enum": ["pass", "warn", "fail"]},
+    "artifact_status": {"enum": ["available", "degraded"]},
     "artifact_source": {
       "type": "object",
       "additionalProperties": false,
@@ -42,6 +44,7 @@
     },
     "per_language": {
       "type": "object",
+      "minProperties": 1,
       "additionalProperties": {"$ref": "#/definitions/language_result"}
     },
     "eligible_languages": {"$ref": "#/definitions/languages"},
@@ -64,6 +67,41 @@
       "items": {"type": "string", "minLength": 1}
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "artifact_status": {"const": "degraded"}
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {"enum": ["warn", "fail"]},
+          "consumer_enablement": {
+            "properties": {
+              "eligible_for_review": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {"enum": ["warn", "fail"]}
+        }
+      },
+      "then": {
+        "properties": {
+          "consumer_enablement": {
+            "properties": {
+              "eligible_for_review": {"const": false}
+            }
+          }
+        }
+      }
+    }
+  ],
   "definitions": {
     "languages": {
       "type": "array",
