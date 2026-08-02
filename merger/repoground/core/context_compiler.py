@@ -12,12 +12,16 @@ import math
 from pathlib import Path
 from typing import Any, Mapping, TextIO
 
-from merger.repoground.core.graph_degradation import graph_gap_from_availability
 from merger.repoground.core.bundle_access import (
     query_existing_index,
     resolve_required_reading_for_bundle,
     search_symbol_index,
     snapshot_status,
+)
+from merger.repoground.core.graph_degradation import graph_gap_from_availability
+from merger.repoground.core.repository_text_trust import (
+    classify_repository_text,
+    trust_model_summary,
 )
 
 KIND = "repobrief.context_compiler"
@@ -42,6 +46,12 @@ DOES_NOT_ESTABLISH = (
     "review_completeness",
     "merge_readiness",
     "agent_quality_improvement",
+    "permission_to_execute_tools",
+    "permission_to_write_files",
+    "permission_to_use_network",
+    "permission_to_read_secrets",
+    "permission_to_merge_changes",
+    "permission_to_deploy_changes",
 )
 
 
@@ -57,6 +67,16 @@ def _read_only_mutation_boundary() -> dict[str, Any]:
             "latest_complete_registry",
         ],
         "read_paths_do_not_refresh": True,
+        "repository_content_grants_control_authority": False,
+        "external_authorization_required_for": [
+            "execute_tools",
+            "write_files",
+            "use_network",
+            "read_secrets",
+            "merge_changes",
+            "deploy_changes",
+        ],
+        "authorization_source": "grabowski_or_operator_policy",
     }
 
 
@@ -82,6 +102,7 @@ def _invalid_result(
         "selected_context": [],
         "omitted_context": [],
         "gaps": [],
+        "trust_model": trust_model_summary(),
         "mutation_boundary": _read_only_mutation_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }
@@ -125,6 +146,7 @@ def _candidate(
     estimated_tokens: int,
     selection_reason: str,
     payload: dict[str, Any],
+    trust: dict[str, Any],
     citations: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
@@ -134,6 +156,7 @@ def _candidate(
         "estimated_tokens": estimated_tokens,
         "selection_reason": selection_reason,
         "citations": citations or [],
+        "trust": trust,
         **payload,
     }
 
@@ -193,6 +216,25 @@ def _retrieval_candidates(
                 estimated_tokens=token_estimate,
                 selection_reason="query_match_with_resolved_range",
                 citations=citations,
+                trust=classify_repository_text(
+                    path=item.get("path"),
+                    source_kind="repository_path",
+                    artifact_role="canonical_md",
+                    citation={
+                        "citation_id": citation_id,
+                        "source_range": source_range,
+                    },
+                    applicability_reason=(
+                        "resolved repository evidence matched the task query"
+                    ),
+                    derivation_type="source_projection",
+                    declared_authority=(
+                        item.get("canonical_authority")
+                        if isinstance(item.get("canonical_authority"), str)
+                        else "canonical_content"
+                    ),
+                    canonicality="content_source",
+                ),
                 payload={
                     "title": item.get("path") or item.get("chunk_id") or f"resolved evidence {ordinal}",
                     "artifact_role": "canonical_md",
@@ -260,6 +302,21 @@ def _symbol_candidates(
                 estimated_tokens=_estimate_tokens_from_text(label, bytes_per_token),
                 selection_reason="symbol_name_or_path_match",
                 citations=citations,
+                trust=classify_repository_text(
+                    path=hit.get("path"),
+                    source_kind="generated_artifact",
+                    artifact_role="python_symbol_index_json",
+                    citation={
+                        "range_ref": range_ref,
+                        "source_range": source_range,
+                    },
+                    applicability_reason=(
+                        "generated symbol navigation matched the task query"
+                    ),
+                    derivation_type="static_analysis",
+                    declared_authority="navigation_index",
+                    canonicality="derived",
+                ),
                 payload={
                     "title": hit.get("qualified_name") or hit.get("name"),
                     "symbol": hit,
@@ -357,6 +414,22 @@ def _relation_candidate_from_line(
             "evidence": evidence,
             "evidence_level": card.get("evidence_level"),
         }],
+        trust=classify_repository_text(
+            path=source_path,
+            source_kind="generated_artifact",
+            artifact_role="relation_cards_jsonl",
+            citation={"source_range": evidence},
+            applicability_reason=(
+                "generated relation navigation matched the task query"
+            ),
+            derivation_type="static_analysis",
+            declared_authority=(
+                card.get("authority")
+                if isinstance(card.get("authority"), str)
+                else "navigation_index"
+            ),
+            canonicality="derived",
+        ),
         payload={
             "title": label,
             "artifact_role": "relation_cards_jsonl",
@@ -518,6 +591,20 @@ def _required_reading_candidates(
                         "authority": artifact.get("authority"),
                         "canonicality": artifact.get("canonicality"),
                     }],
+                    trust=classify_repository_text(
+                        path=artifact.get("path"),
+                        source_kind="generated_artifact",
+                        artifact_role=role,
+                        citation={"range_ref": artifact.get("path")},
+                        applicability_reason=(
+                            "bundle manifest selected this artifact as "
+                            f"{reason.replace('_', ' ')}"
+                        ),
+                        derivation_type="manifest_projection",
+                        source_sha256=artifact.get("sha256"),
+                        declared_authority=artifact.get("authority"),
+                        canonicality=artifact.get("canonicality"),
+                    ),
                     payload={
                         "title": role,
                         "artifact_role": role,
@@ -724,6 +811,7 @@ def compile_context_plan(
             ],
             "omission_reasons": sorted({item.get("omission_reason") for item in omitted if item.get("omission_reason")}),
         },
+        "trust_model": trust_model_summary(),
         "mutation_boundary": _read_only_mutation_boundary(),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }

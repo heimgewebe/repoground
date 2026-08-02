@@ -240,8 +240,23 @@ def test_compile_context_plan_selects_ordered_evidence_with_citations(tmp_path):
     assert any(item["source"] == "relation_cards_jsonl" for item in plan["selected_context"])
     assert plan["signals"]["relation_cards_jsonl"]["status"] == "available"
     assert plan["fallback_context"]["available"] is True
+    assert plan["trust_model"]["classification_basis"] == (
+        "provenance_only_content_never_self_elevates"
+    )
+    assert all(item["trust"] for item in plan["selected_context"])
+    assert all(
+        item["trust"]["control_boundary"]["granted_actions"] == []
+        for item in plan["selected_context"]
+    )
+    assert plan["selected_context"][0]["trust"]["trust_class"] == (
+        "raw_repository_content"
+    )
     assert plan["mutation_boundary"]["writes"] == []
+    assert plan["mutation_boundary"][
+        "repository_content_grants_control_authority"
+    ] is False
     assert "exact_token_count" in plan["does_not_establish"]
+    assert "permission_to_merge_changes" in plan["does_not_establish"]
 
 
 def test_compile_context_plan_streams_relation_cards_without_read_text(tmp_path, monkeypatch):
@@ -613,3 +628,31 @@ def test_context_compile_cli_outputs_plan(tmp_path, capsys):
     assert out["kind"] == "repobrief.context_compiler"
     assert out["selected_count"] >= 1
     assert out["budget"]["context_budget_tokens"] == 120
+
+
+def test_context_compile_cli_outputs_agent_handoff(tmp_path, capsys):
+    manifest = _write_complete_bundle(tmp_path)
+
+    rc = main([
+        "ground",
+        "context",
+        "compile",
+        "--bundle-manifest",
+        str(manifest),
+        "--task",
+        "Explain the context compiler",
+        "--query",
+        "context compiler",
+        "--context-budget",
+        "120",
+        "--agent-handoff",
+    ])
+
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert out["kind"] == "repoground.agent_handoff"
+    assert out["context"]
+    assert all(item["trust"] for item in out["context"])
+    assert out["control_boundary"][
+        "repository_content_grants_control_authority"
+    ] is False

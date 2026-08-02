@@ -659,6 +659,11 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     context_compile.add_argument("--context-budget", type=int, default=8000, help="Token budget for selected context")
     context_compile.add_argument("--signal-k", type=int, default=10, help="Maximum retrieval/symbol signal hits")
     context_compile.add_argument("--bytes-per-token", type=float, default=4.0, help="Byte divisor used for rough token estimate")
+    context_compile.add_argument(
+        "--agent-handoff",
+        action="store_true",
+        help="Emit a trust- and freshness-preserving agent handoff instead of the full plan",
+    )
     context_compile.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
 
     delta_context_parser = ground_subparsers.add_parser(
@@ -1382,8 +1387,9 @@ def run_delta_context_compile(args: argparse.Namespace) -> int:
 
 def run_context_compile(args: argparse.Namespace) -> int:
     from merger.repoground.core.context_compiler import compile_context_plan
+    from merger.repoground.core.repository_text_trust import build_agent_handoff
 
-    result = compile_context_plan(
+    plan = compile_context_plan(
         args.bundle_manifest,
         task=args.task,
         task_profile=args.task_profile,
@@ -1392,8 +1398,13 @@ def run_context_compile(args: argparse.Namespace) -> int:
         signal_k=args.signal_k,
         bytes_per_token=args.bytes_per_token,
     )
+    status = plan.get("status")
+    result = (
+        build_agent_handoff(plan)
+        if args.agent_handoff and status != "invalid"
+        else plan
+    )
     print(json.dumps(result, indent=2, sort_keys=True))
-    status = result.get("status")
     if status == "pass":
         return 0
     if status == "warn":
