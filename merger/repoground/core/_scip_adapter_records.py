@@ -190,6 +190,8 @@ def _relationship_records(
             )
         )
         return []
+    if not relationships:
+        return []
     source = _relationship_source(
         source_symbol,
         path=path,
