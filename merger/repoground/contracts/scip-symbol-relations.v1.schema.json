@@ -1,0 +1,208 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://repoground.merger/schemas/scip-symbol-relations.v1.json",
+  "title": "RepoGround SCIP symbol relations v1",
+  "description": "Optional derived navigation records projected from an already decoded, digest-bound SCIP index. This artifact does not decode protobuf, run an indexer, establish repository truth, prove completeness, or enable a consumer by itself.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "authority",
+    "canonicality",
+    "status",
+    "source",
+    "languages",
+    "records",
+    "record_count",
+    "degradations",
+    "consumer_enablement",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "repoground.scip_symbol_relations"},
+    "version": {"const": "1.0"},
+    "authority": {"const": "navigation_index"},
+    "canonicality": {"const": "derived"},
+    "status": {"enum": ["available", "degraded"]},
+    "source": {"$ref": "#/definitions/source"},
+    "languages": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "records": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/record"}
+    },
+    "record_count": {"type": "integer", "minimum": 0},
+    "degradations": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/degradation"}
+    },
+    "consumer_enablement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requires_language_benchmark",
+        "eligible_for_review",
+        "default_promoted"
+      ],
+      "properties": {
+        "requires_language_benchmark": {"const": true},
+        "eligible_for_review": {"const": false},
+        "default_promoted": {"const": false}
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 12,
+      "maxItems": 12,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "definitions": {
+    "digest64": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![\\s\\S]*[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029\\uFEFF])(?![\\s\\S]*[\\uD800-\\uDFFF])(?![\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u202F\\u205F\\u3000]+$)(?![A-Za-z]:)(?!/)(?![\\s\\S]*//)(?![\\s\\S]*/$)(?![\\s\\S]*\\\\)(?![\\s\\S]*(?:^|/)\\.\\.?(?:/|$))[\\s\\S]+$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "protocol",
+        "protocol_version",
+        "index_sha256",
+        "repository_commit",
+        "indexer",
+        "project_root_sha256",
+        "text_document_encoding"
+      ],
+      "properties": {
+        "format": {"const": "decoded_scip_protobuf_json"},
+        "protocol": {"const": "SCIP"},
+        "protocol_version": {"type": ["string", "integer", "null"]},
+        "index_sha256": {"$ref": "#/definitions/digest64"},
+        "repository_commit": {"$ref": "#/definitions/commit"},
+        "indexer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version", "arguments_sha256"],
+          "properties": {
+            "name": {"type": ["string", "null"], "minLength": 1},
+            "version": {"type": ["string", "null"], "minLength": 1},
+            "arguments_sha256": {"$ref": "#/definitions/digest64"}
+          }
+        },
+        "project_root_sha256": {
+          "anyOf": [
+            {"$ref": "#/definitions/digest64"},
+            {"type": "null"}
+          ]
+        },
+        "text_document_encoding": {"type": ["string", "integer", "null"]}
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start_line",
+        "start_character",
+        "end_line",
+        "end_character",
+        "position_encoding"
+      ],
+      "properties": {
+        "start_line": {"type": "integer", "minimum": 1},
+        "start_character": {"type": "integer", "minimum": 0},
+        "end_line": {"type": "integer", "minimum": 1},
+        "end_character": {"type": "integer", "minimum": 0},
+        "position_encoding": {"type": ["string", "integer"]}
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_type",
+        "relation",
+        "language",
+        "symbol",
+        "target_symbol",
+        "roles",
+        "source",
+        "source_rule"
+      ],
+      "properties": {
+        "record_type": {"enum": ["occurrence", "relationship"]},
+        "relation": {
+          "enum": [
+            "definition",
+            "reference",
+            "references_symbol",
+            "implements_symbol",
+            "type_definition",
+            "definition_alias"
+          ]
+        },
+        "language": {"type": "string", "minLength": 1},
+        "symbol": {"type": "string", "minLength": 1},
+        "target_symbol": {"type": ["string", "null"], "minLength": 1},
+        "roles": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "definition",
+              "import",
+              "write_access",
+              "read_access",
+              "generated",
+              "test",
+              "forward_definition"
+            ]
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "range"],
+          "properties": {
+            "path": {"$ref": "#/definitions/repo_path"},
+            "range": {"$ref": "#/definitions/range"}
+          }
+        },
+        "source_rule": {
+          "enum": [
+            "scip_occurrence_symbol_roles",
+            "scip_symbol_information_relationship"
+          ]
+        }
+      }
+    },
+    "degradation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "document", "symbol", "count"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1},
+        "document": {"type": ["string", "null"]},
+        "symbol": {"type": ["string", "null"]},
+        "count": {"type": ["integer", "null"], "minimum": 0}
+      }
+    }
+  }
+}
