@@ -47,6 +47,13 @@ def _threshold(value: Any, *, field: str) -> float:
     return result
 
 
+def _artifact_status(artifact: Mapping[str, Any]) -> str:
+    status = artifact.get("status")
+    if status not in {"available", "degraded"}:
+        raise ValueError("artifact status must be available or degraded")
+    return status
+
+
 def _actual_benchmark_sets(
     artifact: Mapping[str, Any],
 ) -> dict[str, set[str]]:
@@ -66,19 +73,26 @@ def _actual_benchmark_sets(
 def _expected_benchmark_sets(
     expected_by_language: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> dict[str, set[str]]:
+    if not expected_by_language:
+        raise ValueError("goldset must contain at least one language")
     expected_sets: dict[str, set[str]] = {}
     for raw_language, expected in expected_by_language.items():
         language = _text(raw_language)
         if language is None:
             raise ValueError("goldset language is invalid")
+        normalized_language = language.casefold()
+        if normalized_language in expected_sets:
+            raise ValueError("goldset languages must be unique after case folding")
         if not isinstance(expected, Sequence) or isinstance(expected, (str, bytes)):
             raise ValueError("goldset language entries must be a sequence")
+        if not expected:
+            raise ValueError("goldset language entries must not be empty")
         identities: set[str] = set()
         for item in expected:
             if not isinstance(item, Mapping):
                 raise ValueError("goldset identity must be an object")
             identities.add(_identity_key(item))
-        expected_sets[language.casefold()] = identities
+        expected_sets[normalized_language] = identities
     return expected_sets
 
 
@@ -132,7 +146,7 @@ def _evaluate_languages(
     for language in sorted(set(actual_by_language) | set(expected_sets)):
         actual = actual_by_language.get(language, set())
         expected = expected_sets.get(language)
-        if not expected:
+        if expected is None:
             unbenchmarked.append(language)
             per_language[language] = _unbenchmarked_result(actual)
             continue
@@ -147,10 +161,16 @@ def _evaluate_languages(
     return per_language, eligible, unbenchmarked, failed
 
 
-def _benchmark_status(failed: list[str], unbenchmarked: list[str]) -> str:
+def _benchmark_status(
+    artifact_status: str,
+    failed: list[str],
+    unbenchmarked: list[str],
+) -> str:
     if failed:
         return "fail"
-    return "warn" if unbenchmarked else "pass"
+    if artifact_status == "degraded" or unbenchmarked:
+        return "warn"
+    return "pass"
 
 
 def evaluate_scip_adapter(
@@ -165,6 +185,7 @@ def evaluate_scip_adapter(
         raise ValueError("artifact is not a SCIP symbol-relations v1 artifact")
     if not isinstance(expected_by_language, Mapping):
         raise TypeError("expected_by_language must be a mapping")
+    artifact_status = _artifact_status(artifact)
     precision_threshold = _threshold(minimum_precision, field="minimum_precision")
     recall_threshold = _threshold(minimum_recall, field="minimum_recall")
     per_language, eligible, unbenchmarked, failed = _evaluate_languages(
@@ -173,13 +194,14 @@ def evaluate_scip_adapter(
         precision_threshold=precision_threshold,
         recall_threshold=recall_threshold,
     )
-    status = _benchmark_status(failed, unbenchmarked)
+    status = _benchmark_status(artifact_status, failed, unbenchmarked)
     source = artifact.get("source")
     source = source if isinstance(source, Mapping) else {}
     return {
         "kind": BENCHMARK_KIND,
         "version": BENCHMARK_VERSION,
         "status": status,
+        "artifact_status": artifact_status,
         "artifact_source": {
             "index_sha256": source.get("index_sha256"),
             "repository_commit": source.get("repository_commit"),
