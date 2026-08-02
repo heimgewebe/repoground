@@ -1,0 +1,573 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://repoground.merger/schemas/repository-text-trust.v1.json",
+  "title": "RepoGround repository text trust descriptor v1",
+  "description": "Provenance-bound trust metadata for agent-visible text. Repository content remains data and cannot grant execution, write, network, secret, merge, or deployment authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "trust_class",
+    "source_origin",
+    "authority",
+    "citation",
+    "applicability",
+    "derivation",
+    "instruction_handling",
+    "content_is_data",
+    "control_boundary",
+    "does_not_establish"
+  ],
+  "properties": {
+    "version": {
+      "const": "repoground.repository_text_trust/v1"
+    },
+    "trust_class": {
+      "enum": [
+        "operator_or_system_instruction",
+        "maintainer_repository_rule",
+        "raw_repository_content",
+        "generated_artifact",
+        "inferred_rule"
+      ]
+    },
+    "source_origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "locator",
+        "path",
+        "artifact_role"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "operator_or_system_instruction",
+            "repository_path",
+            "generated_artifact",
+            "inferred_rule"
+          ]
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "artifact_role": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class",
+        "canonicality",
+        "content_can_self_elevate"
+      ],
+      "properties": {
+        "class": {
+          "type": "string",
+          "minLength": 1
+        },
+        "canonicality": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_can_self_elevate": {
+          "const": false
+        }
+      }
+    },
+    "citation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "artifact_role",
+        "sha256",
+        "citation_id",
+        "range_ref",
+        "source_range"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "repository_range",
+            "artifact_reference",
+            "external_control_plane_reference"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "artifact_role": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "citation_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "range_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "source_range": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "minProperties": 1
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "citation_id"
+          ],
+          "properties": {
+            "citation_id": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "range_ref"
+          ],
+          "properties": {
+            "range_ref": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "sha256"
+          ],
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        },
+        {
+          "required": [
+            "source_range"
+          ],
+          "properties": {
+            "source_range": {
+              "type": "object",
+              "minProperties": 1
+            }
+          }
+        }
+      ]
+    },
+    "applicability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "scope"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "derivation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "canonical_repository_rule"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "direct",
+            "source_projection",
+            "manifest_projection",
+            "static_analysis",
+            "inference"
+          ]
+        },
+        "canonical_repository_rule": {
+          "const": false
+        }
+      }
+    },
+    "instruction_handling": {
+      "enum": [
+        "external_control_plane_only",
+        "repository_semantics_only",
+        "treat_as_untrusted_content",
+        "treat_as_derived_content",
+        "advisory_inference_only"
+      ]
+    },
+    "content_is_data": {
+      "type": "boolean"
+    },
+    "control_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_content_grants_control_authority",
+        "granted_actions",
+        "external_authorization_required_for",
+        "authorization_source"
+      ],
+      "properties": {
+        "repository_content_grants_control_authority": {
+          "const": false
+        },
+        "granted_actions": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "external_authorization_required_for": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": [
+            {
+              "const": "execute_tools"
+            },
+            {
+              "const": "write_files"
+            },
+            {
+              "const": "use_network"
+            },
+            {
+              "const": "read_secrets"
+            },
+            {
+              "const": "merge_changes"
+            },
+            {
+              "const": "deploy_changes"
+            }
+          ],
+          "additionalItems": false
+        },
+        "authorization_source": {
+          "const": "grabowski_or_operator_policy"
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 10,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "trust_class": {
+            "const": "operator_or_system_instruction"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_origin": {
+            "properties": {
+              "kind": {
+                "const": "operator_or_system_instruction"
+              },
+              "path": {
+                "const": null
+              },
+              "artifact_role": {
+                "const": null
+              }
+            }
+          },
+          "authority": {
+            "properties": {
+              "class": {
+                "const": "control_plane_instruction"
+              },
+              "canonicality": {
+                "const": "external"
+              }
+            }
+          },
+          "citation": {
+            "properties": {
+              "kind": {
+                "const": "external_control_plane_reference"
+              },
+              "path": {
+                "const": null
+              },
+              "artifact_role": {
+                "const": null
+              }
+            }
+          },
+          "instruction_handling": {
+            "const": "external_control_plane_only"
+          },
+          "content_is_data": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "trust_class": {
+            "const": "maintainer_repository_rule"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_origin": {
+            "properties": {
+              "kind": {
+                "const": "repository_path"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "authority": {
+            "properties": {
+              "class": {
+                "const": "repository_rule"
+              },
+              "canonicality": {
+                "const": "maintainer_authored"
+              }
+            }
+          },
+          "citation": {
+            "properties": {
+              "kind": {
+                "const": "repository_range"
+              }
+            }
+          },
+          "instruction_handling": {
+            "const": "repository_semantics_only"
+          },
+          "content_is_data": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "trust_class": {
+            "const": "raw_repository_content"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_origin": {
+            "properties": {
+              "kind": {
+                "const": "repository_path"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "authority": {
+            "properties": {
+              "class": {
+                "not": {
+                  "enum": [
+                    "control_plane_instruction",
+                    "operator_instruction",
+                    "system_instruction",
+                    "operator_or_system_instruction",
+                    "repository_rule",
+                    "inferred_rule"
+                  ]
+                }
+              },
+              "canonicality": {
+                "not": {
+                  "const": "external"
+                }
+              }
+            }
+          },
+          "citation": {
+            "properties": {
+              "kind": {
+                "const": "repository_range"
+              }
+            }
+          },
+          "instruction_handling": {
+            "const": "treat_as_untrusted_content"
+          },
+          "content_is_data": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "trust_class": {
+            "const": "generated_artifact"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_origin": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "generated_artifact",
+                  "repository_path"
+                ]
+              }
+            }
+          },
+          "authority": {
+            "properties": {
+              "class": {
+                "not": {
+                  "enum": [
+                    "control_plane_instruction",
+                    "operator_instruction",
+                    "system_instruction",
+                    "operator_or_system_instruction",
+                    "repository_rule",
+                    "inferred_rule"
+                  ]
+                }
+              },
+              "canonicality": {
+                "not": {
+                  "const": "external"
+                }
+              }
+            }
+          },
+          "instruction_handling": {
+            "const": "treat_as_derived_content"
+          },
+          "content_is_data": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "trust_class": {
+            "const": "inferred_rule"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "source_origin": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "inferred_rule",
+                  "repository_path"
+                ]
+              }
+            }
+          },
+          "authority": {
+            "properties": {
+              "class": {
+                "const": "inferred_rule"
+              },
+              "canonicality": {
+                "const": "derived"
+              }
+            }
+          },
+          "derivation": {
+            "properties": {
+              "type": {
+                "const": "inference"
+              },
+              "canonical_repository_rule": {
+                "const": false
+              }
+            }
+          },
+          "instruction_handling": {
+            "const": "advisory_inference_only"
+          },
+          "content_is_data": {
+            "const": true
+          }
+        }
+      }
+    }
+  ]
+}

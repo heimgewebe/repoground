@@ -1,0 +1,200 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://repoground.merger/schemas/agent-handoff.v1.json",
+  "title": "RepoGround agent handoff v1",
+  "description": "Read-only context handoff that preserves source trust and freshness while keeping all control authority external to repository content.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "status",
+    "task",
+    "task_profile",
+    "bundle_manifest",
+    "bundle_run_id",
+    "freshness",
+    "context",
+    "trust_model",
+    "control_boundary",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "const": "repoground.agent_handoff"
+    },
+    "version": {
+      "const": "repoground.agent_handoff/v1"
+    },
+    "status": {
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "invalid"
+      ]
+    },
+    "task": {
+      "type": "string",
+      "minLength": 1
+    },
+    "task_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bundle_manifest": {
+      "type": "string",
+      "minLength": 1
+    },
+    "bundle_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "freshness": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "context": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "trust"
+        ],
+        "properties": {
+          "trust": {
+            "$ref": "https://repoground.merger/schemas/repository-text-trust.v1.json"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "trust_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "trust_classes",
+        "classification_basis",
+        "control_actions",
+        "authorization_source"
+      ],
+      "properties": {
+        "version": {
+          "const": "repoground.repository_text_trust/v1"
+        },
+        "trust_classes": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": [
+            {
+              "const": "operator_or_system_instruction"
+            },
+            {
+              "const": "maintainer_repository_rule"
+            },
+            {
+              "const": "raw_repository_content"
+            },
+            {
+              "const": "generated_artifact"
+            },
+            {
+              "const": "inferred_rule"
+            }
+          ],
+          "additionalItems": false
+        },
+        "classification_basis": {
+          "const": "provenance_only_content_never_self_elevates"
+        },
+        "control_actions": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": [
+            {
+              "const": "execute_tools"
+            },
+            {
+              "const": "write_files"
+            },
+            {
+              "const": "use_network"
+            },
+            {
+              "const": "read_secrets"
+            },
+            {
+              "const": "merge_changes"
+            },
+            {
+              "const": "deploy_changes"
+            }
+          ],
+          "additionalItems": false
+        },
+        "authorization_source": {
+          "const": "grabowski_or_operator_policy"
+        }
+      }
+    },
+    "control_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository_content_grants_control_authority",
+        "external_authorization_required_for",
+        "authorization_source"
+      ],
+      "properties": {
+        "repository_content_grants_control_authority": {
+          "const": false
+        },
+        "external_authorization_required_for": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": [
+            {
+              "const": "execute_tools"
+            },
+            {
+              "const": "write_files"
+            },
+            {
+              "const": "use_network"
+            },
+            {
+              "const": "read_secrets"
+            },
+            {
+              "const": "merge_changes"
+            },
+            {
+              "const": "deploy_changes"
+            }
+          ],
+          "additionalItems": false
+        },
+        "authorization_source": {
+          "const": "grabowski_or_operator_policy"
+        }
+      }
+    },
+    "does_not_establish": {
+      "type": "array",
+      "minItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}
