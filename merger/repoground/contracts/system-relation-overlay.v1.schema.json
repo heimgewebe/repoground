@@ -1,0 +1,465 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://repoground.merger/schemas/system-relation-overlay.v1.json",
+  "title": "RepoGround system relation overlay v1",
+  "description": "Derived navigation relations for build targets, package targets, test registration, schema validation and artifact flow. Records remain provenance-bound evidence and do not prove execution, correctness, completeness or artifact materialization.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "authority",
+    "canonicality",
+    "risk_class",
+    "status",
+    "source",
+    "relation_kinds",
+    "evidence_classes",
+    "records",
+    "record_count",
+    "degradations",
+    "consumer_enablement",
+    "absence_semantics",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {"const": "repoground.system_relation_overlay"},
+    "version": {"const": "1.0"},
+    "authority": {"const": "navigation_index"},
+    "canonicality": {"const": "derived"},
+    "risk_class": {"const": "navigation"},
+    "status": {"enum": ["available", "degraded"]},
+    "source": {"$ref": "#/definitions/source_provenance"},
+    "relation_kinds": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/definitions/relation_kind"}
+    },
+    "evidence_classes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/definitions/evidence_class"}
+    },
+    "records": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/record"}
+    },
+    "record_count": {"type": "integer", "minimum": 0},
+    "degradations": {
+      "type": "array",
+      "items": {"$ref": "#/definitions/degradation"}
+    },
+    "consumer_enablement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eligible_for_review", "default_promoted"],
+      "properties": {
+        "eligible_for_review": {"const": false},
+        "default_promoted": {"const": false}
+      }
+    },
+    "absence_semantics": {
+      "const": "A missing record means only that this evidence document did not establish the relation. It is not evidence that the relation is absent."
+    },
+    "does_not_establish": {
+      "const": [
+        "repository_truth",
+        "build_execution",
+        "build_success",
+        "package_publishability",
+        "test_execution",
+        "test_collection",
+        "test_sufficiency",
+        "schema_validation_success",
+        "schema_conformance",
+        "artifact_materialization",
+        "artifact_freshness",
+        "runtime_behavior",
+        "runtime_correctness",
+        "relation_completeness",
+        "default_promotion"
+      ]
+    }
+  },
+  "definitions": {
+    "digest64": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "commit": {
+      "type": "string",
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\\\).+$"
+    },
+    "relation_kind": {
+      "enum": [
+        "build_target",
+        "package_target",
+        "test_registration",
+        "validates_schema",
+        "produces_artifact",
+        "consumes_artifact"
+      ]
+    },
+    "evidence_class": {
+      "enum": [
+        "manifest_declaration",
+        "workflow_declaration",
+        "explicit_test_registration",
+        "test_import_or_reference",
+        "test_naming_heuristic",
+        "schema_validation_call",
+        "artifact_declaration"
+      ]
+    },
+    "endpoint_kind": {
+      "enum": [
+        "repository",
+        "package",
+        "build_target",
+        "package_target",
+        "test",
+        "test_target",
+        "validator",
+        "schema_contract",
+        "artifact_producer",
+        "artifact_consumer",
+        "artifact_contract",
+        "workflow"
+      ]
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "identity"],
+      "properties": {
+        "kind": {"$ref": "#/definitions/endpoint_kind"},
+        "identity": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_line", "start_character", "end_line", "end_character"],
+      "properties": {
+        "start_line": {"type": "integer", "minimum": 1},
+        "start_character": {"type": "integer", "minimum": 0},
+        "end_line": {"type": "integer", "minimum": 1},
+        "end_character": {"type": "integer", "minimum": 0}
+      }
+    },
+    "relation_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "range"],
+      "properties": {
+        "path": {"$ref": "#/definitions/repo_path"},
+        "kind": {
+          "enum": [
+            "manifest",
+            "workflow",
+            "test_registry",
+            "source_file",
+            "artifact_contract"
+          ]
+        },
+        "range": {"$ref": "#/definitions/range"}
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["class", "level", "strength"],
+      "properties": {
+        "class": {"$ref": "#/definitions/evidence_class"},
+        "level": {"enum": ["S0", "S1"]},
+        "strength": {"enum": ["declared", "referenced", "heuristic"]}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "class": {"const": "manifest_declaration"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "workflow_declaration"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "explicit_test_registration"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "test_import_or_reference"},
+            "level": {"const": "S0"},
+            "strength": {"const": "referenced"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "test_naming_heuristic"},
+            "level": {"const": "S0"},
+            "strength": {"const": "heuristic"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "schema_validation_call"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "artifact_declaration"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
+        }
+      ]
+    },
+    "contract_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "version"],
+      "properties": {
+        "kind": {"enum": ["schema", "artifact"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 4096},
+        "version": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id_sha256",
+        "relation",
+        "subject",
+        "target",
+        "source",
+        "evidence",
+        "contract_identity"
+      ],
+      "properties": {
+        "record_id_sha256": {"$ref": "#/definitions/digest64"},
+        "relation": {"$ref": "#/definitions/relation_kind"},
+        "subject": {"$ref": "#/definitions/endpoint"},
+        "target": {"$ref": "#/definitions/endpoint"},
+        "source": {"$ref": "#/definitions/relation_source"},
+        "evidence": {"$ref": "#/definitions/evidence"},
+        "contract_identity": {
+          "anyOf": [
+            {"$ref": "#/definitions/contract_identity"},
+            {"type": "null"}
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "relation": {"enum": ["build_target", "package_target"]}
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {
+                  "class": {
+                    "enum": ["manifest_declaration", "workflow_declaration"]
+                  }
+                }
+              },
+              "source": {
+                "properties": {"kind": {"enum": ["manifest", "workflow"]}}
+              },
+              "contract_identity": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"relation": {"const": "test_registration"}}
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {
+                  "class": {
+                    "enum": [
+                      "explicit_test_registration",
+                      "test_import_or_reference",
+                      "test_naming_heuristic"
+                    ]
+                  }
+                }
+              },
+              "contract_identity": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"relation": {"const": "validates_schema"}}
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {"class": {"const": "schema_validation_call"}}
+              },
+              "source": {
+                "properties": {"kind": {"const": "source_file"}}
+              },
+              "contract_identity": {
+                "type": "object",
+                "properties": {"kind": {"const": "schema"}}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "relation": {"enum": ["produces_artifact", "consumes_artifact"]}
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {"class": {"const": "artifact_declaration"}}
+              },
+              "source": {
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "manifest",
+                      "workflow",
+                      "source_file",
+                      "artifact_contract"
+                    ]
+                  }
+                }
+              },
+              "contract_identity": {
+                "type": "object",
+                "properties": {"kind": {"const": "artifact"}}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "properties": {"class": {"const": "manifest_declaration"}}
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source": {"properties": {"kind": {"const": "manifest"}}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "properties": {"class": {"const": "workflow_declaration"}}
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source": {"properties": {"kind": {"const": "workflow"}}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "properties": {
+                  "class": {
+                    "enum": [
+                      "test_import_or_reference",
+                      "test_naming_heuristic",
+                      "schema_validation_call"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source": {"properties": {"kind": {"const": "source_file"}}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "properties": {"class": {"const": "explicit_test_registration"}}
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "source": {
+                "properties": {
+                  "kind": {"enum": ["manifest", "workflow", "test_registry"]}
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "source_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["format", "evidence_sha256", "repository_commit", "producer"],
+      "properties": {
+        "format": {"const": "repoground_system_relation_evidence_v1"},
+        "evidence_sha256": {"$ref": "#/definitions/digest64"},
+        "repository_commit": {"$ref": "#/definitions/commit"},
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1, "maxLength": 256},
+            "version": {"type": "string", "minLength": 1, "maxLength": 128}
+          }
+        }
+      }
+    },
+    "degradation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "count"],
+      "properties": {
+        "code": {
+          "enum": ["duplicate_records_deduplicated", "records_empty"]
+        },
+        "message": {"type": "string", "minLength": 1},
+        "count": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
