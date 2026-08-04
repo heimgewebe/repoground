@@ -14,7 +14,9 @@ from pathlib import Path
 import jsonschema
 import pytest
 
+from merger.repoground.architecture import call_graph as call_graph_module
 from merger.repoground.architecture.call_graph import (
+    CallGraphBuildCache,
     DOES_NOT_ESTABLISH,
     MAX_SKIPPED_ERRORS,
     _CallGraphVisitor,
@@ -1119,9 +1121,7 @@ def captured_name_guard_success_terminates(value, allowed):
         if call["callee_expression"] == "run"
     }
 
-    assert {
-        name: call["evidence_level"] for name, call in run_calls.items()
-    } == {
+    assert {name: call["evidence_level"] for name, call in run_calls.items()} == {
         "capture_success_terminates": "S1",
         "capture_success_falls_through": "S0",
         "unrelated_capture_guard_success_terminates": "S1",
@@ -1130,15 +1130,17 @@ def captured_name_guard_success_terminates(value, allowed):
     assert run_calls["capture_success_terminates"]["resolution_reason"] == (
         "local_imported_internal_name"
     )
-    assert run_calls["unrelated_capture_guard_success_terminates"][
-        "resolution_reason"
-    ] == "local_imported_internal_name"
+    assert (
+        run_calls["unrelated_capture_guard_success_terminates"]["resolution_reason"]
+        == "local_imported_internal_name"
+    )
     assert run_calls["capture_success_falls_through"]["resolution_reason"] == (
         "lexically_shadowed_name"
     )
-    assert run_calls["captured_name_guard_success_terminates"][
-        "resolution_reason"
-    ] == "lexically_shadowed_name"
+    assert (
+        run_calls["captured_name_guard_success_terminates"]["resolution_reason"]
+        == "lexically_shadowed_name"
+    )
 
 
 def test_try_fallthrough_keeps_only_safe_reachable_import_paths(tmp_path):
@@ -2509,3 +2511,215 @@ def test_redefined_module_function_is_not_treated_as_direct_recursion(tmp_path):
     assert call["evidence_level"] == "S0"
     assert call["resolution_reason"] == "local_module_function_multiple_definitions"
     assert call["resolved_target_ids"] == []
+
+
+def _write_incremental_fixture(root: Path, *, file_count: int = 4) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    padding = "\n".join(f"PAD_{index} = {index}" for index in range(900))
+    for index in range(file_count):
+        (root / f"module_{index}.py").write_text(
+            f"def target_{index}(value):\n"
+            f"    return value\n\n"
+            f"def caller_{index}(value):\n"
+            f"    return target_{index}(value)\n\n"
+            f"{padding}\n",
+            encoding="utf-8",
+        )
+
+
+def test_incremental_cache_invalidates_file_set_and_content(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write_incremental_fixture(repo_root)
+    cache = CallGraphBuildCache()
+    cold_report: dict[str, object] = {}
+    cold = extract_python_calls(
+        repo_root,
+        cache=cache,
+        max_workers=1,
+        build_report=cold_report,
+    )
+    warm_report: dict[str, object] = {}
+    warm = extract_python_calls(
+        repo_root,
+        cache=cache,
+        max_workers=1,
+        build_report=warm_report,
+    )
+    assert warm == cold
+    assert warm_report["cache_hits"] == 4
+    assert warm_report["cache_misses"] == 0
+
+    changed = repo_root / "module_1.py"
+    changed.write_text(
+        changed.read_text(encoding="utf-8")
+        + "\ndef extra(value):\n    return target_1(value)\n",
+        encoding="utf-8",
+    )
+    (repo_root / "module_2.py").rename(repo_root / "renamed.py")
+    (repo_root / "module_3.py").unlink()
+    (repo_root / "added.py").write_text(
+        "def added(value):\n    return value\n",
+        encoding="utf-8",
+    )
+
+    incremental_report: dict[str, object] = {}
+    incremental = extract_python_calls(
+        repo_root,
+        cache=cache,
+        max_workers=1,
+        build_report=incremental_report,
+    )
+    clean = extract_python_calls(
+        repo_root,
+        cache=CallGraphBuildCache(),
+        max_workers=1,
+    )
+    assert incremental == clean
+    assert incremental_report["cache_hits"] == 1
+    assert incremental_report["cache_misses"] == 3
+    assert incremental_report["cache_entries"] == 4
+
+
+def test_cache_entries_are_bound_to_producer_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    _write_incremental_fixture(repo_root, file_count=2)
+    cache = CallGraphBuildCache()
+    extract_python_calls(repo_root, cache=cache, max_workers=1)
+
+    monkeypatch.setattr(
+        call_graph_module,
+        "CALL_GRAPH_PRODUCER_VERSION",
+        "python-call-graph-v1-cache-forced-invalidation",
+    )
+    report: dict[str, object] = {}
+    invalidated = extract_python_calls(
+        repo_root,
+        cache=cache,
+        max_workers=1,
+        build_report=report,
+    )
+    clean = extract_python_calls(repo_root, max_workers=1)
+    assert invalidated == clean
+    assert report["cache_hits"] == 0
+    assert report["cache_misses"] == 2
+
+
+def test_bounded_parallel_build_is_byte_equivalent(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    _write_incremental_fixture(repo_root, file_count=12)
+    serial = extract_python_calls(repo_root, max_workers=1)
+    report: dict[str, object] = {}
+    parallel = extract_python_calls(
+        repo_root,
+        max_workers=2,
+        max_in_flight_bytes=50_000,
+        build_report=report,
+    )
+    assert parallel == serial
+    assert report["parallel_eligible"] is True
+    assert report["parallel_files"] == 12
+    assert 0 < report["peak_in_flight_bytes"] <= 50_000
+    assert report["parallel_fallback"] is False
+
+
+def test_parallel_failure_discards_partial_results_and_retries_serially(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    _write_incremental_fixture(repo_root, file_count=12)
+    serial = extract_python_calls(repo_root, max_workers=1)
+
+    class BrokenExecutor:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> "BrokenExecutor":
+            raise RuntimeError("forced worker failure")
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr(call_graph_module, "_ProcessPoolExecutor", BrokenExecutor)
+    report: dict[str, object] = {}
+    fallback = extract_python_calls(
+        repo_root,
+        max_workers=2,
+        build_report=report,
+    )
+    assert fallback == serial
+    assert report["parallel_fallback"] is True
+    assert report["parallel_files"] == 0
+    assert report["serial_files"] == 12
+    assert "forced worker failure" in str(report["parallel_fallback_reason"])
+
+
+@pytest.mark.parametrize(
+    ("max_workers", "max_in_flight_bytes"),
+    [(0, 1024), (True, 1024), (1, 0), (1, True)],
+)
+def test_incremental_build_rejects_invalid_bounds(
+    tmp_path: Path,
+    max_workers: object,
+    max_in_flight_bytes: object,
+) -> None:
+    with pytest.raises(ValueError):
+        extract_python_calls(
+            tmp_path,
+            max_workers=max_workers,  # type: ignore[arg-type]
+            max_in_flight_bytes=max_in_flight_bytes,  # type: ignore[arg-type]
+        )
+
+
+def test_generate_document_uses_process_local_default_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    _write_incremental_fixture(repo_root)
+    monkeypatch.setattr(
+        call_graph_module,
+        "_DEFAULT_BUILD_CACHE",
+        CallGraphBuildCache(),
+    )
+    first_report: dict[str, object] = {}
+    first = generate_call_graph_document(
+        repo_root,
+        "run-1",
+        "a" * 64,
+        max_workers=1,
+        build_report=first_report,
+    )
+    second_report: dict[str, object] = {}
+    second = generate_call_graph_document(
+        repo_root,
+        "run-1",
+        "a" * 64,
+        max_workers=1,
+        build_report=second_report,
+    )
+    assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+    assert first_report["cache_hits"] == 0
+    assert first_report["cache_misses"] == 4
+    assert second_report["cache_hits"] == 4
+    assert second_report["cache_misses"] == 0
+
+
+def test_unavailable_process_pool_falls_back_to_complete_serial_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    _write_incremental_fixture(repo_root, file_count=12)
+    serial = extract_python_calls(repo_root, max_workers=1)
+    monkeypatch.setattr(call_graph_module, "_ProcessPoolExecutor", None)
+    report: dict[str, object] = {}
+    fallback = extract_python_calls(
+        repo_root,
+        max_workers=2,
+        build_report=report,
+    )
+    assert fallback == serial
+    assert report["parallel_fallback"] is True
+    assert report["parallel_files"] == 0
+    assert report["serial_files"] == 12
+    assert report["parallel_fallback_reason"] == "ProcessPoolExecutor unavailable"

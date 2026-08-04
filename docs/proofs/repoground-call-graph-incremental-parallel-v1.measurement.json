@@ -1,0 +1,179 @@
+{
+  "cold_parallel": {
+    "build_report": {
+      "cache_entries": 700,
+      "cache_hits": 0,
+      "cache_misses": 702,
+      "max_in_flight_bytes": 67108864,
+      "max_workers": 4,
+      "parallel_eligible": true,
+      "parallel_fallback": false,
+      "parallel_fallback_reason": null,
+      "parallel_files": 702,
+      "peak_in_flight_bytes": 402407,
+      "producer_version": "python-call-graph-v1-cache-1-py3.10",
+      "python_file_count": 702,
+      "schema_version": 1,
+      "serial_files": 0
+    },
+    "memory_scope": "Parent-process Python allocations plus the producer's explicit source-payload budget; child-process RSS is not measured.",
+    "parent_peak_bytes": 157200473,
+    "result_sha256": "c12547d4e4dad664f0eb0d8cbf3b8b063ea29db4ded8aa09e6653a94511a1295",
+    "timing": {
+      "max_ms": 11707.529547,
+      "median_ms": 10267.536486,
+      "min_ms": 9106.118657,
+      "p95_ms": 11707.529547,
+      "repetitions": 3
+    }
+  },
+  "cold_serial": {
+    "build_report": {
+      "cache_entries": 700,
+      "cache_hits": 0,
+      "cache_misses": 702,
+      "max_in_flight_bytes": 67108864,
+      "max_workers": 1,
+      "parallel_eligible": false,
+      "parallel_fallback": false,
+      "parallel_fallback_reason": null,
+      "parallel_files": 0,
+      "peak_in_flight_bytes": 0,
+      "producer_version": "python-call-graph-v1-cache-1-py3.10",
+      "python_file_count": 702,
+      "schema_version": 1,
+      "serial_files": 702
+    },
+    "memory_scope": "Parent-process Python allocations plus the producer's explicit source-payload budget; child-process RSS is not measured.",
+    "parent_peak_bytes": 156208461,
+    "result_sha256": "c12547d4e4dad664f0eb0d8cbf3b8b063ea29db4ded8aa09e6653a94511a1295",
+    "timing": {
+      "max_ms": 17400.547151,
+      "median_ms": 16006.583635,
+      "min_ms": 12500.529288,
+      "p95_ms": 17400.547151,
+      "repetitions": 3
+    }
+  },
+  "configuration": {
+    "max_in_flight_bytes": 67108864,
+    "max_workers": 4,
+    "repetitions": 3
+  },
+  "corpus": {
+    "manifest_sha256": "48474b3cb4aaf509b38c214cdc0441c476bbb43ba625266b809ba09325384eb1",
+    "python_file_count": 702,
+    "python_source_bytes": 8853965
+  },
+  "decision": {
+    "cache_optimization_retained": true,
+    "parallel_optimization_retained": true,
+    "regressions": [],
+    "status": "pass"
+  },
+  "does_not_establish": [
+    "faster_all_repositories",
+    "child_process_peak_rss",
+    "semantic_correctness_beyond_equivalence_to_the_serial_producer",
+    "production_capacity_or_slo_compliance"
+  ],
+  "environment": {
+    "cpu_count": 32,
+    "platform": "Linux-7.0.11-76070011-generic-x86_64-with-glibc2.35",
+    "python": "3.10.12"
+  },
+  "equivalence": {
+    "cold_parallel": true,
+    "small_delta_clean_rebuild": true,
+    "warm_unchanged": true
+  },
+  "kind": "repoground_call_graph_incremental_parallel_measurement",
+  "observed_at_unix": 1785829396,
+  "producer_version": "python-call-graph-v1-cache-1-py3.10",
+  "schema_version": 1,
+  "small_delta": {
+    "build_report": {
+      "cache_entries": 700,
+      "cache_hits": 699,
+      "cache_misses": 3,
+      "max_in_flight_bytes": 67108864,
+      "max_workers": 4,
+      "parallel_eligible": false,
+      "parallel_fallback": false,
+      "parallel_fallback_reason": null,
+      "parallel_files": 0,
+      "peak_in_flight_bytes": 0,
+      "producer_version": "python-call-graph-v1-cache-1-py3.10",
+      "python_file_count": 702,
+      "schema_version": 1,
+      "serial_files": 3
+    },
+    "byte_equivalent_to_clean": true,
+    "clean_result_sha256": [
+      "c12547d4e4dad664f0eb0d8cbf3b8b063ea29db4ded8aa09e6653a94511a1295"
+    ],
+    "memory_scope": "Parent-process Python allocations plus the producer's explicit source-payload budget; child-process RSS is not measured.",
+    "mutated_path": "merger/repoground/core/merge.py",
+    "mutation": "append one comment in the temporary corpus",
+    "parent_peak_bytes": 124323552,
+    "result_sha256": [
+      "c12547d4e4dad664f0eb0d8cbf3b8b063ea29db4ded8aa09e6653a94511a1295"
+    ],
+    "timing": {
+      "max_ms": 6242.775215,
+      "median_ms": 5491.759583,
+      "min_ms": 5377.590772,
+      "p95_ms": 6242.775215,
+      "repetitions": 3
+    }
+  },
+  "speedup": {
+    "cold_parallel_vs_serial_median": 1.5589507431334975,
+    "small_delta_vs_cold_serial_median": 2.914654837504018,
+    "warm_unchanged_vs_cold_serial_median": 3.6869966037409334
+  },
+  "warm_unchanged": {
+    "build_report": {
+      "cache_entries": 700,
+      "cache_hits": 700,
+      "cache_misses": 2,
+      "max_in_flight_bytes": 67108864,
+      "max_workers": 4,
+      "parallel_eligible": false,
+      "parallel_fallback": false,
+      "parallel_fallback_reason": null,
+      "parallel_files": 0,
+      "peak_in_flight_bytes": 0,
+      "producer_version": "python-call-graph-v1-cache-1-py3.10",
+      "python_file_count": 702,
+      "schema_version": 1,
+      "serial_files": 2
+    },
+    "memory_scope": "Parent-process Python allocations plus the producer's explicit source-payload budget; child-process RSS is not measured.",
+    "parent_peak_bytes": 120715772,
+    "result_sha256": "c12547d4e4dad664f0eb0d8cbf3b8b063ea29db4ded8aa09e6653a94511a1295",
+    "seed_build_report": {
+      "cache_entries": 700,
+      "cache_hits": 0,
+      "cache_misses": 702,
+      "max_in_flight_bytes": 67108864,
+      "max_workers": 1,
+      "parallel_eligible": false,
+      "parallel_fallback": false,
+      "parallel_fallback_reason": null,
+      "parallel_files": 0,
+      "peak_in_flight_bytes": 0,
+      "producer_version": "python-call-graph-v1-cache-1-py3.10",
+      "python_file_count": 702,
+      "schema_version": 1,
+      "serial_files": 702
+    },
+    "timing": {
+      "max_ms": 4928.699905,
+      "median_ms": 4341.361101,
+      "min_ms": 3685.868839,
+      "p95_ms": 4928.699905,
+      "repetitions": 3
+    }
+  }
+}
