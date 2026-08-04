@@ -1,0 +1,71 @@
+---
+name: RPU V1 T032 Diagnose
+
+"on":
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/rpu-v1-t032-diagnose.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-generated-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha }}"
+
+      - name: Materialize and apply revision-bound transformer
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import base64
+          import gzip
+          import hashlib
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/rpu-v1-t032-apply.yml")
+          lines = workflow.read_text(encoding="utf-8").splitlines()
+          start = next(i for i, line in enumerate(lines) if "cat <<'RPU_T032_B64'" in line) + 1
+          end = next(i for i in range(start, len(lines)) if lines[i].strip() == "RPU_T032_B64")
+          payload = gzip.decompress(base64.b64decode("".join(line.strip() for line in lines[start:end]), validate=True))
+          expected = "fce42c0640a73a5325a9315631f93c19c971a7c5a7c206e023b83104b5f13fef"
+          actual = hashlib.sha256(payload).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"transformer digest mismatch: {actual}")
+          target = Path(".github/scripts/apply_rpu_t032.py")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_bytes(payload)
+          PY
+          python .github/scripts/apply_rpu_t032.py
+
+      - name: Print exact compatibility contexts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path("merger/repoground/architecture/call_graph.py").read_text(encoding="utf-8")
+          for needle in (
+              "method_not_defined_in_same_or_single_base",
+              "dynamic_attribute_call",
+              "receiver_not_direct_method_parameter",
+          ):
+              print(f"\n===== {needle} =====")
+              positions = []
+              start = 0
+              while True:
+                  index = text.find(needle, start)
+                  if index < 0:
+                      break
+                  positions.append(index)
+                  start = index + len(needle)
+              print(f"occurrences={len(positions)}")
+              for number, index in enumerate(positions, 1):
+                  print(f"--- occurrence {number} ---")
+                  print(text[max(0, index - 1800): index + 1800])
+          PY
