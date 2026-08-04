@@ -141,10 +141,10 @@ jobs:
         run: |
           git diff --check
           changed="$(git diff --name-only | sort)"
-          expected=$'merger/repoground/architecture/call_graph.py\nmerger/repoground/tests/test_python_call_graph_s1_recall.py'
-          test "$changed" = "$expected"
+          test "$changed" = "merger/repoground/architecture/call_graph.py"
           untracked="$(git ls-files --others --exclude-standard | sort)"
-          test "$untracked" = ".github/scripts/apply_rpu_t032.py"
+          expected_untracked=$'.github/scripts/apply_rpu_t032.py\nmerger/repoground/tests/test_python_call_graph_s1_recall.py'
+          test "$untracked" = "$expected_untracked"
 
       - name: Commit and publish tested patch
         run: |
