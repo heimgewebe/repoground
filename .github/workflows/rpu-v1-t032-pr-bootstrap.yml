@@ -1,0 +1,103 @@
+---
+name: RPU V1 T032 PR Bootstrap
+
+"on":
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/rpu-v1-t032-apply.yml"
+      - ".github/workflows/rpu-v1-t032-pr-bootstrap.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-tested-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha }}"
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Materialize revision-bound transformer
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import base64
+          import gzip
+          import hashlib
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/rpu-v1-t032-apply.yml")
+          lines = workflow.read_text(encoding="utf-8").splitlines()
+          start = next(
+              index
+              for index, line in enumerate(lines)
+              if "cat <<'RPU_T032_B64'" in line
+          ) + 1
+          end = next(
+              index
+              for index in range(start, len(lines))
+              if lines[index].strip() == "RPU_T032_B64"
+          )
+          encoded = "".join(line.strip() for line in lines[start:end])
+          payload = gzip.decompress(base64.b64decode(encoded, validate=True))
+          digest = hashlib.sha256(payload).hexdigest()
+          expected = "fce42c0640a73a5325a9315631f93c19c971a7c5a7c206e023b83104b5f13fef"
+          if digest != expected:
+              raise SystemExit(f"transformer digest mismatch: {digest}")
+          Path("/tmp/apply_rpu_t032.py").write_bytes(payload)
+          PY
+          python -m py_compile /tmp/apply_rpu_t032.py
+
+      - name: Apply bounded source transformation
+        run: |
+          if test ! -f merger/repoground/tests/test_python_call_graph_s1_recall.py; then
+            python /tmp/apply_rpu_t032.py
+          fi
+
+      - name: Install locked development dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+
+      - name: Ruff autofix and verification
+        run: |
+          ruff check --fix \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+          ruff check \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Run focused call-graph tests
+        run: |
+          python -m pytest -q \
+            merger/repoground/tests/test_python_call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Verify bounded diff
+        run: |
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected=$'merger/repoground/architecture/call_graph.py\nmerger/repoground/tests/test_python_call_graph_s1_recall.py'
+          test -z "$changed" || test "$changed" = "$expected"
+
+      - name: Commit and publish tested patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "feat(call-graph): expand conservative S1 recall"
+          git push origin HEAD:feat/repobrief-call-graph-s1-recall-v1
