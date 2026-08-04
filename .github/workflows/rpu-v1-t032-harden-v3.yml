@@ -64,6 +64,7 @@ jobs:
 
       - name: Verify bounded diff
         run: |
+          rm -rf .pytest_cache
           git diff --check
           changed="$(git diff --name-only | sort)"
           expected=$'merger/repoground/architecture/call_graph.py\nmerger/repoground/tests/test_python_call_graph_s1_recall.py'
