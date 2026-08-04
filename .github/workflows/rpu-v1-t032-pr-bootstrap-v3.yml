@@ -67,16 +67,18 @@ jobs:
               raise SystemExit(f"unexpected absent-method reason count: {text.count(old_reason)}")
           text = text.replace(old_reason, new_reason)
 
-          old_dispatch = '''        if self._direct_method_context(parts[0], stack) is not None:
-              return self._resolve_receiver_dotted(state, parts, stack)
-          return self._resolve_module_dotted(state, parts, stack)
-          '''
-          new_dispatch = '''        if self._direct_method_context(parts[0], stack) is not None:
-              return self._resolve_receiver_dotted(state, parts, stack)
-          if parts[0] in {"self", "cls"}:
-              return _verdict("unresolved", "receiver_not_direct_method_parameter")
-          return self._resolve_module_dotted(state, parts, stack)
-          '''
+          old_dispatch = (
+              "        if self._direct_method_context(parts[0], stack) is not None:\n"
+              "            return self._resolve_receiver_dotted(state, parts, stack)\n"
+              "        return self._resolve_module_dotted(state, parts, stack)\n"
+          )
+          new_dispatch = (
+              "        if self._direct_method_context(parts[0], stack) is not None:\n"
+              "            return self._resolve_receiver_dotted(state, parts, stack)\n"
+              "        if parts[0] in {\"self\", \"cls\"}:\n"
+              "            return _verdict(\"unresolved\", \"receiver_not_direct_method_parameter\")\n"
+              "        return self._resolve_module_dotted(state, parts, stack)\n"
+          )
           if text.count(old_dispatch) != 1:
               raise SystemExit(f"unexpected receiver-dispatch block count: {text.count(old_dispatch)}")
           path.write_text(text.replace(old_dispatch, new_dispatch), encoding="utf-8")
