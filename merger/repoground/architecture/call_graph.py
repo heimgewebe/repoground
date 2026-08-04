@@ -8,10 +8,13 @@ lexical bindings. Everything else remains explicit S0 navigation evidence.
 from __future__ import annotations
 
 import ast
+import hashlib
 import os
-from operator import attrgetter
+import sys
 from dataclasses import dataclass, field, replace
+from operator import attrgetter
 from pathlib import Path
+from threading import RLock
 from typing import Any, Iterable, Iterator, Sequence
 
 from merger.repoground.architecture.call_graph_contract import (
@@ -24,6 +27,11 @@ from merger.repoground.architecture.symbol_index import (
     _range_ref,
     _symbol_id,
 )
+
+try:
+    from concurrent.futures import ProcessPoolExecutor as _ProcessPoolExecutor
+except ImportError:  # pragma: no cover - platform-dependent stdlib surface
+    _ProcessPoolExecutor = None
 
 RESOLUTION_STATUSES = ("resolved", "candidate", "ambiguous", "unresolved")
 EVIDENCE_LEVELS = ("S0", "S1")
@@ -61,6 +69,97 @@ class _RawCall:
     end_col: int
     func: ast.expr
     stack: tuple[_ScopeFrame, ...]
+
+
+CALL_GRAPH_CACHE_SCHEMA_VERSION = 1
+CALL_GRAPH_PRODUCER_VERSION = (
+    f"python-call-graph-v1-cache-{CALL_GRAPH_CACHE_SCHEMA_VERSION}-"
+    f"py{sys.version_info.major}.{sys.version_info.minor}"
+)
+DEFAULT_CALL_GRAPH_MAX_WORKERS = max(1, min(4, os.cpu_count() or 1))
+DEFAULT_CALL_GRAPH_MAX_IN_FLIGHT_BYTES = 64 * 1024 * 1024
+_MIN_PARALLEL_FILES = 8
+_MIN_PARALLEL_BYTES = 128 * 1024
+
+
+@dataclass(frozen=True, slots=True)
+class _CachedRawCall:
+    start_line: int
+    start_col: int
+    end_line: int
+    end_col: int
+    callee_expression: str
+    stack: tuple[_ScopeFrame, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _ModuleSnapshot:
+    path: str
+    module: str
+    functions: tuple[tuple[str, tuple[str, ...]], ...]
+    classes: tuple[tuple[str, tuple[str, ...]], ...]
+    methods: tuple[tuple[str, str, tuple[str, ...]], ...]
+    symbol_kinds: tuple[tuple[str, str], ...]
+    from_imports: tuple[tuple[str, str, str], ...]
+    module_aliases: tuple[tuple[str, str], ...]
+    imported_module_names: tuple[str, ...]
+    binding_sources: tuple[tuple[str, tuple[str, ...]], ...]
+    calls: tuple[_CachedRawCall, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _CallGraphCacheEntry:
+    content_sha256: str
+    producer_version: str
+    snapshot: _ModuleSnapshot
+
+
+@dataclass(slots=True)
+class CallGraphBuildCache:
+    """Process-local, input-bound cache of immutable per-file analysis snapshots."""
+
+    _entries: dict[str, _CallGraphCacheEntry] = field(
+        default_factory=dict, init=False, repr=False
+    )
+    _lock: Any = field(default_factory=RLock, init=False, repr=False, compare=False)
+
+    def lookup(self, path: str, content_sha256: str) -> _ModuleSnapshot | None:
+        with self._lock:
+            entry = self._entries.get(path)
+            if (
+                entry is None
+                or entry.content_sha256 != content_sha256
+                or entry.producer_version != CALL_GRAPH_PRODUCER_VERSION
+            ):
+                return None
+            return entry.snapshot
+
+    def replace(self, entries: dict[str, _CallGraphCacheEntry]) -> None:
+        with self._lock:
+            self._entries = dict(entries)
+
+    @property
+    def entry_count(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+_DEFAULT_BUILD_CACHE = CallGraphBuildCache()
+
+
+@dataclass(frozen=True, slots=True)
+class _PythonFileInput:
+    path: Path
+    relative_path: str
+    content_sha256: str
+    size_bytes: int
+    is_package: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _ParseOutcome:
+    snapshot: _ModuleSnapshot | None
+    error: str | None = None
 
 
 class _ModuleState:
@@ -1659,13 +1758,235 @@ class _Resolver:
         return record
 
 
-def extract_python_calls(
-    repo_root: Path,
-) -> tuple[list[dict[str, Any]], int, list[str]]:
-    """Return deterministic call records plus bounded parse diagnostics."""
-    modules: dict[str, list[_ModuleState]] = {}
-    skipped_files_count = 0
-    skipped_errors: list[str] = []
+def _snapshot_module_state(state: _ModuleState) -> _ModuleSnapshot:
+    return _ModuleSnapshot(
+        path=state.path,
+        module=state.module,
+        functions=tuple(
+            (name, tuple(values)) for name, values in sorted(state.functions.items())
+        ),
+        classes=tuple(
+            (name, tuple(values)) for name, values in sorted(state.classes.items())
+        ),
+        methods=tuple(
+            (owner, name, tuple(values))
+            for (owner, name), values in sorted(state.methods.items())
+        ),
+        symbol_kinds=tuple(sorted(state.symbol_kinds.items())),
+        from_imports=tuple(
+            (name, module, original)
+            for name, (module, original) in sorted(state.from_imports.items())
+        ),
+        module_aliases=tuple(sorted(state.module_aliases.items())),
+        imported_module_names=tuple(sorted(state.imported_module_names)),
+        binding_sources=tuple(
+            (name, tuple(sorted(values)))
+            for name, values in sorted(state.binding_sources.items())
+        ),
+        calls=tuple(
+            _CachedRawCall(
+                start_line=raw_call.start_line,
+                start_col=raw_call.start_col,
+                end_line=raw_call.end_line,
+                end_col=raw_call.end_col,
+                callee_expression=ast.unparse(raw_call.func),
+                stack=raw_call.stack,
+            )
+            for raw_call in state.calls
+        ),
+    )
+
+
+def _restore_module_state(snapshot: _ModuleSnapshot) -> _ModuleState:
+    state = _ModuleState(snapshot.path, snapshot.module)
+    state.functions = {name: list(values) for name, values in snapshot.functions}
+    state.classes = {name: list(values) for name, values in snapshot.classes}
+    state.methods = {
+        (owner, name): list(values) for owner, name, values in snapshot.methods
+    }
+    state.symbol_kinds = dict(snapshot.symbol_kinds)
+    state.from_imports = {
+        name: (module, original) for name, module, original in snapshot.from_imports
+    }
+    state.module_aliases = dict(snapshot.module_aliases)
+    state.imported_module_names = set(snapshot.imported_module_names)
+    state.binding_sources = {
+        name: set(values) for name, values in snapshot.binding_sources
+    }
+    state.calls = [
+        _RawCall(
+            start_line=raw_call.start_line,
+            start_col=raw_call.start_col,
+            end_line=raw_call.end_line,
+            end_col=raw_call.end_col,
+            func=ast.parse(raw_call.callee_expression, mode="eval").body,
+            stack=raw_call.stack,
+        )
+        for raw_call in snapshot.calls
+    ]
+    return state
+
+
+def _parse_python_source(
+    relative_path: str,
+    filename: str,
+    is_package: bool,
+    source: str,
+) -> _ParseOutcome:
+    try:
+        tree = ast.parse(source, filename=filename)
+    except SyntaxError as exc:
+        return _ParseOutcome(
+            snapshot=None,
+            error=(f"Failed to parse {relative_path}: {type(exc).__name__} - {exc}"),
+        )
+    visitor = _CallGraphVisitor(relative_path, is_package=is_package)
+    visitor.visit(tree)
+    return _ParseOutcome(snapshot=_snapshot_module_state(visitor.state))
+
+
+def _fingerprint_python_file(path: Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _read_parse_input(item: _PythonFileInput) -> tuple[str | None, str | None]:
+    try:
+        payload = item.path.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != item.content_sha256:
+            raise OSError("source changed while the call graph was being generated")
+        return payload.decode("utf-8"), None
+    except (OSError, UnicodeDecodeError) as exc:
+        return None, (
+            f"Failed to parse {item.relative_path}: {type(exc).__name__} - {exc}"
+        )
+
+
+def _parse_serial(
+    items: Sequence[_PythonFileInput],
+) -> dict[str, _ParseOutcome]:
+    outcomes: dict[str, _ParseOutcome] = {}
+    for item in items:
+        source, error = _read_parse_input(item)
+        if error is not None:
+            outcomes[item.relative_path] = _ParseOutcome(None, error)
+            continue
+        assert source is not None
+        outcomes[item.relative_path] = _parse_python_source(
+            item.relative_path,
+            str(item.path),
+            item.is_package,
+            source,
+        )
+    return outcomes
+
+
+def _parse_bounded_parallel(
+    items: Sequence[_PythonFileInput],
+    *,
+    max_workers: int,
+    max_in_flight_bytes: int,
+) -> tuple[dict[str, _ParseOutcome], int, int, str | None]:
+    outcomes: dict[str, _ParseOutcome] = {}
+    peak_in_flight_bytes = 0
+    parallel_files = 0
+    executor_type = _ProcessPoolExecutor
+    if executor_type is None:
+        return (
+            _parse_serial(items),
+            0,
+            0,
+            "ProcessPoolExecutor unavailable",
+        )
+    try:
+        with executor_type(max_workers=max_workers) as executor:
+            index = 0
+            while index < len(items):
+                batch: list[tuple[_PythonFileInput, str]] = []
+                batch_bytes = 0
+                while index < len(items):
+                    item = items[index]
+                    if item.size_bytes > max_in_flight_bytes:
+                        source, error = _read_parse_input(item)
+                        outcomes[item.relative_path] = (
+                            _ParseOutcome(None, error)
+                            if error is not None
+                            else _parse_python_source(
+                                item.relative_path,
+                                str(item.path),
+                                item.is_package,
+                                source or "",
+                            )
+                        )
+                        index += 1
+                        continue
+                    if batch and (
+                        len(batch) >= max_workers * 2
+                        or batch_bytes + item.size_bytes > max_in_flight_bytes
+                    ):
+                        break
+                    source, error = _read_parse_input(item)
+                    index += 1
+                    if error is not None:
+                        outcomes[item.relative_path] = _ParseOutcome(None, error)
+                        continue
+                    assert source is not None
+                    batch.append((item, source))
+                    batch_bytes += len(source.encode("utf-8"))
+                if not batch:
+                    continue
+                peak_in_flight_bytes = max(peak_in_flight_bytes, batch_bytes)
+                futures = [
+                    executor.submit(
+                        _parse_python_source,
+                        item.relative_path,
+                        str(item.path),
+                        item.is_package,
+                        source,
+                    )
+                    for item, source in batch
+                ]
+                for (item, _), future in zip(batch, futures):
+                    outcomes[item.relative_path] = future.result()
+                    parallel_files += 1
+        return outcomes, parallel_files, peak_in_flight_bytes, None
+    except Exception as exc:
+        # Discard every parallel result. A complete serial retry prevents a
+        # worker failure from producing a mixed or partial graph.
+        return (
+            _parse_serial(items),
+            0,
+            0,
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _normalized_worker_count(max_workers: int | None) -> int:
+    value = DEFAULT_CALL_GRAPH_MAX_WORKERS if max_workers is None else max_workers
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("max_workers must be a positive integer or None")
+    return min(value, 32)
+
+
+def _collect_python_inputs(
+    repo_root: Path, cache: CallGraphBuildCache | None
+) -> tuple[
+    list[str],
+    dict[str, _PythonFileInput],
+    dict[str, _ParseOutcome],
+    int,
+    list[_PythonFileInput],
+]:
+    ordered_paths: list[str] = []
+    inputs: dict[str, _PythonFileInput] = {}
+    outcomes: dict[str, _ParseOutcome] = {}
+    cache_hits = 0
+    cache_misses: list[_PythonFileInput] = []
     for root, dirs, files in os.walk(repo_root, topdown=True):
         dirs[:] = sorted(
             directory for directory in dirs if directory not in EXCLUDED_DIRS
@@ -1675,18 +1996,111 @@ def extract_python_calls(
                 continue
             path = Path(root) / file_name
             rel_path = path.relative_to(repo_root).as_posix()
+            ordered_paths.append(rel_path)
             try:
-                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            except (OSError, SyntaxError, UnicodeDecodeError) as exc:
-                skipped_files_count += 1
-                if len(skipped_errors) < MAX_SKIPPED_ERRORS:
-                    skipped_errors.append(
-                        f"Failed to parse {rel_path}: {type(exc).__name__} - {exc}"
-                    )
+                content_sha256, size_bytes = _fingerprint_python_file(path)
+            except OSError as exc:
+                outcomes[rel_path] = _ParseOutcome(
+                    None,
+                    f"Failed to parse {rel_path}: {type(exc).__name__} - {exc}",
+                )
                 continue
-            visitor = _CallGraphVisitor(rel_path, is_package=file_name == "__init__.py")
-            visitor.visit(tree)
-            modules.setdefault(visitor.state.module, []).append(visitor.state)
+            item = _PythonFileInput(
+                path=path,
+                relative_path=rel_path,
+                content_sha256=content_sha256,
+                size_bytes=size_bytes,
+                is_package=file_name == "__init__.py",
+            )
+            inputs[rel_path] = item
+            snapshot = None if cache is None else cache.lookup(rel_path, content_sha256)
+            if snapshot is None:
+                cache_misses.append(item)
+                continue
+            try:
+                _restore_module_state(snapshot)
+            except (SyntaxError, ValueError, TypeError):
+                cache_misses.append(item)
+                continue
+            outcomes[rel_path] = _ParseOutcome(snapshot=snapshot)
+            cache_hits += 1
+    return ordered_paths, inputs, outcomes, cache_hits, cache_misses
+
+
+def _assemble_module_states(
+    ordered_paths: Sequence[str],
+    inputs: dict[str, _PythonFileInput],
+    outcomes: dict[str, _ParseOutcome],
+    cache: CallGraphBuildCache | None,
+) -> tuple[dict[str, list[_ModuleState]], int, list[str]]:
+    modules: dict[str, list[_ModuleState]] = {}
+    current_cache_entries: dict[str, _CallGraphCacheEntry] = {}
+    skipped_files_count = 0
+    skipped_errors: list[str] = []
+    for rel_path in ordered_paths:
+        outcome = outcomes[rel_path]
+        if outcome.error is not None or outcome.snapshot is None:
+            skipped_files_count += 1
+            if len(skipped_errors) < MAX_SKIPPED_ERRORS:
+                skipped_errors.append(outcome.error or f"Failed to parse {rel_path}")
+            continue
+        state = _restore_module_state(outcome.snapshot)
+        modules.setdefault(state.module, []).append(state)
+        item = inputs[rel_path]
+        current_cache_entries[rel_path] = _CallGraphCacheEntry(
+            content_sha256=item.content_sha256,
+            producer_version=CALL_GRAPH_PRODUCER_VERSION,
+            snapshot=outcome.snapshot,
+        )
+    if cache is not None:
+        cache.replace(current_cache_entries)
+    return modules, skipped_files_count, skipped_errors
+
+
+def extract_python_calls(
+    repo_root: Path,
+    *,
+    cache: CallGraphBuildCache | None = None,
+    max_workers: int | None = None,
+    max_in_flight_bytes: int = DEFAULT_CALL_GRAPH_MAX_IN_FLIGHT_BYTES,
+    build_report: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], int, list[str]]:
+    """Return deterministic calls with optional hash-bound reuse and parsing."""
+    workers = _normalized_worker_count(max_workers)
+    if (
+        isinstance(max_in_flight_bytes, bool)
+        or not isinstance(max_in_flight_bytes, int)
+        or max_in_flight_bytes < 1
+    ):
+        raise ValueError("max_in_flight_bytes must be a positive integer")
+
+    ordered_paths, inputs, outcomes, cache_hits, cache_misses = _collect_python_inputs(
+        repo_root, cache
+    )
+
+    parallel_eligible = (
+        workers > 1
+        and len(cache_misses) >= _MIN_PARALLEL_FILES
+        and sum(item.size_bytes for item in cache_misses) >= _MIN_PARALLEL_BYTES
+    )
+    parallel_files = 0
+    peak_in_flight_bytes = 0
+    fallback_reason: str | None = None
+    if parallel_eligible:
+        parsed, parallel_files, peak_in_flight_bytes, fallback_reason = (
+            _parse_bounded_parallel(
+                cache_misses,
+                max_workers=workers,
+                max_in_flight_bytes=max_in_flight_bytes,
+            )
+        )
+    else:
+        parsed = _parse_serial(cache_misses)
+    outcomes.update(parsed)
+
+    modules, skipped_files_count, skipped_errors = _assemble_module_states(
+        ordered_paths, inputs, outcomes, cache
+    )
 
     resolver = _Resolver(modules)
     calls = [
@@ -1704,13 +2118,46 @@ def extract_python_calls(
             item["caller_symbol_id"] or "",
         )
     )
+    if build_report is not None:
+        build_report.clear()
+        build_report.update(
+            {
+                "schema_version": 1,
+                "producer_version": CALL_GRAPH_PRODUCER_VERSION,
+                "python_file_count": len(ordered_paths),
+                "cache_hits": cache_hits,
+                "cache_misses": len(cache_misses),
+                "cache_entries": 0 if cache is None else cache.entry_count,
+                "max_workers": workers,
+                "parallel_eligible": parallel_eligible,
+                "parallel_files": parallel_files,
+                "serial_files": len(cache_misses) - parallel_files,
+                "max_in_flight_bytes": max_in_flight_bytes,
+                "peak_in_flight_bytes": peak_in_flight_bytes,
+                "parallel_fallback": fallback_reason is not None,
+                "parallel_fallback_reason": fallback_reason,
+            }
+        )
     return calls, skipped_files_count, skipped_errors
 
 
 def generate_call_graph_document(
-    repo_root: Path, run_id: str, canonical_sha256: str
+    repo_root: Path,
+    run_id: str,
+    canonical_sha256: str,
+    *,
+    cache: CallGraphBuildCache | None = None,
+    max_workers: int | None = None,
+    max_in_flight_bytes: int = DEFAULT_CALL_GRAPH_MAX_IN_FLIGHT_BYTES,
+    build_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    calls, skipped_count, skipped_errors = extract_python_calls(repo_root)
+    calls, skipped_count, skipped_errors = extract_python_calls(
+        repo_root,
+        cache=_DEFAULT_BUILD_CACHE if cache is None else cache,
+        max_workers=max_workers,
+        max_in_flight_bytes=max_in_flight_bytes,
+        build_report=build_report,
+    )
     resolution_counts = {status: 0 for status in RESOLUTION_STATUSES}
     evidence_counts = {level: 0 for level in EVIDENCE_LEVELS}
     relation_counts = {relation: 0 for relation in RELATION_TYPES}
