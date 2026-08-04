@@ -1,0 +1,38 @@
+---
+name: RPU V1 T032 Transformer Diagnose
+
+"on":
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/rpu-v1-t032-transformer-diagnose.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: "${{ github.event.pull_request.head.sha }}"
+      - name: Decode and inspect failing replacement
+        run: |
+          mkdir -p .github/scripts
+          base64 -d .github/rpu-t032/transformer.b64 | gzip -d > .github/scripts/transformer.py
+          python - <<'PY'
+          from pathlib import Path
+
+          script = Path('.github/scripts/transformer.py').read_text(encoding='utf-8')
+          marker = 'from import flow handling'
+          index = script.index(marker)
+          print('===== TRANSFORMER CONTEXT =====')
+          print(script[max(0, index - 3500): index + 1000])
+
+          source = Path('merger/repoground/architecture/call_graph.py').read_text(encoding='utf-8')
+          index = source.index('    def visit_ImportFrom')
+          print('===== SOURCE CONTEXT =====')
+          print(source[index:index + 3000])
+          PY
