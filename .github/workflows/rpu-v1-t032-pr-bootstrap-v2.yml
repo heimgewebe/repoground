@@ -1,0 +1,111 @@
+---
+name: RPU V1 T032 PR Bootstrap V2
+
+"on":
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/rpu-v1-t032-apply.yml"
+      - ".github/workflows/rpu-v1-t032-pr-bootstrap-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-tested-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha }}"
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Materialize revision-bound transformer
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import base64
+          import gzip
+          import hashlib
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/rpu-v1-t032-apply.yml")
+          lines = workflow.read_text(encoding="utf-8").splitlines()
+          start = next(
+              index
+              for index, line in enumerate(lines)
+              if "cat <<'RPU_T032_B64'" in line
+          ) + 1
+          end = next(
+              index
+              for index in range(start, len(lines))
+              if lines[index].strip() == "RPU_T032_B64"
+          )
+          encoded = "".join(line.strip() for line in lines[start:end])
+          payload = gzip.decompress(base64.b64decode(encoded, validate=True))
+          expected = "fce42c0640a73a5325a9315631f93c19c971a7c5a7c206e023b83104b5f13fef"
+          actual = hashlib.sha256(payload).hexdigest()
+          if actual != expected:
+              raise SystemExit(f"transformer digest mismatch: {actual}")
+          target = Path(".github/scripts/apply_rpu_t032.py")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_bytes(payload)
+          PY
+          python -m py_compile .github/scripts/apply_rpu_t032.py
+
+      - name: Apply bounded source transformation
+        run: python .github/scripts/apply_rpu_t032.py
+
+      - name: Materialize revision-bound precision goldset
+        run: |
+          cat <<'RPU_T032_TEST_B64' | base64 -d > merger/repoground/tests/test_python_call_graph_s1_recall.py
+          ZnJvbSBfX2Z1dHVyZV9fIGltcG9ydCBhbm5vdGF0aW9ucwoKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCmZyb20gdHlwaW5nIGltcG9ydCBBbnkKCmZyb20gbWVyZ2VyLnJlcG9ncm91bmQuYXJjaGl0ZWN0dXJlLmNhbGxfZ3JhcGggaW1wb3J0IGV4dHJhY3RfcHl0aG9uX2NhbGxzCgoKZGVmIF93cml0ZShyb290OiBQYXRoLCByZWxhdGl2ZTogc3RyLCBzb3VyY2U6IHN0cikgLT4gTm9uZToKICAgIHBhdGggPSByb290IC8gcmVsYXRpdmUKICAgIHBhdGgucGFyZW50Lm1rZGlyKHBhcmVudHM9VHJ1ZSwgZXhpc3Rfb2s9VHJ1ZSkKICAgIHBhdGgud3JpdGVfdGV4dChzb3VyY2UsIGVuY29kaW5nPSJ1dGYtOCIpCgoKZGVmIF9zaW5nbGUoCiAgICBjYWxsczogbGlzdFtkaWN0W3N0ciwgQW55XV0sCiAgICBleHByZXNzaW9uOiBzdHIsCiAgICAqLAogICAgY2FsbGVyOiBzdHIgfCBOb25lID0gTm9uZSwKKSAtPiBkaWN0W3N0ciwgQW55XToKICAgIG1hdGNoZXMgPSBbCiAgICAgICAgY2FsbAogICAgICAgIGZvciBjYWxsIGluIGNhbGxzCiAgICAgICAgaWYgY2FsbFsiY2FsbGVlX2V4cHJlc3Npb24iXSA9PSBleHByZXNzaW9uCiAgICAgICAgYW5kIChjYWxsZXIgaXMgTm9uZSBvciBjYWxsWyJjYWxsZXJfcXVhbGlmaWVkX25hbWUiXSA9PSBjYWxsZXIpCiAgICBdCiAgICBhc3NlcnQgbGVuKG1hdGNoZXMpID09IDEsIG1hdGNoZXMKICAgIHJldHVybiBtYXRjaGVzWzBdCgoKZGVmIF9hc3NlcnRfczFfcHJlY2lzaW9uKAogICAgY2FsbHM6IGxpc3RbZGljdFtzdHIsIEFueV1dLAogICAgZXhwZWN0ZWQ6IGRpY3Rbc3RyLCB0dXBsZVtzdHIsIHN0cl1dLAopIC0+IE5vbmU6CiAgICBieV9yZWFzb246IGRpY3Rbc3RyLCBsaXN0W2Jvb2xdXSA9IHt9CiAgICBmb3IgZXhwcmVzc2lvbiwgKHJlYXNvbiwgdGFyZ2V0X2lkKSBpbiBleHBlY3RlZC5pdGVtcygpOgogICAgICAgIGNhbGwgPSBfc2luZ2xlKGNhbGxzLCBleHByZXNzaW9uKQogICAgICAgIGFzc2VydCBjYWxsWyJldmlkZW5jZV9sZXZlbCJdID09ICJTMSIKICAgICAgICBhc3NlcnQgY2FsbFsicmVzb2x1dGlvbl9zdGF0dXMiXSA9PSAicmVzb2x2ZWQiCiAgICAgICAgYXNzZXJ0IGNhbGxbInJlc29sdXRpb25fcmVhc29uIl0gPT0gcmVhc29uCiAgICAgICAgY29ycmVjdCA9IGNhbGxbInJlc29sdmVkX3RhcmdldF9pZHMiXSA9PSBbdGFyZ2V0X2lkXQogICAgICAgIGJ5X3JlYXNvbi5zZXRkZWZhdWx0KHJlYXNvbiwgW10pLmFwcGVuZChjb3JyZWN0KQogICAgYXNzZXJ0IGJ5X3JlYXNvbgogICAgZm9yIG91dGNvbWVzIGluIGJ5X3JlYXNvbi52YWx1ZXMoKToKICAgICAgICBwcmVjaXNpb24gPSBzdW0ob3V0Y29tZXMpIC8gbGVuKG91dGNvbWVzKQogICAgICAgIGFzc2VydCBwcmVjaXNpb24gPT0gMS4wCiAgICAgICAgYXNzZXJ0IHByZWNpc2lvbiA+PSAwLjk3CgoKZGVmIHRlc3RfcHJvbW90ZWRfcmVhc29uX2NsYXNzZXNfaGF2ZV9maXhlZF9nb2xkc2V0X3ByZWNpc2lvbih0bXBfcGF0aDogUGF0aCkgLT4gTm9uZToKICAgIF93cml0ZSgKICAgICAgICB0bXBfcGF0aCwKICAgICAgICAibW9kZWwucHkiLAogICAgICAgICIiImNsYXNzIEJhc2U6CiAgICBkZWYgdGFyZ2V0KHNlbGYpOgogICAgICAgIHJldHVybiAxCgoKY2xhc3MgQ2hpbGQoQmFzZSk6CiAgICBkZWYgaW5oZXJpdGVkKHNlbGYpOgogICAgICAgIHJldHVybiBzZWxmLnRhcmdldCgpCgogICAgZGVmIGFsaWFzZWQoc2VsZik6CiAgICAgICAgcmVjZWl2ZXIgPSBzZWxmCiAgICAgICAgcmV0dXJuIHJlY2VpdmVyLnRhcmdldCgpCgogICAgZGVmIHZpYV9zdXBlcihzZWxmKToKICAgICAgICByZXR1cm4gc3VwZXIoKS50YXJnZXQoKQoiIiIsCiAgICApCiAgICBfd3JpdGUodG1wX3BhdGgsICJwa2cvX19pbml0X18ucHkiLCAiIikKICAgIF93cml0ZSgKICAgICAgICB0bXBfcGF0aCwKICAgICAgICAicGtnL2ltcGwucHkiLAogICAgICAgICIiImRlZiB0YXJnZXQoKToKICAgIHJldHVybiAxCiIiIiwKICAgICkKICAgIF93cml0ZSgKICAgICAgICB0bXBfcGF0aCwKICAgICAgICAicGtnL3JlZXhwb3J0LnB5IiwKICAgICAgICAiZnJvbSBwa2cuaW1wbCBpbXBvcnQgdGFyZ2V0XG4iLAogICAgKQogICAgX3dyaXRlKAogICAgICAgIHRtcF9wYXRoLAogICAgICAgICJ0cmFuc2l0aXZlLnB5IiwKICAgICAgICAiZnJvbSBwa2cucmVleHBvcnQgaW1wb3J0IHRhcmdldFxudGFyZ2V0KClcbiIsCiAgICApCgogICAgY2FsbHMsIGVycm9ycywgXyA9IGV4dHJhY3RfcHl0aG9uX2NhbGxzKHRtcF9wYXRoKQogICAgYXNzZXJ0IGVycm9ycyA9PSBbXQogICAgX2Fzc2VydF9zMV9wcmVjaXNpb24oCiAgICAgICAgY2FsbHMsCiAgICAgICAgewogICAgICAgICAgICAic2VsZi50YXJnZXQiOiAoCiAgICAgICAgICAgICAgICAic2VsZl9zaW5nbGVfaW5oZXJpdGFuY2VfbWV0aG9kIiwKICAgICAgICAgICAgICAgICJweTptb2RlbC5weTpmdW5jdGlvbjpCYXNlLnRhcmdldCIsCiAgICAgICAgICAgICksCiAgICAgICAgICAgICJyZWNlaXZlci50YXJnZXQiOiAoCiAgICAgICAgICAgICAgICAicmVjZWl2ZXJfYWxpYXNfc2luZ2xlX2luaGVyaXRhbmNlX21ldGhvZCIsCiAgICAgICAgICAgICAgICAicHk6bW9kZWwucHk6ZnVuY3Rpb246QmFzZS50YXJnZXQiLAogICAgICAgICAgICApLAogICAgICAgICAgICAic3VwZXIoKS50YXJnZXQiOiAoCiAgICAgICAgICAgICAgICAic3VwZXJfc2luZ2xlX2luaGVyaXRhbmNlX21ldGhvZCIsCiAgICAgICAgICAgICAgICAicHk6bW9kZWwucHk6ZnVuY3Rpb246QmFzZS50YXJnZXQiLAogICAgICAgICAgICApLAogICAgICAgICAgICAidGFyZ2V0IjogKAogICAgICAgICAgICAgICAgInRyYW5zaXRpdmVfaW1wb3J0ZWRfaW50ZXJuYWxfbmFtZSIsCiAgICAgICAgICAgICAgICAicHk6cGtnOmltcGwucHk6ZnVuY3Rpb246dGFyZ2V0IiwKICAgICAgICAgICAgKSwKICAgICAgICB9LAogICAgKQoKCmRlZiB0ZXN0X21peGluX3ByZWNlZGVuY2VfcmVtYWluc19leHBsaWNpdF9zMCh0bXBfcGF0aDogUGF0aCkgLT4gTm9uZToKICAgIF93cml0ZSgKICAgICAgICB0bXBfcGF0aCwKICAgICAgICAibWl4aW5zLnB5IiwKICAgICAgICAiIiJjbGFzcyBMZWZ0OgogICAgZGVmIHRhcmdldChzZWxmKToKICAgICAgICByZXR1cm4gMQoKCmNsYXNzIFJpZ2h0OgogICAgZGVmIHRhcmdldChzZWxmKToKICAgICAgICByZXR1cm4gMgoKCmNsYXNzIENvbWJpbmVkKExlZnQsIFJpZ2h0KToKICAgIGRlZiBjYWxsKHNlbGYpOgogICAgICAgIHJldHVybiBzZWxmLnRhcmdldCgpCiIiIiwKICAgICkKCiAgICBjYWxscywgZXJyb3JzLCBfID0gZXh0cmFjdF9weXRob25fY2FsbHModG1wX3BhdGgpCiAgICBhc3NlcnQgZXJyb3JzID09IFtdCiAgICBjYWxsID0gX3NpbmdsZShjYWxscywgInNlbGYudGFyZ2V0IikKICAgIGFzc2VydCBjYWxsWyJldmlkZW5jZV9sZXZlbCJdID09ICJTMCIKICAgIGFzc2VydCBjYWxsWyJyZXNvbHV0aW9uX3N0YXR1cyJdID09ICJ1bnJlc29sdmVkIgogICAgYXNzZXJ0IGNhbGxbInJlc29sdXRpb25fcmVhc29uIl0gPT0gIm1peGluX29yX211bHRpcGxlX2luaGVyaXRhbmNlX25vdF9wcm9tb3RlZCIKICAgIGFzc2VydCBjYWxsWyJyZXNvbHZlZF90YXJnZXRfaWRzIl0gPT0gW10KCgpkZWYgdGVzdF9zdGFyX2ltcG9ydF9hbmRfbW9kdWxlX2dldGF0dHJfcmVtYWluX2V4cGxpY2l0X3MwKHRtcF9wYXRoOiBQYXRoKSAtPiBOb25lOgogICAgX3dyaXRlKHRtcF9wYXRoLCAicGtnL19faW5pdF9fLnB5IiwgIiIpCiAgICBfd3JpdGUoCiAgICAgICAgdG1wX3BhdGgsCiAgICAgICAgInBrZy9zdGFyLnB5IiwKICAgICAgICAiIiJfX2FsbF9fID0gWyJleHBvcnRlZCJdCgoKZGVmIGV4cG9ydGVkKCk6CiAgICByZXR1cm4gMQoiIiIsCiAgICApCiAgICBfd3JpdGUoCiAgICAgICAgdG1wX3BhdGgsCiAgICAgICAgInBrZy9keW5hbWljLnB5IiwKICAgICAgICAiIiJkZWYgX19nZXRhdHRyX18obmFtZSk6CiAgICByZXR1cm4gbGFtYmRhOiBuYW1lCiIiIiwKICAgICkKICAgIF93cml0ZSgKICAgICAgICB0bXBfcGF0aCwKICAgICAgICAic3Rhcl91c2VyLnB5IiwKICAgICAgICAiZnJvbSBwa2cuc3RhciBpbXBvcnQgKlxuZXhwb3J0ZWQoKVxuIiwKICAgICkKICAgIF93cml0ZSgKICAgICAgICB0bXBfcGF0aCwKICAgICAgICAiZHluYW1pY191c2VyLnB5IiwKICAgICAgICAiaW1wb3J0IHBrZy5keW5hbWljIGFzIGR5blxuZHluLm1pc3NpbmcoKVxuIiwKICAgICkKCiAgICBjYWxscywgZXJyb3JzLCBfID0gZXh0cmFjdF9weXRob25fY2FsbHModG1wX3BhdGgpCiAgICBhc3NlcnQgZXJyb3JzID09IFtdCiAgICBzdGFyID0gX3NpbmdsZShjYWxscywgImV4cG9ydGVkIikKICAgIGFzc2VydCBzdGFyWyJldmlkZW5jZV9sZXZlbCJdID09ICJTMCIKICAgIGFzc2VydCBzdGFyWyJyZXNvbHV0aW9uX3JlYXNvbiJdID09ICJzdGFyX2ltcG9ydF91bnJlc29sdmVkIgogICAgYXNzZXJ0IHN0YXJbInJlc29sdmVkX3RhcmdldF9pZHMiXSA9PSBbXQogICAgZHluYW1pYyA9IF9zaW5nbGUoY2FsbHMsICJkeW4ubWlzc2luZyIpCiAgICBhc3NlcnQgZHluYW1pY1siZXZpZGVuY2VfbGV2ZWwiXSA9PSAiUzAiCiAgICBhc3NlcnQgZHluYW1pY1sicmVzb2x1dGlvbl9yZWFzb24iXSA9PSAibW9kdWxlX2FsaWFzX2NhbGxfbW9kdWxlX2dldGF0dHJfZGlzcGF0Y2giCiAgICBhc3NlcnQgZHluYW1pY1sicmVzb2x2ZWRfdGFyZ2V0X2lkcyJdID09IFtdCgoKZGVmIHRlc3RfYWxpYXNfcmViaW5kaW5nX2FuZF9tb25rZXlfcGF0Y2hfZG9fbm90X3Byb21vdGUodG1wX3BhdGg6IFBhdGgpIC0+IE5vbmU6CiAgICBfd3JpdGUoCiAgICAgICAgdG1wX3BhdGgsCiAgICAgICAgImR5bmFtaWMucHkiLAogICAgICAgICIiImNsYXNzIEJhc2U6CiAgICBkZWYgdGFyZ2V0KHNlbGYpOgogICAgICAgIHJldHVybiAxCgoKY2xhc3MgQ2hpbGQoQmFzZSk6CiAgICBkZWYgcmVib3VuZChzZWxmKToKICAgICAgICByZWNlaXZlciA9IHNlbGYKICAgICAgICByZWNlaXZlciA9IG9iamVjdCgpCiAgICAgICAgcmV0dXJuIHJlY2VpdmVyLnRhcmdldCgpCgoKQ2hpbGQudGFyZ2V0ID0gbGFtYmRhIHNlbGY6IDIKQ2hpbGQoKS50YXJnZXQoKQoiIiIsCiAgICApCgogICAgY2FsbHMsIGVycm9ycywgXyA9IGV4dHJhY3RfcHl0aG9uX2NhbGxzKHRtcF9wYXRoKQogICAgYXNzZXJ0IGVycm9ycyA9PSBbXQogICAgcmVib3VuZCA9IF9zaW5nbGUoY2FsbHMsICJyZWNlaXZlci50YXJnZXQiKQogICAgYXNzZXJ0IHJlYm91bmRbImV2aWRlbmNlX2xldmVsIl0gPT0gIlMwIgogICAgYXNzZXJ0IHJlYm91bmRbInJlc29sdXRpb25fcmVhc29uIl0gPT0gImF0dHJpYnV0ZV9yb290X2xleGljYWxseV9zaGFkb3dlZF9uYW1lIgogICAgYXNzZXJ0IHJlYm91bmRbInJlc29sdmVkX3RhcmdldF9pZHMiXSA9PSBbXQogICAgbW9ua2V5X3BhdGNoID0gX3NpbmdsZShjYWxscywgIkNoaWxkKCkudGFyZ2V0IikKICAgIGFzc2VydCBtb25rZXlfcGF0Y2hbImV2aWRlbmNlX2xldmVsIl0gPT0gIlMwIgogICAgYXNzZXJ0IG1vbmtleV9wYXRjaFsicmVzb2x1dGlvbl9yZWFzb24iXSA9PSAiZHluYW1pY19jYWxsZWVfZXhwcmVzc2lvbiIKICAgIGFzc2VydCBtb25rZXlfcGF0Y2hbInJlc29sdmVkX3RhcmdldF9pZHMiXSA9PSBbXQo=
+          RPU_T032_TEST_B64
+          test "$(sha256sum merger/repoground/tests/test_python_call_graph_s1_recall.py | awk '{print $1}')" = "ae576f0e45a16cdd6008ddb9959901b23a22637792a51cc0a240fa4c2110f61b"
+          python -m py_compile merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Install locked development dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+
+      - name: Ruff verification
+        run: |
+          ruff check --fix \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+          ruff check \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Focused call-graph tests
+        run: |
+          python -m pytest -q \
+            merger/repoground/tests/test_python_call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Verify bounded diff
+        run: |
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected=$'merger/repoground/architecture/call_graph.py\nmerger/repoground/tests/test_python_call_graph_s1_recall.py'
+          test "$changed" = "$expected"
+          untracked="$(git ls-files --others --exclude-standard | sort)"
+          test "$untracked" = ".github/scripts/apply_rpu_t032.py"
+
+      - name: Commit and publish tested patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/scripts/apply_rpu_t032.py
+          rmdir .github/scripts 2>/dev/null || true
+          git add \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+          git commit -m "feat(call-graph): expand conservative S1 recall"
+          git push origin HEAD:feat/repobrief-call-graph-s1-recall-v1
