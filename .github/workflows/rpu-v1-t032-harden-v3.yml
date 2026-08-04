@@ -44,6 +44,27 @@ jobs:
 
       - name: Apply bounded hardening
         run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("merger/repoground/architecture/call_graph.py")
+          text = path.read_text(encoding="utf-8")
+          current = '''                if alias.name == "*":
+                    if source:
+                        self.state.star_imports.add(source)
+                    continue
+                local = alias.asname or alias.name
+          '''
+          transformer_input = '''                if alias.name == "*":
+                    if source:
+                        self.state.star_imports.add(source)
+                        continue
+                local = alias.asname or alias.name
+          '''
+          if text.count(current) != 1:
+              raise SystemExit(f"unexpected normalized import block count: {text.count(current)}")
+          path.write_text(text.replace(current, transformer_input), encoding="utf-8")
+          PY
           python .github/scripts/apply_rpu_t032_hardening.py
           cp /tmp/test_python_call_graph_s1_recall.py merger/repoground/tests/test_python_call_graph_s1_recall.py
           cp /tmp/repobrief-call-graph-s1-recall-v1.json docs/proofs/repobrief-call-graph-s1-recall-v1.json
