@@ -1,0 +1,164 @@
+---
+name: RPU V1 T032 Hardened Evaluation
+
+"on":
+  pull_request:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/rpu-v1-t032-harden.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  harden-and-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: "${{ github.event.pull_request.head.sha }}"
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Materialize revision-bound inputs
+        shell: bash
+        run: |
+          mkdir -p .github/scripts docs/proofs
+          cat <<'TRANSFORMER_B64' | base64 -d | gzip -d > .github/scripts/apply_rpu_t032_hardening.py
+          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
+          TRANSFORMER_B64
+          cat <<'GOLDSET_B64' | base64 -d | gzip -d > /tmp/test_python_call_graph_s1_recall.py
+          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
+          GOLDSET_B64
+          cat <<'PROOF_B64' | base64 -d | gzip -d > /tmp/repobrief-call-graph-s1-recall-v1.json
+          H4sIAAAAAAACA61Y3W7aOhB+z1P4uZUc2A5pkIpUqVKlUkGloL1bFzueAxt7ZB9kSuK7d5w6YyYECJQ2ubtfM9+M30d2v5mT4B4Yb7KEGGiCKfuO
+          86I0GK4l4VPePxM0DDnB4hPS/UCzGSd4P0b/OCZ4Ai5PuXg5ijF3cxIRXVOkJynxgEe+goj7A0fMSfhjOBPs5e5YvL1eXX17d3H57+1tf/P83YYE
+          z1ykj83tu8gm5ITxKieYE8k4c2XxB/Gl6GchRmt0JKPYofJpuIMyQohU6UBxsMvoOv6EVjBwfTt4ebhLNBNm7B3IC1qnSUugKZyWAGHYoFWkgEqY
+          al1JBDg9OZ6dmgP0WZHPj3X8/Ru9OS/7mVTp7X57WqgU3T9jLmgZlOQj/TlP3TpJM+txf8Z8rKPY8dQ3RIZBT4gcoIO7Bv2aD4JkDPqg9p5vLa
+          6UVN/rqE3hnRKeKTzEjBT5nG69bBSBBNDhqLC5zIcGc1tMOd4u5ULSBoqbtU5uBcB39C6oT6VIEp+Hb7epSsOgmSDDN9nRlBFHJ18Wq7ucvzTWE+
+          AN/9OBj2SULYpgOKAlxjKVBHPgmLeTKgbpSpkpFUwI9qEgiWrjKQPRr7u+T1Gwjoz/3j4eysgUsWPO9Nwns2zEIAq22I9vD5zh2qzXX+a6PTxYLI
+          NaOYHH4MPSlC8sy0XFGgbHsFGcge5pzyP8vWQnTR/qygBe5z3plzhtHYVWz3wT6XoU6Rs6M0GJxzJukfAzku0zKhNsrr4GHbZfZQi0lHsOFa+Y3
+          QCnRSHKGChxyHsVaFbcQOVZF0emrF0S3QS1JKYWdRQ67koHe5PqR2LL9RApQVTT9bXLs3z8MqTK6QMVaIj1nmMxwS6Q1PWo+1YryTzIH8VLnPc9
+          RP05iTBtJCGVUffGxZyEckJusxqkjBm8wMu10DtUS4VVH7T6nDBosJQMvNHuOGYI0YQrKuaQIGlDgAXA22cNXyAgKJ/rN7jz6hqSSJw/OwmBGopR
+          4rTGHO23ZK2L/mFyRaBMY7DplGsycVQ6e7fXwmj/Yb/aZQ8mM4Z6cP5zI/uQ8TyWnaNl0qNQ8lUmjuUM02S8HLo6mJ2q5Uvg8V/nhjYyjsbnMIvM
+          GP/LZ/3pr5c++lxmzj2sUf6T0/wrc5StqVwFe3i/vr1evypQyCKtDZ+EEAtPSk3wjJbF0+5KagWSoqV15SB5js2xp1wznORbEoIFzv+MokT6+sY
+          i9KqeUDjHLyB+JnyNM3+9/1qZ/L/KLxj88T2M5tLQl2WpAqN24/7Vdo75v+z6n0sRGgAQAAA==
+          PROOF_B64
+          test "$(sha256sum .github/scripts/apply_rpu_t032_hardening.py | awk '{print $1}')" = "6a9ab1444e4ac01b5235eecf692f986891964c17a1f5d5b316d865ea1f8eb92f"
+          test "$(sha256sum /tmp/test_python_call_graph_s1_recall.py | awk '{print $1}')" = "4057a65e512fd0bff70972e438779a02a0abf546af567ab4be7bb74f2025ba2c"
+          test "$(sha256sum /tmp/repobrief-call-graph-s1-recall-v1.json | awk '{print $1}')" = "66707c4bd596de7f7787d28c515bd960dd955c7651c3c138d05fc1e848f5f268"
+          python -m py_compile .github/scripts/apply_rpu_t032_hardening.py
+          python -m py_compile /tmp/test_python_call_graph_s1_recall.py
+          python -m json.tool /tmp/repobrief-call-graph-s1-recall-v1.json >/dev/null
+
+      - name: Apply bounded hardening
+        run: |
+          python .github/scripts/apply_rpu_t032_hardening.py
+          cp /tmp/test_python_call_graph_s1_recall.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+          cp /tmp/repobrief-call-graph-s1-recall-v1.json \
+            docs/proofs/repobrief-call-graph-s1-recall-v1.json
+
+      - name: Install locked development dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+
+      - name: Ruff verification
+        run: |
+          ruff check --fix             merger/repoground/architecture/call_graph.py             merger/repoground/tests/test_python_call_graph_s1_recall.py
+          ruff check             merger/repoground/architecture/call_graph.py             merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Focused producer and goldset tests
+        run: |
+          python -m pytest -q             merger/repoground/tests/test_python_call_graph.py             merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Verify bounded diff
+        run: |
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected=$'merger/repoground/architecture/call_graph.py\nmerger/repoground/tests/test_python_call_graph_s1_recall.py'
+          test "$changed" = "$expected"
+          untracked="$(git ls-files --others --exclude-standard | sort)"
+          expected_untracked=$'.github/scripts/apply_rpu_t032_hardening.py\ndocs/proofs/repobrief-call-graph-s1-recall-v1.json'
+          test "$untracked" = "$expected_untracked"
+
+      - name: Commit and publish hardened implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/scripts/apply_rpu_t032_hardening.py
+          rmdir .github/scripts 2>/dev/null || true
+          git add             merger/repoground/architecture/call_graph.py             merger/repoground/tests/test_python_call_graph_s1_recall.py             docs/proofs/repobrief-call-graph-s1-recall-v1.json
+          git commit -m "fix(call-graph): harden S1 recall evaluation"
+          git push origin HEAD:feat/repobrief-call-graph-s1-recall-v1
