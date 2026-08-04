@@ -56,6 +56,7 @@ class _ScopeFrame:
     start_line: int | None = None
     end_line: int | None = None
     receiver_name: str | None = None
+    receiver_aliases: tuple[str, ...] = field(default_factory=tuple)
     type_alias_name: str | None = None
 
 
@@ -71,7 +72,7 @@ class _RawCall:
     stack: tuple[_ScopeFrame, ...]
 
 
-CALL_GRAPH_CACHE_SCHEMA_VERSION = 1
+CALL_GRAPH_CACHE_SCHEMA_VERSION = 2
 CALL_GRAPH_PRODUCER_VERSION = (
     f"python-call-graph-v1-cache-{CALL_GRAPH_CACHE_SCHEMA_VERSION}-"
     f"py{sys.version_info.major}.{sys.version_info.minor}"
@@ -98,11 +99,14 @@ class _ModuleSnapshot:
     module: str
     functions: tuple[tuple[str, tuple[str, ...]], ...]
     classes: tuple[tuple[str, tuple[str, ...]], ...]
+    class_bases: tuple[tuple[str, tuple[str, ...]], ...]
     methods: tuple[tuple[str, str, tuple[str, ...]], ...]
     symbol_kinds: tuple[tuple[str, str], ...]
     from_imports: tuple[tuple[str, str, str], ...]
     module_aliases: tuple[tuple[str, str], ...]
     imported_module_names: tuple[str, ...]
+    star_imports: tuple[str, ...]
+    has_module_getattr: bool
     binding_sources: tuple[tuple[str, tuple[str, ...]], ...]
     calls: tuple[_CachedRawCall, ...]
 
@@ -170,11 +174,14 @@ class _ModuleState:
         self.module = module
         self.functions: dict[str, list[str]] = {}
         self.classes: dict[str, list[str]] = {}
+        self.class_bases: dict[str, tuple[str, ...]] = {}
         self.methods: dict[tuple[str, str], list[str]] = {}
         self.symbol_kinds: dict[str, str] = {}
         self.from_imports: dict[str, tuple[str, str]] = {}
         self.module_aliases: dict[str, str] = {}
         self.imported_module_names: set[str] = set()
+        self.star_imports: set[str] = set()
+        self.has_module_getattr = False
         self.binding_sources: dict[str, set[str]] = {}
         self.calls: list[_RawCall] = []
 
@@ -449,6 +456,8 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self.state.add_symbol(symbol_id, kind)
         named_frames = [frame for frame in self.stack if frame.name]
         if not named_frames:
+            if kind in _FUNCTION_KINDS and name == "__getattr__":
+                self.state.has_module_getattr = True
             self.state.add_binding(name, "def" if kind in _FUNCTION_KINDS else "class")
             table = (
                 self.state.functions if kind in _FUNCTION_KINDS else self.state.classes
@@ -520,7 +529,13 @@ class _CallGraphVisitor(ast.NodeVisitor):
         return None
 
     def visit_ClassDef(self, node: ast.ClassDef) -> Any:
+        is_top_level = not self.stack
         self._register_def(node.name, "class")
+        if is_top_level:
+            self.state.class_bases[node.name] = tuple(
+                base.id if isinstance(base, ast.Name) else "<dynamic>"
+                for base in node.bases
+            )
         for decorator in node.decorator_list:
             self.visit(decorator)
         for base in node.bases:
@@ -640,6 +655,8 @@ class _CallGraphVisitor(ast.NodeVisitor):
         if not self.stack:
             for alias in node.names:
                 if alias.name == "*":
+                    if source:
+                        self.state.star_imports.add(source)
                     continue
                 local = alias.asname or alias.name
                 self.state.add_binding(local, "import")
@@ -762,6 +779,14 @@ class _CallGraphVisitor(ast.NodeVisitor):
             return
         if self.stack:
             self._invalidate_local_imports(names)
+            frame = self.stack[-1]
+            receiver_aliases = tuple(
+                alias for alias in frame.receiver_aliases if alias not in names
+            )
+            if receiver_aliases != frame.receiver_aliases:
+                self.stack[-1] = replace(
+                    frame, receiver_aliases=receiver_aliases
+                )
             return
         for name in names:
             self.state.add_binding(name, "assign")
@@ -770,6 +795,30 @@ class _CallGraphVisitor(ast.NodeVisitor):
         target_list = tuple(targets)
         names = set().union(*(_target_names(target) for target in target_list))
         self._bind_or_invalidate_names(names)
+
+    def _establish_receiver_aliases(
+        self, targets: Iterable[ast.expr], value: ast.expr | None
+    ) -> None:
+        if not self.stack or value is None:
+            return
+        frame = self.stack[-1]
+        if frame.kind not in _FUNCTION_KINDS or frame.receiver_name is None:
+            return
+        known_receivers = {frame.receiver_name, *frame.receiver_aliases}
+        if not isinstance(value, ast.Name) or value.id not in known_receivers:
+            return
+        target_list = tuple(targets)
+        if not target_list or not all(isinstance(target, ast.Name) for target in target_list):
+            return
+        aliases = set(frame.receiver_aliases)
+        aliases.update(
+            target.id
+            for target in target_list
+            if isinstance(target, ast.Name) and target.id != frame.receiver_name
+        )
+        self.stack[-1] = replace(
+            frame, receiver_aliases=tuple(sorted(aliases))
+        )
 
     def _bind_module_target(self, target: ast.expr) -> None:
         if isinstance(target, ast.Name):
@@ -783,6 +832,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
         for target in node.targets:
             self.visit(target)
         self._bind_or_invalidate_targets(node.targets)
+        self._establish_receiver_aliases(node.targets, node.value)
         return None
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
@@ -791,6 +841,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
             self.visit(node.value)
         self.visit(node.target)
         self._bind_or_invalidate_targets((node.target,))
+        self._establish_receiver_aliases((node.target,), node.value)
         return None
 
     def visit_AugAssign(self, node: ast.AugAssign) -> Any:
@@ -803,6 +854,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self.visit(node.value)
         self.visit(node.target)
         self._bind_or_invalidate_targets((node.target,))
+        self._establish_receiver_aliases((node.target,), node.value)
         return None
 
     def visit_Delete(self, node: ast.Delete) -> Any:
@@ -1406,8 +1458,16 @@ class _Resolver:
         self.modules = modules
 
     def _target_in_module(
-        self, module: str, name: str, reason_prefix: str
+        self,
+        module: str,
+        name: str,
+        reason_prefix: str,
+        *,
+        _visited: frozenset[tuple[str, str]] = frozenset(),
     ) -> dict[str, Any]:
+        key = (module, name)
+        if key in _visited:
+            return _verdict("unresolved", "transitive_import_cycle")
         states = self.modules.get(module, [])
         if not states:
             return _verdict("unresolved", f"{reason_prefix}_foreign_module")
@@ -1440,6 +1500,22 @@ class _Resolver:
                 f"{reason_prefix}_multiple_definitions",
                 candidates=all_targets,
             )
+        state = states[0]
+        imported = state.from_imports.get(name)
+        if imported is not None:
+            source_module, original = imported
+            return self._target_in_module(
+                source_module,
+                original,
+                "transitive_imported_internal_name",
+                _visited=_visited | {key},
+            )
+        if state.has_module_getattr:
+            return _verdict(
+                "unresolved", f"{reason_prefix}_module_getattr_dispatch"
+            )
+        if state.star_imports:
+            return _verdict("unresolved", f"{reason_prefix}_star_import_unresolved")
         return _verdict("unresolved", f"{reason_prefix}_name_not_found")
 
     def _shadow_reason(
@@ -1601,7 +1677,10 @@ class _Resolver:
             )
         if "import" in sources:
             return _verdict("unresolved", "module_object_called")
-        return self._local_binding_verdict(local_functions, local_classes)
+        verdict = self._local_binding_verdict(local_functions, local_classes)
+        if verdict["resolution_reason"] == "unknown_name" and state.star_imports:
+            return _verdict("unresolved", "star_import_unresolved")
+        return verdict
 
     def _direct_method_context(
         self, root: str, stack: Sequence[_ScopeFrame]
@@ -1615,11 +1694,50 @@ class _Resolver:
         if function_index is None:
             return None
         method = stack[function_index]
-        if method.kind not in _FUNCTION_KINDS or method.receiver_name != root:
+        valid_receivers = {method.receiver_name, *method.receiver_aliases}
+        if method.kind not in _FUNCTION_KINDS or root not in valid_receivers:
             return None
         if function_index == 0 or stack[function_index - 1].kind != "class":
             return None
         return method, stack[function_index - 1]
+
+    def _resolve_single_inheritance_method(
+        self,
+        state: _ModuleState,
+        class_name: str,
+        method_name: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        visited: set[str] = set()
+        current = class_name
+        while True:
+            if current in visited:
+                return _verdict("unresolved", "single_inheritance_cycle")
+            visited.add(current)
+            bases = state.class_bases.get(current, ())
+            if not bases:
+                return _verdict("unresolved", "method_not_defined_in_same_class")
+            if len(bases) > 1:
+                return _verdict(
+                    "unresolved", "mixin_or_multiple_inheritance_not_promoted"
+                )
+            base = bases[0]
+            if base == "<dynamic>":
+                return _verdict("unresolved", "dynamic_base_class_not_promoted")
+            if len(state.classes.get(base, [])) != 1:
+                return _verdict(
+                    "unresolved", "single_inheritance_nonlocal_or_ambiguous_base"
+                )
+            methods = state.methods.get((base, method_name), [])
+            if len(methods) == 1:
+                return _verdict("resolved", reason, resolved=methods)
+            if len(methods) > 1:
+                return _verdict(
+                    "ambiguous",
+                    "inherited_method_multiple_definitions",
+                    candidates=methods,
+                )
+            current = base
 
     def _resolve_receiver_dotted(
         self, state: _ModuleState, parts: list[str], stack: Sequence[_ScopeFrame]
@@ -1629,24 +1747,35 @@ class _Resolver:
         context = self._direct_method_context(parts[0], stack)
         if context is None:
             return _verdict("unresolved", "receiver_not_direct_method_parameter")
-        _, class_frame = context
+        method_frame, class_frame = context
         class_index = next(
             index for index, frame in enumerate(stack) if frame is class_frame
         )
         class_named = _named_frames(stack[: class_index + 1])
         class_qualified = ".".join(frame.name for frame in class_named if frame.name)
         methods = state.methods.get((class_qualified, parts[1]), [])
+        is_alias = parts[0] != method_frame.receiver_name
         if len(methods) == 1:
-            return _verdict(
-                "resolved", f"{parts[0]}_method_same_class", resolved=methods
+            reason = (
+                "receiver_alias_method_same_class"
+                if is_alias
+                else f"{parts[0]}_method_same_class"
             )
+            return _verdict("resolved", reason, resolved=methods)
         if len(methods) > 1:
             return _verdict(
                 "ambiguous",
                 "method_multiple_definitions_in_same_class",
                 candidates=methods,
             )
-        return _verdict("unresolved", "method_not_defined_in_same_class")
+        reason = (
+            "receiver_alias_single_inheritance_method"
+            if is_alias
+            else f"{parts[0]}_single_inheritance_method"
+        )
+        return self._resolve_single_inheritance_method(
+            state, class_qualified, parts[1], reason
+        )
 
     def _resolve_local_import_dotted(
         self, parts: list[str], stack: Sequence[_ScopeFrame]
@@ -1722,11 +1851,48 @@ class _Resolver:
                 return _verdict("unresolved", "nested_module_attribute")
         return _verdict("unresolved", "dynamic_attribute_call")
 
+    def _resolve_super_attribute(
+        self,
+        state: _ModuleState,
+        func: ast.Attribute,
+        stack: Sequence[_ScopeFrame],
+    ) -> dict[str, Any]:
+        super_call = func.value
+        if not isinstance(super_call, ast.Call):
+            return _verdict("unresolved", "dynamic_super_expression")
+        if super_call.args or super_call.keywords:
+            return _verdict("unresolved", "super_arguments_not_promoted")
+        function_index: int | None = None
+        for index in range(len(stack) - 1, -1, -1):
+            if stack[index].kind in (*_FUNCTION_KINDS, "lambda"):
+                function_index = index
+                break
+        if function_index is None or function_index == 0:
+            return _verdict("unresolved", "super_outside_direct_method")
+        method = stack[function_index]
+        class_frame = stack[function_index - 1]
+        if (
+            method.kind not in _FUNCTION_KINDS
+            or method.receiver_name is None
+            or class_frame.kind != "class"
+        ):
+            return _verdict("unresolved", "super_outside_direct_method")
+        class_named = _named_frames(stack[:function_index])
+        class_qualified = ".".join(frame.name for frame in class_named if frame.name)
+        return self._resolve_single_inheritance_method(
+            state,
+            class_qualified,
+            func.attr,
+            "super_single_inheritance_method",
+        )
+
     def _resolve_dotted(
         self, state: _ModuleState, parts: list[str], stack: Sequence[_ScopeFrame]
     ) -> dict[str, Any]:
-        if parts[0] in ("self", "cls"):
+        if self._direct_method_context(parts[0], stack) is not None:
             return self._resolve_receiver_dotted(state, parts, stack)
+        if parts[0] in {"self", "cls"}:
+            return _verdict("unresolved", "receiver_not_direct_method_parameter")
         return self._resolve_module_dotted(state, parts, stack)
 
     def resolve(self, state: _ModuleState, raw_call: _RawCall) -> dict[str, Any]:
@@ -1736,13 +1902,24 @@ class _Resolver:
             simple_name: str | None = func.id
             verdict = self._resolve_name(state, func.id, stack)
         else:
-            parts = _dotted_parts(func)
-            if parts is not None:
-                simple_name = parts[-1]
-                verdict = self._resolve_dotted(state, parts, stack)
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Call)
+                and isinstance(func.value.func, ast.Name)
+                and func.value.func.id == "super"
+            ):
+                simple_name = func.attr
+                verdict = self._resolve_super_attribute(state, func, stack)
             else:
-                simple_name = func.attr if isinstance(func, ast.Attribute) else None
-                verdict = _verdict("unresolved", "dynamic_callee_expression")
+                parts = _dotted_parts(func)
+                if parts is not None:
+                    simple_name = parts[-1]
+                    verdict = self._resolve_dotted(state, parts, stack)
+                else:
+                    simple_name = (
+                        func.attr if isinstance(func, ast.Attribute) else None
+                    )
+                    verdict = _verdict("unresolved", "dynamic_callee_expression")
         record = {
             "path": state.path,
             "start_line": raw_call.start_line,
@@ -1768,6 +1945,10 @@ def _snapshot_module_state(state: _ModuleState) -> _ModuleSnapshot:
         classes=tuple(
             (name, tuple(values)) for name, values in sorted(state.classes.items())
         ),
+        class_bases=tuple(
+            (name, tuple(values))
+            for name, values in sorted(state.class_bases.items())
+        ),
         methods=tuple(
             (owner, name, tuple(values))
             for (owner, name), values in sorted(state.methods.items())
@@ -1779,6 +1960,8 @@ def _snapshot_module_state(state: _ModuleState) -> _ModuleSnapshot:
         ),
         module_aliases=tuple(sorted(state.module_aliases.items())),
         imported_module_names=tuple(sorted(state.imported_module_names)),
+        star_imports=tuple(sorted(state.star_imports)),
+        has_module_getattr=state.has_module_getattr,
         binding_sources=tuple(
             (name, tuple(sorted(values)))
             for name, values in sorted(state.binding_sources.items())
@@ -1801,6 +1984,9 @@ def _restore_module_state(snapshot: _ModuleSnapshot) -> _ModuleState:
     state = _ModuleState(snapshot.path, snapshot.module)
     state.functions = {name: list(values) for name, values in snapshot.functions}
     state.classes = {name: list(values) for name, values in snapshot.classes}
+    state.class_bases = {
+        name: tuple(values) for name, values in snapshot.class_bases
+    }
     state.methods = {
         (owner, name): list(values) for owner, name, values in snapshot.methods
     }
@@ -1810,6 +1996,8 @@ def _restore_module_state(snapshot: _ModuleSnapshot) -> _ModuleState:
     }
     state.module_aliases = dict(snapshot.module_aliases)
     state.imported_module_names = set(snapshot.imported_module_names)
+    state.star_imports = set(snapshot.star_imports)
+    state.has_module_getattr = snapshot.has_module_getattr
     state.binding_sources = {
         name: set(values) for name, values in snapshot.binding_sources
     }
