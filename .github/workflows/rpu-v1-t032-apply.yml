@@ -1,0 +1,77 @@
+---
+name: RPU V1 T032 Apply
+
+"on":
+  push:
+    branches:
+      - "feat/repobrief-call-graph-s1-recall-v1"
+    paths:
+      - ".github/workflows/rpu-v1-t032-apply.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-tested-patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: "feat/repobrief-call-graph-s1-recall-v1"
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Materialize revision-bound transformer
+        shell: bash
+        run: |
+          cat <<'RPU_T032_B64' | base64 -d | gzip -d > /tmp/apply_rpu_t032.py
+          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
+          RPU_T032_B64
+          test "$(sha256sum /tmp/apply_rpu_t032.py | awk '{print $1}')" = "fce42c0640a73a5325a9315631f93c19c971a7c5a7c206e023b83104b5f13fef"
+          python -m py_compile /tmp/apply_rpu_t032.py
+
+      - name: Apply bounded source transformation
+        run: python /tmp/apply_rpu_t032.py
+
+      - name: Install locked development dependencies
+        run: python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-dev.lock.txt
+
+      - name: Ruff autofix and verification
+        run: |
+          ruff check --fix \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+          ruff check \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Run focused call-graph tests
+        run: |
+          python -m pytest -q \
+            merger/repoground/tests/test_python_call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+
+      - name: Verify bounded diff
+        shell: bash
+        run: |
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected=$'merger/repoground/architecture/call_graph.py\nmerger/repoground/tests/test_python_call_graph_s1_recall.py'
+          test "$changed" = "$expected"
+
+      - name: Commit and publish tested patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            merger/repoground/architecture/call_graph.py \
+            merger/repoground/tests/test_python_call_graph_s1_recall.py
+          git commit -m "feat(call-graph): expand conservative S1 recall"
+          git push origin HEAD:feat/repobrief-call-graph-s1-recall-v1
