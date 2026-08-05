@@ -114,7 +114,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "id"],
-      "description": "Only allowlisted trusted_wrapper or tool_gateway issuers may mint observed evidence. Answer text and self-declarations are not issuers.",
+      "description": "Only allowlisted trusted_wrapper or tool_gateway issuers may mint observed evidence. Runtime allowlist couples kind to id exactly: trusted_wrapper↔repoground.agent_consumption.tool_read_wrapper and tool_gateway↔repoground.agent_consumption.tool_gateway. Answer text and self-declarations are not issuers.",
       "properties": {
         "kind": {
           "type": "string",
@@ -122,11 +122,40 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+          "enum": [
+            "repoground.agent_consumption.tool_read_wrapper",
+            "repoground.agent_consumption.tool_gateway"
+          ]
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "trusted_wrapper" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "const": "repoground.agent_consumption.tool_read_wrapper"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "tool_gateway" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "const": "repoground.agent_consumption.tool_gateway"
+              }
+            }
+          }
+        }
+      ]
     },
     "retention": {
       "type": "object",

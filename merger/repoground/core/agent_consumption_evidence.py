@@ -18,11 +18,17 @@ Rejected observations (missing, stale, task-mismatch, commit-mismatch, replay,
 artifact-mismatch, untrusted issuer, privacy, invalid) never elevate evidence
 to ``declared-and-observed``.
 
+Invalid comparison bindings (empty/invalid ``task_id``, invalid ``repo_commit``,
+invalid explicit ``as_of``, or invalid ``max_age_seconds``) fail closed: no
+receipt is accepted, no ``observed=true`` or ``declared-and-observed`` state is
+emitted, and schema-placeholder fields never stand in for a trusted observation.
+
 This comparison does not establish semantic reading, relevance, correctness,
 completeness, forensic readiness, runtime interception or mandatory adoption.
 It preserves the nine agent-consumption ``does_not_establish`` boundaries and
 adds observation-specific non-claims.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -73,6 +79,31 @@ _WARN = "warn"
 _INFO = "info"
 
 _COMMIT_LEN = 40
+_SCHEMA_PLACEHOLDER_TASK = "unknown"
+_SCHEMA_PLACEHOLDER_COMMIT = "0" * _COMMIT_LEN
+
+_PRIVACY_FORBIDDEN_KEYS = frozenset(
+    {
+        "content",
+        "body",
+        "text",
+        "raw",
+        "source_text",
+        "source_content",
+        "payload",
+        "blob",
+        "data",
+        "file_bytes",
+        "bytes_content",
+        "secret",
+        "secrets",
+        "token",
+        "password",
+        "api_key",
+        "private_key",
+        "authorization",
+    }
+)
 
 
 def compare_agent_consumption_evidence(
@@ -100,35 +131,28 @@ def compare_agent_consumption_evidence(
     declared_roles = _declared_roles(answer_compliance, diagnostics)
     expected = _role_set(expected_roles, "expected_roles", diagnostics)
     identity_index = _declared_identity_index(declared_identities, diagnostics)
-    as_of_dt = _parse_as_of(as_of, diagnostics)
-    max_age = _normalize_max_age(max_age_seconds, diagnostics)
+    as_of_dt, as_of_ok = _parse_as_of(as_of, diagnostics)
+    max_age, max_age_ok = _normalize_max_age(max_age_seconds, diagnostics)
+    # Bound comparison only accepts observations when every binding input is
+    # schema-valid. Placeholder task/commit values remain schema fields only.
+    accept_observations = (
+        task is not None and commit is not None and as_of_ok and max_age_ok
+    )
 
     accepted_by_role: dict[str, dict[str, Any]] = {}
     accepted_refs: list[dict[str, str]] = []
     seen_events: dict[str, str] = {}
-    raw_receipts = list(receipts) if isinstance(receipts, Sequence) and not isinstance(
-        receipts, (str, bytes, bytearray)
-    ) else []
-    if receipts is not None and not isinstance(receipts, Sequence):
-        diagnostics.append(
-            _diag(
-                "invalid_input_field",
-                _FAIL,
-                "receipts must be an array of receipt objects.",
-            )
-        )
-        raw_receipts = []
-    elif isinstance(receipts, (str, bytes, bytearray)):
-        diagnostics.append(
-            _diag(
-                "invalid_input_field",
-                _FAIL,
-                "receipts must be an array of receipt objects.",
-            )
-        )
-        raw_receipts = []
+    raw_receipts = _normalize_receipts_input(receipts, diagnostics)
 
     for index, raw in enumerate(raw_receipts):
+        if not accept_observations:
+            _reject_unbound_receipt(
+                raw,
+                index=index,
+                rejected=rejected,
+                diagnostics=diagnostics,
+            )
+            continue
         _ingest_receipt(
             raw,
             index=index,
@@ -144,7 +168,98 @@ def compare_agent_consumption_evidence(
             diagnostics=diagnostics,
         )
 
+    # Fail-closed binding: never report observed elevation without valid binds.
+    if not accept_observations:
+        accepted_by_role.clear()
+        accepted_refs.clear()
+
     roles = sorted(set(declared_roles) | set(accepted_by_role) | expected)
+    comparisons = _build_comparisons(
+        roles=roles,
+        declared_roles=declared_roles,
+        accepted_by_role=accepted_by_role,
+        expected=expected,
+        diagnostics=diagnostics,
+    )
+
+    if not roles:
+        diagnostics.append(
+            _diag(
+                "missing",
+                _WARN,
+                "No declared roles, accepted receipts, or expected roles were supplied.",
+            )
+        )
+
+    return _evidence(
+        task_id=task if task is not None else _SCHEMA_PLACEHOLDER_TASK,
+        repo_commit=commit if commit is not None else _SCHEMA_PLACEHOLDER_COMMIT,
+        comparisons=comparisons,
+        accepted_refs=accepted_refs,
+        rejected=rejected,
+        diagnostics=diagnostics,
+    )
+
+
+def _normalize_receipts_input(
+    receipts: Sequence[Any] | None,
+    diagnostics: list[dict[str, Any]],
+) -> list[Any]:
+    if receipts is None:
+        return []
+    if isinstance(receipts, (str, bytes, bytearray)) or not isinstance(
+        receipts, Sequence
+    ):
+        diagnostics.append(
+            _diag(
+                "invalid_input_field",
+                _FAIL,
+                "receipts must be an array of receipt objects.",
+            )
+        )
+        return []
+    return list(receipts)
+
+
+def _reject_unbound_receipt(
+    raw: Any,
+    *,
+    index: int,
+    rejected: list[dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+) -> None:
+    """Reject a receipt because the comparison binding is not trustworthy."""
+    label = f"receipts[{index}]"
+    access_event_id = None
+    artifact_role = None
+    receipt_sha256 = None
+    if isinstance(raw, Mapping):
+        access_event_id = _maybe_str(raw.get("access_event_id"))
+        artifact_role = _maybe_str(raw.get("artifact_role"))
+        receipt_sha256 = _maybe_hex(raw.get("receipt_sha256"))
+    _reject(
+        rejected,
+        diagnostics,
+        reason="invalid_receipt",
+        code="invalid_input_field",
+        detail=(
+            f"{label} cannot elevate evidence because the comparison binding "
+            "(task_id, repo_commit, as_of, and/or max_age_seconds) is invalid."
+        ),
+        access_event_id=access_event_id,
+        artifact_role=artifact_role,
+        receipt_sha256=receipt_sha256,
+    )
+
+
+def _build_comparisons(
+    *,
+    roles: list[str],
+    declared_roles: set[str],
+    accepted_by_role: dict[str, dict[str, Any]],
+    expected: set[str],
+    diagnostics: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     comparisons: list[dict[str, Any]] = []
     for role in roles:
         declared = role in declared_roles
@@ -192,32 +307,15 @@ def compare_agent_consumption_evidence(
             item["receipt_binding_sha256"] = observed_receipt["binding_sha256"]
             item["artifact_identity"] = deepcopy(observed_receipt["artifact_identity"])
         comparisons.append(item)
-
-    if not roles:
-        diagnostics.append(
-            _diag(
-                "missing",
-                _WARN,
-                "No declared roles, accepted receipts, or expected roles were supplied.",
-            )
-        )
-
-    return _evidence(
-        task_id=task or "unknown",
-        repo_commit=commit or ("0" * _COMMIT_LEN),
-        comparisons=comparisons,
-        accepted_refs=accepted_refs,
-        rejected=rejected,
-        diagnostics=diagnostics,
-    )
+    return comparisons
 
 
 def _ingest_receipt(
     raw: Any,
     *,
     index: int,
-    task_id: str | None,
-    repo_commit: str | None,
+    task_id: str,
+    repo_commit: str,
     as_of_dt: datetime | None,
     max_age: int | None,
     identity_index: dict[str, dict[str, Any]],
@@ -238,49 +336,101 @@ def _ingest_receipt(
         )
         return
 
+    if _reject_privacy_fields(
+        raw, label=label, rejected=rejected, diagnostics=diagnostics
+    ):
+        return
+
+    receipt = _validated_receipt_or_reject(
+        raw, label=label, rejected=rejected, diagnostics=diagnostics
+    )
+    if receipt is None:
+        return
+
+    if _reject_replay(
+        receipt,
+        label=label,
+        seen_events=seen_events,
+        rejected=rejected,
+        diagnostics=diagnostics,
+    ):
+        return
+
+    if _reject_binding_mismatch(
+        receipt,
+        label=label,
+        task_id=task_id,
+        repo_commit=repo_commit,
+        rejected=rejected,
+        diagnostics=diagnostics,
+    ):
+        return
+
+    if _reject_stale(
+        receipt,
+        label=label,
+        as_of_dt=as_of_dt,
+        max_age=max_age,
+        rejected=rejected,
+        diagnostics=diagnostics,
+    ):
+        return
+
+    if _reject_identity_conflicts(
+        receipt,
+        label=label,
+        identity_index=identity_index,
+        accepted_by_role=accepted_by_role,
+        accepted_refs=accepted_refs,
+        rejected=rejected,
+        diagnostics=diagnostics,
+    ):
+        return
+
+    _accept_receipt(
+        receipt,
+        accepted_by_role=accepted_by_role,
+        accepted_refs=accepted_refs,
+        seen_events=seen_events,
+    )
+
+
+def _reject_privacy_fields(
+    raw: Mapping[str, Any],
+    *,
+    label: str,
+    rejected: list[dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+) -> bool:
     # Privacy fail-closed before structural validation so content-bearing forgeries
     # never become observations.
     forbidden = sorted(
-        k
-        for k in raw
-        if isinstance(k, str)
-        and k
-        in {
-            "content",
-            "body",
-            "text",
-            "raw",
-            "source_text",
-            "source_content",
-            "payload",
-            "blob",
-            "data",
-            "file_bytes",
-            "bytes_content",
-            "secret",
-            "secrets",
-            "token",
-            "password",
-            "api_key",
-            "private_key",
-            "authorization",
-        }
+        k for k in raw if isinstance(k, str) and k in _PRIVACY_FORBIDDEN_KEYS
     )
-    if forbidden:
-        _reject(
-            rejected,
-            diagnostics,
-            reason="privacy_violation",
-            code="privacy_violation",
-            detail=f"{label} contains forbidden content/secret fields: {', '.join(forbidden)}.",
-            access_event_id=_maybe_str(raw.get("access_event_id")),
-            artifact_role=_maybe_str(raw.get("artifact_role")),
-            receipt_sha256=_maybe_hex(raw.get("receipt_sha256")),
-        )
-        return
+    if not forbidden:
+        return False
+    _reject(
+        rejected,
+        diagnostics,
+        reason="privacy_violation",
+        code="privacy_violation",
+        detail=f"{label} contains forbidden content/secret fields: {', '.join(forbidden)}.",
+        access_event_id=_maybe_str(raw.get("access_event_id")),
+        artifact_role=_maybe_str(raw.get("artifact_role")),
+        receipt_sha256=_maybe_hex(raw.get("receipt_sha256")),
+    )
+    return True
 
+
+def _validated_receipt_or_reject(
+    raw: Mapping[str, Any],
+    *,
+    label: str,
+    rejected: list[dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+) -> dict[str, Any] | None:
     try:
-        receipt = validate_tool_read_receipt(raw)
+        return validate_tool_read_receipt(raw)
     except ToolReadReceiptError as exc:
         message = str(exc)
         if "allowlisted trusted source" in message or "issuer.kind" in message:
@@ -305,28 +455,49 @@ def _ingest_receipt(
             artifact_role=_maybe_str(raw.get("artifact_role")),
             receipt_sha256=_maybe_hex(raw.get("receipt_sha256")),
         )
-        return
+        return None
 
+
+def _reject_replay(
+    receipt: Mapping[str, Any],
+    *,
+    label: str,
+    seen_events: Mapping[str, str],
+    rejected: list[dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+) -> bool:
     event_id = receipt["access_event_id"]
-    if event_id in seen_events:
-        _reject(
-            rejected,
-            diagnostics,
-            reason="replay",
-            code="replay",
-            detail=(
-                f"{label} replays access_event_id '{event_id}' already seen for "
-                f"binding {seen_events[event_id][:12]}…; replay never elevates evidence."
-            ),
-            access_event_id=event_id,
-            artifact_role=receipt["artifact_role"],
-            receipt_sha256=receipt["receipt_sha256"],
-        )
-        # A replay must not keep a previously accepted observation for the same
-        # event, and must not add a second observation.
-        return
+    if event_id not in seen_events:
+        return False
+    _reject(
+        rejected,
+        diagnostics,
+        reason="replay",
+        code="replay",
+        detail=(
+            f"{label} replays access_event_id '{event_id}' already seen for "
+            f"binding {seen_events[event_id][:12]}…; replay never elevates evidence."
+        ),
+        access_event_id=event_id,
+        artifact_role=receipt["artifact_role"],
+        receipt_sha256=receipt["receipt_sha256"],
+    )
+    # A replay must not keep a previously accepted observation for the same
+    # event, and must not add a second observation.
+    return True
 
-    if task_id is not None and receipt["task_id"] != task_id:
+
+def _reject_binding_mismatch(
+    receipt: Mapping[str, Any],
+    *,
+    label: str,
+    task_id: str,
+    repo_commit: str,
+    rejected: list[dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+) -> bool:
+    event_id = receipt["access_event_id"]
+    if receipt["task_id"] != task_id:
         _reject(
             rejected,
             diagnostics,
@@ -340,57 +511,83 @@ def _ingest_receipt(
             artifact_role=receipt["artifact_role"],
             receipt_sha256=receipt["receipt_sha256"],
         )
-        return
-
-    if repo_commit is not None and receipt["repo_commit"] != repo_commit:
+        return True
+    if receipt["repo_commit"] != repo_commit:
         _reject(
             rejected,
             diagnostics,
             reason="commit_mismatch",
             code="commit_mismatch",
+            detail=(f"{label} repo_commit does not match the bound repository commit."),
+            access_event_id=event_id,
+            artifact_role=receipt["artifact_role"],
+            receipt_sha256=receipt["receipt_sha256"],
+        )
+        return True
+    return False
+
+
+def _reject_stale(
+    receipt: Mapping[str, Any],
+    *,
+    label: str,
+    as_of_dt: datetime | None,
+    max_age: int | None,
+    rejected: list[dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+) -> bool:
+    if max_age is None or as_of_dt is None:
+        return False
+    event_id = receipt["access_event_id"]
+    observed_dt = _parse_timestamp(receipt["observed_at"])
+    if observed_dt is None:
+        _reject(
+            rejected,
+            diagnostics,
+            reason="invalid_receipt",
+            code="invalid_input_field",
+            detail=f"{label} observed_at could not be parsed for freshness.",
+            access_event_id=event_id,
+            artifact_role=receipt["artifact_role"],
+            receipt_sha256=receipt["receipt_sha256"],
+        )
+        return True
+    age = (as_of_dt - observed_dt).total_seconds()
+    if age > max_age or age < 0:
+        _reject(
+            rejected,
+            diagnostics,
+            reason="stale",
+            code="stale",
             detail=(
-                f"{label} repo_commit does not match the bound repository commit."
+                f"{label} is stale or not-yet-valid relative to as_of "
+                f"(age_seconds={age}, max_age_seconds={max_age})."
             ),
             access_event_id=event_id,
             artifact_role=receipt["artifact_role"],
             receipt_sha256=receipt["receipt_sha256"],
         )
-        return
+        return True
+    return False
 
-    if max_age is not None and as_of_dt is not None:
-        observed_dt = _parse_timestamp(receipt["observed_at"])
-        if observed_dt is None:
-            _reject(
-                rejected,
-                diagnostics,
-                reason="invalid_receipt",
-                code="invalid_input_field",
-                detail=f"{label} observed_at could not be parsed for freshness.",
-                access_event_id=event_id,
-                artifact_role=receipt["artifact_role"],
-                receipt_sha256=receipt["receipt_sha256"],
-            )
-            return
-        age = (as_of_dt - observed_dt).total_seconds()
-        if age > max_age or age < 0:
-            _reject(
-                rejected,
-                diagnostics,
-                reason="stale",
-                code="stale",
-                detail=(
-                    f"{label} is stale or not-yet-valid relative to as_of "
-                    f"(age_seconds={age}, max_age_seconds={max_age})."
-                ),
-                access_event_id=event_id,
-                artifact_role=receipt["artifact_role"],
-                receipt_sha256=receipt["receipt_sha256"],
-            )
-            return
 
+def _reject_identity_conflicts(
+    receipt: Mapping[str, Any],
+    *,
+    label: str,
+    identity_index: Mapping[str, Mapping[str, Any]],
+    accepted_by_role: dict[str, dict[str, Any]],
+    accepted_refs: list[dict[str, str]],
+    rejected: list[dict[str, Any]],
+    diagnostics: list[dict[str, Any]],
+) -> bool:
     role = receipt["artifact_role"]
+    event_id = receipt["access_event_id"]
     expected_identity = identity_index.get(role)
-    if expected_identity is not None and expected_identity != receipt["artifact_identity"]:
+    if (
+        expected_identity is not None
+        and expected_identity != receipt["artifact_identity"]
+    ):
         _reject(
             rejected,
             diagnostics,
@@ -404,7 +601,7 @@ def _ingest_receipt(
             artifact_role=role,
             receipt_sha256=receipt["receipt_sha256"],
         )
-        return
+        return True
 
     prior = accepted_by_role.get(role)
     if prior is not None and prior["artifact_identity"] != receipt["artifact_identity"]:
@@ -424,12 +621,26 @@ def _ingest_receipt(
         # Downgrade the prior acceptance: conflicting identities remove observed
         # elevation for the role.
         del accepted_by_role[role]
-        accepted_refs[:] = [ref for ref in accepted_refs if ref["artifact_role"] != role]
-        return
+        accepted_refs[:] = [
+            ref for ref in accepted_refs if ref["artifact_role"] != role
+        ]
+        return True
+    return False
 
+
+def _accept_receipt(
+    receipt: Mapping[str, Any],
+    *,
+    accepted_by_role: dict[str, dict[str, Any]],
+    accepted_refs: list[dict[str, str]],
+    seen_events: dict[str, str],
+) -> None:
+    event_id = receipt["access_event_id"]
+    role = receipt["artifact_role"]
+    prior = accepted_by_role.get(role)
     seen_events[event_id] = receipt["binding_sha256"]
     if prior is None:
-        accepted_by_role[role] = receipt
+        accepted_by_role[role] = dict(receipt)
         accepted_refs.append(
             {
                 "access_event_id": event_id,
@@ -576,8 +787,10 @@ def _require_bound_str(
 
 
 def _require_commit(value: Any, diagnostics: list[dict[str, Any]]) -> str | None:
-    if isinstance(value, str) and len(value) == _COMMIT_LEN and all(
-        ch in "0123456789abcdef" for ch in value
+    if (
+        isinstance(value, str)
+        and len(value) == _COMMIT_LEN
+        and all(ch in "0123456789abcdef" for ch in value)
     ):
         return value
     diagnostics.append(
@@ -592,9 +805,14 @@ def _require_commit(value: Any, diagnostics: list[dict[str, Any]]) -> str | None
 
 def _normalize_max_age(
     value: int | None, diagnostics: list[dict[str, Any]]
-) -> int | None:
+) -> tuple[int | None, bool]:
+    """Return (normalized_max_age, binding_ok).
+
+    ``None`` input is valid (no freshness window). Invalid explicit values fail
+    the comparison binding so no receipt can elevate evidence.
+    """
     if value is None:
-        return None
+        return None, True
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         diagnostics.append(
             _diag(
@@ -603,15 +821,20 @@ def _normalize_max_age(
                 "max_age_seconds must be a non-negative integer when provided.",
             )
         )
-        return None
-    return value
+        return None, False
+    return value, True
 
 
 def _parse_as_of(
     value: str | None, diagnostics: list[dict[str, Any]]
-) -> datetime | None:
+) -> tuple[datetime | None, bool]:
+    """Return (as_of datetime, binding_ok).
+
+    Omitted ``as_of`` uses wall-clock UTC and keeps the binding valid. An
+    explicit invalid timestamp fails closed (no receipt acceptance).
+    """
     if value is None:
-        return datetime.now(timezone.utc)
+        return datetime.now(timezone.utc), True
     parsed = _parse_timestamp(value)
     if parsed is None:
         diagnostics.append(
@@ -621,8 +844,8 @@ def _parse_as_of(
                 "as_of must be an ISO-8601 UTC timestamp ending with Z.",
             )
         )
-        return datetime.now(timezone.utc)
-    return parsed
+        return None, False
+    return parsed, True
 
 
 def _parse_timestamp(value: str) -> datetime | None:
@@ -639,8 +862,10 @@ def _maybe_str(value: Any) -> str | None:
 
 
 def _maybe_hex(value: Any) -> str | None:
-    if isinstance(value, str) and len(value) == 64 and all(
-        ch in "0123456789abcdef" for ch in value
+    if (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(ch in "0123456789abcdef" for ch in value)
     ):
         return value
     return None
@@ -735,9 +960,7 @@ def _evidence(
             item["binding_sha256"],
         ),
     )
-    ordered_comparisons = sorted(
-        comparisons, key=lambda item: item["artifact_role"]
-    )
+    ordered_comparisons = sorted(comparisons, key=lambda item: item["artifact_role"])
     return {
         "kind": KIND,
         "version": VERSION,

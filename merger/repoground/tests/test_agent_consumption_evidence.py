@@ -1,6 +1,7 @@
 """Schema, determinism, negative, freshness, replay, mismatch and E2E tests
 for agent tool-read receipts and consumption evidence comparison.
 """
+
 from __future__ import annotations
 
 import copy
@@ -135,6 +136,51 @@ def test_receipt_schema_rejects_content_field():
         jsonschema.validate(instance=receipt, schema=_load_schema(_RECEIPT_SCHEMA))
 
 
+def test_receipt_schema_rejects_unknown_issuer_id():
+    _require_jsonschema()
+    receipt = _mint()
+    receipt["issuer"] = {
+        "kind": "trusted_wrapper",
+        "id": "answer_text.self_declaration",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=receipt, schema=_load_schema(_RECEIPT_SCHEMA))
+
+
+def test_receipt_schema_rejects_kind_id_mismatch_wrapper_with_gateway_id():
+    _require_jsonschema()
+    receipt = _mint()
+    receipt["issuer"] = {
+        "kind": "trusted_wrapper",
+        "id": "repoground.agent_consumption.tool_gateway",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=receipt, schema=_load_schema(_RECEIPT_SCHEMA))
+
+
+def test_receipt_schema_rejects_kind_id_mismatch_gateway_with_wrapper_id():
+    _require_jsonschema()
+    receipt = _mint()
+    receipt["issuer"] = {
+        "kind": "tool_gateway",
+        "id": "repoground.agent_consumption.tool_read_wrapper",
+    }
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=receipt, schema=_load_schema(_RECEIPT_SCHEMA))
+
+
+def test_receipt_schema_accepts_tool_gateway_issuer_pair():
+    _require_jsonschema()
+    receipt = _mint()
+    # Schema-only instance: runtime mint path uses trusted_wrapper by default.
+    receipt["issuer"] = {
+        "kind": "tool_gateway",
+        "id": "repoground.agent_consumption.tool_gateway",
+    }
+    # Hashes are intentionally stale here; schema does not recompute digests.
+    jsonschema.validate(instance=receipt, schema=_load_schema(_RECEIPT_SCHEMA))
+
+
 # ── Determinism ─────────────────────────────────────────────────────────────
 
 
@@ -168,10 +214,18 @@ def test_comparison_output_is_deterministic():
     receipt = _mint()
     ac = _answer_compliance(["canonical_md", "agent_reading_pack"])
     a = compare_agent_consumption_evidence(
-        ac, [receipt], task_id=_TASK, repo_commit=_COMMIT, expected_roles=["post_emit_health"]
+        ac,
+        [receipt],
+        task_id=_TASK,
+        repo_commit=_COMMIT,
+        expected_roles=["post_emit_health"],
     )
     b = compare_agent_consumption_evidence(
-        ac, [receipt], task_id=_TASK, repo_commit=_COMMIT, expected_roles=["post_emit_health"]
+        ac,
+        [receipt],
+        task_id=_TASK,
+        repo_commit=_COMMIT,
+        expected_roles=["post_emit_health"],
     )
     assert canonical_json(a) == canonical_json(b)
 
@@ -412,6 +466,80 @@ def test_privacy_violation_receipt_fails_closed():
     assert evidence["status"] == "fail"
 
 
+# ── Fail-closed comparison bindings ──────────────────────────────────────────
+
+
+def _assert_no_trusted_observation(evidence: dict) -> None:
+    assert evidence["accepted_receipt_refs"] == []
+    assert all(item["observed"] is False for item in evidence["comparisons"])
+    assert all(
+        item["state"] != "declared-and-observed" for item in evidence["comparisons"]
+    )
+    assert evidence["status"] == "fail"
+    assert "invalid_input_field" in _codes(evidence)
+    if jsonschema is not None:
+        jsonschema.validate(instance=evidence, schema=_load_schema(_EVIDENCE_SCHEMA))
+
+
+def test_empty_task_id_never_accepts_receipts_or_observes():
+    receipt = _mint(event_id="evt-empty-task-001")
+    evidence = compare_agent_consumption_evidence(
+        _answer_compliance(["canonical_md"]),
+        [receipt],
+        task_id="",
+        repo_commit=_COMMIT,
+    )
+    _assert_no_trusted_observation(evidence)
+    assert evidence["task_id"] == "unknown"
+    assert _states(evidence)["canonical_md"] == "declared-only"
+
+
+def test_invalid_repo_commit_never_accepts_receipts_or_observes():
+    receipt = _mint(event_id="evt-bad-commit-001")
+    evidence = compare_agent_consumption_evidence(
+        _answer_compliance(["canonical_md"]),
+        [receipt],
+        task_id=_TASK,
+        repo_commit="not-a-commit",
+    )
+    _assert_no_trusted_observation(evidence)
+    # Schema placeholder only — not a trusted observation binding.
+    assert evidence["repo_commit"] == "0" * 40
+    assert _states(evidence)["canonical_md"] == "declared-only"
+
+
+def test_invalid_explicit_as_of_never_accepts_receipts_or_observes():
+    receipt = _mint(event_id="evt-bad-asof-001")
+    evidence = compare_agent_consumption_evidence(
+        _answer_compliance(["canonical_md"]),
+        [receipt],
+        task_id=_TASK,
+        repo_commit=_COMMIT,
+        as_of="not-a-timestamp",
+        max_age_seconds=3600,
+    )
+    _assert_no_trusted_observation(evidence)
+    assert evidence["task_id"] == _TASK
+    assert evidence["repo_commit"] == _COMMIT
+    assert _states(evidence)["canonical_md"] == "declared-only"
+
+
+def test_invalid_max_age_seconds_never_accepts_receipts_or_observes():
+    receipt = _mint(event_id="evt-bad-max-age-001")
+    evidence = compare_agent_consumption_evidence(
+        _answer_compliance(["canonical_md"]),
+        [receipt],
+        task_id=_TASK,
+        repo_commit=_COMMIT,
+        as_of=_AS_OF,
+        max_age_seconds=-1,
+    )
+    _assert_no_trusted_observation(evidence)
+    assert evidence["task_id"] == _TASK
+    assert evidence["repo_commit"] == _COMMIT
+    assert _states(evidence)["canonical_md"] == "declared-only"
+
+
 # ── E2E wrapper adoption ─────────────────────────────────────────────────────
 
 
@@ -448,7 +576,9 @@ def test_e2e_trusted_wrapper_declaration_comparison_without_semantic_overclaim()
         assert "truth source" not in encoded
         validate_tool_read_receipt(receipt)
 
-    ac = _answer_compliance(["canonical_md", "agent_reading_pack", "citation_map_jsonl"])
+    ac = _answer_compliance(
+        ["canonical_md", "agent_reading_pack", "citation_map_jsonl"]
+    )
     evidence = compare_agent_consumption_evidence(
         ac,
         receipts,
