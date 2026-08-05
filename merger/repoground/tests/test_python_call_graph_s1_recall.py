@@ -186,6 +186,164 @@ def exported():
     assert dynamic["resolved_target_ids"] == []
 
 
+def test_receiver_alias_self_assignment_preserves_s1(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "model.py",
+        """class Model:
+    def target(self):
+        return 1
+
+    def assigned(self):
+        receiver = self
+        receiver = receiver
+        return receiver.target()
+
+    def annotated(self):
+        receiver = self
+        receiver: Model = receiver
+        return receiver.target()
+
+    def named(self):
+        receiver = self
+        (receiver := receiver)
+        return receiver.target()
+""",
+    )
+
+    calls, skipped_count, skipped_errors = extract_python_calls(tmp_path)
+    assert skipped_count == 0
+    assert skipped_errors == []
+    for caller in ("Model.assigned", "Model.annotated", "Model.named"):
+        call = _single(calls, "receiver.target", caller=caller)
+        assert call["evidence_level"] == "S1"
+        assert call["resolution_status"] == "resolved"
+        assert call["resolution_reason"] == "receiver_alias_method_same_class"
+        assert call["resolved_target_ids"] == ["py:model.py:function:Model.target"]
+
+
+def test_receiver_rebinding_downgrades_self_and_super_but_keeps_prior_alias(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "model.py",
+        """class Base:
+    def target(self):
+        return 1
+
+
+class Child(Base):
+    def rebound(self):
+        receiver = self
+        self = object()
+        self.target()
+        super().target()
+        return receiver.target()
+
+    def restored(self):
+        receiver = self
+        self = object()
+        self = receiver
+        return self.target()
+""",
+    )
+
+    calls, skipped_count, skipped_errors = extract_python_calls(tmp_path)
+    assert skipped_count == 0
+    assert skipped_errors == []
+
+    rebound_self = _single(calls, "self.target", caller="Child.rebound")
+    assert rebound_self["evidence_level"] == "S0"
+    assert rebound_self["resolution_reason"] == "receiver_not_direct_method_parameter"
+    assert rebound_self["resolved_target_ids"] == []
+
+    rebound_super = _single(calls, "super().target", caller="Child.rebound")
+    assert rebound_super["evidence_level"] == "S0"
+    assert rebound_super["resolution_reason"] == "super_outside_direct_method"
+    assert rebound_super["resolved_target_ids"] == []
+
+    preserved_alias = _single(calls, "receiver.target", caller="Child.rebound")
+    assert preserved_alias["evidence_level"] == "S1"
+    assert preserved_alias["resolution_reason"] == (
+        "receiver_alias_single_inheritance_method"
+    )
+    assert preserved_alias["resolved_target_ids"] == [
+        "py:model.py:function:Base.target"
+    ]
+
+    restored_self = _single(calls, "self.target", caller="Child.restored")
+    assert restored_self["evidence_level"] == "S1"
+    assert restored_self["resolution_reason"] == "self_single_inheritance_method"
+    assert restored_self["resolved_target_ids"] == ["py:model.py:function:Base.target"]
+
+
+def test_receiver_aliases_require_all_reachable_paths(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "model.py",
+        """class Model:
+    def target(self):
+        return 1
+
+    def one_branch(self, condition):
+        if condition:
+            receiver = self
+        return receiver.target()
+
+    def both_branches(self, condition):
+        if condition:
+            receiver = self
+        else:
+            receiver = self
+        return receiver.target()
+
+    def returning_rebind(self, condition):
+        if condition:
+            self = object()
+            return 0
+        return self.target()
+
+    def conditional_expression(self, condition):
+        (receiver := self) if condition else None
+        return receiver.target()
+
+    def short_circuit(self, condition):
+        condition and (receiver := self)
+        return receiver.target()
+
+    def chained_compare(self, condition):
+        condition < 1 < (receiver := self)
+        return receiver.target()
+""",
+    )
+
+    calls, skipped_count, skipped_errors = extract_python_calls(tmp_path)
+    assert skipped_count == 0
+    assert skipped_errors == []
+
+    for caller in (
+        "Model.one_branch",
+        "Model.conditional_expression",
+        "Model.short_circuit",
+        "Model.chained_compare",
+    ):
+        call = _single(calls, "receiver.target", caller=caller)
+        assert call["evidence_level"] == "S0"
+        assert call["resolution_reason"] == "attribute_root_lexically_shadowed_name"
+        assert call["resolved_target_ids"] == []
+
+    both = _single(calls, "receiver.target", caller="Model.both_branches")
+    assert both["evidence_level"] == "S1"
+    assert both["resolution_reason"] == "receiver_alias_method_same_class"
+    assert both["resolved_target_ids"] == ["py:model.py:function:Model.target"]
+
+    returning = _single(calls, "self.target", caller="Model.returning_rebind")
+    assert returning["evidence_level"] == "S1"
+    assert returning["resolution_reason"] == "self_method_same_class"
+    assert returning["resolved_target_ids"] == ["py:model.py:function:Model.target"]
+
+
 def test_alias_rebinding_and_monkey_patch_do_not_promote(tmp_path: Path) -> None:
     _write(
         tmp_path,

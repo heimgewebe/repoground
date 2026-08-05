@@ -56,8 +56,17 @@ class _ScopeFrame:
     start_line: int | None = None
     end_line: int | None = None
     receiver_name: str | None = None
+    receiver_binding_active: bool = False
     receiver_aliases: tuple[str, ...] = field(default_factory=tuple)
     type_alias_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalFlowState:
+    """Definite local evidence shared by every path reaching a program point."""
+
+    imports: dict[str, tuple[str, ...]]
+    receiver_names: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,6 +349,7 @@ def _function_frame(
         start_line=int(getattr(node, "lineno", 0) or 0) or None,
         end_line=int(getattr(node, "end_lineno", 0) or 0) or None,
         receiver_name=receiver_name,
+        receiver_binding_active=receiver_name is not None,
     )
 
 
@@ -443,8 +453,8 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self.state = _ModuleState(path, _module_name(path))
         self.is_package = is_package
         self.stack: list[_ScopeFrame] = []
-        self._loop_break_bindings: list[list[dict[str, tuple[str, ...]]]] = []
-        self._loop_continue_bindings: list[list[dict[str, tuple[str, ...]]]] = []
+        self._loop_break_bindings: list[list[_LocalFlowState]] = []
+        self._loop_continue_bindings: list[list[_LocalFlowState]] = []
         self._suppress_loop_exits = 0
 
     def _qualified(self, name: str) -> str:
@@ -756,15 +766,57 @@ class _CallGraphVisitor(ast.NodeVisitor):
             if all(state.get(name) == binding for state in rest)
         }
 
+    def _local_flow_state(self) -> _LocalFlowState:
+        return _LocalFlowState(
+            imports=self._local_import_bindings(),
+            receiver_names=self._receiver_names(),
+        )
+
+    def _set_local_flow_state(self, state: _LocalFlowState) -> None:
+        self._set_local_import_bindings(state.imports)
+        if not self.stack:
+            return
+        frame = self.stack[-1]
+        if frame.kind not in _FUNCTION_KINDS or frame.receiver_name is None:
+            return
+        self.stack[-1] = replace(
+            frame,
+            receiver_binding_active=frame.receiver_name in state.receiver_names,
+            receiver_aliases=tuple(
+                sorted(state.receiver_names - {frame.receiver_name})
+            ),
+        )
+
+    def _intersect_local_flow_states(self, *states: _LocalFlowState) -> _LocalFlowState:
+        if not states:
+            return _LocalFlowState(imports={}, receiver_names=frozenset())
+        receiver_names = set(states[0].receiver_names)
+        for state in states[1:]:
+            receiver_names.intersection_update(state.receiver_names)
+        return _LocalFlowState(
+            imports=self._intersect_import_bindings(
+                *(state.imports for state in states)
+            ),
+            receiver_names=frozenset(receiver_names),
+        )
+
+    def _flow_without_names(
+        self, state: _LocalFlowState, changed_names: set[str]
+    ) -> _LocalFlowState:
+        return _LocalFlowState(
+            imports=self._bindings_without_names(state.imports, changed_names),
+            receiver_names=state.receiver_names - changed_names,
+        )
+
     def _visit_unreachable_statement_list(self, statements: Sequence[ast.stmt]) -> None:
-        imports_before = self._local_import_bindings()
+        flow_before = self._local_flow_state()
         self._suppress_loop_exits += 1
         try:
             for statement in statements:
                 self.visit(statement)
         finally:
             self._suppress_loop_exits -= 1
-            self._set_local_import_bindings(imports_before)
+            self._set_local_flow_state(flow_before)
 
     def _visit_statement_list(self, statements: Sequence[ast.stmt]) -> bool:
         for index, statement in enumerate(statements):
@@ -783,9 +835,17 @@ class _CallGraphVisitor(ast.NodeVisitor):
             receiver_aliases = tuple(
                 alias for alias in frame.receiver_aliases if alias not in names
             )
-            if receiver_aliases != frame.receiver_aliases:
+            receiver_binding_active = frame.receiver_binding_active and (
+                frame.receiver_name not in names
+            )
+            if (
+                receiver_aliases != frame.receiver_aliases
+                or receiver_binding_active != frame.receiver_binding_active
+            ):
                 self.stack[-1] = replace(
-                    frame, receiver_aliases=receiver_aliases
+                    frame,
+                    receiver_binding_active=receiver_binding_active,
+                    receiver_aliases=receiver_aliases,
                 )
             return
         for name in names:
@@ -796,19 +856,35 @@ class _CallGraphVisitor(ast.NodeVisitor):
         names = set().union(*(_target_names(target) for target in target_list))
         self._bind_or_invalidate_names(names)
 
+    def _receiver_names(self) -> frozenset[str]:
+        if not self.stack:
+            return frozenset()
+        frame = self.stack[-1]
+        if frame.kind not in _FUNCTION_KINDS or frame.receiver_name is None:
+            return frozenset()
+        names = set(frame.receiver_aliases)
+        if frame.receiver_binding_active:
+            names.add(frame.receiver_name)
+        return frozenset(names)
+
     def _establish_receiver_aliases(
-        self, targets: Iterable[ast.expr], value: ast.expr | None
+        self,
+        targets: Iterable[ast.expr],
+        value: ast.expr | None,
+        *,
+        known_receivers: frozenset[str],
     ) -> None:
         if not self.stack or value is None:
             return
         frame = self.stack[-1]
         if frame.kind not in _FUNCTION_KINDS or frame.receiver_name is None:
             return
-        known_receivers = {frame.receiver_name, *frame.receiver_aliases}
         if not isinstance(value, ast.Name) or value.id not in known_receivers:
             return
         target_list = tuple(targets)
-        if not target_list or not all(isinstance(target, ast.Name) for target in target_list):
+        if not target_list or not all(
+            isinstance(target, ast.Name) for target in target_list
+        ):
             return
         aliases = set(frame.receiver_aliases)
         aliases.update(
@@ -816,8 +892,14 @@ class _CallGraphVisitor(ast.NodeVisitor):
             for target in target_list
             if isinstance(target, ast.Name) and target.id != frame.receiver_name
         )
+        receiver_binding_active = frame.receiver_binding_active or any(
+            isinstance(target, ast.Name) and target.id == frame.receiver_name
+            for target in target_list
+        )
         self.stack[-1] = replace(
-            frame, receiver_aliases=tuple(sorted(aliases))
+            frame,
+            receiver_binding_active=receiver_binding_active,
+            receiver_aliases=tuple(sorted(aliases)),
         )
 
     def _bind_module_target(self, target: ast.expr) -> None:
@@ -831,8 +913,11 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self.visit(node.value)
         for target in node.targets:
             self.visit(target)
+        known_receivers = self._receiver_names()
         self._bind_or_invalidate_targets(node.targets)
-        self._establish_receiver_aliases(node.targets, node.value)
+        self._establish_receiver_aliases(
+            node.targets, node.value, known_receivers=known_receivers
+        )
         return None
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> Any:
@@ -840,8 +925,11 @@ class _CallGraphVisitor(ast.NodeVisitor):
         if node.value is not None:
             self.visit(node.value)
         self.visit(node.target)
+        known_receivers = self._receiver_names()
         self._bind_or_invalidate_targets((node.target,))
-        self._establish_receiver_aliases((node.target,), node.value)
+        self._establish_receiver_aliases(
+            (node.target,), node.value, known_receivers=known_receivers
+        )
         return None
 
     def visit_AugAssign(self, node: ast.AugAssign) -> Any:
@@ -853,8 +941,11 @@ class _CallGraphVisitor(ast.NodeVisitor):
     def visit_NamedExpr(self, node: ast.NamedExpr) -> Any:
         self.visit(node.value)
         self.visit(node.target)
+        known_receivers = self._receiver_names()
         self._bind_or_invalidate_targets((node.target,))
-        self._establish_receiver_aliases((node.target,), node.value)
+        self._establish_receiver_aliases(
+            (node.target,), node.value, known_receivers=known_receivers
+        )
         return None
 
     def visit_Delete(self, node: ast.Delete) -> Any:
@@ -905,23 +996,21 @@ class _CallGraphVisitor(ast.NodeVisitor):
 
     def visit_If(self, node: ast.If) -> Any:
         self.visit(node.test)
-        imports_before = self._local_import_bindings()
+        flow_before = self._local_flow_state()
 
         body_falls_through = self._visit_statement_list(node.body)
-        imports_after_body = self._local_import_bindings()
+        flow_after_body = self._local_flow_state()
 
-        self._set_local_import_bindings(imports_before)
+        self._set_local_flow_state(flow_before)
         else_falls_through = self._visit_statement_list(node.orelse)
-        imports_after_else = self._local_import_bindings()
+        flow_after_else = self._local_flow_state()
 
         reachable_states = []
         if body_falls_through:
-            reachable_states.append(imports_after_body)
+            reachable_states.append(flow_after_body)
         if else_falls_through:
-            reachable_states.append(imports_after_else)
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*reachable_states)
-        )
+            reachable_states.append(flow_after_else)
+        self._set_local_flow_state(self._intersect_local_flow_states(*reachable_states))
         return None
 
     @staticmethod
@@ -933,8 +1022,8 @@ class _CallGraphVisitor(ast.NodeVisitor):
 
     @staticmethod
     def _loop_exit_checkpoint(
-        exit_stack: list[list[dict[str, tuple[str, ...]]]],
-    ) -> tuple[list[dict[str, tuple[str, ...]]] | None, int]:
+        exit_stack: list[list[_LocalFlowState]],
+    ) -> tuple[list[_LocalFlowState] | None, int]:
         if not exit_stack:
             return None, 0
         states = exit_stack[-1]
@@ -942,8 +1031,8 @@ class _CallGraphVisitor(ast.NodeVisitor):
 
     @staticmethod
     def _take_loop_exits_since(
-        checkpoint: tuple[list[dict[str, tuple[str, ...]]] | None, int],
-    ) -> list[dict[str, tuple[str, ...]]]:
+        checkpoint: tuple[list[_LocalFlowState] | None, int],
+    ) -> list[_LocalFlowState]:
         states, start = checkpoint
         if states is None:
             return []
@@ -974,13 +1063,13 @@ class _CallGraphVisitor(ast.NodeVisitor):
     def _visit_try_handlers(
         self,
         handlers: Sequence[ast.ExceptHandler],
-        handler_entry: dict[str, tuple[str, ...]],
-    ) -> list[dict[str, tuple[str, ...]]]:
+        handler_entry: _LocalFlowState,
+    ) -> list[_LocalFlowState]:
         normal_exit_states = []
         for handler in handlers:
-            self._set_local_import_bindings(handler_entry)
+            self._set_local_flow_state(handler_entry)
             if self._visit_try_handler(handler):
-                normal_exit_states.append(self._local_import_bindings())
+                normal_exit_states.append(self._local_flow_state())
         return normal_exit_states
 
     def _visit_try_else_path(
@@ -988,25 +1077,25 @@ class _CallGraphVisitor(ast.NodeVisitor):
         statements: Sequence[ast.stmt],
         *,
         body_falls_through: bool,
-        imports_after_body: dict[str, tuple[str, ...]],
-    ) -> list[dict[str, tuple[str, ...]]]:
-        self._set_local_import_bindings(imports_after_body)
+        flow_after_body: _LocalFlowState,
+    ) -> list[_LocalFlowState]:
+        self._set_local_flow_state(flow_after_body)
         if not body_falls_through:
             self._visit_unreachable_statement_list(statements)
             return []
         if self._visit_statement_list(statements):
-            return [self._local_import_bindings()]
+            return [self._local_flow_state()]
         return []
 
     def _visit_try_except_else_paths(
         self,
         node: ast.Try | ast.TryStar,
-        imports_before_try: dict[str, tuple[str, ...]],
-    ) -> list[dict[str, tuple[str, ...]]]:
+        flow_before_try: _LocalFlowState,
+    ) -> list[_LocalFlowState]:
         body_falls_through = self._visit_statement_list(node.body)
-        imports_after_body = self._local_import_bindings()
-        handler_entry = self._bindings_without_names(
-            imports_before_try,
+        flow_after_body = self._local_flow_state()
+        handler_entry = self._flow_without_names(
+            flow_before_try,
             self._binding_names_in_statements(node.body),
         )
         normal_exit_states = self._visit_try_handlers(
@@ -1017,7 +1106,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
             self._visit_try_else_path(
                 node.orelse,
                 body_falls_through=body_falls_through,
-                imports_after_body=imports_after_body,
+                flow_after_body=flow_after_body,
             )
         )
         return normal_exit_states
@@ -1025,8 +1114,8 @@ class _CallGraphVisitor(ast.NodeVisitor):
     def _exceptional_finally_entry(
         self,
         node: ast.Try | ast.TryStar,
-        imports_before_try: dict[str, tuple[str, ...]],
-    ) -> dict[str, tuple[str, ...]]:
+        flow_before_try: _LocalFlowState,
+    ) -> _LocalFlowState:
         changed_before_finally = self._binding_names_in_statements(
             [
                 *node.body,
@@ -1037,8 +1126,8 @@ class _CallGraphVisitor(ast.NodeVisitor):
         changed_before_finally.update(
             handler.name for handler in node.handlers if isinstance(handler.name, str)
         )
-        return self._bindings_without_names(
-            imports_before_try,
+        return self._flow_without_names(
+            flow_before_try,
             changed_before_finally,
         )
 
@@ -1062,29 +1151,45 @@ class _CallGraphVisitor(ast.NodeVisitor):
         )
         return result
 
+    def _apply_finally_flow_state(
+        self,
+        flow: _LocalFlowState,
+        flow_after_finally: _LocalFlowState,
+        changed_names: set[str],
+    ) -> _LocalFlowState:
+        return _LocalFlowState(
+            imports=self._apply_finally_bindings(
+                flow.imports,
+                flow_after_finally.imports,
+                changed_names,
+            ),
+            receiver_names=(flow.receiver_names - changed_names)
+            | (flow_after_finally.receiver_names & changed_names),
+        )
+
     def _paths_after_finally(
         self,
-        paths: Sequence[dict[str, tuple[str, ...]]],
+        paths: Sequence[_LocalFlowState],
         *,
         final_falls_through: bool,
-        imports_after_finally: dict[str, tuple[str, ...]],
+        flow_after_finally: _LocalFlowState,
         changed_names: set[str],
-    ) -> list[dict[str, tuple[str, ...]]]:
+    ) -> list[_LocalFlowState]:
         if not final_falls_through:
             return []
         return [
-            self._apply_finally_bindings(
-                imports,
-                imports_after_finally,
+            self._apply_finally_flow_state(
+                flow,
+                flow_after_finally,
                 changed_names,
             )
-            for imports in paths
+            for flow in paths
         ]
 
     @staticmethod
     def _restore_loop_exits_after_finally(
-        checkpoint: tuple[list[dict[str, tuple[str, ...]]] | None, int],
-        resumed_exits: Sequence[dict[str, tuple[str, ...]]],
+        checkpoint: tuple[list[_LocalFlowState] | None, int],
+        resumed_exits: Sequence[_LocalFlowState],
     ) -> None:
         states, start = checkpoint
         if states is None:
@@ -1096,43 +1201,37 @@ class _CallGraphVisitor(ast.NodeVisitor):
         self,
         node: ast.Try | ast.TryStar,
         *,
-        imports_before_try: dict[str, tuple[str, ...]],
-        normal_exit_states: Sequence[dict[str, tuple[str, ...]]],
-        break_checkpoint: tuple[
-            list[dict[str, tuple[str, ...]]] | None,
-            int,
-        ],
-        continue_checkpoint: tuple[
-            list[dict[str, tuple[str, ...]]] | None,
-            int,
-        ],
+        flow_before_try: _LocalFlowState,
+        normal_exit_states: Sequence[_LocalFlowState],
+        break_checkpoint: tuple[list[_LocalFlowState] | None, int],
+        continue_checkpoint: tuple[list[_LocalFlowState] | None, int],
     ) -> None:
         pending_breaks = self._take_loop_exits_since(break_checkpoint)
         pending_continues = self._take_loop_exits_since(continue_checkpoint)
-        finally_entry = self._intersect_import_bindings(
+        finally_entry = self._intersect_local_flow_states(
             *normal_exit_states,
             *pending_breaks,
             *pending_continues,
-            self._exceptional_finally_entry(node, imports_before_try),
+            self._exceptional_finally_entry(node, flow_before_try),
         )
-        self._set_local_import_bindings(finally_entry)
+        self._set_local_flow_state(finally_entry)
         final_falls_through = self._visit_statement_list(node.finalbody)
-        imports_after_finally = self._local_import_bindings()
+        flow_after_finally = self._local_flow_state()
         changed_names = self._binding_names_in_statements(node.finalbody)
 
         normal_after_finally = self._paths_after_finally(
             normal_exit_states,
             final_falls_through=final_falls_through,
-            imports_after_finally=imports_after_finally,
+            flow_after_finally=flow_after_finally,
             changed_names=changed_names,
         )
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*normal_after_finally)
+        self._set_local_flow_state(
+            self._intersect_local_flow_states(*normal_after_finally)
         )
         breaks_after_finally = self._paths_after_finally(
             pending_breaks,
             final_falls_through=final_falls_through,
-            imports_after_finally=imports_after_finally,
+            flow_after_finally=flow_after_finally,
             changed_names=changed_names,
         )
         self._restore_loop_exits_after_finally(
@@ -1142,7 +1241,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
         continues_after_finally = self._paths_after_finally(
             pending_continues,
             final_falls_through=final_falls_through,
-            imports_after_finally=imports_after_finally,
+            flow_after_finally=flow_after_finally,
             changed_names=changed_names,
         )
         self._restore_loop_exits_after_finally(
@@ -1151,20 +1250,20 @@ class _CallGraphVisitor(ast.NodeVisitor):
         )
 
     def _visit_try_statement(self, node: ast.Try | ast.TryStar) -> None:
-        imports_before_try = self._local_import_bindings()
+        flow_before_try = self._local_flow_state()
         break_checkpoint = self._loop_exit_checkpoint(self._loop_break_bindings)
         continue_checkpoint = self._loop_exit_checkpoint(self._loop_continue_bindings)
         normal_exit_states = self._visit_try_except_else_paths(
             node,
-            imports_before_try,
+            flow_before_try,
         )
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*normal_exit_states)
+        self._set_local_flow_state(
+            self._intersect_local_flow_states(*normal_exit_states)
         )
         if node.finalbody:
             self._visit_try_finally_paths(
                 node,
-                imports_before_try=imports_before_try,
+                flow_before_try=flow_before_try,
                 normal_exit_states=normal_exit_states,
                 break_checkpoint=break_checkpoint,
                 continue_checkpoint=continue_checkpoint,
@@ -1180,7 +1279,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
 
     def _visit_for_statement(self, node: ast.For | ast.AsyncFor) -> None:
         self.visit(node.iter)
-        imports_after_iter = self._local_import_bindings()
+        flow_after_iter = self._local_flow_state()
         self.visit(node.target)
         names = _target_names(node.target)
         self._bind_or_invalidate_names(names)
@@ -1192,46 +1291,36 @@ class _CallGraphVisitor(ast.NodeVisitor):
             break_bindings = self._loop_break_bindings.pop()
             continue_bindings = self._loop_continue_bindings.pop()
 
-        def without_target_names(
-            state: dict[str, tuple[str, ...]],
-        ) -> dict[str, tuple[str, ...]]:
-            return {
-                name: binding for name, binding in state.items() if name not in names
-            }
-
         break_bindings = [
-            without_target_names(break_state) for break_state in break_bindings
+            self._flow_without_names(break_state, names)
+            for break_state in break_bindings
         ]
         continue_bindings = [
-            without_target_names(continue_state) for continue_state in continue_bindings
+            self._flow_without_names(continue_state, names)
+            for continue_state in continue_bindings
         ]
 
-        # The loop may execute zero times. A target-name reimport observed while
-        # walking the body is not definite: it may be conditional, and another
-        # iteration rebinds the target first. ``else`` may establish it again.
-        # Other imports must agree before the loop and on body fallthrough.
-        imports_after_body = {
-            name: binding
-            for name, binding in self._local_import_bindings().items()
-            if name not in names
-        }
-        normal_exit_states = [imports_after_iter, *continue_bindings]
+        # The loop may execute zero times. Evidence created in the body is only
+        # definite when it agrees with the zero-iteration and continuation paths.
+        flow_after_body = self._flow_without_names(
+            self._local_flow_state(),
+            names,
+        )
+        normal_exit_states = [flow_after_iter, *continue_bindings]
         if body_falls_through:
-            normal_exit_states.append(imports_after_body)
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*normal_exit_states)
+            normal_exit_states.append(flow_after_body)
+        self._set_local_flow_state(
+            self._intersect_local_flow_states(*normal_exit_states)
         )
         else_falls_through = self._visit_statement_list(node.orelse)
-        imports_after_else = self._local_import_bindings()
+        flow_after_else = self._local_flow_state()
 
-        # Every possible break skips ``else``. Keep only the identical import
-        # bindings present on the else path and on every observed break path.
+        # Every possible break skips ``else``. Keep only evidence present on the
+        # else path and on every observed break path.
         reachable_states = list(break_bindings)
         if else_falls_through:
-            reachable_states.append(imports_after_else)
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*reachable_states)
-        )
+            reachable_states.append(flow_after_else)
+        self._set_local_flow_state(self._intersect_local_flow_states(*reachable_states))
 
     def visit_For(self, node: ast.For) -> Any:
         self._visit_for_statement(node)
@@ -1243,7 +1332,7 @@ class _CallGraphVisitor(ast.NodeVisitor):
 
     def visit_While(self, node: ast.While) -> Any:
         self.visit(node.test)
-        imports_after_test = self._local_import_bindings()
+        flow_after_test = self._local_flow_state()
         self._loop_break_bindings.append([])
         self._loop_continue_bindings.append([])
         try:
@@ -1251,29 +1340,27 @@ class _CallGraphVisitor(ast.NodeVisitor):
         finally:
             break_bindings = self._loop_break_bindings.pop()
             continue_bindings = self._loop_continue_bindings.pop()
-        normal_exit_states = [imports_after_test, *continue_bindings]
+        normal_exit_states = [flow_after_test, *continue_bindings]
         if body_falls_through:
-            normal_exit_states.append(self._local_import_bindings())
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*normal_exit_states)
+            normal_exit_states.append(self._local_flow_state())
+        self._set_local_flow_state(
+            self._intersect_local_flow_states(*normal_exit_states)
         )
         else_falls_through = self._visit_statement_list(node.orelse)
         reachable_states = list(break_bindings)
         if else_falls_through:
-            reachable_states.append(self._local_import_bindings())
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*reachable_states)
-        )
+            reachable_states.append(self._local_flow_state())
+        self._set_local_flow_state(self._intersect_local_flow_states(*reachable_states))
         return None
 
     def visit_Break(self, _node: ast.Break) -> Any:
         if self._loop_break_bindings and not self._suppress_loop_exits:
-            self._loop_break_bindings[-1].append(self._local_import_bindings())
+            self._loop_break_bindings[-1].append(self._local_flow_state())
         return None
 
     def visit_Continue(self, _node: ast.Continue) -> Any:
         if self._loop_continue_bindings and not self._suppress_loop_exits:
-            self._loop_continue_bindings[-1].append(self._local_import_bindings())
+            self._loop_continue_bindings[-1].append(self._local_flow_state())
         return None
 
     def _visit_with_statement(self, node: ast.With | ast.AsyncWith) -> None:
@@ -1310,44 +1397,75 @@ class _CallGraphVisitor(ast.NodeVisitor):
             for case in node.cases:
                 for name in _match_pattern_names(case.pattern):
                     self.state.add_binding(name, "assign")
-        next_case_state = self._local_import_bindings()
-        fallthrough_states: list[dict[str, tuple[str, ...]]] = []
+        next_case_state = self._local_flow_state()
+        fallthrough_states: list[_LocalFlowState] = []
         exhaustive = False
         for case in node.cases:
             pattern_names = _match_pattern_names(case.pattern)
             pattern_miss_state = next_case_state
-            pattern_success_state = self._bindings_without_names(
+            pattern_success_state = self._flow_without_names(
                 next_case_state,
                 pattern_names,
             )
-            self._set_local_import_bindings(pattern_success_state)
+            self._set_local_flow_state(pattern_success_state)
             self.visit(case.pattern)
             if case.guard is not None:
                 self.visit(case.guard)
-                guard_state = self._local_import_bindings()
-                # A later case can be reached either because this pattern did not
-                # match or because its guard was false. Retain only imports that
-                # survive both paths.
-                next_case_state = self._intersect_import_bindings(
+                guard_state = self._local_flow_state()
+                # A later case can be reached because the pattern missed or its
+                # guard was false. Retain only evidence surviving both paths.
+                next_case_state = self._intersect_local_flow_states(
                     pattern_miss_state,
                     guard_state,
                 )
             else:
                 guard_state = pattern_success_state
                 next_case_state = pattern_miss_state
-            self._set_local_import_bindings(guard_state)
+            self._set_local_flow_state(guard_state)
             if self._visit_statement_list(case.body):
-                fallthrough_states.append(self._local_import_bindings())
+                fallthrough_states.append(self._local_flow_state())
             if case.guard is None and _match_pattern_is_irrefutable(case.pattern):
                 exhaustive = True
                 break
         if not exhaustive:
-            # A refutable match may select no case. The pre-match path is therefore
-            # a reachable exit and must prevent conditional imports becoming S1.
+            # A refutable match may select no case. The pre-match path is a
+            # reachable exit and prevents conditional evidence becoming S1.
             fallthrough_states.append(next_case_state)
-        self._set_local_import_bindings(
-            self._intersect_import_bindings(*fallthrough_states)
+        self._set_local_flow_state(
+            self._intersect_local_flow_states(*fallthrough_states)
         )
+        return None
+
+    def visit_IfExp(self, node: ast.IfExp) -> Any:
+        self.visit(node.test)
+        flow_before_branches = self._local_flow_state()
+        self.visit(node.body)
+        flow_after_body = self._local_flow_state()
+        self._set_local_flow_state(flow_before_branches)
+        self.visit(node.orelse)
+        self._set_local_flow_state(
+            self._intersect_local_flow_states(
+                flow_after_body,
+                self._local_flow_state(),
+            )
+        )
+        return None
+
+    def visit_BoolOp(self, node: ast.BoolOp) -> Any:
+        exit_states = []
+        for value in node.values:
+            self.visit(value)
+            exit_states.append(self._local_flow_state())
+        self._set_local_flow_state(self._intersect_local_flow_states(*exit_states))
+        return None
+
+    def visit_Compare(self, node: ast.Compare) -> Any:
+        self.visit(node.left)
+        exit_states = []
+        for comparator in node.comparators:
+            self.visit(comparator)
+            exit_states.append(self._local_flow_state())
+        self._set_local_flow_state(self._intersect_local_flow_states(*exit_states))
         return None
 
     def visit_Call(self, node: ast.Call) -> Any:
@@ -1511,9 +1629,7 @@ class _Resolver:
                 _visited=_visited | {key},
             )
         if state.has_module_getattr:
-            return _verdict(
-                "unresolved", f"{reason_prefix}_module_getattr_dispatch"
-            )
+            return _verdict("unresolved", f"{reason_prefix}_module_getattr_dispatch")
         if state.star_imports:
             return _verdict("unresolved", f"{reason_prefix}_star_import_unresolved")
         return _verdict("unresolved", f"{reason_prefix}_name_not_found")
@@ -1694,7 +1810,9 @@ class _Resolver:
         if function_index is None:
             return None
         method = stack[function_index]
-        valid_receivers = {method.receiver_name, *method.receiver_aliases}
+        valid_receivers = set(method.receiver_aliases)
+        if method.receiver_binding_active and method.receiver_name is not None:
+            valid_receivers.add(method.receiver_name)
         if method.kind not in _FUNCTION_KINDS or root not in valid_receivers:
             return None
         if function_index == 0 or stack[function_index - 1].kind != "class":
@@ -1874,6 +1992,7 @@ class _Resolver:
         if (
             method.kind not in _FUNCTION_KINDS
             or method.receiver_name is None
+            or not method.receiver_binding_active
             or class_frame.kind != "class"
         ):
             return _verdict("unresolved", "super_outside_direct_method")
@@ -1916,9 +2035,7 @@ class _Resolver:
                     simple_name = parts[-1]
                     verdict = self._resolve_dotted(state, parts, stack)
                 else:
-                    simple_name = (
-                        func.attr if isinstance(func, ast.Attribute) else None
-                    )
+                    simple_name = func.attr if isinstance(func, ast.Attribute) else None
                     verdict = _verdict("unresolved", "dynamic_callee_expression")
         record = {
             "path": state.path,
@@ -1946,8 +2063,7 @@ def _snapshot_module_state(state: _ModuleState) -> _ModuleSnapshot:
             (name, tuple(values)) for name, values in sorted(state.classes.items())
         ),
         class_bases=tuple(
-            (name, tuple(values))
-            for name, values in sorted(state.class_bases.items())
+            (name, tuple(values)) for name, values in sorted(state.class_bases.items())
         ),
         methods=tuple(
             (owner, name, tuple(values))
@@ -1984,9 +2100,7 @@ def _restore_module_state(snapshot: _ModuleSnapshot) -> _ModuleState:
     state = _ModuleState(snapshot.path, snapshot.module)
     state.functions = {name: list(values) for name, values in snapshot.functions}
     state.classes = {name: list(values) for name, values in snapshot.classes}
-    state.class_bases = {
-        name: tuple(values) for name, values in snapshot.class_bases
-    }
+    state.class_bases = {name: tuple(values) for name, values in snapshot.class_bases}
     state.methods = {
         (owner, name): list(values) for owner, name, values in snapshot.methods
     }
