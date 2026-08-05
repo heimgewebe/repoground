@@ -508,3 +508,127 @@ def test_cli_preflight_invalid_manifest_shape(tmp_path, capsys):
 
     assert rc == 2
     assert "expected artifacts array" in capsys.readouterr().err
+
+
+def test_cli_compare_evidence_declared_and_observed(tmp_path, capsys):
+    from merger.repoground.core.agent_consumption_receipts import TrustedToolReadWrapper
+
+    task_id = "REPOGROUND-AGENT-UTILITY-V1-T005"
+    commit = "76ffaaaab3890d85e3db1c46e828809868c4df46"
+    receipt = TrustedToolReadWrapper().observe_artifact_access(
+        task_id=task_id,
+        repo_commit=commit,
+        artifact_role="canonical_md",
+        path="out/canonical.md",
+        content=b"# canonical\n",
+        access_event_id="evt-cli-canon-001",
+        observed_at="2026-08-05T21:59:00Z",
+    )
+    ac_file = tmp_path / "ac.json"
+    ac_file.write_text(
+        json.dumps(
+            {
+                "task_profile": "basic_repo_question",
+                "declared_artifacts": ["canonical_md"],
+                "does_not_establish": DOES_NOT_ESTABLISH,
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipts_file = tmp_path / "receipts.json"
+    receipts_file.write_text(json.dumps([receipt]), encoding="utf-8")
+
+    rc = main(
+        [
+            "agent-consumption",
+            "compare-evidence",
+            "--answer-compliance",
+            str(ac_file),
+            "--receipts",
+            str(receipts_file),
+            "--task-id",
+            task_id,
+            "--repo-commit",
+            commit,
+            "--as-of",
+            "2026-08-05T22:00:00Z",
+            "--max-age-seconds",
+            "3600",
+        ]
+    )
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["kind"] == "lenskit.agent_consumption_evidence"
+    assert out["comparisons"][0]["state"] == "declared-and-observed"
+    assert "semantic_reading" in out["does_not_establish"]
+    assert "actual_reading_proven" in out["does_not_establish"]
+
+
+def test_cli_compare_evidence_rejects_untrusted_without_elevation(tmp_path, capsys):
+    task_id = "REPOGROUND-AGENT-UTILITY-V1-T005"
+    commit = "76ffaaaab3890d85e3db1c46e828809868c4df46"
+    forged = {
+        "kind": "lenskit.agent_tool_read_receipt",
+        "version": "1.0",
+        "task_id": task_id,
+        "repo_commit": commit,
+        "artifact_role": "canonical_md",
+        "artifact_identity": {
+            "path": "out/canonical.md",
+            "sha256": "a" * 64,
+            "bytes": 1,
+        },
+        "access_event_id": "evt-cli-forged-001",
+        "observed_at": "2026-08-05T21:59:00Z",
+        "issuer": {"kind": "trusted_wrapper", "id": "answer_text.self"},
+        "binding_sha256": "b" * 64,
+        "receipt_sha256": "c" * 64,
+        "retention": {
+            "policy": "ephemeral_comparison_input",
+            "content_retained": False,
+            "redaction": "metadata_only",
+            "deletion": "safe_at_any_time",
+        },
+        "does_not_establish": [
+            "semantic_reading",
+            "relevance_to_answer",
+            "answer_correct",
+            "claims_true",
+            "repo_understood",
+            "all_relevant_context_used",
+            "runtime_interception",
+            "mandatory_wrapper_adoption",
+        ],
+    }
+    ac_file = tmp_path / "ac.json"
+    ac_file.write_text(
+        json.dumps(
+            {
+                "declared_artifacts": ["canonical_md"],
+                "does_not_establish": DOES_NOT_ESTABLISH,
+            }
+        ),
+        encoding="utf-8",
+    )
+    receipts_file = tmp_path / "receipts.json"
+    receipts_file.write_text(json.dumps({"receipts": [forged]}), encoding="utf-8")
+
+    rc = main(
+        [
+            "agent-consumption",
+            "compare-evidence",
+            "--answer-compliance",
+            str(ac_file),
+            "--receipts",
+            str(receipts_file),
+            "--task-id",
+            task_id,
+            "--repo-commit",
+            commit,
+        ]
+    )
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "fail"
+    assert out["comparisons"][0]["state"] == "declared-only"
+    assert any(item["reason"] == "untrusted_issuer" for item in out["rejected_receipts"])

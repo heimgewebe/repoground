@@ -1,0 +1,222 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/agent-tool-read-receipt.v1.schema.json",
+  "title": "Agent Tool-Read Receipt (agent-tool-read-receipt v1.0)",
+  "description": "Data-sparing, versioned observation that a trusted wrapper or tool gateway recorded access to one artifact identity for one task and one repository commit. Stores only bounded metadata and digests. Never stores artifact content. Does not establish semantic reading, relevance, answer correctness, or truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "task_id",
+    "repo_commit",
+    "artifact_role",
+    "artifact_identity",
+    "access_event_id",
+    "observed_at",
+    "issuer",
+    "binding_sha256",
+    "receipt_sha256",
+    "retention",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.agent_tool_read_receipt"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "Exact task identity this observation is bound to."
+    },
+    "repo_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Full lowercase repository commit SHA-1 the access is bound to."
+    },
+    "artifact_role": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+      "description": "Artifact role accessed (for example canonical_md). Role only; not content."
+    },
+    "artifact_identity": {
+      "$ref": "#/definitions/artifact_identity"
+    },
+    "access_event_id": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$",
+      "description": "Unique identifier for this single access event. Used for replay detection."
+    },
+    "observed_at": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 40,
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z$",
+      "description": "UTC observation timestamp (ISO-8601 with trailing Z)."
+    },
+    "issuer": {
+      "$ref": "#/definitions/issuer"
+    },
+    "binding_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the deterministic binding material (task, commit, role, identity, event, issuer)."
+    },
+    "receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the full receipt without the receipt_sha256 field."
+    },
+    "retention": {
+      "$ref": "#/definitions/retention"
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish_array"
+    }
+  },
+  "definitions": {
+    "artifact_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "description": "Immutable artifact identity without content. path is a relative locator; sha256 and bytes bind the bytes that were hashed at observation time.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9._@+/-]+$",
+          "description": "Relative POSIX-like path locator. Never absolute. Never contains '..'."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456
+        }
+      }
+    },
+    "issuer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "description": "Only allowlisted trusted_wrapper or tool_gateway issuers may mint observed evidence. Runtime allowlist couples kind to id exactly: trusted_wrapper↔repoground.agent_consumption.tool_read_wrapper and tool_gateway↔repoground.agent_consumption.tool_gateway. Answer text and self-declarations are not issuers.",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["trusted_wrapper", "tool_gateway"]
+        },
+        "id": {
+          "type": "string",
+          "enum": [
+            "repoground.agent_consumption.tool_read_wrapper",
+            "repoground.agent_consumption.tool_gateway"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "trusted_wrapper" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "const": "repoground.agent_consumption.tool_read_wrapper"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "tool_gateway" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "id": {
+                "const": "repoground.agent_consumption.tool_gateway"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "content_retained",
+        "redaction",
+        "deletion"
+      ],
+      "properties": {
+        "policy": {
+          "type": "string",
+          "const": "ephemeral_comparison_input",
+          "description": "Receipts are comparison inputs; long-term archival is operator-controlled and optional."
+        },
+        "content_retained": {
+          "type": "boolean",
+          "const": false,
+          "description": "Artifact body/content must never be retained in the receipt."
+        },
+        "redaction": {
+          "type": "string",
+          "const": "metadata_only",
+          "description": "Only role, path, digests, sizes, and binding identifiers are retained."
+        },
+        "deletion": {
+          "type": "string",
+          "const": "safe_at_any_time",
+          "description": "Deleting a receipt never corrupts source repositories; absence becomes missing/unavailable evidence."
+        }
+      }
+    },
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "semantic_reading",
+          "relevance_to_answer",
+          "answer_correct",
+          "claims_true",
+          "repo_understood",
+          "all_relevant_context_used",
+          "runtime_interception",
+          "mandatory_wrapper_adoption"
+        ]
+      },
+      "allOf": [
+        { "contains": { "const": "semantic_reading" } },
+        { "contains": { "const": "relevance_to_answer" } },
+        { "contains": { "const": "answer_correct" } },
+        { "contains": { "const": "claims_true" } },
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "all_relevant_context_used" } },
+        { "contains": { "const": "runtime_interception" } },
+        { "contains": { "const": "mandatory_wrapper_adoption" } }
+      ]
+    }
+  }
+}

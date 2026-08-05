@@ -46,6 +46,50 @@ def register_agent_consumption_commands(subparsers) -> None:
     val_parser.add_argument("--strict", action="store_true", help="Treat 'warn' status as exit code 1")
     val_parser.add_argument("--out", "--output", dest="out", help="Output path for the trace JSON")
 
+    # compare-evidence command (declaration vs trusted tool-read receipts)
+    ev_parser = subparsers_ac.add_parser(
+        "compare-evidence",
+        help=(
+            "Compare Answer Compliance declarations with trusted tool-read "
+            "receipts for one task_id and repo_commit"
+        ),
+    )
+    ev_parser.add_argument(
+        "--answer-compliance",
+        required=True,
+        help="Path to Answer Compliance JSON (declaration layer only)",
+    )
+    ev_parser.add_argument(
+        "--receipts",
+        required=True,
+        help="Path to a JSON array of tool-read receipts, or an object with a receipts array",
+    )
+    ev_parser.add_argument("--task-id", required=True, help="Exact task identity binding")
+    ev_parser.add_argument(
+        "--repo-commit",
+        required=True,
+        help="Full lowercase 40-character repository commit SHA-1",
+    )
+    ev_parser.add_argument(
+        "--expected-roles",
+        help="Comma-separated roles expected even when undeclared/unobserved (become unavailable)",
+    )
+    ev_parser.add_argument(
+        "--declared-identities",
+        help="Optional JSON object mapping artifact roles to path/sha256/bytes identities",
+    )
+    ev_parser.add_argument(
+        "--as-of",
+        help="Optional ISO-8601 UTC timestamp (…Z) used for freshness comparison",
+    )
+    ev_parser.add_argument(
+        "--max-age-seconds",
+        type=int,
+        help="Optional maximum receipt age in seconds relative to --as-of",
+    )
+    ev_parser.add_argument("--strict", action="store_true", help="Treat 'warn' status as exit code 1")
+    ev_parser.add_argument("--out", "--output", dest="out", help="Output path for the evidence JSON")
+
 
 class AgentConsumptionCliError(Exception):
     """User-facing CLI input/output error."""
@@ -330,6 +374,58 @@ def run_agent_consumption_validate_trace(args: argparse.Namespace) -> int:
         return 2
 
 
+def _load_receipts(path: Path) -> list:
+    data = _read_json_any(path)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and isinstance(data.get("receipts"), list):
+        return data["receipts"]
+    raise AgentConsumptionCliError(
+        f"Invalid receipts file {path}: expected a JSON array or an object "
+        "with a receipts array."
+    )
+
+
+def run_agent_consumption_compare_evidence(args: argparse.Namespace) -> int:
+    from merger.repoground.core.agent_consumption_evidence import (
+        compare_agent_consumption_evidence,
+    )
+
+    try:
+        ac_data = _read_json_object(Path(args.answer_compliance))
+        _require_keys(
+            ac_data,
+            {"declared_artifacts"},
+            label="Answer compliance",
+        )
+        receipts = _load_receipts(Path(args.receipts))
+        expected_roles = sorted(_parse_roles_csv(args.expected_roles))
+        declared_identities = None
+        if args.declared_identities:
+            declared_identities = _read_json_object(Path(args.declared_identities))
+
+        evidence = compare_agent_consumption_evidence(
+            ac_data,
+            receipts,
+            task_id=args.task_id,
+            repo_commit=args.repo_commit,
+            expected_roles=expected_roles or None,
+            declared_identities=declared_identities,
+            as_of=args.as_of,
+            max_age_seconds=args.max_age_seconds,
+        )
+
+        out_path = Path(args.out) if args.out else None
+        _write_json_or_stdout(evidence, out_path)
+        return _exit_for_status(evidence.get("status", "unknown"), strict=args.strict)
+    except AgentConsumptionCliError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+    except Exception as e:
+        print(f"Error: unexpected failure: {e}", file=sys.stderr)
+        return 2
+
+
 def run_agent_consumption(args: argparse.Namespace) -> int:
     if args.agent_consumption_cmd == "required":
         return run_agent_consumption_required(args)
@@ -337,4 +433,6 @@ def run_agent_consumption(args: argparse.Namespace) -> int:
         return run_agent_consumption_preflight(args)
     if args.agent_consumption_cmd == "validate-trace":
         return run_agent_consumption_validate_trace(args)
+    if args.agent_consumption_cmd == "compare-evidence":
+        return run_agent_consumption_compare_evidence(args)
     return 2
