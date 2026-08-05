@@ -29,6 +29,7 @@ jobs:
         env:
           BASE: 76ffaaaab3890d85e3db1c46e828809868c4df46
           BRANCH: feat/t020-call-graph-config-relations-v1
+          EXPECTED_GZIP_SHA256: 641275def2bbd3c35d5db12ab2b978db6898232d0a3554456fb11cf60235d853
           EXPECTED_PATCH_SHA256: b10d3da84957c8e4d5890e4dd89a4065153b963a7c7a35c35d87e91f178455c7
           EXPECTED_TREE: 2fd925b729395388c56abbf92017733fa555dd77
         run: |
@@ -43,8 +44,11 @@ jobs:
             exit 1
           fi
 
-          cat .t020-payload/part-*.b64 > /tmp/repoground-t020.patch.b64
-          base64 --decode /tmp/repoground-t020.patch.b64 > /tmp/repoground-t020.patch
+          cat .t020-payload/gzpart-*.b64 > /tmp/repoground-t020.patch.gz.b64
+          base64 --decode /tmp/repoground-t020.patch.gz.b64 > /tmp/repoground-t020.patch.gz
+          printf '%s  %s\n' "$EXPECTED_GZIP_SHA256" /tmp/repoground-t020.patch.gz \
+            | sha256sum --check -
+          gzip --decompress --stdout /tmp/repoground-t020.patch.gz > /tmp/repoground-t020.patch
           printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" /tmp/repoground-t020.patch \
             | sha256sum --check -
 
