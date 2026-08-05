@@ -1,0 +1,71 @@
+name: Apply T020 delivery payload
+
+on:
+  push:
+    branches:
+      - feat/t020-call-graph-config-relations-v1
+    paths:
+      - .t020-payload/READY
+
+permissions:
+  contents: write
+
+concurrency:
+  group: t020-delivery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Verify and apply exact T020 tree
+        shell: bash
+        env:
+          BASE: 76ffaaaab3890d85e3db1c46e828809868c4df46
+          BRANCH: feat/t020-call-graph-config-relations-v1
+          EXPECTED_PATCH_SHA256: b10d3da84957c8e4d5890e4dd89a4065153b963a7c7a35c35d87e91f178455c7
+          EXPECTED_TREE: 2fd925b729395388c56abbf92017733fa555dd77
+        run: |
+          set -euo pipefail
+
+          test "$(git merge-base "$BASE" HEAD)" = "$BASE"
+          unexpected="$({ git diff --name-only "$BASE"..HEAD || true; } \
+            | grep -Ev '^(\.t020-payload/|\.github/workflows/apply-t020-payload\.yml$)' \
+            || true)"
+          if [[ -n "$unexpected" ]]; then
+            printf 'Unexpected pre-existing branch changes:\n%s\n' "$unexpected" >&2
+            exit 1
+          fi
+
+          cat .t020-payload/part-*.b64 > /tmp/repoground-t020.patch.b64
+          base64 --decode /tmp/repoground-t020.patch.b64 > /tmp/repoground-t020.patch
+          printf '%s  %s\n' "$EXPECTED_PATCH_SHA256" /tmp/repoground-t020.patch \
+            | sha256sum --check -
+
+          git apply --check /tmp/repoground-t020.patch
+          git apply /tmp/repoground-t020.patch
+          rm -rf .t020-payload .github/workflows/apply-t020-payload.yml
+          git add -A
+
+          actual_tree="$(git write-tree)"
+          if [[ "$actual_tree" != "$EXPECTED_TREE" ]]; then
+            printf 'Tree mismatch: expected %s, got %s\n' \
+              "$EXPECTED_TREE" "$actual_tree" >&2
+            exit 1
+          fi
+
+          git config user.name 'RepoGround delivery bot'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          new_commit="$(printf '%s\n' \
+            'feat(graph): add T020 call assurance and typed structure relations' \
+            | git commit-tree "$actual_tree" -p "$BASE")"
+          expected_remote="$(git rev-parse HEAD)"
+          git push \
+            --force-with-lease="refs/heads/$BRANCH:$expected_remote" \
+            origin "$new_commit:refs/heads/$BRANCH"
