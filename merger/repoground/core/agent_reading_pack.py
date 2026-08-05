@@ -636,6 +636,14 @@ def render_agent_reading_pack(model: PackModel) -> str:
     lines.append("- `answer-compliance.v1`: answer-side declaration of artifacts, ranges and non-claims.")
     lines.append("- `agent-consumption-trace.v1`: comparison of required reading and declared consumption.")
     lines.append(
+        "- `agent-tool-read-receipt.v1`: trusted wrapper/gateway observation bound to "
+        "task, commit, role and artifact identity (no content)."
+    )
+    lines.append(
+        "- `agent-consumption-evidence.v1`: declaration-vs-receipt comparison states "
+        "declared-only / observed-only / declared-and-observed / unavailable."
+    )
+    lines.append(
         "- CLI: `python3 -m merger.repoground.cli.main agent-consumption required "
         "--task-profile <profile> ...`"
     )
@@ -644,8 +652,11 @@ def render_agent_reading_pack(model: PackModel) -> str:
         "- CLI: `python3 -m merger.repoground.cli.main agent-consumption validate-trace ...`"
     )
     lines.append(
-        "- does_not_establish: actual_reading_proven, answer_correct, repo_understood, "
-        "all_relevant_context_used or claims_true."
+        "- CLI: `python3 -m merger.repoground.cli.main agent-consumption compare-evidence ...`"
+    )
+    lines.append(
+        "- does_not_establish: actual_reading_proven, semantic_reading, relevance_to_answer, "
+        "answer_correct, repo_understood, all_relevant_context_used or claims_true."
     )
     lines.append("")
 

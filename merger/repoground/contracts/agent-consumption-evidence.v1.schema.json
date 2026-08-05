@@ -1,0 +1,246 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/contracts/agent-consumption-evidence.v1.schema.json",
+  "title": "Agent Consumption Evidence Comparison (agent-consumption-evidence v1.0)",
+  "description": "Deterministic comparison of Answer Compliance declarations against trusted tool-read receipts for the same task_id, repo_commit, artifact_role and immutable artifact identity. Comparison only. Does not prove semantic reading, relevance, correctness, completeness, or truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "version",
+    "task_id",
+    "repo_commit",
+    "status",
+    "comparisons",
+    "accepted_receipt_refs",
+    "rejected_receipts",
+    "diagnostics",
+    "retention",
+    "does_not_establish"
+  ],
+  "properties": {
+    "kind": {
+      "type": "string",
+      "const": "lenskit.agent_consumption_evidence"
+    },
+    "version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "repo_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["pass", "warn", "fail"],
+      "description": "pass: no fail diagnostics and at least the comparison completed. warn: non-elevating caveats such as observed-only or rejected non-matching receipts. fail: input/invariant failure or untrusted elevation attempt."
+    },
+    "comparisons": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/comparison" }
+    },
+    "accepted_receipt_refs": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/receipt_ref" }
+    },
+    "rejected_receipts": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/rejected_receipt" }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/diagnostic" }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "content_retained",
+        "redaction",
+        "deletion"
+      ],
+      "properties": {
+        "policy": { "type": "string", "const": "ephemeral_comparison_input" },
+        "content_retained": { "type": "boolean", "const": false },
+        "redaction": { "type": "string", "const": "metadata_only" },
+        "deletion": { "type": "string", "const": "safe_at_any_time" }
+      }
+    },
+    "does_not_establish": {
+      "$ref": "#/definitions/does_not_establish_array"
+    }
+  },
+  "definitions": {
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_role",
+        "state",
+        "declared",
+        "observed"
+      ],
+      "properties": {
+        "artifact_role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "declared-only",
+            "observed-only",
+            "declared-and-observed",
+            "unavailable"
+          ]
+        },
+        "declared": { "type": "boolean" },
+        "observed": { "type": "boolean" },
+        "receipt_binding_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifact_identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "bytes"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1, "maxLength": 512 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "bytes": { "type": "integer", "minimum": 0, "maximum": 268435456 }
+          }
+        }
+      }
+    },
+    "receipt_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access_event_id",
+        "artifact_role",
+        "binding_sha256",
+        "receipt_sha256"
+      ],
+      "properties": {
+        "access_event_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "artifact_role": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "binding_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "rejected_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "detail"],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": [
+            "missing",
+            "stale",
+            "task_mismatch",
+            "commit_mismatch",
+            "replay",
+            "artifact_mismatch",
+            "untrusted_issuer",
+            "invalid_receipt",
+            "privacy_violation",
+            "binding_mismatch"
+          ]
+        },
+        "detail": { "type": "string", "minLength": 1, "maxLength": 512 },
+        "access_event_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "artifact_role": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "severity", "detail"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_input_field",
+            "missing",
+            "stale",
+            "task_mismatch",
+            "commit_mismatch",
+            "replay",
+            "artifact_mismatch",
+            "untrusted_issuer",
+            "privacy_violation",
+            "binding_mismatch",
+            "declared_only",
+            "observed_only",
+            "unavailable",
+            "missing_negative_semantics"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warn", "fail"]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "artifact_role": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "does_not_establish_array": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "actual_reading_proven",
+          "semantic_reading",
+          "relevance_to_answer",
+          "answer_correct",
+          "repo_understood",
+          "all_relevant_context_used",
+          "claims_true",
+          "test_sufficiency",
+          "regression_absence",
+          "runtime_behavior",
+          "forensic_ready",
+          "runtime_interception",
+          "mandatory_wrapper_adoption"
+        ]
+      },
+      "allOf": [
+        { "contains": { "const": "actual_reading_proven" } },
+        { "contains": { "const": "semantic_reading" } },
+        { "contains": { "const": "relevance_to_answer" } },
+        { "contains": { "const": "answer_correct" } },
+        { "contains": { "const": "repo_understood" } },
+        { "contains": { "const": "all_relevant_context_used" } },
+        { "contains": { "const": "claims_true" } },
+        { "contains": { "const": "test_sufficiency" } },
+        { "contains": { "const": "regression_absence" } },
+        { "contains": { "const": "runtime_behavior" } },
+        { "contains": { "const": "forensic_ready" } },
+        { "contains": { "const": "runtime_interception" } },
+        { "contains": { "const": "mandatory_wrapper_adoption" } }
+      ],
+      "description": "Preserves existing agent-consumption negative semantics and adds observation-specific non-claims."
+    }
+  }
+}

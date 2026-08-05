@@ -5,6 +5,8 @@
 Required Reading Protocol Core implemented.
 Answer Compliance Contract v1 implemented.
 Agent Consumption Trace v1 implemented.
+Agent Tool-Read Receipts and Consumption Evidence Comparison v1 implemented
+(optional, declaration-vs-observation layer; no runtime interception).
 The Agent Entry Manifest core is implemented with a contract, producer and
 focused tests.
 The dedicated Agent Consumption CLI is implemented. Automatic bundle emission,
@@ -142,12 +144,20 @@ Commands:
 - `agent-consumption required`
 - `agent-consumption preflight`
 - `agent-consumption validate-trace`
+- `agent-consumption compare-evidence`
 
 `preflight` resolves required reading, can derive available roles from a Bundle Manifest, emits an Answer Compliance template, and optionally validates a supplied Answer Compliance file into an Agent Consumption Trace.
 
+`compare-evidence` compares Answer Compliance declarations with trusted
+tool-read receipts for one `task_id` and `repo_commit`. It reports
+`declared-only`, `observed-only`, `declared-and-observed`, or `unavailable`
+per artifact role. It does not prove semantic reading, relevance, correctness,
+or truth.
+
 The CLI is a thin execution layer. It does not create an Agent Entry Manifest,
 mutate Bundle Manifest, update Output Health/Post-Emit Health, enforce Export
-Safety, or prove actual reading.
+Safety, intercept runtime tool calls, require wrapper adoption, or prove actual
+semantic reading.
 
 ## Agent Consumption Trace
 
@@ -202,9 +212,115 @@ Deferred:
 - Output Health or Post-Emit Health integration
 - export-safety wiring
 - mandatory adoption by external agent wrappers
-- source-bound tool-read receipts that compare declarations with observed access events
-- cryptographic binding of those future receipts to task, commit and consumed artifact identities
+- runtime interception of arbitrary tool calls
+- cryptographic signing of receipts beyond deterministic SHA-256 binding
 
 The validator performs no I/O, holds no global state, and reuses the existing Required Reading resolution rather than re-deriving it.
 
 `available_roles` is supplied explicitly. When omitted, only required and recommended roles are treated as known, and any other declared role is conservatively warned. The trace does not infer roles from the Bundle Manifest. The `preflight` CLI can derive roles from a Bundle Manifest as operator convenience, but it still does not mutate or certify the bundle. Agent Entry Manifest consumption remains deferred, and the `ArtifactRole` enum is not extended here.
+
+---
+
+## Tool-Read Receipts and Consumption Evidence
+
+### Purpose
+
+The evidence layer is a **separate, optional** comparison surface that sits
+beside the declaration-only Agent Consumption Trace:
+
+1. Answer Compliance still declares what an answer claims it used.
+2. A **trusted wrapper or tool gateway** may mint a tool-read receipt when it
+   observes access to one artifact identity.
+3. `compare_agent_consumption_evidence` compares declarations and receipts for
+   **exactly the same** `task_id`, `repo_commit`, `artifact_role`, and immutable
+   artifact identity (`path` + `sha256` + `bytes`).
+
+The layer is deliberately data-sparing:
+
+- no artifact body/content is stored on the receipt;
+- secrets and content-bearing fields fail closed;
+- metadata size and character shapes are strictly bounded;
+- SHA-256 binding uses deterministic JSON serialization (`sort_keys`, compact
+  separators, UTF-8).
+
+### Trust boundary
+
+Only allowlisted issuers may produce observed evidence:
+
+| issuer.kind | issuer.id |
+|-------------|-----------|
+| `trusted_wrapper` | `repoground.agent_consumption.tool_read_wrapper` |
+| `tool_gateway` | `repoground.agent_consumption.tool_gateway` |
+
+Answer text, free-form self-declarations, and unknown issuer ids never mint
+observed evidence. The comparison rejects untrusted and invalid receipts
+without elevating any role to `declared-and-observed`.
+
+### Comparison states
+
+| state | meaning |
+|-------|---------|
+| `declared-only` | Role is declared in Answer Compliance; no accepted trusted receipt |
+| `observed-only` | Accepted trusted receipt exists; role was not declared |
+| `declared-and-observed` | Declaration and accepted trusted receipt for the same role (and matching identity when provided) |
+| `unavailable` | Role is expected but has neither declaration nor accepted observation |
+
+Rejected receipts are diagnosed and listed; they never raise the evidence state.
+
+### Rejection diagnostics that never elevate evidence
+
+| reason | meaning |
+|--------|---------|
+| `missing` | No usable declaration/observation material for the comparison set |
+| `stale` | Receipt age exceeds `max_age_seconds` relative to `as_of` |
+| `task_mismatch` | Receipt `task_id` differs from the bound task |
+| `commit_mismatch` | Receipt `repo_commit` differs from the bound commit |
+| `replay` | Duplicate `access_event_id` |
+| `artifact_mismatch` | Role identity conflicts with declared or previously accepted identity |
+| `untrusted_issuer` | Issuer not on the allowlist |
+| `privacy_violation` | Content/secret-bearing fields present |
+| `binding_mismatch` | `binding_sha256` / `receipt_sha256` does not recompute |
+| `invalid_receipt` | Structural or shape failure |
+
+### Retention, redaction, deletion
+
+Every receipt and evidence report carries:
+
+```text
+policy = ephemeral_comparison_input
+content_retained = false
+redaction = metadata_only
+deletion = safe_at_any_time
+```
+
+Operators may discard receipts at any time. Deletion never mutates repository
+content; absence becomes `missing` / `unavailable` rather than a stronger claim.
+
+### Files
+
+| File | Role |
+|------|------|
+| `merger/repoground/contracts/agent-tool-read-receipt.v1.schema.json` | Receipt JSON Schema |
+| `merger/repoground/contracts/agent-consumption-evidence.v1.schema.json` | Evidence comparison JSON Schema |
+| `merger/repoground/core/agent_consumption_receipts.py` | Mint/validate + `TrustedToolReadWrapper` |
+| `merger/repoground/core/agent_consumption_evidence.py` | Pure comparison: `compare_agent_consumption_evidence(...)` |
+| `merger/repoground/tests/test_agent_consumption_evidence.py` | Schema, determinism, negative, replay, freshness, mismatch, E2E tests |
+| `docs/contracts/agent-consumption-evidence-v1.md` | Contract surface notes |
+| `docs/proofs/agent-consumption-evidence-v1-proof.md` | Implementation proof |
+
+### Non-claims
+
+Evidence comparison does **not** establish:
+
+- semantic reading or understanding;
+- relevance of observed files to an answer;
+- answer correctness or claim truth;
+- complete context use;
+- test sufficiency, regression absence, or runtime behavior;
+- forensic readiness;
+- runtime interception or mandatory wrapper adoption;
+- that every wrapper emits trusted receipts.
+
+The existing Trace `does_not_establish` set remains intact for declaration
+comparison. Evidence comparison includes those nine boundaries and adds
+observation-specific non-claims.
