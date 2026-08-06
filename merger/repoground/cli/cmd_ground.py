@@ -657,6 +657,8 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     context_compile.add_argument("--task-profile", default="basic_repo_question", help="Required-reading task profile")
     context_compile.add_argument("--query", help="Optional retrieval/symbol query; defaults to --task")
     context_compile.add_argument("--context-budget", type=int, default=8000, help="Token budget for selected context")
+    context_compile.add_argument("--context-budget-bytes", type=int, help="Optional hard byte budget; defaults to token budget times --bytes-per-token")
+    context_compile.add_argument("--changed-path", action="append", default=[], help="Changed repository path to protect from signal-lane caps; repeatable")
     context_compile.add_argument("--signal-k", type=int, default=10, help="Maximum retrieval/symbol signal hits")
     context_compile.add_argument("--bytes-per-token", type=float, default=4.0, help="Byte divisor used for rough token estimate")
     context_compile.add_argument(
@@ -664,6 +666,7 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
         action="store_true",
         help="Emit a trust- and freshness-preserving agent handoff instead of the full plan",
     )
+    context_compile.add_argument("--verbose", action="store_true", help="Emit the full context plan instead of the compact standard projection")
     context_compile.add_argument("--strict", action="store_true", help="Treat warn status as exit code 1")
 
     delta_context_parser = ground_subparsers.add_parser(
@@ -1386,7 +1389,7 @@ def run_delta_context_compile(args: argparse.Namespace) -> int:
 
 
 def run_context_compile(args: argparse.Namespace) -> int:
-    from merger.repoground.core.context_compiler import compile_context_plan
+    from merger.repoground.core.context_compiler import compile_context_plan, project_context_plan
     from merger.repoground.core.repository_text_trust import build_agent_handoff
 
     plan = compile_context_plan(
@@ -1394,15 +1397,17 @@ def run_context_compile(args: argparse.Namespace) -> int:
         task=args.task,
         task_profile=args.task_profile,
         context_budget_tokens=args.context_budget,
+        context_budget_bytes=args.context_budget_bytes,
         query=args.query,
         signal_k=args.signal_k,
         bytes_per_token=args.bytes_per_token,
+        changed_paths=args.changed_path,
     )
     status = plan.get("status")
     result = (
         build_agent_handoff(plan)
         if args.agent_handoff and status != "invalid"
-        else plan
+        else project_context_plan(plan, verbose=args.verbose)
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     if status == "pass":

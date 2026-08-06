@@ -5,6 +5,7 @@ refresh indexes, import target code, or write bundle artifacts. It ranks bounded
 context candidates from resolved evidence, symbol navigation and required
 reading, then selects as many as fit into a caller-supplied token budget.
 """
+
 from __future__ import annotations
 
 import json
@@ -18,6 +19,10 @@ from merger.repoground.core.bundle_access import (
     search_symbol_index,
     snapshot_status,
 )
+from merger.repoground.core.context_budgeting import (
+    normalize_changed_paths,
+    select_relevance_budgeted_context,
+)
 from merger.repoground.core.graph_degradation import graph_gap_from_availability
 from merger.repoground.core.repository_text_trust import (
     classify_repository_text,
@@ -27,6 +32,8 @@ from merger.repoground.core.repository_text_trust import (
 KIND = "repobrief.context_compiler"
 VERSION = "v1"
 MAX_CONTEXT_BUDGET_TOKENS = 1_000_000
+MAX_CONTEXT_BUDGET_BYTES = 64 * 1024 * 1024
+MAX_CHANGED_PATHS = 100
 MAX_SIGNAL_HITS = 50
 RELATION_ERROR_SAMPLE_LIMIT = 10
 # Preserve strict whole-artifact UTF-8 validation without retaining the unread tail.
@@ -46,6 +53,8 @@ DOES_NOT_ESTABLISH = (
     "review_completeness",
     "merge_readiness",
     "agent_quality_improvement",
+    "semantic_similarity_truth",
+    "high_score_completeness",
     "permission_to_execute_tools",
     "permission_to_write_files",
     "permission_to_use_network",
@@ -109,7 +118,11 @@ def _invalid_result(
 
 
 def _estimate_tokens_from_bytes(byte_count: Any, bytes_per_token: float) -> int:
-    if isinstance(byte_count, bool) or not isinstance(byte_count, int) or byte_count <= 0:
+    if (
+        isinstance(byte_count, bool)
+        or not isinstance(byte_count, int)
+        or byte_count <= 0
+    ):
         return 1
     return max(1, int(math.ceil(byte_count / bytes_per_token)))
 
@@ -179,13 +192,19 @@ def _retrieval_candidates(
     )
     gaps: list[dict[str, Any]] = []
     if result.get("status") != "available":
-        gaps.append({
+        gaps.append(
+            {
             "source": "resolved_evidence",
             "status": result.get("status"),
             "error_code": result.get("error_code"),
             "reason": result.get("error") or "resolved evidence query unavailable",
-        })
-        return [], {"status": result.get("status"), "error_code": result.get("error_code")}, gaps
+            }
+        )
+        return (
+            [],
+            {"status": result.get("status"), "error_code": result.get("error_code")},
+            gaps,
+        )
 
     projection = result.get("source_citation_projection")
     items = projection.get("items") if isinstance(projection, dict) else []
@@ -194,19 +213,33 @@ def _retrieval_candidates(
         if not isinstance(item, dict):
             continue
         text = item.get("text_excerpt")
-        citation_id = item.get("citation_id") if isinstance(item.get("citation_id"), str) else None
-        source_range = item.get("source_range") if isinstance(item.get("source_range"), dict) else None
-        citation_range = item.get("citation_range") if isinstance(item.get("citation_range"), dict) else None
+        citation_id = (
+            item.get("citation_id")
+            if isinstance(item.get("citation_id"), str)
+            else None
+        )
+        source_range = (
+            item.get("source_range")
+            if isinstance(item.get("source_range"), dict)
+            else None
+        )
+        citation_range = (
+            item.get("citation_range")
+            if isinstance(item.get("citation_range"), dict)
+            else None
+        )
         citations = []
         if citation_id or source_range or citation_range:
-            citations.append({
+            citations.append(
+                {
                 "citation_id": citation_id,
                 "source_range": source_range,
                 "citation_range": citation_range,
                 "range_status": item.get("range_status"),
                 "citation_status": item.get("citation_status"),
                 "live_repo_address": item.get("live_repo_address"),
-            })
+                }
+            )
         token_estimate = _estimate_tokens_from_text(text, bytes_per_token)
         candidates.append(
             _candidate(
@@ -236,7 +269,9 @@ def _retrieval_candidates(
                     canonicality="content_source",
                 ),
                 payload={
-                    "title": item.get("path") or item.get("chunk_id") or f"resolved evidence {ordinal}",
+                    "title": item.get("path")
+                    or item.get("chunk_id")
+                    or f"resolved evidence {ordinal}",
                     "artifact_role": "canonical_md",
                     "path": item.get("path"),
                     "chunk_id": item.get("chunk_id"),
@@ -248,12 +283,20 @@ def _retrieval_candidates(
             )
         )
     if not candidates:
-        gaps.append({"source": "resolved_evidence", "status": "empty", "reason": "query returned no resolved source candidates"})
+        gaps.append(
+            {
+                "source": "resolved_evidence",
+                "status": "empty",
+                "reason": "query returned no resolved source candidates",
+            }
+        )
     signal = {
         "status": "available",
         "hit_count": len(candidates),
         "query_status": result.get("status"),
-        "citation_projection_status": projection.get("status") if isinstance(projection, dict) else None,
+        "citation_projection_status": projection.get("status")
+        if isinstance(projection, dict)
+        else None,
     }
     return candidates, signal, gaps
 
@@ -271,29 +314,52 @@ def _symbol_candidates(
     if result.get("status") == "available" and result.get("hit_count") == 0:
         compact_query = _compact_match_text(query)
         if compact_query and compact_query != query.strip().casefold():
-            compact_result = search_symbol_index(manifest_path, compact_query, k=signal_k)
-            if compact_result.get("status") == "available" and compact_result.get("hit_count", 0) > 0:
+            compact_result = search_symbol_index(
+                manifest_path, compact_query, k=signal_k
+            )
+            if (
+                compact_result.get("status") == "available"
+                and compact_result.get("hit_count", 0) > 0
+            ):
                 result = compact_result
     gaps: list[dict[str, Any]] = []
     if result.get("status") != "available":
-        gaps.append({
+        gaps.append(
+            {
             "source": "python_symbol_index_json",
             "status": result.get("status"),
             "error_code": result.get("error_code"),
             "reason": result.get("error") or "symbol index unavailable",
-        })
-        return [], {"status": result.get("status"), "error_code": result.get("error_code")}, gaps
+            }
+        )
+        return (
+            [],
+            {"status": result.get("status"), "error_code": result.get("error_code")},
+            gaps,
+        )
     candidates: list[dict[str, Any]] = []
-    for ordinal, hit in enumerate(result.get("hits") if isinstance(result.get("hits"), list) else []):
+    for ordinal, hit in enumerate(
+        result.get("hits") if isinstance(result.get("hits"), list) else []
+    ):
         if not isinstance(hit, dict):
             continue
         label = " ".join(
             str(hit.get(part, ""))
             for part in ("kind", "qualified_name", "path", "range_ref")
         )
-        source_range = hit.get("source_range") if isinstance(hit.get("source_range"), dict) else None
-        range_ref = hit.get("range_ref") if isinstance(hit.get("range_ref"), str) else None
-        citations = [{"range_ref": range_ref, "source_range": source_range}] if range_ref or source_range else []
+        source_range = (
+            hit.get("source_range")
+            if isinstance(hit.get("source_range"), dict)
+            else None
+        )
+        range_ref = (
+            hit.get("range_ref") if isinstance(hit.get("range_ref"), str) else None
+        )
+        citations = (
+            [{"range_ref": range_ref, "source_range": source_range}]
+            if range_ref or source_range
+            else []
+        )
         candidates.append(
             _candidate(
                 candidate_id=f"symbol:{ordinal}",
@@ -326,9 +392,14 @@ def _symbol_candidates(
             )
         )
     if not candidates:
-        gaps.append({"source": "python_symbol_index_json", "status": "empty", "reason": "symbol search returned no candidates"})
+        gaps.append(
+            {
+                "source": "python_symbol_index_json",
+                "status": "empty",
+                "reason": "symbol search returned no candidates",
+            }
+        )
     return candidates, {"status": "available", "hit_count": len(candidates)}, gaps
-
 
 
 def _relation_path_value(value: Any) -> str | None:
@@ -354,7 +425,9 @@ def _relation_search_text(
         evidence.get("start_line"),
         evidence.get("end_line"),
     )
-    return " ".join(str(value) for value in values if value not in (None, "")).casefold()
+    return " ".join(
+        str(value) for value in values if value not in (None, "")
+    ).casefold()
 
 
 def _relation_query_matches(
@@ -407,13 +480,15 @@ def _relation_candidate_from_line(
         priority=25 + match_ordinal,
         estimated_tokens=_estimate_tokens_from_text(label, bytes_per_token),
         selection_reason="relation_card_match",
-        citations=[{
+        citations=[
+            {
             "artifact_role": "relation_cards_jsonl",
             "source_path": source_path,
             "target_path": target_path,
             "evidence": evidence,
             "evidence_level": card.get("evidence_level"),
-        }],
+            }
+        ],
         trust=classify_repository_text(
             path=source_path,
             source_kind="generated_artifact",
@@ -461,20 +536,32 @@ def _relation_candidates(
     artifacts = _artifact_by_role(status)
     artifact = artifacts.get("relation_cards_jsonl")
     if not isinstance(artifact, dict) or not artifact.get("absolute_path"):
-        return [], {"status": "missing", "error_code": "relation_cards_jsonl_missing"}, [{
+        return (
+            [],
+            {"status": "missing", "error_code": "relation_cards_jsonl_missing"},
+            [
+                {
             "source": "relation_cards_jsonl",
             "status": "missing",
             "error_code": "relation_cards_jsonl_missing",
             "reason": "relation_cards_jsonl artifact is not present in the bundle manifest",
-        }]
+                }
+            ],
+        )
     path = Path(str(artifact["absolute_path"]))
     if not path.is_file():
-        return [], {"status": "missing", "error_code": "relation_cards_jsonl_file_missing"}, [{
+        return (
+            [],
+            {"status": "missing", "error_code": "relation_cards_jsonl_file_missing"},
+            [
+                {
             "source": "relation_cards_jsonl",
             "status": "missing",
             "error_code": "relation_cards_jsonl_file_missing",
             "reason": "relation_cards_jsonl artifact file does not exist",
-        }]
+                }
+            ],
+        )
 
     stripped_query = query.strip()
     q = stripped_query.casefold()
@@ -500,11 +587,13 @@ def _relation_candidates(
                 if error is not None:
                     invalid_row_count += 1
                     if len(errors) < RELATION_ERROR_SAMPLE_LIMIT:
-                        errors.append({
+                        errors.append(
+                            {
                             "row": row_number,
                             "error_type": error["error_type"],
                             "message": error["message"],
-                        })
+                            }
+                        )
                     continue
                 if candidate is None:
                     continue
@@ -514,19 +603,28 @@ def _relation_candidates(
                     unparsed_tail_present = _consume_text_stream(rows)
                     break
     except (OSError, UnicodeError) as exc:
-        return [], {"status": "invalid", "error_code": "relation_cards_jsonl_unreadable"}, [{
+        return (
+            [],
+            {"status": "invalid", "error_code": "relation_cards_jsonl_unreadable"},
+            [
+                {
             "source": "relation_cards_jsonl",
             "status": "invalid",
             "error_code": "relation_cards_jsonl_unreadable",
             "reason": str(exc),
-        }]
+                }
+            ],
+        )
 
     errors_truncated = invalid_row_count > len(errors)
     json_row_validation_complete = not unparsed_tail_present
-    invalid_row_count_scope = "complete_artifact" if json_row_validation_complete else "parsed_prefix"
+    invalid_row_count_scope = (
+        "complete_artifact" if json_row_validation_complete else "parsed_prefix"
+    )
     gaps: list[dict[str, Any]] = []
     if invalid_row_count:
-        gaps.append({
+        gaps.append(
+            {
             "source": "relation_cards_jsonl",
             "status": "invalid_rows",
             "invalid_row_count": invalid_row_count,
@@ -534,11 +632,20 @@ def _relation_candidates(
             "row_errors": errors,
             "row_error_sample_limit": RELATION_ERROR_SAMPLE_LIMIT,
             "row_errors_truncated": errors_truncated,
-        })
+            }
+        )
     if not candidates:
-        gaps.append({"source": "relation_cards_jsonl", "status": "empty", "reason": "relation card search returned no candidates"})
+        gaps.append(
+            {
+                "source": "relation_cards_jsonl",
+                "status": "empty",
+                "reason": "relation card search returned no candidates",
+            }
+        )
     signal_status = "warn" if invalid_row_count else "available"
-    return candidates, {
+    return (
+        candidates,
+        {
         "status": signal_status,
         "hit_count": len(candidates),
         "invalid_row_count": invalid_row_count,
@@ -548,7 +655,119 @@ def _relation_candidates(
         "candidate_limit_reached": candidate_limit_reached,
         "json_row_validation_complete": json_row_validation_complete,
         "tail_utf8_validation_complete": True,
-    }, gaps
+        },
+        gaps,
+    )
+
+
+def _changed_path_candidates(
+    manifest_path: Path,
+    *,
+    changed_paths: list[str],
+    bytes_per_token: float,
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
+    """Resolve every declared changed path independently of signal lane caps."""
+    candidates: list[dict[str, Any]] = []
+    gaps: list[dict[str, Any]] = []
+    for ordinal, changed_path in enumerate(changed_paths):
+        result = query_existing_index(
+            manifest_path,
+            "",
+            k=1,
+            filters={"path": changed_path},
+            resolve_evidence=True,
+            project_sources=True,
+        )
+        if result.get("status") != "available":
+            gaps.append(
+                {
+                    "source": "changed_path",
+                    "path": changed_path,
+                    "status": result.get("status"),
+                    "error_code": result.get("error_code"),
+                    "reason": result.get("error") or "changed path lookup unavailable",
+                }
+            )
+            continue
+        projection = result.get("source_citation_projection")
+        items = projection.get("items") if isinstance(projection, dict) else []
+        item = items[0] if isinstance(items, list) and items else None
+        if not isinstance(item, dict):
+            gaps.append(
+                {
+                    "source": "changed_path",
+                    "path": changed_path,
+                    "status": "missing",
+                    "reason": "changed path is absent from the bound index",
+                }
+            )
+            continue
+        text_excerpt = item.get("text_excerpt")
+        source_range = (
+            item.get("source_range")
+            if isinstance(item.get("source_range"), dict)
+            else None
+        )
+        citation_id = (
+            item.get("citation_id")
+            if isinstance(item.get("citation_id"), str)
+            else None
+        )
+        citations = [
+            {
+                "citation_id": citation_id,
+                "source_range": source_range,
+                "range_status": item.get("range_status"),
+                "citation_status": item.get("citation_status"),
+            }
+        ]
+        candidates.append(
+            _candidate(
+                candidate_id=f"changed-path:{ordinal}:{changed_path}",
+                source="changed_path",
+                priority=5 + ordinal,
+                estimated_tokens=_estimate_tokens_from_text(
+                    text_excerpt, bytes_per_token
+                ),
+                selection_reason="declared_changed_path",
+                citations=citations,
+                trust=classify_repository_text(
+                    path=item.get("path") or changed_path,
+                    source_kind="repository_path",
+                    artifact_role="canonical_md",
+                    citation={"citation_id": citation_id, "source_range": source_range},
+                    applicability_reason="caller-declared changed path resolved in the bound index",
+                    derivation_type="source_projection",
+                    declared_authority=(
+                        item.get("canonical_authority")
+                        if isinstance(item.get("canonical_authority"), str)
+                        else "canonical_content"
+                    ),
+                    canonicality="content_source",
+                ),
+                payload={
+                    "title": item.get("path") or changed_path,
+                    "artifact_role": "canonical_md",
+                    "path": item.get("path") or changed_path,
+                    "chunk_id": item.get("chunk_id"),
+                    "text_excerpt": text_excerpt,
+                    "source_range": source_range,
+                    "declared_changed_path": changed_path,
+                    "canonical_authority": item.get("canonical_authority"),
+                },
+            )
+        )
+    return (
+        candidates,
+        {
+            "status": "available" if not gaps else "warn",
+            "requested_count": len(changed_paths),
+            "resolved_count": len(candidates),
+            "uncapped_by_signal_k": True,
+        },
+        gaps,
+    )
+
 
 def _required_reading_candidates(
     status: Mapping[str, Any],
@@ -570,7 +789,9 @@ def _required_reading_candidates(
             if role == "bundle_manifest":
                 artifact = {
                     "role": "bundle_manifest",
-                    "path": Path(str(status.get("bundle_manifest", "bundle_manifest"))).name,
+                    "path": Path(
+                        str(status.get("bundle_manifest", "bundle_manifest"))
+                    ).name,
                     "absolute_path": status.get("bundle_manifest"),
                     "bytes": None,
                     "authority": "navigation_index",
@@ -583,14 +804,18 @@ def _required_reading_candidates(
                     candidate_id=f"artifact:{role}",
                     source="required_reading",
                     priority=base_priority + ordinal,
-                    estimated_tokens=_estimate_tokens_from_bytes(artifact.get("bytes"), bytes_per_token),
+                    estimated_tokens=_estimate_tokens_from_bytes(
+                        artifact.get("bytes"), bytes_per_token
+                    ),
                     selection_reason=reason,
-                    citations=[{
+                    citations=[
+                        {
                         "artifact_role": role,
                         "path": artifact.get("path"),
                         "authority": artifact.get("authority"),
                         "canonicality": artifact.get("canonicality"),
-                    }],
+                        }
+                    ],
                     trust=classify_repository_text(
                         path=artifact.get("path"),
                         source_kind="generated_artifact",
@@ -621,7 +846,9 @@ def _required_reading_candidates(
 def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[Any, Any, Any]] = set()
     result: list[dict[str, Any]] = []
-    for candidate in sorted(candidates, key=lambda c: (c["priority"], c["estimated_tokens"], c["id"])):
+    for candidate in sorted(
+        candidates, key=lambda c: (c["priority"], c["estimated_tokens"], c["id"])
+    ):
         key = (candidate.get("source"), candidate.get("path"), candidate.get("title"))
         if key in seen:
             continue
@@ -630,24 +857,210 @@ def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
     return result
 
 
-def _select_candidates(candidates: list[dict[str, Any]], budget: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _select_candidates(
+    candidates: list[dict[str, Any]], budget: int
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     selected: list[dict[str, Any]] = []
     omitted: list[dict[str, Any]] = []
     used = 0
     for candidate in candidates:
         estimate = candidate["estimated_tokens"]
         if used + estimate <= budget:
-            selected_item = {**candidate, "selection_status": "selected", "budget_before_tokens": used, "budget_after_tokens": used + estimate}
+            selected_item = {
+                **candidate,
+                "selection_status": "selected",
+                "budget_before_tokens": used,
+                "budget_after_tokens": used + estimate,
+            }
             selected.append(selected_item)
             used += estimate
         else:
-            omitted.append({
+            omitted.append(
+                {
                 **candidate,
                 "selection_status": "omitted",
                 "omission_reason": "estimated_tokens_exceed_remaining_budget",
                 "budget_remaining_tokens": max(budget - used, 0),
-            })
+                }
+            )
     return selected, omitted
+
+
+def project_context_plan(
+    plan: Mapping[str, Any], *, verbose: bool = False
+) -> dict[str, Any]:
+    """Return the compact standard projection; retain the full plan on request."""
+    if verbose or not isinstance(plan, Mapping) or plan.get("status") == "invalid":
+        return dict(plan)
+
+    def compact_item(
+        item: Mapping[str, Any], *, omitted: bool = False
+    ) -> dict[str, Any]:
+        result = {
+            key: item.get(key)
+            for key in (
+                "id",
+                "source",
+                "title",
+                "path",
+                "source_path",
+                "target_path",
+                "source_range",
+                "citations",
+                "estimated_tokens",
+                "estimated_bytes",
+                "ranking_evidence",
+            )
+            if item.get(key) is not None
+        }
+        if omitted:
+            for key in (
+                "omission_reason",
+                "omission_constraints",
+                "budget_remaining_tokens",
+                "budget_remaining_bytes",
+                "required_tokens",
+                "required_bytes",
+            ):
+                if item.get(key) is not None:
+                    result[key] = item[key]
+        return result
+
+    return {
+        "kind": plan.get("kind"),
+        "version": plan.get("version"),
+        "projection": "repobrief.context_plan.compact.v1",
+        "status": plan.get("status"),
+        "task": plan.get("task"),
+        "task_profile": plan.get("task_profile"),
+        "query": plan.get("query"),
+        "bundle_manifest": plan.get("bundle_manifest"),
+        "bundle_run_id": plan.get("bundle_run_id"),
+        "budget": plan.get("budget"),
+        "selected_count": plan.get("selected_count"),
+        "omitted_count": plan.get("omitted_count"),
+        "selected_context": [
+            compact_item(item)
+            for item in plan.get("selected_context", [])
+            if isinstance(item, Mapping)
+        ],
+        "omitted_context": [
+            compact_item(item, omitted=True)
+            for item in plan.get("omitted_context", [])
+            if isinstance(item, Mapping)
+        ],
+        "gaps": list(plan.get("gaps") or []),
+        "signals": plan.get("signals"),
+        "selection_trace": plan.get("selection_trace"),
+        "mutation_boundary": {
+            "ref": "repobrief.mutation_boundary.read_only_frontdoor.v1",
+            "writes": [],
+            "read_only": True,
+        },
+        "does_not_establish": {
+            "ref": "repobrief.context_plan.does_not_establish.v1",
+            "items": list(plan.get("does_not_establish") or []),
+        },
+        "verbose_available": True,
+    }
+
+
+def _prepare_context_selection_inputs(
+    *,
+    context_budget_tokens: int,
+    context_budget_bytes: int | None,
+    signal_k: int,
+    bytes_per_token: float,
+    changed_paths: list[str] | None,
+) -> tuple[tuple[str, str] | None, int, float, list[str]]:
+    if (
+        not isinstance(context_budget_tokens, int)
+        or isinstance(context_budget_tokens, bool)
+        or context_budget_tokens < 1
+        or context_budget_tokens > MAX_CONTEXT_BUDGET_TOKENS
+    ):
+        return (
+            (
+                "context_budget_out_of_bounds",
+                f"context_budget_tokens must be an integer between 1 and {MAX_CONTEXT_BUDGET_TOKENS}",
+            ),
+            0,
+            0.0,
+            [],
+        )
+    if context_budget_bytes is not None and (
+        not isinstance(context_budget_bytes, int)
+        or isinstance(context_budget_bytes, bool)
+        or context_budget_bytes < 1
+        or context_budget_bytes > MAX_CONTEXT_BUDGET_BYTES
+    ):
+        return (
+            (
+                "context_byte_budget_out_of_bounds",
+                f"context_budget_bytes must be null or an integer between 1 and {MAX_CONTEXT_BUDGET_BYTES}",
+            ),
+            0,
+            0.0,
+            [],
+        )
+    if (
+        not isinstance(signal_k, int)
+        or isinstance(signal_k, bool)
+        or signal_k < 1
+        or signal_k > MAX_SIGNAL_HITS
+    ):
+        return (
+            (
+                "signal_k_out_of_bounds",
+                f"signal_k must be an integer between 1 and {MAX_SIGNAL_HITS}",
+            ),
+            0,
+            0.0,
+            [],
+        )
+    if (
+        not isinstance(bytes_per_token, (int, float))
+        or isinstance(bytes_per_token, bool)
+        or bytes_per_token <= 0
+    ):
+        return (
+            (
+                "bytes_per_token_invalid",
+                "bytes_per_token must be a number greater than 0",
+            ),
+            0,
+            0.0,
+            [],
+        )
+    normalized_bytes_per_token = float(bytes_per_token)
+    try:
+        normalized_changed_paths = normalize_changed_paths(changed_paths)
+    except ValueError as exc:
+        return (("changed_paths_invalid", str(exc)), 0, 0.0, [])
+    if len(normalized_changed_paths) > MAX_CHANGED_PATHS:
+        return (
+            (
+                "changed_paths_out_of_bounds",
+                f"changed_paths must contain at most {MAX_CHANGED_PATHS} unique paths",
+            ),
+            0,
+            0.0,
+            [],
+        )
+    effective_byte_budget = (
+        context_budget_bytes
+        if context_budget_bytes is not None
+        else max(
+            1,
+            int(math.ceil(context_budget_tokens * normalized_bytes_per_token)),
+        )
+    )
+    return (
+        None,
+        effective_byte_budget,
+        normalized_bytes_per_token,
+        normalized_changed_paths,
+    )
 
 
 def compile_context_plan(
@@ -656,54 +1069,127 @@ def compile_context_plan(
     task: str,
     task_profile: str = "basic_repo_question",
     context_budget_tokens: int = 8_000,
+    context_budget_bytes: int | None = None,
     query: str | None = None,
     signal_k: int = 10,
     bytes_per_token: float = DEFAULT_BYTES_PER_TOKEN,
+    changed_paths: list[str] | None = None,
+    ranking_weights: Mapping[str, float] | None = None,
 ) -> dict[str, Any]:
     manifest_path = Path(bundle_manifest).expanduser().resolve()
     if not isinstance(task, str) or not task.strip():
-        return _invalid_result(manifest_path, error="task must be a non-empty string", error_code="task_invalid", task=str(task), task_profile=task_profile, context_budget_tokens=context_budget_tokens)
+        return _invalid_result(
+            manifest_path,
+            error="task must be a non-empty string",
+            error_code="task_invalid",
+            task=str(task),
+            task_profile=task_profile,
+            context_budget_tokens=context_budget_tokens,
+        )
     if not isinstance(task_profile, str) or not task_profile.strip():
-        return _invalid_result(manifest_path, error="task_profile must be a non-empty string", error_code="task_profile_invalid", task=task, task_profile=str(task_profile), context_budget_tokens=context_budget_tokens)
-    if not isinstance(context_budget_tokens, int) or isinstance(context_budget_tokens, bool) or context_budget_tokens < 1 or context_budget_tokens > MAX_CONTEXT_BUDGET_TOKENS:
-        return _invalid_result(manifest_path, error=f"context_budget_tokens must be an integer between 1 and {MAX_CONTEXT_BUDGET_TOKENS}", error_code="context_budget_out_of_bounds", task=task, task_profile=task_profile, context_budget_tokens=context_budget_tokens)
-    if not isinstance(signal_k, int) or isinstance(signal_k, bool) or signal_k < 1 or signal_k > MAX_SIGNAL_HITS:
-        return _invalid_result(manifest_path, error=f"signal_k must be an integer between 1 and {MAX_SIGNAL_HITS}", error_code="signal_k_out_of_bounds", task=task, task_profile=task_profile, context_budget_tokens=context_budget_tokens)
-    if not isinstance(bytes_per_token, (int, float)) or isinstance(bytes_per_token, bool) or bytes_per_token <= 0:
-        return _invalid_result(manifest_path, error="bytes_per_token must be a number greater than 0", error_code="bytes_per_token_invalid", task=task, task_profile=task_profile, context_budget_tokens=context_budget_tokens)
-    bytes_per_token = float(bytes_per_token)
+        return _invalid_result(
+            manifest_path,
+            error="task_profile must be a non-empty string",
+            error_code="task_profile_invalid",
+            task=task,
+            task_profile=str(task_profile),
+            context_budget_tokens=context_budget_tokens,
+        )
+    (
+        input_error,
+        effective_byte_budget,
+        bytes_per_token,
+        normalized_changed_paths,
+    ) = _prepare_context_selection_inputs(
+        context_budget_tokens=context_budget_tokens,
+        context_budget_bytes=context_budget_bytes,
+        signal_k=signal_k,
+        bytes_per_token=bytes_per_token,
+        changed_paths=changed_paths,
+    )
+    if input_error is not None:
+        error_code, error = input_error
+        return _invalid_result(
+            manifest_path,
+            error=error,
+            error_code=error_code,
+            task=task,
+            task_profile=task_profile,
+            context_budget_tokens=context_budget_tokens,
+        )
 
     effective_query = query if isinstance(query, str) and query.strip() else task
     try:
         status = snapshot_status(manifest_path)
-        required_resolution = resolve_required_reading_for_bundle(manifest_path, task_profile)
+        required_resolution = resolve_required_reading_for_bundle(
+            manifest_path, task_profile
+        )
     except ValueError as exc:
-        return _invalid_result(manifest_path, error=str(exc), error_code="bundle_manifest_invalid", task=task, task_profile=task_profile, context_budget_tokens=context_budget_tokens)
+        return _invalid_result(
+            manifest_path,
+            error=str(exc),
+            error_code="bundle_manifest_invalid",
+            task=task,
+            task_profile=task_profile,
+            context_budget_tokens=context_budget_tokens,
+        )
 
-    required = required_resolution.get("required_reading") if isinstance(required_resolution.get("required_reading"), dict) else {}
+    required = (
+        required_resolution.get("required_reading")
+        if isinstance(required_resolution.get("required_reading"), dict)
+        else {}
+    )
     gaps: list[dict[str, Any]] = []
     if required.get("status") in {"fail", "not_applicable"}:
-        gaps.append({
+        gaps.append(
+            {
             "source": "required_reading",
             "status": required.get("status"),
             "missing_required": required.get("missing_required"),
             "reason": "required reading is not fully available",
-        })
+            }
+        )
     elif required.get("missing_recommended"):
-        gaps.append({
+        gaps.append(
+            {
             "source": "required_reading",
             "status": "warn",
             "missing_recommended": required.get("missing_recommended"),
             "reason": "recommended reading is not fully available",
-        })
+            }
+        )
 
-    availability = status.get("availability_model") if isinstance(status.get("availability_model"), dict) else {}
-    freshness = availability.get("freshness") if isinstance(availability, dict) else None
-    graph_availability = availability.get("graph_availability") if isinstance(availability, dict) else None
-    if isinstance(freshness, dict) and freshness.get("status") not in {"fresh", "not_comparable"}:
-        gaps.append({"source": "freshness", "status": freshness.get("status"), "reason": freshness.get("reason")})
-    if isinstance(graph_availability, dict) and graph_availability.get("status") != "available":
-        gaps.append(graph_gap_from_availability("graph_availability", graph_availability))
+    availability = (
+        status.get("availability_model")
+        if isinstance(status.get("availability_model"), dict)
+        else {}
+    )
+    freshness = (
+        availability.get("freshness") if isinstance(availability, dict) else None
+    )
+    graph_availability = (
+        availability.get("graph_availability")
+        if isinstance(availability, dict)
+        else None
+    )
+    if isinstance(freshness, dict) and freshness.get("status") not in {
+        "fresh",
+        "not_comparable",
+    }:
+        gaps.append(
+            {
+                "source": "freshness",
+                "status": freshness.get("status"),
+                "reason": freshness.get("reason"),
+            }
+        )
+    if (
+        isinstance(graph_availability, dict)
+        and graph_availability.get("status") != "available"
+    ):
+        gaps.append(
+            graph_gap_from_availability("graph_availability", graph_availability)
+        )
 
     retrieval_candidates, retrieval_signal, retrieval_gaps = _retrieval_candidates(
         manifest_path,
@@ -723,19 +1209,49 @@ def compile_context_plan(
         signal_k=signal_k,
         bytes_per_token=bytes_per_token,
     )
+    changed_candidates, changed_signal, changed_gaps = _changed_path_candidates(
+        manifest_path,
+        changed_paths=normalized_changed_paths,
+        bytes_per_token=bytes_per_token,
+    )
     gaps.extend(retrieval_gaps)
     gaps.extend(symbol_gaps)
     gaps.extend(relation_gaps)
+    gaps.extend(changed_gaps)
 
     required_candidates = _required_reading_candidates(
         status,
         required,
         bytes_per_token=bytes_per_token,
     )
-    all_candidates = _dedupe_candidates(retrieval_candidates + symbol_candidates + relation_candidates + required_candidates)
-    selected, omitted = _select_candidates(all_candidates, context_budget_tokens)
+    all_candidates = _dedupe_candidates(
+        changed_candidates
+        + retrieval_candidates
+        + symbol_candidates
+        + relation_candidates
+        + required_candidates
+    )
+    try:
+        selected, omitted, relevance_trace = select_relevance_budgeted_context(
+            all_candidates,
+            token_budget=context_budget_tokens,
+            byte_budget=effective_byte_budget,
+            bytes_per_token=bytes_per_token,
+            changed_paths=normalized_changed_paths,
+            weights=ranking_weights,
+        )
+    except ValueError as exc:
+        return _invalid_result(
+            manifest_path,
+            error=str(exc),
+            error_code="ranking_weights_invalid",
+            task=task,
+            task_profile=task_profile,
+            context_budget_tokens=context_budget_tokens,
+        )
 
     used_tokens = sum(item["estimated_tokens"] for item in selected)
+    used_bytes = sum(item["estimated_bytes"] for item in selected)
     candidate_counts: dict[str, int] = {}
     selected_counts: dict[str, int] = {}
     for candidate in all_candidates:
@@ -746,8 +1262,11 @@ def compile_context_plan(
         selected_counts[source] = selected_counts.get(source, 0) + 1
 
     fallback_roles = [
-        item for item in selected + omitted
-        if item.get("source") == "required_reading" and item.get("artifact_role") in {"canonical_md", "agent_reading_pack", "bundle_manifest"}
+        item
+        for item in selected + omitted
+        if item.get("source") == "required_reading"
+        and item.get("artifact_role")
+        in {"canonical_md", "agent_reading_pack", "bundle_manifest"}
     ]
     status_value = "pass"
     if not selected or required.get("status") in {"fail", "not_applicable"}:
@@ -768,6 +1287,10 @@ def compile_context_plan(
             "context_budget_tokens": context_budget_tokens,
             "estimated_used_tokens": used_tokens,
             "estimated_remaining_tokens": max(context_budget_tokens - used_tokens, 0),
+            "context_budget_bytes": effective_byte_budget,
+            "estimated_used_bytes": used_bytes,
+            "estimated_remaining_bytes": max(effective_byte_budget - used_bytes, 0),
+            "byte_budget_is_hard": True,
             "bytes_per_token": bytes_per_token,
             "exact_tokenizer": False,
         },
@@ -775,6 +1298,7 @@ def compile_context_plan(
             "resolved_evidence": retrieval_signal,
             "python_symbol_index_json": symbol_signal,
             "relation_cards_jsonl": relation_signal,
+            "changed_paths": changed_signal,
             "required_reading": {
                 "status": required.get("status"),
                 "required": required.get("required"),
@@ -783,7 +1307,9 @@ def compile_context_plan(
                 "missing_recommended": required.get("missing_recommended"),
             },
             "availability": {
-                "status": availability.get("status") if isinstance(availability, dict) else None,
+                "status": availability.get("status")
+                if isinstance(availability, dict)
+                else None,
                 "freshness": freshness,
                 "graph_availability": graph_availability,
             },
@@ -802,14 +1328,27 @@ def compile_context_plan(
         },
         "gaps": gaps,
         "selection_trace": {
-            "ordering": "priority_then_estimated_tokens_then_id",
-            "priority_bands": [
+            **relevance_trace,
+            "candidate_generation_priority_bands": [
+                {
+                    "source": "changed_path",
+                    "priority": "5+ and independent of signal_k",
+                },
                 {"source": "resolved_evidence", "priority": "10-19"},
                 {"source": "python_symbol_index_json", "priority": "20-29"},
                 {"source": "relation_cards_jsonl", "priority": "25+"},
-                {"source": "required_reading", "priority": "30+ required, 60+ recommended"},
+                {
+                    "source": "required_reading",
+                    "priority": "30+ required, 60+ recommended",
+                },
             ],
-            "omission_reasons": sorted({item.get("omission_reason") for item in omitted if item.get("omission_reason")}),
+            "omission_reasons": sorted(
+                {
+                    item.get("omission_reason")
+                    for item in omitted
+                    if item.get("omission_reason")
+                }
+            ),
         },
         "trust_model": trust_model_summary(),
         "mutation_boundary": _read_only_mutation_boundary(),

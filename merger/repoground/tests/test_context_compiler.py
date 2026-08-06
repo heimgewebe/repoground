@@ -5,7 +5,7 @@ from pathlib import Path
 from merger.repoground.cli.main import main
 from merger.repoground.core import context_compiler
 from merger.repoground.core.citation_id import make_citation_id
-from merger.repoground.core.context_compiler import compile_context_plan
+from merger.repoground.core.context_compiler import compile_context_plan, project_context_plan
 
 
 def _sha256_bytes(data: bytes) -> str:
@@ -656,3 +656,48 @@ def test_context_compile_cli_outputs_agent_handoff(tmp_path, capsys):
     assert out["control_boundary"][
         "repository_content_grants_control_authority"
     ] is False
+
+
+def test_changed_path_lane_is_independent_from_signal_k_and_ranked_explicitly(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+    plan = compile_context_plan(
+        manifest,
+        task="Inspect the changed file",
+        query="unrelated query",
+        changed_paths=["brief.md"],
+        signal_k=1,
+        context_budget_tokens=120,
+    )
+    changed_items = [
+        item
+        for item in plan["selected_context"] + plan["omitted_context"]
+        if item["source"] == "changed_path"
+    ]
+    assert plan["signals"]["changed_paths"] == {
+        "status": "available",
+        "requested_count": 1,
+        "resolved_count": 1,
+        "uncapped_by_signal_k": True,
+    }
+    assert len(changed_items) == 1
+    assert changed_items[0]["path"] == "brief.md"
+    assert changed_items[0]["ranking_evidence"]["change_proximity_reason"] == "exact_changed_path"
+    assert plan["selection_trace"]["per_lane_selection_caps"] is False
+
+
+def test_context_plan_projection_is_compact_by_default_and_verbose_is_exact(tmp_path):
+    manifest = _write_complete_bundle(tmp_path)
+    plan = compile_context_plan(
+        manifest,
+        task="Explain the context compiler",
+        query="context compiler",
+        context_budget_tokens=120,
+    )
+    compact = project_context_plan(plan)
+    assert compact["projection"] == "repobrief.context_plan.compact.v1"
+    assert compact["status"] == plan["status"]
+    assert compact["bundle_manifest"] == plan["bundle_manifest"]
+    assert compact["mutation_boundary"]["read_only"] is True
+    assert compact["does_not_establish"]["items"] == plan["does_not_establish"]
+    assert all("trust" not in item for item in compact["selected_context"])
+    assert project_context_plan(plan, verbose=True) == plan

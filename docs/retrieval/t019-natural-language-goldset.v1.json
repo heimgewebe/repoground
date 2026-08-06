@@ -1,0 +1,89 @@
+{
+  "kind": "repoground.natural_language_retrieval_goldset",
+  "version": "1.0",
+  "id": "repoground-t019-natural-language-v1",
+  "task_id": "REPOGROUND-AGENT-UTILITY-V1-T019",
+  "source_commit": "cfd341b00c6a36125a014dbfa54cf78c8215da75",
+  "categories": ["exact_identifier", "paraphrase", "synonym", "compound", "true_miss"],
+  "metrics": ["recall_at_k", "mrr", "miss_taxonomy", "latency_ms", "context_bytes", "tool_calls"],
+  "cases": [
+    {
+      "id": "de-exact-context-compiler",
+      "language": "de",
+      "category": "exact_identifier",
+      "query": "Wo ist compile_context_plan implementiert?",
+      "expected_paths": ["merger/repoground/core/context_compiler.py"]
+    },
+    {
+      "id": "en-exact-profile-routing",
+      "language": "en",
+      "category": "exact_identifier",
+      "query": "Find evaluate_evidence for task profile routing",
+      "expected_paths": ["merger/repoground/retrieval/task_profile_routing.py"]
+    },
+    {
+      "id": "de-paraphrase-budget",
+      "language": "de",
+      "category": "paraphrase",
+      "query": "Wie wird ein begrenztes Kontextfenster auf relevante Fundstellen verteilt?",
+      "expected_paths": ["merger/repoground/core/context_compiler.py"]
+    },
+    {
+      "id": "en-paraphrase-read-only",
+      "language": "en",
+      "category": "paraphrase",
+      "query": "Which code reads an existing bundle index without refreshing it?",
+      "expected_paths": ["merger/repoground/core/query_index_access.py", "merger/repoground/core/bundle_access.py"]
+    },
+    {
+      "id": "de-synonym-evidence",
+      "language": "de",
+      "category": "synonym",
+      "query": "Finde die Belegauflösung für Treffer und Quellenangaben",
+      "expected_paths": ["merger/repoground/core/query_index_access.py", "merger/repoground/core/citation_projection.py"]
+    },
+    {
+      "id": "en-synonym-review",
+      "language": "en",
+      "category": "synonym",
+      "query": "Locate the opt-in code review search planner and fallback",
+      "expected_paths": ["merger/repoground/retrieval/review_query.py", "merger/repoground/retrieval/review_router.py"]
+    },
+    {
+      "id": "de-compound-routing-binding",
+      "language": "de",
+      "category": "compound",
+      "query": "Welche Stelle entscheidet pro Aufgabenprofil über optionale Suchrouten und Fallbacks?",
+      "expected_paths": ["merger/repoground/retrieval/task_profile_routing.py"]
+    },
+    {
+      "id": "en-compound-compact",
+      "language": "en",
+      "category": "compound",
+      "query": "Where are compact read responses produced while preserving freshness, mutation boundaries and non-claims?",
+      "expected_paths": ["merger/repoground/core/response_projection.py"]
+    },
+    {
+      "id": "de-true-miss",
+      "language": "de",
+      "category": "true_miss",
+      "query": "Wo wird der interstellare Pinguinmotor kalibriert?",
+      "expected_paths": []
+    },
+    {
+      "id": "en-true-miss",
+      "language": "en",
+      "category": "true_miss",
+      "query": "Find the lunar cheese authentication daemon",
+      "expected_paths": []
+    }
+  ],
+  "does_not_establish": [
+    "semantic_truth",
+    "retrieval_completeness",
+    "repository_understanding",
+    "answer_correctness",
+    "test_sufficiency",
+    "merge_readiness"
+  ]
+}
