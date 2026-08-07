@@ -167,6 +167,34 @@ class PrunePlan:
     bytes: int
 
 
+class ManagedWorktreeDirtyError(RuntimeError):
+    """Preserve semantic changes in a managed worktree instead of resetting them."""
+
+    def __init__(self, path: Path, status: list[tuple[str, str]]) -> None:
+        self.path = path
+        self.status_count = len(status)
+        self.status_sample = tuple(status[:20])
+        sample = "\n".join(
+            f"{code} {relative}" for code, relative in self.status_sample
+        )
+        super().__init__(
+            f"managed worktree is not clean; refusing reset or cleanup: {path}\n{sample}"
+        )
+
+    def receipt(self) -> dict[str, object]:
+        return {
+            "reason": "managed_worktree_dirty",
+            "worktree": str(self.path),
+            "status_count": self.status_count,
+            "status_sample": [
+                {"code": code, "path": relative}
+                for code, relative in self.status_sample
+            ],
+            "status_truncated": self.status_count > len(self.status_sample),
+            "automatic_reset_authorized": False,
+        }
+
+
 def run(
     argv: list[str],
     cwd: Path | None = None,
@@ -1747,12 +1775,7 @@ def cleanup_managed_disposable_artifacts(path: Path, expected_repo: Path) -> lis
     for code, relative in status:
         artifact = managed_disposable_artifact_root(relative)
         if code not in {"??", "!!"} or artifact is None:
-            sample = "\n".join(
-                f"{row_code} {row_path}" for row_code, row_path in status[:20]
-            )
-            raise RuntimeError(
-                f"managed worktree is not clean; refusing reset or cleanup: {path}\n{sample}"
-            )
+            raise ManagedWorktreeDirtyError(path, status)
         roots.add(artifact)
     assert_managed_worktree_idle(path)
     retained: list[Path] = []
@@ -1787,10 +1810,7 @@ def assert_managed_worktree_clean(path: Path, expected_repo: Path) -> None:
     assert_managed_worktree_identity(path, expected_repo)
     status = managed_worktree_status(path)
     if status:
-        sample = "\n".join(f"{code} {relative}" for code, relative in status[:20])
-        raise RuntimeError(
-            f"managed worktree is not clean; refusing reset or cleanup: {path}\n{sample}"
-        )
+        raise ManagedWorktreeDirtyError(path, status)
 
 
 def generation_environment(cache_root: Path) -> dict[str, str]:
@@ -3544,7 +3564,8 @@ def main(argv: list[str]) -> int:
             log(f"GENERATOR-PREFLIGHT-FAILED: {exc}")
             print(json.dumps(summary, indent=2, sort_keys=True))
             return 1
-        changed = published = skipped = failed = queued = retained = prune_failed = 0
+        changed = published = skipped = failed = queued = retained = deferred = 0
+        prune_failed = 0
         details: list[dict[str, object]] = []
         protected: set[Path] = set()
         reconciliation = reconcile_prune_transactions(protected=protected, apply=True)
@@ -3671,6 +3692,21 @@ def main(argv: list[str]) -> int:
                 if source_hygiene_cleanup:
                     published_detail["source_hygiene_cleanup"] = source_hygiene_cleanup
                 details.append(published_detail)
+            except ManagedWorktreeDirtyError as exc:
+                deferred += 1
+                details.append(
+                    {
+                        "repo": entry.key,
+                        "status": "deferred",
+                        "deferred_reason": "managed_source_worktree_dirty",
+                        "managed_source_worktree": exc.receipt(),
+                    }
+                )
+                log(
+                    f"DEFERRED {entry.key}: managed source worktree is dirty; "
+                    "automatic reset refused"
+                )
+                continue
             except Exception as exc:
                 residue_blocker = parse_managed_build_blocker(exc)
                 if (
@@ -3698,7 +3734,7 @@ def main(argv: list[str]) -> int:
                 details.append(failed_detail)
                 log(f"FAILED {entry.key}: {exc}")
         summary: dict[str, object] = {
-            "status": "warn" if failed or retained else "ok",
+            "status": "warn" if failed or retained or deferred else "ok",
             "mode": mode,
             "count": len(entries),
             "changed": changed,
@@ -3706,6 +3742,7 @@ def main(argv: list[str]) -> int:
             "skipped": skipped,
             "queued": queued,
             "retained": retained,
+            "deferred": deferred,
             "failed": failed,
             "prune_failed": prune_failed,
             "retention": args.retention,
@@ -3730,6 +3767,7 @@ def main(argv: list[str]) -> int:
                         "skipped",
                         "queued",
                         "retained",
+                        "deferred",
                         "failed",
                         "prune_failed",
                         "retention",
