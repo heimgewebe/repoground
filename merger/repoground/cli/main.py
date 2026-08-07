@@ -94,6 +94,10 @@ def main(args: Optional[List[str]] = None) -> int:
     from .cmd_diagnostics import register_diagnostics_commands
     register_diagnostics_commands(subparsers)
 
+    # Read-only environment/evidence readiness diagnostic.
+    from .cmd_doctor import register_doctor_command
+    register_doctor_command(subparsers)
+
     # Index command
     index_parser = subparsers.add_parser("index", help="Build or verify retrieval index")
     index_parser.add_argument("--dump", required=True, help="Path to dump_index.json")
@@ -303,6 +307,9 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)
+    elif parsed_args.command == "doctor":
+        from .cmd_doctor import run_doctor
+        return run_doctor(parsed_args)
     elif parsed_args.command in {"token-budget", "evidence-query", "retrieval-snapshot", "diagnostics", "observed-calls"}:
         from .cmd_diagnostics import run_diagnostics
         from .cmd_evidence_query import run_evidence_query

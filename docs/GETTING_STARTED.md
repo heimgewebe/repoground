@@ -1,6 +1,6 @@
 # Getting Started mit RepoGround
 
-> Aktualisiert am 2026-05-31.
+> Aktualisiert am 2026-08-07.
 > Einstieg in fünf Minuten: Repository aufbereiten, Ergebnis lesen, durchsuchen.
 > Für die normative Spezifikation siehe
 > [`merger/repoground/repoground-build-spec.md`](../merger/repoground/repoground-build-spec.md),
@@ -24,20 +24,61 @@ Die **Wahrheitsquelle** ist immer der kanonische Markdown-Dump (`canonical_md`).
 Alle anderen Artefakte (Index, Citation-Map, Agent Reading Pack, Health) sind
 **Navigation/Diagnose, nicht Wahrheit**.
 
-## 2. Voraussetzungen
+## 2. Voraussetzungen und reproduzierbarer Einstieg
 
-- Python 3.12 ist die CI- und Release-Kandidaten-Basis; lokale Aufrufe erfolgen
-  über `python3` (ältere 3.x-Versionen können funktionieren, gehören aber nicht
-  zum reproduzierbaren Lockvertrag)
-- Kern-Pipeline läuft ohne Drittpakete. Für Validierung/Service/Tests:
+### Python- und Abhängigkeitsvertrag
+
+- **CPython 3.12** ist die aktuelle CI- und Release-Kandidaten-Basis. Genau
+  diese Version läuft in `pytest-full` und `release-candidate`.
+- Ein anderer Interpreter ab Python 3.10 kann einzelne Core-Pfade ausführen,
+  gehört aber nicht zur aktuell reproduzierten Release-Basis; `repoground
+  doctor` meldet ihn deshalb als `degraded` statt ihn still als gleichwertig
+  auszugeben.
+- Der Repositoryvertrag behauptet derzeit **keine PyPI-/Wheel-Installation** als
+  kanonischen Einstieg. Der reproduzierbare Pfad ist ein Source-Checkout plus
+  die hashgebundenen Locks im Repository.
+
+Einen neuen Source-Checkout anlegen und anschließend in einer lokalen Python-3.12-Umgebung den reproduzierbaren Runtime-Lock anwenden:
 
 ```bash
-python3 -m pip install --require-hashes -r requirements/repoground-dev.lock.txt
+git clone https://github.com/heimgewebe/repoground.git
+cd repoground
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --require-hashes -r requirements/repoground-runtime.lock.txt
+.venv/bin/python -m merger.repoground --version
+.venv/bin/python -m merger.repoground doctor --repo-root .
+```
 
-# Optionales semantisches Reranking, nur für CPython 3.12 / Linux x86-64 / CPU:
-python3 -m pip install --only-binary=:all: --require-hashes \
+`doctor` installiert oder repariert nichts. Direkt nach einem frischen Checkout
+ohne vorhandenes Bundle ist ein `degraded`-Ergebnis erwartbar; die einzelnen
+Checks erklären den Grund. Für Tests und Entwicklungswerkzeuge zusätzlich:
+
+```bash
+.venv/bin/python -m pip install --require-hashes -r requirements/repoground-dev.lock.txt
+```
+
+Optionales semantisches Reranking hat einen engeren Vertrag und bleibt
+standardmäßig aus. Unterstützt ist nur CPython 3.12 / Linux x86-64 / CPU:
+
+```bash
+.venv/bin/python -m pip install --only-binary=:all: --require-hashes \
   -r requirements/repoground-semantic-linux-x86_64-py312.lock.txt
 ```
+
+### Upgrade eines Source-Checkouts
+
+1. Den Checkout über den normalen reviewten Git-/Deployment-Pfad auf den
+   gewünschten RepoGround-Commit bringen. `doctor` führt **kein** `fetch`,
+   `pull`, `reset` oder anderes Upgrade aus.
+2. Den aktuellen Commit mit `git rev-parse HEAD` kontrollieren.
+3. Den hashgebundenen Runtime-Lock erneut anwenden; bei Entwicklungsarbeit auch
+   den Dev-Lock.
+4. `.venv/bin/python -m merger.repoground doctor --repo-root .` ausführen.
+5. Nach Auswahl oder Erzeugung eines Bundles den strikten Bundle-Readback aus
+   Abschnitt 6 ausführen.
+
+Damit sind Source-Revision, Abhängigkeiten und Diagnose getrennt prüfbar. Ein
+grüner Doctor ist trotzdem kein Test-, Review- oder Merge-Reife-Beweis.
 
 ## 3. Minimalbeispiel: einen Dump erzeugen
 
@@ -94,6 +135,9 @@ Zitiert wird ausschließlich gegen `canonical_md`.
 ## 5. Durchsuchen & zitieren (`repoground` CLI)
 
 ```bash
+# 0) Read-only Umgebung, MCP-Konfiguration und vorhandene Evidence prüfen
+python3 -m merger.repoground doctor --repo-root . --json
+
 # 1) Index bauen (SQLite FTS5)
 python3 -m merger.repoground.cli.main index \
   --dump <dump_index.json> --chunk-index <chunk_index.jsonl> --out index.sqlite
@@ -112,7 +156,7 @@ python3 -m merger.repoground.cli.main bundle-health post <bundle.manifest.json>
 python3 -m merger.repoground.cli.main agent-pack produce <bundle.manifest.json> --json
 ```
 
-Weitere Subkommandos: `eval`, `architecture`, `atlas`, `federation`,
+Weitere Subkommandos: `doctor`, `eval`, `architecture`, `atlas`, `federation`,
 `context-quality`, `governance`, `parity`, `artifact`, `service-client`, `verify`,
 `pr-explain`. Jeweils `--help` für Details.
 
@@ -122,7 +166,52 @@ Federierte Query ohne persistierten Index:
 repoground federation query --bundle repo_a=/path/to/bundle-a --bundle repo_b=/path/to/bundle-b -q "symbol" --trace
 ```
 
-## 6. Fehlerbehebung (Kurz)
+## 6. Doctor, erster Bundle-Readback und MCP
+
+`repoground doctor` ist die gemeinsame **read-only** Diagnoseoberfläche. Sie
+fasst vorhandene RepoGround-Prüfpfade zusammen, erzeugt aber keine zweite
+Wahrheitsquelle. Jeder Check meldet `available`, `degraded` oder `blocked` sowie
+Ursache, Auswirkung und eine erlaubte nächste Aktion. Fehlende optionale
+Sprach-/Graphadapter blockieren den Python-/FTS-Kern nicht.
+
+Nach dem ersten Build den vom Build ausgegebenen Manifestpfad exakt
+zurücklesen:
+
+```bash
+.venv/bin/python -m merger.repoground doctor \
+  --repo-root . \
+  --manifest /absolute/path/to/<stem>.bundle.manifest.json \
+  --strict --json
+```
+
+`--strict` liefert Exit 1, wenn ein **erforderlicher** Check nur `degraded` ist;
+`blocked` liefert immer Exit 2. Fehlende optionale Adapter verändern den
+Core-Gesamtstatus nicht. Der Freshness-Check vergleicht nur das vorhandene
+Bundle mit dem ausdrücklich angegebenen lokalen Checkout. Er synchronisiert
+nicht mit GitHub und baut kein Bundle neu.
+
+Für projektlokales MCP ist die eingecheckte `.mcp.json` der kanonische Einstieg.
+Sie startet `scripts/repoground-mcp-project.py`; dieser bindet den Checkout als
+`--repo-root` und wählt fail-closed genau ein gesundes Bundle aus dem
+kanonischen Publikationskatalog. Der Doctor prüft Konfigurationsdatei und Starter,
+behauptet aber **keine** aktive MCP-Clientverbindung. Der direkte Serverstart und
+die generische Client-Konfiguration stehen in
+[`usage/repoground-mcp-stdio.md`](usage/repoground-mcp-stdio.md).
+
+Doctor-Grenzen:
+
+- kein `pip install` oder Interpreterwechsel;
+- kein `git fetch/pull/reset` und keine Repositorymutation;
+- kein Bundle-Build oder Refresh;
+- kein Dienststart/-restart;
+- kein Secret-Read;
+- keine Netzwerk-Synchronisierung.
+
+Ein `available`-Verdikt belegt lokale Bereitschaft der geprüften Oberflächen,
+nicht Repositoryverständnis, Antwortkorrektheit, Testgenüge, Reviewvollständigkeit
+oder Merge-Reife.
+
+## 7. Fehlerbehebung (Kurz)
 
 - **„range_ref failed schema" / Hash mismatch:** Der `range_ref` passt nicht
   zum Artefakt-Inhalt — Bundle veraltet oder Ref von Hand editiert. Bundle neu
@@ -134,7 +223,7 @@ repoground federation query --bundle repo_a=/path/to/bundle-a --bundle repo_b=/p
 - **Atlas verweigert Pfad:** `..`/relative Pfade sind verboten; absolute Pfade
   oder Presets nutzen (s. README, „ATLAS MODE").
 
-## 7. Weiterlesen
+## 8. Weiterlesen
 
 - [Master-Roadmap](roadmap/repoground-master-roadmap.md) — Reihenfolge & Tracks
 - [Systemkarte](architecture/system-map.repoground.md) — Modul-Zusammenspiel
