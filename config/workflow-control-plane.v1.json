@@ -128,7 +128,7 @@
       "path": ".github/workflows/pr-heimgewebe-commands.yml",
       "class": "operator_command",
       "rationale": "PR comment command surface; not a merge gate.",
-      "sha256": "c802df6c42dbf0643fbb727366db743fb1f5b691a9e00d956e39465b5d42b71c",
+      "sha256": "fe734222ec5d34fa2f8df0d46bb099874d544a6f5af91c6672da716b38a68a76",
       "bytes": 563
     },
     {
