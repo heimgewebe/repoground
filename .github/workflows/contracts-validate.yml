@@ -286,7 +286,7 @@ jobs:
   validate:
     name: "Validate fixtures via reusable workflow"
     needs: [version-sync-check, guard]
-    uses: heimgewebe/contracts-mirror/.github/workflows/contracts-ajv-reusable.yml@968518ebbef3b36c008320d701c87473aa012a88
+    uses: heimgewebe/contracts-mirror/.github/workflows/contracts-ajv-reusable.yml@2fd956e75c6b5f4427f7ecfd05017ba2de33831a
     secrets: inherit
     with:
       fixtures_glob: ${{ vars.FIXTURES_GLOB || 'merger/repoground/contracts/examples/**/*.json merger/repoground/contracts/examples/**/*.jsonl' }}
