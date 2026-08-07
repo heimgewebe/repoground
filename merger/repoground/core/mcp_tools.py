@@ -578,14 +578,26 @@ def query_existing_index(
         max_answer_tokens=1,
         k=k,
     )
+    # The frontdoor status must follow the search backend, not the fact that a
+    # pack was produced. A pack is always produced — including when no index
+    # exists to query — so hardcoding "available" here is what turned a missing
+    # `sqlite_index` into a silent zero-result answer.
+    retrieval_infrastructure = pack["retrieval_infrastructure"]
     result = {
         "kind": READ_ONLY_KIND,
         "version": READ_ONLY_VERSION,
         "tool": "query_existing_index",
-        "status": "available",
+        # `missing` for an absent index, `invalid` for a rejected request — the
+        # same vocabulary `_invalid_read_result` uses for the other read tools.
+        "status": (
+            "available"
+            if retrieval_infrastructure["index_resolved"]
+            else retrieval_infrastructure["status"]
+        ),
         "route": "text_retrieval",
         "intent": {"kind": "text_retrieval"},
         "retrieval": pack["retrieval"],
+        "retrieval_infrastructure": retrieval_infrastructure,
         "retrieval_hits": pack["retrieval_hits"],
         "resolved_ranges": pack["resolved_ranges"],
         "budget": pack["budget"],

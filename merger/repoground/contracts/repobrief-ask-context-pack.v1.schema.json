@@ -17,7 +17,8 @@
     "resolved_ranges",
     "answer_scaffold",
     "forbidden_operations",
-    "does_not_establish"
+    "does_not_establish",
+    "retrieval_infrastructure"
   ],
   "properties": {
     "kind": {
@@ -240,7 +241,10 @@
           "type": "string"
         },
         "fts_query": {
-          "type": ["string", "null"]
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "strategy": {
           "type": "string",
@@ -253,6 +257,41 @@
         "match_count": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "retrieval_infrastructure": {
+      "type": "object",
+      "description": "State of the search backend this pack queried, kept separate from `availability` (which describes the snapshot). Distinguishes an absent index from an index that was searched and matched nothing.",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "index_resolved"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "missing",
+            "invalid",
+            "unknown"
+          ]
+        },
+        "index_resolved": {
+          "type": "boolean"
+        },
+        "error_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },

@@ -188,17 +188,125 @@ def test_daily_profile_publishes_the_call_navigation_artifacts(published_bundle)
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     rules = manifest["capabilities"]["repobrief_profile_policy"]["artifact_rules"]
-    for role in ("python_symbol_index_json", "python_call_graph_json"):
+    # Every role here backs an agent-facing tool. Excluding one does not shrink
+    # that tool's answers, it removes the tool: the symbol index and call graph
+    # carry find_symbol/find_references/get_callers/get_callees, `sqlite_index`
+    # carries `query`.
+    for role, tools in (
+        ("python_symbol_index_json", "find_symbol/find_references"),
+        ("python_call_graph_json", "get_callers/get_callees"),
+        ("sqlite_index", "query"),
+    ):
         assert rules[role] != "profile_excluded", (
-            f"{role} is excluded from the daily publication; "
-            "find_symbol/find_references/get_callers/get_callees cannot be served"
+            f"{role} is excluded from the daily publication; {tools} cannot be served"
         )
 
-    # The storage intent of the compact profile is still honoured.
-    assert rules["sqlite_index"] == "profile_excluded"
     removed = " ".join(snapshot["removed_profile_excluded_artifacts"])
     assert "python_symbol_index" not in removed
     assert "python_call_graph" not in removed
+    assert "sqlite" not in removed
+
+
+@pytest.mark.publication_surface
+def test_query_answers_against_the_published_bundle(published_bundle):
+    """`query` must find an identifier the published bundle demonstrably contains.
+
+    This is the assertion whose absence let `sqlite_index` be dropped from the
+    daily profile: `query` kept reporting `available` while returning nothing for
+    every input, including identifiers present in the indexed source.
+    """
+    manifest_path, _, _ = published_bundle
+
+    response = mcp_tools.query_existing_index(
+        bundle_manifest=manifest_path, query="helper", k=5
+    )
+
+    assert response["status"] == "available", response.get("retrieval_infrastructure")
+    assert response["retrieval_infrastructure"]["index_resolved"] is True
+    assert response["retrieval"]["strategy"] != "none"
+    assert response["retrieval"]["match_count"] > 0
+    assert any(
+        entry.get("source_path") == "pkg/core.py"
+        for entry in response["resolved_ranges"]
+    ), response["resolved_ranges"]
+
+
+@pytest.mark.publication_surface
+def test_query_returns_no_hits_for_an_absent_term(published_bundle):
+    """A term genuinely absent from the repo must be an empty answer, not an error.
+
+    Paired with the test above this pins both directions: without it, "always
+    returns hits" would pass just as happily as a working index.
+    """
+    manifest_path, _, _ = published_bundle
+
+    response = mcp_tools.query_existing_index(
+        bundle_manifest=manifest_path, query="zzzqqqxyzabsentidentifier", k=5
+    )
+
+    assert response["status"] == "available"
+    assert response["retrieval_infrastructure"]["index_resolved"] is True
+    assert response["retrieval"]["match_count"] == 0
+    assert response["resolved_ranges"] == []
+
+
+@pytest.mark.publication_surface
+def test_query_results_depend_on_the_query(published_bundle):
+    """Different queries must produce different evidence.
+
+    `context_compose` feeds its `query_snippets` lane from these ranges, so a
+    query-independent result there is this failure one layer up: two unrelated
+    queries composed byte-identical context while the index was missing.
+    """
+    manifest_path, _, _ = published_bundle
+
+    helper_ranges = mcp_tools.query_existing_index(
+        bundle_manifest=manifest_path, query="helper", k=5
+    )["resolved_ranges"]
+    caller_ranges = mcp_tools.query_existing_index(
+        bundle_manifest=manifest_path, query="run_once", k=5
+    )["resolved_ranges"]
+
+    assert helper_ranges and caller_ranges
+    assert helper_ranges != caller_ranges
+    assert any(r.get("source_path") == "pkg/caller.py" for r in caller_ranges)
+
+
+@pytest.mark.publication_surface
+def test_query_reports_unavailable_when_the_search_index_is_absent(
+    published_bundle, tmp_path
+):
+    """Missing search infrastructure must surface, not masquerade as no results.
+
+    The profile fix restores the index; this pins the behaviour that made its
+    absence undetectable for days. A bundle without `sqlite_index` previously
+    answered `status: available` with zero hits and advised the caller to
+    rephrase — indistinguishable from a genuinely empty repository.
+    """
+    manifest_path, _, _ = published_bundle
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"] = [
+        artifact
+        for artifact in manifest["artifacts"]
+        if artifact.get("role") != "sqlite_index"
+    ]
+    stripped = tmp_path / manifest_path.name
+    stripped.write_text(json.dumps(manifest), encoding="utf-8")
+
+    response = mcp_tools.query_existing_index(
+        bundle_manifest=stripped, query="helper", k=5
+    )
+
+    assert response["status"] == "missing"
+    infrastructure = response["retrieval_infrastructure"]
+    assert infrastructure["index_resolved"] is False
+    assert infrastructure["error_code"] == "sqlite_index_missing"
+    assert response["availability"]["status"] == "missing"
+    # The "rephrase your query" advice is actively wrong here and must not appear.
+    assert not any(
+        "Rephrase" in caveat.get("detail", "")
+        for caveat in response["answer_caveats"]
+    ), response["answer_caveats"]
 
 
 @pytest.mark.publication_surface

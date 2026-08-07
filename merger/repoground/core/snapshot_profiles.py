@@ -152,16 +152,22 @@ PROFILE_ARTIFACT_RULES = {
         "python_symbol_index_json": REQ_RECOMMENDED,
         "python_call_graph_json": REQ_RECOMMENDED,
     },
-    # The daily fleet publication is the bundle the agent-facing call-navigation
-    # tools resolve against. Excluding the Python symbol index and call graph
-    # here removes `find_symbol`, `find_references`, `get_callers`, and
-    # `get_callees` from that surface entirely, so they stay part of the compact
-    # profile. `sqlite_index` remains excluded: it carries the bulk of the storage
-    # cost and no
-    # agent-facing read path consumes it.
+    # The daily fleet publication is the bundle every agent-facing read path
+    # resolves against, so an artifact excluded here is not merely smaller — it
+    # removes the tools built on it. Excluding the Python symbol index and call
+    # graph removed `find_symbol`, `find_references`, `get_callers`, and
+    # `get_callees`; excluding `sqlite_index` removed `query`, whose FTS runs
+    # against exactly that index (see `core/ask_context.py`).
+    #
+    # `sqlite_index` was previously excluded on the premise that it "carries the
+    # bulk of the storage cost and no agent-facing read path consumes it".
+    # Measured against the 2026-08-07 repoground publication, both halves were
+    # wrong: the index is 21.2 MB of a 201 MB bundle (~10.5%), against a
+    # published 65 MB call graph (~32%), and rebuilds in 0.55 s from the already
+    # published chunk index. It stays in the profile.
     "fleet-context": {
         **BASE_RULES,
-        "sqlite_index": REQ_EXCLUDED,
+        "sqlite_index": REQ_RECOMMENDED,
         "export_safety_report": REQ_REQUIRED,
         "retrieval_eval_json": REQ_RECOMMENDED,
         "python_symbol_index_json": REQ_RECOMMENDED,
