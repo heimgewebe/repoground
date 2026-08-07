@@ -9,11 +9,12 @@ Bureau task: `heimgewebe/bureau#671`
 - the existing persisted state contract `repobrief.fleet-publication-state.v1` is retained and extended additively;
 - state records distinguish the generator Git commit from the generator-input digest and record the verified bundle-manifest path;
 - a successful publication is labelled only `fresh_at_publication`; a later unchanged run performs a new remote-head comparison;
-- generator preflight and per-repository failures return a non-zero process status and preserve a machine-readable `fleet-last.json` receipt.
+- generator preflight and true per-repository publication failures return a non-zero process status and preserve a machine-readable `fleet-last.json` receipt;
+- a pre-existing dirty managed source worktree is preserved and reported as `deferred`; it makes the fleet receipt visibly `warn` but does not make the whole service fail when no true publication failure occurred.
 
 ## Covered by repository tests
 
-The focused tests cover canonical input paths, independent RepoGround discovery, persisted-state field semantics, installer ordering, generator-preflight failure receipts, and an unchanged second run that creates no additional bundle and preserves publication time.
+The focused tests cover canonical input paths, independent RepoGround discovery, persisted-state field semantics, installer ordering, generator-preflight failure receipts, typed preservation of dirty managed source worktrees, non-fatal per-repository deferral, and an unchanged second run that creates no additional bundle and preserves publication time.
 
 These tests do not establish that the user service has already been installed or that live repositories have already produced fresh bundles.
 

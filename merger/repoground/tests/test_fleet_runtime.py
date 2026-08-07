@@ -2627,6 +2627,121 @@ def test_regression_canonical_unit_names_and_installer_cutover_order() -> None:
     assert install_position < reload_position < enable_position
 
 
+def test_dirty_managed_worktree_is_typed_and_preserved(tmp_path: Path) -> None:
+    module = load_publisher()
+    repo, sha = initialize_repository(tmp_path)
+    worktree = tmp_path / "managed"
+    git(repo, "worktree", "add", "--detach", str(worktree), sha)
+    tracked = worktree / "tracked.txt"
+    tracked.write_text("operator-owned change\n", encoding="utf-8")
+
+    with pytest.raises(module.ManagedWorktreeDirtyError) as caught:
+        module.assert_managed_worktree_clean(worktree, repo)
+
+    assert tracked.read_text(encoding="utf-8") == "operator-owned change\n"
+    receipt = caught.value.receipt()
+    assert receipt["reason"] == "managed_worktree_dirty"
+    assert receipt["automatic_reset_authorized"] is False
+    assert receipt["status_count"] == 1
+    assert receipt["status_sample"] == [{"code": " M", "path": "tracked.txt"}]
+    assert receipt["status_truncated"] is False
+
+
+def test_dirty_source_worktree_is_deferred_without_poisoning_fleet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+    repo, source_sha = initialize_repository(tmp_path, "demo")
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    dirty_worktree = source_root / "heimgewebe__demo__main"
+    git(repo, "worktree", "add", "--detach", str(dirty_worktree), source_sha)
+    tracked = dirty_worktree / "tracked.txt"
+    tracked.write_text("operator-owned source change\n", encoding="utf-8")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+    monkeypatch.setattr(
+        module,
+        "prioritize_fleet_publication",
+        lambda entries: (entries, {"policy": "test"}),
+    )
+    monkeypatch.setattr(
+        module,
+        "reconcile_prune_transactions",
+        lambda *, protected, apply: {"status": "ok"},
+    )
+    monkeypatch.setattr(module, "ensure_tool_worktree", lambda: ("b" * 40, "c" * 64))
+    monkeypatch.setattr(
+        module,
+        "remote_head",
+        lambda path: ("origin/main", "main", source_sha),
+    )
+    monkeypatch.setattr(
+        module,
+        "publish",
+        lambda *args, **kwargs: pytest.fail("deferred repository must not publish"),
+    )
+
+    assert module.main(["--repo", "heimgewebe/demo"]) == 0
+    assert tracked.read_text(encoding="utf-8") == "operator-owned source change\n"
+    receipt = json.loads((roots["log"] / "fleet-last.json").read_text(encoding="utf-8"))
+    assert receipt["status"] == "warn"
+    assert receipt["deferred"] == 1
+    assert receipt["failed"] == 0
+    detail = receipt["details"][0]
+    assert detail["status"] == "deferred"
+    assert detail["deferred_reason"] == "managed_source_worktree_dirty"
+    assert detail["managed_source_worktree"] == {
+        "reason": "managed_worktree_dirty",
+        "worktree": str(dirty_worktree),
+        "status_count": 1,
+        "status_sample": [{"code": " M", "path": "tracked.txt"}],
+        "status_truncated": False,
+        "automatic_reset_authorized": False,
+    }
+
+
+def test_dirty_generator_worktree_remains_a_hard_preflight_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=tmp_path / "demo",
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    monkeypatch.setattr(module, "discover", lambda: [entry])
+    dirty_tool = tmp_path / "tool-worktree"
+
+    def dirty_generator() -> tuple[str, str]:
+        raise module.ManagedWorktreeDirtyError(dirty_tool, [(" M", "generator.py")])
+
+    monkeypatch.setattr(module, "ensure_tool_worktree", dirty_generator)
+
+    assert module.main(["--repo", "heimgewebe/demo"]) == 1
+    receipt = json.loads((roots["log"] / "fleet-last.json").read_text(encoding="utf-8"))
+    assert receipt["status"] == "error"
+    assert receipt["phase"] == "generator_preflight"
+    assert receipt["failed"] == 1
+    assert "managed worktree is not clean" in receipt["error"]
+    assert "deferred" not in receipt
+
+
 def test_managed_build_blocker_is_structured_in_fleet_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
