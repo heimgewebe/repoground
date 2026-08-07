@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +102,8 @@ def _content_tokens(query: str) -> list[str]:
     """Deterministic, order-preserving content tokens for relaxed retrieval."""
     tokens: list[str] = []
     seen: set[str] = set()
-    for token in re.findall(r"\b\w+\b", query.lower()):
+    normalized_query = unicodedata.normalize("NFC", query)
+    for token in re.findall(r"\b\w+\b", normalized_query.lower()):
         # Retain the original identifier and additionally expose its snake_case
         # parts.  FTS tokenizers differ in their underscore handling; the OR
         # fallback must be deterministic across both behaviours.
