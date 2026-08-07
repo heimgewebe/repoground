@@ -101,7 +101,7 @@ def _content_tokens(query: str) -> list[str]:
     """Deterministic, order-preserving content tokens for relaxed retrieval."""
     tokens: list[str] = []
     seen: set[str] = set()
-    for token in re.findall(r"[a-z0-9_]+", query.lower()):
+    for token in re.findall(r"\b\w+\b", query.lower()):
         # Retain the original identifier and additionally expose its snake_case
         # parts.  FTS tokenizers differ in their underscore handling; the OR
         # fallback must be deterministic across both behaviours.

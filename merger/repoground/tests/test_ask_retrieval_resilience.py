@@ -84,6 +84,13 @@ def test_content_tokens_drop_stopwords_and_dedupe():
     assert _content_tokens("how does the is are") == []
 
 
+def test_content_tokens_preserve_unicode_words_for_or_fallback():
+    assert _content_tokens("Wie funktioniert die Übergabe?") == [
+        "funktioniert",
+        "übergabe",
+    ]
+
+
 def test_content_tokens_adds_deterministic_snake_case_parts_for_or_fallback():
     assert _content_tokens("How does build_live_repo_address work?") == [
         "build_live_repo_address",
