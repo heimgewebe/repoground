@@ -148,6 +148,12 @@ def test_query_uses_text_retrieval_for_broad_question(monkeypatch):
             },
             "retrieval_hits": [],
             "resolved_ranges": [],
+            "retrieval_infrastructure": {
+                "status": "available",
+                "index_resolved": True,
+                "error_code": None,
+                "detail": None,
+            },
             "budget": {"max_context_tokens": 1000},
             "availability": {"status": "available", "caveats": []},
             "freshness": {"status": "fresh", "caveats": []},

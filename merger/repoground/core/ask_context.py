@@ -161,6 +161,7 @@ DOES_NOT_ESTABLISH = [
 ]
 _FRESHNESS_STATUSES = {"fresh", "stale", "unknown", "not_comparable", "not_applicable"}
 _AVAILABILITY_STATUSES = {"available", "partial", "missing", "unknown"}
+_RETRIEVAL_INFRASTRUCTURE_STATUSES = {"available", "missing", "invalid", "unknown"}
 _RANGE_STATUSES = {
     "resolved",
     "missing",
@@ -256,6 +257,33 @@ def _availability_block(snapshot: dict[str, Any]) -> dict[str, Any]:
                 "detail": "Snapshot availability metadata was unavailable.",
             }
         ],
+    }
+
+
+def _retrieval_infrastructure_block(query_result: dict[str, Any]) -> dict[str, Any]:
+    """Report whether the search backend itself resolved, separately from the bundle.
+
+    `_availability_block` describes the snapshot; it cannot see whether the FTS
+    index this pack queries actually exists. Keeping the two apart is what makes
+    "the index is absent" distinguishable from "the index was searched and held
+    nothing" — reporting the former as the latter tells the agent to rephrase a
+    query that no wording could ever answer.
+    """
+    status = query_result.get("status")
+    if status == "available":
+        return {
+            "status": "available",
+            "index_resolved": True,
+            "error_code": None,
+            "detail": None,
+        }
+    error_code = query_result.get("error_code")
+    detail = str(query_result.get("error") or "Query backend unavailable.")
+    return {
+        "status": _as_status(status, _RETRIEVAL_INFRASTRUCTURE_STATUSES, "unknown"),
+        "index_resolved": False,
+        "error_code": error_code,
+        "detail": detail,
     }
 
 
@@ -523,18 +551,26 @@ def build_ask_context_pack(
         "match_count": len(resolved_ranges),
     }
 
+    retrieval_infrastructure = _retrieval_infrastructure_block(query_result)
+    if not retrieval_infrastructure["index_resolved"]:
+        # The pack cannot be more available than the backend it queries. Without
+        # this, a bundle published without `sqlite_index` answers every query
+        # with `available` and zero hits, which reads as "the repo contains
+        # nothing matching" instead of "nothing was searched".
+        availability = {
+            "status": "missing",
+            "caveats": list(availability.get("caveats") or [])
+            + [
+                {
+                    "kind": "missing_artifact",
+                    "detail": retrieval_infrastructure["detail"],
+                }
+            ],
+        }
+
     caveats = list(freshness.get("caveats") or []) + list(
         availability.get("caveats") or []
     )
-    if query_result.get("status") != "available":
-        caveats.append(
-            {
-                "kind": "missing_artifact",
-                "detail": str(
-                    query_result.get("error") or "Query evidence unavailable."
-                ),
-            }
-        )
     if truncated:
         caveats.append(
             {
@@ -553,7 +589,7 @@ def build_ask_context_pack(
                 ),
             }
         )
-    elif not resolved_ranges:
+    elif not resolved_ranges and retrieval_infrastructure["index_resolved"]:
         caveats.append(
             {
                 "kind": "other",
@@ -579,6 +615,7 @@ def build_ask_context_pack(
         "availability": availability,
         "required_reading": required_reading,
         "retrieval": retrieval,
+        "retrieval_infrastructure": retrieval_infrastructure,
         "retrieval_hits": retrieval_hits,
         "resolved_ranges": resolved_ranges,
         "answer_scaffold": {

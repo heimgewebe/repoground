@@ -36,11 +36,20 @@ The context pack must carry:
 - freshness status and caveats;
 - availability status and caveats;
 - required-reading result;
+- retrieval-infrastructure state;
 - retrieval hits;
 - resolved ranges;
 - answer scaffold;
 - forbidden operations;
 - mandatory non-claims.
+
+`availability` describes the snapshot; `retrieval_infrastructure` describes the
+search backend the pack queried. They are separate because a bundle can be
+perfectly available while carrying no index to search — a pack that reports only
+the former answers every query with zero hits and calls itself available, which
+a caller cannot distinguish from a repository that genuinely holds no match. A
+pack whose `retrieval_infrastructure.index_resolved` is false makes no claim
+about what the repository contains.
 
 ## Read-only boundary
 

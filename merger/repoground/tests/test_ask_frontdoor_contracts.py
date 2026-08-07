@@ -82,6 +82,12 @@ def _context_pack():
             "missing_recommended": ["citation_map_jsonl"],
             "status": "warn",
         },
+        "retrieval_infrastructure": {
+            "status": "available",
+            "index_resolved": True,
+            "error_code": None,
+            "detail": None,
+        },
         "retrieval_hits": [{"artifact_role": "canonical_md", "ref": "hit-1", "score": 1.0, "citation_id": "cit_0000000000000001"}],
         "resolved_ranges": [{"artifact_role": "canonical_md", "status": "resolved", "range_ref": {"file_path": "demo.md"}, "content_sha256": SHA}],
         "answer_scaffold": {
@@ -119,6 +125,19 @@ def test_context_pack_schema_accepts_context_and_scaffold():
 def test_context_pack_requires_resolved_ranges_and_hits():
     pack = _context_pack()
     del pack["resolved_ranges"]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(instance=pack, schema=_schema(CONTEXT_SCHEMA))
+
+
+def test_context_pack_requires_retrieval_infrastructure():
+    """A pack must always state whether its search backend resolved.
+
+    Leaving this optional would let a consumer read a pack with no hits and no
+    infrastructure block as an empty result, which is exactly how a missing
+    `sqlite_index` stayed invisible.
+    """
+    pack = _context_pack()
+    del pack["retrieval_infrastructure"]
     with pytest.raises(jsonschema.ValidationError):
         jsonschema.validate(instance=pack, schema=_schema(CONTEXT_SCHEMA))
 

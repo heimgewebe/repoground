@@ -100,29 +100,32 @@ def test_profile_rules_match_expected_high_signal_requirements():
     assert PROFILE_ARTIFACT_RULES["local-private"]["citation_map_jsonl"] == "optional"
 
 
-def test_fleet_context_preserves_citation_truth_without_heavy_indexes():
+def test_fleet_context_preserves_citation_truth():
     rules = PROFILE_ARTIFACT_RULES["fleet-context"]
 
     assert rules["citation_map_jsonl"] == "required"
     assert rules["chunk_index_jsonl"] == "required"
     assert rules["export_safety_report"] == "required"
     assert rules["retrieval_eval_json"] == "recommended"
-    assert rules["sqlite_index"] == "profile_excluded"
 
 
-def test_fleet_context_keeps_the_call_navigation_indexes():
-    """The daily fleet bundle backs find_symbol/get_callers/get_callees.
+def test_fleet_context_keeps_every_index_an_agent_tool_reads():
+    """The daily fleet bundle is what the agent-facing tools resolve against.
 
-    Excluding these two artifacts silently removed all three tools from the
-    agent-facing surface, so the compact profile must keep carrying them.
+    Each of these artifacts backs a tool rather than merely enriching one, so
+    excluding any of them removes the tool outright: the symbol index and call
+    graph carry find_symbol/find_references/get_callers/get_callees, and
+    `sqlite_index` carries `query`. Both exclusions have happened, and both
+    passed every profile-level test while the tools returned nothing.
     """
     rules = PROFILE_ARTIFACT_RULES["fleet-context"]
 
     assert rules["python_symbol_index_json"] == "recommended"
     assert rules["python_call_graph_json"] == "recommended"
+    assert rules["sqlite_index"] == "recommended"
 
 
-def test_fleet_context_accepts_the_compact_surface_and_rejects_heavy_indexes():
+def test_fleet_context_accepts_the_agent_facing_surface():
     compact_roles = {
         "canonical_md",
         "bundle_manifest",
@@ -139,14 +142,18 @@ def test_fleet_context_accepts_the_compact_surface_and_rejects_heavy_indexes():
         "python_call_graph_json",
     }
 
-    compact = evaluate_profile("fleet-context", compact_roles)
-    assert compact["status"] == "pass"
-    assert compact["missing_required"] == []
-    assert compact["profile_excluded_present"] == []
+    # `sqlite_index` is the backing store for `query`. A fleet publication that
+    # omits it still emits, but it must not evaluate as a clean pass: that is the
+    # signal which was missing while `query` silently answered nothing.
+    without_search = evaluate_profile("fleet-context", compact_roles)
+    assert without_search["status"] == "warn"
+    assert without_search["missing_required"] == []
+    assert "sqlite_index" in without_search["missing_recommended"]
 
-    invalid = evaluate_profile("fleet-context", compact_roles | {"sqlite_index"})
-    assert invalid["status"] == "fail"
-    assert invalid["profile_excluded_present"] == ["sqlite_index"]
+    with_search = evaluate_profile("fleet-context", compact_roles | {"sqlite_index"})
+    assert with_search["status"] == "pass"
+    assert with_search["missing_required"] == []
+    assert with_search["profile_excluded_present"] == []
 
 
 def test_profile_output_mode_plan_is_machine_readable():
@@ -169,8 +176,8 @@ def test_profile_output_mode_plan_is_machine_readable():
     assert fleet_default["selected_output_mode"] == "dual"
     assert fleet_default["defaulted"] is True
     assert fleet_default["conflicts"] == []
-    assert fleet_default["excluded_roles"] == ["sqlite_index"]
-    assert fleet_default["post_emit_dropped_roles"] == ["sqlite_index"]
+    assert fleet_default["excluded_roles"] == []
+    assert fleet_default["post_emit_dropped_roles"] == []
 
     fleet_archive = profile_output_mode_plan("fleet-context", "archive")
     assert fleet_archive["selected_output_mode"] == "archive"
