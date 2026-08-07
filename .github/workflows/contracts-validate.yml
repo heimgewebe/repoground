@@ -52,7 +52,7 @@ jobs:
       - name: Verify 'uses:' pins for heimgewebe/contracts-mirror
         env:
           REQUIRED_REPO: "heimgewebe/contracts-mirror/.github/workflows/contracts-ajv-reusable.yml"
-          REQUIRED_REF: "968518ebbef3b36c008320d701c87473aa012a88"
+          REQUIRED_REF: "2fd956e75c6b5f4427f7ecfd05017ba2de33831a"
         run: |
           set -euo pipefail
           shopt -s extglob
@@ -290,4 +290,4 @@ jobs:
     secrets: inherit
     with:
       fixtures_glob: ${{ vars.FIXTURES_GLOB || 'merger/repoground/contracts/examples/**/*.json merger/repoground/contracts/examples/**/*.jsonl' }}
-      contracts_ref: 968518ebbef3b36c008320d701c87473aa012a88
+      contracts_ref: 2fd956e75c6b5f4427f7ecfd05017ba2de33831a
