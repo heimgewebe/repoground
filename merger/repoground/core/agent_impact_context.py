@@ -13,6 +13,9 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from merger.repoground.architecture.path_classification import is_test_path as _is_test_path
+from merger.repoground.core.call_graph_confidence import (
+    call_graph_coverage_confidence as _shared_call_graph_coverage,
+)
 
 KIND = "repobrief.agent_impact_context"
 VERSION = "1.0"
@@ -1859,6 +1862,9 @@ def build_agent_impact_context(
     unresolved_risks: list[dict[str, Any]] = []
     call_graph_coverage_gaps: list[dict[str, Any]] = []
     edit_selection: dict[str, Any] = {}
+    call_graph_coverage = (
+        _shared_call_graph_coverage(call_graph) if call_graph else {}
+    )
     # Impact consumers need trusted call relations as evidence, but edit-only
     # selection, unresolved-risk projection and coverage-gap semantics stay
     # confined to edit mode. Missing optional call graphs therefore do not
@@ -1878,6 +1884,24 @@ def build_agent_impact_context(
             expected_run_id=run_id,
             expected_digest=digest,
         )
+        if request.mode == "edit":
+            assessment = _mapping(
+                _mapping(call_graph_coverage.get("task_profile_confidence")).get(
+                    "change_impact"
+                )
+            )
+            if (
+                assessment.get("status") != "sufficient"
+                and call_graph_coverage.get("skipped_files_count") == 0
+            ):
+                call_graph_coverage_gaps.append(
+                    {
+                        "kind": "call_graph_confidence_gap",
+                        "task_profile": "change_impact",
+                        "assessment": dict(assessment),
+                        "coverage_reason": "call_graph_below_task_profile_boundary",
+                    }
+                )
 
     if request.mode == "impact":
         impact_call_relations = direct_callers + direct_callees
@@ -1958,6 +1982,7 @@ def build_agent_impact_context(
                 "changed_test_paths_establish_coverage": False,
                 "current_read_evidence_from_graph_or_symbols_only": True,
                 "query_context_used": bool(_query_items(query_context)),
+                "call_graph_coverage": call_graph_coverage if call_graph else None,
             },
         }
     )
@@ -1982,6 +2007,7 @@ def build_agent_impact_context(
             ),
             "selection": edit_selection,
             "nonverdicts": list(_EDIT_CONTEXT_NONVERDICTS),
+            "call_graph_coverage": call_graph_coverage,
             "call_graph_coverage_gaps": call_graph_coverage_gaps,
             "relation_count": len(relations),
             "direct_caller_count": len(direct_callers),
