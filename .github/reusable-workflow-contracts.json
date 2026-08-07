@@ -5,8 +5,8 @@
     {
       "caller_path": ".github/workflows/pr-heimgewebe-commands.yml",
       "job": "dispatch",
-      "uses": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@75ab0d5a5a90b79f2cd527d1b9a263d0f1a24043",
-      "source_content_sha256": "7914e34042f0cc55308f03dc43ad9ae1f2c5d7c083778f646ee1e12e5d4cd5f0",
+      "uses": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@1e1dc53db419b3223d46ec279d389962bbcdc592",
+      "source_content_sha256": "d4659017fda70503ce09246807d069cbdd8c247c996fccd8e37ccac446b4e9bd",
       "required_permissions": {
         "contents": "read",
         "issues": "write",

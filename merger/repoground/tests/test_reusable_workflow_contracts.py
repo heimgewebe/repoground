@@ -44,7 +44,7 @@ def test_contract_rejects_lower_permission_and_secret_fanout(tmp_path: Path) -> 
     _write_fixture(tmp_path)
     caller = tmp_path / ".github/workflows/pr-heimgewebe-commands.yml"
     caller.write_text(
-        """\npermissions:\n  contents: read\njobs:\n  dispatch:\n    if: github.event.issue.pull_request != null\n    uses: heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@75ab0d5a5a90b79f2cd527d1b9a263d0f1a24043\n    secrets:\n      inherit: true\n""",
+        """\npermissions:\n  contents: read\njobs:\n  dispatch:\n    if: github.event.issue.pull_request != null\n    uses: heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@1e1dc53db419b3223d46ec279d389962bbcdc592\n    secrets:\n      inherit: true\n""",
         encoding="utf-8",
     )
     codes = {finding.code for finding in scan(tmp_path)}
