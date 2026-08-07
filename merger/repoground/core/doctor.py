@@ -444,126 +444,138 @@ def _default_bundle_root(repo_root: Path) -> Path | None:
     return None
 
 
-def _bundle_checks(
+def _catalog_check_from_selection(
+    root: Path,
+    repo_identity: str | None,
+    selection: dict[str, Any],
+) -> tuple[dict[str, Any], str | None]:
+    evidence = {
+        "bundle_root": str(root),
+        "repo_identity": repo_identity,
+        "selection_status": selection.get("status"),
+        "selection_reason": selection.get("reason"),
+    }
+    selected = selection.get("selected")
+    selected_manifest = (
+        selected.get("manifest_path") if isinstance(selected, dict) else None
+    )
+    status = selection.get("status")
+    if status == "available" and isinstance(selected_manifest, str):
+        evidence.update(
+            {
+                "manifest_path": selected_manifest,
+                "manifest_sha256": selected.get("manifest_sha256"),
+            }
+        )
+        return (
+            _check(
+                "bundle_catalog",
+                "available",
+                cause="unique_healthy_bundle_selected",
+                impact="A unique healthy existing RepoGround bundle is selected for this repository identity.",
+                next_action="No action required.",
+                evidence=evidence,
+            ),
+            selected_manifest,
+        )
+    if status == "ambiguous":
+        return (
+            _check(
+                "bundle_catalog",
+                "blocked",
+                cause=str(selection.get("reason") or "bundle_selection_ambiguous"),
+                impact="Doctor cannot choose one evidence generation without guessing.",
+                next_action="Bind an exact --manifest or a qualified repository identity through the existing publication setup.",
+                evidence=evidence,
+            ),
+            None,
+        )
+    if status == "blocked":
+        failure_evidence = {
+            **evidence,
+            **{key: value for key, value in selection.items() if key.startswith("error")},
+        }
+        return (
+            _check(
+                "bundle_catalog",
+                "blocked",
+                cause=str(selection.get("reason") or "bundle_catalog_probe_failed"),
+                impact="Existing publication discovery could not be evaluated safely.",
+                next_action="Inspect the catalog error; doctor will not repair or refresh publications.",
+                evidence=failure_evidence,
+            ),
+            None,
+        )
+    return (
+        _check(
+            "bundle_catalog",
+            "degraded",
+            cause=str(selection.get("reason") or "no_matching_healthy_bundle"),
+            impact="No unique healthy existing bundle is available for manifest/freshness checks.",
+            next_action="Create or select a healthy bundle explicitly outside doctor.",
+            evidence=evidence,
+        ),
+        None,
+    )
+
+
+def _select_bundle_for_doctor(
     repo_root: Path,
     *,
     bundle_root: str | Path | None,
     manifest: str | Path | None,
-) -> list[dict[str, Any]]:
-    selected_manifest: str | None = None
-    selection_evidence: dict[str, Any] = {}
+) -> tuple[dict[str, Any], str | None]:
     if manifest is not None:
         selected_manifest = str(Path(manifest).expanduser().resolve())
-        catalog_check = _check(
-            "bundle_catalog",
-            "available",
-            cause="exact_manifest_selected",
-            impact="Doctor will validate the explicitly selected existing manifest without catalog discovery.",
-            next_action="No action required.",
-            evidence={"manifest_path": selected_manifest, "selection_mode": "exact_manifest"},
+        return (
+            _check(
+                "bundle_catalog",
+                "available",
+                cause="exact_manifest_selected",
+                impact="Doctor will validate the explicitly selected existing manifest without catalog discovery.",
+                next_action="No action required.",
+                evidence={
+                    "manifest_path": selected_manifest,
+                    "selection_mode": "exact_manifest",
+                },
+            ),
+            selected_manifest,
         )
-    else:
-        root = (
-            Path(bundle_root).expanduser().resolve()
-            if bundle_root is not None
-            else _default_bundle_root(repo_root)
-        )
-        if root is None:
-            catalog_check = _check(
+    root = (
+        Path(bundle_root).expanduser().resolve()
+        if bundle_root is not None
+        else _default_bundle_root(repo_root)
+    )
+    if root is None:
+        return (
+            _check(
                 "bundle_catalog",
                 "degraded",
                 cause="bundle_root_not_configured_or_discovered",
                 impact="No existing publication can be selected for integrity or freshness checks.",
                 next_action="Pass --bundle-root/--manifest or create a bundle explicitly outside doctor.",
-            )
-        else:
-            try:
-                repo_identity = checkout_repo_identity(repo_root)
-                selection = select_bundle_manifest(
-                    root,
-                    repo=repo_identity,
-                    require_healthy=True,
-                )
-            except (BundleCatalogError, OSError, RuntimeError, ValueError) as exc:
-                selection = {
-                    "status": "blocked",
-                    "reason": "bundle_catalog_probe_failed",
-                    "error_type": type(exc).__name__,
-                    "error": str(exc)[:240],
-                }
-                repo_identity = None
-            selection_evidence = {
-                "bundle_root": str(root),
-                "repo_identity": repo_identity,
-                "selection_status": selection.get("status"),
-                "selection_reason": selection.get("reason"),
-            }
-            selected = selection.get("selected")
-            selected_manifest = (
-                selected.get("manifest_path") if isinstance(selected, dict) else None
-            )
-            if selection.get("status") == "available" and isinstance(
-                selected_manifest, str
-            ):
-                selection_evidence.update(
-                    {
-                        "manifest_path": selected_manifest,
-                        "manifest_sha256": selected.get("manifest_sha256"),
-                    }
-                )
-                catalog_check = _check(
-                    "bundle_catalog",
-                    "available",
-                    cause="unique_healthy_bundle_selected",
-                    impact="A unique healthy existing RepoGround bundle is selected for this repository identity.",
-                    next_action="No action required.",
-                    evidence=selection_evidence,
-                )
-            elif selection.get("status") == "ambiguous":
-                catalog_check = _check(
-                    "bundle_catalog",
-                    "blocked",
-                    cause=str(selection.get("reason") or "bundle_selection_ambiguous"),
-                    impact="Doctor cannot choose one evidence generation without guessing.",
-                    next_action="Bind an exact --manifest or a qualified repository identity through the existing publication setup.",
-                    evidence=selection_evidence,
-                )
-            elif selection.get("status") == "blocked":
-                catalog_check = _check(
-                    "bundle_catalog",
-                    "blocked",
-                    cause=str(selection.get("reason") or "bundle_catalog_probe_failed"),
-                    impact="Existing publication discovery could not be evaluated safely.",
-                    next_action="Inspect the catalog error; doctor will not repair or refresh publications.",
-                    evidence={**selection_evidence, **{k: v for k, v in selection.items() if k.startswith("error")}},
-                )
-            else:
-                catalog_check = _check(
-                    "bundle_catalog",
-                    "degraded",
-                    cause=str(selection.get("reason") or "no_matching_healthy_bundle"),
-                    impact="No unique healthy existing bundle is available for manifest/freshness checks.",
-                    next_action="Create or select a healthy bundle explicitly outside doctor.",
-                    evidence=selection_evidence,
-                )
-
-    if not selected_manifest:
-        manifest_check = _check(
-            "manifest_integrity",
-            "degraded",
-            cause="manifest_not_selected",
-            impact="Manifest-bound artifact integrity was not checked because no bundle was selected.",
-            next_action="Provide a unique healthy bundle or an exact --manifest.",
+            ),
+            None,
         )
-        freshness_check = _check(
-            "freshness",
-            "degraded",
-            cause="manifest_not_selected",
-            impact="Snapshot-vs-checkout freshness is unknown.",
-            next_action="Provide a selected manifest and local repository root; doctor will not refresh it.",
+    try:
+        repo_identity = checkout_repo_identity(repo_root)
+        selection = select_bundle_manifest(
+            root,
+            repo=repo_identity,
+            require_healthy=True,
         )
-        return [catalog_check, manifest_check, freshness_check]
+    except (BundleCatalogError, OSError, RuntimeError, ValueError) as exc:
+        repo_identity = None
+        selection = {
+            "status": "blocked",
+            "reason": "bundle_catalog_probe_failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:240],
+        }
+    return _catalog_check_from_selection(root, repo_identity, selection)
 
+
+def _manifest_integrity_check(selected_manifest: str) -> dict[str, Any]:
     try:
         health = inspect_bundle_health(selected_manifest)
     except (OSError, RuntimeError, ValueError) as exc:
@@ -574,7 +586,7 @@ def _bundle_checks(
             "manifest_sha256": None,
         }
     if health.get("health_status") == "pass":
-        manifest_check = _check(
+        return _check(
             "manifest_integrity",
             "available",
             cause="manifest_bound_health_passed",
@@ -587,21 +599,22 @@ def _bundle_checks(
             },
             does_not_establish=["content_truth", "runtime_correctness"],
         )
-    else:
-        manifest_check = _check(
-            "manifest_integrity",
-            "blocked",
-            cause="manifest_health_not_pass",
-            impact="The selected bundle cannot be treated as a healthy evidence generation.",
-            next_action="Inspect or regenerate the bundle explicitly; doctor will not mutate it.",
-            evidence={
-                "manifest_path": selected_manifest,
-                "manifest_sha256": health.get("manifest_sha256"),
-                "health_status": health.get("health_status"),
-                "reasons": health.get("reasons", []),
-            },
-        )
+    return _check(
+        "manifest_integrity",
+        "blocked",
+        cause="manifest_health_not_pass",
+        impact="The selected bundle cannot be treated as a healthy evidence generation.",
+        next_action="Inspect or regenerate the bundle explicitly; doctor will not mutate it.",
+        evidence={
+            "manifest_path": selected_manifest,
+            "manifest_sha256": health.get("manifest_sha256"),
+            "health_status": health.get("health_status"),
+            "reasons": health.get("reasons", []),
+        },
+    )
 
+
+def _freshness_check(repo_root: Path, selected_manifest: str) -> dict[str, Any]:
     try:
         freshness = evaluate_live_freshness(selected_manifest, repo_root=repo_root)
     except (OSError, RuntimeError, ValueError) as exc:
@@ -612,40 +625,69 @@ def _bundle_checks(
             "error": str(exc)[:240],
         }
     status = freshness.get("status")
+    evidence = {
+        "status": status,
+        "reason": freshness.get("reason"),
+        "bundle_manifest": selected_manifest,
+        "snapshot_provenance": freshness.get("snapshot_provenance"),
+        "current_provenance": freshness.get("current_provenance"),
+        "error_type": freshness.get("error_type"),
+    }
     if status == "fresh":
-        freshness_check = _check(
+        return _check(
             "freshness",
             "available",
             cause=str(freshness.get("reason") or "snapshot_matches_local_checkout"),
             impact="The selected snapshot commit matches the clean explicitly selected local checkout.",
             next_action="No action required.",
-            evidence={
-                "status": status,
-                "reason": freshness.get("reason"),
-                "bundle_manifest": selected_manifest,
-                "snapshot_provenance": freshness.get("snapshot_provenance"),
-                "current_provenance": freshness.get("current_provenance"),
-            },
+            evidence=evidence,
             does_not_establish=["freshness_against_remote"],
         )
-    else:
-        freshness_check = _check(
-            "freshness",
-            "degraded",
-            cause=str(freshness.get("reason") or "freshness_not_established"),
-            impact="The existing snapshot is stale or cannot be proven comparable to the local checkout.",
-            next_action="Treat evidence as stale/uncertain or create a new snapshot explicitly outside doctor.",
-            evidence={
-                "status": status,
-                "reason": freshness.get("reason"),
-                "bundle_manifest": selected_manifest,
-                "snapshot_provenance": freshness.get("snapshot_provenance"),
-                "current_provenance": freshness.get("current_provenance"),
-                "error_type": freshness.get("error_type"),
-            },
-            does_not_establish=["freshness_against_remote"],
-        )
-    return [catalog_check, manifest_check, freshness_check]
+    return _check(
+        "freshness",
+        "degraded",
+        cause=str(freshness.get("reason") or "freshness_not_established"),
+        impact="The existing snapshot is stale or cannot be proven comparable to the local checkout.",
+        next_action="Treat evidence as stale/uncertain or create a new snapshot explicitly outside doctor.",
+        evidence=evidence,
+        does_not_establish=["freshness_against_remote"],
+    )
+
+
+def _bundle_checks(
+    repo_root: Path,
+    *,
+    bundle_root: str | Path | None,
+    manifest: str | Path | None,
+) -> list[dict[str, Any]]:
+    catalog_check, selected_manifest = _select_bundle_for_doctor(
+        repo_root,
+        bundle_root=bundle_root,
+        manifest=manifest,
+    )
+    if selected_manifest is None:
+        return [
+            catalog_check,
+            _check(
+                "manifest_integrity",
+                "degraded",
+                cause="manifest_not_selected",
+                impact="Manifest-bound artifact integrity was not checked because no bundle was selected.",
+                next_action="Provide a unique healthy bundle or an exact --manifest.",
+            ),
+            _check(
+                "freshness",
+                "degraded",
+                cause="manifest_not_selected",
+                impact="Snapshot-vs-checkout freshness is unknown.",
+                next_action="Provide a selected manifest and local repository root; doctor will not refresh it.",
+            ),
+        ]
+    return [
+        catalog_check,
+        _manifest_integrity_check(selected_manifest),
+        _freshness_check(repo_root, selected_manifest),
+    ]
 
 
 def _overall_status(checks: list[dict[str, Any]]) -> str:

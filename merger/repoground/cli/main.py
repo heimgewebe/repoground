@@ -307,17 +307,16 @@ def main(args: Optional[List[str]] = None) -> int:
     elif parsed_args.command == "agent-consumption":
         from .cmd_agent_consumption import run_agent_consumption
         return run_agent_consumption(parsed_args)
-    elif parsed_args.command == "doctor":
-        from .cmd_doctor import run_doctor
-        return run_doctor(parsed_args)
-    elif parsed_args.command in {"token-budget", "evidence-query", "retrieval-snapshot", "diagnostics", "observed-calls"}:
+    elif parsed_args.command in {"doctor", "token-budget", "evidence-query", "retrieval-snapshot", "diagnostics", "observed-calls"}:
         from .cmd_diagnostics import run_diagnostics
+        from .cmd_doctor import run_doctor
         from .cmd_evidence_query import run_evidence_query
         from .cmd_incremental_snapshot import run_incremental_snapshot
         from .cmd_observed_calls import run_observed_calls
         from .cmd_token_budget import run_token_budget
 
         handlers = {
+            "doctor": run_doctor,
             "token-budget": run_token_budget,
             "evidence-query": run_evidence_query,
             "retrieval-snapshot": run_incremental_snapshot,

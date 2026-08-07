@@ -93,7 +93,7 @@ merger/repoground/tests/test_live_freshness.py
 
 Result: **46 passed**.
 
-Targeted Ruff on the changed Python surface: **pass**.
+Targeted Ruff on the changed Python surface: **pass**. A later PR-wide Ruff job also passed `ruff check --config ruff-ci.toml .`, but its maintainability ratchet correctly rejected the first PR head because adding a separate `doctor` dispatch branch raised `cli.main::main` from complexity 42 to 43 and `_bundle_checks` introduced complexity 12. The remediation did not raise any ceiling: doctor joined the existing auxiliary handler table and bundle selection/health/freshness were split into bounded helpers. The exact local CI ratchet then reported `status=pass`, `new_count=0`, `finding_count=189`, `excess_total=2314` and `max_complexity=138`; full-scope Ruff remained pass and the 46 focused regressions remained pass.
 
 ## Real Heim-PC readback
 
