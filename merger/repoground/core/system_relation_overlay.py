@@ -35,6 +35,7 @@ ENDPOINT_KINDS = frozenset(
         "artifact_consumer",
         "artifact_contract",
         "workflow",
+        "config_contract",
     }
 )
 
@@ -46,6 +47,8 @@ EVIDENCE_PROFILES = {
     "test_naming_heuristic": ("S0", "heuristic"),
     "schema_validation_call": ("S1", "declared"),
     "artifact_declaration": ("S1", "declared"),
+    "config_declaration": ("S1", "declared"),
+    "workflow_config_reference": ("S1", "declared"),
 }
 
 SOURCE_KINDS_BY_EVIDENCE = {
@@ -60,6 +63,8 @@ SOURCE_KINDS_BY_EVIDENCE = {
     "artifact_declaration": frozenset(
         {"manifest", "workflow", "source_file", "artifact_contract"}
     ),
+    "config_declaration": frozenset({"manifest", "config_file"}),
+    "workflow_config_reference": frozenset({"workflow"}),
 }
 
 RELATION_RULES = {
@@ -84,6 +89,7 @@ RELATION_RULES = {
     "validates_schema": {
         "evidence": frozenset({"schema_validation_call"}),
         "contract_kind": "schema",
+        "target_kind": "schema_contract",
     },
     "produces_artifact": {
         "evidence": frozenset({"artifact_declaration"}),
@@ -92,6 +98,16 @@ RELATION_RULES = {
     "consumes_artifact": {
         "evidence": frozenset({"artifact_declaration"}),
         "contract_kind": "artifact",
+    },
+    "declares_config": {
+        "evidence": frozenset({"config_declaration"}),
+        "contract_kind": "config",
+        "target_kind": "config_contract",
+    },
+    "references_config": {
+        "evidence": frozenset({"workflow_config_reference"}),
+        "contract_kind": "config",
+        "target_kind": "config_contract",
     },
 }
 
@@ -109,6 +125,7 @@ DOES_NOT_ESTABLISH = (
     "artifact_freshness",
     "runtime_behavior",
     "runtime_correctness",
+    "config_runtime_effect",
     "relation_completeness",
     "default_promotion",
 )
@@ -294,10 +311,17 @@ def _normalize_record(value: Any, *, index: int) -> dict[str, Any]:
             f"evidence_class {evidence_class!r} is incompatible with relation {relation!r}"
         )
     evidence_level, evidence_strength = EVIDENCE_PROFILES[evidence_class]
+    subject = _endpoint(mapping["subject"], label="subject")
+    target = _endpoint(mapping["target"], label="target")
+    expected_target_kind = rule.get("target_kind")
+    if expected_target_kind is not None and target["kind"] != expected_target_kind:
+        raise SystemRelationOverlayError(
+            f"target.kind must be {expected_target_kind!r} for relation {relation!r}"
+        )
     record = {
         "relation": relation,
-        "subject": _endpoint(mapping["subject"], label="subject"),
-        "target": _endpoint(mapping["target"], label="target"),
+        "subject": subject,
+        "target": target,
         "source": _source(mapping["source"], evidence_class=evidence_class),
         "evidence": {
             "class": evidence_class,

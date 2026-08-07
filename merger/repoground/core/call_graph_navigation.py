@@ -24,6 +24,9 @@ from merger.repoground.architecture.call_graph_contract import (
     REQUIRED_NONCLAIMS as CALL_GRAPH_REQUIRED_NONCLAIMS,
 )
 from merger.repoground.core import call_graph_validation as _call_graph_validation
+from merger.repoground.core.call_graph_confidence import (
+    call_graph_coverage_confidence as _shared_call_graph_coverage,
+)
 from merger.repoground.core.call_navigation_index import (
     CallNavigationIndex,
     SymbolNavigationIndex,
@@ -110,15 +113,6 @@ _CALL_GRAPH_DOES_NOT_ESTABLISH = CALL_GRAPH_PRODUCER_NONCLAIMS
 
 _CALL_NAV_DOES_NOT_ESTABLISH = tuple(
     dict.fromkeys([*_DOES_NOT_ESTABLISH, *_CALL_GRAPH_DOES_NOT_ESTABLISH])
-)
-# A caller or callee list is bounded by the resolved share of the call graph.
-# These are the claims a partial graph cannot support even when the returned
-# rows themselves are correct.
-_CALL_GRAPH_COVERAGE_DOES_NOT_ESTABLISH = (
-    "complete_call_graph",
-    "caller_completeness",
-    "callee_completeness",
-    "unresolved_edges_are_irrelevant",
 )
 _CALL_NAVIGATION_CACHE_MAX_ENTRIES = 2
 
@@ -534,55 +528,7 @@ def _detached_record(value: Any) -> dict[str, Any] | None:
 
 
 def _call_graph_coverage(data: dict[str, Any]) -> dict[str, Any]:
-    """State how much of the call graph actually resolved.
-
-    Only `resolved` edges can produce callers or callees. Every other status is
-    an edge the resolver saw but could not bind, so a caller or callee list is
-    complete only relative to the resolved share. Reporting that share beside
-    the results keeps a partial answer from reading as an exhaustive one.
-    """
-    raw = data.get("resolution_counts")
-    if not isinstance(raw, Mapping):
-        return {
-            "scope": "observed_call_edges",
-            "completeness": "unknown",
-            "reason": "call_graph_resolution_counts_unavailable",
-            "resolved_call_edges": None,
-            "total_call_edges": None,
-            "resolved_ratio": None,
-            "unresolved_by_status": {},
-            "does_not_establish": list(_CALL_GRAPH_COVERAGE_DOES_NOT_ESTABLISH),
-        }
-
-    counts = {
-        status: int(raw.get(status) or 0) for status in CALL_RESOLUTION_STATUSES
-    }
-    resolved = counts.get("resolved", 0)
-    total = sum(counts.values())
-    unresolved_by_status = {
-        status: value
-        for status, value in counts.items()
-        if status != "resolved" and value
-    }
-    if total <= 0:
-        completeness = "unknown"
-        ratio = None
-    elif not unresolved_by_status:
-        completeness = "complete"
-        ratio = 1.0
-    else:
-        completeness = "partial"
-        ratio = round(resolved / total, 6)
-    return {
-        "scope": "observed_call_edges",
-        "completeness": completeness,
-        "reason": None,
-        "resolved_call_edges": resolved,
-        "total_call_edges": total,
-        "resolved_ratio": ratio,
-        "unresolved_by_status": unresolved_by_status,
-        "does_not_establish": list(_CALL_GRAPH_COVERAGE_DOES_NOT_ESTABLISH),
-    }
+    return _shared_call_graph_coverage(data)
 
 
 def _call_graph_metadata(data: dict[str, Any]) -> dict[str, Any]:

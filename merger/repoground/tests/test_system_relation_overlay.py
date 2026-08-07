@@ -159,6 +159,38 @@ def _evidence() -> dict:
                     "version": "1.0",
                 },
             ),
+            _record(
+                "declares_config",
+                "repository",
+                "heimgewebe/repoground",
+                "config_contract",
+                "repoground.runtime",
+                "pyproject.toml",
+                "manifest",
+                18,
+                "config_declaration",
+                {
+                    "kind": "config",
+                    "id": "repoground.runtime",
+                    "version": "1.0",
+                },
+            ),
+            _record(
+                "references_config",
+                "workflow",
+                ".github/workflows/release.yml",
+                "config_contract",
+                "repoground.runtime",
+                ".github/workflows/release.yml",
+                "workflow",
+                31,
+                "workflow_config_reference",
+                {
+                    "kind": "config",
+                    "id": "repoground.runtime",
+                    "version": "1.0",
+                },
+            ),
         ],
     }
 
@@ -187,12 +219,14 @@ def test_projects_all_relation_families_with_fixed_navigation_boundary():
     assert artifact["authority"] == "navigation_index"
     assert artifact["canonicality"] == "derived"
     assert artifact["risk_class"] == "navigation"
-    assert artifact["record_count"] == 8
+    assert artifact["record_count"] == 10
     assert artifact["relation_kinds"] == [
         "build_target",
         "consumes_artifact",
+        "declares_config",
         "package_target",
         "produces_artifact",
+        "references_config",
         "test_registration",
         "validates_schema",
     ]
@@ -211,6 +245,7 @@ def test_projects_all_relation_families_with_fixed_navigation_boundary():
     assert "test_sufficiency" in artifact["does_not_establish"]
     assert "schema_conformance" in artifact["does_not_establish"]
     assert "artifact_materialization" in artifact["does_not_establish"]
+    assert "config_runtime_effect" in artifact["does_not_establish"]
     assert "not evidence that the relation is absent" in artifact["absence_semantics"]
 
 
@@ -273,6 +308,45 @@ def test_schema_and_artifact_relations_preserve_contract_identity():
     )
 
 
+def test_config_relations_are_typed_separately_from_python_calls():
+    records = [
+        record
+        for record in _artifact()["records"]
+        if record["relation"] in {"declares_config", "references_config"}
+    ]
+
+    assert [record["relation"] for record in records] == [
+        "declares_config",
+        "references_config",
+    ]
+    assert all(record["contract_identity"]["kind"] == "config" for record in records)
+    assert all(record["target"]["kind"] == "config_contract" for record in records)
+    assert all(record["relation"] not in {"calls", "constructs"} for record in records)
+    assert records[0]["source"]["path"] == "pyproject.toml"
+    assert records[1]["source"]["path"] == ".github/workflows/release.yml"
+
+
+@pytest.mark.parametrize(
+    ("relation", "expected_target_kind"),
+    [
+        ("validates_schema", "schema_contract"),
+        ("declares_config", "config_contract"),
+        ("references_config", "config_contract"),
+    ],
+)
+def test_contract_relations_reject_wrong_target_kind(relation, expected_target_kind):
+    evidence = _evidence()
+    record = next(item for item in evidence["records"] if item["relation"] == relation)
+    record["target"]["kind"] = "repository"
+
+    with pytest.raises(SystemRelationOverlayError, match=f"target.kind must be '{expected_target_kind}'"):
+        normalize_system_relation_evidence(
+            evidence,
+            evidence_sha256=EVIDENCE_SHA,
+            repository_commit=REPOSITORY_COMMIT,
+        )
+
+
 def test_output_and_record_ids_are_deterministic_under_input_reordering():
     first = _evidence()
     second = copy.deepcopy(first)
@@ -292,7 +366,7 @@ def test_exact_duplicates_are_deduplicated_and_reported():
     artifact = _artifact(evidence)
 
     assert artifact["status"] == "degraded"
-    assert artifact["record_count"] == 8
+    assert artifact["record_count"] == 10
     assert artifact["degradations"] == [
         {
             "code": "duplicate_records_deduplicated",

@@ -76,6 +76,7 @@
         "artifact_freshness",
         "runtime_behavior",
         "runtime_correctness",
+        "config_runtime_effect",
         "relation_completeness",
         "default_promotion"
       ]
@@ -102,7 +103,9 @@
         "test_registration",
         "validates_schema",
         "produces_artifact",
-        "consumes_artifact"
+        "consumes_artifact",
+        "declares_config",
+        "references_config"
       ]
     },
     "evidence_class": {
@@ -113,7 +116,9 @@
         "test_import_or_reference",
         "test_naming_heuristic",
         "schema_validation_call",
-        "artifact_declaration"
+        "artifact_declaration",
+        "config_declaration",
+        "workflow_config_reference"
       ]
     },
     "endpoint_kind": {
@@ -129,7 +134,8 @@
         "artifact_producer",
         "artifact_consumer",
         "artifact_contract",
-        "workflow"
+        "workflow",
+        "config_contract"
       ]
     },
     "endpoint": {
@@ -164,7 +170,8 @@
             "workflow",
             "test_registry",
             "source_file",
-            "artifact_contract"
+            "artifact_contract",
+            "config_file"
           ]
         },
         "range": {"$ref": "#/definitions/range"}
@@ -228,6 +235,20 @@
             "level": {"const": "S1"},
             "strength": {"const": "declared"}
           }
+        },
+        {
+          "properties": {
+            "class": {"const": "config_declaration"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "workflow_config_reference"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
         }
       ]
     },
@@ -236,7 +257,7 @@
       "additionalProperties": false,
       "required": ["kind", "id", "version"],
       "properties": {
-        "kind": {"enum": ["schema", "artifact"]},
+        "kind": {"enum": ["schema", "artifact", "config"]},
         "id": {"type": "string", "minLength": 1, "maxLength": 4096},
         "version": {"type": "string", "minLength": 1, "maxLength": 128}
       }
@@ -323,6 +344,9 @@
               "source": {
                 "properties": {"kind": {"const": "source_file"}}
               },
+              "target": {
+                "properties": {"kind": {"const": "schema_contract"}}
+              },
               "contract_identity": {
                 "type": "object",
                 "properties": {"kind": {"const": "schema"}}
@@ -356,6 +380,50 @@
               "contract_identity": {
                 "type": "object",
                 "properties": {"kind": {"const": "artifact"}}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"relation": {"const": "declares_config"}}
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {"class": {"const": "config_declaration"}}
+              },
+              "source": {
+                "properties": {"kind": {"enum": ["manifest", "config_file"]}}
+              },
+              "target": {
+                "properties": {"kind": {"const": "config_contract"}}
+              },
+              "contract_identity": {
+                "type": "object",
+                "properties": {"kind": {"const": "config"}}
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"relation": {"const": "references_config"}}
+          },
+          "then": {
+            "properties": {
+              "evidence": {
+                "properties": {"class": {"const": "workflow_config_reference"}}
+              },
+              "source": {
+                "properties": {"kind": {"const": "workflow"}}
+              },
+              "target": {
+                "properties": {"kind": {"const": "config_contract"}}
+              },
+              "contract_identity": {
+                "type": "object",
+                "properties": {"kind": {"const": "config"}}
               }
             }
           }

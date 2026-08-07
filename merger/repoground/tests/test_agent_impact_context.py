@@ -428,6 +428,29 @@ def test_agent_impact_context_is_schema_valid_and_deterministic() -> None:
     assert set(DOES_NOT_ESTABLISH) <= set(first["does_not_establish"])
 
 
+def test_edit_context_exposes_task_profile_call_graph_confidence() -> None:
+    result = _context()
+
+    coverage = result["edit_context"]["call_graph_coverage"]
+    assert coverage["resolved_ratio"] == 0.75
+    assert coverage["status_ratios"] == {
+        "resolved": 0.75,
+        "candidate": 0.25,
+        "ambiguous": 0.0,
+        "unresolved": 0.0,
+    }
+    assert coverage["unresolved_by_reason"] == {
+        "candidate": {"name_match_not_unique": 1}
+    }
+    assert coverage["task_profile_confidence"]["change_impact"] == {
+        "status": "sufficient",
+        "minimum_resolved_ratio": 0.75,
+        "observed_resolved_ratio": 0.75,
+        "completeness_caveat": None,
+    }
+    assert result["composition"]["call_graph_coverage"] == coverage
+
+
 def test_target_symbols_preserve_requested_path_diversity_before_filling() -> None:
     test_path = "scripts/ci/tests/test_kubernetes_platform_contract.py"
     source_path = "scripts/platform/kind_reference.py"

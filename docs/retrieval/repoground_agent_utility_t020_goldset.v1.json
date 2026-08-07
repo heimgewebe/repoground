@@ -1,0 +1,128 @@
+{
+  "kind": "repoground.agent_utility_t020_goldset",
+  "version": "1.0",
+  "task_id": "REPOGROUND-AGENT-UTILITY-V1-T020",
+  "python_call_goldset": "docs/retrieval/python_call_graph_goldset.v1.json",
+  "required_python_case_ids": [
+    "direct-local-helper",
+    "imported-normalize-alias",
+    "module-normalize-alias",
+    "dynamic-higher-order-call",
+    "ambiguous-conditional-definition"
+  ],
+  "required_python_metrics": {
+    "minimum_s1_precision": 0.97,
+    "minimum_target_recall": 1.0,
+    "maximum_false_positive_count": 0
+  },
+  "structural_relation_evidence": {
+    "kind": "repoground.system_relation_evidence",
+    "version": "1.0",
+    "producer": {
+      "name": "repoground-agent-utility-t020-goldset",
+      "version": "1.0"
+    },
+    "records": [
+      {
+        "relation": "declares_config",
+        "subject": {
+          "kind": "repository",
+          "identity": "heimgewebe/repoground"
+        },
+        "target": {
+          "kind": "config_contract",
+          "identity": "repoground.runtime"
+        },
+        "source": {
+          "path": "pyproject.toml",
+          "kind": "manifest",
+          "range": {
+            "start_line": 18,
+            "start_character": 0,
+            "end_line": 18,
+            "end_character": 80
+          }
+        },
+        "evidence_class": "config_declaration",
+        "contract_identity": {
+          "kind": "config",
+          "id": "repoground.runtime",
+          "version": "1.0"
+        }
+      },
+      {
+        "relation": "references_config",
+        "subject": {
+          "kind": "workflow",
+          "identity": ".github/workflows/release.yml"
+        },
+        "target": {
+          "kind": "config_contract",
+          "identity": "repoground.runtime"
+        },
+        "source": {
+          "path": ".github/workflows/release.yml",
+          "kind": "workflow",
+          "range": {
+            "start_line": 31,
+            "start_character": 0,
+            "end_line": 31,
+            "end_character": 80
+          }
+        },
+        "evidence_class": "workflow_config_reference",
+        "contract_identity": {
+          "kind": "config",
+          "id": "repoground.runtime",
+          "version": "1.0"
+        }
+      },
+      {
+        "relation": "validates_schema",
+        "subject": {
+          "kind": "validator",
+          "identity": "merger.repoground.core.relation_card_validate.validate_relation_card"
+        },
+        "target": {
+          "kind": "schema_contract",
+          "identity": "relation-card.v1"
+        },
+        "source": {
+          "path": "merger/repoground/core/relation_card_validate.py",
+          "kind": "source_file",
+          "range": {
+            "start_line": 42,
+            "start_character": 0,
+            "end_line": 42,
+            "end_character": 80
+          }
+        },
+        "evidence_class": "schema_validation_call",
+        "contract_identity": {
+          "kind": "schema",
+          "id": "https://repoground.merger/schemas/relation-card.v1.json",
+          "version": "1.0"
+        }
+      }
+    ]
+  },
+  "expected_structural_relations": [
+    "declares_config",
+    "references_config",
+    "validates_schema"
+  ],
+  "expected_structural_nonclaims": [
+    "schema_conformance",
+    "config_runtime_effect",
+    "runtime_behavior",
+    "relation_completeness"
+  ],
+  "scale_gate": {
+    "synthetic_call_count": 50000,
+    "requires_byte_equivalence": true,
+    "does_not_establish": [
+      "performance_on_all_machines",
+      "runtime_call_graph_completeness"
+    ]
+  }
+}
