@@ -59,6 +59,26 @@ def file_sha256(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+def _verify_file_binding(
+    path: str | Path,
+    declared_sha256: str,
+    *,
+    field: str,
+    errors: list[str],
+) -> None:
+    candidate = Path(path)
+    if not candidate.is_file():
+        errors.append(f"{field}_path must reference a readable regular file")
+        return
+    try:
+        observed_sha256 = file_sha256(candidate)
+    except OSError:
+        errors.append(f"{field}_path must reference a readable regular file")
+        return
+    if _is_sha256(declared_sha256) and observed_sha256 != declared_sha256:
+        errors.append(f"{field}_sha256 must match {field}_path contents")
+
+
 def validate_model_binding(
     model_binding: Mapping[str, Any],
     embedding_policy: Mapping[str, Any],
@@ -147,8 +167,26 @@ def build_hybrid_route_binding(
         errors.append("index_sha256 must be a lowercase SHA-256")
     if not _is_sha256(bundle_manifest_sha256):
         errors.append("bundle_manifest_sha256 must be a lowercase SHA-256")
-    if not isinstance(repository_commit, str) or len(repository_commit) != 40:
-        errors.append("repository_commit must be a 40-character commit")
+    _verify_file_binding(
+        index_path,
+        index_sha256,
+        field="index",
+        errors=errors,
+    )
+    _verify_file_binding(
+        bundle_manifest_path,
+        bundle_manifest_sha256,
+        field="bundle_manifest",
+        errors=errors,
+    )
+    if not (
+        isinstance(repository_commit, str)
+        and len(repository_commit) == 40
+        and all(character in "0123456789abcdef" for character in repository_commit)
+    ):
+        errors.append(
+            "repository_commit must be a 40-character lowercase hexadecimal commit"
+        )
     evidence_path = Path(routing_evidence_path).resolve()
     binding = {
         "kind": "repoground.hybrid_retrieval_binding",
