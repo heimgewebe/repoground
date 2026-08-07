@@ -9,6 +9,8 @@ Covers two guarantees added on top of the deterministic FTS retrieval:
   tasks do not have to parse it out of the excerpt text.
 """
 
+import unicodedata
+
 from merger.repoground.core.ask_context import (
     _content_tokens,
     _or_fts_query,
@@ -86,6 +88,15 @@ def test_content_tokens_drop_stopwords_and_dedupe():
 
 def test_content_tokens_preserve_unicode_words_for_or_fallback():
     assert _content_tokens("Wie funktioniert die Übergabe?") == [
+        "funktioniert",
+        "übergabe",
+    ]
+
+
+def test_content_tokens_normalize_decomposed_unicode_for_or_fallback():
+    query = unicodedata.normalize("NFD", "Wie funktioniert die Übergabe?")
+
+    assert _content_tokens(query) == [
         "funktioniert",
         "übergabe",
     ]
