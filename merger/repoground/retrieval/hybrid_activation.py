@@ -30,6 +30,8 @@ DOES_NOT_ESTABLISH = [
     "answer_correctness",
     "test_sufficiency",
     "merge_readiness",
+    "current_repository_git_object_presence",
+    "freshness_against_remote",
 ]
 
 
@@ -37,6 +39,14 @@ def _is_sha256(value: object) -> bool:
     return (
         isinstance(value, str)
         and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _is_git_commit(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
         and all(character in "0123456789abcdef" for character in value)
     )
 
@@ -77,6 +87,81 @@ def _verify_file_binding(
         return
     if _is_sha256(declared_sha256) and observed_sha256 != declared_sha256:
         errors.append(f"{field}_sha256 must match {field}_path contents")
+
+
+def _load_bound_manifest(
+    path: str | Path,
+    declared_sha256: str,
+    *,
+    errors: list[str],
+) -> Mapping[str, Any] | None:
+    candidate = Path(path)
+    if not candidate.is_file():
+        errors.append("bundle_manifest_path must reference a readable regular file")
+        return None
+    try:
+        payload = candidate.read_bytes()
+    except OSError:
+        errors.append("bundle_manifest_path must reference a readable regular file")
+        return None
+    observed_sha256 = hashlib.sha256(payload).hexdigest()
+    if _is_sha256(declared_sha256) and observed_sha256 != declared_sha256:
+        errors.append("bundle_manifest_sha256 must match bundle_manifest_path contents")
+    try:
+        manifest = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        errors.append("bundle_manifest_path must contain valid UTF-8 JSON")
+        return None
+    if not isinstance(manifest, Mapping):
+        errors.append("bundle_manifest_path JSON must be an object")
+        return None
+    return manifest
+
+
+def _bind_repository_commit_to_manifest(
+    manifest: Mapping[str, Any],
+    repository_commit: str,
+    *,
+    errors: list[str],
+) -> dict[str, Any] | None:
+    provenance = manifest.get("snapshot_provenance")
+    repositories = (
+        provenance.get("repositories") if isinstance(provenance, Mapping) else None
+    )
+    if not isinstance(repositories, list):
+        errors.append(
+            "bundle_manifest snapshot_provenance must record repository provenance"
+        )
+        return None
+    present = [
+        item
+        for item in repositories
+        if isinstance(item, Mapping) and item.get("provenance_status") == "present"
+    ]
+    if len(present) != 1:
+        errors.append(
+            "repository_commit binding requires exactly one present repository in "
+            "bundle_manifest snapshot_provenance"
+        )
+        return None
+    repository = present[0]
+    manifest_commit = repository.get("git_commit")
+    if not _is_git_commit(manifest_commit):
+        errors.append(
+            "bundle_manifest snapshot provenance git_commit must be a 40-character "
+            "lowercase hexadecimal commit"
+        )
+        return None
+    if _is_git_commit(repository_commit) and repository_commit != manifest_commit:
+        errors.append(
+            "repository_commit must match bundle_manifest snapshot provenance git_commit"
+        )
+    return {
+        "source": "bundle_manifest.snapshot_provenance",
+        "repository_name": repository.get("name"),
+        "provenance_status": repository.get("provenance_status"),
+        "git_commit": manifest_commit,
+    }
 
 
 def validate_model_binding(
@@ -173,20 +258,24 @@ def build_hybrid_route_binding(
         field="index",
         errors=errors,
     )
-    _verify_file_binding(
+    manifest = _load_bound_manifest(
         bundle_manifest_path,
         bundle_manifest_sha256,
-        field="bundle_manifest",
         errors=errors,
     )
-    if not (
-        isinstance(repository_commit, str)
-        and len(repository_commit) == 40
-        and all(character in "0123456789abcdef" for character in repository_commit)
-    ):
+    if not _is_git_commit(repository_commit):
         errors.append(
             "repository_commit must be a 40-character lowercase hexadecimal commit"
         )
+    repository_commit_binding = (
+        _bind_repository_commit_to_manifest(
+            manifest,
+            repository_commit,
+            errors=errors,
+        )
+        if manifest is not None
+        else None
+    )
     evidence_path = Path(routing_evidence_path).resolve()
     binding = {
         "kind": "repoground.hybrid_retrieval_binding",
@@ -207,6 +296,7 @@ def build_hybrid_route_binding(
             "sha256": bundle_manifest_sha256,
         },
         "repository_commit": repository_commit,
+        "repository_commit_binding": repository_commit_binding,
         "routing_evidence": {
             "path": str(evidence_path),
             "sha256": file_sha256(evidence_path),

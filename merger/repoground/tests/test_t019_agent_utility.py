@@ -26,6 +26,33 @@ COMMIT = "cfd341b00c6a36125a014dbfa54cf78c8215da75"
 SHA = "a" * 64
 
 
+def _write_binding_manifest(path: Path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "snapshot_provenance": {
+                    "version": "v1",
+                    "repositories": [
+                        {
+                            "name": "repoground",
+                            "repo_root": None,
+                            "repo_remote": "https://github.com/heimgewebe/repoground.git",
+                            "git_commit": COMMIT,
+                            "git_dirty": False,
+                            "git_branch": "main",
+                            "provenance_status": "present",
+                            "freshness_basis": "git_commit",
+                        }
+                    ],
+                    "does_not_establish": ["freshness_against_remote"],
+                }
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_multilingual_goldset_is_complete_and_targets_real_paths() -> None:
     goldset = load_goldset(GOLDSET)
     assert validate_goldset(goldset) == []
@@ -76,7 +103,7 @@ def test_hybrid_binding_requires_exact_model_index_manifest_and_commit(
     index = tmp_path / "index.sqlite"
     manifest = tmp_path / "bundle.manifest.json"
     index.write_bytes(b"index")
-    manifest.write_text("{}", encoding="utf-8")
+    _write_binding_manifest(manifest)
     policy = {
         "model_name": "local-fixture-model",
         "dimensions": 8,
@@ -138,7 +165,7 @@ def test_runtime_activation_passes_policy_only_after_gate(
     index = tmp_path / "index.sqlite"
     manifest = tmp_path / "bundle.manifest.json"
     index.write_bytes(b"index")
-    manifest.write_text("{}", encoding="utf-8")
+    _write_binding_manifest(manifest)
     policy = {
         "model_name": "local-fixture-model",
         "dimensions": 8,
