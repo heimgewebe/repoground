@@ -19,6 +19,7 @@ primary commands:
   ground    snapshot, ask and evidence-access operations
   serve     run the RepoGround HTTP/Web service
   mcp       run the RepoGround MCP stdio server
+  doctor    inspect local RepoGround readiness without repair or refresh
 
 All established advanced commands remain available through the same CLI.
 """
