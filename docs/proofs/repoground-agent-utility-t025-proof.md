@@ -40,21 +40,37 @@ That P2 finding was upheld. The candidate Doctor/test changes were reverted inst
 
 ## Host follow-up registration
 
-T025 is not allowed to replace the OS-managed system Python. The existing wrapper already provides the correct extension point:
+T025 is not allowed to replace the OS-managed system Python. The CLI wrapper already provides a bounded interpreter extension point:
 
 ```text
 REPOGROUND_PYTHON=${REPOGROUND_PYTHON:-python3}
 ```
 
-The bounded follow-up is therefore to provision a dedicated, rollback-capable CPython 3.12 runtime and bind CLI/service execution through `REPOGROUND_PYTHON`, while leaving `/usr/bin/python3` and system-wide Python defaults untouched.
+A second exact-head Codex review found an important separate execution surface: the canonical systemd unit does **not** consume `REPOGROUND_PYTHON`. Both `docs/systemd/repoground.service` and the currently loaded unit instead use:
+
+```text
+ExecStart=/usr/bin/python3 -m merger.repoground serve
+```
+
+Live systemd readback also binds the installed unit to `%h/.config/systemd/user/repoground.service` with that same direct `/usr/bin/python3` `ExecStart`.
+
+Therefore the bounded host follow-up has two distinct bindings that must converge on the same dedicated, rollback-capable CPython 3.12 runtime while leaving `/usr/bin/python3` and system-wide Python defaults untouched:
+
+1. **CLI:** select the dedicated runtime through the existing `REPOGROUND_PYTHON` wrapper contract.
+2. **Service:** update the canonical RepoGround systemd unit separately so `ExecStart` executes that same dedicated runtime, then install/reload the unit through the normal service path.
+
+The follow-up must prove both interpreter surfaces after the change: CLI interpreter identity plus service `ExecStart`/process interpreter identity, followed by `repoground --help`, Doctor and read-only service status.
 
 Canonical Bureau intake was used instead of writing Registry/Queue state by hand:
 
-- idempotency key: `repoground-t025-python312-followup`
-- event: `4635`
+- initial idempotency key: `repoground-t025-python312-followup`
+- initial event: `4635`
 - candidate: `candidate-eb1aed44105a6a9ad2f9fbaf`
-- source binding: this T025 task digest `c51ead7962ae2f96d7eaffc20248d1847461966104dc7093b8a6a2a72ae0fe75`
-- candidate assessment: `promote`
+- initial source binding: T025 task digest `c51ead7962ae2f96d7eaffc20248d1847461966104dc7093b8a6a2a72ae0fe75`
+- exact-head review refinement superseding event `4635`: event `4637`
+- refinement source: `heimgewebe/repoground#1174:discussion_r3741680616`
+- refinement evidence SHA-256: canonical systemd unit `c8cb501a11980c0a2679968d36f565733f20f593761ec92ff472c14a3d096f9f`
+- latest candidate assessment: `promote`
 - target identifier checked: `REPOGROUND-AGENT-UTILITY-V1-T026`
 
 The intake result explicitly does **not** establish Registry task truth, Queue truth, claim authority or dispatch authority. Promotion to a canonical Registry task is currently fail-closed because the installed Bureau controller is still source-bound to `88c404515b8d699e9518ce77778bbd6f88b63b9c`, while the freshly cloned Bureau Registry is on `764348f8cf79b0e45877c3fc993bceed26064453`; the task publisher reports `release-registry-identity-mismatch` / stale runtime. T025 does not bypass that controller invariant with a manual Registry PR.
@@ -67,7 +83,7 @@ The final branch restores `merger/repoground/core/doctor.py` and `merger/repogro
 - Python below the declared core minimum remains blocked;
 - Python 3.12 remains the reproduced CI/release baseline;
 - the canonical wrapper contract and T024 behavior are unchanged;
-- no Host-Python installation or service mutation is performed by T025.
+- no Host-Python installation, wrapper mutation or service mutation is performed by T025.
 
 ## Nonclaims
 
@@ -76,10 +92,12 @@ This proof does not establish that:
 - CPython 3.10.12 is defective, unsafe or incapable of running useful RepoGround core paths;
 - every RepoGround feature fails outside Python 3.12;
 - the OS-managed system Python should be replaced;
+- `REPOGROUND_PYTHON` controls the systemd service interpreter;
 - the Bureau intake candidate is already a Registry task or queue entry;
 - `REPOGROUND-AGENT-UTILITY-V1-T026` is claimable before the Bureau controller/Registry identity mismatch is resolved;
+- a concrete Python-3.12 provisioning mechanism has already been selected;
 - optional Rust/Bash adapters are relevant to the Python-runtime decision.
 
 ## Closeout boundary
 
-The RepoGround product decision is resolved: keep the documented Doctor semantics and do not ship the rejected readiness broadening. The necessary Host mutation is registered in canonical Bureau intake and assessed for promotion, but canonical task publication remains administratively blocked by the stale Bureau controller. This proof therefore records the completed T025 product investigation without claiming that the future Host migration has already occurred or that Bureau has already published T026 as task truth.
+The RepoGround product decision is resolved: keep the documented Doctor semantics and do not ship the rejected readiness broadening. The necessary Host mutation is registered in canonical Bureau intake, refined to cover CLI and service as separate interpreter bindings, and assessed for promotion, but canonical task publication remains administratively blocked by the stale Bureau controller. This proof therefore records the completed T025 product investigation without claiming that the future Host migration has already occurred or that Bureau has already published T026 as task truth.
