@@ -15,4 +15,4 @@ jobs:
   guard:
     # Fleet-Repos, die von metarepo aus via wgx up Templates beziehen,
     # werden auf den kanonischen Guard-Workflow aus heimgewebe/wgx gesetzt.
-    uses: heimgewebe/wgx/.github/workflows/wgx-guard.yml@a7466bf2c3cb7fa3b261bfb2d008612abc0f85b1  # WGX PR #639 merge 2026-07-12
+    uses: heimgewebe/wgx/.github/workflows/wgx-guard.yml@d8f5aa2730a55d059c1f41acd2eb029a3103cca5  # WGX PR #639 merge 2026-07-12
