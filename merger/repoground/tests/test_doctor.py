@@ -105,12 +105,9 @@ def test_foreign_executable_named_repoground_is_degraded(monkeypatch, tmp_path: 
 def test_wrapper_identity_uses_running_source_not_inspected_repo(monkeypatch, tmp_path: Path) -> None:
     canonical = "#!/usr/bin/env bash\nexec python3 -m repoground \"$@\"\n"
     source_root = tmp_path / "repoground-source"
-    source = source_root / "scripts" / "ops" / "repoground-cli-wrapper"
-    source.parent.mkdir(parents=True)
-    source.write_text(canonical, encoding="utf-8")
-    wrapper = tmp_path / "bin" / "repoground"
-    wrapper.parent.mkdir()
-    wrapper.write_text(canonical, encoding="utf-8")
+    source, wrapper = _wrapper_fixture(
+        source_root, installed=canonical, canonical=canonical
+    )
     inspected = tmp_path / "application-repo"
     inspected.mkdir()
     monkeypatch.setattr(doctor, "_canonical_wrapper_source", lambda: source)
@@ -120,6 +117,7 @@ def test_wrapper_identity_uses_running_source_not_inspected_repo(monkeypatch, tm
 
     assert check["status"] == "available"
     assert check["evidence"]["canonical_source"] == str(source)
+    assert str(inspected) not in check["evidence"]["canonical_source"]
 
 
 def test_tracked_wrapper_does_not_import_repoground_from_cwd(tmp_path: Path) -> None:
@@ -127,15 +125,27 @@ def test_tracked_wrapper_does_not_import_repoground_from_cwd(tmp_path: Path) -> 
     package = source_root / "repoground"
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
-    (package / "__main__.py").write_text(
-        "import json, os, sys; print(json.dumps({\"marker\": \"canonical\", \"cwd\": os.getcwd(), \"args\": sys.argv[1:]}))\n",
+    (package / "__main__.py").write_text("", encoding="utf-8")
+    (package / "cli.py").write_text(
+        "import json, os\n"
+        "def main(argv=None):\n"
+        "    print(json.dumps({'marker': 'canonical', 'cwd': os.getcwd(), 'args': list(argv or [])}))\n"
+        "    return 0\n",
         encoding="utf-8",
     )
     hostile_cwd = tmp_path / "hostile"
     hostile_package = hostile_cwd / "repoground"
     hostile_package.mkdir(parents=True)
-    (hostile_package / "__init__.py").write_text("", encoding="utf-8")
-    (hostile_package / "__main__.py").write_text("print(\"hostile\")\n", encoding="utf-8")
+    marker = tmp_path / "shadowed.txt"
+    (hostile_package / "__init__.py").write_text(
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('shadowed', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    (hostile_package / "cli.py").write_text(
+        "def main(argv=None):\n    print('hostile')\n    return 0\n",
+        encoding="utf-8",
+    )
     wrapper = Path(__file__).resolve().parents[3] / "scripts" / "ops" / "repoground-cli-wrapper"
     env = os.environ.copy()
     env.update({"REPOGROUND_ROOT": str(source_root), "REPOGROUND_PYTHON": sys.executable})
@@ -152,6 +162,7 @@ def test_tracked_wrapper_does_not_import_repoground_from_cwd(tmp_path: Path) -> 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload == {"marker": "canonical", "cwd": str(hostile_cwd), "args": ["probe"]}
+    assert not marker.exists()
 
 
 def test_missing_jsonschema_is_degraded_without_core_block(monkeypatch) -> None:
@@ -372,7 +383,7 @@ def test_doctor_summary_ignores_optional_degradation(monkeypatch, tmp_path: Path
     monkeypatch.setattr(
         doctor,
         "check_wrapper",
-        lambda _root: doctor._check(
+        lambda: doctor._check(
             "wrapper",
             "degraded",
             cause="fixture_optional_missing",

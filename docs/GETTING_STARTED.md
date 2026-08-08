@@ -53,11 +53,15 @@ python3.12 -m venv .venv
 ohne vorhandenes Bundle ist ein `degraded`-Ergebnis erwartbar; die einzelnen
 Checks erklären den Grund. Der optionale globale Befehl `repoground` ist kein
 Dienststarter: die kanonische Vorlage liegt in
-`scripts/ops/repoground-cli-wrapper`, delegiert an `python -m repoground` und
-verwendet standardmäßig `~/repos/repoground` als Source-Checkout. Für einen
-anderen Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Doctor prüft
-einen gefundenen globalen Wrapper gegen diese Vorlage und meldet historische
-Service-/Browser-Starter oder fremde Executables nicht als `available`.
+`scripts/ops/repoground-cli-wrapper`, startet Python gegen CWD-Shadowing im
+Isolated Mode und delegiert anschließend an die kanonische RepoGround-CLI. Das
+aufrufende Arbeitsverzeichnis bleibt dabei für relative Nutzerpfade erhalten.
+Standardmäßig ist `~/repos/repoground` der Source-Checkout; für einen anderen
+Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Doctor vergleicht einen
+gefundenen globalen Wrapper mit der Vorlage aus der laufenden RepoGround-
+Installation, unabhängig vom per `--repo-root` untersuchten Repository, und
+meldet historische Service-/Browser-Starter oder fremde Executables nicht als
+`available`.
 
 Für Tests und Entwicklungswerkzeuge zusätzlich:
 

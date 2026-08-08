@@ -9,4 +9,17 @@ if [[ ! -f "$REPOGROUND_ROOT/repoground/__main__.py" ]]; then
   exit 1
 fi
 
-exec "$REPOGROUND_PYTHON" -I -c 'import os, runpy, sys; root = os.path.realpath(sys.argv.pop(1)); sys.path.insert(0, root); runpy.run_module("repoground", run_name="__main__", alter_sys=True)' "$REPOGROUND_ROOT" "$@"
+exec "$REPOGROUND_PYTHON" -I -c '
+import os
+import site
+import sys
+
+root = os.path.realpath(sys.argv[1])
+user_site = site.getusersitepackages()
+sys.path.insert(0, root)
+if isinstance(user_site, str) and user_site and user_site not in sys.path:
+    sys.path.insert(1, user_site)
+
+from repoground.cli import main
+raise SystemExit(main(sys.argv[2:]))
+' "$REPOGROUND_ROOT" "$@"

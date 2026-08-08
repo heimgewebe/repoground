@@ -856,7 +856,7 @@ def build_doctor_report(
             config_path=mcp_config,
             starter_path=mcp_starter,
         ),
-        check_wrapper(root),
+        check_wrapper(),
         *check_optional_adapters(),
         *_bundle_checks(root, bundle_root=bundle_root, manifest=manifest),
     ]
