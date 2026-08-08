@@ -8,55 +8,78 @@ Observed on: 2026-08-08
 
 ## Decision gate
 
-The host runtime is CPython 3.10.12. Before this change, `repoground doctor --json` classified the required `python` check as `degraded` with cause `python_version_outside_ci_release_baseline`, while the same check reported `core_minimum: 3.10` and `core_runtime_supported: true`.
+T025 had to distinguish two competing explanations for the remaining Heim-PC Doctor degradation after T024:
 
-The repository keeps Python 3.12 as the explicit reproducible validation baseline: both the full pytest job and the release-candidate job in `.github/workflows/test-suite.yml` use Python 3.12. T025 does not change that baseline or either CI gate.
+1. **Doctor-contract hypothesis:** CPython 3.10.12 is supported for the canonical RepoGround host contract and Doctor incorrectly treats the Python 3.12 CI/release baseline as a hard host requirement.
+2. **Host-runtime hypothesis:** Python 3.12 is intentionally part of the canonical readiness contract, while Python >=3.10 only supports narrower core paths; the Heim-PC therefore needs a separate runtime migration if full readiness is desired.
 
-Decision: the Doctor status was too strict for a supported host runtime. Runtime support and CI/release equivalence are different claims. A host interpreter that meets the declared core minimum should not degrade the required Doctor status solely because it differs from the CI/release baseline.
+Fresh host readback established CPython 3.10.12 and no executable `python3.12` in `PATH`. The global RepoGround wrapper remains byte-identical to `scripts/ops/repoground-cli-wrapper` (`sha256:6f12e8c0bb598f0d91c83139a7e9bfb3e072af6b43e29a0da9f16d56892a7e16`), and `repoground.service` is active/running with zero restarts.
 
-Counterhypothesis: CPython 3.10.12 is actually unsupported and the host must migrate to Python 3.12. The current RepoGround contract does not support that conclusion: `CORE_PYTHON_MINIMUM` remains 3.10 and the pre-change Doctor evidence itself reports `core_runtime_supported: true`. Therefore T025 does not mutate or replace the operating-system Python runtime.
+The decisive product authority is `docs/GETTING_STARTED.md`, not the internal `CORE_PYTHON_MINIMUM` constant in isolation. The repository architecture marks `docs/GETTING_STARTED.md` as normative for product boundaries. That contract states that:
 
-## Bounded implementation
+- CPython 3.12 is the reproduced CI and release-candidate baseline;
+- another interpreter from Python 3.10 may run individual core paths;
+- `repoground doctor` intentionally reports such an interpreter as `degraded` rather than silently treating it as release-equivalent.
 
-`check_python_runtime()` now records whether the CI/release baseline matches separately from whether the core runtime is supported.
+**Decision:** the Host-runtime hypothesis is currently supported. The existing Doctor behavior is consistent with the normative product contract. T025 therefore must not weaken the required Python check merely to make the Heim-PC Doctor green.
 
-- Python below 3.10 remains `blocked`.
-- Supported Python outside the 3.12 baseline is `available`, retains cause `python_version_outside_ci_release_baseline`, and explicitly does not establish `ci_release_equivalence`.
-- Python 3.12 remains the reproduced CI/release baseline and keeps the baseline-match path unchanged.
-- No CI workflow, release gate, dependency lock, wrapper, service, adapter, or operating-system runtime is changed.
+## Rejected RepoGround-side candidate fix
 
-## Local verification before publication
+An initial candidate patch on commit `512594c38a39c02ae9954c87c2c839a7a008b609` changed a supported non-3.12 interpreter from required `degraded` to `available` while retaining a `does_not_establish: [ci_release_equivalence]` marker.
 
-Focused Doctor regression gate:
+The candidate was technically well-tested:
+
+- focused Doctor tests passed;
+- Ruff passed;
+- the release contract passed;
+- the exact candidate head passed all GitHub CI, including `pytest-full`, browser tests, release-candidate, CodeQL and contract/security gates.
+
+Those green tests did **not** prove the semantic change was correct. Codex review on the exact head identified the missing contract dimension: `docs/GETTING_STARTED.md` still promises `degraded`, and making the required Python check `available` can let `doctor --strict` succeed on a runtime that the onboarding contract does not treat as reproduced readiness.
+
+That P2 finding was upheld. The candidate Doctor/test changes were reverted instead of broadening the normative support claim without evidence. The final T025 RepoGround diff is evidence-only; it does not change Doctor, launcher, CI, release gates, service code, locks or runtime requirements.
+
+## Host follow-up registration
+
+T025 is not allowed to replace the OS-managed system Python. The existing wrapper already provides the correct extension point:
 
 ```text
-python3 -m pytest -q merger/repoground/tests/test_doctor.py
-19 passed in 0.29s
+REPOGROUND_PYTHON=${REPOGROUND_PYTHON:-python3}
 ```
 
-Branch-local CLI readback on CPython 3.10.12 reports:
+The bounded follow-up is therefore to provision a dedicated, rollback-capable CPython 3.12 runtime and bind CLI/service execution through `REPOGROUND_PYTHON`, while leaving `/usr/bin/python3` and system-wide Python defaults untouched.
 
-```text
-python.status = available
-python.cause = python_version_outside_ci_release_baseline
-python.evidence.core_runtime_supported = true
-python.evidence.ci_release_baseline = 3.12
-python.evidence.ci_release_baseline_matches = false
-python.does_not_establish = [ci_release_equivalence]
-```
+Canonical Bureau intake was used instead of writing Registry/Queue state by hand:
 
-The branch-local overall Doctor remains `degraded` before commit because freshness correctly detects the intentionally dirty implementation worktree. That freshness result is independent of the Python-runtime classification and is not overridden by T025.
+- idempotency key: `repoground-t025-python312-followup`
+- event: `4635`
+- candidate: `candidate-eb1aed44105a6a9ad2f9fbaf`
+- source binding: this T025 task digest `c51ead7962ae2f96d7eaffc20248d1847461966104dc7093b8a6a2a72ae0fe75`
+- candidate assessment: `promote`
+- target identifier checked: `REPOGROUND-AGENT-UTILITY-V1-T026`
 
-Live pre-change host evidence also established that `repoground.service` is active/running with zero restarts and that `/home/alex/.local/bin/repoground` is byte-identical to the tracked canonical wrapper (`sha256:6f12e8c0bb598f0d91c83139a7e9bfb3e072af6b43e29a0da9f16d56892a7e16`).
+The intake result explicitly does **not** establish Registry task truth, Queue truth, claim authority or dispatch authority. Promotion to a canonical Registry task is currently fail-closed because the installed Bureau controller is still source-bound to `88c404515b8d699e9518ce77778bbd6f88b63b9c`, while the freshly cloned Bureau Registry is on `764348f8cf79b0e45877c3fc993bceed26064453`; the task publisher reports `release-registry-identity-mismatch` / stale runtime. T025 does not bypass that controller invariant with a manual Registry PR.
+
+## Regression and non-regression evidence
+
+The final branch restores `merger/repoground/core/doctor.py` and `merger/repoground/tests/test_doctor.py` byte-for-byte to the T025 base revision. Therefore:
+
+- Python 3.10.12 remains a non-baseline `degraded` required Doctor check;
+- Python below the declared core minimum remains blocked;
+- Python 3.12 remains the reproduced CI/release baseline;
+- the canonical wrapper contract and T024 behavior are unchanged;
+- no Host-Python installation or service mutation is performed by T025.
 
 ## Nonclaims
 
-This change does not establish that:
+This proof does not establish that:
 
-- Python 3.10 is CI/release-equivalent to Python 3.12;
-- every future RepoGround feature will remain compatible with Python 3.10;
-- the optional Rust or Bash structure adapters are available;
-- a dirty or revision-mismatched checkout is fresh;
-- the operating-system Python should be upgraded or replaced.
+- CPython 3.10.12 is defective, unsafe or incapable of running useful RepoGround core paths;
+- every RepoGround feature fails outside Python 3.12;
+- the OS-managed system Python should be replaced;
+- the Bureau intake candidate is already a Registry task or queue entry;
+- `REPOGROUND-AGENT-UTILITY-V1-T026` is claimable before the Bureau controller/Registry identity mismatch is resolved;
+- optional Rust/Bash adapters are relevant to the Python-runtime decision.
 
-Exact-head GitHub CI and the post-merge live wrapper/Doctor/service readback remain required before T025 can be treated as closed.
+## Closeout boundary
+
+The RepoGround product decision is resolved: keep the documented Doctor semantics and do not ship the rejected readiness broadening. The necessary Host mutation is registered in canonical Bureau intake and assessed for promotion, but canonical task publication remains administratively blocked by the stale Bureau controller. This proof therefore records the completed T025 product investigation without claiming that the future Host migration has already occurred or that Bureau has already published T026 as task truth.

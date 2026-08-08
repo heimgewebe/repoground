@@ -98,14 +98,12 @@ def _module_available(module: str) -> bool:
 def check_python_runtime() -> dict[str, Any]:
     version = tuple(sys.version_info[:3])
     core_supported = version >= CORE_PYTHON_MINIMUM
-    baseline_matches = version[:2] == CI_RELEASE_PYTHON_BASELINE
     evidence = {
         "implementation": sys.implementation.name,
         "version": ".".join(str(item) for item in version),
         "core_minimum": ".".join(str(item) for item in CORE_PYTHON_MINIMUM),
         "core_runtime_supported": core_supported,
         "ci_release_baseline": ".".join(str(item) for item in CI_RELEASE_PYTHON_BASELINE),
-        "ci_release_baseline_matches": baseline_matches,
         "ci_release_baseline_role": "reproducible_validation",
     }
     if not core_supported:
@@ -117,15 +115,14 @@ def check_python_runtime() -> dict[str, Any]:
             next_action="Use Python 3.12, the current CI and release-candidate baseline.",
             evidence=evidence,
         )
-    if not baseline_matches:
+    if version[:2] != CI_RELEASE_PYTHON_BASELINE:
         return _check(
             "python",
-            "available",
+            "degraded",
             cause="python_version_outside_ci_release_baseline",
-            impact="This interpreter is supported for RepoGround core commands but is not the currently reproduced CI/release baseline.",
-            next_action="Use Python 3.12 when CI/release-equivalent validation is required; no host interpreter replacement is required for core support.",
+            impact="Core commands may work, but this interpreter is not the currently reproduced CI/release baseline.",
+            next_action="Prefer Python 3.12 for reproducible validation; do not auto-install or replace the interpreter.",
             evidence=evidence,
-            does_not_establish=["ci_release_equivalence"],
         )
     return _check(
         "python",
