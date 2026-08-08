@@ -34,6 +34,13 @@ _MAX_CONFIG_BYTES = 256 * 1024
 _GIT_TIMEOUT_SECONDS = 3
 _MAX_WRAPPER_BYTES = 16 * 1024
 _CANONICAL_WRAPPER_RELATIVE = Path("scripts/ops/repoground-cli-wrapper")
+
+
+def _canonical_wrapper_source() -> Path:
+    """Return the tracked wrapper from the running RepoGround source tree."""
+    return Path(__file__).resolve().parents[3] / _CANONICAL_WRAPPER_RELATIVE
+
+
 _HISTORICAL_WRAPPER_MARKERS = (
     b"repoground.service",
     b"systemctl --user start",
@@ -298,7 +305,7 @@ def check_wrapper(repo_root: str | Path = ".") -> dict[str, Any]:
         )
 
     wrapper = Path(os.path.abspath(os.path.expanduser(executable)))
-    canonical = Path(repo_root).expanduser().resolve() / _CANONICAL_WRAPPER_RELATIVE
+    canonical = _canonical_wrapper_source()
     try:
         canonical_raw = _read_bounded_regular_bytes(
             canonical, max_bytes=_MAX_WRAPPER_BYTES

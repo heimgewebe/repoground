@@ -9,5 +9,4 @@ if [[ ! -f "$REPOGROUND_ROOT/repoground/__main__.py" ]]; then
   exit 1
 fi
 
-export PYTHONPATH="$REPOGROUND_ROOT${PYTHONPATH:+:$PYTHONPATH}"
-exec "$REPOGROUND_PYTHON" -m repoground "$@"
+exec "$REPOGROUND_PYTHON" -I -c 'import os, runpy, sys; root = os.path.realpath(sys.argv.pop(1)); sys.path.insert(0, root); runpy.run_module("repoground", run_name="__main__", alter_sys=True)' "$REPOGROUND_ROOT" "$@"
