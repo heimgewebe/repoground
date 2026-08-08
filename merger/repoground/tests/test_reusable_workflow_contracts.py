@@ -36,6 +36,28 @@ def _contract() -> dict:
     )
 
 
+def _contract_with_recursive_workflow() -> dict:
+    contract = _contract()
+    root = contract["contracts"][1]
+    workflow_use = (
+        "example/reusable/.github/workflows/check.yml@"
+        "0123456789abcdef0123456789abcdef01234567"
+    )
+    root["transitive_uses"].append(workflow_use)
+    root["transitive_workflows"] = [
+        {
+            "uses": workflow_use,
+            "source_content_sha256": "0" * 64,
+            "transitive_uses": [
+                "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+                "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+            ],
+            "transitive_workflows": [],
+        }
+    ]
+    return contract
+
+
 def test_repository_reusable_workflow_callers_match_contracts() -> None:
     assert scan(_repo_root()) == []
 
@@ -100,7 +122,7 @@ def test_contract_rejects_invalid_root_source_hash(tmp_path: Path) -> None:
 
 
 def test_contract_rejects_missing_recursive_workflow_closure(tmp_path: Path) -> None:
-    contract = _contract()
+    contract = _contract_with_recursive_workflow()
     contract["contracts"][1]["transitive_workflows"] = []
     _write_fixture(tmp_path, contract)
     assert [finding.code for finding in scan(tmp_path)] == [
@@ -109,7 +131,7 @@ def test_contract_rejects_missing_recursive_workflow_closure(tmp_path: Path) -> 
 
 
 def test_contract_rejects_detached_recursive_workflow_closure(tmp_path: Path) -> None:
-    contract = _contract()
+    contract = _contract_with_recursive_workflow()
     closure = contract["contracts"][1]["transitive_workflows"][0]
     closure["uses"] = (
         "heimgewebe/metarepo/.github/workflows/other.yml@"
@@ -122,7 +144,7 @@ def test_contract_rejects_detached_recursive_workflow_closure(tmp_path: Path) ->
 
 
 def test_contract_rejects_mutable_recursive_action_ref(tmp_path: Path) -> None:
-    contract = _contract()
+    contract = _contract_with_recursive_workflow()
     closure = contract["contracts"][1]["transitive_workflows"][0]
     closure["transitive_uses"][1] = "actions/setup-node@v6"
     _write_fixture(tmp_path, contract)
@@ -132,7 +154,7 @@ def test_contract_rejects_mutable_recursive_action_ref(tmp_path: Path) -> None:
 
 
 def test_contract_rejects_invalid_recursive_source_hash(tmp_path: Path) -> None:
-    contract = _contract()
+    contract = _contract_with_recursive_workflow()
     closure = contract["contracts"][1]["transitive_workflows"][0]
     closure["source_content_sha256"] = "missing"
     _write_fixture(tmp_path, contract)
@@ -142,7 +164,7 @@ def test_contract_rejects_invalid_recursive_source_hash(tmp_path: Path) -> None:
 
 
 def test_contract_rejects_unrecorded_third_level_workflow(tmp_path: Path) -> None:
-    contract = _contract()
+    contract = _contract_with_recursive_workflow()
     closure = contract["contracts"][1]["transitive_workflows"][0]
     closure["transitive_uses"].append(
         "example/inner/.github/workflows/check.yml@"

@@ -57,12 +57,16 @@ def test_wgx_active_identity_is_repoground() -> None:
     assert isinstance(tasks, dict)
     assert all("repoground" in str(command).lower() for command in tasks.values())
 
-    workflow = (ROOT / ".github/workflows/wgx-guard.yml").read_text(encoding="utf-8")
-    assert (
-        "heimgewebe/wgx/.github/workflows/wgx-guard.yml"
-        "@a7466bf2c3cb7fa3b261bfb2d008612abc0f85b1"
-        in workflow
+    workflow = _yaml(".github/workflows/wgx-guard.yml")
+    jobs = workflow["jobs"]
+    assert isinstance(jobs, dict)
+    guard = jobs["guard"]
+    assert isinstance(guard, dict)
+    assert guard["uses"] == (
+        "heimgewebe/metarepo/.github/workflows/reusable-repo-verify.yml"
+        "@fe6950616b2d06343e284a56a8944e0a36f1f972"
     )
+    assert guard["with"] == {"mode": "guard"}
     audit = (ROOT / "docs/architecture/inconsistencies.md").read_text(encoding="utf-8")
     assert "`profile: repoground`, `class: knowledge-compiler`" in audit
     assert "Historische Lenskit-/RepoLens-Belege werden nicht umgeschrieben" in audit
