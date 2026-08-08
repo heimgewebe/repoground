@@ -32,12 +32,14 @@ def test_python_runtime_distinguishes_core_support_from_release_baseline(monkeyp
 
     check = doctor.check_python_runtime()
 
-    assert check["status"] == "degraded"
+    assert check["status"] == "available"
     assert check["cause"] == "python_version_outside_ci_release_baseline"
     assert check["evidence"]["core_minimum"] == "3.10"
     assert check["evidence"]["core_runtime_supported"] is True
     assert check["evidence"]["ci_release_baseline"] == "3.12"
+    assert check["evidence"]["ci_release_baseline_matches"] is False
     assert check["evidence"]["ci_release_baseline_role"] == "reproducible_validation"
+    assert "ci_release_equivalence" in check["does_not_establish"]
 
 
 def test_python_runtime_below_core_minimum_is_blocked(monkeypatch) -> None:
@@ -48,6 +50,19 @@ def test_python_runtime_below_core_minimum_is_blocked(monkeypatch) -> None:
     assert check["status"] == "blocked"
     assert check["cause"] == "python_version_too_old"
     assert check["evidence"]["core_runtime_supported"] is False
+    assert check["evidence"]["ci_release_baseline_matches"] is False
+
+
+def test_python_runtime_ci_release_baseline_match_stays_available(monkeypatch) -> None:
+    monkeypatch.setattr(doctor.sys, "version_info", (3, 12, 4))
+
+    check = doctor.check_python_runtime()
+
+    assert check["status"] == "available"
+    assert check["cause"] == "python_ci_release_baseline_matches"
+    assert check["evidence"]["core_runtime_supported"] is True
+    assert check["evidence"]["ci_release_baseline"] == "3.12"
+    assert check["evidence"]["ci_release_baseline_matches"] is True
 
 
 def _wrapper_fixture(tmp_path: Path, *, installed: str, canonical: str) -> tuple[Path, Path]:
