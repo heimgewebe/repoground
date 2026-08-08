@@ -163,8 +163,8 @@
       "path": ".github/workflows/wgx-guard.yml",
       "class": "required_protection",
       "rationale": "wgx profile guard.",
-      "sha256": "6908956802b270bcb9f37066daa29c979ef4d4afa97d3ec914fa4ffc78469e66",
-      "bytes": 576
+      "sha256": "9cb7c5b0579d2b022fc68c926cd6e04695a09eb5441a6e716376b3640c192695",
+      "bytes": 556
     }
   ],
   "counts_by_class": {
