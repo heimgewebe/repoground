@@ -7,6 +7,7 @@ starts services, reads secrets or performs network synchronization.
 """
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -31,6 +32,21 @@ VERSION = "1.0"
 STATUS_VALUES = ("available", "degraded", "blocked")
 _MAX_CONFIG_BYTES = 256 * 1024
 _GIT_TIMEOUT_SECONDS = 3
+_MAX_WRAPPER_BYTES = 16 * 1024
+_CANONICAL_WRAPPER_RELATIVE = Path("scripts/ops/repoground-cli-wrapper")
+
+
+def _canonical_wrapper_source() -> Path:
+    """Return the tracked wrapper from the running RepoGround source tree."""
+    return Path(__file__).resolve().parents[3] / _CANONICAL_WRAPPER_RELATIVE
+
+
+_HISTORICAL_WRAPPER_MARKERS = (
+    b"repoground.service",
+    b"systemctl --user start",
+    b"xdg-open",
+    b"/api/health",
+)
 
 DOES_NOT_ESTABLISH = (
     "remote_freshness",
@@ -233,7 +249,48 @@ def check_jsonschema_dependency() -> dict[str, Any]:
     )
 
 
-def check_wrapper() -> dict[str, Any]:
+def _read_bounded_regular_bytes(path: Path, *, max_bytes: int) -> bytes:
+    before = path.lstat()
+    if stat.S_ISLNK(before.st_mode):
+        raise ValueError("symbolic_link")
+    if not stat.S_ISREG(before.st_mode):
+        raise ValueError("not_regular_file")
+    if before.st_size > max_bytes:
+        raise ValueError("file_too_large")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        opened_identity = (
+            opened.st_dev,
+            opened.st_ino,
+            opened.st_size,
+            opened.st_mtime_ns,
+        )
+        if identity != opened_identity or not stat.S_ISREG(opened.st_mode):
+            raise ValueError("file_changed_before_read")
+        chunks: list[bytes] = []
+        remaining = max_bytes + 1
+        while remaining > 0:
+            chunk = os.read(descriptor, min(65536, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+        after_identity = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+        if len(raw) > max_bytes:
+            raise ValueError("file_too_large")
+        if after_identity != opened_identity or len(raw) != after.st_size:
+            raise ValueError("file_changed_while_reading")
+        return raw
+    finally:
+        os.close(descriptor)
+
+
+def check_wrapper(repo_root: str | Path = ".") -> dict[str, Any]:
     executable = shutil.which("repoground")
     if executable is None:
         return _check(
@@ -241,20 +298,101 @@ def check_wrapper() -> dict[str, Any]:
             "degraded",
             cause="repoground_wrapper_not_on_path",
             impact="The optional convenience command is unavailable, but the canonical module CLI remains usable.",
-            next_action="Use `python -m merger.repoground`; install a wrapper only if desired.",
+            next_action="Use `python -m merger.repoground`; install the tracked canonical wrapper only if desired.",
             optional=True,
             evidence={"module_cli": "python -m merger.repoground"},
             does_not_establish=["module_cli_failure"],
         )
+
+    wrapper = Path(os.path.abspath(os.path.expanduser(executable)))
+    canonical = _canonical_wrapper_source()
+    try:
+        canonical_raw = _read_bounded_regular_bytes(
+            canonical, max_bytes=_MAX_WRAPPER_BYTES
+        )
+    except (OSError, ValueError) as exc:
+        return _check(
+            "wrapper",
+            "degraded",
+            cause="canonical_wrapper_source_unavailable",
+            impact="The discovered convenience command cannot be identity-checked against the tracked RepoGround delegate.",
+            next_action="Use the canonical module CLI and restore the tracked wrapper source before installing a global command.",
+            optional=True,
+            evidence={
+                "executable": str(wrapper),
+                "canonical_source": str(canonical),
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+            does_not_establish=["module_cli_failure", "service_readiness"],
+        )
+
+    try:
+        installed_raw = _read_bounded_regular_bytes(
+            wrapper, max_bytes=_MAX_WRAPPER_BYTES
+        )
+    except (OSError, ValueError) as exc:
+        return _check(
+            "wrapper",
+            "blocked",
+            cause="repoground_wrapper_unsafe_or_unreadable",
+            impact="A command named `repoground` is on PATH, but doctor cannot safely verify it as the canonical CLI delegate.",
+            next_action="Inspect the wrapper without following symlinks; replace it only through a reviewed, rollback-bound host migration.",
+            optional=True,
+            evidence={
+                "executable": str(wrapper),
+                "error": str(exc),
+                "error_type": type(exc).__name__,
+            },
+            does_not_establish=["module_cli_failure", "service_readiness"],
+        )
+
+    installed_sha256 = hashlib.sha256(installed_raw).hexdigest()
+    canonical_sha256 = hashlib.sha256(canonical_raw).hexdigest()
+    evidence = {
+        "executable": str(wrapper),
+        "canonical_source": str(canonical),
+        "installed_sha256": installed_sha256,
+        "canonical_sha256": canonical_sha256,
+    }
+    if installed_raw == canonical_raw:
+        return _check(
+            "wrapper",
+            "available",
+            cause="repoground_wrapper_canonical_delegate",
+            impact="The global convenience command is byte-identical to the tracked RepoGround CLI delegate.",
+            next_action="No action required.",
+            optional=True,
+            evidence=evidence,
+            does_not_establish=["service_readiness", "future_wrapper_drift"],
+        )
+
+    historical_markers = [
+        marker.decode("ascii")
+        for marker in _HISTORICAL_WRAPPER_MARKERS
+        if marker in installed_raw
+    ]
+    if historical_markers:
+        return _check(
+            "wrapper",
+            "degraded",
+            cause="repoground_wrapper_historical_service_launcher",
+            impact="The global `repoground` command still starts or probes the historical service/browser path instead of delegating to the canonical CLI.",
+            next_action="Replace it with the tracked canonical wrapper only after hash-bound host preflight and rollback capture.",
+            optional=True,
+            evidence={**evidence, "historical_markers": historical_markers},
+            does_not_establish=["service_failure", "module_cli_failure"],
+        )
+
     return _check(
         "wrapper",
-        "available",
-        cause="repoground_wrapper_on_path",
-        impact="The optional convenience starter is discoverable on PATH.",
-        next_action="No action required.",
+        "degraded",
+        cause="repoground_wrapper_identity_mismatch",
+        impact="A different executable is named `repoground`; its delegation semantics are not established by the repository contract.",
+        next_action="Inspect its provenance and replace it only if the exact host state is approved for migration.",
         optional=True,
-        evidence={"executable": executable},
-        does_not_establish=["service_readiness"],
+        evidence=evidence,
+        does_not_establish=["foreign_wrapper_semantic_correctness", "module_cli_failure"],
     )
 
 

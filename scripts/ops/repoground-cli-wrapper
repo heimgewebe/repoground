@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
+REPOGROUND_PYTHON="${REPOGROUND_PYTHON:-python3}"
+
+if [[ ! -f "$REPOGROUND_ROOT/repoground/__main__.py" ]]; then
+  printf 'repoground: canonical source checkout unavailable: %s\n' "$REPOGROUND_ROOT" >&2
+  exit 1
+fi
+
+exec "$REPOGROUND_PYTHON" -I -c '
+import os
+import site
+import sys
+
+root = os.path.realpath(sys.argv[1])
+user_site = site.getusersitepackages()
+sys.path.insert(0, root)
+if isinstance(user_site, str) and user_site and user_site not in sys.path:
+    sys.path.insert(1, user_site)
+
+from repoground.cli import main
+raise SystemExit(main(sys.argv[2:]))
+' "$REPOGROUND_ROOT" "$@"

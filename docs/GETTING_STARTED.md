@@ -51,7 +51,19 @@ python3.12 -m venv .venv
 
 `doctor` installiert oder repariert nichts. Direkt nach einem frischen Checkout
 ohne vorhandenes Bundle ist ein `degraded`-Ergebnis erwartbar; die einzelnen
-Checks erklären den Grund. Für Tests und Entwicklungswerkzeuge zusätzlich:
+Checks erklären den Grund. Der optionale globale Befehl `repoground` ist kein
+Dienststarter: die kanonische Vorlage liegt in
+`scripts/ops/repoground-cli-wrapper`, startet Python gegen CWD-Shadowing im
+Isolated Mode und delegiert anschließend an die kanonische RepoGround-CLI. Das
+aufrufende Arbeitsverzeichnis bleibt dabei für relative Nutzerpfade erhalten.
+Standardmäßig ist `~/repos/repoground` der Source-Checkout; für einen anderen
+Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Doctor vergleicht einen
+gefundenen globalen Wrapper mit der Vorlage aus der laufenden RepoGround-
+Installation, unabhängig vom per `--repo-root` untersuchten Repository, und
+meldet historische Service-/Browser-Starter oder fremde Executables nicht als
+`available`.
+
+Für Tests und Entwicklungswerkzeuge zusätzlich:
 
 ```bash
 .venv/bin/python -m pip install --require-hashes -r requirements/repoground-dev.lock.txt

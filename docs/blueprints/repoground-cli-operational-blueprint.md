@@ -61,10 +61,21 @@ Installation aus.
 
 ### Wrapper-Readiness
 
-Die Verfügbarkeit des Befehls `repoground` im `PATH` ist host- und
-benutzerabhängig und kein dauerhafter Repository-Contract. Sie wird mit
-`command -v repoground` separat geprüft. Fehlt der Wrapper, bleibt die
-Modul-CLI über `python -m merger.repoground` verwendbar.
+Die Verfügbarkeit des Befehls `repoground` im `PATH` wird weiterhin mit
+`command -v repoground` geprüft und ist host- und benutzerabhängig. Bloße
+Auffindbarkeit reicht jedoch nicht als Identitätsbeweis:
+`repoground doctor` vergleicht einen gefundenen Wrapper fail-closed mit der
+Vorlage `scripts/ops/repoground-cli-wrapper` aus der **laufenden RepoGround-
+Installation**, nicht aus dem per `--repo-root` untersuchten Repository. Der
+kanonische Wrapper startet Python im Isolated Mode, setzt danach nur die
+kanonische RepoGround-Source vor die benötigten User-Site-Pakete und delegiert
+an die vorhandene CLI-Fassade. Dadurch bleibt das aufrufende Arbeitsverzeichnis
+für relative Nutzerpfade erhalten, kann aber kein eigenes `repoground`-Paket in
+die Modulauflösung einschleusen. Der Wrapper startet weder Dienst noch Browser.
+Historische Service-/Browser-Starter und
+fremde ausführbare Dateien werden als `degraded` beziehungsweise unsichere
+Dateitypen als `blocked` gemeldet. Fehlt der Wrapper, bleibt die Modul-CLI über
+`python -m merger.repoground` verwendbar.
 
 ### Service-Launcher-Readiness
 
