@@ -27,6 +27,29 @@ def _available(check_id: str, *, optional: bool = False) -> dict:
     )
 
 
+def test_python_runtime_distinguishes_core_support_from_release_baseline(monkeypatch) -> None:
+    monkeypatch.setattr(doctor.sys, "version_info", (3, 10, 12))
+
+    check = doctor.check_python_runtime()
+
+    assert check["status"] == "degraded"
+    assert check["cause"] == "python_version_outside_ci_release_baseline"
+    assert check["evidence"]["core_minimum"] == "3.10"
+    assert check["evidence"]["core_runtime_supported"] is True
+    assert check["evidence"]["ci_release_baseline"] == "3.12"
+    assert check["evidence"]["ci_release_baseline_role"] == "reproducible_validation"
+
+
+def test_python_runtime_below_core_minimum_is_blocked(monkeypatch) -> None:
+    monkeypatch.setattr(doctor.sys, "version_info", (3, 9, 19))
+
+    check = doctor.check_python_runtime()
+
+    assert check["status"] == "blocked"
+    assert check["cause"] == "python_version_too_old"
+    assert check["evidence"]["core_runtime_supported"] is False
+
+
 def _wrapper_fixture(tmp_path: Path, *, installed: str, canonical: str) -> tuple[Path, Path]:
     source = tmp_path / "scripts" / "ops" / "repoground-cli-wrapper"
     source.parent.mkdir(parents=True)

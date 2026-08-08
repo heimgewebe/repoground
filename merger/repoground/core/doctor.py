@@ -30,6 +30,8 @@ from merger.repoground.core.live_freshness import evaluate_live_freshness
 KIND = "repoground.doctor"
 VERSION = "1.0"
 STATUS_VALUES = ("available", "degraded", "blocked")
+CORE_PYTHON_MINIMUM = (3, 10)
+CI_RELEASE_PYTHON_BASELINE = (3, 12)
 _MAX_CONFIG_BYTES = 256 * 1024
 _GIT_TIMEOUT_SECONDS = 3
 _MAX_WRAPPER_BYTES = 16 * 1024
@@ -95,12 +97,16 @@ def _module_available(module: str) -> bool:
 
 def check_python_runtime() -> dict[str, Any]:
     version = tuple(sys.version_info[:3])
+    core_supported = version >= CORE_PYTHON_MINIMUM
     evidence = {
         "implementation": sys.implementation.name,
         "version": ".".join(str(item) for item in version),
-        "ci_release_baseline": "3.12",
+        "core_minimum": ".".join(str(item) for item in CORE_PYTHON_MINIMUM),
+        "core_runtime_supported": core_supported,
+        "ci_release_baseline": ".".join(str(item) for item in CI_RELEASE_PYTHON_BASELINE),
+        "ci_release_baseline_role": "reproducible_validation",
     }
-    if version < (3, 10):
+    if not core_supported:
         return _check(
             "python",
             "blocked",
@@ -109,7 +115,7 @@ def check_python_runtime() -> dict[str, Any]:
             next_action="Use Python 3.12, the current CI and release-candidate baseline.",
             evidence=evidence,
         )
-    if version[:2] != (3, 12):
+    if version[:2] != CI_RELEASE_PYTHON_BASELINE:
         return _check(
             "python",
             "degraded",
