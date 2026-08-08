@@ -24,6 +24,78 @@ def _available(check_id: str, *, optional: bool = False) -> dict:
     )
 
 
+def _wrapper_fixture(tmp_path: Path, *, installed: str, canonical: str) -> tuple[Path, Path]:
+    source = tmp_path / "scripts" / "ops" / "repoground-cli-wrapper"
+    source.parent.mkdir(parents=True)
+    source.write_text(canonical, encoding="utf-8")
+    source.chmod(0o755)
+    wrapper = tmp_path / "bin" / "repoground"
+    wrapper.parent.mkdir()
+    wrapper.write_text(installed, encoding="utf-8")
+    wrapper.chmod(0o755)
+    return source, wrapper
+
+
+def test_missing_wrapper_is_optional_degradation(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(doctor.shutil, "which", lambda _name: None)
+
+    check = doctor.check_wrapper(tmp_path)
+
+    assert check["status"] == "degraded"
+    assert check["cause"] == "repoground_wrapper_not_on_path"
+    assert check["optional"] is True
+
+
+def test_canonical_wrapper_delegate_is_available(monkeypatch, tmp_path: Path) -> None:
+    canonical = "#!/usr/bin/env bash\nexec python3 -m repoground \"$@\"\n"
+    _source, wrapper = _wrapper_fixture(
+        tmp_path, installed=canonical, canonical=canonical
+    )
+    monkeypatch.setattr(doctor.shutil, "which", lambda _name: str(wrapper))
+
+    check = doctor.check_wrapper(tmp_path)
+
+    assert check["status"] == "available"
+    assert check["cause"] == "repoground_wrapper_canonical_delegate"
+    assert check["evidence"]["installed_sha256"] == check["evidence"]["canonical_sha256"]
+
+
+def test_historical_service_browser_wrapper_is_degraded(monkeypatch, tmp_path: Path) -> None:
+    canonical = "#!/usr/bin/env bash\nexec python3 -m repoground \"$@\"\n"
+    historical = (
+        "#!/usr/bin/env bash\n"
+        "systemctl --user start repoground.service\n"
+        "curl -fsS http://127.0.0.1:8787/api/health\n"
+        "xdg-open http://127.0.0.1:8787\n"
+    )
+    _source, wrapper = _wrapper_fixture(
+        tmp_path, installed=historical, canonical=canonical
+    )
+    monkeypatch.setattr(doctor.shutil, "which", lambda _name: str(wrapper))
+
+    check = doctor.check_wrapper(tmp_path)
+
+    assert check["status"] == "degraded"
+    assert check["cause"] == "repoground_wrapper_historical_service_launcher"
+    assert "repoground.service" in check["evidence"]["historical_markers"]
+
+
+def test_foreign_executable_named_repoground_is_degraded(monkeypatch, tmp_path: Path) -> None:
+    canonical = "#!/usr/bin/env bash\nexec python3 -m repoground \"$@\"\n"
+    _source, wrapper = _wrapper_fixture(
+        tmp_path,
+        installed="#!/usr/bin/env bash\necho foreign-tool\n",
+        canonical=canonical,
+    )
+    monkeypatch.setattr(doctor.shutil, "which", lambda _name: str(wrapper))
+
+    check = doctor.check_wrapper(tmp_path)
+
+    assert check["status"] == "degraded"
+    assert check["cause"] == "repoground_wrapper_identity_mismatch"
+    assert check["evidence"]["installed_sha256"] != check["evidence"]["canonical_sha256"]
+
+
 def test_missing_jsonschema_is_degraded_without_core_block(monkeypatch) -> None:
     monkeypatch.setattr(
         doctor,
@@ -242,7 +314,7 @@ def test_doctor_summary_ignores_optional_degradation(monkeypatch, tmp_path: Path
     monkeypatch.setattr(
         doctor,
         "check_wrapper",
-        lambda: doctor._check(
+        lambda _root: doctor._check(
             "wrapper",
             "degraded",
             cause="fixture_optional_missing",

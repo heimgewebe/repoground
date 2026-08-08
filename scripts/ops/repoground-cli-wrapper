@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
+REPOGROUND_PYTHON="${REPOGROUND_PYTHON:-python3}"
+
+if [[ ! -f "$REPOGROUND_ROOT/repoground/__main__.py" ]]; then
+  printf 'repoground: canonical source checkout unavailable: %s\n' "$REPOGROUND_ROOT" >&2
+  exit 1
+fi
+
+export PYTHONPATH="$REPOGROUND_ROOT${PYTHONPATH:+:$PYTHONPATH}"
+exec "$REPOGROUND_PYTHON" -m repoground "$@"
