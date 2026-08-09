@@ -17,7 +17,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -69,7 +69,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0
-          persist-credentials: false
+          ref: ${{ github.head_ref }}
+          persist-credentials: true
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
@@ -90,6 +91,18 @@ jobs:
             --no-emit-index-url \
             --output-file requirements/repoground-runtime.lock.txt \
             requirements/repoground-runtime.in
+
+      - name: Commit generated runtime lock to this PR branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          if ! git diff --quiet -- requirements/repoground-runtime.lock.txt; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add requirements/repoground-runtime.lock.txt
+            git commit -m 'chore(runtime): regenerate production lock'
+            git push origin HEAD:${{ github.head_ref }}
+            exit 1
+          fi
 
       - name: Upload generated runtime lock
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
@@ -141,7 +154,7 @@ jobs:
 
       - name: Run Playwright browser tests
         run: |
-          python -m pytest -q -m browser merger/repoground/tests/test_webui_payload.py \
+          python -m pytest -q -m browser merger/repoground/frontends/webui/tests/test_webui_payload.py \
             --browser chromium \
             --output=test-results \
             --tracing retain-on-failure \
