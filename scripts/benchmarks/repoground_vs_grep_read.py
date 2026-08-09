@@ -110,7 +110,8 @@ def _attach_repoground_visible_content(
     index: Path, result: dict[str, Any]
 ) -> list[tuple[str, str]]:
     """Expose exactly selected indexed chunks, preserving their path association."""
-    connection = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
+    index_uri = f"{index.resolve().as_uri()}?mode=ro"
+    connection = sqlite3.connect(index_uri, uri=True)
     visible_payload: list[tuple[str, str]] = []
     try:
         for hit in result.get("results", []):
