@@ -926,9 +926,13 @@ def test_managed_build_residue_fresh_or_changed_stays_fail_closed(
     assert payload.read_bytes() == b"changed"
 
 
+@pytest.mark.parametrize("resource_schema_version", ["2", "3"])
 @pytest.mark.parametrize("lease_target", ["worktree", "build"])
 def test_exact_active_managed_build_lease_blocks_quarantine(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, lease_target: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    lease_target: str,
+    resource_schema_version: str,
 ) -> None:
     module = load_publisher()
     repo, sha = initialize_repository(tmp_path, "repo")
@@ -967,7 +971,8 @@ def test_exact_active_managed_build_lease_blocks_quarantine(
             """
         )
         connection.execute(
-            "INSERT INTO metadata(key, value) VALUES('schema_version', '2')"
+            "INSERT INTO metadata(key, value) VALUES('schema_version', ?)",
+            (resource_schema_version,),
         )
         target = worktree if lease_target == "worktree" else build
         now = int(time.time())
@@ -994,6 +999,9 @@ def test_exact_active_managed_build_lease_blocks_quarantine(
     assert blocker is not None
     assert blocker["classification"] == "active-legitimate"
     assert blocker["reason"] == "exact active Grabowski path lease"
+    assert blocker["lease_evidence"]["authority"] == (
+        f"grabowski-resources-sqlite-v{resource_schema_version}"
+    )
     leases = blocker["lease_evidence"]["active_leases"]
     assert leases == [
         {
@@ -1005,6 +1013,35 @@ def test_exact_active_managed_build_lease_blocks_quarantine(
     ]
     assert payload.read_bytes() == b"leased"
     assert not (source_root / module.MANAGED_BUILD_QUARANTINE_DIR_NAME).exists()
+
+
+def test_managed_build_lease_evidence_rejects_unknown_resource_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    worktree = tmp_path / "managed"
+    build = worktree / "build"
+    build.mkdir(parents=True)
+    database = tmp_path / "resources.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE leases(
+                resource_key TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                expires_at_unix INTEGER NOT NULL,
+                updated_at_unix INTEGER NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO metadata(key, value) VALUES('schema_version', '4')"
+        )
+    monkeypatch.setattr(module, "GRABOWSKI_RESOURCE_DB", database)
+
+    with pytest.raises(RuntimeError, match="canonical Grabowski lease schema is incompatible"):
+        module.managed_build_lease_evidence(worktree, build)
 
 
 def test_managed_build_quarantine_rolls_back_when_receipt_write_fails(
