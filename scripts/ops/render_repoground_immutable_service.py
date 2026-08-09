@@ -39,6 +39,16 @@ def render_service_unit(
     if python != expected_python:
         raise ValueError("python_path must be <runtime_dir>/.venv/bin/python")
 
+    immutable_exec_environment = " ".join(
+        (
+            "REPOGROUND_SERVICE_UNIT=repoground",
+            f"REPOGROUND_VERSION={commit}",
+            f"REPOGROUND_BUILD_ID={commit}",
+            f"PYTHONPATH={runtime}",
+            "PYTHONDONTWRITEBYTECODE=1",
+        )
+    )
+
     return f"""[Unit]
 Description=RepoGround Web UI / Atlas Browser
 After=network.target
@@ -62,7 +72,7 @@ WorkingDirectory={runtime}
 ExecStartPre=/usr/bin/test -d {runtime}
 ExecStartPre=/usr/bin/test -x {python}
 ExecStartPre=/bin/sh -c 'test -n "$REPOGROUND_TOKEN" || {{ echo "REPOGROUND_TOKEN is required" >&2; exit 1; }}'
-ExecStart={python} -m merger.repoground serve
+ExecStart=/usr/bin/env {immutable_exec_environment} {python} -m merger.repoground serve
 Restart=on-failure
 RestartSec=2
 
