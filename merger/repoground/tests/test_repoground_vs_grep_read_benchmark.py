@@ -51,7 +51,8 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     assert report["acceptance"]["same_question_set"] is True
     assert report["acceptance"]["same_k"] == 1
     assert report["configuration"]["legacy_expected_pattern_contract"] == "all=>path"
-    assert report["configuration"]["preferred_question_contract"] == (
+    assert report["configuration"]["default_question_contract"] == "expected_patterns"
+    assert report["configuration"]["opt_in_question_contract"] == (
         "expected_paths+expected_evidence"
     )
     assert report["configuration"]["oracle_reads_counted_as_condition_calls"] is False
