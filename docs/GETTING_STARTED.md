@@ -59,14 +59,24 @@ aufrufende Arbeitsverzeichnis bleibt dabei für relative Nutzerpfade erhalten.
 Standardmäßig ist `~/repos/repoground` der Source-Checkout; für einen anderen
 Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Auf verwalteten
 Heim-PC-Installationen bevorzugt der Wrapper ohne explizites
-`REPOGROUND_PYTHON` den ausführbaren Interpreter unter
-`~/.local/share/repoground/runtime/current/bin/python`; fehlt dieser Pfad, bleibt
-`python3` der kompatible Fallback für Core-Pfade und Doctor meldet weiterhin die
-Abweichung von der 3.12-Basis. Ein explizites `REPOGROUND_PYTHON` hat Vorrang vor
-beiden Defaults. Die kanonische `repoground.service`-Unit fällt dagegen bewusst
-**nicht** auf das System-Python zurück: sie bindet denselben verwalteten
-`runtime/current`-Interpreter und darf erst installiert bzw. neu gestartet
-werden, nachdem dieser Runtime-Pfad vollständig vorbereitet und geprüft wurde.
+`REPOGROUND_PYTHON` den Interpreter der **aktiven immutable Runtime** unter
+`~/.local/share/repoground-runtime/current/.venv/bin/python`; fehlt dieser
+Aktivierungszeiger, bleibt `python3` der kompatible Fallback für Core-Pfade und
+Doctor meldet weiterhin die Abweichung von der 3.12-Basis. Ein explizites
+`REPOGROUND_PYTHON` hat Vorrang vor beiden Defaults.
+
+Der Produktionsdienst hat einen strengeren Vertrag als die statische
+Source-Checkout-Beispielunit in `docs/systemd/repoground.service`: produktive
+Runtimes werden aus einem verifizierten Release-Kandidaten git-frei unter
+`~/.local/share/repoground-runtime/<commit>` materialisiert. Source-Verzeichnis,
+`PYTHONPATH`, `REPOGROUND_VERSION`, `REPOGROUND_BUILD_ID` und der Interpreter
+`<commit>/.venv/bin/python` müssen auf denselben exakten Commit zeigen.
+`scripts/ops/render_repoground_immutable_service.py` rendert diese commitgebundene
+Produktionsunit deterministisch; sie fällt **nicht** auf `/usr/bin/python3`
+zurück. Der `current`-Zeiger ist nur die CLI-Aktivierungsreferenz und darf erst
+nach vorbereitetem Canary/Rollback atomar auf denselben Release umgeschaltet
+werden, den der Dienst explizit verwendet.
+
 Doctor vergleicht einen gefundenen globalen Wrapper mit der Vorlage aus der
 laufenden RepoGround-Installation, unabhängig vom per `--repo-root` untersuchten
 Repository, und meldet historische Service-/Browser-Starter oder fremde

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
-REPOGROUND_MANAGED_PYTHON="$HOME/.local/share/repoground/runtime/current/bin/python"
+REPOGROUND_MANAGED_PYTHON="$HOME/.local/share/repoground-runtime/current/.venv/bin/python"
 if [[ -z ${REPOGROUND_PYTHON:-} ]]; then
   if [[ -x "$REPOGROUND_MANAGED_PYTHON" ]]; then
     REPOGROUND_PYTHON="$REPOGROUND_MANAGED_PYTHON"

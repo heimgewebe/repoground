@@ -1,15 +1,26 @@
 from __future__ import annotations
 
+import importlib.util
 import os
 import shlex
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[3]
 WRAPPER = ROOT / "scripts" / "ops" / "repoground-cli-wrapper"
-SERVICE_UNIT = ROOT / "docs" / "systemd" / "repoground.service"
-MANAGED_RUNTIME_RELATIVE = Path(".local/share/repoground/runtime/current/bin/python")
+RENDERER = ROOT / "scripts" / "ops" / "render_repoground_immutable_service.py"
+MANAGED_RUNTIME_RELATIVE = Path(".local/share/repoground-runtime/current/.venv/bin/python")
+
+
+def _renderer_module():
+    spec = importlib.util.spec_from_file_location("repoground_service_renderer", RENDERER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _source_root(tmp_path: Path) -> Path:
@@ -41,7 +52,7 @@ def _wrapper_env(home: Path, source_root: Path) -> dict[str, str]:
     return env
 
 
-def test_wrapper_prefers_managed_runtime_when_present(tmp_path: Path) -> None:
+def test_wrapper_prefers_active_immutable_runtime_when_present(tmp_path: Path) -> None:
     home = tmp_path / "home"
     source_root = _source_root(tmp_path)
     marker = tmp_path / "managed.args"
@@ -88,7 +99,7 @@ def test_wrapper_explicit_python_override_wins_over_managed_runtime(tmp_path: Pa
     assert not managed_marker.exists()
 
 
-def test_wrapper_falls_back_to_path_python3_without_managed_runtime(tmp_path: Path) -> None:
+def test_wrapper_falls_back_to_path_python3_without_active_runtime(tmp_path: Path) -> None:
     home = tmp_path / "home"
     source_root = _source_root(tmp_path)
     marker = tmp_path / "fallback.args"
@@ -109,10 +120,53 @@ def test_wrapper_falls_back_to_path_python3_without_managed_runtime(tmp_path: Pa
     assert marker.read_text(encoding="utf-8").splitlines()[0] == "fallback"
 
 
-def test_service_requires_same_managed_runtime_without_system_python_fallback() -> None:
-    text = SERVICE_UNIT.read_text(encoding="utf-8")
-    managed = "%h/.local/share/repoground/runtime/current/bin/python"
+def test_renderer_binds_source_and_python_to_same_immutable_commit(tmp_path: Path) -> None:
+    renderer = _renderer_module()
+    commit = "a" * 40
+    runtime = tmp_path / commit
+    python = runtime / ".venv" / "bin" / "python"
+    env_file = tmp_path / "repoground.env"
 
-    assert f"ExecStartPre=/usr/bin/test -x {managed}" in text
-    assert f"ExecStart={managed} -m merger.repoground serve" in text
-    assert "ExecStart=/usr/bin/python3 -m merger.repoground serve" not in text
+    text = renderer.render_service_unit(
+        commit=commit,
+        runtime_dir=runtime,
+        python_path=python,
+        env_file=env_file,
+    )
+
+    assert f"ConditionPathIsDirectory={runtime}" in text
+    assert f"Environment=REPOGROUND_VERSION={commit}" in text
+    assert f"Environment=REPOGROUND_BUILD_ID={commit}" in text
+    assert f"Environment=PYTHONPATH={runtime}" in text
+    assert f"WorkingDirectory={runtime}" in text
+    assert f"ExecStartPre=/usr/bin/test -x {python}" in text
+    assert f"ExecStart={python} -m merger.repoground serve" in text
+    assert "/usr/bin/python3 -m merger.repoground serve" not in text
+
+
+def test_renderer_rejects_python_outside_commit_runtime(tmp_path: Path) -> None:
+    renderer = _renderer_module()
+    commit = "b" * 40
+    runtime = tmp_path / commit
+
+    with pytest.raises(ValueError, match="python_path"):
+        renderer.render_service_unit(
+            commit=commit,
+            runtime_dir=runtime,
+            python_path=tmp_path / "other" / "python",
+            env_file=tmp_path / "repoground.env",
+        )
+
+
+def test_renderer_rejects_runtime_not_named_for_commit(tmp_path: Path) -> None:
+    renderer = _renderer_module()
+    commit = "c" * 40
+    runtime = tmp_path / ("d" * 40)
+
+    with pytest.raises(ValueError, match="basename"):
+        renderer.render_service_unit(
+            commit=commit,
+            runtime_dir=runtime,
+            python_path=runtime / ".venv" / "bin" / "python",
+            env_file=tmp_path / "repoground.env",
+        )
