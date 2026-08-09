@@ -90,6 +90,7 @@ GRABOWSKI_RESOURCE_DB = Path(
     os.environ.get("REPOGROUND_GRABOWSKI_RESOURCE_DB")
     or "/home/alex/.local/state/grabowski/resources.sqlite3"
 ).expanduser()
+SUPPORTED_GRABOWSKI_RESOURCE_SCHEMA_VERSIONS = frozenset({"2", "3"})
 QUARANTINE_DIR_NAME = ".repoground-prune-quarantine"
 PERSISTED_V1_QUARANTINE_DIR_NAME = "." + "r" + "b-prune-quarantine"
 READABLE_QUARANTINE_DIR_NAMES = (
@@ -1350,7 +1351,13 @@ def managed_build_lease_evidence(
                 "expires_at_unix",
                 "updated_at_unix",
             }
-            if schema_row != ("2",) or not required.issubset(columns):
+            schema_version = (
+                schema_row[0] if schema_row is not None and len(schema_row) == 1 else None
+            )
+            if (
+                schema_version not in SUPPORTED_GRABOWSKI_RESOURCE_SCHEMA_VERSIONS
+                or not required.issubset(columns)
+            ):
                 raise RuntimeError("canonical Grabowski lease schema is incompatible")
             placeholders = ",".join("?" for _ in resource_keys)
             now = int(time.time())
@@ -1365,7 +1372,7 @@ def managed_build_lease_evidence(
             raise
         raise RuntimeError("canonical Grabowski lease read failed") from exc
     return {
-        "authority": "grabowski-resources-sqlite-v2",
+        "authority": f"grabowski-resources-sqlite-v{schema_version}",
         "database": str(database),
         "checked_at_unix": now,
         "resource_keys": resource_keys,
