@@ -95,8 +95,7 @@ jobs:
       - name: Verify production runtime can import the service
         run: |
           python -m venv /tmp/repoground-runtime-smoke
-          /tmp/repoground-runtime-smoke/bin/python -m pip install --disable-pip-version-check --require-hashes \
-            -r requirements/repoground-runtime.lock.txt
+          /tmp/repoground-runtime-smoke/bin/python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-runtime.lock.txt
           /tmp/repoground-runtime-smoke/bin/python -c 'import fastapi, uvicorn; import merger.repoground.cli.serve; import merger.repoground.service.app'
           /tmp/repoground-runtime-smoke/bin/python -m merger.repoground serve --help >/dev/null
 
