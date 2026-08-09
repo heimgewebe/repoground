@@ -48,6 +48,10 @@ ConditionPathIsDirectory={runtime}
 
 [Service]
 Type=simple
+Environment=REPOGROUND_HUB=%h/repos
+Environment=REPOGROUND_MERGES=%h/repoground-out
+Environment=REPOGROUND_HOST=127.0.0.1
+Environment=REPOGROUND_PORT=8787
 EnvironmentFile={env}
 Environment=REPOGROUND_SERVICE_UNIT=repoground
 Environment=REPOGROUND_VERSION={commit}
