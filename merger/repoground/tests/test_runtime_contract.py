@@ -71,7 +71,7 @@ def test_wrapper_prefers_active_immutable_runtime_when_present(tmp_path: Path) -
     args = marker.read_text(encoding="utf-8").splitlines()
     assert args[0] == "managed"
     assert args[1:3] == ["-I", "-c"]
-    assert args[-2:] == [str(source_root), "probe"]
+    assert args[-3:] == [str(source_root), "0", "probe"]
 
 
 def test_wrapper_explicit_python_override_wins_over_managed_runtime(tmp_path: Path) -> None:
@@ -95,7 +95,9 @@ def test_wrapper_explicit_python_override_wins_over_managed_runtime(tmp_path: Pa
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert override_marker.read_text(encoding="utf-8").splitlines()[0] == "override"
+    args = override_marker.read_text(encoding="utf-8").splitlines()
+    assert args[0] == "override"
+    assert args[-3:] == [str(source_root), "1", "probe"]
     assert not managed_marker.exists()
 
 
@@ -117,7 +119,9 @@ def test_wrapper_falls_back_to_path_python3_without_active_runtime(tmp_path: Pat
     )
 
     assert completed.returncode == 0, completed.stderr
-    assert marker.read_text(encoding="utf-8").splitlines()[0] == "fallback"
+    args = marker.read_text(encoding="utf-8").splitlines()
+    assert args[0] == "fallback"
+    assert args[-3:] == [str(source_root), "1", "probe"]
 
 
 def test_renderer_binds_source_and_python_to_same_immutable_commit(tmp_path: Path) -> None:
@@ -169,4 +173,18 @@ def test_renderer_rejects_runtime_not_named_for_commit(tmp_path: Path) -> None:
             runtime_dir=runtime,
             python_path=runtime / ".venv" / "bin" / "python",
             env_file=tmp_path / "repoground.env",
+        )
+
+
+def test_renderer_rejects_parent_directory_segments() -> None:
+    renderer = _renderer_module()
+    commit = "e" * 40
+    runtime = Path("/srv/repoground-runtime/ignored/..") / commit
+
+    with pytest.raises(ValueError, match="canonical simple absolute path"):
+        renderer.render_service_unit(
+            commit=commit,
+            runtime_dir=runtime,
+            python_path=runtime / ".venv" / "bin" / "python",
+            env_file="/etc/repoground/env",
         )
