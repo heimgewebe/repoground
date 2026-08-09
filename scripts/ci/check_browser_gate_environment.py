@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 
 EXPECTED_VERSIONS = {
-    "playwright": "1.61.0",
+    "playwright": "1.62.0",
     "pytest": "9.1.1",
     "pytest-asyncio": "1.4.0",
     "pytest-base-url": "2.1.0",

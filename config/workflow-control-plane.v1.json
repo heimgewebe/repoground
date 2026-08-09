@@ -156,7 +156,7 @@
       "path": ".github/workflows/test-suite.yml",
       "class": "required_protection",
       "rationale": "Primary pytest and browser gate surface.",
-      "sha256": "53f3aae139356cb1f69ef0831eec3ae6db0e84ffeb4b37ec754e89f4d3433ec0",
+      "sha256": "ad341ea2427c3a7968c7e7e124f63fbd90420529ba20efcd29e06f7cdfc9d371",
       "bytes": 5315
     },
     {
