@@ -25,7 +25,8 @@ public compatibility aliases.
 ## Reproducible local benchmark
 
 `scripts/benchmarks/repoground_vs_grep_read.py` consumes the committed
-20-question `docs/retrieval/review_queries.v1.json` and an existing local index:
+20-question `docs/retrieval/review_queries.v1.json` by default and an existing
+local index:
 
 ```bash
 python3 scripts/benchmarks/repoground_vs_grep_read.py \
@@ -34,13 +35,13 @@ python3 scripts/benchmarks/repoground_vs_grep_read.py \
   --out /tmp/repoground-vs-grep-read.json
 ```
 
-It uses only local `rg` plus bounded file reads through RepoGround's existing
-review-intent FTS5/BM25 path. The v2 report hashes the index, fixed question
-set and local source tree. For every one of the same 20–30 questions and the
-same `k` limit, it records runtime, logical tool calls, spawned process calls,
-bounded source reads, response bytes, a documented bytes/4 token proxy,
-source/index freshness and false-confidence status. Aggregates contain the
-same measures and the total compact-response reduction.
+The current harness emits report contract v3. Legacy `expected_patterns`
+retains its historical all-path meaning; the opt-in
+`docs/retrieval/review_queries.v2.json` separates `expected_paths` from
+`expected_evidence`. The grep/read condition now includes the bounded source
+content it actually reads in its measured response payload, so current
+`response_bytes` and token-proxy values are intentionally not comparable to the
+older v2 report's baseline payload accounting.
 
 False confidence is recorded only when a condition returned a result and is
 therefore presented as useful, while one or more expected targets are absent
@@ -56,16 +57,24 @@ The decision is fail-closed and has three outcomes:
   benefit contract;
 - `fail` when compaction, freshness or relative quality regresses.
 
-The committed local report `repoground-vs-grep-read.v2.json` is
-`inconclusive`. On 20 fixed questions RepoGround missed 37 expected targets
-versus 60 for `grep/read`, but both conditions had 20 false-confidence cases.
-RepoGround used 551.335 ms versus 166.691 ms, emitted 292,150 raw bytes, and
-its 98,966-byte compact form was still larger than the 26,690-byte baseline.
-The committed run records `ripgrep` as the baseline search engine. When `rg` is
-not installed, the same harness uses a deterministic UTF-8 Python substring
-search, records `python_utf8_substring`, and starts no hidden subprocess. The
-report persists no absolute local paths and binds the benchmark script, index,
-question set and source tree by SHA-256.
-No category is recommended and no default activation follows from this slice.
-The benchmark does not claim repository understanding, answer correctness or
-quality beyond the measured cases.
+## Historical v2 measurement
+
+The committed `repoground-vs-grep-read.v2.json` is a **historical measurement
+from the v2 harness**. It remains immutable evidence for that earlier harness,
+not a current performance claim for report contract v3. Its recorded numbers
+were: 20 fixed questions; RepoGround missed 37 expected targets versus 60 for
+`grep/read`; both conditions had 20 false-confidence cases; RepoGround used
+551.335 ms versus 166.691 ms, emitted 292,150 raw bytes, and its 98,966-byte
+compact form was larger than the then-recorded 26,690-byte baseline.
+
+Those payload totals must not be compared with current v3 runs because v3
+charges grep/read for the bounded source text delivered to the consumer and
+uses the corrected locator/evidence scoring contract. See
+`repoground-vs-grep-read.v3-contract-proof.md` for current deterministic
+measurement-contract evidence. A new full-repository v3 performance report
+requires a fresh local bundle index; no such index is committed here, so this
+proof makes no new full-repository performance or preference claim.
+
+No category is recommended and no default activation follows from the
+historical v2 measurement. The benchmark does not claim repository
+understanding, answer correctness or quality beyond the measured cases.

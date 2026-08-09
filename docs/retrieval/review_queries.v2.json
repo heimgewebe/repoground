@@ -1,0 +1,292 @@
+[
+  {
+    "query": "Find the Agent Reading Pack producer and its primary tests",
+    "category": "agent_pack",
+    "expected_paths": [
+      "merger/repoground/core/agent_reading_pack.py",
+      "merger/repoground/tests/test_agent_reading_pack.py"
+    ],
+    "expected_evidence": [
+      "produce_agent_reading_pack"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the Agent Reading Pack task-profile usage rules",
+    "category": "agent_pack",
+    "expected_paths": [
+      "merger/repoground/tests/test_agent_reading_pack_usage_rules.py"
+    ],
+    "expected_evidence": [
+      "REQUIRED_READING_BY_TASK"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find claim-to-evidence map production, tests, and contract",
+    "category": "claim_evidence",
+    "expected_paths": [
+      "merger/repoground/core/claim_evidence_map.py",
+      "merger/repoground/tests/test_claim_evidence_map.py",
+      "merger/repoground/contracts/claim-evidence-map.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find citation map production, producer tests, and schema",
+    "category": "citation_map",
+    "expected_paths": [
+      "merger/repoground/core/citation_map.py",
+      "merger/repoground/tests/test_citation_map_producer.py",
+      "merger/repoground/contracts/citation-map.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find post-emit health checks, tests, and contract",
+    "category": "post_emit_health",
+    "expected_paths": [
+      "merger/repoground/core/post_emit_health.py",
+      "merger/repoground/tests/test_post_emit_health.py",
+      "merger/repoground/contracts/post-emit-health.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find bundle surface validation implementation, tests, and contract",
+    "category": "bundle_surface",
+    "expected_paths": [
+      "merger/repoground/core/bundle_surface_validate.py",
+      "merger/repoground/tests/test_bundle_surface_validate.py",
+      "merger/repoground/contracts/bundle-surface-validation.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the bundle manifest contract and its integration and schema tests",
+    "category": "bundle_manifest",
+    "expected_paths": [
+      "merger/repoground/contracts/bundle-manifest.v1.schema.json",
+      "merger/repoground/tests/test_bundle_manifest_integration.py",
+      "merger/repoground/tests/test_bundle_manifest_schema.py"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval evaluation metrics implementation, tests, and output contract",
+    "category": "retrieval",
+    "expected_paths": [
+      "merger/repoground/retrieval/eval_core.py",
+      "merger/repoground/tests/test_retrieval_eval.py",
+      "merger/repoground/contracts/retrieval-eval.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval miss diagnostics implementation and tests",
+    "category": "retrieval",
+    "expected_paths": [
+      "merger/repoground/retrieval/eval_diagnostics.py",
+      "merger/repoground/tests/test_retrieval_eval_diagnostics.py"
+    ],
+    "expected_evidence": [
+      "miss_taxonomy"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval router selection logic and router tests",
+    "category": "router",
+    "expected_paths": [
+      "merger/repoground/retrieval/router.py",
+      "merger/repoground/tests/test_router.py"
+    ],
+    "expected_evidence": [
+      "route_query"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the RepoGround query CLI command and its registration",
+    "category": "cli",
+    "expected_paths": [
+      "merger/repoground/cli/cmd_query.py",
+      "merger/repoground/cli/main.py"
+    ],
+    "expected_evidence": [
+      "run_query"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the RepoGround retrieval eval CLI command and its registration",
+    "category": "cli",
+    "expected_paths": [
+      "merger/repoground/cli/cmd_eval.py",
+      "merger/repoground/cli/main.py"
+    ],
+    "expected_evidence": [
+      "run_eval"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find the contracts inventory and contracts matrix documentation",
+    "category": "contracts",
+    "expected_paths": [
+      "merger/repoground/contracts/",
+      "docs/contracts/contracts-matrix.md"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find retrieval and evidence JSON contracts used during review",
+    "category": "contracts",
+    "expected_paths": [
+      "merger/repoground/contracts/retrieval-eval.v1.schema.json",
+      "merger/repoground/contracts/claim-evidence-map.v1.schema.json",
+      "merger/repoground/contracts/citation-map.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find repository path security enforcement and merge security tests",
+    "category": "security",
+    "expected_paths": [
+      "merger/repoground/core/path_security.py",
+      "merger/repoground/tests/test_merge_security.py"
+    ],
+    "expected_evidence": [
+      "resolve_secure_path"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find service artifact path security coverage",
+    "category": "security",
+    "expected_paths": [
+      "merger/repoground/tests/test_service_artifact_security.py"
+    ],
+    "expected_evidence": [
+      "test_download_symlink_bypass_blocked"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find source acquisition implementation, tests, and report contract",
+    "category": "source_acquisition",
+    "expected_paths": [
+      "merger/repoground/service/source_acquisition.py",
+      "merger/repoground/tests/test_source_acquisition.py",
+      "merger/repoground/contracts/source-acquisition-report.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find PR-Schau bundle production, verification, tests, and contract",
+    "category": "pr_schau",
+    "expected_paths": [
+      "merger/repoground/core/pr_schau_bundle.py",
+      "merger/repoground/cli/pr_schau_verify.py",
+      "merger/repoground/tests/test_pr_schau_verify_units.py",
+      "merger/repoground/contracts/pr-schau.v1.schema.json"
+    ],
+    "expected_evidence": [],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find range reference resolution, tests, and both contract versions",
+    "category": "range_ref",
+    "expected_paths": [
+      "merger/repoground/core/range_resolver.py",
+      "merger/repoground/tests/test_range_resolver.py",
+      "merger/repoground/contracts/range-ref.v1.schema.json",
+      "merger/repoground/contracts/range-ref.v2.schema.json"
+    ],
+    "expected_evidence": [
+      "resolve_range_ref"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  },
+  {
+    "query": "Find lens selection implementation and tests",
+    "category": "lenses",
+    "expected_paths": [
+      "merger/repoground/core/lenses.py",
+      "merger/repoground/tests/test_lenses.py"
+    ],
+    "expected_evidence": [
+      "infer_lens"
+    ],
+    "filters": {},
+    "accept_criteria": {
+      "recall_at_10": 0.2
+    }
+  }
+]
