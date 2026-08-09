@@ -57,11 +57,20 @@ Dienststarter: die kanonische Vorlage liegt in
 Isolated Mode und delegiert anschließend an die kanonische RepoGround-CLI. Das
 aufrufende Arbeitsverzeichnis bleibt dabei für relative Nutzerpfade erhalten.
 Standardmäßig ist `~/repos/repoground` der Source-Checkout; für einen anderen
-Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Doctor vergleicht einen
-gefundenen globalen Wrapper mit der Vorlage aus der laufenden RepoGround-
-Installation, unabhängig vom per `--repo-root` untersuchten Repository, und
-meldet historische Service-/Browser-Starter oder fremde Executables nicht als
-`available`.
+Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Auf verwalteten
+Heim-PC-Installationen bevorzugt der Wrapper ohne explizites
+`REPOGROUND_PYTHON` den ausführbaren Interpreter unter
+`~/.local/share/repoground/runtime/current/bin/python`; fehlt dieser Pfad, bleibt
+`python3` der kompatible Fallback für Core-Pfade und Doctor meldet weiterhin die
+Abweichung von der 3.12-Basis. Ein explizites `REPOGROUND_PYTHON` hat Vorrang vor
+beiden Defaults. Die kanonische `repoground.service`-Unit fällt dagegen bewusst
+**nicht** auf das System-Python zurück: sie bindet denselben verwalteten
+`runtime/current`-Interpreter und darf erst installiert bzw. neu gestartet
+werden, nachdem dieser Runtime-Pfad vollständig vorbereitet und geprüft wurde.
+Doctor vergleicht einen gefundenen globalen Wrapper mit der Vorlage aus der
+laufenden RepoGround-Installation, unabhängig vom per `--repo-root` untersuchten
+Repository, und meldet historische Service-/Browser-Starter oder fremde
+Executables nicht als `available`.
 
 Für Tests und Entwicklungswerkzeuge zusätzlich:
 

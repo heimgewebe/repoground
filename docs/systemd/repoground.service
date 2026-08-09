@@ -13,8 +13,9 @@ Environment=REPOGROUND_PORT=8787
 Environment=REPOGROUND_SERVICE_UNIT=repoground
 # Required local file; never commit its secrets.
 EnvironmentFile=%h/.config/repoground/env
+ExecStartPre=/usr/bin/test -x %h/.local/share/repoground/runtime/current/bin/python
 ExecStartPre=/bin/sh -c 'test -n "$REPOGROUND_TOKEN" || { echo "REPOGROUND_TOKEN is required" >&2; exit 1; }'
-ExecStart=/usr/bin/python3 -m merger.repoground serve
+ExecStart=%h/.local/share/repoground/runtime/current/bin/python -m merger.repoground serve
 Restart=on-failure
 RestartSec=2
 
