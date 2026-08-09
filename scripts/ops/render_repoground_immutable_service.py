@@ -10,8 +10,14 @@ SAFE_PATH_RE = re.compile(r"^/[A-Za-z0-9._/-]+$")
 
 def _safe_absolute_path(value: str | Path, *, label: str) -> Path:
     text = str(value)
-    if not SAFE_PATH_RE.fullmatch(text) or "//" in text:
-        raise ValueError(f"{label} must be a simple absolute path")
+    path_segments = text.split("/")
+    if (
+        not SAFE_PATH_RE.fullmatch(text)
+        or "//" in text
+        or any(segment in {".", ".."} for segment in path_segments)
+        or (text != "/" and text.endswith("/"))
+    ):
+        raise ValueError(f"{label} must be a canonical simple absolute path")
     return Path(text)
 
 
