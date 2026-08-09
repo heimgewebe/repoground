@@ -1,16 +1,31 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
-REPOGROUND_MANAGED_PYTHON="$HOME/.local/share/repoground-runtime/current/.venv/bin/python"
-REPOGROUND_USE_USER_SITE=1
-if [[ -z ${REPOGROUND_PYTHON:-} ]]; then
-  if [[ -x "$REPOGROUND_MANAGED_PYTHON" ]]; then
+REPOGROUND_MANAGED_ROOT="$HOME/.local/share/repoground-runtime/current"
+REPOGROUND_MANAGED_PYTHON="$REPOGROUND_MANAGED_ROOT/.venv/bin/python"
+REPOGROUND_ROOT_EXPLICIT=0
+REPOGROUND_PYTHON_EXPLICIT=0
+[[ -n ${REPOGROUND_ROOT:-} ]] && REPOGROUND_ROOT_EXPLICIT=1
+[[ -n ${REPOGROUND_PYTHON:-} ]] && REPOGROUND_PYTHON_EXPLICIT=1
+
+if [[ $REPOGROUND_ROOT_EXPLICIT -eq 0 && $REPOGROUND_PYTHON_EXPLICIT -eq 0 ]]; then
+  if [[ -e "$REPOGROUND_MANAGED_ROOT" || -L "$REPOGROUND_MANAGED_ROOT" ]]; then
+    if [[ ! -x "$REPOGROUND_MANAGED_PYTHON" ]]; then
+      printf 'repoground: managed runtime activation exists but Python is unavailable: %s\n' "$REPOGROUND_MANAGED_PYTHON" >&2
+      exit 1
+    fi
+    REPOGROUND_ROOT="$REPOGROUND_MANAGED_ROOT"
     REPOGROUND_PYTHON="$REPOGROUND_MANAGED_PYTHON"
     REPOGROUND_USE_USER_SITE=0
   else
+    REPOGROUND_ROOT="$HOME/repos/repoground"
     REPOGROUND_PYTHON=python3
+    REPOGROUND_USE_USER_SITE=1
   fi
+else
+  REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
+  REPOGROUND_PYTHON="${REPOGROUND_PYTHON:-python3}"
+  REPOGROUND_USE_USER_SITE=1
 fi
 
 if [[ ! -f "$REPOGROUND_ROOT/repoground/__main__.py" ]]; then
