@@ -76,22 +76,19 @@ def _target_state(candidates: list[str], expected: list[str]) -> dict[str, Any]:
 
 
 def _expected_contract(case: dict[str, Any]) -> tuple[list[str], list[str]]:
-    """Split locator targets from source-evidence targets.
+    """Return explicit locator and source-evidence targets.
 
-    New question sets may declare ``expected_paths`` and ``expected_evidence``
-    explicitly.  The committed v1 question set predates that contract and mixes
-    both forms in ``expected_patterns``; repository-relative targets contain a
-    slash, while bare identifiers are treated as source evidence.
+    New question sets declare ``expected_paths`` and ``expected_evidence``
+    explicitly.  Legacy ``expected_patterns`` retains the original benchmark
+    semantics: every entry is a path target.  This is intentionally not guessed
+    from spelling because repository-root paths and bare symbols are ambiguous.
     """
     if "expected_paths" in case or "expected_evidence" in case:
         expected_paths = list(case.get("expected_paths") or [])
         expected_evidence = list(case.get("expected_evidence") or [])
         return expected_paths, expected_evidence
 
-    legacy = list(case.get("expected_patterns") or [])
-    expected_paths = [pattern for pattern in legacy if "/" in pattern]
-    expected_evidence = [pattern for pattern in legacy if "/" not in pattern]
-    return expected_paths, expected_evidence
+    return list(case.get("expected_patterns") or []), []
 
 
 def _source_evidence_targets(
@@ -474,7 +471,8 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "k": k,
             "read_limit_bytes": READ_LIMIT_BYTES,
             "token_proxy_bytes_per_token": TOKEN_PROXY_BYTES_PER_TOKEN,
-            "legacy_expected_pattern_contract": "slash=>path; no-slash=>source_evidence",
+            "legacy_expected_pattern_contract": "all=>path",
+            "preferred_question_contract": "expected_paths+expected_evidence",
             "source_evidence_scoring": "full_returned_source_file_oracle",
             "oracle_reads_counted_as_condition_calls": False,
         },
@@ -503,7 +501,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--index", required=True, type=Path)
     parser.add_argument("--repo-root", required=True, type=Path)
-    parser.add_argument("--questions", type=Path, default=Path("docs/retrieval/review_queries.v1.json"))
+    parser.add_argument("--questions", type=Path, default=Path("docs/retrieval/review_queries.v2.json"))
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
