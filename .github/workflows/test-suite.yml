@@ -81,7 +81,7 @@ jobs:
           python -m pip install --disable-pip-version-check --require-hashes \
             -r requirements/repoground-lock-tools.lock.txt
 
-      - name: Verify runtime lock is reproducible
+      - name: Compile runtime lock
         run: |
           python -m piptools compile \
             --generate-hashes \
@@ -90,19 +90,25 @@ jobs:
             --no-emit-index-url \
             --output-file requirements/repoground-runtime.lock.txt \
             requirements/repoground-runtime.in
-          if ! git diff --exit-code -- requirements/repoground-runtime.lock.txt; then
-            echo '--- BEGIN GENERATED REPOGROUND RUNTIME LOCK ---'
-            cat requirements/repoground-runtime.lock.txt
-            echo '--- END GENERATED REPOGROUND RUNTIME LOCK ---'
-            exit 1
-          fi
+
+      - name: Upload generated runtime lock
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: generated-runtime-lock-${{ github.sha }}
+          path: requirements/repoground-runtime.lock.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Verify runtime lock is reproducible
+        run: git diff --exit-code -- requirements/repoground-runtime.lock.txt
 
       - name: Verify production runtime can import the service
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes \
+          python -m venv /tmp/repoground-runtime-smoke
+          /tmp/repoground-runtime-smoke/bin/python -m pip install --disable-pip-version-check --require-hashes \
             -r requirements/repoground-runtime.lock.txt
-          python -c 'import fastapi, uvicorn; import merger.repoground.cli.serve; import merger.repoground.service.app'
-          python -m merger.repoground serve --help >/dev/null
+          /tmp/repoground-runtime-smoke/bin/python -c 'import fastapi, uvicorn; import merger.repoground.cli.serve; import merger.repoground.service.app'
+          /tmp/repoground-runtime-smoke/bin/python -m merger.repoground serve --help >/dev/null
 
       - name: Check release contracts
         run: python scripts/release/check_release_contract.py
