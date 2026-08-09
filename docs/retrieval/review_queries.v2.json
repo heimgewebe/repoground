@@ -207,7 +207,7 @@
       "merger/repoground/tests/test_merge_security.py"
     ],
     "expected_evidence": [
-      "safe_join"
+      "resolve_secure_path"
     ],
     "filters": {},
     "accept_criteria": {
@@ -221,7 +221,7 @@
       "merger/repoground/tests/test_service_artifact_security.py"
     ],
     "expected_evidence": [
-      "artifact_path"
+      "test_download_symlink_bypass_blocked"
     ],
     "filters": {},
     "accept_criteria": {
@@ -267,7 +267,7 @@
       "merger/repoground/contracts/range-ref.v2.schema.json"
     ],
     "expected_evidence": [
-      "range_ref_resolution"
+      "resolve_range_ref"
     ],
     "filters": {},
     "accept_criteria": {
