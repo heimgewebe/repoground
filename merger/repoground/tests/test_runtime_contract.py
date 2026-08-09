@@ -12,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 WRAPPER = ROOT / "scripts" / "ops" / "repoground-cli-wrapper"
 RENDERER = ROOT / "scripts" / "ops" / "render_repoground_immutable_service.py"
+SOURCE_SERVICE = ROOT / "docs" / "systemd" / "repoground.service"
 MANAGED_ROOT_RELATIVE = Path(".local/share/repoground-runtime/current")
 
 
@@ -180,6 +181,27 @@ def test_renderer_binds_source_and_python_to_same_immutable_commit(tmp_path: Pat
     assert f"ExecStartPre=/usr/bin/test -x {python}" in text
     assert f"ExecStart={python} -m merger.repoground serve" in text
     assert "/usr/bin/python3 -m merger.repoground serve" not in text
+
+
+def test_renderer_preserves_canonical_service_environment_defaults(tmp_path: Path) -> None:
+    renderer = _renderer_module()
+    commit = "f" * 40
+    runtime = tmp_path / commit
+    env_file = tmp_path / "repoground.env"
+    text = renderer.render_service_unit(
+        commit=commit,
+        runtime_dir=runtime,
+        python_path=runtime / ".venv" / "bin" / "python",
+        env_file=env_file,
+    )
+    source_lines = SOURCE_SERVICE.read_text(encoding="utf-8").splitlines()
+    environment_file_offset = text.index(f"EnvironmentFile={env_file}")
+
+    for name in ("REPOGROUND_HUB", "REPOGROUND_MERGES", "REPOGROUND_HOST", "REPOGROUND_PORT"):
+        prefix = f"Environment={name}="
+        source_line = next(line for line in source_lines if line.startswith(prefix))
+        assert source_line in text
+        assert text.index(source_line) < environment_file_offset
 
 
 def test_renderer_rejects_python_outside_commit_runtime(tmp_path: Path) -> None:
