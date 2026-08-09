@@ -11,7 +11,7 @@ def _load_goldset(name: str):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_review_queries_v2_is_lossless_split_of_v1():
+def test_review_queries_v2_preserves_v1_questions_and_path_targets():
     legacy = _load_goldset("review_queries.v1.json")
     explicit = _load_goldset("review_queries.v2.json")
 
@@ -23,7 +23,28 @@ def test_review_queries_v2_is_lossless_split_of_v1():
         assert new["filters"] == old["filters"]
         assert new["accept_criteria"] == old["accept_criteria"]
         assert "expected_patterns" not in new
-        assert new["expected_paths"] + new["expected_evidence"] == old["expected_patterns"]
+        legacy_path_targets = [
+            pattern for pattern in old["expected_patterns"] if "/" in pattern
+        ]
+        assert new["expected_paths"] == legacy_path_targets
+
+
+def test_review_queries_v2_evidence_is_bound_to_expected_files():
+    root = _repo_root()
+    explicit = _load_goldset("review_queries.v2.json")
+
+    for case in explicit:
+        target_texts = []
+        for relative in case["expected_paths"]:
+            path = root / relative
+            if path.is_file():
+                target_texts.append(path.read_text(encoding="utf-8", errors="replace"))
+
+        for evidence in case["expected_evidence"]:
+            assert any(evidence in text for text in target_texts), (
+                f"evidence {evidence!r} is absent from expected files for "
+                f"{case['query']!r}"
+            )
 
 
 def test_benchmark_cli_keeps_canonical_v1_goldset_as_default():
