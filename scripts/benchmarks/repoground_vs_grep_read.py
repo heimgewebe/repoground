@@ -472,7 +472,8 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "read_limit_bytes": READ_LIMIT_BYTES,
             "token_proxy_bytes_per_token": TOKEN_PROXY_BYTES_PER_TOKEN,
             "legacy_expected_pattern_contract": "all=>path",
-            "preferred_question_contract": "expected_paths+expected_evidence",
+            "default_question_contract": "expected_patterns",
+            "opt_in_question_contract": "expected_paths+expected_evidence",
             "source_evidence_scoring": "full_returned_source_file_oracle",
             "oracle_reads_counted_as_condition_calls": False,
         },
@@ -501,7 +502,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--index", required=True, type=Path)
     parser.add_argument("--repo-root", required=True, type=Path)
-    parser.add_argument("--questions", type=Path, default=Path("docs/retrieval/review_queries.v2.json"))
+    parser.add_argument("--questions", type=Path, default=Path("docs/retrieval/review_queries.v1.json"))
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
