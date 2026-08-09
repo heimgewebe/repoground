@@ -85,13 +85,18 @@ def _expected_contract(case: dict[str, Any]) -> tuple[list[str], list[str]]:
 
 def _expected_targets(
     paths: list[str],
-    visible_texts: list[str],
+    visible_payload: list[tuple[str, str]],
     expected_paths: list[str],
     expected_evidence: list[str],
 ) -> dict[str, Any]:
-    """Score only locators and text actually exposed by this condition."""
+    """Score evidence only from visible payload belonging to expected paths."""
     path_state = _target_state(paths, expected_paths)
-    evidence_state = _target_state(visible_texts, expected_evidence)
+    eligible_texts = [
+        text
+        for path, text in visible_payload
+        if any(expected_path in path for expected_path in expected_paths)
+    ]
+    evidence_state = _target_state(eligible_texts, expected_evidence)
     return {
         "expected": path_state["expected"] + evidence_state["expected"],
         "found": path_state["found"] + evidence_state["found"],
@@ -101,10 +106,12 @@ def _expected_targets(
     }
 
 
-def _attach_repoground_visible_content(index: Path, result: dict[str, Any]) -> list[str]:
-    """Expose exactly the selected indexed chunks and return their visible text."""
+def _attach_repoground_visible_content(
+    index: Path, result: dict[str, Any]
+) -> list[tuple[str, str]]:
+    """Expose exactly selected indexed chunks, preserving their path association."""
     connection = sqlite3.connect(f"file:{index}?mode=ro", uri=True)
-    visible_texts: list[str] = []
+    visible_payload: list[tuple[str, str]] = []
     try:
         for hit in result.get("results", []):
             chunk_id = hit.get("chunk_id")
@@ -116,10 +123,12 @@ def _attach_repoground_visible_content(index: Path, result: dict[str, Any]) -> l
                 ).fetchone()
             content = row[0] if row and isinstance(row[0], str) else ""
             hit["content"] = content
-            visible_texts.append(content)
+            path = hit.get("path")
+            if isinstance(path, str):
+                visible_payload.append((path, content))
     finally:
         connection.close()
-    return visible_texts
+    return visible_payload
 
 
 def _source_freshness(
@@ -247,7 +256,7 @@ def _measurement(
     process_calls: int,
     source_read_calls: int,
     paths: list[str],
-    visible_texts: list[str],
+    visible_payload: list[tuple[str, str]],
     expected_paths: list[str],
     expected_evidence: list[str],
     freshness: dict[str, Any],
@@ -257,7 +266,7 @@ def _measurement(
         json.dumps(result, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )
     target_state = _expected_targets(
-        paths, visible_texts, expected_paths, expected_evidence
+        paths, visible_payload, expected_paths, expected_evidence
     )
     useful_displayed = bool(paths)
     false_confidence = useful_displayed and (
@@ -398,7 +407,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
 
         started = time.perf_counter_ns()
         rg_result = _execute_review_query(index, query, k=k)
-        rg_visible_texts = _attach_repoground_visible_content(index, rg_result)
+        rg_visible_payload = _attach_repoground_visible_content(index, rg_result)
         rg_runtime = time.perf_counter_ns() - started
         rg_paths = [hit["path"] for hit in rg_result["results"]]
         rg_freshness = _source_freshness(rg_paths, root, index_mtime_ns)
@@ -408,9 +417,11 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
         grep_result, process_calls, read_calls = _grep_read(root, query, k)
         grep_runtime = time.perf_counter_ns() - started
         grep_paths = grep_result["paths"]
-        grep_visible_texts = [
-            read.get("content", "") for read in grep_result.get("reads", [])
-            if isinstance(read.get("content", ""), str)
+        grep_visible_payload = [
+            (read["path"], read["content"])
+            for read in grep_result.get("reads", [])
+            if isinstance(read.get("path"), str)
+            and isinstance(read.get("content"), str)
         ]
         grep_freshness = _source_freshness(grep_paths, root, None)
 
@@ -426,7 +437,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
                 process_calls=0,
                 source_read_calls=0,
                 paths=rg_paths,
-                visible_texts=rg_visible_texts,
+                visible_payload=rg_visible_payload,
                 expected_paths=expected_paths,
                 expected_evidence=expected_evidence,
                 freshness=rg_freshness,
@@ -439,7 +450,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
                 process_calls=process_calls,
                 source_read_calls=read_calls,
                 paths=grep_paths,
-                visible_texts=grep_visible_texts,
+                visible_payload=grep_visible_payload,
                 expected_paths=expected_paths,
                 expected_evidence=expected_evidence,
                 freshness=grep_freshness,
@@ -491,6 +502,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "default_question_contract": "expected_patterns",
             "opt_in_question_contract": "expected_paths+expected_evidence",
             "source_evidence_scoring": "condition_visible_payload",
+            "evidence_path_binding": "matched_expected_paths_only",
             "repoground_visible_payload": "selected_index_chunk_content",
             "grep_read_visible_payload": f"first_{READ_LIMIT_BYTES}_source_bytes_per_path",
         },
