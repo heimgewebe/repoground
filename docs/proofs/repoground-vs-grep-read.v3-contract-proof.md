@@ -15,10 +15,14 @@ claim a new full-repository performance result.
 - Evidence is scored only from content exposed by the compared condition:
   RepoGround exposes the selected indexed chunk content; grep/read exposes only
   the bounded source bytes returned in its reads.
+- Evidence can satisfy a case only when that visible payload belongs to a
+  returned path matching one of the case's `expected_paths`; an unrelated hit
+  cannot supply evidence for a different expected path.
 - The grep/read response contains the bounded source content actually read, so
   its `response_bytes` and bytes/4 token proxy charge that delivered text.
-- No full-file scoring oracle is used. Text outside a selected RepoGround chunk
-  or outside grep/read's bounded payload cannot satisfy `expected_evidence`.
+- No full-file scoring oracle is used. Text outside a selected RepoGround chunk,
+  outside grep/read's bounded payload, or on an unrelated returned path cannot
+  satisfy `expected_evidence`.
 
 ## Deterministic current fixture measurement
 
@@ -37,10 +41,10 @@ bytes**, yielding a bytes/4 token proxy of **53**. The response includes the
 
 These values are deterministic for the committed fixture and current response
 shape. Regression tests additionally verify that source text outside a
-condition's visible payload cannot satisfy evidence, the explicit
-locator/evidence split, the canonical v1 default, root-level legacy path
-handling, and that every v2 evidence anchor occurs in at least one intended
-expected file.
+condition's visible payload or on an unrelated returned path cannot satisfy
+evidence, the explicit locator/evidence split, the canonical v1 default,
+root-level legacy path handling, and that every v2 evidence anchor occurs in at
+least one intended expected file.
 
 ## Full-repository boundary
 
