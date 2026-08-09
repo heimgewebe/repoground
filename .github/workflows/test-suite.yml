@@ -78,8 +78,7 @@ jobs:
 
       - name: Install pinned lock compiler
         run: |
-          python -m pip install --disable-pip-version-check --require-hashes \
-            -r requirements/repoground-lock-tools.lock.txt
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-lock-tools.lock.txt
 
       - name: Verify runtime lock is reproducible
         run: |
