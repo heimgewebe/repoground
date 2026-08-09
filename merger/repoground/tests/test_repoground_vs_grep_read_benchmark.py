@@ -50,8 +50,9 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     assert len(report["cases"]) == 20
     assert report["acceptance"]["same_question_set"] is True
     assert report["acceptance"]["same_k"] == 1
-    assert report["configuration"]["legacy_expected_pattern_contract"] == (
-        "slash=>path; no-slash=>source_evidence"
+    assert report["configuration"]["legacy_expected_pattern_contract"] == "all=>path"
+    assert report["configuration"]["preferred_question_contract"] == (
+        "expected_paths+expected_evidence"
     )
     assert report["configuration"]["oracle_reads_counted_as_condition_calls"] is False
     assert set(report["inputs"]) >= {
@@ -75,11 +76,27 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     assert report["aggregates"]["repoground"]["compaction"]["aggregate_pass"] is True
 
 
+def test_legacy_expected_patterns_preserve_root_level_path_targets():
+    module = _benchmark_module()
+
+    paths, evidence = module._expected_contract({
+        "expected_patterns": ["missing.py", "README", "src/widget.py"],
+    })
+
+    assert paths == ["missing.py", "README", "src/widget.py"]
+    assert evidence == []
+
+
 def test_benchmark_separates_locator_and_source_evidence_targets(tmp_path):
     module = _benchmark_module()
     root, index, questions = _fixture_index(tmp_path)
     questions.write_text(json.dumps([
-        {"query": "widget", "category": "fixture", "expected_patterns": ["src/widget.py", "def widget"]}
+        {
+            "query": "widget",
+            "category": "fixture",
+            "expected_paths": ["src/widget.py"],
+            "expected_evidence": ["def widget"],
+        }
         for _ in range(20)
     ]), encoding="utf-8")
 
@@ -101,7 +118,8 @@ def test_benchmark_marks_missing_source_evidence_as_false_confidence(tmp_path):
         {
             "query": "widget",
             "category": "fixture",
-            "expected_patterns": ["src/widget.py", "def missing_widget"],
+            "expected_paths": ["src/widget.py"],
+            "expected_evidence": ["def missing_widget"],
         }
         for _ in range(20)
     ]), encoding="utf-8")
