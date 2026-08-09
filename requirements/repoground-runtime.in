@@ -1,2 +1,5 @@
-# Runtime inputs for the non-semantic RepoGround core.
+# Runtime inputs for the non-semantic RepoGround core and production service.
 -r ../merger/repoground/requirements.txt
+fastapi>=0.119,<1
+pydantic>=2,<3
+uvicorn[standard]>=0.30,<1

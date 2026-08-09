@@ -76,6 +76,28 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install pinned lock compiler
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-lock-tools.lock.txt
+
+      - name: Verify runtime lock is reproducible
+        run: |
+          python -m piptools compile \
+            --generate-hashes \
+            --resolver=backtracking \
+            --strip-extras \
+            --no-emit-index-url \
+            --output-file requirements/repoground-runtime.lock.txt \
+            requirements/repoground-runtime.in
+          git diff --exit-code -- requirements/repoground-runtime.lock.txt
+
+      - name: Verify production runtime can import the service
+        run: |
+          python -m venv /tmp/repoground-runtime-smoke
+          /tmp/repoground-runtime-smoke/bin/python -m pip install --disable-pip-version-check --require-hashes -r requirements/repoground-runtime.lock.txt
+          /tmp/repoground-runtime-smoke/bin/python -c 'import fastapi, uvicorn; import merger.repoground.cli.serve; import merger.repoground.service.app'
+          /tmp/repoground-runtime-smoke/bin/python -m merger.repoground serve --help >/dev/null
+
       - name: Check release contracts
         run: python scripts/release/check_release_contract.py
 

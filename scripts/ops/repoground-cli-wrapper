@@ -1,8 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
-REPOGROUND_PYTHON="${REPOGROUND_PYTHON:-python3}"
+REPOGROUND_MANAGED_BASE="$HOME/.local/share/repoground-runtime"
+REPOGROUND_MANAGED_POINTER="$REPOGROUND_MANAGED_BASE/current"
+REPOGROUND_ROOT_EXPLICIT=0
+REPOGROUND_PYTHON_EXPLICIT=0
+[[ -n ${REPOGROUND_ROOT:-} ]] && REPOGROUND_ROOT_EXPLICIT=1
+[[ -n ${REPOGROUND_PYTHON:-} ]] && REPOGROUND_PYTHON_EXPLICIT=1
+
+if [[ $REPOGROUND_ROOT_EXPLICIT -eq 0 && $REPOGROUND_PYTHON_EXPLICIT -eq 0 ]]; then
+  if [[ -e "$REPOGROUND_MANAGED_POINTER" || -L "$REPOGROUND_MANAGED_POINTER" ]]; then
+    if ! REPOGROUND_MANAGED_BASE_RESOLVED="$(readlink -f -- "$REPOGROUND_MANAGED_BASE")" || [[ -z "$REPOGROUND_MANAGED_BASE_RESOLVED" ]]; then
+      printf 'repoground: managed runtime root cannot be resolved: %s\n' "$REPOGROUND_MANAGED_BASE" >&2
+      exit 1
+    fi
+    if ! REPOGROUND_MANAGED_ROOT="$(readlink -f -- "$REPOGROUND_MANAGED_POINTER")" || [[ -z "$REPOGROUND_MANAGED_ROOT" ]]; then
+      printf 'repoground: managed runtime activation cannot be resolved: %s\n' "$REPOGROUND_MANAGED_POINTER" >&2
+      exit 1
+    fi
+    REPOGROUND_MANAGED_PARENT="${REPOGROUND_MANAGED_ROOT%/*}"
+    REPOGROUND_MANAGED_RELEASE="${REPOGROUND_MANAGED_ROOT##*/}"
+    if [[ "$REPOGROUND_MANAGED_PARENT" != "$REPOGROUND_MANAGED_BASE_RESOLVED" || ! "$REPOGROUND_MANAGED_RELEASE" =~ ^[0-9a-f]{40}$ ]]; then
+      printf 'repoground: managed runtime activation must resolve to an immutable commit directory: %s\n' "$REPOGROUND_MANAGED_ROOT" >&2
+      exit 1
+    fi
+    REPOGROUND_MANAGED_PYTHON="$REPOGROUND_MANAGED_ROOT/.venv/bin/python"
+    if [[ ! -x "$REPOGROUND_MANAGED_PYTHON" ]]; then
+      printf 'repoground: managed runtime activation exists but Python is unavailable: %s\n' "$REPOGROUND_MANAGED_PYTHON" >&2
+      exit 1
+    fi
+    REPOGROUND_ROOT="$REPOGROUND_MANAGED_ROOT"
+    REPOGROUND_PYTHON="$REPOGROUND_MANAGED_PYTHON"
+    REPOGROUND_USE_USER_SITE=0
+  else
+    REPOGROUND_ROOT="$HOME/repos/repoground"
+    REPOGROUND_PYTHON=python3
+    REPOGROUND_USE_USER_SITE=1
+  fi
+else
+  REPOGROUND_ROOT="${REPOGROUND_ROOT:-$HOME/repos/repoground}"
+  REPOGROUND_PYTHON="${REPOGROUND_PYTHON:-python3}"
+  REPOGROUND_USE_USER_SITE=1
+fi
 
 if [[ ! -f "$REPOGROUND_ROOT/repoground/__main__.py" ]]; then
   printf 'repoground: canonical source checkout unavailable: %s\n' "$REPOGROUND_ROOT" >&2
@@ -15,11 +54,13 @@ import site
 import sys
 
 root = os.path.realpath(sys.argv[1])
-user_site = site.getusersitepackages()
+use_user_site = sys.argv[2] == "1"
 sys.path.insert(0, root)
-if isinstance(user_site, str) and user_site and user_site not in sys.path:
-    sys.path.insert(1, user_site)
+if use_user_site:
+    user_site = site.getusersitepackages()
+    if isinstance(user_site, str) and user_site and user_site not in sys.path:
+        sys.path.insert(1, user_site)
 
 from repoground.cli import main
-raise SystemExit(main(sys.argv[2:]))
-' "$REPOGROUND_ROOT" "$@"
+raise SystemExit(main(sys.argv[3:]))
+' "$REPOGROUND_ROOT" "$REPOGROUND_USE_USER_SITE" "$@"

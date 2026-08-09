@@ -57,11 +57,30 @@ Dienststarter: die kanonische Vorlage liegt in
 Isolated Mode und delegiert anschließend an die kanonische RepoGround-CLI. Das
 aufrufende Arbeitsverzeichnis bleibt dabei für relative Nutzerpfade erhalten.
 Standardmäßig ist `~/repos/repoground` der Source-Checkout; für einen anderen
-Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Doctor vergleicht einen
-gefundenen globalen Wrapper mit der Vorlage aus der laufenden RepoGround-
-Installation, unabhängig vom per `--repo-root` untersuchten Repository, und
-meldet historische Service-/Browser-Starter oder fremde Executables nicht als
-`available`.
+Checkout kann `REPOGROUND_ROOT` explizit gesetzt werden. Auf verwalteten
+Heim-PC-Installationen bevorzugt der Wrapper ohne explizites
+`REPOGROUND_PYTHON` den Interpreter der **aktiven immutable Runtime** unter
+`~/.local/share/repoground-runtime/current/.venv/bin/python`; fehlt dieser
+Aktivierungszeiger, bleibt `python3` der kompatible Fallback für Core-Pfade und
+Doctor meldet weiterhin die Abweichung von der 3.12-Basis. Ein explizites
+`REPOGROUND_PYTHON` hat Vorrang vor beiden Defaults.
+
+Der Produktionsdienst hat einen strengeren Vertrag als die statische
+Source-Checkout-Beispielunit in `docs/systemd/repoground.service`: produktive
+Runtimes werden aus einem verifizierten Release-Kandidaten git-frei unter
+`~/.local/share/repoground-runtime/<commit>` materialisiert. Source-Verzeichnis,
+`PYTHONPATH`, `REPOGROUND_VERSION`, `REPOGROUND_BUILD_ID` und der Interpreter
+`<commit>/.venv/bin/python` müssen auf denselben exakten Commit zeigen.
+`scripts/ops/render_repoground_immutable_service.py` rendert diese commitgebundene
+Produktionsunit deterministisch; sie fällt **nicht** auf `/usr/bin/python3`
+zurück. Der `current`-Zeiger ist nur die CLI-Aktivierungsreferenz und darf erst
+nach vorbereitetem Canary/Rollback atomar auf denselben Release umgeschaltet
+werden, den der Dienst explizit verwendet.
+
+Doctor vergleicht einen gefundenen globalen Wrapper mit der Vorlage aus der
+laufenden RepoGround-Installation, unabhängig vom per `--repo-root` untersuchten
+Repository, und meldet historische Service-/Browser-Starter oder fremde
+Executables nicht als `available`.
 
 Für Tests und Entwicklungswerkzeuge zusätzlich:
 
