@@ -5,7 +5,7 @@
     {
       "caller_path": ".github/workflows/pr-heimgewebe-commands.yml",
       "job": "dispatch",
-      "uses": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@1e1dc53db419b3223d46ec279d389962bbcdc592",
+      "uses": "heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@5afd566efb27fb6594ff32daa4d3b86c5184ba30",
       "source_content_sha256": "d4659017fda70503ce09246807d069cbdd8c247c996fccd8e37ccac446b4e9bd",
       "required_permissions": {
         "contents": "read",
@@ -29,8 +29,8 @@
     {
       "caller_path": ".github/workflows/wgx-guard.yml",
       "job": "guard",
-      "uses": "heimgewebe/metarepo/.github/workflows/reusable-repo-verify.yml@fe6950616b2d06343e284a56a8944e0a36f1f972",
-      "source_content_sha256": "b960e1080a991cfaf412f3242382c911281a65e9b33a110a1a822d5bbd2f3c4b",
+      "uses": "heimgewebe/metarepo/.github/workflows/reusable-repo-verify.yml@5afd566efb27fb6594ff32daa4d3b86c5184ba30",
+      "source_content_sha256": "56a987f6f5c4138f6c5024382fd7a7cd82f4631fa4fbdf28bf1a12ddbcf26e1c",
       "required_permissions": {
         "contents": "read"
       },
