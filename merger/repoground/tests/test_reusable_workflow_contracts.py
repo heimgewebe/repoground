@@ -65,8 +65,9 @@ def test_repository_reusable_workflow_callers_match_contracts() -> None:
 def test_contract_rejects_lower_permission_and_secret_fanout(tmp_path: Path) -> None:
     _write_fixture(tmp_path)
     caller = tmp_path / ".github/workflows/pr-heimgewebe-commands.yml"
+    valid_use = _contract()["contracts"][0]["uses"]
     caller.write_text(
-        """\npermissions:\n  contents: read\njobs:\n  dispatch:\n    if: github.event.issue.pull_request != null\n    uses: heimgewebe/metarepo/.github/workflows/heimgewebe-command-dispatch.yml@1e1dc53db419b3223d46ec279d389962bbcdc592\n    secrets:\n      inherit: true\n""",
+        f"""\npermissions:\n  contents: read\njobs:\n  dispatch:\n    if: github.event.issue.pull_request != null\n    uses: {valid_use}\n    secrets:\n      inherit: true\n""",
         encoding="utf-8",
     )
     codes = {finding.code for finding in scan(tmp_path)}

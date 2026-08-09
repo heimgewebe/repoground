@@ -128,8 +128,8 @@
       "path": ".github/workflows/pr-heimgewebe-commands.yml",
       "class": "operator_command",
       "rationale": "PR comment command surface; not a merge gate.",
-      "sha256": "fe734222ec5d34fa2f8df0d46bb099874d544a6f5af91c6672da716b38a68a76",
-      "bytes": 563
+      "sha256": "de1efca37cdc8ed4865987e189768885809b210d2f8e0d2958f7efa51ef48397",
+      "bytes": 526
     },
     {
       "path": ".github/workflows/python-call-graph-goldset.yml",
@@ -163,7 +163,7 @@
       "path": ".github/workflows/wgx-guard.yml",
       "class": "required_protection",
       "rationale": "wgx profile guard.",
-      "sha256": "9cb7c5b0579d2b022fc68c926cd6e04695a09eb5441a6e716376b3640c192695",
+      "sha256": "8cdaec478de624bd59a7bec17cedb56c369376c18d69f86ab5c25444af28232b",
       "bytes": 556
     }
   ],
