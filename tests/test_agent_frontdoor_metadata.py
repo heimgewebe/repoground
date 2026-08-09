@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -10,6 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _yaml(path: str) -> dict[str, object]:
     data = yaml.safe_load((ROOT / path).read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    return data
+
+
+def _json(path: str) -> dict[str, object]:
+    data = json.loads((ROOT / path).read_text(encoding="utf-8"))
     assert isinstance(data, dict)
     return data
 
@@ -62,10 +69,16 @@ def test_wgx_active_identity_is_repoground() -> None:
     assert isinstance(jobs, dict)
     guard = jobs["guard"]
     assert isinstance(guard, dict)
-    assert guard["uses"] == (
-        "heimgewebe/metarepo/.github/workflows/reusable-repo-verify.yml"
-        "@fe6950616b2d06343e284a56a8944e0a36f1f972"
+    contracts = _json(".github/reusable-workflow-contracts.json")["contracts"]
+    assert isinstance(contracts, list)
+    wgx_contract = next(
+        contract
+        for contract in contracts
+        if isinstance(contract, dict)
+        and contract.get("caller_path") == ".github/workflows/wgx-guard.yml"
+        and contract.get("job") == "guard"
     )
+    assert guard["uses"] == wgx_contract["uses"]
     assert guard["with"] == {"mode": "guard"}
     audit = (ROOT / "docs/architecture/inconsistencies.md").read_text(encoding="utf-8")
     assert "`profile: repoground`, `class: knowledge-compiler`" in audit
