@@ -12,10 +12,13 @@ claim a new full-repository performance result.
 - `review_queries.v2.json` is opt-in and separates locator targets
   (`expected_paths`) from source evidence (`expected_evidence`).
 - Legacy `expected_patterns` remains all-path for backward-compatible scoring.
-- The grep/read response now contains the bounded source content actually read,
-  so its `response_bytes` and bytes/4 token proxy charge that delivered text.
-- Oracle reads used only to score expected evidence are not counted as condition
-  tool calls or payload; the report exposes that limitation.
+- Evidence is scored only from content exposed by the compared condition:
+  RepoGround exposes the selected indexed chunk content; grep/read exposes only
+  the bounded source bytes returned in its reads.
+- The grep/read response contains the bounded source content actually read, so
+  its `response_bytes` and bytes/4 token proxy charge that delivered text.
+- No full-file scoring oracle is used. Text outside a selected RepoGround chunk
+  or outside grep/read's bounded payload cannot satisfy `expected_evidence`.
 
 ## Deterministic current fixture measurement
 
@@ -33,7 +36,8 @@ bytes**, yielding a bytes/4 token proxy of **53**. The response includes the
 34-byte source content rather than only a `bytes_read` counter.
 
 These values are deterministic for the committed fixture and current response
-shape; the regression tests verify the source content itself, the explicit
+shape. Regression tests additionally verify that source text outside a
+condition's visible payload cannot satisfy evidence, the explicit
 locator/evidence split, the canonical v1 default, root-level legacy path
 handling, and that every v2 evidence anchor occurs in at least one intended
 expected file.
