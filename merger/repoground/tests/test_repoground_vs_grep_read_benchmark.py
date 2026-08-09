@@ -45,10 +45,15 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
 
     report = module.run(index, root, questions, k=1)
 
+    assert report["version"] == "v3"
     assert report["status"] == "inconclusive"
     assert len(report["cases"]) == 20
     assert report["acceptance"]["same_question_set"] is True
     assert report["acceptance"]["same_k"] == 1
+    assert report["configuration"]["legacy_expected_pattern_contract"] == (
+        "slash=>path; no-slash=>source_evidence"
+    )
+    assert report["configuration"]["oracle_reads_counted_as_condition_calls"] is False
     assert set(report["inputs"]) >= {
         "benchmark_script_sha256", "index_sha256", "questions_sha256", "repo_tree_sha256",
     }
@@ -68,6 +73,47 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
         assert case["repoground"]["compaction"]["pass"] is True
         assert case["repoground"]["false_confidence"] is False
     assert report["aggregates"]["repoground"]["compaction"]["aggregate_pass"] is True
+
+
+def test_benchmark_separates_locator_and_source_evidence_targets(tmp_path):
+    module = _benchmark_module()
+    root, index, questions = _fixture_index(tmp_path)
+    questions.write_text(json.dumps([
+        {"query": "widget", "category": "fixture", "expected_patterns": ["src/widget.py", "def widget"]}
+        for _ in range(20)
+    ]), encoding="utf-8")
+
+    report = module.run(index, root, questions, k=1)
+
+    for condition in ("repoground", "grep_read"):
+        targets = report["cases"][0][condition]["expected_targets"]
+        assert targets["paths"]["found"] == ["src/widget.py"]
+        assert targets["paths"]["missing"] == []
+        assert targets["source_evidence"]["found"] == ["def widget"]
+        assert targets["source_evidence"]["missing"] == []
+        assert report["cases"][0][condition]["false_confidence"] is False
+
+
+def test_benchmark_marks_missing_source_evidence_as_false_confidence(tmp_path):
+    module = _benchmark_module()
+    root, index, questions = _fixture_index(tmp_path)
+    questions.write_text(json.dumps([
+        {
+            "query": "widget",
+            "category": "fixture",
+            "expected_patterns": ["src/widget.py", "def missing_widget"],
+        }
+        for _ in range(20)
+    ]), encoding="utf-8")
+
+    report = module.run(index, root, questions, k=1)
+
+    for condition in ("repoground", "grep_read"):
+        targets = report["cases"][0][condition]["expected_targets"]
+        assert targets["paths"]["missing"] == []
+        assert targets["source_evidence"]["missing"] == ["def missing_widget"]
+        assert report["cases"][0][condition]["false_confidence"] is True
+        assert report["aggregates"][condition]["false_confidence_cases"] == 20
 
 
 def test_benchmark_defines_false_confidence_for_missing_targets_or_stale_sources(tmp_path):
@@ -165,5 +211,10 @@ def test_benchmark_uses_python_fallback_without_ripgrep(monkeypatch, tmp_path):
 
     assert result["search_engine"] == "python_utf8_substring"
     assert result["paths"] == ["src/widget.py"]
+    assert result["reads"] == [{
+        "path": "src/widget.py",
+        "bytes_read": len("def widget():\n    return 'widget'\n".encode("utf-8")),
+        "content": "def widget():\n    return 'widget'\n",
+    }]
     assert process_calls == 0
     assert read_calls == 1
