@@ -57,6 +57,7 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     assert configuration["default_question_contract"] == "expected_patterns"
     assert configuration["opt_in_question_contract"] == "expected_paths+expected_evidence"
     assert configuration["source_evidence_scoring"] == "condition_visible_payload"
+    assert configuration["evidence_path_binding"] == "matched_expected_paths_only"
     assert configuration["repoground_visible_payload"] == "selected_index_chunk_content"
     assert set(report["inputs"]) >= {
         "benchmark_script_sha256", "index_sha256", "questions_sha256", "repo_tree_sha256",
@@ -125,6 +126,23 @@ def test_source_evidence_cannot_use_text_outside_condition_payload(tmp_path):
     assert repo_targets["source_evidence"]["missing"] == ["def widget"]
     assert report["cases"][0]["repoground"]["false_confidence"] is True
     assert grep_targets["source_evidence"]["found"] == ["def widget"]
+
+
+def test_source_evidence_cannot_leak_from_unrelated_visible_path():
+    module = _benchmark_module()
+    targets = module._expected_targets(
+        ["src/widget.py", "src/unrelated.py"],
+        [
+            ("src/widget.py", "widget implementation"),
+            ("src/unrelated.py", "def widget(): pass"),
+        ],
+        ["src/widget.py"],
+        ["def widget"],
+    )
+
+    assert targets["paths"]["found"] == ["src/widget.py"]
+    assert targets["source_evidence"]["found"] == []
+    assert targets["source_evidence"]["missing"] == ["def widget"]
 
 
 def test_benchmark_marks_missing_source_evidence_as_false_confidence(tmp_path):
