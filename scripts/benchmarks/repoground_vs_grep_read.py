@@ -65,10 +65,84 @@ def _tokens(question: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"[A-Za-z0-9_]{3,}", question.lower())))
 
 
-def _expected_targets(paths: list[str], expected: list[str]) -> dict[str, Any]:
-    found = [pattern for pattern in expected if any(pattern in path for path in paths)]
+def _target_state(candidates: list[str], expected: list[str]) -> dict[str, Any]:
+    found = [
+        pattern
+        for pattern in expected
+        if any(pattern in candidate for candidate in candidates)
+    ]
     missing = [pattern for pattern in expected if pattern not in found]
     return {"expected": expected, "found": found, "missing": missing}
+
+
+def _expected_contract(case: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Split locator targets from source-evidence targets.
+
+    New question sets may declare ``expected_paths`` and ``expected_evidence``
+    explicitly.  The committed v1 question set predates that contract and mixes
+    both forms in ``expected_patterns``; repository-relative targets contain a
+    slash, while bare identifiers are treated as source evidence.
+    """
+    if "expected_paths" in case or "expected_evidence" in case:
+        expected_paths = list(case.get("expected_paths") or [])
+        expected_evidence = list(case.get("expected_evidence") or [])
+        return expected_paths, expected_evidence
+
+    legacy = list(case.get("expected_patterns") or [])
+    expected_paths = [pattern for pattern in legacy if "/" in pattern]
+    expected_evidence = [pattern for pattern in legacy if "/" not in pattern]
+    return expected_paths, expected_evidence
+
+
+def _source_evidence_targets(
+    root: Path,
+    paths: list[str],
+    expected: list[str],
+) -> dict[str, Any]:
+    """Score source evidence in returned paths without charging oracle reads.
+
+    These reads are benchmark ground-truth checks, not payload shown to either
+    condition.  Keeping them outside measured tool/source-read counts prevents
+    the scoring oracle itself from changing the compared interaction cost.
+    """
+    if not expected:
+        return _target_state([], expected)
+
+    resolved_root = root.resolve()
+    source_texts: list[str] = []
+    for relative in paths:
+        candidate = resolved_root / relative
+        if candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(resolved_root)
+        except (OSError, ValueError):
+            continue
+        if not resolved.is_file():
+            continue
+        try:
+            source_texts.append(resolved.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return _target_state(source_texts, expected)
+
+
+def _expected_targets(
+    root: Path,
+    paths: list[str],
+    expected_paths: list[str],
+    expected_evidence: list[str],
+) -> dict[str, Any]:
+    path_state = _target_state(paths, expected_paths)
+    evidence_state = _source_evidence_targets(root, paths, expected_evidence)
+    return {
+        "expected": path_state["expected"] + evidence_state["expected"],
+        "found": path_state["found"] + evidence_state["found"],
+        "missing": path_state["missing"] + evidence_state["missing"],
+        "paths": path_state,
+        "source_evidence": evidence_state,
+    }
 
 
 def _source_freshness(paths: list[str], root: Path, index_mtime_ns: int | None) -> dict[str, Any]:
@@ -169,7 +243,12 @@ def _grep_read(root: Path, question: str, k: int) -> tuple[dict[str, Any], int, 
     reads = []
     for relative in paths:
         with (root / relative).open("rb") as handle:
-            reads.append({"path": relative, "bytes_read": len(handle.read(READ_LIMIT_BYTES))})
+            payload = handle.read(READ_LIMIT_BYTES)
+        reads.append({
+            "path": relative,
+            "bytes_read": len(payload),
+            "content": payload.decode("utf-8", errors="replace"),
+        })
     result = {
         "query": question,
         "k": k,
@@ -181,11 +260,22 @@ def _grep_read(root: Path, question: str, k: int) -> tuple[dict[str, Any], int, 
     return result, process_calls, len(reads)
 
 
-def _measurement(condition: str, result: dict[str, Any], *, runtime_ns: int, process_calls: int,
-                 source_read_calls: int, paths: list[str], expected: list[str], freshness: dict[str, Any],
-                 compact: dict[str, Any] | None = None) -> dict[str, Any]:
+def _measurement(
+    condition: str,
+    result: dict[str, Any],
+    *,
+    runtime_ns: int,
+    process_calls: int,
+    source_read_calls: int,
+    paths: list[str],
+    expected_paths: list[str],
+    expected_evidence: list[str],
+    root: Path,
+    freshness: dict[str, Any],
+    compact: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     response_bytes = len(json.dumps(result, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-    target_state = _expected_targets(paths, expected)
+    target_state = _expected_targets(root, paths, expected_paths, expected_evidence)
     useful_displayed = bool(paths)
     false_confidence = useful_displayed and (
         bool(target_state["missing"]) or freshness["status"] != "fresh"
@@ -300,7 +390,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
     cases = []
     for ordinal, case in enumerate(questions, start=1):
         query = case["query"]
-        expected = case["expected_patterns"]
+        expected_paths, expected_evidence = _expected_contract(case)
         started = time.perf_counter_ns()
         rg_result = _execute_review_query(index, query, k=k)
         rg_runtime = time.perf_counter_ns() - started
@@ -312,7 +402,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
         grep_result, process_calls, read_calls = _grep_read(root, query, k)
         grep_runtime = time.perf_counter_ns() - started
         grep_paths = grep_result["paths"]
-        # rg/read deliberately does not consume the index; its source freshness
+        # grep/read deliberately does not consume the index; its source freshness
         # is therefore recorded independently rather than pretending index use.
         grep_freshness = _source_freshness(grep_paths, root, None)
         cases.append({
@@ -320,12 +410,31 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "query": query,
             "category": case.get("category"),
             "k": k,
-            "repoground": _measurement("repoground", rg_result, runtime_ns=rg_runtime, process_calls=0,
-                                         source_read_calls=0, paths=rg_paths, expected=expected,
-                                         freshness=rg_freshness, compact=rg_compact),
-            "grep_read": _measurement("grep_read", grep_result, runtime_ns=grep_runtime,
-                                        process_calls=process_calls, source_read_calls=read_calls,
-                                        paths=grep_paths, expected=expected, freshness=grep_freshness),
+            "repoground": _measurement(
+                "repoground",
+                rg_result,
+                runtime_ns=rg_runtime,
+                process_calls=0,
+                source_read_calls=0,
+                paths=rg_paths,
+                expected_paths=expected_paths,
+                expected_evidence=expected_evidence,
+                root=root,
+                freshness=rg_freshness,
+                compact=rg_compact,
+            ),
+            "grep_read": _measurement(
+                "grep_read",
+                grep_result,
+                runtime_ns=grep_runtime,
+                process_calls=process_calls,
+                source_read_calls=read_calls,
+                paths=grep_paths,
+                expected_paths=expected_paths,
+                expected_evidence=expected_evidence,
+                root=root,
+                freshness=grep_freshness,
+            ),
         })
     aggregates = {name: _aggregate(cases, name) for name in ("repoground", "grep_read")}
     compaction = aggregates["repoground"]["compaction"]
@@ -349,7 +458,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
         inconclusive_reasons = ["no_named_category_with_safe_reproducible_benefit"]
     return {
         "kind": "repoground_vs_grep_read_benchmark",
-        "version": "v2",
+        "version": "v3",
         "status": status,
         "acceptance": {
             "same_question_set": True,
@@ -361,7 +470,14 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "preference_recommendation": "repoground" if recommended_categories else None,
         },
         "category_decisions": category_decisions,
-        "configuration": {"k": k, "read_limit_bytes": READ_LIMIT_BYTES, "token_proxy_bytes_per_token": TOKEN_PROXY_BYTES_PER_TOKEN},
+        "configuration": {
+            "k": k,
+            "read_limit_bytes": READ_LIMIT_BYTES,
+            "token_proxy_bytes_per_token": TOKEN_PROXY_BYTES_PER_TOKEN,
+            "legacy_expected_pattern_contract": "slash=>path; no-slash=>source_evidence",
+            "source_evidence_scoring": "full_returned_source_file_oracle",
+            "oracle_reads_counted_as_condition_calls": False,
+        },
         "inputs": {
             "benchmark_script_sha256": _sha256(Path(__file__)),
             "index_sha256": _sha256(index),
@@ -374,7 +490,12 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
         "environment": {"python": sys.version.split()[0], "platform": platform.platform(), "pid": os.getpid()},
         "cases": cases,
         "aggregates": aggregates,
-        "does_not_establish": ["repository_understanding", "answer_correctness", "unmeasured_query_quality"],
+        "does_not_establish": [
+            "repository_understanding",
+            "answer_correctness",
+            "unmeasured_query_quality",
+            "agent_visible_source_evidence",
+        ],
     }
 
 
