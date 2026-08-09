@@ -12,7 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[3]
 WRAPPER = ROOT / "scripts" / "ops" / "repoground-cli-wrapper"
 RENDERER = ROOT / "scripts" / "ops" / "render_repoground_immutable_service.py"
-MANAGED_RUNTIME_RELATIVE = Path(".local/share/repoground-runtime/current/.venv/bin/python")
+MANAGED_ROOT_RELATIVE = Path(".local/share/repoground-runtime/current")
 
 
 def _renderer_module():
@@ -23,8 +23,7 @@ def _renderer_module():
     return module
 
 
-def _source_root(tmp_path: Path) -> Path:
-    root = tmp_path / "source"
+def _source_root(root: Path) -> Path:
     package = root / "repoground"
     package.mkdir(parents=True)
     (package / "__main__.py").write_text("", encoding="utf-8")
@@ -45,23 +44,24 @@ def _fake_python(path: Path, marker: Path, label: str, *, exit_code: int = 0) ->
     path.chmod(0o755)
 
 
-def _wrapper_env(home: Path, source_root: Path) -> dict[str, str]:
+def _wrapper_env(home: Path) -> dict[str, str]:
     env = os.environ.copy()
+    env.pop("REPOGROUND_ROOT", None)
     env.pop("REPOGROUND_PYTHON", None)
-    env.update({"HOME": str(home), "REPOGROUND_ROOT": str(source_root)})
+    env["HOME"] = str(home)
     return env
 
 
-def test_wrapper_prefers_active_immutable_runtime_when_present(tmp_path: Path) -> None:
+def test_wrapper_binds_managed_source_and_python_to_active_runtime(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    source_root = _source_root(tmp_path)
+    managed_root = _source_root(home / MANAGED_ROOT_RELATIVE)
+    managed_python = managed_root / ".venv" / "bin" / "python"
     marker = tmp_path / "managed.args"
-    managed_python = home / MANAGED_RUNTIME_RELATIVE
     _fake_python(managed_python, marker, "managed")
 
     completed = subprocess.run(
         [str(WRAPPER), "probe"],
-        env=_wrapper_env(home, source_root),
+        env=_wrapper_env(home),
         capture_output=True,
         text=True,
         check=False,
@@ -71,27 +71,24 @@ def test_wrapper_prefers_active_immutable_runtime_when_present(tmp_path: Path) -
     args = marker.read_text(encoding="utf-8").splitlines()
     assert args[0] == "managed"
     assert args[1:3] == ["-I", "-c"]
-    assert args[-3:] == [str(source_root), "0", "probe"]
+    assert args[-3:] == [str(managed_root), "0", "probe"]
 
 
-def test_wrapper_explicit_python_override_wins_over_managed_runtime(tmp_path: Path) -> None:
+def test_wrapper_explicit_overrides_do_not_mix_with_managed_runtime(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    source_root = _source_root(tmp_path)
+    managed_root = _source_root(home / MANAGED_ROOT_RELATIVE)
     managed_marker = tmp_path / "managed.args"
-    override_marker = tmp_path / "override.args"
-    managed_python = home / MANAGED_RUNTIME_RELATIVE
+    _fake_python(managed_root / ".venv" / "bin" / "python", managed_marker, "managed", exit_code=91)
+
+    source_root = _source_root(tmp_path / "source")
     override_python = tmp_path / "override-python"
-    _fake_python(managed_python, managed_marker, "managed", exit_code=91)
+    override_marker = tmp_path / "override.args"
     _fake_python(override_python, override_marker, "override")
-    env = _wrapper_env(home, source_root)
-    env["REPOGROUND_PYTHON"] = str(override_python)
+    env = _wrapper_env(home)
+    env.update({"REPOGROUND_ROOT": str(source_root), "REPOGROUND_PYTHON": str(override_python)})
 
     completed = subprocess.run(
-        [str(WRAPPER), "probe"],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
+        [str(WRAPPER), "probe"], env=env, capture_output=True, text=True, check=False
     )
 
     assert completed.returncode == 0, completed.stderr
@@ -101,27 +98,64 @@ def test_wrapper_explicit_python_override_wins_over_managed_runtime(tmp_path: Pa
     assert not managed_marker.exists()
 
 
-def test_wrapper_falls_back_to_path_python3_without_active_runtime(tmp_path: Path) -> None:
+def test_wrapper_explicit_source_uses_path_python3_instead_of_managed_python(tmp_path: Path) -> None:
     home = tmp_path / "home"
-    source_root = _source_root(tmp_path)
-    marker = tmp_path / "fallback.args"
+    managed_root = _source_root(home / MANAGED_ROOT_RELATIVE)
+    managed_marker = tmp_path / "managed.args"
+    _fake_python(managed_root / ".venv" / "bin" / "python", managed_marker, "managed", exit_code=91)
+
+    source_root = _source_root(tmp_path / "source")
+    fallback_marker = tmp_path / "fallback.args"
     fake_bin = tmp_path / "bin"
-    _fake_python(fake_bin / "python3", marker, "fallback")
-    env = _wrapper_env(home, source_root)
+    _fake_python(fake_bin / "python3", fallback_marker, "fallback")
+    env = _wrapper_env(home)
+    env["REPOGROUND_ROOT"] = str(source_root)
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
     completed = subprocess.run(
-        [str(WRAPPER), "probe"],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
+        [str(WRAPPER), "probe"], env=env, capture_output=True, text=True, check=False
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    args = fallback_marker.read_text(encoding="utf-8").splitlines()
+    assert args[0] == "fallback"
+    assert args[-3:] == [str(source_root), "1", "probe"]
+    assert not managed_marker.exists()
+
+
+def test_wrapper_falls_back_to_checkout_before_first_managed_activation(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    source_root = _source_root(home / "repos" / "repoground")
+    marker = tmp_path / "fallback.args"
+    fake_bin = tmp_path / "bin"
+    _fake_python(fake_bin / "python3", marker, "fallback")
+    env = _wrapper_env(home)
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    completed = subprocess.run(
+        [str(WRAPPER), "probe"], env=env, capture_output=True, text=True, check=False
     )
 
     assert completed.returncode == 0, completed.stderr
     args = marker.read_text(encoding="utf-8").splitlines()
     assert args[0] == "fallback"
     assert args[-3:] == [str(source_root), "1", "probe"]
+
+
+def test_wrapper_fails_closed_when_activation_exists_without_python(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _source_root(home / MANAGED_ROOT_RELATIVE)
+
+    completed = subprocess.run(
+        [str(WRAPPER), "probe"],
+        env=_wrapper_env(home),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "managed runtime activation exists but Python is unavailable" in completed.stderr
 
 
 def test_renderer_binds_source_and_python_to_same_immutable_commit(tmp_path: Path) -> None:
