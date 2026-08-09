@@ -1,6 +1,9 @@
 import json
 
-from merger.repoground.tests.test_repoground_vs_grep_read_benchmark import _benchmark_module
+from merger.repoground.tests.test_repoground_vs_grep_read_benchmark import (
+    _benchmark_module,
+    _fixture_index,
+)
 
 
 def test_v3_fixture_payload_measurement_matches_contract_proof(monkeypatch, tmp_path):
@@ -21,3 +24,15 @@ def test_v3_fixture_payload_measurement_matches_contract_proof(monkeypatch, tmp_
     assert (response_bytes + 3) // 4 == 53
     assert process_calls == 0
     assert read_calls == 1
+
+
+def test_v3_readonly_index_uri_handles_uri_delimiters(tmp_path):
+    module = _benchmark_module()
+    root, index, questions = _fixture_index(tmp_path)
+    special_index = index.with_name("fixture?x#y.index.sqlite")
+    index.rename(special_index)
+
+    report = module.run(special_index, root, questions, k=1)
+
+    assert report["inputs"]["index_path"] == special_index.name
+    assert report["cases"][0]["repoground"]["paths"] == ["src/widget.py"]
