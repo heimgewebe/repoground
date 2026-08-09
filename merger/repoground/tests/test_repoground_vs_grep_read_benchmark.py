@@ -120,7 +120,11 @@ def test_benchmark_defines_false_confidence_for_missing_targets_or_stale_sources
     module = _benchmark_module()
     root, index, questions = _fixture_index(tmp_path)
     questions.write_text(json.dumps([
-        {"query": "widget", "expected_patterns": ["src/widget.py", "missing.py"]}
+        {
+            "query": "widget",
+            "expected_paths": ["src/widget.py", "missing.py"],
+            "expected_evidence": [],
+        }
         for _ in range(20)
     ]), encoding="utf-8")
 
@@ -185,7 +189,12 @@ def test_benchmark_fails_on_quality_regression(monkeypatch, tmp_path):
     root, index, questions = _fixture_index(tmp_path)
     (root / "missing.py").write_text("# baseline-only target\n", encoding="utf-8")
     questions.write_text(json.dumps([
-        {"query": "widget", "category": "fixture", "expected_patterns": ["src/widget.py", "missing.py"]}
+        {
+            "query": "widget",
+            "category": "fixture",
+            "expected_paths": ["src/widget.py", "missing.py"],
+            "expected_evidence": [],
+        }
         for _ in range(20)
     ]), encoding="utf-8")
 
