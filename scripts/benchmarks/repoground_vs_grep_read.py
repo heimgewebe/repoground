@@ -33,6 +33,23 @@ COMPACTION_REQUIRED_PERCENT = 60.0
 TOKEN_PROXY_BYTES_PER_TOKEN = 4
 READ_LIMIT_BYTES = 4096
 
+_GREP_READ_FRAMING_STOPWORDS = frozenset(
+    {
+        "and", "are", "both", "does", "during", "find", "for", "from",
+        "get", "give", "how", "into", "its", "locate", "primary",
+        "repository", "show", "that", "the", "this", "used", "uses",
+        "using", "what", "where", "which", "with",
+    }
+)
+
+# Evaluation artifacts can contain the benchmark questions or prior expected
+# targets. Returning them would let either condition learn from the test itself.
+_BENCHMARK_LEAKAGE_GLOBS = (
+    "docs/retrieval/review_queries.v*.json",
+    "docs/proofs/repoground-vs-grep-read*",
+    "docs/diagnostics/retrieval-v*-default-promotion-*",
+)
+
 
 def _execute_review_query(*args: Any, **kwargs: Any) -> dict[str, Any]:
     from merger.repoground.retrieval.review_query import execute_review_query
@@ -60,7 +77,26 @@ def _tree_sha256(root: Path) -> str:
 
 
 def _tokens(question: str) -> list[str]:
-    return list(dict.fromkeys(re.findall(r"[A-Za-z0-9_]{3,}", question.lower())))
+    raw = list(dict.fromkeys(re.findall(r"[A-Za-z0-9_]{3,}", question.lower())))
+    useful = [token for token in raw if token not in _GREP_READ_FRAMING_STOPWORDS]
+    return useful or raw
+
+
+def _benchmark_excluded_paths(root: Path, questions_path: Path) -> list[str]:
+    root = root.resolve()
+    excluded: set[str] = set()
+    try:
+        relative_questions = questions_path.resolve().relative_to(root).as_posix()
+    except ValueError:
+        pass
+    else:
+        excluded.add(relative_questions)
+
+    for pattern in _BENCHMARK_LEAKAGE_GLOBS:
+        for path in root.glob(pattern):
+            if path.is_file() and not path.is_symlink():
+                excluded.add(path.relative_to(root).as_posix())
+    return sorted(excluded)
 
 
 def _target_state(candidates: list[str], expected: list[str]) -> dict[str, Any]:
@@ -201,12 +237,21 @@ def _python_matching_paths(root: Path, token: str) -> list[Path]:
     return matches
 
 
-def _grep_read(root: Path, question: str, k: int) -> tuple[dict[str, Any], int, int]:
-    paths: list[str] = []
+def _grep_read(
+    root: Path,
+    question: str,
+    k: int,
+    *,
+    excluded_paths: list[str] | None = None,
+) -> tuple[dict[str, Any], int, int]:
+    tokens = _tokens(question)
+    excluded = set(excluded_paths or [])
+    match_counts: Counter[str] = Counter()
     process_calls = 0
     ripgrep = shutil.which("rg")
     search_engine = "ripgrep" if ripgrep else "python_utf8_substring"
-    for token in _tokens(question):
+
+    for token in tokens:
         if ripgrep:
             process_calls += 1
             run = subprocess.run(
@@ -218,18 +263,24 @@ def _grep_read(root: Path, question: str, k: int) -> tuple[dict[str, Any], int, 
             candidates = [Path(raw) for raw in run.stdout.splitlines()]
         else:
             candidates = _python_matching_paths(root, token)
+
+        seen_for_token: set[str] = set()
         for path in candidates:
             try:
                 relative = path.relative_to(root).as_posix()
             except ValueError:
                 continue
-            if relative not in paths:
-                paths.append(relative)
-            if len(paths) >= k:
-                break
-        if len(paths) >= k:
-            break
+            if relative in excluded or relative in seen_for_token:
+                continue
+            seen_for_token.add(relative)
+            match_counts[relative] += 1
 
+    def rank_key(relative: str) -> tuple[int, int, str]:
+        path_text = relative.casefold()
+        path_term_matches = sum(token in path_text for token in tokens)
+        return (-match_counts[relative], -path_term_matches, relative)
+
+    paths = sorted(match_counts, key=rank_key)[:k]
     reads = []
     for relative in paths:
         with (root / relative).open("rb") as handle:
@@ -244,8 +295,14 @@ def _grep_read(root: Path, question: str, k: int) -> tuple[dict[str, Any], int, 
         "k": k,
         "status": "available",
         "search_engine": search_engine,
+        "query_terms": tokens,
+        "ranking": "distinct_query_term_matches_desc_then_path_term_matches_desc_then_path",
         "paths": paths,
         "reads": reads,
+        "applied_exclusions": {
+            "paths": sorted(excluded),
+            "reason": "benchmark_leakage_control",
+        },
     }, process_calls, len(reads)
 
 
@@ -401,13 +458,16 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
     root = repo_root.resolve()
     index = index.resolve()
     index_mtime_ns = index.stat().st_mtime_ns
+    benchmark_excluded_paths = _benchmark_excluded_paths(root, questions_path)
     cases = []
     for ordinal, case in enumerate(questions, start=1):
         query = case["query"]
         expected_paths, expected_evidence = _expected_contract(case)
 
         started = time.perf_counter_ns()
-        rg_result = _execute_review_query(index, query, k=k)
+        rg_result = _execute_review_query(
+            index, query, k=k, excluded_paths=benchmark_excluded_paths
+        )
         rg_visible_payload = _attach_repoground_visible_content(index, rg_result)
         rg_runtime = time.perf_counter_ns() - started
         rg_paths = [hit["path"] for hit in rg_result["results"]]
@@ -415,7 +475,9 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
         rg_compact = _compact_repoground_response(rg_result, rg_freshness)
 
         started = time.perf_counter_ns()
-        grep_result, process_calls, read_calls = _grep_read(root, query, k)
+        grep_result, process_calls, read_calls = _grep_read(
+            root, query, k, excluded_paths=benchmark_excluded_paths
+        )
         grep_runtime = time.perf_counter_ns() - started
         grep_paths = grep_result["paths"]
         grep_visible_payload = [
@@ -483,7 +545,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
 
     return {
         "kind": "repoground_vs_grep_read_benchmark",
-        "version": "v3",
+        "version": "v4",
         "status": status,
         "acceptance": {
             "same_question_set": True,
@@ -506,6 +568,11 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "evidence_path_binding": "matched_expected_paths_only",
             "repoground_visible_payload": "selected_index_chunk_content",
             "grep_read_visible_payload": f"first_{READ_LIMIT_BYTES}_source_bytes_per_path",
+            "grep_read_token_selection": "deduped_nonframing_query_terms",
+            "grep_read_path_ranking": (
+                "distinct_query_term_matches_desc_then_path_term_matches_desc_then_path"
+            ),
+            "benchmark_leakage_exclusion_globs": list(_BENCHMARK_LEAKAGE_GLOBS),
         },
         "inputs": {
             "benchmark_script_sha256": _sha256(Path(__file__)),
@@ -514,6 +581,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "repo_tree_sha256": _tree_sha256(root),
             "index_path": index.name,
             "repo_root": ".",
+            "benchmark_excluded_paths": benchmark_excluded_paths,
             "absolute_paths_persisted": False,
         },
         "environment": {
