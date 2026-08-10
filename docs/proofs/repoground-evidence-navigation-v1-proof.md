@@ -25,7 +25,7 @@ public compatibility aliases.
 ## Reproducible local benchmark
 
 `scripts/benchmarks/repoground_vs_grep_read.py` consumes the committed
-20-question `docs/retrieval/review_queries.v1.json` by default and an existing
+20-question `docs/retrieval/review_queries.v2.json` by default and an existing
 local index:
 
 ```bash
@@ -35,13 +35,18 @@ python3 scripts/benchmarks/repoground_vs_grep_read.py \
   --out /tmp/repoground-vs-grep-read.json
 ```
 
-The current harness emits report contract v3. Legacy `expected_patterns`
-retains its historical all-path meaning; the opt-in
-`docs/retrieval/review_queries.v2.json` separates `expected_paths` from
-`expected_evidence`. The grep/read condition now includes the bounded source
-content it actually reads in its measured response payload, so current
-`response_bytes` and token-proxy values are intentionally not comparable to the
-older v2 report's baseline payload accounting.
+The current harness emits report contract v5. The default v2 question contract
+separates `expected_paths` from `expected_evidence`; the historical v1 contract
+remains explicitly runnable with
+`--questions docs/retrieval/review_queries.v1.json` and retains its all-path
+`expected_patterns` meaning. Each v5 report records the selected question
+contract plus a repository-relative question path when that input is inside the
+measured repository; external absolute question paths are not persisted.
+
+The grep/read condition includes the bounded source content it actually reads in
+its measured response payload, so current `response_bytes` and token-proxy values
+are intentionally not comparable to older harness versions that used different
+payload accounting.
 
 False confidence is recorded only when a condition returned a result and is
 therefore presented as useful, while one or more expected targets are absent
@@ -61,20 +66,19 @@ The decision is fail-closed and has three outcomes:
 
 The committed `repoground-vs-grep-read.v2.json` is a **historical measurement
 from the v2 harness**. It remains immutable evidence for that earlier harness,
-not a current performance claim for report contract v3. Its recorded numbers
-were: 20 fixed questions; RepoGround missed 37 expected targets versus 60 for
-`grep/read`; both conditions had 20 false-confidence cases; RepoGround used
-551.335 ms versus 166.691 ms, emitted 292,150 raw bytes, and its 98,966-byte
-compact form was larger than the then-recorded 26,690-byte baseline.
+not a current performance claim. Its recorded numbers were: 20 fixed questions;
+RepoGround missed 37 expected targets versus 60 for `grep/read`; both conditions
+had 20 false-confidence cases; RepoGround used 551.335 ms versus 166.691 ms,
+emitted 292,150 raw bytes, and its 98,966-byte compact form was larger than the
+then-recorded 26,690-byte baseline.
 
-Those payload totals must not be compared with current v3 runs because v3
-charges grep/read for the bounded source text delivered to the consumer and
-uses the corrected locator/evidence scoring contract. See
-`repoground-vs-grep-read.v3-contract-proof.md` for current deterministic
-measurement-contract evidence. A new full-repository v3 performance report
-requires a fresh local bundle index; no such index is committed here, so this
-proof makes no new full-repository performance or preference claim.
+Those payload totals must not be compared with current v5 runs. v3 changed
+visible-payload accounting, v4 corrected comparator fairness, and v5 promotes
+the explicit locator/evidence question contract. Their historical contracts are
+preserved in `repoground-vs-grep-read.v3-contract-proof.md` and
+`repoground-vs-grep-read.v4-contract-proof.md`; current hash-bound default and
+legacy readbacks are documented in `repoground-vs-grep-read.v5-contract-proof.md`.
 
-No category is recommended and no default activation follows from the
-historical v2 measurement. The benchmark does not claim repository
-understanding, answer correctness or quality beyond the measured cases.
+The historical v2 measurement recommends no category and caused no default
+activation. The current benchmark still does not claim repository understanding,
+answer correctness or quality beyond the measured cases.
