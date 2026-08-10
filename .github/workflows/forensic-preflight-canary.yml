@@ -72,7 +72,7 @@ jobs:
         with:
           # The RepoGround dependency locks are generated and supported on
           # Python 3.12; every lock consumer must use the same interpreter line.
-          python-version: '3.12'
+          python-version: '3.14'
 
       - name: Log Python Version
         run: python --version
