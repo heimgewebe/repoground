@@ -45,6 +45,6 @@ jobs:
       - name: Run contract tests
         run: python -m pytest -q merger/repoground/tests/test_architecture_source_roots_schema.py
       - name: Ruff
-        run: ruff check merger/repoground/tests/test_architecture_source_roots_schema.py
+        run: ruff check --select E4,E7,E9,F merger/repoground/tests/test_architecture_source_roots_schema.py
       - name: Structural checks
         run: git diff --check

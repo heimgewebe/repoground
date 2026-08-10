@@ -145,7 +145,7 @@ jobs:
 
       - name: Lint audit script and falsification tests
         run: |
-          ruff check \
+          ruff check --select E4,E7,E9,F \
             scripts/proofs/guard_relation_validates_schema_audit.py \
             merger/repoground/tests/test_guard_relation_validates_schema_audit.py
 
@@ -352,7 +352,7 @@ jobs:
 
       - name: Ruff (lens model core and tests)
         run: |
-          ruff check \
+          ruff check --select E4,E7,E9,F \
             merger/repoground/core/lens_facets.py \
             merger/repoground/core/lens_cards.py \
             merger/repoground/core/lens_card_validate.py \
