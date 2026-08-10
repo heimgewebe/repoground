@@ -3,11 +3,60 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .query_core import execute_query, normalize_excluded_paths
 from .review_router import plan_review_query
+
+
+_SOURCE_DEPRIORITIZED_LAYERS = frozenset({"contract", "docs", "test"})
+_PATH_TOKEN_RE = re.compile(r"[^\W_]+")
+
+
+def _rerank_source_lane(
+    hits: List[Dict[str, Any]], *, anchor_terms: List[str]
+) -> List[Dict[str, Any]]:
+    """Prefer source-like paths, then subject-rich paths, without dropping candidates.
+
+    The source review lane is intentionally broad so production code outside one
+    conventional directory remains eligible.  That breadth must not make tests,
+    docs, or contracts act as the source lane merely because their prose has a
+    stronger BM25 score.  Re-ranking is therefore soft and deterministic: known
+    non-source layers are demoted, subject terms in the repository path break
+    ties, and the existing query rank is the final tie-breaker.
+    """
+    anchors = [term.casefold() for term in anchor_terms if term]
+    decorated = []
+    for original_rank, hit in enumerate(hits, start=1):
+        layer = str(hit.get("layer") or "").casefold()
+        path_tokens = {
+            token.casefold()
+            for token in _PATH_TOKEN_RE.findall(str(hit.get("path") or ""))
+        }
+        path_anchor_matches = sum(anchor in path_tokens for anchor in anchors)
+        non_source_layer = layer in _SOURCE_DEPRIORITIZED_LAYERS
+        diagnostics = hit["why"].setdefault("diagnostics", {})
+        review_diag = diagnostics["review_intent"]
+        review_diag["source_role_rerank"] = {
+            "original_lane_rank": original_rank,
+            "layer": layer or None,
+            "non_source_layer_penalty": int(non_source_layer),
+            "path_anchor_matches": path_anchor_matches,
+            "anchor_term_count": len(anchors),
+            "method": "source_layer_then_path_anchor_coverage_then_original_rank",
+        }
+        decorated.append(
+            ((int(non_source_layer), -path_anchor_matches, original_rank), hit)
+        )
+
+    reranked = [hit for _, hit in sorted(decorated, key=lambda item: item[0])]
+    for lane_rank, hit in enumerate(reranked, start=1):
+        review_diag = hit["why"]["diagnostics"]["review_intent"]
+        review_diag["lane_rank"] = lane_rank
+        review_diag["source_role_rerank"]["reranked_lane_rank"] = lane_rank
+    return reranked
 
 
 def _collect_unique_path_candidates(
@@ -209,6 +258,11 @@ def execute_review_query(
                     break
             if len(lane_hits) >= candidate_path_target:
                 break
+
+        if lane["name"] == "source":
+            lane_hits = _rerank_source_lane(
+                lane_hits, anchor_terms=list(plan.get("anchor_terms") or [])
+            )
 
         lane_results.append((lane["name"], lane_hits))
         lane_summaries.append(
