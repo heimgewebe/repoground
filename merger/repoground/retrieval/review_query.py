@@ -59,6 +59,17 @@ def _rerank_source_lane(
     return reranked
 
 
+def _rerank_review_lane(
+    lane_name: str,
+    hits: List[Dict[str, Any]],
+    *,
+    anchor_terms: List[str],
+) -> List[Dict[str, Any]]:
+    if lane_name != "source":
+        return hits
+    return _rerank_source_lane(hits, anchor_terms=anchor_terms)
+
+
 def _collect_unique_path_candidates(
     run_query: Callable[[int], Dict[str, Any]],
     *,
@@ -259,10 +270,11 @@ def execute_review_query(
             if len(lane_hits) >= candidate_path_target:
                 break
 
-        if lane["name"] == "source":
-            lane_hits = _rerank_source_lane(
-                lane_hits, anchor_terms=list(plan.get("anchor_terms") or [])
-            )
+        lane_hits = _rerank_review_lane(
+            lane["name"],
+            lane_hits,
+            anchor_terms=list(plan.get("anchor_terms") or []),
+        )
 
         lane_results.append((lane["name"], lane_hits))
         lane_summaries.append(
