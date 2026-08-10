@@ -82,14 +82,18 @@ def _tokens(question: str) -> list[str]:
     return useful or raw
 
 
+def _repository_relative_path(root: Path, path: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
 def _benchmark_excluded_paths(root: Path, questions_path: Path) -> list[str]:
     root = root.resolve()
     excluded: set[str] = set()
-    try:
-        relative_questions = questions_path.resolve().relative_to(root).as_posix()
-    except ValueError:
-        pass
-    else:
+    relative_questions = _repository_relative_path(root, questions_path)
+    if relative_questions is not None:
         excluded.add(relative_questions)
 
     for pattern in _BENCHMARK_LEAKAGE_GLOBS:
@@ -117,6 +121,20 @@ def _expected_contract(case: dict[str, Any]) -> tuple[list[str], list[str]]:
             list(case.get("expected_evidence") or []),
         )
     return list(case.get("expected_patterns") or []), []
+
+
+def _selected_question_contract(questions: list[dict[str, Any]]) -> str:
+    contracts = {
+        (
+            "expected_paths+expected_evidence"
+            if "expected_paths" in case or "expected_evidence" in case
+            else "expected_patterns"
+        )
+        for case in questions
+    }
+    if len(contracts) == 1:
+        return next(iter(contracts))
+    return "mixed"
 
 
 def _expected_targets(
@@ -458,6 +476,8 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
     root = repo_root.resolve()
     index = index.resolve()
     index_mtime_ns = index.stat().st_mtime_ns
+    selected_question_contract = _selected_question_contract(questions)
+    questions_repository_path = _repository_relative_path(root, questions_path)
     benchmark_excluded_paths = _benchmark_excluded_paths(root, questions_path)
     cases = []
     for ordinal, case in enumerate(questions, start=1):
@@ -566,6 +586,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "legacy_question_contract": "expected_patterns",
             "default_questions_path": "docs/retrieval/review_queries.v2.json",
             "legacy_questions_path": "docs/retrieval/review_queries.v1.json",
+            "selected_question_contract": selected_question_contract,
             "source_evidence_scoring": "condition_visible_payload",
             "evidence_path_binding": "matched_expected_paths_only",
             "repoground_visible_payload": "selected_index_chunk_content",
@@ -580,6 +601,12 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "benchmark_script_sha256": _sha256(Path(__file__)),
             "index_sha256": _sha256(index),
             "questions_sha256": _sha256(questions_path),
+            "questions_path": questions_repository_path,
+            "questions_path_scope": (
+                "repo_relative"
+                if questions_repository_path is not None
+                else "external_not_persisted"
+            ),
             "repo_tree_sha256": _tree_sha256(root),
             "index_path": index.name,
             "repo_root": ".",

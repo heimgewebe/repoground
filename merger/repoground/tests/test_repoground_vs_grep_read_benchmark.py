@@ -58,6 +58,7 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     assert configuration["legacy_question_contract"] == "expected_patterns"
     assert configuration["default_questions_path"] == "docs/retrieval/review_queries.v2.json"
     assert configuration["legacy_questions_path"] == "docs/retrieval/review_queries.v1.json"
+    assert configuration["selected_question_contract"] == "expected_patterns"
     assert configuration["source_evidence_scoring"] == "condition_visible_payload"
     assert configuration["evidence_path_binding"] == "matched_expected_paths_only"
     assert configuration["repoground_visible_payload"] == "selected_index_chunk_content"
@@ -71,6 +72,8 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     }
     assert report["inputs"]["repo_root"] == "."
     assert report["inputs"]["index_path"] == index.name
+    assert report["inputs"]["questions_path"] is None
+    assert report["inputs"]["questions_path_scope"] == "external_not_persisted"
     assert report["inputs"]["absolute_paths_persisted"] is False
     assert str(tmp_path) not in json.dumps(report["inputs"])
     for case in report["cases"]:
@@ -85,6 +88,38 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
         assert case["repoground"]["compaction"]["pass"] is True
         assert case["repoground"]["false_confidence"] is False
     assert report["aggregates"]["repoground"]["compaction"]["aggregate_pass"] is True
+
+
+def test_benchmark_records_selected_contract_and_safe_repo_relative_question_path(tmp_path):
+    module = _benchmark_module()
+    root, index, _ = _fixture_index(tmp_path)
+    questions = root / "docs/retrieval/review_queries.v2.json"
+    questions.parent.mkdir(parents=True)
+    questions.write_text(
+        json.dumps(
+            [
+                {
+                    "query": "widget",
+                    "category": "fixture",
+                    "expected_paths": ["src/widget.py"],
+                    "expected_evidence": ["def widget"],
+                }
+                for _ in range(20)
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    report = module.run(index, root, questions, k=1)
+
+    assert report["configuration"]["selected_question_contract"] == (
+        "expected_paths+expected_evidence"
+    )
+    assert report["inputs"]["questions_path"] == (
+        "docs/retrieval/review_queries.v2.json"
+    )
+    assert report["inputs"]["questions_path_scope"] == "repo_relative"
+    assert str(tmp_path) not in json.dumps(report["inputs"])
 
 
 def test_benchmark_cli_defaults_to_v2_question_contract(monkeypatch, tmp_path):

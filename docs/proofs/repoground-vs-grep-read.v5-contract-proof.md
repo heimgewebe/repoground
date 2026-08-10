@@ -43,8 +43,12 @@ contract selection and explicit report metadata:
 - legacy question contract: `expected_patterns`;
 - legacy v1 `expected_patterns` semantics remain `all=>path` when selected;
 - report version is `v5`;
-- reports expose `default_questions_path` and `legacy_questions_path` so the
-  selection is machine-visible rather than inferred from prose.
+- reports expose `default_questions_path` and `legacy_questions_path`;
+- `selected_question_contract` records the contract actually inferred from the
+  selected question set for that run;
+- `inputs.questions_path` records the selected question file only when it can be
+  represented safely relative to the measured repository, otherwise it is null
+  with `questions_path_scope=external_not_persisted`.
 
 No goldset file is modified by this promotion.
 
@@ -87,16 +91,19 @@ same comparator implementation:
 - repository-tree SHA-256:
   `eebed2ebaffe7f248a427478e508f634032bcea3e83093c0e7f7780845e05068`;
 - v5 benchmark script SHA-256:
-  `be8e3b3fe98ded5e2b0cc17b210e162bd0cc6d2806bf0a7017ae95255233e490`;
+  `3aae0e890cd27dba48228ab34d3277f0bc6ef1781e68e10728c0e729a4b027d6`;
 - RepoGround source-index freshness: **20/20 fresh** in both runs.
 
 Canonical default invocation, with **no `--questions` argument**:
 
 - report SHA-256:
-  `c58d64dc65f3921901d0414ebb9f01321a5f9e3d407550c7c80fe70fc2852bd9`;
+  `45c69ec435ebfc84acca870cab6f831229e9a1fec49c78b807fb69730a0c56b8`;
 - report version: `v5`;
 - status: `pass`;
 - `default_questions_path`: `docs/retrieval/review_queries.v2.json`;
+- `selected_question_contract`: `expected_paths+expected_evidence`;
+- `inputs.questions_path`: `docs/retrieval/review_queries.v2.json` with
+  `questions_path_scope=repo_relative`;
 - `legacy_question_contract`: `expected_patterns`;
 - v2 question-set SHA-256:
   `47c6aed16294e8543f65324f26342a846b89951e918e6e7880d3d7ea1e6754e9`;
@@ -109,11 +116,14 @@ Canonical default invocation, with **no `--questions` argument**:
 Explicit legacy invocation with `--questions docs/retrieval/review_queries.v1.json`:
 
 - report SHA-256:
-  `f1879b2cd01d583c8b125bee45616d14d0ac09bda2bb022debec3216b21ebf6d`;
+  `60aa82ae4d4b9b90961f72cc4ad8fbb08e9e8b27cfb9ffd4e4d27ae709174a51`;
 - report version: `v5`;
 - status: `pass`;
 - v1 question-set SHA-256 remains
   `47f562e6c5b5b63205930e92186d406d33029f7330796312ca5844a177fc3f77`;
+- `selected_question_contract`: `expected_patterns`;
+- `inputs.questions_path`: `docs/retrieval/review_queries.v1.json` with
+  `questions_path_scope=repo_relative`;
 - `legacy_expected_pattern_contract` remains `all=>path`;
 - RepoGround missing targets: **29**; grep/read: **53**;
 - RepoGround false-confidence cases: **19**; grep/read: **20**.
