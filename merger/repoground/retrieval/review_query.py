@@ -3,11 +3,93 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from .query_core import execute_query, normalize_excluded_paths
 from .review_router import plan_review_query
+
+
+_SOURCE_DEPRIORITIZED_LAYERS = frozenset({"docs", "test"})
+_SOURCE_DEPRIORITIZED_PATH_PARTS = frozenset({"contracts"})
+_REVIEW_VARIANT_RANK = {"strict": 0, "relaxed": 1}
+_PATH_TOKEN_RE = re.compile(r"[^\W_]+")
+
+
+def _rerank_source_lane(
+    hits: List[Dict[str, Any]], *, anchor_terms: List[str]
+) -> List[Dict[str, Any]]:
+    """Prefer source-like paths, then subject-rich paths, without dropping candidates.
+
+    The source review lane is intentionally broad so production code outside one
+    conventional directory remains eligible.  That breadth must not make tests,
+    docs, or contracts act as the source lane merely because their prose has a
+    stronger BM25 score.  Re-ranking is therefore soft and deterministic: known
+    non-source layers are demoted, subject terms in the repository path break
+    ties, and the existing query rank is the final tie-breaker.
+    """
+    anchors = [term.casefold() for term in anchor_terms if term]
+    decorated = []
+    for original_rank, hit in enumerate(hits, start=1):
+        layer = str(hit.get("layer") or "").casefold()
+        path = str(hit.get("path") or "")
+        path_parts = {part.casefold() for part in Path(path).parts}
+        path_tokens = {
+            token.casefold() for token in _PATH_TOKEN_RE.findall(path)
+        }
+        path_anchor_matches = sum(anchor in path_tokens for anchor in anchors)
+        non_source_layer = layer in _SOURCE_DEPRIORITIZED_LAYERS
+        non_source_path = bool(path_parts & _SOURCE_DEPRIORITIZED_PATH_PARTS)
+        non_source_penalty = int(non_source_layer or non_source_path)
+        diagnostics = hit["why"].setdefault("diagnostics", {})
+        review_diag = diagnostics["review_intent"]
+        variant = str(review_diag.get("variant") or "").casefold()
+        variant_rank = _REVIEW_VARIANT_RANK.get(variant, len(_REVIEW_VARIANT_RANK))
+        review_diag["source_role_rerank"] = {
+            "original_lane_rank": original_rank,
+            "layer": layer or None,
+            "variant": variant or None,
+            "variant_rank": variant_rank,
+            "non_source_layer_penalty": int(non_source_layer),
+            "non_source_path_penalty": int(non_source_path),
+            "non_source_penalty": non_source_penalty,
+            "path_anchor_matches": path_anchor_matches,
+            "anchor_term_count": len(anchors),
+            "method": (
+                "source_role_then_variant_then_path_anchor_coverage_"
+                "then_original_rank"
+            ),
+        }
+        decorated.append(
+            (
+                (
+                    non_source_penalty,
+                    variant_rank,
+                    -path_anchor_matches,
+                    original_rank,
+                ),
+                hit,
+            )
+        )
+
+    reranked = [hit for _, hit in sorted(decorated, key=lambda item: item[0])]
+    for lane_rank, hit in enumerate(reranked, start=1):
+        review_diag = hit["why"]["diagnostics"]["review_intent"]
+        review_diag["lane_rank"] = lane_rank
+        review_diag["source_role_rerank"]["reranked_lane_rank"] = lane_rank
+    return reranked
+
+
+def _rerank_review_lane(
+    lane_name: str,
+    hits: List[Dict[str, Any]],
+    *,
+    anchor_terms: List[str],
+) -> List[Dict[str, Any]]:
+    if lane_name != "source":
+        return hits
+    return _rerank_source_lane(hits, anchor_terms=anchor_terms)
 
 
 def _collect_unique_path_candidates(
@@ -209,6 +291,12 @@ def execute_review_query(
                     break
             if len(lane_hits) >= candidate_path_target:
                 break
+
+        lane_hits = _rerank_review_lane(
+            lane["name"],
+            lane_hits,
+            anchor_terms=list(plan.get("anchor_terms") or []),
+        )
 
         lane_results.append((lane["name"], lane_hits))
         lane_summaries.append(
