@@ -65,36 +65,36 @@
       "path": ".github/workflows/graph-bundle-sources.yml",
       "class": "fast_feedback",
       "rationale": "Graph bundle source contract.",
-      "sha256": "dd936420c963badfd234518afb7370d32d9c8d0320e21d7774e375ca45ba0fbf",
-      "bytes": 4502
+      "sha256": "c21bedf1071a35eebcc52b869a2c1a51bb97b38a68c135d8c3ffc96b71db1f3d",
+      "bytes": 4522
     },
     {
       "path": ".github/workflows/graph-model.yml",
       "class": "diagnostic",
       "rationale": "Graph model suite (broader than single contract).",
-      "sha256": "f02a19dcb16a249734a70315e39afd257e2873d3f42d952133647fa6f355faf7",
-      "bytes": 6430
+      "sha256": "1d634ea8bd68e66f6e4394da0e9887933c091850c82576d0e97c3c138e7e5890",
+      "bytes": 6450
     },
     {
       "path": ".github/workflows/graph-quality-goldset.yml",
       "class": "diagnostic",
       "rationale": "Graph quality goldset evaluation.",
-      "sha256": "f2aa1a3bb94b77fb3db35ba71d9924f60751912bb7877038bf3d9a1145afc83a",
-      "bytes": 2816
+      "sha256": "4a36d523d2e072c4d04132adf083c9a897627208a31745553b2c372180ae8893",
+      "bytes": 2836
     },
     {
       "path": ".github/workflows/graph-source-roots.yml",
       "class": "fast_feedback",
       "rationale": "Graph source-root contract.",
-      "sha256": "e1caffb741c64cc85ca6ae01c65896ec2b3f45fafe8dea5b72ff7dd3e9f4bd3e",
-      "bytes": 2092
+      "sha256": "33cc704aec84257951159393f35fb3a587b1ed99ecf6eb30b3077c6c0926e7f4",
+      "bytes": 2112
     },
     {
       "path": ".github/workflows/lens-model.yml",
       "class": "diagnostic",
       "rationale": "Lens model suite.",
-      "sha256": "e1b0e3a0ebdce1add078612d2df981994a91ed8be7e6f22c9e5e2287005f526a",
-      "bytes": 16858
+      "sha256": "6e3151e8451e528a394c0f644d8d9560a2b0d34311d263996b23880365da1071",
+      "bytes": 16898
     },
     {
       "path": ".github/workflows/lint.yml",
@@ -135,8 +135,8 @@
       "path": ".github/workflows/python-call-graph-goldset.yml",
       "class": "diagnostic",
       "rationale": "Call-graph goldset evaluation.",
-      "sha256": "7b3c2553fab8e05aefcce5d554fd3f5ece0512c393b6a4d31c840d0c7aafb4fd",
-      "bytes": 3900
+      "sha256": "3992b03266e3191d875a5050b4a8c378865ff911933a25f6bbc7e97b7cf184a3",
+      "bytes": 3920
     },
     {
       "path": ".github/workflows/semantic-lock.yml",
