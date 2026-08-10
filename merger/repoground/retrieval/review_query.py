@@ -11,7 +11,9 @@ from .query_core import execute_query, normalize_excluded_paths
 from .review_router import plan_review_query
 
 
-_SOURCE_DEPRIORITIZED_LAYERS = frozenset({"contract", "docs", "test"})
+_SOURCE_DEPRIORITIZED_LAYERS = frozenset({"docs", "test"})
+_SOURCE_DEPRIORITIZED_PATH_PARTS = frozenset({"contracts"})
+_REVIEW_VARIANT_RANK = {"strict": 0, "relaxed": 1}
 _PATH_TOKEN_RE = re.compile(r"[^\W_]+")
 
 
@@ -31,24 +33,44 @@ def _rerank_source_lane(
     decorated = []
     for original_rank, hit in enumerate(hits, start=1):
         layer = str(hit.get("layer") or "").casefold()
+        path = str(hit.get("path") or "")
+        path_parts = {part.casefold() for part in Path(path).parts}
         path_tokens = {
-            token.casefold()
-            for token in _PATH_TOKEN_RE.findall(str(hit.get("path") or ""))
+            token.casefold() for token in _PATH_TOKEN_RE.findall(path)
         }
         path_anchor_matches = sum(anchor in path_tokens for anchor in anchors)
         non_source_layer = layer in _SOURCE_DEPRIORITIZED_LAYERS
+        non_source_path = bool(path_parts & _SOURCE_DEPRIORITIZED_PATH_PARTS)
+        non_source_penalty = int(non_source_layer or non_source_path)
         diagnostics = hit["why"].setdefault("diagnostics", {})
         review_diag = diagnostics["review_intent"]
+        variant = str(review_diag.get("variant") or "").casefold()
+        variant_rank = _REVIEW_VARIANT_RANK.get(variant, len(_REVIEW_VARIANT_RANK))
         review_diag["source_role_rerank"] = {
             "original_lane_rank": original_rank,
             "layer": layer or None,
+            "variant": variant or None,
+            "variant_rank": variant_rank,
             "non_source_layer_penalty": int(non_source_layer),
+            "non_source_path_penalty": int(non_source_path),
+            "non_source_penalty": non_source_penalty,
             "path_anchor_matches": path_anchor_matches,
             "anchor_term_count": len(anchors),
-            "method": "source_layer_then_path_anchor_coverage_then_original_rank",
+            "method": (
+                "source_role_then_variant_then_path_anchor_coverage_"
+                "then_original_rank"
+            ),
         }
         decorated.append(
-            ((int(non_source_layer), -path_anchor_matches, original_rank), hit)
+            (
+                (
+                    non_source_penalty,
+                    variant_rank,
+                    -path_anchor_matches,
+                    original_rank,
+                ),
+                hit,
+            )
         )
 
     reranked = [hit for _, hit in sorted(decorated, key=lambda item: item[0])]

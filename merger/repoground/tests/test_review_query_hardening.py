@@ -146,9 +146,10 @@ def test_source_lane_rerank_prefers_source_layer_and_subject_path():
     hits = [
         hit("merger/repoground/tests/test_output_health.py", "test", 1),
         hit("docs/proofs/agent-reading-pack-proof.md", "docs", 2),
-        hit("merger/repoground/cli/cmd_agent_pack.py", "cli", 3),
-        hit("merger/repoground/core/agent_reading_pack.py", "core", 4),
-        hit("merger/repoground/core/bundle_surface_validate.py", "core", 5),
+        hit("merger/repoground/contracts/agent-reading-pack.json", "unknown", 3),
+        hit("merger/repoground/cli/cmd_agent_pack.py", "cli", 4),
+        hit("merger/repoground/core/agent_reading_pack.py", "core", 5),
+        hit("merger/repoground/core/bundle_surface_validate.py", "core", 6),
     ]
 
     reranked = _rerank_source_lane(hits, anchor_terms=["agent", "reading", "pack"])
@@ -161,10 +162,54 @@ def test_source_lane_rerank_prefers_source_layer_and_subject_path():
     diagnostic = reranked[0]["why"]["diagnostics"]["review_intent"][
         "source_role_rerank"
     ]
-    assert diagnostic["original_lane_rank"] == 4
+    assert diagnostic["original_lane_rank"] == 5
     assert diagnostic["reranked_lane_rank"] == 1
     assert diagnostic["path_anchor_matches"] == 3
     assert diagnostic["non_source_layer_penalty"] == 0
+    contract_hit = next(
+        item for item in reranked if "/contracts/" in item["path"]
+    )
+    contract_diag = contract_hit["why"]["diagnostics"]["review_intent"][
+        "source_role_rerank"
+    ]
+    assert contract_diag["layer"] == "unknown"
+    assert contract_diag["non_source_path_penalty"] == 1
+    assert contract_diag["non_source_penalty"] == 1
+
+
+def test_source_lane_rerank_preserves_strict_before_relaxed():
+    def hit(path, variant, lane_rank):
+        return {
+            "path": path,
+            "layer": "core",
+            "why": {
+                "diagnostics": {
+                    "review_intent": {
+                        "lane": "source",
+                        "variant": variant,
+                        "lane_rank": lane_rank,
+                    }
+                }
+            },
+        }
+
+    hits = [
+        hit("src/implementation.py", "strict", 1),
+        hit("src/alpha_beta.py", "relaxed", 2),
+    ]
+
+    reranked = _rerank_source_lane(hits, anchor_terms=["alpha", "beta"])
+
+    assert [item["path"] for item in reranked] == [
+        "src/implementation.py",
+        "src/alpha_beta.py",
+    ]
+    assert reranked[0]["why"]["diagnostics"]["review_intent"][
+        "source_role_rerank"
+    ]["variant_rank"] == 0
+    assert reranked[1]["why"]["diagnostics"]["review_intent"][
+        "source_role_rerank"
+    ]["variant_rank"] == 1
 
 
 def test_review_query_source_lane_does_not_let_test_prose_occupy_source_slot(tmp_path):
