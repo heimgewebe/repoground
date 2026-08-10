@@ -47,15 +47,17 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     root, index, questions = _fixture_index(tmp_path)
     report = module.run(index, root, questions, k=1)
 
-    assert report["version"] == "v4"
+    assert report["version"] == "v5"
     assert report["status"] == "inconclusive"
     assert len(report["cases"]) == 20
     assert report["acceptance"]["same_question_set"] is True
     assert report["acceptance"]["same_k"] == 1
     configuration = report["configuration"]
     assert configuration["legacy_expected_pattern_contract"] == "all=>path"
-    assert configuration["default_question_contract"] == "expected_patterns"
-    assert configuration["opt_in_question_contract"] == "expected_paths+expected_evidence"
+    assert configuration["default_question_contract"] == "expected_paths+expected_evidence"
+    assert configuration["legacy_question_contract"] == "expected_patterns"
+    assert configuration["default_questions_path"] == "docs/retrieval/review_queries.v2.json"
+    assert configuration["legacy_questions_path"] == "docs/retrieval/review_queries.v1.json"
     assert configuration["source_evidence_scoring"] == "condition_visible_payload"
     assert configuration["evidence_path_binding"] == "matched_expected_paths_only"
     assert configuration["repoground_visible_payload"] == "selected_index_chunk_content"
@@ -83,6 +85,34 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
         assert case["repoground"]["compaction"]["pass"] is True
         assert case["repoground"]["false_confidence"] is False
     assert report["aggregates"]["repoground"]["compaction"]["aggregate_pass"] is True
+
+
+def test_benchmark_cli_defaults_to_v2_question_contract(monkeypatch, tmp_path):
+    module = _benchmark_module()
+    captured = {}
+
+    def fake_run(index, repo_root, questions_path, k):
+        captured["questions_path"] = questions_path
+        return {"status": "inconclusive"}
+
+    output = tmp_path / "measurement.json"
+    monkeypatch.setattr(module, "run", fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "repoground_vs_grep_read.py",
+            "--index",
+            "fixture.index.sqlite",
+            "--repo-root",
+            ".",
+            "--out",
+            str(output),
+        ],
+    )
+
+    assert module.main() == 0
+    assert captured["questions_path"] == Path("docs/retrieval/review_queries.v2.json")
 
 
 def test_legacy_expected_patterns_preserve_root_level_path_targets():

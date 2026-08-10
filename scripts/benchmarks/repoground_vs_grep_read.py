@@ -545,7 +545,7 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
 
     return {
         "kind": "repoground_vs_grep_read_benchmark",
-        "version": "v4",
+        "version": "v5",
         "status": status,
         "acceptance": {
             "same_question_set": True,
@@ -562,8 +562,10 @@ def run(index: Path, repo_root: Path, questions_path: Path, k: int) -> dict[str,
             "read_limit_bytes": READ_LIMIT_BYTES,
             "token_proxy_bytes_per_token": TOKEN_PROXY_BYTES_PER_TOKEN,
             "legacy_expected_pattern_contract": "all=>path",
-            "default_question_contract": "expected_patterns",
-            "opt_in_question_contract": "expected_paths+expected_evidence",
+            "default_question_contract": "expected_paths+expected_evidence",
+            "legacy_question_contract": "expected_patterns",
+            "default_questions_path": "docs/retrieval/review_queries.v2.json",
+            "legacy_questions_path": "docs/retrieval/review_queries.v1.json",
             "source_evidence_scoring": "condition_visible_payload",
             "evidence_path_binding": "matched_expected_paths_only",
             "repoground_visible_payload": "selected_index_chunk_content",
@@ -606,7 +608,7 @@ def main() -> int:
     parser.add_argument(
         "--questions",
         type=Path,
-        default=Path("docs/retrieval/review_queries.v1.json"),
+        default=Path("docs/retrieval/review_queries.v2.json"),
     )
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--out", type=Path, required=True)

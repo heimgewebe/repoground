@@ -47,10 +47,25 @@ def test_review_queries_v2_evidence_is_bound_to_expected_files():
             )
 
 
-def test_benchmark_cli_keeps_canonical_v1_goldset_as_default():
+def test_benchmark_cli_uses_v2_goldset_as_canonical_default():
     script = (
         _repo_root() / "scripts" / "benchmarks" / "repoground_vs_grep_read.py"
     ).read_text(encoding="utf-8")
 
-    assert 'default=Path("docs/retrieval/review_queries.v1.json")' in script
-    assert 'default=Path("docs/retrieval/review_queries.v2.json")' not in script
+    assert 'default=Path("docs/retrieval/review_queries.v2.json")' in script
+    assert 'default=Path("docs/retrieval/review_queries.v1.json")' not in script
+
+
+def test_v5_default_promotion_does_not_rewrite_v4_contract():
+    proofs = _repo_root() / "docs" / "proofs"
+    v4 = (proofs / "repoground-vs-grep-read.v4-contract-proof.md").read_text(
+        encoding="utf-8"
+    )
+    v5 = (proofs / "repoground-vs-grep-read.v5-contract-proof.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "canonical CLI default remains `docs/retrieval/review_queries.v1.json`" in v4
+    assert "report version is `v5`" in v5
+    assert "CLI default: `docs/retrieval/review_queries.v2.json`" in v5
+    assert "explicit legacy path: `docs/retrieval/review_queries.v1.json`" in v5
