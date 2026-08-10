@@ -2,7 +2,10 @@ import json
 
 from merger.repoground.retrieval import index_db
 from merger.repoground.retrieval.eval_core import do_eval
-from merger.repoground.retrieval.review_query import execute_review_query
+from merger.repoground.retrieval.review_query import (
+    _rerank_source_lane,
+    execute_review_query,
+)
 
 
 def _build_review_index(tmp_path, chunks):
@@ -122,3 +125,132 @@ def test_review_query_marks_non_executable_plan_as_legacy_fallback(tmp_path):
     assert condition["fallback_mode"] == "legacy"
     assert condition["ranking_algorithm_changed"] is False
     assert report["details"][0]["query_mode"] == "review_intent_fallback"
+
+
+def test_source_lane_rerank_prefers_source_layer_and_subject_path():
+    def hit(path, layer, lane_rank):
+        return {
+            "path": path,
+            "layer": layer,
+            "why": {
+                "diagnostics": {
+                    "review_intent": {
+                        "lane": "source",
+                        "variant": "strict",
+                        "lane_rank": lane_rank,
+                    }
+                }
+            },
+        }
+
+    hits = [
+        hit("merger/repoground/tests/test_output_health.py", "test", 1),
+        hit("docs/proofs/agent-reading-pack-proof.md", "docs", 2),
+        hit("merger/repoground/contracts/agent-reading-pack.json", "unknown", 3),
+        hit("merger/repoground/cli/cmd_agent_pack.py", "cli", 4),
+        hit("merger/repoground/core/agent_reading_pack.py", "core", 5),
+        hit("merger/repoground/core/bundle_surface_validate.py", "core", 6),
+    ]
+
+    reranked = _rerank_source_lane(hits, anchor_terms=["agent", "reading", "pack"])
+
+    assert [item["path"] for item in reranked[:3]] == [
+        "merger/repoground/core/agent_reading_pack.py",
+        "merger/repoground/cli/cmd_agent_pack.py",
+        "merger/repoground/core/bundle_surface_validate.py",
+    ]
+    diagnostic = reranked[0]["why"]["diagnostics"]["review_intent"][
+        "source_role_rerank"
+    ]
+    assert diagnostic["original_lane_rank"] == 5
+    assert diagnostic["reranked_lane_rank"] == 1
+    assert diagnostic["path_anchor_matches"] == 3
+    assert diagnostic["non_source_layer_penalty"] == 0
+    contract_hit = next(
+        item for item in reranked if "/contracts/" in item["path"]
+    )
+    contract_diag = contract_hit["why"]["diagnostics"]["review_intent"][
+        "source_role_rerank"
+    ]
+    assert contract_diag["layer"] == "unknown"
+    assert contract_diag["non_source_path_penalty"] == 1
+    assert contract_diag["non_source_penalty"] == 1
+
+
+def test_source_lane_rerank_preserves_strict_before_relaxed():
+    def hit(path, variant, lane_rank):
+        return {
+            "path": path,
+            "layer": "core",
+            "why": {
+                "diagnostics": {
+                    "review_intent": {
+                        "lane": "source",
+                        "variant": variant,
+                        "lane_rank": lane_rank,
+                    }
+                }
+            },
+        }
+
+    hits = [
+        hit("src/implementation.py", "strict", 1),
+        hit("src/alpha_beta.py", "relaxed", 2),
+    ]
+
+    reranked = _rerank_source_lane(hits, anchor_terms=["alpha", "beta"])
+
+    assert [item["path"] for item in reranked] == [
+        "src/implementation.py",
+        "src/alpha_beta.py",
+    ]
+    assert reranked[0]["why"]["diagnostics"]["review_intent"][
+        "source_role_rerank"
+    ]["variant_rank"] == 0
+    assert reranked[1]["why"]["diagnostics"]["review_intent"][
+        "source_role_rerank"
+    ]["variant_rank"] == 1
+
+
+def test_review_query_source_lane_does_not_let_test_prose_occupy_source_slot(tmp_path):
+    chunks = [
+        {
+            **_review_chunk("noise-test", "tests/test_output_health.py"),
+            "layer": "test",
+            "content": "agent reading pack " * 8,
+        },
+        {
+            **_review_chunk("noise-doc", "docs/proofs/agent-reading-pack-proof.md"),
+            "layer": "docs",
+            "content": "agent reading pack " * 8,
+        },
+        {
+            **_review_chunk("source", "src/core/agent_reading_pack.py"),
+            "layer": "core",
+            "content": "def produce_agent_reading_pack(): pass",
+        },
+        {
+            **_review_chunk("target-test", "tests/test_agent_reading_pack.py"),
+            "layer": "test",
+            "content": "agent reading pack producer",
+        },
+    ]
+    index_path = _build_review_index(tmp_path, chunks)
+
+    result = execute_review_query(
+        index_path,
+        "Find the Agent Reading Pack producer and its primary tests",
+        k=3,
+        explain=True,
+    )
+    paths = [item["path"] for item in result["results"]]
+
+    assert "src/core/agent_reading_pack.py" in paths
+    source_hit = next(
+        item
+        for item in result["results"]
+        if item["path"] == "src/core/agent_reading_pack.py"
+    )
+    review_diag = source_hit["why"]["diagnostics"]["review_intent"]
+    assert review_diag["selected_from_lane"] == "source"
+    assert review_diag["source_role_rerank"]["path_anchor_matches"] == 3
