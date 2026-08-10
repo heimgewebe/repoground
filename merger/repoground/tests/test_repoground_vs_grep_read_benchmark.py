@@ -47,7 +47,7 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     root, index, questions = _fixture_index(tmp_path)
     report = module.run(index, root, questions, k=1)
 
-    assert report["version"] == "v3"
+    assert report["version"] == "v4"
     assert report["status"] == "inconclusive"
     assert len(report["cases"]) == 20
     assert report["acceptance"]["same_question_set"] is True
@@ -59,6 +59,11 @@ def test_benchmark_writes_per_case_and_aggregate_measurements_with_input_hashes(
     assert configuration["source_evidence_scoring"] == "condition_visible_payload"
     assert configuration["evidence_path_binding"] == "matched_expected_paths_only"
     assert configuration["repoground_visible_payload"] == "selected_index_chunk_content"
+    assert configuration["grep_read_token_selection"] == "deduped_nonframing_query_terms"
+    assert configuration["grep_read_path_ranking"] == (
+        "distinct_query_term_matches_desc_then_path_term_matches_desc_then_path"
+    )
+    assert configuration["benchmark_leakage_exclusion_globs"]
     assert set(report["inputs"]) >= {
         "benchmark_script_sha256", "index_sha256", "questions_sha256", "repo_tree_sha256",
     }
@@ -207,7 +212,7 @@ def test_benchmark_recommends_only_a_named_safe_benefit(monkeypatch, tmp_path):
     module = _benchmark_module()
     root, index, questions = _fixture_index(tmp_path)
 
-    def empty_grep_read(_root, question, k):
+    def empty_grep_read(_root, question, k, *, excluded_paths=None):
         return {"query": question, "k": k, "status": "available", "paths": [], "reads": []}, 1, 0
 
     monkeypatch.setattr(module, "_grep_read", empty_grep_read)
@@ -231,7 +236,7 @@ def test_benchmark_fails_on_quality_regression(monkeypatch, tmp_path):
         for _ in range(20)
     ]), encoding="utf-8")
 
-    def perfect_grep_read(_root, question, k):
+    def perfect_grep_read(_root, question, k, *, excluded_paths=None):
         return {
             "query": question, "k": k, "status": "available",
             "paths": ["src/widget.py", "missing.py"], "reads": [],
@@ -256,3 +261,60 @@ def test_benchmark_uses_python_fallback_without_ripgrep(monkeypatch, tmp_path):
     }]
     assert process_calls == 0
     assert read_calls == 1
+
+
+def test_grep_read_ranks_all_meaningful_terms_instead_of_first_instruction_word(
+    monkeypatch, tmp_path
+):
+    module = _benchmark_module()
+    root = tmp_path / "repo"
+    target = root / "src/agent_reading_pack.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("agent reading pack producer tests\n", encoding="utf-8")
+    for ordinal in range(12):
+        decoy = root / "docs" / f"find-{ordinal:02d}.md"
+        decoy.parent.mkdir(parents=True, exist_ok=True)
+        decoy.write_text("find only\n", encoding="utf-8")
+
+    monkeypatch.setattr(module.shutil, "which", lambda _name: None)
+    result, process_calls, read_calls = module._grep_read(
+        root, "Find the Agent Reading Pack producer and its primary tests", 1
+    )
+
+    assert result["query_terms"] == ["agent", "reading", "pack", "producer", "tests"]
+    assert result["paths"] == ["src/agent_reading_pack.py"]
+    assert process_calls == 0
+    assert read_calls == 1
+
+
+def test_benchmark_excludes_self_measurement_artifacts_from_both_conditions(
+    monkeypatch, tmp_path
+):
+    module = _benchmark_module()
+    root, index, questions = _fixture_index(tmp_path)
+    leak_question = root / "docs/retrieval/review_queries.v1.json"
+    leak_question.parent.mkdir(parents=True)
+    leak_question.write_text("widget\n", encoding="utf-8")
+    leak_proof = root / "docs/proofs/repoground-vs-grep-read.v2.json"
+    leak_proof.parent.mkdir(parents=True)
+    leak_proof.write_text("widget\n", encoding="utf-8")
+
+    seen_exclusions = []
+    real_execute = module._execute_review_query
+
+    def capture_execute(*args, **kwargs):
+        seen_exclusions.extend(kwargs.get("excluded_paths") or [])
+        return real_execute(*args, **kwargs)
+
+    monkeypatch.setattr(module, "_execute_review_query", capture_execute)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: None)
+    report = module.run(index, root, questions, k=1)
+
+    expected_exclusions = {
+        "docs/retrieval/review_queries.v1.json",
+        "docs/proofs/repoground-vs-grep-read.v2.json",
+    }
+    assert expected_exclusions <= set(seen_exclusions)
+    assert expected_exclusions <= set(report["inputs"]["benchmark_excluded_paths"])
+    assert report["cases"][0]["grep_read"]["paths"] == ["src/widget.py"]
+    assert not expected_exclusions.intersection(report["cases"][0]["repoground"]["paths"])
