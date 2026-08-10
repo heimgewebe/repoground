@@ -23,7 +23,7 @@ TORCH_URL = (
 TORCH_SHA256 = "4ca4a9394b0c771238a4f73590fdbbc4debad85ed0fa63d026ae1b085da7d6e2"
 SUPPORTED_TARGET_ID = "cpython-312-linux-x86_64"
 ROOT_PINS = {
-    "sentence-transformers": "5.6.0",
+    "sentence-transformers": "5.7.0",
     "torch": "2.13.0+cpu",
 }
 

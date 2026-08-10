@@ -95,7 +95,7 @@
             "additionalProperties": false,
             "properties": {
               "sentence-transformers": {
-                "const": "5.6.0"
+                "const": "5.7.0"
               },
               "torch": {
                 "const": "2.13.0+cpu"

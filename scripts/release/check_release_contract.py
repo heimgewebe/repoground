@@ -206,7 +206,7 @@ def _check_semantic_target_policy(
                 )
             )
     if target.get("root_pins") != {
-        "sentence-transformers": "5.6.0",
+        "sentence-transformers": "5.7.0",
         "torch": "2.13.0+cpu",
     }:
         findings.append(
@@ -307,9 +307,9 @@ def _check_semantic_lock_boundary(
         )
     required_fragments = (
         (
-            "sentence-transformers==5.6.0 \\",
+            "sentence-transformers==5.7.0 \\",
             "SEMANTIC_ROOT_PIN_MISSING",
-            "sentence-transformers==5.6.0",
+            "sentence-transformers==5.7.0",
         ),
         (
             "torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu",

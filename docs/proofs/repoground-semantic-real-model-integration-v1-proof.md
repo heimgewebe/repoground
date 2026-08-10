@@ -1,6 +1,6 @@
 # RepoGround Semantic Real-Model Integration v1 — Proof
 
-Status: implemented and locally verified after rebasing onto RepoGround main commit `f7f9ef29a45e0f3b43e303e8e4bf5bc888dfb1d3`. Executable review-hardening evidence was produced from branch head `70b355af943aaf2efb164b80cd424c94707742f1` before this final evidence-only proof update.
+Status: current semantic runtime binding renewed for `sentence-transformers==5.7.0`; the historical 5.6.0 execution receipts below are retained as historical evidence.
 
 ## Problem
 
@@ -16,7 +16,7 @@ The optional semantic dependency installation proof deliberately downloaded no m
 - contains no downloaded or pre-trained model weights;
 - is built and saved twice independently and requires the same canonical tree SHA-256 for both outputs;
 - hashes canonical relative paths and file bytes while deliberately excluding modes, ownership and timestamps, which are enforced separately where required;
-- is bound to tree SHA-256 `913b82d98b28add74e605bde8a807826ce1b995b783ddac158e7f0fdf5bcfc75`;
+- is bound to tree SHA-256 `e485be2434452c8d4d084ed096372cc9d3a44b7a2323442c91e0502d73b3a0e2`;
 - is reloaded from a local path with `local_files_only=True`;
 - emits actual NumPy query, single-document and document-batch embeddings;
 - passes those embeddings through RepoGround's model cache, dimension validation and cosine scorer.
@@ -42,7 +42,9 @@ The model is intentionally serialized twice from two independently constructed l
 
 The workflow path filter also now watches the real renamed platform contract, `docs/release/repoground-semantic-platforms.v1.json`, instead of the obsolete pre-cutover filename.
 
-The container image is not independently hard-coded in the integration wrapper. It is read from the digest-pinned `compiler.image` field in that platform contract. Updating the tag or digest therefore requires one explicit contract change, regenerated semantic locks, a new deterministic model-tree hash check, and renewed local and GitHub integration evidence. The `sentence-transformers==5.6.0` and `torch==2.13.0+cpu` roots are likewise compatibility pins for reproducibility; they are not an instruction to select versions dynamically at runtime.
+The container image is not independently hard-coded in the integration wrapper. It is read from the digest-pinned `compiler.image` field in that platform contract. Updating the tag or digest therefore requires one explicit contract change, regenerated semantic locks, a new deterministic model-tree hash check, and renewed local and GitHub integration evidence. The `sentence-transformers==5.7.0` and `torch==2.13.0+cpu` roots are likewise compatibility pins for reproducibility; they are not an instruction to select versions dynamically at runtime.
+
+The receipts in this section establish the original 5.6.0 lane. The current 5.7.0 binding above is revalidated by the same executable `semantic-lock` lane; a version change is accepted only when the generated model tree is reproducible and matches the renewed explicit SHA-256 identity.
 
 ## Real execution evidence
 

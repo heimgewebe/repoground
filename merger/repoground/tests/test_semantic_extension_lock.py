@@ -79,7 +79,7 @@ def test_semantic_lock_is_exact_single_wheel_closure() -> None:
     starts = _package_starts(text)
     assert len(starts) == 58
     assert text.count("--hash=sha256:") == len(starts)
-    assert "sentence-transformers==5.6.0 \\" in text
+    assert "sentence-transformers==5.7.0 \\" in text
     assert (
         "torch @ https://download-r2.pytorch.org/whl/cpu/"
         "torch-2.13.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl \\"

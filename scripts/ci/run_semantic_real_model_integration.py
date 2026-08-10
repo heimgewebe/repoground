@@ -124,7 +124,7 @@ def _fixture_vocab_sha256() -> str:
 
 
 EXPECTED_MODEL_TREE_SHA256 = (
-    "913b82d98b28add74e605bde8a807826ce1b995b783ddac158e7f0fdf5bcfc75"
+    "e485be2434452c8d4d084ed096372cc9d3a44b7a2323442c91e0502d73b3a0e2"
 )
 QUERY_TEXT = "community shared water"
 CANDIDATE_TEXTS = (

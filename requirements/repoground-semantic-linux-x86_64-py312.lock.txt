@@ -5,9 +5,9 @@
 # One selected wheel hash per package intentionally fails closed on other targets.
 #
 
-annotated-doc==0.0.4 \
-    --hash=sha256:571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320
-    # wheel: annotated_doc-0.0.4-py3-none-any.whl
+annotated-doc==0.0.5 \
+    --hash=sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101
+    # wheel: annotated_doc-0.0.5-py3-none-any.whl
 anyio==4.14.2 \
     --hash=sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494
     # wheel: anyio-4.14.2-py3-none-any.whl
@@ -17,36 +17,36 @@ arrow==1.4.0 \
 attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
     # wheel: attrs-26.1.0-py3-none-any.whl
-certifi==2026.6.17 \
-    --hash=sha256:2227dcbaafe0d2f59279d1762ddddc37783ed4354594f194ffc31d20f41fc3db
-    # wheel: certifi-2026.6.17-py3-none-any.whl
+certifi==2026.7.22 \
+    --hash=sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775
+    # wheel: certifi-2026.7.22-py3-none-any.whl
 click==8.4.2 \
     --hash=sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76
     # wheel: click-8.4.2-py3-none-any.whl
-filelock==3.29.7 \
-    --hash=sha256:987db6f789a3a2a59f55081801b2b3697cb97e2a736b5f1a9e99b559285fbc51
-    # wheel: filelock-3.29.7-py3-none-any.whl
+filelock==3.32.2 \
+    --hash=sha256:87dd94cf281e586d135fa51132b8e3d9a598b316e90377a288663c9321036c82
+    # wheel: filelock-3.32.2-py3-none-any.whl
 fqdn==1.5.1 \
     --hash=sha256:3a179af3761e4df6eb2e026ff9e1a3033d3587bf980a0b1b2e1e5d08d7358014
     # wheel: fqdn-1.5.1-py3-none-any.whl
-fsspec==2026.6.0 \
-    --hash=sha256:02e0b71817df9b2169dc30a16832045764def1191b43dcff5bb85bdee212d2a1
-    # wheel: fsspec-2026.6.0-py3-none-any.whl
+fsspec==2026.7.0 \
+    --hash=sha256:b57ddbafedfaef7018c1ecab32aa200a9d7ca26b77965f64e48b70061249d279
+    # wheel: fsspec-2026.7.0-py3-none-any.whl
 h11==0.16.0 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
     # wheel: h11-0.16.0-py3-none-any.whl
-hf-xet==1.5.1 \
-    --hash=sha256:892e3a3a3aecc12aded8b93cf4f9cd059282c7de0732f7d55026f3abdf474350
-    # wheel: hf_xet-1.5.1-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+hf-xet==1.6.0 \
+    --hash=sha256:d62671bb130879cef0ee4c9ebe47a14af6c66ec53e6d84dc15936e5ffdfac82f
+    # wheel: hf_xet-1.6.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
 httpcore==1.0.9 \
     --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55
     # wheel: httpcore-1.0.9-py3-none-any.whl
 httpx==0.28.1 \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
     # wheel: httpx-0.28.1-py3-none-any.whl
-huggingface-hub==1.23.0 \
-    --hash=sha256:b1d604788f5adc7f0eb246e03e0ec19011ca06e38400218c347dccc3dffa64a2
-    # wheel: huggingface_hub-1.23.0-py3-none-any.whl
+huggingface-hub==1.27.0 \
+    --hash=sha256:7df6827c2f956c60fbaa64646e979e566db76f619dd0a9729dfb8c5a3eb4f68d
+    # wheel: huggingface_hub-1.27.0-py3-none-any.whl
 idna==3.18 \
     --hash=sha256:7f952cbe720b688055e3f87de14f5c3e5fdaa8bc3928985c4077ca689de849a2
     # wheel: idna-3.18-py3-none-any.whl
@@ -89,12 +89,12 @@ narwhals==2.24.0 \
 networkx==3.6.1 \
     --hash=sha256:d47fbf302e7d9cbbb9e2555a0d267983d2aa476bac30e90dfbe5669bd57f3762
     # wheel: networkx-3.6.1-py3-none-any.whl
-numpy==2.5.1 \
-    --hash=sha256:59fda5e192b570217ec2580c96f00e9a7e12ef6866a900eb089b62c1a32545ca
-    # wheel: numpy-2.5.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-packaging==26.2 \
-    --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e
-    # wheel: packaging-26.2-py3-none-any.whl
+numpy==2.5.2 \
+    --hash=sha256:3cdec01fa790a186d430433fdd4d4ffb70eed6f0eeb4bf05c8dbe2dce0a9bcb8
+    # wheel: numpy-2.5.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+    # wheel: packaging-26.3-py3-none-any.whl
 pygments==2.20.0 \
     --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
     # wheel: pygments-2.20.0-py3-none-any.whl
@@ -107,9 +107,9 @@ pyyaml==6.0.3 \
 referencing==0.37.0 \
     --hash=sha256:381329a9f99628c9069361716891d34ad94af76e461dcb0335825aecc7692231
     # wheel: referencing-0.37.0-py3-none-any.whl
-regex==2026.7.10 \
-    --hash=sha256:f6222cafe00e072bb2b8f14142cd969637411fbc4dd3b1d73a90a3b817fa046f
-    # wheel: regex-2026.7.10-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
+regex==2026.7.19 \
+    --hash=sha256:9dce8ec9695f531a1b8a6f314fd4b393adcccf2ea861db480cdf97a301d01a68
+    # wheel: regex-2026.7.19-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl
 rfc3339-validator==0.1.4 \
     --hash=sha256:24f6ec1eda14ef823da9e36ec7113124b39c04d50a4d3d3a3c2859577e7791fa
     # wheel: rfc3339_validator-0.1.4-py2.py3-none-any.whl
@@ -134,12 +134,12 @@ scikit-learn==1.9.0 \
 scipy==1.18.0 \
     --hash=sha256:1f55797419e16e7f30cf88ffb3113ce0467f00cfe3f70d5c281730b21769bfc2
     # wheel: scipy-1.18.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-sentence-transformers==5.6.0 \
-    --hash=sha256:d2075b5e687a1611005e20ab04a6846994d51adfcf39610aed066af3c0c0b81f
-    # wheel: sentence_transformers-5.6.0-py3-none-any.whl
-setuptools==83.0.0 \
-    --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
-    # wheel: setuptools-83.0.0-py3-none-any.whl
+sentence-transformers==5.7.0 \
+    --hash=sha256:b78141da3d8137e70d965866e2ca43190b9266f3d4d8752e250ded75e7136730
+    # wheel: sentence_transformers-5.7.0-py3-none-any.whl
+setuptools==84.0.0 \
+    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670
+    # wheel: setuptools-84.0.0-py3-none-any.whl
 shellingham==1.5.4 \
     --hash=sha256:7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686
     # wheel: shellingham-1.5.4-py2.py3-none-any.whl
@@ -158,15 +158,15 @@ tokenizers==0.22.2 \
 torch @ https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp312-cp312-manylinux_2_28_x86_64.whl \
     --hash=sha256:4ca4a9394b0c771238a4f73590fdbbc4debad85ed0fa63d026ae1b085da7d6e2
     # wheel: torch-2.13.0+cpu-cp312-cp312-manylinux_2_28_x86_64.whl
-tqdm==4.68.4 \
-    --hash=sha256:5168118b2368f48c561afda8020fd79195b1bdb0bdf8086b88442c267a315dc2
-    # wheel: tqdm-4.68.4-py3-none-any.whl
-transformers==5.13.1 \
-    --hash=sha256:53f0ea8aa397e29244c2377ba981bcaf0c87adcf44fbdd447ef6306522afcacd
-    # wheel: transformers-5.13.1-py3-none-any.whl
-typer==0.26.8 \
-    --hash=sha256:3512ca79ac5c11113414b36e80281b872884477722440691c89d1112e321a49c
-    # wheel: typer-0.26.8-py3-none-any.whl
+tqdm==4.70.0 \
+    --hash=sha256:7f585706bfddbdebf89daac705b2dfcc16890130727d3197ca62c732b4310953
+    # wheel: tqdm-4.70.0-py3-none-any.whl
+transformers==5.15.0 \
+    --hash=sha256:d7f007736f67749ae9490c4f8cb5d30b452ae2d68c8675e50ba8d63ea7feb107
+    # wheel: transformers-5.15.0-py3-none-any.whl
+typer==0.27.1 \
+    --hash=sha256:53150287edd11baeb4e4722c8e394fcdf8181c0ae89485cba8d25c778d5edd56
+    # wheel: typer-0.27.1-py3-none-any.whl
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
     # wheel: typing_extensions-4.16.0-py3-none-any.whl
