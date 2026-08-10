@@ -23,19 +23,19 @@
       "artifact_policy": "selected_binary_wheels_only",
       "input": {
         "path": "requirements/repoground-semantic-linux-x86_64-py312.in",
-        "sha256": "3c43cf1ef68ed6f8095e459304cc0226e84f366f8ec7d04c2787aa66209fc6fe"
+        "sha256": "b03f79cb88fecffca4556b35ddbce81bf83ddd2caac1158ed3b17a180a9cf0e3"
       },
       "constraints": {
         "path": "requirements/repoground-semantic-linux-x86_64-py312.constraints.txt",
-        "sha256": "511510bf090d31b872fd6900d3aca9a8aced66e374bee845070064e2511aeeba"
+        "sha256": "402a19795990ead31c83bb2a23fcb7aabe6c561185d2c588837e51404f4854c2"
       },
       "lock": {
         "path": "requirements/repoground-semantic-linux-x86_64-py312.lock.txt",
-        "sha256": "8846ffb3e549726c90af6945664b2c83778629690d052d13ab474c585269205f"
+        "sha256": "1360a6a19359c8ebc1add7046b7d28475b51f444e79b51477670b84ff64e76f6"
       },
       "package_count": 58,
       "root_pins": {
-        "sentence-transformers": "5.6.0",
+        "sentence-transformers": "5.7.0",
         "torch": "2.13.0+cpu"
       },
       "install_verification_command": "scripts/release/compile_semantic_lock.sh --verify-install <empty-target>"

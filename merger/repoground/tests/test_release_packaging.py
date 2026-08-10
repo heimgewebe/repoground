@@ -71,8 +71,8 @@ def _repo(tmp_path: Path) -> Path:
         locks / "repoground-semantic-linux-x86_64-py312.constraints.txt"
     )
     semantic_lock = locks / "repoground-semantic-linux-x86_64-py312.lock.txt"
-    semantic_input.write_text("sentence-transformers==5.6.0\n", encoding="utf-8")
-    semantic_constraints.write_text("sentence-transformers==5.6.0\n", encoding="utf-8")
+    semantic_input.write_text("sentence-transformers==5.7.0\n", encoding="utf-8")
+    semantic_constraints.write_text("sentence-transformers==5.7.0\n", encoding="utf-8")
     semantic_lock.write_text(_minimal_lock(), encoding="utf-8")
     semantic_contract = repo / "docs/release/repoground-semantic-platforms.v1.json"
     semantic_contract.parent.mkdir(parents=True)
@@ -91,7 +91,7 @@ def _repo(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (repo / "merger/repoground/requirements-semantic.txt").write_text(
-        "sentence-transformers==5.6.0\n", encoding="utf-8"
+        "sentence-transformers==5.7.0\n", encoding="utf-8"
     )
     release_scripts = repo / "scripts/release"
     release_scripts.mkdir(parents=True, exist_ok=True)

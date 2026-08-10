@@ -34,7 +34,7 @@ RUNNER = ROOT / "scripts/ci/run_semantic_real_model_integration.py"
 
 def test_real_model_fixture_identity_is_explicit() -> None:
     sentence_transformers_version, torch_version = _locked_runtime_versions()
-    assert sentence_transformers_version == "5.6.0"
+    assert sentence_transformers_version == "5.7.0"
     assert torch_version == "2.13.0+cpu"
     assert SEMANTIC_TARGET_ID == "cpython-312-linux-x86_64"
     assert FIXTURE_DIMENSIONS == 8
@@ -62,7 +62,7 @@ def test_semantic_platform_contract_is_lazy_and_cached(monkeypatch: pytest.Monke
             {
                 "id": SEMANTIC_TARGET_ID,
                 "root_pins": {
-                    "sentence-transformers": "5.6.0",
+                    "sentence-transformers": "5.7.0",
                     "torch": "2.13.0+cpu",
                 },
             }
@@ -83,7 +83,7 @@ def test_semantic_platform_contract_is_lazy_and_cached(monkeypatch: pytest.Monke
         assert semantic_runner._semantic_platform_contract() is contract
         assert semantic_runner._semantic_platform_contract() is contract
         assert calls == ["load"]
-        assert semantic_runner._locked_runtime_versions() == ("5.6.0", "2.13.0+cpu")
+        assert semantic_runner._locked_runtime_versions() == ("5.7.0", "2.13.0+cpu")
         assert calls == ["load"]
 
         def fail_if_versions_are_recomputed(_contract: dict[str, object]) -> tuple[str, str]:
@@ -94,7 +94,7 @@ def test_semantic_platform_contract_is_lazy_and_cached(monkeypatch: pytest.Monke
             "_locked_root_versions",
             fail_if_versions_are_recomputed,
         )
-        assert semantic_runner._locked_runtime_versions() == ("5.6.0", "2.13.0+cpu")
+        assert semantic_runner._locked_runtime_versions() == ("5.7.0", "2.13.0+cpu")
     finally:
         semantic_runner._semantic_platform_contract.cache_clear()
         semantic_runner._locked_runtime_versions.cache_clear()
@@ -258,7 +258,7 @@ def test_integration_report_hashes_actual_fixture_vocab(
 
     report = semantic_runner._integration_report(
         runtime={
-            "sentence_transformers_version": "5.6.0",
+            "sentence_transformers_version": "5.7.0",
             "torch_version": "2.13.0+cpu",
             "numpy_version": "2.5.1",
         },
