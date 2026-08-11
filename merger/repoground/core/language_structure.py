@@ -353,39 +353,93 @@ def _normalized_terms(terms: Iterable[str]) -> tuple[str, ...]:
     )
 
 
-def _record_search_text(record: Mapping[str, Any]) -> str:
+def _matching_terms(value: Any, terms: tuple[str, ...]) -> frozenset[str]:
+    if value is None:
+        return frozenset()
+    text = str(value).casefold()
+    return frozenset(term for term in terms if term in text)
+
+
+def _record_relevance_score(
+    record: Mapping[str, Any], paths: set[str], terms: tuple[str, ...]
+) -> tuple[int, ...]:
     source = record.get("source")
     source_path = source.get("path") if isinstance(source, Mapping) else ""
     adapter = record.get("adapter")
     adapter_id = adapter.get("id") if isinstance(adapter, Mapping) else ""
-    return " ".join(
-        str(value)
-        for value in (
-            record.get("language"),
-            record.get("relation"),
-            record.get("record_type"),
-            record.get("symbol_kind"),
-            record.get("symbol"),
-            record.get("target_symbol"),
-            source_path,
-            adapter_id,
-        )
-        if value is not None
-    ).casefold()
+    entity_terms = _matching_terms(record.get("symbol"), terms) | _matching_terms(
+        record.get("target_symbol"), terms
+    )
+    path_terms = _matching_terms(source_path, terms)
+    relation_terms = _matching_terms(record.get("relation"), terms)
+    broad_metadata_terms = _matching_terms(
+        record.get("record_type"), terms
+    ) | _matching_terms(record.get("symbol_kind"), terms)
+    generic_metadata_terms = _matching_terms(
+        record.get("language"), terms
+    ) | _matching_terms(adapter_id, terms)
+    specific_terms = entity_terms | path_terms | relation_terms
+    all_terms = specific_terms | broad_metadata_terms | generic_metadata_terms
+    return (
+        int(bool(paths) and isinstance(source_path, str) and source_path in paths),
+        len(specific_terms),
+        len(entity_terms),
+        len(path_terms),
+        len(relation_terms),
+        len(broad_metadata_terms),
+        len(generic_metadata_terms),
+        len(all_terms),
+    )
 
 
 def _relevant_record(
     record: Mapping[str, Any], paths: set[str], terms: tuple[str, ...]
 ) -> bool:
-    source = record.get("source")
-    source_path = source.get("path") if isinstance(source, Mapping) else None
-    if paths and isinstance(source_path, str) and source_path in paths:
+    if not paths and not terms:
         return True
-    if terms:
-        haystack = _record_search_text(record)
-        if any(term in haystack for term in terms):
-            return True
-    return not paths and not terms
+    return any(_record_relevance_score(record, paths, terms))
+
+
+def _record_tiebreaker(record: Mapping[str, Any]) -> tuple[Any, ...]:
+    source = record.get("source")
+    source_path = source.get("path") if isinstance(source, Mapping) else ""
+    range_value = source.get("range") if isinstance(source, Mapping) else None
+    adapter = record.get("adapter")
+    adapter_id = adapter.get("id") if isinstance(adapter, Mapping) else ""
+    return (
+        str(record.get("language") or ""),
+        str(source_path or ""),
+        int(range_value.get("start_line", 0))
+        if isinstance(range_value, Mapping)
+        else 0,
+        int(range_value.get("start_character", 0))
+        if isinstance(range_value, Mapping)
+        else 0,
+        str(record.get("relation") or ""),
+        str(record.get("record_type") or ""),
+        str(record.get("symbol") or ""),
+        str(record.get("target_symbol") or ""),
+        str(adapter_id or ""),
+        str(record.get("id") or ""),
+    )
+
+
+def _rank_relevant_records(
+    records: Iterable[Any], paths: set[str], terms: tuple[str, ...]
+) -> list[dict[str, Any]]:
+    by_score: dict[tuple[int, ...], list[dict[str, Any]]] = {}
+    for record in records:
+        if not isinstance(record, Mapping) or not _relevant_record(
+            record, paths, terms
+        ):
+            continue
+        score = _record_relevance_score(record, paths, terms)
+        by_score.setdefault(score, []).append(deepcopy(dict(record)))
+    ranked: list[dict[str, Any]] = []
+    for score in sorted(by_score, reverse=True):
+        tied = sorted(by_score[score], key=_record_tiebreaker)
+        ranked.extend(_interleave_by_language(tied))
+    return ranked
 
 
 def _relevant_degradation(
@@ -424,18 +478,12 @@ def select_language_structure_evidence(
     path_set = {str(path) for path in paths if str(path)}
     normalized_terms = _normalized_terms(terms)
     raw_records = document.get("records")
-    records = (
-        [
-            deepcopy(record)
-            for record in raw_records
-            if isinstance(raw_records, list)
-            and isinstance(record, Mapping)
-            and _relevant_record(record, path_set, normalized_terms)
-        ]
-        if isinstance(raw_records, list)
-        else []
+    records = _rank_relevant_records(
+        raw_records if isinstance(raw_records, list) else [],
+        path_set,
+        normalized_terms,
     )
-    selected = _interleave_by_language(records)[:max_items]
+    selected = records[:max_items]
     for record in selected:
         provenance = record.get("provenance")
         if isinstance(provenance, dict) and bundle_manifest_sha256:
@@ -466,7 +514,17 @@ def select_language_structure_evidence(
         "filters": {
             "paths": sorted(path_set),
             "terms": list(normalized_terms),
-            "match_semantics": "path_or_term",
+            "match_semantics": "exact_path_or_term_substring_by_explicit_field",
+            "ranking": [
+                "exact_path_filter",
+                "symbol_or_target_term",
+                "source_path_term",
+                "relation_term",
+                "record_type_or_symbol_kind_term",
+                "language_or_adapter_term",
+                "total_explicit_term_coverage",
+                "deterministic_language_fair_ties",
+            ],
         },
         "does_not_establish": list(DOES_NOT_ESTABLISH),
     }

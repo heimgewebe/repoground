@@ -17,6 +17,7 @@ from merger.repoground.core.language_structure import (
     build_language_structure_document,
     compose_language_structure_evidence,
     make_record,
+    select_language_structure_evidence,
     source_range,
 )
 from merger.repoground.core.language_structure_benchmark import (
@@ -44,6 +45,41 @@ def _kwargs() -> dict[str, str]:
         "bundle_manifest": MANIFEST,
         "canonical_dump_index_sha256": DUMP_SHA,
     }
+
+
+def _selection_record(
+    *,
+    language: str,
+    symbol: str,
+    source_path: str,
+    line: int = 1,
+    relation: str = "definition",
+    target_symbol: str | None = None,
+) -> dict:
+    adapter_id = {
+        "bash": "bash-static-structure",
+        "rust": "rust-static-structure",
+    }[language]
+    return make_record(
+        language=language,
+        adapter_id=adapter_id,
+        adapter_version="1.0",
+        record_type="symbol" if relation == "definition" else "relation",
+        relation=relation,
+        symbol=symbol,
+        target_symbol=target_symbol,
+        symbol_kind="function",
+        source_path=source_path,
+        source_range_value=source_range(
+            line=line,
+            start_character=0,
+            end_character=len(symbol),
+        ),
+        evidence_level="S0",
+        confidence=0.7,
+        basis="ranking regression fixture",
+        **_kwargs(),
+    )
 
 
 def _normalized_scip_artifact() -> dict:
@@ -373,6 +409,128 @@ def test_mixed_evidence_budget_preserves_provenance_ranges_and_uncertainty(tmp_p
         "bash",
         "rust",
     }
+
+
+def test_specific_symbol_match_precedes_generic_language_matches() -> None:
+    records = [
+        _selection_record(
+            language="rust",
+            symbol=f"alpha_{index:02d}",
+            source_path=f"src/{index:02d}.rs",
+        )
+        for index in range(12)
+    ]
+    records.append(
+        _selection_record(
+            language="rust",
+            symbol="helper",
+            source_path="src/zz_helper.rs",
+        )
+    )
+
+    selected = select_language_structure_evidence(
+        {"status": "available", "records": records, "degradations": []},
+        terms=["rust", "helper"],
+        max_items=3,
+    )
+
+    assert selected["records"][0]["symbol"] == "helper"
+    assert any(record["symbol"] == "helper" for record in selected["records"])
+    assert selected["truncated"] is True
+
+
+@pytest.mark.parametrize("specific_field", ["target", "path", "relation"])
+def test_specific_explicit_field_matches_precede_generic_language_match(
+    specific_field: str,
+) -> None:
+    generic = _selection_record(
+        language="rust",
+        symbol="generic",
+        source_path="src/a.rs",
+    )
+    kwargs = {
+        "language": "rust",
+        "symbol": "owner",
+        "source_path": "src/z.rs",
+    }
+    query = "needle"
+    if specific_field == "target":
+        kwargs["target_symbol"] = "needle"
+        kwargs["relation"] = "call"
+    elif specific_field == "path":
+        kwargs["source_path"] = "src/needle.rs"
+    else:
+        kwargs["relation"] = "call"
+        query = "call"
+    specific = _selection_record(**kwargs)
+
+    selected = select_language_structure_evidence(
+        {
+            "status": "available",
+            "records": [generic, specific],
+            "degradations": [],
+        },
+        terms=["rust", query],
+        max_items=1,
+    )
+
+    assert selected["records"] == [specific]
+
+
+def test_relevance_ties_have_input_order_independent_tiebreaks() -> None:
+    records = [
+        _selection_record(
+            language="rust",
+            symbol="helper",
+            source_path=path,
+        )
+        for path in ("src/z.rs", "src/a.rs", "src/m.rs")
+    ]
+
+    first = select_language_structure_evidence(
+        {"status": "available", "records": records, "degradations": []},
+        terms=["helper"],
+        max_items=3,
+    )
+    second = select_language_structure_evidence(
+        {
+            "status": "available",
+            "records": list(reversed(records)),
+            "degradations": [],
+        },
+        terms=["helper"],
+        max_items=3,
+    )
+
+    first_paths = [record["source"]["path"] for record in first["records"]]
+    second_paths = [record["source"]["path"] for record in second["records"]]
+    assert first_paths == ["src/a.rs", "src/m.rs", "src/z.rs"]
+    assert second_paths == first_paths
+
+
+def test_relevance_ties_interleave_languages_before_item_limit() -> None:
+    records = [
+        _selection_record(
+            language=language,
+            symbol="helper",
+            source_path=f"{language}/{index:02d}.{'sh' if language == 'bash' else 'rs'}",
+        )
+        for language in ("bash", "rust")
+        for index in range(4)
+    ]
+
+    selected = select_language_structure_evidence(
+        {"status": "available", "records": records, "degradations": []},
+        terms=["helper"],
+        max_items=4,
+    )
+
+    assert [record["language"] for record in selected["records"]] == [
+        "bash",
+        "rust",
+        "bash",
+        "rust",
+    ]
 
 
 def test_common_record_contract_rejects_nonfinite_confidence():
