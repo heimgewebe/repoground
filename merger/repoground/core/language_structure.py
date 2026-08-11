@@ -258,6 +258,41 @@ def build_language_structure_document(
             "limit": max_records,
         }
         records = records[:max_records]
+    summaries = {
+        "bash": deepcopy(bash["summary"]),
+        "rust": deepcopy(rust["summary"]),
+    }
+    language_truncations: list[dict[str, Any]] = []
+    for language, summary in summaries.items():
+        retained_records = [
+            record for record in records if record.get("language") == language
+        ]
+        observed_record_count = int(summary.get("record_count", 0))
+        retained_record_count = len(retained_records)
+        summary["record_count"] = retained_record_count
+        if language == "rust":
+            summary["scip_record_count"] = sum(
+                1
+                for record in retained_records
+                if record.get("adapter")
+                == {"id": "rust-scip-structure", "version": "1.0"}
+            )
+        if observed_record_count > retained_record_count:
+            summary["status"] = "degraded"
+            language_truncations.append(
+                {
+                    "language": language,
+                    "reason": "global_record_limit",
+                    "detail": {
+                        "observed_record_count": observed_record_count,
+                        "retained_record_count": retained_record_count,
+                        "omitted_record_count": (
+                            observed_record_count - retained_record_count
+                        ),
+                        "limit": max_records,
+                    },
+                }
+            )
     degradations = sorted(
         [*bash["degradations"], *rust["degradations"]],
         key=lambda item: (
@@ -268,6 +303,7 @@ def build_language_structure_document(
         ),
     )
     if truncation is not None:
+        degradations.extend(language_truncations)
         degradations.append(
             {
                 "language": "mixed",
@@ -295,10 +331,7 @@ def build_language_structure_document(
             "secrets_read": False,
             "workspace_state_used_beyond_bound_source": False,
         },
-        "languages": {
-            "bash": bash["summary"],
-            "rust": rust["summary"],
-        },
+        "languages": summaries,
         "records": records,
         "record_count": len(records),
         "degradations": degradations,

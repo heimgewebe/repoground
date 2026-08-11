@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import jsonschema
 
-from merger.repoground.core import doctor
+from merger.repoground.core import doctor, language_structure
 from merger.repoground.core.agent_impact_adapter import RepoGroundAgentImpactAdapter
 from merger.repoground.core.ask_context import build_ask_context_pack
 from merger.repoground.core.constants import ArtifactRole
@@ -194,6 +194,77 @@ def test_bundle_emits_contract_bound_language_structure_and_access_is_fail_close
     blocked = load_language_structure_artifact(manifest_path)
     assert blocked["status"] == "blocked"
     assert blocked["reason"] == "language_structure_integrity_mismatch"
+
+
+def test_global_record_limit_rebinds_language_summaries_without_hiding_loss(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    original_builder = language_structure.build_language_structure_document
+
+    def limited_builder(*args, **kwargs):
+        return original_builder(*args, **kwargs, max_records=2)
+
+    monkeypatch.setattr(
+        language_structure,
+        "build_language_structure_document",
+        limited_builder,
+    )
+    repo, commit, artifacts = _bundle(tmp_path)
+    manifest_path = artifacts.bundle_manifest
+    language_path = artifacts.language_structure
+    assert manifest_path is not None
+    assert language_path is not None
+
+    document = json.loads(language_path.read_text(encoding="utf-8"))
+    retained_counts = {
+        language: sum(
+            record["language"] == language for record in document["records"]
+        )
+        for language in ("bash", "rust")
+    }
+    assert document["record_count"] == 2
+    assert document["truncation"]["reason"] == "global_record_limit"
+    assert document["truncation"]["limit"] == 2
+    assert document["truncation"]["observed"] > document["record_count"]
+    assert {
+        language: document["languages"][language]["record_count"]
+        for language in ("bash", "rust")
+    } == retained_counts
+    assert document["languages"]["rust"]["scip_record_count"] == sum(
+        record["adapter"]["id"] == "rust-scip-structure"
+        for record in document["records"]
+        if record["language"] == "rust"
+    )
+    per_language_loss = {
+        item["language"]: item["detail"]
+        for item in document["degradations"]
+        if item["reason"] == "global_record_limit"
+        and item["language"] in {"bash", "rust"}
+    }
+    assert set(per_language_loss) == {"rust"}
+    for language, detail in per_language_loss.items():
+        assert document["languages"][language]["status"] == "degraded"
+        assert detail["retained_record_count"] == retained_counts[language]
+        assert detail["omitted_record_count"] == (
+            detail["observed_record_count"] - detail["retained_record_count"]
+        )
+
+    loaded = load_language_structure_artifact(manifest_path)
+    assert loaded["status"] == "available"
+    assert loaded["content_json"]["status"] == "degraded"
+
+    repeated = original_builder(
+        repo,
+        repository_commit=commit,
+        bundle_manifest=manifest_path.name,
+        canonical_dump_index_sha256=document["source"][
+            "canonical_dump_index_sha256"
+        ],
+        run_id=document["run_id"],
+        max_records=2,
+    )
+    assert repeated == document
 
 
 def test_bundle_language_structure_is_opt_in_and_refuses_dirty_commit_binding(
