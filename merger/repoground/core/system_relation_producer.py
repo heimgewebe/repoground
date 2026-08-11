@@ -1,0 +1,800 @@
+"""Conservative revision-bound producer for static repository relations.
+
+The producer intentionally supports only a small set of declarations whose
+meaning can be established from repository text without executing code:
+
+* root ``pyproject.toml`` first-level ``[tool.NAME]`` tables declare config contracts;
+* ``*.schema.json`` files with a top-level literal ``$id`` declare schema contracts;
+* local GitHub workflow ``uses: ./.github/workflows/...`` entries reference an
+  existing workflow file in the same commit.
+
+Candidates and file bytes are read from the Git object database of the requested
+commit, never from the mutable working tree. Everything dynamic or ambiguous is
+omitted rather than inferred. The result is deterministic and suitable for
+``system_relation_overlay`` normalization, but it is not runtime truth and does
+not establish config effects, schema conformance or workflow execution.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import subprocess
+from collections.abc import Mapping
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 compatibility
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        tomllib = None
+
+from merger.repoground.core.system_relation_overlay import (
+    normalize_system_relation_evidence,
+)
+
+KIND = "repoground.system_relation_producer_result"
+VERSION = "1.0"
+EVIDENCE_KIND = "repoground.system_relation_evidence"
+EVIDENCE_VERSION = "1.0"
+PRODUCER_NAME = "repoground.system_relation_producer"
+PRODUCER_VERSION = "1.0"
+
+DEFAULT_MAX_FILES = 512
+DEFAULT_MAX_FILE_BYTES = 1_048_576
+DEFAULT_MAX_TOTAL_BYTES = 8_388_608
+DEFAULT_MAX_CANDIDATE_INDEX_BYTES = 4_194_304
+_GIT_TIMEOUT_SECONDS = 10
+_SUPPORTED_RELATIONS = (
+    "declares_config",
+    "declares_schema",
+    "references_workflow",
+)
+_SUPPORTED_SOURCES = (
+    "root pyproject.toml first-level [tool.NAME] tables",
+    "tracked *.schema.json with a top-level literal $id",
+    "tracked .github/workflows/*.yml|*.yaml static local reusable-workflow references",
+)
+_DOES_NOT_ESTABLISH = (
+    "repository_truth_beyond_requested_commit",
+    "complete_repository_relation_coverage",
+    "runtime_config_effect",
+    "schema_conformance",
+    "schema_validation_execution",
+    "workflow_execution",
+    "workflow_validity",
+    "runtime_behavior",
+    "runtime_correctness",
+    "default_activation",
+)
+_SENSITIVE_PARTS = frozenset(
+    {
+        ".env",
+        "secret",
+        "secrets",
+        "credential",
+        "credentials",
+        "private-key",
+        "private_key",
+        "tokens",
+    }
+)
+_TOOL_TABLE_RE = re.compile(
+    r"^(?P<prefix>\s*)\[tool\.(?P<name>[A-Za-z0-9_-]+)\]\s*(?:#.*)?$"
+)
+_WORKFLOW_USES_RE = re.compile(
+    r"^(?P<prefix>\s*)uses\s*:\s*(?P<quote>['\"]?)(?P<value>[^'\"\s#]+)(?P=quote)\s*(?:#.*)?$"
+)
+
+
+class SystemRelationProducerError(ValueError):
+    """Raised when the producer request or revision source is unsafe."""
+
+
+def _canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def _canonical_sha256(value: Any) -> str:
+    return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _commit(value: Any) -> str:
+    if not isinstance(value, str):
+        raise SystemRelationProducerError("repository_commit must be a string")
+    commit = value.strip()
+    if len(commit) not in {40, 64} or any(
+        character not in "0123456789abcdef" for character in commit
+    ):
+        raise SystemRelationProducerError(
+            "repository_commit must be a lowercase 40- or 64-character digest"
+        )
+    return commit
+
+
+def _repository_identity(value: Any) -> str:
+    if not isinstance(value, str):
+        raise SystemRelationProducerError("repository_identity must be a string")
+    identity = value.strip()
+    if not identity or len(identity) > 4096 or "\x00" in identity:
+        raise SystemRelationProducerError(
+            "repository_identity must be non-empty and bounded"
+        )
+    return identity
+
+
+def _positive_int(value: Any, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise SystemRelationProducerError(f"{field} must be an integer >= 1")
+    return value
+
+
+def _git_environment() -> dict[str, str]:
+    environment = dict(os.environ)
+    environment.update(
+        {
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": "/bin/false",
+        }
+    )
+    return environment
+
+
+def _git_stdout(
+    root: Path,
+    arguments: list[str],
+    *,
+    operation: str,
+) -> bytes:
+    command = [
+        "git",
+        "-c",
+        "core.pager=cat",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "diff.external=",
+        "-c",
+        "protocol.file.allow=never",
+        "-C",
+        str(root),
+        *arguments,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            env=_git_environment(),
+        )
+    except FileNotFoundError as exc:
+        raise SystemRelationProducerError("git executable is unavailable") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise SystemRelationProducerError(
+            f"git {operation} exceeded the bounded timeout"
+        ) from exc
+    if completed.returncode != 0:
+        raise SystemRelationProducerError(f"git {operation} failed")
+    return completed.stdout
+
+
+def _verify_revision_source(root: Path, commit: str) -> None:
+    raw_root = _git_stdout(
+        root,
+        ["rev-parse", "--show-toplevel"],
+        operation="repository-root verification",
+    )
+    try:
+        observed_root = Path(raw_root.decode("utf-8").strip()).resolve(strict=True)
+    except (UnicodeDecodeError, OSError) as exc:
+        raise SystemRelationProducerError("git repository root is invalid") from exc
+    if observed_root != root:
+        raise SystemRelationProducerError(
+            "repository_root must be the Git repository toplevel"
+        )
+    object_type = _git_stdout(
+        root,
+        ["cat-file", "-t", commit],
+        operation="commit verification",
+    ).strip()
+    if object_type != b"commit":
+        raise SystemRelationProducerError(
+            "repository_commit must identify a local Git commit object"
+        )
+
+
+def _safe_repo_path(relative: str) -> bool:
+    parsed = PurePosixPath(relative)
+    return bool(
+        relative
+        and not relative.startswith("/")
+        and "\\" not in relative
+        and "//" not in relative
+        and all(part not in {"", ".", ".."} for part in parsed.parts)
+    )
+
+
+def _sensitive_path(relative: str) -> bool:
+    for raw_part in PurePosixPath(relative).parts:
+        part = raw_part.casefold()
+        stem = part.rsplit(".", 1)[0]
+        if part in _SENSITIVE_PARTS or stem in _SENSITIVE_PARTS:
+            return True
+        if "credential" in part or "private_key" in part or "private-key" in part:
+            return True
+    return False
+
+
+def _candidate_kind(relative: str) -> str | None:
+    path = PurePosixPath(relative)
+    if relative == "pyproject.toml":
+        return "pyproject"
+    if path.name.endswith(".schema.json"):
+        return "schema"
+    parts = path.parts
+    if (
+        len(parts) == 3
+        and parts[:2] == (".github", "workflows")
+        and path.suffix.casefold() in {".yml", ".yaml"}
+    ):
+        return "workflow"
+    return None
+
+
+def _omission(
+    path: str,
+    reason: str,
+    *,
+    line: int | None = None,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"path": path, "reason": reason}
+    if line is not None:
+        result["line"] = line
+    if detail is not None:
+        result["detail"] = detail[:512]
+    return result
+
+
+def _git_candidates(
+    root: Path,
+    *,
+    commit: str,
+    max_candidate_index_bytes: int,
+) -> tuple[
+    list[tuple[str, str, int, str]],
+    list[dict[str, Any]],
+    set[str],
+    int,
+]:
+    payload = _git_stdout(
+        root,
+        ["ls-tree", "-r", "-z", "--long", commit],
+        operation="candidate enumeration",
+    )
+    if len(payload) > max_candidate_index_bytes:
+        raise SystemRelationProducerError(
+            "candidate index exceeds max_candidate_index_bytes"
+        )
+
+    candidates: list[tuple[str, str, int, str]] = []
+    omissions: list[dict[str, Any]] = []
+    available_paths: set[str] = set()
+    for raw_entry in payload.split(b"\x00"):
+        if not raw_entry:
+            continue
+        try:
+            metadata, raw_path = raw_entry.split(b"\t", 1)
+            mode, object_type, object_id, raw_size = metadata.split()
+        except ValueError:
+            raise SystemRelationProducerError(
+                "git candidate index contained an invalid entry"
+            ) from None
+        path_fingerprint = hashlib.sha256(raw_path).hexdigest()[:16]
+        try:
+            relative = raw_path.decode("utf-8")
+        except UnicodeDecodeError:
+            omissions.append(
+                _omission(
+                    f"<non-utf8-path:{path_fingerprint}>",
+                    "non_utf8_path_omitted",
+                )
+            )
+            continue
+        if not _safe_repo_path(relative):
+            omissions.append(_omission(relative, "unsafe_path_omitted"))
+            continue
+        candidate_kind = _candidate_kind(relative)
+        if candidate_kind is None:
+            continue
+        if _sensitive_path(relative):
+            omissions.append(_omission(relative, "sensitive_path_omitted"))
+            continue
+        if object_type != b"blob" or mode == b"120000":
+            omissions.append(_omission(relative, "non_regular_file_omitted"))
+            continue
+        try:
+            size = int(raw_size)
+            object_id_text = object_id.decode("ascii")
+        except (ValueError, UnicodeDecodeError):
+            omissions.append(_omission(relative, "git_metadata_invalid"))
+            continue
+        available_paths.add(relative)
+        candidates.append((relative, object_id_text, size, candidate_kind))
+
+    candidates.sort(key=lambda item: item[0])
+    omissions.sort(key=_omission_order)
+    return candidates, omissions, available_paths, len(payload)
+
+
+def _git_blob(root: Path, object_id: str) -> bytes:
+    return _git_stdout(
+        root,
+        ["cat-file", "blob", object_id],
+        operation="blob read",
+    )
+
+
+def _line_range(
+    line_number: int,
+    line: str,
+    *,
+    start_character: int = 0,
+) -> dict[str, int]:
+    end_character = len(line.rstrip("\r\n"))
+    return {
+        "start_line": line_number,
+        "start_character": start_character,
+        "end_line": line_number,
+        "end_character": end_character,
+    }
+
+
+def _raw_record(
+    *,
+    relation: str,
+    subject_kind: str,
+    subject_identity: str,
+    target_kind: str,
+    target_identity: str,
+    path: str,
+    source_kind: str,
+    source_range: Mapping[str, int],
+    evidence_class: str,
+    contract_identity: Mapping[str, str] | None,
+) -> dict[str, Any]:
+    return {
+        "relation": relation,
+        "subject": {"kind": subject_kind, "identity": subject_identity},
+        "target": {"kind": target_kind, "identity": target_identity},
+        "source": {
+            "path": path,
+            "kind": source_kind,
+            "range": dict(source_range),
+        },
+        "evidence_class": evidence_class,
+        "contract_identity": (
+            dict(contract_identity) if contract_identity is not None else None
+        ),
+    }
+
+
+def _scan_pyproject(
+    text: str,
+    *,
+    relative: str,
+    repository_identity: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if tomllib is None:
+        return [], [_omission(relative, "toml_parser_unavailable")]
+    try:
+        parsed = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, ValueError) as exc:
+        return [], [_omission(relative, "invalid_toml", detail=str(exc))]
+    tool_table = parsed.get("tool") if isinstance(parsed, Mapping) else None
+    if not isinstance(tool_table, Mapping):
+        return [], []
+
+    records: list[dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        match = _TOOL_TABLE_RE.match(line)
+        if match is None:
+            continue
+        name = match.group("name")
+        if name in seen_names or name not in tool_table:
+            continue
+        seen_names.add(name)
+        contract_id = f"pyproject.tool.{name}"
+        records.append(
+            _raw_record(
+                relation="declares_config",
+                subject_kind="repository",
+                subject_identity=repository_identity,
+                target_kind="config_contract",
+                target_identity=contract_id,
+                path=relative,
+                source_kind="manifest",
+                source_range=_line_range(
+                    line_number,
+                    line,
+                    start_character=len(match.group("prefix")),
+                ),
+                evidence_class="config_declaration",
+                contract_identity={
+                    "kind": "config",
+                    "id": contract_id,
+                    "version": "unversioned",
+                },
+            )
+        )
+    return records, []
+
+
+def _json_depths_by_offset(text: str) -> list[int]:
+    depths: list[int] = [0] * len(text)
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, character in enumerate(text):
+        depths[index] = depth
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+        else:
+            if character == '"':
+                in_string = True
+            elif character in "{[":
+                depth += 1
+            elif character in "}]":
+                depth = max(0, depth - 1)
+    return depths
+
+
+def _top_level_json_key_range(
+    text: str,
+    *,
+    key: str,
+    expected_value: str,
+) -> dict[str, int] | None:
+    depths = _json_depths_by_offset(text)
+    pattern = re.compile(
+        rf'"{re.escape(key)}"\s*:\s*(?P<value>"(?:\\.|[^"\\])*")'
+    )
+    for match in pattern.finditer(text):
+        if match.start() >= len(depths) or depths[match.start()] != 1:
+            continue
+        try:
+            observed = json.loads(match.group("value"))
+        except json.JSONDecodeError:
+            continue
+        if observed != expected_value:
+            continue
+        line_number = text.count("\n", 0, match.start()) + 1
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        line_end = text.find("\n", match.start())
+        if line_end < 0:
+            line_end = len(text)
+        line = text[line_start:line_end]
+        return _line_range(
+            line_number,
+            line,
+            start_character=match.start() - line_start,
+        )
+    return None
+
+
+def _scan_schema(
+    text: str,
+    *,
+    relative: str,
+    repository_identity: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return [], [_omission(relative, "invalid_json_schema", detail=str(exc))]
+    if not isinstance(parsed, Mapping):
+        return [], [_omission(relative, "schema_root_not_object")]
+    schema_id = parsed.get("$id")
+    if not isinstance(schema_id, str) or not schema_id.strip():
+        return [], [_omission(relative, "schema_id_missing_or_nonliteral")]
+    schema_id = schema_id.strip()
+    source_range = _top_level_json_key_range(
+        text,
+        key="$id",
+        expected_value=schema_id,
+    )
+    if source_range is None:
+        return [], [_omission(relative, "schema_id_range_unresolved")]
+    record = _raw_record(
+        relation="declares_schema",
+        subject_kind="repository",
+        subject_identity=repository_identity,
+        target_kind="schema_contract",
+        target_identity=schema_id,
+        path=relative,
+        source_kind="schema_file",
+        source_range=source_range,
+        evidence_class="schema_declaration",
+        contract_identity={
+            "kind": "schema",
+            "id": schema_id,
+            "version": "unversioned",
+        },
+    )
+    return [record], []
+
+
+def _workflow_target(value: str) -> str | None:
+    if not value.startswith("./.github/workflows/"):
+        return None
+    relative = value[2:]
+    path = PurePosixPath(relative)
+    if (
+        path.suffix.casefold() not in {".yml", ".yaml"}
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        return None
+    return path.as_posix()
+
+
+def _scan_workflow(
+    text: str,
+    *,
+    relative: str,
+    available_paths: set[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    records: list[dict[str, Any]] = []
+    omissions: list[dict[str, Any]] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if "uses:" not in line:
+            continue
+        if "${{" in line:
+            omissions.append(
+                _omission(relative, "dynamic_workflow_reference", line=line_number)
+            )
+            continue
+        match = _WORKFLOW_USES_RE.match(line)
+        if match is None:
+            if ".github/workflows" in line:
+                omissions.append(
+                    _omission(relative, "ambiguous_workflow_reference", line=line_number)
+                )
+            continue
+        value = match.group("value")
+        target = _workflow_target(value)
+        if target is None:
+            if ".github/workflows" in value:
+                omissions.append(
+                    _omission(relative, "unsupported_workflow_reference", line=line_number)
+                )
+            continue
+        if target not in available_paths:
+            omissions.append(
+                _omission(
+                    relative,
+                    "workflow_target_missing",
+                    line=line_number,
+                    detail=target,
+                )
+            )
+            continue
+        records.append(
+            _raw_record(
+                relation="references_workflow",
+                subject_kind="workflow",
+                subject_identity=relative,
+                target_kind="workflow",
+                target_identity=target,
+                path=relative,
+                source_kind="workflow",
+                source_range=_line_range(
+                    line_number,
+                    line,
+                    start_character=len(match.group("prefix")),
+                ),
+                evidence_class="workflow_reference",
+                contract_identity=None,
+            )
+        )
+    return records, omissions
+
+
+def _record_order(record: Mapping[str, Any]) -> bytes:
+    return _canonical_bytes(record)
+
+
+def _omission_order(item: Mapping[str, Any]) -> tuple[str, str, int, str]:
+    return (
+        str(item.get("path", "")),
+        str(item.get("reason", "")),
+        int(item.get("line", 0) or 0),
+        str(item.get("detail", "")),
+    )
+
+
+def collect_system_relation_evidence(
+    repository_root: str | Path,
+    *,
+    repository_identity: str,
+    repository_commit: str,
+    max_files: int = DEFAULT_MAX_FILES,
+    max_file_bytes: int = DEFAULT_MAX_FILE_BYTES,
+    max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
+    max_candidate_index_bytes: int = DEFAULT_MAX_CANDIDATE_INDEX_BYTES,
+) -> dict[str, Any]:
+    """Collect bounded static relation evidence from one exact Git commit."""
+    identity = _repository_identity(repository_identity)
+    commit = _commit(repository_commit)
+    max_files = _positive_int(max_files, field="max_files")
+    max_file_bytes = _positive_int(max_file_bytes, field="max_file_bytes")
+    max_total_bytes = _positive_int(max_total_bytes, field="max_total_bytes")
+    max_candidate_index_bytes = _positive_int(
+        max_candidate_index_bytes,
+        field="max_candidate_index_bytes",
+    )
+
+    root = Path(repository_root).expanduser()
+    try:
+        root = root.resolve(strict=True)
+    except OSError as exc:
+        raise SystemRelationProducerError(
+            f"repository_root must resolve to an existing directory: {exc}"
+        ) from exc
+    if not root.is_dir():
+        raise SystemRelationProducerError("repository_root must be a directory")
+
+    _verify_revision_source(root, commit)
+    candidates, omissions, available_paths, candidate_index_bytes = _git_candidates(
+        root,
+        commit=commit,
+        max_candidate_index_bytes=max_candidate_index_bytes,
+    )
+    records: list[dict[str, Any]] = []
+    scanned_files = 0
+    scanned_bytes = 0
+    considered_candidates = 0
+
+    for index, (relative, object_id, size, candidate_kind) in enumerate(candidates):
+        if index >= max_files:
+            remaining = len(candidates) - index
+            omissions.append(
+                _omission(
+                    relative,
+                    "file_budget_exhausted",
+                    detail=(
+                        f"remaining_candidate_count={remaining}"
+                        if remaining > 1
+                        else None
+                    ),
+                )
+            )
+            break
+        considered_candidates += 1
+        if size > max_file_bytes:
+            omissions.append(
+                _omission(relative, "file_too_large", detail=str(size))
+            )
+            continue
+        if scanned_bytes + size > max_total_bytes:
+            omissions.append(
+                _omission(relative, "total_byte_budget_exhausted", detail=str(size))
+            )
+            continue
+        try:
+            payload = _git_blob(root, object_id)
+        except SystemRelationProducerError:
+            omissions.append(_omission(relative, "git_blob_read_failed"))
+            continue
+        if len(payload) != size:
+            omissions.append(_omission(relative, "git_blob_size_mismatch"))
+            continue
+        try:
+            text = payload.decode("utf-8")
+        except UnicodeDecodeError:
+            omissions.append(_omission(relative, "invalid_utf8"))
+            continue
+
+        scanned_files += 1
+        scanned_bytes += len(payload)
+        if candidate_kind == "pyproject":
+            found, skipped = _scan_pyproject(
+                text,
+                relative=relative,
+                repository_identity=identity,
+            )
+        elif candidate_kind == "schema":
+            found, skipped = _scan_schema(
+                text,
+                relative=relative,
+                repository_identity=identity,
+            )
+        else:
+            found, skipped = _scan_workflow(
+                text,
+                relative=relative,
+                available_paths=available_paths,
+            )
+        records.extend(found)
+        omissions.extend(skipped)
+
+    records.sort(key=_record_order)
+    omissions.sort(key=_omission_order)
+    evidence = {
+        "kind": EVIDENCE_KIND,
+        "version": EVIDENCE_VERSION,
+        "producer": {"name": PRODUCER_NAME, "version": PRODUCER_VERSION},
+        "records": records,
+    }
+    evidence_sha256 = _canonical_sha256(evidence)
+    overlay = normalize_system_relation_evidence(
+        evidence,
+        evidence_sha256=evidence_sha256,
+        repository_commit=commit,
+    )
+    revision_binding = {
+        "mode": "git_commit_object",
+        "repository_commit": commit,
+        "verified": True,
+    }
+    return {
+        "kind": KIND,
+        "version": VERSION,
+        "repository": {"identity": identity, "commit": commit},
+        "revision_binding": revision_binding,
+        "producer_contract": {
+            "supported_sources": list(_SUPPORTED_SOURCES),
+            "supported_relations": list(_SUPPORTED_RELATIONS),
+            "dynamic_or_ambiguous_references": "omitted_with_reason",
+            "repository_source": "git_object_database",
+            "working_tree_reads": False,
+            "network_access": False,
+            "secret_file_scanning": False,
+        },
+        "evidence_sha256": evidence_sha256,
+        "evidence": evidence,
+        "overlay": overlay,
+        "omissions": omissions,
+        "scan": {
+            "candidate_count": len(candidates),
+            "considered_candidate_count": considered_candidates,
+            "scanned_file_count": scanned_files,
+            "scanned_bytes": scanned_bytes,
+            "candidate_index_bytes": candidate_index_bytes,
+            "limits": {
+                "max_files": max_files,
+                "max_file_bytes": max_file_bytes,
+                "max_total_bytes": max_total_bytes,
+                "max_candidate_index_bytes": max_candidate_index_bytes,
+            },
+        },
+        "absence_semantics": (
+            "Missing records mean only that this bounded producer did not establish "
+            "a supported static relation in the requested commit; they do not establish absence."
+        ),
+        "does_not_establish": list(_DOES_NOT_ESTABLISH),
+    }
+
+
+__all__ = [
+    "SystemRelationProducerError",
+    "collect_system_relation_evidence",
+]

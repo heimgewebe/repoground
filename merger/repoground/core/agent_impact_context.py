@@ -16,6 +16,9 @@ from merger.repoground.architecture.path_classification import is_test_path as _
 from merger.repoground.core.call_graph_confidence import (
     call_graph_coverage_confidence as _shared_call_graph_coverage,
 )
+from merger.repoground.core.system_relation_context import (
+    project_system_relation_context,
+)
 
 KIND = "repobrief.agent_impact_context"
 VERSION = "1.0"
@@ -1767,6 +1770,8 @@ def build_agent_impact_context(
     relation_cards: Any = None,
     query_context: Any = None,
     source_statuses: Any = None,
+    repository_commit: Any = None,
+    system_relation_result: Any = None,
 ) -> dict[str, Any]:
     """Build a bounded impact/edit context from existing RepoGround artifacts."""
 
@@ -1811,6 +1816,24 @@ def build_agent_impact_context(
         )
 
     paths = set(request.paths)
+    structural_context = None
+    if repository_commit is not None or system_relation_result is not None:
+        structural_context = project_system_relation_context(
+            system_relation_result,
+            repository_commit=repository_commit,
+            target_paths=paths,
+            max_items=request.max_items,
+        )
+        structural_status = structural_context.get("status")
+        if structural_status in {"blocked", "missing"}:
+            gaps.append(
+                {
+                    "source": "system_relation_evidence",
+                    "status": structural_status,
+                    "reason": structural_context.get("reason"),
+                    "binding": structural_context.get("binding"),
+                }
+            )
     (
         target_symbols,
         all_target_symbols,
@@ -1933,7 +1956,13 @@ def build_agent_impact_context(
         )
     )
     resolved_target = bool(
-        target_symbols or any(path in id_by_path for path in paths)
+        target_symbols
+        or any(path in id_by_path for path in paths)
+        or (
+            structural_context is not None
+            and structural_context.get("status") == "available"
+            and structural_context.get("records")
+        )
     )
     result = _base_result(
         status=_result_status(
@@ -1986,6 +2015,13 @@ def build_agent_impact_context(
             },
         }
     )
+    if structural_context is not None:
+        result["structural_relations"] = structural_context
+        result["composition"]["system_relation_evidence_used"] = bool(
+            structural_context.get("status") == "available"
+            and structural_context.get("records")
+        )
+
     if request.mode == "edit":
         selected_call_relations = (
             edit_selection["direct_callers"]["selected"]

@@ -105,7 +105,9 @@
         "produces_artifact",
         "consumes_artifact",
         "declares_config",
-        "references_config"
+        "references_config",
+        "declares_schema",
+        "references_workflow"
       ]
     },
     "evidence_class": {
@@ -118,7 +120,9 @@
         "schema_validation_call",
         "artifact_declaration",
         "config_declaration",
-        "workflow_config_reference"
+        "workflow_config_reference",
+        "schema_declaration",
+        "workflow_reference"
       ]
     },
     "endpoint_kind": {
@@ -171,7 +175,8 @@
             "test_registry",
             "source_file",
             "artifact_contract",
-            "config_file"
+            "config_file",
+            "schema_file"
           ]
         },
         "range": {"$ref": "#/definitions/range"}
@@ -248,6 +253,20 @@
             "class": {"const": "workflow_config_reference"},
             "level": {"const": "S1"},
             "strength": {"const": "declared"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "schema_declaration"},
+            "level": {"const": "S1"},
+            "strength": {"const": "declared"}
+          }
+        },
+        {
+          "properties": {
+            "class": {"const": "workflow_reference"},
+            "level": {"const": "S0"},
+            "strength": {"const": "referenced"}
           }
         }
       ]
@@ -493,6 +512,31 @@
                   "kind": {"enum": ["manifest", "workflow", "test_registry"]}
                 }
               }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"relation": {"const": "declares_schema"}}},
+          "then": {
+            "properties": {
+              "evidence": {"properties": {"class": {"const": "schema_declaration"}}},
+              "source": {"properties": {"kind": {"const": "schema_file"}}},
+              "target": {"properties": {"kind": {"const": "schema_contract"}}},
+              "contract_identity": {
+                "type": "object",
+                "properties": {"kind": {"const": "schema"}}
+              }
+            }
+          }
+        },
+        {
+          "if": {"properties": {"relation": {"const": "references_workflow"}}},
+          "then": {
+            "properties": {
+              "evidence": {"properties": {"class": {"const": "workflow_reference"}}},
+              "source": {"properties": {"kind": {"const": "workflow"}}},
+              "target": {"properties": {"kind": {"const": "workflow"}}},
+              "contract_identity": {"type": "null"}
             }
           }
         }

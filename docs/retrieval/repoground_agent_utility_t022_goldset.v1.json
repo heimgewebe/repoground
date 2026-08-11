@@ -1,0 +1,105 @@
+{
+  "kind": "repoground.agent_utility_t022_goldset",
+  "version": "1.0",
+  "task_id": "REPOGROUND-AGENT-UTILITY-V1-T022",
+  "repository_identity": "repoground/goldset",
+  "revision_policy": "materialized_fixture_git_head",
+  "gates": {
+    "minimum_precision": 1.0,
+    "minimum_recall": 1.0,
+    "minimum_range_accuracy": 1.0,
+    "maximum_s1_false_positive_count": 0,
+    "require_exact_omission_reasons": true
+  },
+  "cases": [
+    {
+      "id": "explicit-pyproject-config",
+      "class": "positive",
+      "files": {
+        "pyproject.toml": "[tool.alpha]\nenabled = true\n\n[project]\nname = \"demo\"\n"
+      },
+      "expected_records": [
+        {
+          "relation": "declares_config",
+          "target_identity": "pyproject.tool.alpha",
+          "path": "pyproject.toml",
+          "start_line": 1,
+          "evidence_level": "S1"
+        }
+      ],
+      "expected_omission_reasons": []
+    },
+    {
+      "id": "literal-schema-id",
+      "class": "positive",
+      "files": {
+        "contracts/widget.schema.json": "{\n  \"$schema\": \"http://json-schema.org/draft-07/schema#\",\n  \"$id\": \"https://example.test/schemas/widget.schema.json\",\n  \"type\": \"object\"\n}\n"
+      },
+      "expected_records": [
+        {
+          "relation": "declares_schema",
+          "target_identity": "https://example.test/schemas/widget.schema.json",
+          "path": "contracts/widget.schema.json",
+          "start_line": 3,
+          "evidence_level": "S1"
+        }
+      ],
+      "expected_omission_reasons": []
+    },
+    {
+      "id": "static-local-workflow-reference",
+      "class": "positive",
+      "files": {
+        ".github/workflows/reuse.yml": "name: reuse\non:\n  workflow_call:\njobs: {}\n",
+        ".github/workflows/caller.yml": "name: caller\njobs:\n  delegated:\n    uses: ./.github/workflows/reuse.yml\n"
+      },
+      "expected_records": [
+        {
+          "relation": "references_workflow",
+          "target_identity": ".github/workflows/reuse.yml",
+          "path": ".github/workflows/caller.yml",
+          "start_line": 4,
+          "evidence_level": "S0"
+        }
+      ],
+      "expected_omission_reasons": []
+    },
+    {
+      "id": "dynamic-workflow-reference",
+      "class": "ambiguous",
+      "files": {
+        ".github/workflows/caller.yml": "name: caller\njobs:\n  delegated:\n    uses: ${{ matrix.workflow }}\n"
+      },
+      "expected_records": [],
+      "expected_omission_reasons": ["dynamic_workflow_reference"]
+    },
+    {
+      "id": "missing-local-workflow-target",
+      "class": "ambiguous",
+      "files": {
+        ".github/workflows/caller.yml": "name: caller\njobs:\n  delegated:\n    uses: ./.github/workflows/missing.yml\n"
+      },
+      "expected_records": [],
+      "expected_omission_reasons": ["workflow_target_missing"]
+    },
+    {
+      "id": "nested-schema-id-only",
+      "class": "ambiguous",
+      "files": {
+        "contracts/nested.schema.json": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"value\": {\"$id\": \"https://example.test/nested\", \"type\": \"string\"}\n  }\n}\n"
+      },
+      "expected_records": [],
+      "expected_omission_reasons": ["schema_id_missing_or_nonliteral"]
+    },
+    {
+      "id": "true-null-unrelated-files",
+      "class": "true_null",
+      "files": {
+        "README.md": "# Ordinary repository\n",
+        "data.json": "{\"name\": \"ordinary data\"}\n"
+      },
+      "expected_records": [],
+      "expected_omission_reasons": []
+    }
+  ]
+}

@@ -46,9 +46,11 @@ EVIDENCE_PROFILES = {
     "test_import_or_reference": ("S0", "referenced"),
     "test_naming_heuristic": ("S0", "heuristic"),
     "schema_validation_call": ("S1", "declared"),
+    "schema_declaration": ("S1", "declared"),
     "artifact_declaration": ("S1", "declared"),
     "config_declaration": ("S1", "declared"),
     "workflow_config_reference": ("S1", "declared"),
+    "workflow_reference": ("S0", "referenced"),
 }
 
 SOURCE_KINDS_BY_EVIDENCE = {
@@ -60,11 +62,13 @@ SOURCE_KINDS_BY_EVIDENCE = {
     "test_import_or_reference": frozenset({"source_file"}),
     "test_naming_heuristic": frozenset({"source_file"}),
     "schema_validation_call": frozenset({"source_file"}),
+    "schema_declaration": frozenset({"schema_file"}),
     "artifact_declaration": frozenset(
         {"manifest", "workflow", "source_file", "artifact_contract"}
     ),
     "config_declaration": frozenset({"manifest", "config_file"}),
     "workflow_config_reference": frozenset({"workflow"}),
+    "workflow_reference": frozenset({"workflow"}),
 }
 
 RELATION_RULES = {
@@ -91,6 +95,11 @@ RELATION_RULES = {
         "contract_kind": "schema",
         "target_kind": "schema_contract",
     },
+    "declares_schema": {
+        "evidence": frozenset({"schema_declaration"}),
+        "contract_kind": "schema",
+        "target_kind": "schema_contract",
+    },
     "produces_artifact": {
         "evidence": frozenset({"artifact_declaration"}),
         "contract_kind": "artifact",
@@ -98,6 +107,11 @@ RELATION_RULES = {
     "consumes_artifact": {
         "evidence": frozenset({"artifact_declaration"}),
         "contract_kind": "artifact",
+    },
+    "references_workflow": {
+        "evidence": frozenset({"workflow_reference"}),
+        "contract_kind": None,
+        "target_kind": "workflow",
     },
     "declares_config": {
         "evidence": frozenset({"config_declaration"}),

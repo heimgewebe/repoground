@@ -106,6 +106,9 @@
     "composition": {
       "type": "object"
     },
+    "structural_relations": {
+      "type": "object"
+    },
     "edit_context": {
       "type": "object"
     },
