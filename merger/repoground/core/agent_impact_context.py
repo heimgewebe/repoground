@@ -16,6 +16,9 @@ from merger.repoground.architecture.path_classification import is_test_path as _
 from merger.repoground.core.call_graph_confidence import (
     call_graph_coverage_confidence as _shared_call_graph_coverage,
 )
+from merger.repoground.core.system_relation_context import (
+    project_system_relation_context,
+)
 
 KIND = "repobrief.agent_impact_context"
 VERSION = "1.0"
@@ -1753,6 +1756,55 @@ def _select_impact_relations(
 
 
 
+
+def _system_relation_context_for_request(
+    *,
+    repository_commit: Any,
+    system_relation_result: Any,
+    paths: set[str],
+    max_items: int,
+    gaps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if repository_commit is None and system_relation_result is None:
+        return None
+    context = project_system_relation_context(
+        system_relation_result,
+        repository_commit=repository_commit,
+        target_paths=paths,
+        max_items=max_items,
+    )
+    status = context.get("status")
+    if status in {"blocked", "missing"}:
+        gaps.append(
+            {
+                "source": "system_relation_evidence",
+                "status": status,
+                "reason": context.get("reason"),
+                "binding": context.get("binding"),
+            }
+        )
+    return context
+
+
+def _structural_context_resolves_target(context: Mapping[str, Any] | None) -> bool:
+    return bool(
+        context
+        and context.get("status") == "available"
+        and context.get("records")
+    )
+
+
+def _attach_structural_context(
+    result: dict[str, Any],
+    context: Mapping[str, Any] | None,
+) -> None:
+    if context is None:
+        return
+    result["structural_relations"] = dict(context)
+    result["composition"]["system_relation_evidence_used"] = (
+        _structural_context_resolves_target(context)
+    )
+
 def build_agent_impact_context(
     *,
     target_path: Any = None,
@@ -1767,6 +1819,8 @@ def build_agent_impact_context(
     relation_cards: Any = None,
     query_context: Any = None,
     source_statuses: Any = None,
+    repository_commit: Any = None,
+    system_relation_result: Any = None,
 ) -> dict[str, Any]:
     """Build a bounded impact/edit context from existing RepoGround artifacts."""
 
@@ -1811,6 +1865,13 @@ def build_agent_impact_context(
         )
 
     paths = set(request.paths)
+    structural_context = _system_relation_context_for_request(
+        repository_commit=repository_commit,
+        system_relation_result=system_relation_result,
+        paths=paths,
+        max_items=request.max_items,
+        gaps=gaps,
+    )
     (
         target_symbols,
         all_target_symbols,
@@ -1933,7 +1994,9 @@ def build_agent_impact_context(
         )
     )
     resolved_target = bool(
-        target_symbols or any(path in id_by_path for path in paths)
+        target_symbols
+        or any(path in id_by_path for path in paths)
+        or _structural_context_resolves_target(structural_context)
     )
     result = _base_result(
         status=_result_status(
@@ -1986,6 +2049,8 @@ def build_agent_impact_context(
             },
         }
     )
+    _attach_structural_context(result, structural_context)
+
     if request.mode == "edit":
         selected_call_relations = (
             edit_selection["direct_callers"]["selected"]
