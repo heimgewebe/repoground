@@ -22,6 +22,7 @@ from scripts.release.build_release_candidate import (
 from scripts.release.compile_dependency_locks import (
     CONTRACT_PATH,
     ContractError,
+    ToolchainContract,
     load_contract,
 )
 
@@ -111,21 +112,11 @@ def _check_lock(path: Path, relative: str) -> list[dict[str, str]]:
     return findings
 
 
-def _check_lock_generator_contract(repo: Path) -> list[dict[str, str]]:
+def _check_lock_generator_pins(
+    tool_lock: str, contract: ToolchainContract
+) -> list[dict[str, str]]:
     findings: list[dict[str, str]] = []
-    try:
-        contract = load_contract(repo)
-    except (ContractError, OSError) as exc:
-        return [
-            _finding(
-                "LOCK_GENERATOR_CONTRACT_INVALID",
-                str(CONTRACT_PATH),
-                str(exc),
-            )
-        ]
-
     tool_lock_path = "requirements/repoground-lock-tools.lock.txt"
-    tool_lock = (repo / tool_lock_path).read_text(encoding="utf-8")
     for package, version in (
         ("pip", contract.pip),
         ("pip-tools", contract.pip_tools),
@@ -141,6 +132,25 @@ def _check_lock_generator_contract(repo: Path) -> list[dict[str, str]]:
                     f"expected {package}=={version}",
                 )
             )
+    return findings
+
+
+def _check_lock_generator_contract(repo: Path) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    try:
+        contract = load_contract(repo)
+    except (ContractError, OSError) as exc:
+        return [
+            _finding(
+                "LOCK_GENERATOR_CONTRACT_INVALID",
+                str(CONTRACT_PATH),
+                str(exc),
+            )
+        ]
+
+    tool_lock_path = "requirements/repoground-lock-tools.lock.txt"
+    tool_lock = (repo / tool_lock_path).read_text(encoding="utf-8")
+    findings.extend(_check_lock_generator_pins(tool_lock, contract))
 
     canonical_check = "scripts/release/compile_dependency_locks.sh --check"
     for relative in (
