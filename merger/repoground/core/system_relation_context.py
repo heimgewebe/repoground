@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from merger.repoground.core.system_relation_overlay import (
+    MAX_EVIDENCE_RECORDS,
     SystemRelationOverlayError,
     normalize_system_relation_evidence,
 )
@@ -15,8 +16,6 @@ KIND = "repoground.system_relation_context"
 VERSION = "1.0"
 PRODUCER_RESULT_KIND = "repoground.system_relation_producer_result"
 PRODUCER_RESULT_VERSION = "1.0"
-MAX_EVIDENCE_RECORDS = 4096
-
 ABSENCE_SEMANTICS = (
     "Missing projected records mean only that coherent supplied evidence did not "
     "establish a supported relation for these target paths."

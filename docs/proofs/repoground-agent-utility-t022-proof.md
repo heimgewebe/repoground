@@ -10,14 +10,18 @@ relations and a fail-closed consumer path into Agent Impact Context.
 The producer supports only these static sources:
 
 - root `pyproject.toml` first-level `[tool.NAME]` tables → `declares_config`;
-- tracked `*.schema.json` files with a literal top-level `$id` → `declares_schema`;
-- direct `.github/workflows/*.yml|*.yaml` static local
+- tracked `*.schema.json` files with exactly one literal top-level `$id` →
+  `declares_schema`;
+- direct job-level `.github/workflows/*.yml|*.yaml` static local
   `uses: ./.github/workflows/...` references whose target exists in the same Git
   commit → `references_workflow`.
 
-Dynamic, generated, ambiguous, missing-target, invalid, oversized, sensitive,
-non-regular and unsupported cases are omitted or reported with a reason. They
-are not inferred.
+Workflow relations come from parsed YAML mapping structure rather than raw-line
+matching, so text inside block scalars such as `run: |` cannot become a
+relation. Duplicate top-level schema `$id` keys are ambiguous and therefore
+omitted. Dynamic, generated, ambiguous, missing-target, invalid, oversized,
+sensitive, non-regular and unsupported cases are likewise omitted or reported
+with a reason. They are not inferred.
 
 ## Revision binding
 
@@ -25,6 +29,12 @@ are not inferred.
 verifies that it names a local Git commit object. Candidate metadata and file
 bytes are then read from the Git object database for that commit. The mutable
 working tree is not a producer input.
+
+The Git tree index is read with a hard streaming byte cap: the producer
+terminates the child process as soon as the configured candidate-index budget
+would be exceeded instead of buffering unbounded output first. Blob bytes that
+were actually read count against the total byte budget even when decoding or
+later parsing fails.
 
 The result includes an explicit `revision_binding` receipt. The context adapter
 rejects the evidence unless all of these are coherent:
@@ -38,16 +48,21 @@ rejects the evidence unless all of these are coherent:
 A mismatch produces a visible `blocked` or `missing` structural-evidence state
 and projects zero structural records.
 
-## Relation separation
+## Relation separation and shared record bound
 
 System relations remain a separate structure lane. They do not become Python
 `calls` or `constructs` edges. Agent Impact Context exposes them under optional
 `structural_relations`; existing relation behavior remains unchanged when the
 new evidence input is absent.
 
+Producer, overlay normalizer and context consumer share the same hard maximum of
+4096 evidence records. The producer truncates deterministically at that bound
+and reports `record_budget_exhausted`; externally supplied evidence above the
+same bound is rejected rather than partly trusted.
+
 `references_workflow` is deliberately S0/reference evidence. Config and schema
 declarations are S1/declaration evidence. This keeps the S1 lane limited to
-facts that are explicitly declared in static source text.
+facts that are explicitly declared in static source structure.
 
 ## Goldset gate
 
@@ -77,9 +92,13 @@ Focused tests cover:
 - commit-object reads remaining stable when the working tree is dirty;
 - malformed and missing commit rejection;
 - deterministic output;
-- bounded file, byte and candidate-index budgets;
+- bounded file, byte, candidate-index and record budgets;
+- candidate-index termination while Git output is being read;
+- invalid UTF-8 blobs still consuming the bytes actually read;
 - dynamic and missing workflow targets;
-- nested versus top-level schema `$id` handling;
+- YAML block-scalar text not masquerading as a `uses` mapping key;
+- duplicate, nested and missing top-level schema `$id` handling;
+- shared producer/consumer record-limit compatibility;
 - optional Python 3.10 TOML-parser absence failing closed;
 - raw-evidence digest tampering;
 - producer revision-binding tampering;

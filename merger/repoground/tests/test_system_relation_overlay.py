@@ -7,6 +7,7 @@ import pytest
 
 import merger.repoground.core as core_api
 from merger.repoground.core.system_relation_overlay import (
+    MAX_EVIDENCE_RECORDS,
     SystemRelationOverlayError,
     normalize_system_relation_evidence,
 )
@@ -539,3 +540,20 @@ def test_public_core_api_exports_overlay_without_promoting_it():
     )
     assert "normalize_system_relation_evidence" in core_api.__all__
     assert core_api.__core_version__ == "2.4.0"
+
+def test_overlay_rejects_raw_record_count_above_shared_limit():
+    evidence = _evidence()
+    evidence["records"] = [
+        copy.deepcopy(evidence["records"][0])
+        for _ in range(MAX_EVIDENCE_RECORDS + 1)
+    ]
+
+    with pytest.raises(
+        SystemRelationOverlayError,
+        match=f"exceeds maximum {MAX_EVIDENCE_RECORDS}",
+    ):
+        normalize_system_relation_evidence(
+            evidence,
+            evidence_sha256=EVIDENCE_SHA,
+            repository_commit=REPOSITORY_COMMIT,
+        )

@@ -20,7 +20,9 @@ import hashlib
 import json
 import os
 import re
+import select
 import subprocess
+import time
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -34,8 +36,15 @@ except ModuleNotFoundError:  # Python 3.10 compatibility
         tomllib = None
 
 from merger.repoground.core.system_relation_overlay import (
+    MAX_EVIDENCE_RECORDS,
     normalize_system_relation_evidence,
 )
+from merger.repoground.core.yaml_compat import ensure_pyyaml_collections_abc_compat
+
+try:
+    import yaml
+except ModuleNotFoundError:
+    yaml = None
 
 KIND = "repoground.system_relation_producer_result"
 VERSION = "1.0"
@@ -85,9 +94,6 @@ _SENSITIVE_PARTS = frozenset(
 )
 _TOOL_TABLE_RE = re.compile(
     r"^(?P<prefix>\s*)\[tool\.(?P<name>[A-Za-z0-9_-]+)\]\s*(?:#.*)?$"
-)
-_WORKFLOW_USES_RE = re.compile(
-    r"^(?P<prefix>\s*)uses\s*:\s*(?P<quote>['\"]?)(?P<value>[^'\"\s#]+)(?P=quote)\s*(?:#.*)?$"
 )
 
 
@@ -190,6 +196,80 @@ def _git_stdout(
         raise SystemRelationProducerError(f"git {operation} failed")
     return completed.stdout
 
+
+def _git_stdout_bounded(
+    root: Path,
+    arguments: list[str],
+    *,
+    operation: str,
+    max_bytes: int,
+) -> bytes:
+    command = [
+        "git",
+        "-c",
+        "core.pager=cat",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "-c",
+        "diff.external=",
+        "-c",
+        "protocol.file.allow=never",
+        "-C",
+        str(root),
+        *arguments,
+    ]
+    try:
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=_git_environment(),
+        )
+    except FileNotFoundError as exc:
+        raise SystemRelationProducerError("git executable is unavailable") from exc
+
+    deadline = time.monotonic() + _GIT_TIMEOUT_SECONDS
+    chunks: list[bytes] = []
+    size = 0
+    try:
+        assert process.stdout is not None
+        while True:
+            remaining_seconds = deadline - time.monotonic()
+            if remaining_seconds <= 0:
+                raise subprocess.TimeoutExpired(command, _GIT_TIMEOUT_SECONDS)
+            ready, _, _ = select.select(
+                [process.stdout], [], [], remaining_seconds
+            )
+            if not ready:
+                raise subprocess.TimeoutExpired(command, _GIT_TIMEOUT_SECONDS)
+            chunk = os.read(
+                process.stdout.fileno(),
+                min(65_536, max_bytes - size + 1),
+            )
+            if not chunk:
+                break
+            size += len(chunk)
+            if size > max_bytes:
+                raise SystemRelationProducerError(
+                    f"git {operation} exceeds max_bytes={max_bytes}"
+                )
+            chunks.append(chunk)
+        remaining_seconds = max(0.001, deadline - time.monotonic())
+        returncode = process.wait(timeout=remaining_seconds)
+    except subprocess.TimeoutExpired as exc:
+        process.kill()
+        process.wait()
+        raise SystemRelationProducerError(
+            f"git {operation} exceeded the bounded timeout"
+        ) from exc
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+    if returncode != 0:
+        raise SystemRelationProducerError(f"git {operation} failed")
+    return b"".join(chunks)
 
 def _verify_revision_source(root: Path, commit: str) -> None:
     raw_root = _git_stdout(
@@ -317,15 +397,12 @@ def _git_candidates(
     set[str],
     int,
 ]:
-    payload = _git_stdout(
+    payload = _git_stdout_bounded(
         root,
         ["ls-tree", "-r", "-z", "--long", commit],
         operation="candidate enumeration",
+        max_bytes=max_candidate_index_bytes,
     )
-    if len(payload) > max_candidate_index_bytes:
-        raise SystemRelationProducerError(
-            "candidate index exceeds max_candidate_index_bytes"
-        )
 
     candidates: list[tuple[str, str, int, str]] = []
     omissions: list[dict[str, Any]] = []
@@ -506,6 +583,10 @@ def _top_level_json_key_range(
     return None
 
 
+class _JSONObjectPairs(list):
+    pass
+
+
 def _scan_schema(
     text: str,
     *,
@@ -513,15 +594,18 @@ def _scan_schema(
     repository_identity: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(text, object_pairs_hook=_JSONObjectPairs)
     except json.JSONDecodeError as exc:
         return [], [_omission(relative, "invalid_json_schema", detail=str(exc))]
-    if not isinstance(parsed, Mapping):
+    if not isinstance(parsed, _JSONObjectPairs):
         return [], [_omission(relative, "schema_root_not_object")]
-    schema_id = parsed.get("$id")
-    if not isinstance(schema_id, str) or not schema_id.strip():
+
+    schema_ids = [value for key, value in parsed if key == "$id"]
+    if len(schema_ids) > 1:
+        return [], [_omission(relative, "schema_id_ambiguous_duplicate")]
+    if not schema_ids or not isinstance(schema_ids[0], str) or not schema_ids[0].strip():
         return [], [_omission(relative, "schema_id_missing_or_nonliteral")]
-    schema_id = schema_id.strip()
+    schema_id = schema_ids[0].strip()
     source_range = _top_level_json_key_range(
         text,
         key="$id",
@@ -547,7 +631,6 @@ def _scan_schema(
     )
     return [record], []
 
-
 def _workflow_target(value: str) -> str | None:
     if not value.startswith("./.github/workflows/"):
         return None
@@ -561,6 +644,86 @@ def _workflow_target(value: str) -> str | None:
     return path.as_posix()
 
 
+def _yaml_mapping_entries(node: Any, key: str) -> list[tuple[Any, Any]]:
+    if getattr(node, "id", None) != "mapping":
+        return []
+    return [
+        (key_node, value_node)
+        for key_node, value_node in node.value
+        if getattr(key_node, "id", None) == "scalar"
+        and key_node.value == key
+    ]
+
+
+def _workflow_job_uses_entry(
+    job_node: Any,
+    *,
+    relative: str,
+) -> tuple[tuple[int, int, str] | None, dict[str, Any] | None]:
+    uses_entries = _yaml_mapping_entries(job_node, "uses")
+    if len(uses_entries) > 1:
+        line = uses_entries[0][0].start_mark.line + 1
+        return None, _omission(
+            relative, "duplicate_workflow_uses_key", line=line
+        )
+    if not uses_entries:
+        return None, None
+    key_node, value_node = uses_entries[0]
+    line = key_node.start_mark.line + 1
+    if (
+        getattr(value_node, "id", None) != "scalar"
+        or value_node.start_mark.line != key_node.start_mark.line
+        or getattr(value_node, "style", None) in {"|", ">"}
+    ):
+        return None, _omission(
+            relative, "ambiguous_workflow_reference", line=line
+        )
+    return (
+        line,
+        key_node.start_mark.column,
+        str(value_node.value).strip(),
+    ), None
+
+
+def _workflow_uses_entries(
+    text: str,
+    *,
+    relative: str,
+) -> tuple[list[tuple[int, int, str]], list[dict[str, Any]]]:
+    if yaml is None:
+        return [], [_omission(relative, "yaml_parser_unavailable")]
+    ensure_pyyaml_collections_abc_compat()
+    try:
+        document = yaml.compose(text)
+    except yaml.YAMLError as exc:
+        return [], [_omission(relative, "invalid_workflow_yaml", detail=str(exc))]
+    if document is None:
+        return [], []
+
+    jobs_entries = _yaml_mapping_entries(document, "jobs")
+    if len(jobs_entries) > 1:
+        return [], [_omission(relative, "duplicate_workflow_jobs_key")]
+    if not jobs_entries:
+        return [], []
+    jobs_node = jobs_entries[0][1]
+    if getattr(jobs_node, "id", None) != "mapping":
+        return [], [_omission(relative, "workflow_jobs_not_mapping")]
+
+    entries: list[tuple[int, int, str]] = []
+    omissions: list[dict[str, Any]] = []
+    for _job_key, job_node in jobs_node.value:
+        entry, omission = _workflow_job_uses_entry(
+            job_node, relative=relative
+        )
+        if entry is not None:
+            entries.append(entry)
+        if omission is not None:
+            omissions.append(omission)
+    entries.sort()
+    omissions.sort(key=_omission_order)
+    return entries, omissions
+
+
 def _scan_workflow(
     text: str,
     *,
@@ -568,23 +731,14 @@ def _scan_workflow(
     available_paths: set[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     records: list[dict[str, Any]] = []
-    omissions: list[dict[str, Any]] = []
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        if "uses:" not in line:
-            continue
-        if "${{" in line:
+    entries, omissions = _workflow_uses_entries(text, relative=relative)
+    lines = text.splitlines()
+    for line_number, start_character, value in entries:
+        if "${{" in value:
             omissions.append(
                 _omission(relative, "dynamic_workflow_reference", line=line_number)
             )
             continue
-        match = _WORKFLOW_USES_RE.match(line)
-        if match is None:
-            if ".github/workflows" in line:
-                omissions.append(
-                    _omission(relative, "ambiguous_workflow_reference", line=line_number)
-                )
-            continue
-        value = match.group("value")
         target = _workflow_target(value)
         if target is None:
             if ".github/workflows" in value:
@@ -602,6 +756,7 @@ def _scan_workflow(
                 )
             )
             continue
+        line = lines[line_number - 1]
         records.append(
             _raw_record(
                 relation="references_workflow",
@@ -614,14 +769,14 @@ def _scan_workflow(
                 source_range=_line_range(
                     line_number,
                     line,
-                    start_character=len(match.group("prefix")),
+                    start_character=start_character,
                 ),
                 evidence_class="workflow_reference",
                 contract_identity=None,
             )
         )
+    omissions.sort(key=_omission_order)
     return records, omissions
-
 
 def _record_order(record: Mapping[str, Any]) -> bytes:
     return _canonical_bytes(record)
@@ -644,25 +799,27 @@ def _candidate_text(
     scanned_bytes: int,
     max_file_bytes: int,
     max_total_bytes: int,
-) -> tuple[str | None, dict[str, Any] | None]:
+) -> tuple[str | None, dict[str, Any] | None, int]:
     relative, object_id, size, _candidate_kind_value = candidate
     if size > max_file_bytes:
-        return None, _omission(relative, "file_too_large", detail=str(size))
+        return None, _omission(relative, "file_too_large", detail=str(size)), 0
     if scanned_bytes + size > max_total_bytes:
-        return None, _omission(
-            relative, "total_byte_budget_exhausted", detail=str(size)
+        return (
+            None,
+            _omission(relative, "total_byte_budget_exhausted", detail=str(size)),
+            0,
         )
     try:
         payload = _git_blob(root, object_id)
     except SystemRelationProducerError:
-        return None, _omission(relative, "git_blob_read_failed")
-    if len(payload) != size:
-        return None, _omission(relative, "git_blob_size_mismatch")
+        return None, _omission(relative, "git_blob_read_failed"), 0
+    bytes_read = len(payload)
+    if bytes_read != size:
+        return None, _omission(relative, "git_blob_size_mismatch"), bytes_read
     try:
-        return payload.decode("utf-8"), None
+        return payload.decode("utf-8"), None, bytes_read
     except UnicodeDecodeError:
-        return None, _omission(relative, "invalid_utf8")
-
+        return None, _omission(relative, "invalid_utf8"), bytes_read
 
 def _scan_candidate_text(
     text: str,
@@ -689,6 +846,28 @@ def _scan_candidate_text(
         relative=relative,
         available_paths=available_paths,
     )
+
+def _extend_records_bounded(
+    records: list[dict[str, Any]],
+    found: list[dict[str, Any]],
+    *,
+    relative: str,
+    omissions: list[dict[str, Any]],
+) -> bool:
+    remaining = MAX_EVIDENCE_RECORDS - len(records)
+    if len(found) <= remaining:
+        records.extend(found)
+        return False
+    records.extend(found[:remaining])
+    omissions.append(
+        _omission(
+            relative,
+            "record_budget_exhausted",
+            detail=f"omitted_record_count={len(found) - remaining}",
+        )
+    )
+    return True
+
 
 def collect_system_relation_evidence(
     repository_root: str | Path,
@@ -749,27 +928,34 @@ def collect_system_relation_evidence(
             )
             break
         considered_candidates += 1
-        text, omission = _candidate_text(
+        text, omission, bytes_read = _candidate_text(
             root,
             candidate,
             scanned_bytes=scanned_bytes,
             max_file_bytes=max_file_bytes,
             max_total_bytes=max_total_bytes,
         )
+        if bytes_read or text is not None:
+            scanned_files += 1
+        scanned_bytes += bytes_read
         if omission is not None:
             omissions.append(omission)
             continue
         assert text is not None
-        scanned_files += 1
-        scanned_bytes += len(text.encode("utf-8"))
         found, skipped = _scan_candidate_text(
             text,
             candidate,
             repository_identity=identity,
             available_paths=available_paths,
         )
-        records.extend(found)
         omissions.extend(skipped)
+        if _extend_records_bounded(
+            records,
+            found,
+            relative=relative,
+            omissions=omissions,
+        ):
+            break
 
     records.sort(key=_record_order)
     omissions.sort(key=_omission_order)
@@ -819,6 +1005,7 @@ def collect_system_relation_evidence(
                 "max_file_bytes": max_file_bytes,
                 "max_total_bytes": max_total_bytes,
                 "max_candidate_index_bytes": max_candidate_index_bytes,
+                "max_records": MAX_EVIDENCE_RECORDS,
             },
         },
         "absence_semantics": (

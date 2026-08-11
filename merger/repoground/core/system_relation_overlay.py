@@ -20,6 +20,7 @@ SOURCE_VERSION = "1.0"
 AUTHORITY = "navigation_index"
 CANONICALITY = "derived"
 RISK_CLASS = "navigation"
+MAX_EVIDENCE_RECORDS = 4096
 
 ENDPOINT_KINDS = frozenset(
     {
@@ -398,6 +399,10 @@ def normalize_system_relation_evidence(
     records_value = mapping["records"]
     if not isinstance(records_value, list):
         raise SystemRelationOverlayError("evidence.records must be a list")
+    if len(records_value) > MAX_EVIDENCE_RECORDS:
+        raise SystemRelationOverlayError(
+            f"evidence.records exceeds maximum {MAX_EVIDENCE_RECORDS}"
+        )
 
     unique: dict[str, dict[str, Any]] = {}
     duplicate_count = 0
@@ -460,6 +465,7 @@ def normalize_system_relation_evidence(
 
 
 __all__ = [
+    "MAX_EVIDENCE_RECORDS",
     "SystemRelationOverlayError",
     "normalize_system_relation_evidence",
 ]

@@ -5,6 +5,7 @@ import pytest
 
 import merger.repoground.core.system_relation_producer as producer
 from merger.repoground.core.system_relation_overlay import (
+    MAX_EVIDENCE_RECORDS,
     normalize_system_relation_evidence,
 )
 from merger.repoground.tests.git_fixture import commit_fixture
@@ -15,6 +16,11 @@ REPOSITORY_IDENTITY = "example/repository"
 def _write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
+
+
+def _write_bytes(path: Path, payload: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
 
 
 def _collect(root: Path, **kwargs):
@@ -171,7 +177,6 @@ def test_schema_without_literal_top_level_id_is_reported_not_inferred(tmp_path):
     ]
 
 
-
 def test_generic_schema_version_field_is_not_promoted_to_contract_identity(tmp_path):
     _write(
         tmp_path / "contracts" / "versioned.schema.json",
@@ -185,6 +190,7 @@ def test_generic_schema_version_field_is_not_promoted_to_contract_identity(tmp_p
         "id": "https://example.test/versioned",
         "version": "unversioned",
     }
+
 
 def test_nested_schema_id_does_not_masquerade_as_top_level_declaration(tmp_path):
     _write(
@@ -299,6 +305,7 @@ def test_repository_commit_must_be_revision_bound(tmp_path, commit):
             repository_commit=commit,
         )
 
+
 def test_missing_toml_parser_omits_config_instead_of_failing_import(tmp_path, monkeypatch):
     _write(tmp_path / "pyproject.toml", "[tool.alpha]\nenabled = true\n")
     monkeypatch.setattr(producer, "tomllib", None)
@@ -308,4 +315,90 @@ def test_missing_toml_parser_omits_config_instead_of_failing_import(tmp_path, mo
     assert result["evidence"]["records"] == []
     assert result["omissions"] == [
         {"path": "pyproject.toml", "reason": "toml_parser_unavailable"}
+    ]
+
+def test_workflow_block_scalar_text_cannot_masquerade_as_uses_key(tmp_path):
+    _write(
+        tmp_path / ".github" / "workflows" / "reuse.yml",
+        "name: reuse\non:\n  workflow_call:\njobs: {}\n",
+    )
+    _write(
+        tmp_path / ".github" / "workflows" / "caller.yml",
+        "name: caller\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
+        "      - run: |\n          echo preparing\n"
+        "          uses: ./.github/workflows/reuse.yml\n",
+    )
+
+    result = _collect(tmp_path)
+
+    assert result["evidence"]["records"] == []
+    assert result["omissions"] == []
+
+
+def test_duplicate_top_level_schema_id_is_ambiguous_not_declared(tmp_path):
+    _write(
+        tmp_path / "contracts" / "duplicate.schema.json",
+        '{"$id":"https://example.test/first","$id":"https://example.test/second","type":"object"}\n',
+    )
+
+    result = _collect(tmp_path)
+
+    assert result["evidence"]["records"] == []
+    assert result["omissions"] == [
+        {
+            "path": "contracts/duplicate.schema.json",
+            "reason": "schema_id_ambiguous_duplicate",
+        }
+    ]
+
+
+def test_candidate_index_limit_is_enforced_while_git_output_is_read(tmp_path):
+    _write(tmp_path / "README.md", "tracked fixture\n")
+    commit = commit_fixture(tmp_path)
+
+    with pytest.raises(
+        producer.SystemRelationProducerError,
+        match="candidate enumeration exceeds max_bytes=32",
+    ):
+        producer.collect_system_relation_evidence(
+            tmp_path,
+            repository_identity=REPOSITORY_IDENTITY,
+            repository_commit=commit,
+            max_candidate_index_bytes=32,
+        )
+
+
+def test_invalid_utf8_blob_reads_still_consume_total_byte_budget(tmp_path):
+    for name in ("a.schema.json", "b.schema.json", "c.schema.json"):
+        _write_bytes(tmp_path / name, b"\xff" * 64)
+
+    result = _collect(tmp_path, max_file_bytes=64, max_total_bytes=128)
+
+    assert result["scan"]["scanned_bytes"] == 128
+    assert result["scan"]["scanned_file_count"] == 2
+    assert [item["reason"] for item in result["omissions"]] == [
+        "invalid_utf8",
+        "invalid_utf8",
+        "total_byte_budget_exhausted",
+    ]
+
+
+def test_producer_record_count_is_capped_at_shared_consumer_limit(tmp_path):
+    content = "".join(
+        f"[tool.item_{index}]\nenabled = true\n"
+        for index in range(MAX_EVIDENCE_RECORDS + 1)
+    )
+    _write(tmp_path / "pyproject.toml", content)
+
+    result = _collect(tmp_path)
+
+    assert len(result["evidence"]["records"]) == MAX_EVIDENCE_RECORDS
+    assert result["overlay"]["record_count"] == MAX_EVIDENCE_RECORDS
+    assert result["scan"]["limits"]["max_records"] == MAX_EVIDENCE_RECORDS
+    assert result["omissions"] == [
+        {
+            "path": "pyproject.toml",
+            "reason": "record_budget_exhausted",
+            "detail": "omitted_record_count=1",
+        }
     ]
