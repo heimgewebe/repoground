@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import jsonschema
 
-from merger.repoground.core import doctor, language_structure
+from merger.repoground.core import ask_context, doctor, language_structure
 from merger.repoground.core.agent_impact_adapter import RepoGroundAgentImpactAdapter
 from merger.repoground.core.ask_context import build_ask_context_pack
 from merger.repoground.core.constants import ArtifactRole
@@ -426,6 +426,62 @@ def test_context_pack_composes_relevant_language_evidence_under_shared_budget(
     )
     assert pack["budget"]["unit"] == "utf8_bytes"
     assert pack["budget"]["byte_budget_is_hard"] is True
+
+
+def test_context_pack_reports_structure_only_after_fts_null(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _repo, _commit, artifacts = _bundle(tmp_path)
+    manifest_path = artifacts.bundle_manifest
+    assert manifest_path is not None
+    executed_fts_queries: list[str] = []
+
+    def empty_fts(_manifest_path, query, _k, prepared_fts_query=None):
+        fts_query = prepared_fts_query or query
+        executed_fts_queries.append(fts_query)
+        return {
+            "status": "available",
+            "query_result": {"fts_query": fts_query, "results": []},
+            "resolved_evidence": {"hits": []},
+            "source_citation_projection": {"items": []},
+        }
+
+    monkeypatch.setattr(ask_context, "_run_query", empty_fts)
+    pack = build_ask_context_pack(
+        manifest_path,
+        query="rust helper",
+        task_profile="basic_repo_question",
+        max_context_tokens=2000,
+        max_answer_tokens=200,
+        k=5,
+    )
+
+    jsonschema.validate(
+        instance=pack,
+        schema=json.loads(
+            (CONTRACTS / "repobrief-ask-context-pack.v1.schema.json").read_text(
+                encoding="utf-8"
+            )
+        ),
+    )
+    assert len(executed_fts_queries) == 2
+    assert pack["retrieval"]["fts_query"] == "rust helper"
+    assert pack["retrieval"]["strategy"] == "structure_only"
+    assert pack["retrieval"]["match_count"] == len(pack["resolved_ranges"])
+    assert pack["retrieval"]["match_count"] > 0
+    assert all(
+        item["artifact_role"] == "language_structure_json"
+        for item in pack["retrieval_hits"]
+    )
+    assert all(
+        item["artifact_role"] == "language_structure_json"
+        for item in pack["resolved_ranges"]
+    )
+    assert not any(
+        "No evidence matched" in caveat["detail"]
+        for caveat in pack["answer_scaffold"]["caveats_to_surface"]
+    )
 
 
 def test_agent_impact_adapter_projects_language_relations_and_ranges(

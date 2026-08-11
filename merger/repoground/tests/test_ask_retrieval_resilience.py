@@ -69,11 +69,16 @@ def test_no_match_query_signals_emptiness_instead_of_silence(tmp_path):
     _validate_context_pack(pack)
     assert pack["retrieval"]["strategy"] == "none"
     assert pack["retrieval"]["match_count"] == 0
+    assert pack["retrieval_hits"] == []
     assert pack["resolved_ranges"] == []
-    assert any(
-        caveat["kind"] == "other" and "No evidence matched" in caveat["detail"]
+    assert "structured_evidence" not in pack
+    no_evidence_caveats = [
+        caveat
         for caveat in pack["answer_scaffold"]["caveats_to_surface"]
-    )
+        if caveat["kind"] == "other"
+        and "No evidence matched" in caveat["detail"]
+    ]
+    assert len(no_evidence_caveats) == 1
 
 
 def test_content_tokens_drop_stopwords_and_dedupe():

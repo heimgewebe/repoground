@@ -250,7 +250,10 @@
           "type": "string",
           "enum": [
             "exact_and",
+            "exact_and_with_structure",
             "or_relaxed",
+            "or_relaxed_with_structure",
+            "structure_only",
             "none"
           ]
         },

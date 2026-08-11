@@ -900,6 +900,7 @@ def _retrieval_caveats(
     state: Mapping[str, Any],
     retrieval_infrastructure: Mapping[str, Any],
     query: str,
+    additional_evidence_present: bool,
 ) -> list[dict[str, Any]]:
     caveats = list(freshness.get("caveats") or []) + list(
         availability.get("caveats") or []
@@ -908,7 +909,7 @@ def _retrieval_caveats(
         caveats.append(
             {
                 "kind": "other",
-                "detail": "Context excerpts were truncated to respect the hard UTF-8 byte budget.",
+                "detail": "Context evidence was truncated to respect the hard UTF-8 byte budget.",
             }
         )
     if state["relaxed"]:
@@ -922,7 +923,11 @@ def _retrieval_caveats(
                 ),
             }
         )
-    elif not state["resolved_ranges"] and retrieval_infrastructure["index_resolved"]:
+    elif (
+        not state["resolved_ranges"]
+        and not additional_evidence_present
+        and retrieval_infrastructure["index_resolved"]
+    ):
         caveats.append(
             {
                 "kind": "other",
@@ -934,6 +939,29 @@ def _retrieval_caveats(
             }
         )
     return caveats
+
+
+def _final_retrieval_metadata(
+    query: str,
+    state: Mapping[str, Any],
+    *,
+    text_match_count: int,
+    structure_match_count: int,
+) -> dict[str, Any]:
+    if text_match_count:
+        strategy = str(state["strategy"])
+        if structure_match_count:
+            strategy += "_with_structure"
+    elif structure_match_count:
+        strategy = "structure_only"
+    else:
+        strategy = "none"
+    return {
+        "raw_query": query,
+        "fts_query": state["fts_query"],
+        "strategy": strategy,
+        "match_count": len(state["resolved_ranges"]),
+    }
 
 
 def _merge_language_context(
@@ -1036,23 +1064,10 @@ def build_ask_context_pack(
         max_context_tokens=max_context_tokens,
         max_context_bytes=text_context_bytes,
     )
-
-    retrieval = {
-        "raw_query": query,
-        "fts_query": state["fts_query"],
-        "strategy": state["strategy"] if state["resolved_ranges"] else "none",
-        "match_count": len(state["resolved_ranges"]),
-    }
+    text_match_count = len(state["resolved_ranges"])
 
     retrieval_infrastructure = _retrieval_infrastructure_block(state["query_result"])
     availability = _retrieval_availability(availability, retrieval_infrastructure)
-    caveats = _retrieval_caveats(
-        freshness,
-        availability,
-        state=state,
-        retrieval_infrastructure=retrieval_infrastructure,
-        query=query,
-    )
     language_context = _language_structure_for_query(
         manifest_path,
         query=query,
@@ -1060,7 +1075,26 @@ def build_ask_context_pack(
         max_bytes=max(0, total_context_bytes - state["used_bytes"]),
         preloaded=language_response,
     )
-    structured_evidence = _merge_language_context(state, caveats, language_context)
+    language_caveats: list[dict[str, Any]] = []
+    structured_evidence = _merge_language_context(
+        state, language_caveats, language_context
+    )
+    structure_match_count = len(state["resolved_ranges"]) - text_match_count
+    retrieval = _final_retrieval_metadata(
+        query,
+        state,
+        text_match_count=text_match_count,
+        structure_match_count=structure_match_count,
+    )
+    caveats = _retrieval_caveats(
+        freshness,
+        availability,
+        state=state,
+        retrieval_infrastructure=retrieval_infrastructure,
+        query=query,
+        additional_evidence_present=bool(structured_evidence),
+    )
+    caveats.extend(language_caveats)
 
     citation_obligations = [
         "Cite every strong repository claim with resolved RepoGround evidence where available.",
