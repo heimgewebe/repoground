@@ -88,6 +88,17 @@ Für Tests und Entwicklungswerkzeuge zusätzlich:
 .venv/bin/python -m pip install --require-hashes -r requirements/repoground-dev.lock.txt
 ```
 
+Wer Abhängigkeits-Locks pflegt, verwendet ausschließlich den in der
+[Release-Policy](release/release-policy.md#dependency-locks) beschriebenen
+Python/pip/pip-tools-Vertrag. Die dort gebundenen Versionen werden aus
+`requirements/repoground-lock-tools.in` gelesen; ein implizites neuestes pip
+ist nicht unterstützt. Derselbe kanonische Read-only-Check läuft lokal und in
+CI:
+
+```bash
+scripts/release/compile_dependency_locks.sh --check
+```
+
 Optionales semantisches Reranking hat einen engeren Vertrag und bleibt
 standardmäßig aus. Unterstützt ist nur CPython 3.12 / Linux x86-64 / CPU:
 

@@ -66,6 +66,15 @@ ruff check --config ruff-ci.toml .
 python3 tools/parity_guard.py
 ```
 
+Änderungen an Abhängigkeits-Inputs werden mit dem einzigen unterstützten,
+in `requirements/repoground-lock-tools.in` gebundenen Python/pip/pip-tools-
+Vertrag geprüft. Release-Dokumentation, Onboarding und CI verwenden denselben
+kanonischen Befehl:
+
+```bash
+scripts/release/compile_dependency_locks.sh --check
+```
+
 Test-Fixtures unter `**/fixtures/**` sind im repo-weiten `ruff-ci.toml` absichtlich zusätzlich
 vom CI-Lint ausgenommen (sie enthalten bewusst „kaputten" Code für Linter-/Graph-Tests).
 `extend-exclude` bewahrt dabei Ruffs eingebaute Ausschlüsse, insbesondere `.git`; Git-Referenzen

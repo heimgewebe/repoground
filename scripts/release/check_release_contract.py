@@ -19,6 +19,12 @@ from scripts.release.build_release_candidate import (
     SEMANTIC_PLATFORM_CONTRACT_PATH,
     VERSION_RE,
 )
+from scripts.release.compile_dependency_locks import (
+    CONTRACT_PATH,
+    ContractError,
+    ToolchainContract,
+    load_contract,
+)
 
 INPUT_PATHS = (
     "requirements/repoground-runtime.in",
@@ -39,6 +45,7 @@ REQUIRED_FILES = (
     "scripts/release/build_release_candidate.py",
     "scripts/release/verify_release_candidate.py",
     "scripts/release/compile_dependency_locks.sh",
+    "scripts/release/compile_dependency_locks.py",
     *INPUT_PATHS,
     *LOCK_PATHS,
     SEMANTIC_PLATFORM_CONTRACT_PATH,
@@ -100,6 +107,104 @@ def _check_lock(path: Path, relative: str) -> list[dict[str, str]]:
                     "LOCK_HASH_MISSING",
                     relative,
                     f"{package} has no SHA-256 hash",
+                )
+            )
+    return findings
+
+
+def _check_lock_generator_pins(
+    tool_lock: str, contract: ToolchainContract
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    tool_lock_path = "requirements/repoground-lock-tools.lock.txt"
+    for package, version in (
+        ("pip", contract.pip),
+        ("pip-tools", contract.pip_tools),
+    ):
+        if not re.search(
+            rf"(?m)^{re.escape(package)}=={re.escape(version)}\s+\\$",
+            tool_lock,
+        ):
+            findings.append(
+                _finding(
+                    "LOCK_GENERATOR_PIN_MISMATCH",
+                    tool_lock_path,
+                    f"expected {package}=={version}",
+                )
+            )
+    return findings
+
+
+def _check_lock_generator_contract(repo: Path) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    try:
+        contract = load_contract(repo)
+    except (ContractError, OSError) as exc:
+        return [
+            _finding(
+                "LOCK_GENERATOR_CONTRACT_INVALID",
+                str(CONTRACT_PATH),
+                str(exc),
+            )
+        ]
+
+    tool_lock_path = "requirements/repoground-lock-tools.lock.txt"
+    tool_lock = (repo / tool_lock_path).read_text(encoding="utf-8")
+    findings.extend(_check_lock_generator_pins(tool_lock, contract))
+
+    canonical_check = "scripts/release/compile_dependency_locks.sh --check"
+    for relative in (
+        ".github/workflows/test-suite.yml",
+        "docs/release/release-policy.md",
+        "docs/GETTING_STARTED.md",
+        "CONTRIBUTING.md",
+    ):
+        try:
+            text = (repo / relative).read_text(encoding="utf-8")
+        except OSError as exc:
+            findings.append(
+                _finding(
+                    "LOCK_GENERATOR_COMMAND_MISSING",
+                    relative,
+                    str(exc),
+                )
+            )
+            continue
+        if canonical_check not in text:
+            findings.append(
+                _finding(
+                    "LOCK_GENERATOR_COMMAND_MISSING",
+                    relative,
+                    canonical_check,
+                )
+            )
+
+    workflow_path = repo / ".github/workflows/test-suite.yml"
+    if workflow_path.is_file():
+        workflow = workflow_path.read_text(encoding="utf-8")
+        if re.search(r"(?:python\s+-m\s+piptools\s+compile|\bpip-compile\b)", workflow):
+            findings.append(
+                _finding(
+                    "WORKFLOW_LOCK_GENERATOR_BYPASS",
+                    ".github/workflows/test-suite.yml",
+                    "CI must delegate to the canonical lock-generator wrapper",
+                )
+            )
+
+    release_policy = (repo / "docs/release/release-policy.md").read_text(
+        encoding="utf-8"
+    )
+    for expected in (
+        f"CPython `{contract.python}`",
+        f"`pip=={contract.pip}`",
+        f"`pip-tools=={contract.pip_tools}`",
+    ):
+        if expected not in release_policy:
+            findings.append(
+                _finding(
+                    "LOCK_GENERATOR_DOCUMENTED_PIN_MISSING",
+                    "docs/release/release-policy.md",
+                    expected,
                 )
             )
     return findings
@@ -489,6 +594,7 @@ def scan(root: str | Path) -> dict[str, object]:
 
     for relative in LOCK_PATHS:
         findings.extend(_check_lock(repo / relative, relative))
+    findings.extend(_check_lock_generator_contract(repo))
     findings.extend(_check_semantic_extension(repo))
     findings.extend(_check_workflows(repo))
 
