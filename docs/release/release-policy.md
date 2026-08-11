@@ -54,8 +54,33 @@ The release-supported Python 3.12 core uses four generated lock surfaces:
 - `requirements/repoground-lock-tools.lock.txt` for the lock compiler itself.
 
 Every resolved package is exactly versioned and carries SHA-256 hashes. The
-input files remain human-maintained; the lock files are regenerated with
-`scripts/release/compile_dependency_locks.sh` and reviewed as normal source.
+input files remain human-maintained and reviewed as normal source.
+
+Exactly one lock-generator contract is supported. Its version source is
+`requirements/repoground-lock-tools.in`:
+
+- CPython `3.12.3` from the digest-pinned container wrapper;
+- `pip==25.3`;
+- `pip-tools==7.6.0`.
+
+The pip pin is part of the contract because pip-tools imports pip internals.
+Do not install an implicitly resolved or latest pip. Regenerate all four locks
+only through the canonical command:
+
+```bash
+scripts/release/compile_dependency_locks.sh
+```
+
+CI and read-only verification use the same command with `--check`:
+
+```bash
+scripts/release/compile_dependency_locks.sh --check
+```
+
+The wrapper validates and reports Python, pip and pip-tools before generation.
+It stages every output away from the checkout and publishes only after all four
+compilations succeed. A contract mismatch or compilation failure therefore
+does not leave a partial lockfile diff.
 
 ## Optional semantic extension
 

@@ -1,2 +1,4 @@
-# Toolchain used only to regenerate the reviewed hash locks.
-pip-tools==7.5.3
+# The only supported toolchain for regenerating the reviewed hash locks.
+# lock-python==3.12.3
+pip==25.3
+pip-tools==7.6.0
