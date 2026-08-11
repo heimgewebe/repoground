@@ -36,6 +36,7 @@ WORKBENCH_ROLES = frozenset(
         "claim_evidence_map_json",
         "concept_cards_jsonl",
         "lens_cards_jsonl",
+        "language_structure_json",
         "python_symbol_index_json",
         "relation_cards_jsonl",
         "required_reading_protocol_json",

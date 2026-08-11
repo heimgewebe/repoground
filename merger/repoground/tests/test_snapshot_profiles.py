@@ -165,6 +165,7 @@ def test_profile_output_mode_plan_is_machine_readable():
         "sqlite_index",
         "python_symbol_index_json",
         "python_call_graph_json",
+        "language_structure_json",
     ]
 
     public_dual = profile_output_mode_plan("public-share", "dual")

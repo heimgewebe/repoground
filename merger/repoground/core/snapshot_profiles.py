@@ -116,6 +116,7 @@ ARTIFACT_ORDER = (
     "retrieval_eval_json",
     "python_symbol_index_json",
     "python_call_graph_json",
+    "language_structure_json",
 )
 
 BASE_RULES = {
@@ -135,6 +136,7 @@ BASE_RULES = {
     "retrieval_eval_json": REQ_OPTIONAL,
     "python_symbol_index_json": REQ_OPTIONAL,
     "python_call_graph_json": REQ_OPTIONAL,
+    "language_structure_json": REQ_OPTIONAL,
 }
 
 PROFILE_ARTIFACT_RULES = {
@@ -203,6 +205,7 @@ PROFILE_ARTIFACT_RULES = {
         "retrieval_eval_json": REQ_NA,
         "python_symbol_index_json": REQ_EXCLUDED,
         "python_call_graph_json": REQ_EXCLUDED,
+        "language_structure_json": REQ_EXCLUDED,
     },
     "ci-artifact": {
         **BASE_RULES,

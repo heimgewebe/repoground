@@ -145,7 +145,8 @@ DEFAULT_META_DENSITY = "auto"
 # Whitelist of known extras keys to prevent accidental resets of unknown flags
 KNOWN_EXTRAS_KEYS = [
     "health", "organism_index", "fleet_panorama",
-    "delta_reports", "augment_sidecar", "heatmap", "json_sidecar"
+    "delta_reports", "augment_sidecar", "heatmap", "json_sidecar",
+    "language_structure"
 ]
 
 try:

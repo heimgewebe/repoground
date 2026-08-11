@@ -89,7 +89,7 @@ class _DummyUI:
 
         # All extras on (non-default for most flags)
         self.extras_config, _ = ExtrasConfig.from_csv(
-            "health,organism_index,fleet_panorama,delta_reports,augment_sidecar,heatmap,json_sidecar"
+            "health,organism_index,fleet_panorama,delta_reports,augment_sidecar,heatmap,json_sidecar,language_structure"
         )
 
         self._on_profile_changed_calls: list = []

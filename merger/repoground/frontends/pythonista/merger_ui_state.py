@@ -15,6 +15,23 @@ BUILD_GLOBAL_NAMES = (
     "sys",
 )
 
+_RESTORED_EXTRAS = (
+    "health",
+    "organism_index",
+    "fleet_panorama",
+    "delta_reports",
+    "augment_sidecar",
+    "heatmap",
+    "json_sidecar",
+    "language_structure",
+)
+
+
+def _restore_extras(extras_config, extras_data):
+    for key in _RESTORED_EXTRAS:
+        if key in extras_data:
+            setattr(extras_config, key, extras_data[key])
+
 
 class MergerUIStateMixin:
     def save_last_state(self, ignore_only: bool = False) -> None:
@@ -75,6 +92,7 @@ class MergerUIStateMixin:
                         "augment_sidecar": self.extras_config.augment_sidecar,
                         "heatmap": self.extras_config.heatmap,
                         "json_sidecar": self.extras_config.json_sidecar,
+                        "language_structure": self.extras_config.language_structure,
                     },
                     "prescan_pool": self._serialize_prescan_pool(),
                 }
@@ -133,20 +151,7 @@ class MergerUIStateMixin:
         # Important: only overwrite if key exists, otherwise keep default (which might be True for new features)
         extras_data = data.get("extras", {})
         if extras_data:
-            if "health" in extras_data:
-                self.extras_config.health = extras_data["health"]
-            if "organism_index" in extras_data:
-                self.extras_config.organism_index = extras_data["organism_index"]
-            if "fleet_panorama" in extras_data:
-                self.extras_config.fleet_panorama = extras_data["fleet_panorama"]
-            if "delta_reports" in extras_data:
-                self.extras_config.delta_reports = extras_data["delta_reports"]
-            if "augment_sidecar" in extras_data:
-                self.extras_config.augment_sidecar = extras_data["augment_sidecar"]
-            if "heatmap" in extras_data:
-                self.extras_config.heatmap = extras_data["heatmap"]
-            if "json_sidecar" in extras_data:
-                self.extras_config.json_sidecar = extras_data["json_sidecar"]
+            _restore_extras(self.extras_config, extras_data)
 
         # Restore Prescan Pool (with migration support)
         self.saved_prescan_selections = deserialize_prescan_pool(data.get("prescan_pool", {}))

@@ -15,6 +15,7 @@ from merger.repoground.core.ask_context import (
     _content_tokens,
     _or_fts_query,
     _resolved_ranges,
+    _resolved_ranges_with_budget,
     build_ask_context_pack,
 )
 from merger.repoground.tests.test_ask_context_cli import (
@@ -172,3 +173,36 @@ def test_resolved_ranges_share_budget_and_drop_empty_or_duplicate_hits():
     assert all(0 < len(item["text_excerpt"]) <= 1600 for item in ranges)
     assert used_chars <= 4000
     assert truncated is True
+
+
+def test_resolved_ranges_enforce_utf8_bytes_without_splitting_unicode():
+    query_result = {
+        "resolved_evidence": {
+            "hits": [
+                {
+                    "artifact_role": "canonical_md",
+                    "range_status": "resolved",
+                    "range": {"text": "é🙂z"},
+                    "source_path": "docs/unicode.md",
+                    "range_ref": {"ref": "unicode"},
+                }
+            ]
+        }
+    }
+
+    ranges, used_bytes, used_characters, truncated, omissions = (
+        _resolved_ranges_with_budget(
+            query_result,
+            max_context_tokens=100,
+            max_context_bytes=5,
+        )
+    )
+
+    assert ranges[0]["text_excerpt"] == "é"
+    assert ranges[0]["text_excerpt_bytes"] == 2
+    assert ranges[0]["text_excerpt_characters"] == 1
+    assert used_bytes == 2
+    assert used_characters == 1
+    assert used_bytes != used_characters
+    assert truncated is True
+    assert omissions[0]["reason"] == "excerpt_truncated"

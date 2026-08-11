@@ -144,7 +144,8 @@
             "augment_sidecar": { "type": "boolean" },
             "delta_reports": { "type": "boolean" },
             "json_sidecar": { "type": "boolean" },
-            "heatmap": { "type": "boolean" }
+            "heatmap": { "type": "boolean" },
+            "language_structure": { "type": "boolean" }
           },
           "additionalProperties": false
         },

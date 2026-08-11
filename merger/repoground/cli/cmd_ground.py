@@ -604,6 +604,11 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     ask_parser.add_argument("--q", required=True, help="Question or task query")
     ask_parser.add_argument("--task-profile", default="basic_repo_question", help="Required-reading task profile")
     ask_parser.add_argument("--context-budget", type=int, default=8000, help="Maximum context token budget")
+    ask_parser.add_argument(
+        "--context-budget-bytes",
+        type=int,
+        help="Optional stricter hard limit for emitted evidence payload UTF-8 bytes",
+    )
     ask_parser.add_argument("--answer-budget", type=int, default=1200, help="Maximum downstream answer token budget")
     ask_parser.add_argument("--k", type=int, default=5, help="Maximum retrieval hits")
     ask_parser.add_argument("--emit", choices=["json", "text"], default="json", help="Output format")
@@ -1293,6 +1298,7 @@ def run_ask(args: argparse.Namespace) -> int:
             query=args.q,
             task_profile=args.task_profile,
             max_context_tokens=args.context_budget,
+            max_context_bytes=args.context_budget_bytes,
             max_answer_tokens=args.answer_budget,
             k=args.k,
         )

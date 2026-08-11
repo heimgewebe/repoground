@@ -1,12 +1,13 @@
 """Deterministic emission of bundle sidecar navigation artifacts.
 
 A sidecar is a secondary artifact written next to the bundle manifest: symbol
-index, call graph, lens/concept/relation cards and PR delta evidence. Each
-writer is pure with respect to the merge run: it receives the manifest path and
-the data it needs, writes at most one file and returns its path or ``None``.
+index, call graph, optional language structure, lens/concept/relation cards and
+PR delta evidence. Each writer is pure with respect to the merge run: it
+receives the manifest path and the data it needs, writes at most one file and
+returns its path or ``None``.
 
 The module depends only on :mod:`merger.repoground.core.artifact_io` and on the
-individual card producers, never on :mod:`merger.repoground.core.merge`, so the
+individual producers, never on :mod:`merger.repoground.core.merge`, so the
 bundle pipeline can import it without an import cycle.
 """
 
@@ -22,6 +23,7 @@ from .artifact_io import (
     write_json_lines,
     write_text_atomic,
 )
+from .snapshot_provenance import repository_snapshot_provenance
 
 _MANIFEST_SUFFIX = ".bundle.manifest.json"
 
@@ -119,6 +121,55 @@ def write_python_call_graph_json(
         base_manifest_path=base_manifest_path,
         suffix=".python_call_graph.json",
         document=generate_call_graph_document(repo_root, run_id, canonical_sha),
+    )
+
+
+def write_language_structure_json(
+    *,
+    base_manifest_path: Path,
+    repo_summaries: List[Dict[str, Any]],
+    final_dump_index: Optional[Path],
+    run_id: str,
+) -> Optional[Path]:
+    """Emit bounded Rust/Bash navigation evidence for one bound Git repository."""
+
+    repo_root = _single_repo_root(repo_summaries, final_dump_index)
+    if repo_root is None:
+        return None
+    canonical_sha = compute_file_sha256(final_dump_index)
+    if not is_sha256_digest(canonical_sha):
+        return None
+    provenance = repository_snapshot_provenance(repo_root)
+    repository_commit = provenance.get("git_commit")
+    if (
+        provenance.get("provenance_status") != "present"
+        or provenance.get("git_dirty") is not False
+        or provenance.get("freshness_basis") != "git_commit"
+        or not isinstance(repository_commit, str)
+    ):
+        # Every language hit is required to carry an exact repository revision.
+        # An unbound or dirty checkout therefore produces no structural sidecar
+        # instead of records whose commit freshness cannot be evaluated.
+        return None
+    from .language_structure import build_language_structure_document
+
+    document = build_language_structure_document(
+        repo_root,
+        repository_commit=repository_commit,
+        bundle_manifest=base_manifest_path.name,
+        canonical_dump_index_sha256=canonical_sha,
+        run_id=run_id,
+    )
+    summaries = document.get("languages")
+    if isinstance(summaries, dict) and not any(
+        isinstance(value, dict) and int(value.get("candidate_file_count", 0)) > 0
+        for value in summaries.values()
+    ):
+        return None
+    return _write_provenance_document(
+        base_manifest_path=base_manifest_path,
+        suffix=".language_structure.json",
+        document=document,
     )
 
 

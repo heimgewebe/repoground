@@ -128,7 +128,8 @@ const EXTRAS_OPTIONS = [
     'organism_index',
     'fleet_panorama',
     'json_sidecar',
-    'heatmap'
+    'heatmap',
+    'language_structure'
 ];
 
 // Default selected extras (based on existing logic/user preference)

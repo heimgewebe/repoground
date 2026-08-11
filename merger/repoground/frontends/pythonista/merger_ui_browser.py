@@ -529,6 +529,7 @@ class MergerUIBrowserMixin:
                 fleet_panorama=self.extras_config.fleet_panorama,
                 augment_sidecar=self.extras_config.augment_sidecar,
                 heatmap=self.extras_config.heatmap,
+                language_structure=self.extras_config.language_structure,
                 delta_reports=True # Force enable
             )
 

@@ -147,7 +147,8 @@ class MergerUIControlsMixin:
             ("Delta Reports", "delta_reports"),
             ("Augment Sidecar", "augment_sidecar"),
             ("AI Heatmap", "heatmap"),
-            ("JSON Sidecar", "json_sidecar")
+            ("JSON Sidecar", "json_sidecar"),
+            ("Rust/Bash Structure (optional)", "language_structure")
         ]
 
         row_h = 44
