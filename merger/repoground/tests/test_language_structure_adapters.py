@@ -5,6 +5,7 @@ import hashlib
 import json
 import subprocess
 from collections import Counter
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 import jsonschema
@@ -25,7 +26,10 @@ from merger.repoground.core.language_structure_benchmark import (
     evaluate_language_structure_goldset,
     load_language_goldset,
 )
-from merger.repoground.core.rust_structure_adapter import scan_rust_repository
+from merger.repoground.core.rust_structure_adapter import (
+    _rust_call_evidence,
+    scan_rust_repository,
+)
 
 COMMIT = "b" * 40
 DUMP_SHA = "c" * 64
@@ -179,6 +183,62 @@ def test_rust_lexer_does_not_invent_calls_from_comments_or_strings(tmp_path):
     result = scan_rust_repository(tmp_path, **_kwargs())
 
     assert not [record for record in result["records"] if record["relation"] == "call"]
+
+
+def test_rust_call_evidence_looks_up_only_scanned_candidates():
+    class LookupOnlyFunctions(Mapping[str, list[tuple[int, int, int]]]):
+        def __getitem__(self, key: str) -> list[tuple[int, int, int]]:
+            if key != "known":
+                raise AssertionError(f"unexpected function lookup: {key}")
+            return [(1, 0, 5)]
+
+        def __iter__(self) -> Iterator[str]:
+            raise AssertionError("function mapping must not be enumerated")
+
+        def __len__(self) -> int:
+            raise AssertionError("function mapping size must not be inspected")
+
+        def keys(self):
+            raise AssertionError("function mapping keys must not be inspected")
+
+    records, degradations = _rust_call_evidence(
+        "known();",
+        line_number=7,
+        path="src/lib.rs",
+        functions=LookupOnlyFunctions(),
+        binding=_kwargs(),
+    )
+
+    assert degradations == []
+    assert [record["target_symbol"] for record in records] == ["known"]
+    assert records[0]["source"]["range"] == {
+        "start_line": 7,
+        "end_line": 7,
+        "start_character": 0,
+        "end_character": 5,
+        "coordinate_basis": "source_lines_1_based_unicode_characters",
+    }
+
+
+def test_rust_call_evidence_preserves_candidate_order_dedup_and_unknown_omission():
+    records, degradations = _rust_call_evidence(
+        "zeta(); missing(); alpha(); alpha();",
+        line_number=11,
+        path="src/lib.rs",
+        functions={
+            "zeta": [(1, 0, 4)],
+            "alpha": [(2, 0, 5)],
+            "unused": [(3, 0, 6)],
+        },
+        binding=_kwargs(),
+    )
+
+    assert degradations == []
+    assert [record["target_symbol"] for record in records] == ["alpha", "zeta"]
+    assert [record["source"]["range"]["start_character"] for record in records] == [
+        19,
+        0,
+    ]
 
 
 def test_rust_scip_records_are_lifted_as_s1(tmp_path):

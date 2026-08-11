@@ -55,6 +55,9 @@ _USE_RE = re.compile(
     r"^[ \t]*(?:pub[ \t]+)?use[ \t]+(?P<target>[^;]+);[ \t]*(?://.*)?$"
 )
 _MACRO_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_:]*![ \t]*(?:\(|\{|\[)")
+_CALL_CANDIDATE_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?P<name>[A-Za-z_][A-Za-z0-9_]*)[ \t]*\("
+)
 _RAW_STRING_START_RE = re.compile(r'r(?P<hashes>#{0,255})"')
 _SCIP_POSITION_ENCODINGS = frozenset(
     {
@@ -709,11 +712,14 @@ def _rust_call_evidence(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     records: list[dict[str, Any]] = []
     degradations: list[dict[str, Any]] = []
-    for callee in sorted(functions):
-        match = re.search(rf"(?<![A-Za-z0-9_]){re.escape(callee)}[ \t]*\(", line)
-        if match is None:
+    candidates: dict[str, re.Match[str]] = {}
+    for match in _CALL_CANDIDATE_RE.finditer(line):
+        candidates.setdefault(match.group("name"), match)
+    for callee in sorted(candidates):
+        locations = functions.get(callee)
+        if locations is None:
             continue
-        locations = functions[callee]
+        match = candidates[callee]
         if len(locations) != 1:
             degradations.append(
                 {
