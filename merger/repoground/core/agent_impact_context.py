@@ -1756,6 +1756,55 @@ def _select_impact_relations(
 
 
 
+
+def _system_relation_context_for_request(
+    *,
+    repository_commit: Any,
+    system_relation_result: Any,
+    paths: set[str],
+    max_items: int,
+    gaps: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if repository_commit is None and system_relation_result is None:
+        return None
+    context = project_system_relation_context(
+        system_relation_result,
+        repository_commit=repository_commit,
+        target_paths=paths,
+        max_items=max_items,
+    )
+    status = context.get("status")
+    if status in {"blocked", "missing"}:
+        gaps.append(
+            {
+                "source": "system_relation_evidence",
+                "status": status,
+                "reason": context.get("reason"),
+                "binding": context.get("binding"),
+            }
+        )
+    return context
+
+
+def _structural_context_resolves_target(context: Mapping[str, Any] | None) -> bool:
+    return bool(
+        context
+        and context.get("status") == "available"
+        and context.get("records")
+    )
+
+
+def _attach_structural_context(
+    result: dict[str, Any],
+    context: Mapping[str, Any] | None,
+) -> None:
+    if context is None:
+        return
+    result["structural_relations"] = dict(context)
+    result["composition"]["system_relation_evidence_used"] = (
+        _structural_context_resolves_target(context)
+    )
+
 def build_agent_impact_context(
     *,
     target_path: Any = None,
@@ -1816,24 +1865,13 @@ def build_agent_impact_context(
         )
 
     paths = set(request.paths)
-    structural_context = None
-    if repository_commit is not None or system_relation_result is not None:
-        structural_context = project_system_relation_context(
-            system_relation_result,
-            repository_commit=repository_commit,
-            target_paths=paths,
-            max_items=request.max_items,
-        )
-        structural_status = structural_context.get("status")
-        if structural_status in {"blocked", "missing"}:
-            gaps.append(
-                {
-                    "source": "system_relation_evidence",
-                    "status": structural_status,
-                    "reason": structural_context.get("reason"),
-                    "binding": structural_context.get("binding"),
-                }
-            )
+    structural_context = _system_relation_context_for_request(
+        repository_commit=repository_commit,
+        system_relation_result=system_relation_result,
+        paths=paths,
+        max_items=request.max_items,
+        gaps=gaps,
+    )
     (
         target_symbols,
         all_target_symbols,
@@ -1958,11 +1996,7 @@ def build_agent_impact_context(
     resolved_target = bool(
         target_symbols
         or any(path in id_by_path for path in paths)
-        or (
-            structural_context is not None
-            and structural_context.get("status") == "available"
-            and structural_context.get("records")
-        )
+        or _structural_context_resolves_target(structural_context)
     )
     result = _base_result(
         status=_result_status(
@@ -2015,12 +2049,7 @@ def build_agent_impact_context(
             },
         }
     )
-    if structural_context is not None:
-        result["structural_relations"] = structural_context
-        result["composition"]["system_relation_evidence_used"] = bool(
-            structural_context.get("status") == "available"
-            and structural_context.get("records")
-        )
+    _attach_structural_context(result, structural_context)
 
     if request.mode == "edit":
         selected_call_relations = (

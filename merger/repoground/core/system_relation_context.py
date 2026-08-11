@@ -119,42 +119,35 @@ def _record_relevant(record: Mapping[str, Any], target_paths: set[str]) -> bool:
     )
 
 
-def project_system_relation_context(
+def _missing(expected_commit: str) -> dict[str, Any]:
+    result = _base("missing")
+    result["reason"] = "system_relation_evidence_missing"
+    result["binding"] = {
+        "expected_repository_commit": expected_commit,
+        "observed_repository_commit": None,
+        "expected_evidence_sha256": None,
+        "observed_evidence_sha256": None,
+    }
+    return result
+
+
+def _producer_binding(
     producer_result: Any,
     *,
-    repository_commit: Any,
-    target_paths: Iterable[str],
-    max_items: int = 25,
-) -> dict[str, Any]:
-    """Project relevant relations only after commit and digest coherence checks."""
-    expected_commit = _expected_commit(repository_commit)
-    if expected_commit is None:
-        return _blocked("expected_repository_commit_invalid")
-    if producer_result is None:
-        result = _base("missing")
-        result["reason"] = "system_relation_evidence_missing"
-        result["binding"] = {
-            "expected_repository_commit": expected_commit,
-            "observed_repository_commit": None,
-            "expected_evidence_sha256": None,
-            "observed_evidence_sha256": None,
-        }
-        return result
+    expected_commit: str,
+) -> tuple[dict[str, Any] | None, Any, Mapping[str, Any] | None]:
     if not isinstance(producer_result, Mapping):
         return _blocked(
-            "producer_result_not_object",
-            expected_commit=expected_commit,
-        )
+            "producer_result_not_object", expected_commit=expected_commit
+        ), None, None
     if producer_result.get("kind") != PRODUCER_RESULT_KIND:
         return _blocked(
-            "producer_result_kind_incompatible",
-            expected_commit=expected_commit,
-        )
+            "producer_result_kind_incompatible", expected_commit=expected_commit
+        ), None, None
     if producer_result.get("version") != PRODUCER_RESULT_VERSION:
         return _blocked(
-            "producer_result_version_incompatible",
-            expected_commit=expected_commit,
-        )
+            "producer_result_version_incompatible", expected_commit=expected_commit
+        ), None, None
 
     repository = producer_result.get("repository")
     observed_commit = (
@@ -165,21 +158,35 @@ def project_system_relation_context(
             "repository_commit_mismatch",
             expected_commit=expected_commit,
             observed_commit=observed_commit,
-        )
+        ), observed_commit, None
 
     revision_binding = producer_result.get("revision_binding")
-    if (
-        not isinstance(revision_binding, Mapping)
-        or revision_binding.get("mode") != "git_commit_object"
-        or revision_binding.get("repository_commit") != expected_commit
-        or revision_binding.get("verified") is not True
-    ):
+    binding_valid = (
+        isinstance(revision_binding, Mapping)
+        and revision_binding.get("mode") == "git_commit_object"
+        and revision_binding.get("repository_commit") == expected_commit
+        and revision_binding.get("verified") is True
+    )
+    if not binding_valid:
         return _blocked(
             "revision_binding_incompatible",
             expected_commit=expected_commit,
             observed_commit=observed_commit,
-        )
+        ), observed_commit, None
+    return None, observed_commit, revision_binding
 
+
+def _validated_overlay(
+    producer_result: Mapping[str, Any],
+    *,
+    expected_commit: str,
+    observed_commit: Any,
+) -> tuple[
+    dict[str, Any] | None,
+    str | None,
+    str | None,
+    dict[str, Any] | None,
+]:
     evidence = producer_result.get("evidence")
     expected_digest = producer_result.get("evidence_sha256")
     if not isinstance(evidence, Mapping):
@@ -188,7 +195,7 @@ def project_system_relation_context(
             expected_commit=expected_commit,
             observed_commit=observed_commit,
             expected_digest=expected_digest,
-        )
+        ), None, None, None
     raw_records = evidence.get("records")
     if not isinstance(raw_records, list):
         return _blocked(
@@ -196,21 +203,22 @@ def project_system_relation_context(
             expected_commit=expected_commit,
             observed_commit=observed_commit,
             expected_digest=expected_digest,
-        )
+        ), None, None, None
     if len(raw_records) > MAX_EVIDENCE_RECORDS:
         return _blocked(
             "evidence_record_limit_exceeded",
             expected_commit=expected_commit,
             observed_commit=observed_commit,
             expected_digest=expected_digest,
-        )
+        ), None, None, None
     if not isinstance(expected_digest, str) or len(expected_digest) != 64:
         return _blocked(
             "evidence_digest_invalid",
             expected_commit=expected_commit,
             observed_commit=observed_commit,
             expected_digest=expected_digest,
-        )
+        ), None, None, None
+
     observed_digest = _canonical_sha256(evidence)
     if observed_digest != expected_digest:
         return _blocked(
@@ -219,7 +227,7 @@ def project_system_relation_context(
             observed_commit=observed_commit,
             expected_digest=expected_digest,
             observed_digest=observed_digest,
-        )
+        ), expected_digest, observed_digest, None
 
     supplied_overlay = producer_result.get("overlay")
     if not isinstance(supplied_overlay, Mapping):
@@ -229,7 +237,7 @@ def project_system_relation_context(
             observed_commit=observed_commit,
             expected_digest=expected_digest,
             observed_digest=observed_digest,
-        )
+        ), expected_digest, observed_digest, None
     try:
         normalized = normalize_system_relation_evidence(
             evidence,
@@ -243,7 +251,7 @@ def project_system_relation_context(
             observed_commit=observed_commit,
             expected_digest=expected_digest,
             observed_digest=observed_digest,
-        )
+        ), expected_digest, observed_digest, None
     if dict(supplied_overlay) != normalized:
         return _blocked(
             "overlay_revalidation_mismatch",
@@ -251,7 +259,43 @@ def project_system_relation_context(
             observed_commit=observed_commit,
             expected_digest=expected_digest,
             observed_digest=observed_digest,
-        )
+        ), expected_digest, observed_digest, None
+    return None, expected_digest, observed_digest, normalized
+
+
+def project_system_relation_context(
+    producer_result: Any,
+    *,
+    repository_commit: Any,
+    target_paths: Iterable[str],
+    max_items: int = 25,
+) -> dict[str, Any]:
+    """Project relevant relations only after commit and digest coherence checks."""
+    expected_commit = _expected_commit(repository_commit)
+    if expected_commit is None:
+        return _blocked("expected_repository_commit_invalid")
+    if producer_result is None:
+        return _missing(expected_commit)
+
+    binding_error, observed_commit, revision_binding = _producer_binding(
+        producer_result,
+        expected_commit=expected_commit,
+    )
+    if binding_error is not None:
+        return binding_error
+    assert isinstance(producer_result, Mapping)
+    assert revision_binding is not None
+
+    overlay_error, expected_digest, observed_digest, normalized = _validated_overlay(
+        producer_result,
+        expected_commit=expected_commit,
+        observed_commit=observed_commit,
+    )
+    if overlay_error is not None:
+        return overlay_error
+    assert expected_digest is not None
+    assert observed_digest is not None
+    assert normalized is not None
 
     paths = _target_path_set(target_paths)
     relevant = [

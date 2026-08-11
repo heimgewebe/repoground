@@ -269,6 +269,43 @@ def _omission(
     return result
 
 
+def _parse_git_candidate(
+    raw_entry: bytes,
+) -> tuple[tuple[str, str, int, str] | None, dict[str, Any] | None]:
+    try:
+        metadata, raw_path = raw_entry.split(b"\t", 1)
+        mode, object_type, object_id, raw_size = metadata.split()
+    except ValueError:
+        raise SystemRelationProducerError(
+            "git candidate index contained an invalid entry"
+        ) from None
+
+    path_fingerprint = hashlib.sha256(raw_path).hexdigest()[:16]
+    try:
+        relative = raw_path.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, _omission(
+            f"<non-utf8-path:{path_fingerprint}>",
+            "non_utf8_path_omitted",
+        )
+    if not _safe_repo_path(relative):
+        return None, _omission(relative, "unsafe_path_omitted")
+
+    candidate_kind = _candidate_kind(relative)
+    if candidate_kind is None:
+        return None, None
+    if _sensitive_path(relative):
+        return None, _omission(relative, "sensitive_path_omitted")
+    if object_type != b"blob" or mode == b"120000":
+        return None, _omission(relative, "non_regular_file_omitted")
+    try:
+        size = int(raw_size)
+        object_id_text = object_id.decode("ascii")
+    except (ValueError, UnicodeDecodeError):
+        return None, _omission(relative, "git_metadata_invalid")
+    return (relative, object_id_text, size, candidate_kind), None
+
+
 def _git_candidates(
     root: Path,
     *,
@@ -296,44 +333,12 @@ def _git_candidates(
     for raw_entry in payload.split(b"\x00"):
         if not raw_entry:
             continue
-        try:
-            metadata, raw_path = raw_entry.split(b"\t", 1)
-            mode, object_type, object_id, raw_size = metadata.split()
-        except ValueError:
-            raise SystemRelationProducerError(
-                "git candidate index contained an invalid entry"
-            ) from None
-        path_fingerprint = hashlib.sha256(raw_path).hexdigest()[:16]
-        try:
-            relative = raw_path.decode("utf-8")
-        except UnicodeDecodeError:
-            omissions.append(
-                _omission(
-                    f"<non-utf8-path:{path_fingerprint}>",
-                    "non_utf8_path_omitted",
-                )
-            )
-            continue
-        if not _safe_repo_path(relative):
-            omissions.append(_omission(relative, "unsafe_path_omitted"))
-            continue
-        candidate_kind = _candidate_kind(relative)
-        if candidate_kind is None:
-            continue
-        if _sensitive_path(relative):
-            omissions.append(_omission(relative, "sensitive_path_omitted"))
-            continue
-        if object_type != b"blob" or mode == b"120000":
-            omissions.append(_omission(relative, "non_regular_file_omitted"))
-            continue
-        try:
-            size = int(raw_size)
-            object_id_text = object_id.decode("ascii")
-        except (ValueError, UnicodeDecodeError):
-            omissions.append(_omission(relative, "git_metadata_invalid"))
-            continue
-        available_paths.add(relative)
-        candidates.append((relative, object_id_text, size, candidate_kind))
+        candidate, omission = _parse_git_candidate(raw_entry)
+        if omission is not None:
+            omissions.append(omission)
+        if candidate is not None:
+            candidates.append(candidate)
+            available_paths.add(candidate[0])
 
     candidates.sort(key=lambda item: item[0])
     omissions.sort(key=_omission_order)
@@ -631,6 +636,60 @@ def _omission_order(item: Mapping[str, Any]) -> tuple[str, str, int, str]:
     )
 
 
+
+def _candidate_text(
+    root: Path,
+    candidate: tuple[str, str, int, str],
+    *,
+    scanned_bytes: int,
+    max_file_bytes: int,
+    max_total_bytes: int,
+) -> tuple[str | None, dict[str, Any] | None]:
+    relative, object_id, size, _candidate_kind_value = candidate
+    if size > max_file_bytes:
+        return None, _omission(relative, "file_too_large", detail=str(size))
+    if scanned_bytes + size > max_total_bytes:
+        return None, _omission(
+            relative, "total_byte_budget_exhausted", detail=str(size)
+        )
+    try:
+        payload = _git_blob(root, object_id)
+    except SystemRelationProducerError:
+        return None, _omission(relative, "git_blob_read_failed")
+    if len(payload) != size:
+        return None, _omission(relative, "git_blob_size_mismatch")
+    try:
+        return payload.decode("utf-8"), None
+    except UnicodeDecodeError:
+        return None, _omission(relative, "invalid_utf8")
+
+
+def _scan_candidate_text(
+    text: str,
+    candidate: tuple[str, str, int, str],
+    *,
+    repository_identity: str,
+    available_paths: set[str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    relative, _object_id, _size, candidate_kind = candidate
+    if candidate_kind == "pyproject":
+        return _scan_pyproject(
+            text,
+            relative=relative,
+            repository_identity=repository_identity,
+        )
+    if candidate_kind == "schema":
+        return _scan_schema(
+            text,
+            relative=relative,
+            repository_identity=repository_identity,
+        )
+    return _scan_workflow(
+        text,
+        relative=relative,
+        available_paths=available_paths,
+    )
+
 def collect_system_relation_evidence(
     repository_root: str | Path,
     *,
@@ -673,7 +732,8 @@ def collect_system_relation_evidence(
     scanned_bytes = 0
     considered_candidates = 0
 
-    for index, (relative, object_id, size, candidate_kind) in enumerate(candidates):
+    for index, candidate in enumerate(candidates):
+        relative = candidate[0]
         if index >= max_files:
             remaining = len(candidates) - index
             omissions.append(
@@ -689,50 +749,25 @@ def collect_system_relation_evidence(
             )
             break
         considered_candidates += 1
-        if size > max_file_bytes:
-            omissions.append(
-                _omission(relative, "file_too_large", detail=str(size))
-            )
+        text, omission = _candidate_text(
+            root,
+            candidate,
+            scanned_bytes=scanned_bytes,
+            max_file_bytes=max_file_bytes,
+            max_total_bytes=max_total_bytes,
+        )
+        if omission is not None:
+            omissions.append(omission)
             continue
-        if scanned_bytes + size > max_total_bytes:
-            omissions.append(
-                _omission(relative, "total_byte_budget_exhausted", detail=str(size))
-            )
-            continue
-        try:
-            payload = _git_blob(root, object_id)
-        except SystemRelationProducerError:
-            omissions.append(_omission(relative, "git_blob_read_failed"))
-            continue
-        if len(payload) != size:
-            omissions.append(_omission(relative, "git_blob_size_mismatch"))
-            continue
-        try:
-            text = payload.decode("utf-8")
-        except UnicodeDecodeError:
-            omissions.append(_omission(relative, "invalid_utf8"))
-            continue
-
+        assert text is not None
         scanned_files += 1
-        scanned_bytes += len(payload)
-        if candidate_kind == "pyproject":
-            found, skipped = _scan_pyproject(
-                text,
-                relative=relative,
-                repository_identity=identity,
-            )
-        elif candidate_kind == "schema":
-            found, skipped = _scan_schema(
-                text,
-                relative=relative,
-                repository_identity=identity,
-            )
-        else:
-            found, skipped = _scan_workflow(
-                text,
-                relative=relative,
-                available_paths=available_paths,
-            )
+        scanned_bytes += len(text.encode("utf-8"))
+        found, skipped = _scan_candidate_text(
+            text,
+            candidate,
+            repository_identity=identity,
+            available_paths=available_paths,
+        )
         records.extend(found)
         omissions.extend(skipped)
 
