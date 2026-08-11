@@ -250,7 +250,10 @@
           "type": "string",
           "enum": [
             "exact_and",
+            "exact_and_with_structure",
             "or_relaxed",
+            "or_relaxed_with_structure",
+            "structure_only",
             "none"
           ]
         },
@@ -323,6 +326,47 @@
           },
           "purpose": {
             "type": "string"
+          },
+          "language": {
+            "type": "string",
+            "enum": ["bash", "rust"]
+          },
+          "adapter": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "version"],
+            "properties": {
+              "id": {"type": "string", "minLength": 1},
+              "version": {"type": "string", "minLength": 1}
+            }
+          },
+          "repository_commit": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"
+          },
+          "bundle_manifest": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bundle_manifest_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "evidence_level": {
+            "type": "string",
+            "enum": ["S0", "S1"]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "uncertainty": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "source_range": {
+            "type": "object"
           }
         }
       }
@@ -358,6 +402,17 @@
           },
           "text_excerpt": {
             "type": "string"
+          },
+          "text_excerpt_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text_excerpt_characters": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text_excerpt_truncated": {
+            "type": "boolean"
           },
           "content_sha256": {
             "type": "string",
@@ -643,8 +698,16 @@
       "additionalProperties": false,
       "required": [
         "max_context_tokens",
+        "token_derived_byte_ceiling",
+        "max_context_bytes",
         "max_answer_tokens",
+        "context_bytes_used",
+        "context_unicode_characters_used",
         "approx_context_chars_used",
+        "byte_budget_is_hard",
+        "unit",
+        "accounting",
+        "omissions",
         "truncated",
         "does_not_establish_quality"
       ],
@@ -657,9 +720,41 @@
           "type": "integer",
           "minimum": 1
         },
+        "token_derived_byte_ceiling": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_context_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "context_bytes_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_unicode_characters_used": {
+          "type": "integer",
+          "minimum": 0
+        },
         "approx_context_chars_used": {
           "type": "integer",
           "minimum": 0
+        },
+        "byte_budget_is_hard": {
+          "type": "boolean",
+          "const": true
+        },
+        "unit": {
+          "type": "string",
+          "const": "utf8_bytes"
+        },
+        "accounting": {
+          "type": "string",
+          "minLength": 1
+        },
+        "omissions": {
+          "type": "array",
+          "items": {"type": "object"}
         },
         "truncated": {
           "type": "boolean"
@@ -670,6 +765,16 @@
         }
       },
       "description": "Token budget report. This is a constraint record, not a quality proof."
+    },
+    "structured_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "language_structure": {
+          "type": "object",
+          "description": "Budgeted optional Rust/Bash navigation evidence with language-specific uncertainty and provenance."
+        }
+      }
     }
   }
 }

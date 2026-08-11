@@ -1,0 +1,245 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/language-structure.v1.schema.json",
+  "title": "RepoGround optional language structure v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "version", "authority", "canonicality", "risk_class", "run_id", "status", "source", "languages", "records", "record_count", "degradations", "truncation", "promotion", "does_not_establish"],
+  "properties": {
+    "kind": {"const": "repoground.language_structure"},
+    "version": {"const": "1.0"},
+    "authority": {"const": "navigation_index"},
+    "canonicality": {"const": "derived"},
+    "risk_class": {"const": "navigation"},
+    "run_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["available", "degraded"]},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_root_name", "repository_commit", "bundle_manifest", "canonical_dump_index_sha256", "network_used", "secrets_read", "workspace_state_used_beyond_bound_source"],
+      "properties": {
+        "repository_root_name": {"type": "string", "minLength": 1},
+        "repository_commit": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
+        "bundle_manifest": {"type": "string", "minLength": 1},
+        "canonical_dump_index_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "network_used": {"const": false},
+        "secrets_read": {"const": false},
+        "workspace_state_used_beyond_bound_source": {"const": false}
+      }
+    },
+    "languages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bash", "rust"],
+      "properties": {
+        "bash": {"$ref": "#/definitions/language_summary"},
+        "rust": {"$ref": "#/definitions/language_summary"}
+      }
+    },
+    "records": {"type": "array", "items": {"$ref": "#/definitions/record"}},
+    "record_count": {"type": "integer", "minimum": 0},
+    "degradations": {"type": "array", "items": {"$ref": "#/definitions/degradation"}},
+    "truncation": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason", "observed", "limit"],
+          "properties": {
+            "reason": {"const": "global_record_limit"},
+            "observed": {"type": "integer", "minimum": 1},
+            "limit": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_promoted", "status", "reason"],
+      "properties": {
+        "default_promoted": {"const": false},
+        "status": {"const": "keep_optional"},
+        "reason": {"type": "string", "minLength": 1}
+      }
+    },
+    "does_not_establish": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
+  },
+  "definitions": {
+    "degradation": {
+      "type": "object",
+      "required": ["language", "reason"],
+      "properties": {
+        "language": {"enum": ["bash", "rust", "mixed"]},
+        "reason": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "line": {"type": "integer", "minimum": 1}
+      }
+    },
+    "language_summary": {
+      "type": "object",
+      "required": ["status", "adapter", "supported_files", "supported_symbols", "supported_relations", "range_basis", "explicit_limits", "candidate_file_count", "scanned_file_count", "record_count"],
+      "properties": {
+        "status": {"enum": ["available", "degraded"]},
+        "adapter": {"$ref": "#/definitions/adapter"},
+        "scip_adapter": {"$ref": "#/definitions/adapter"},
+        "supported_files": {"type": "array", "items": {"type": "string"}},
+        "supported_symbols": {"type": "array", "items": {"type": "string"}},
+        "supported_relations": {"type": "array", "items": {"type": "string"}},
+        "range_basis": {"type": "string"},
+        "explicit_limits": {"type": "array", "items": {"type": "string"}},
+        "candidate_file_count": {"type": "integer", "minimum": 0},
+        "scanned_file_count": {"type": "integer", "minimum": 0},
+        "scip_record_count": {"type": "integer", "minimum": 0},
+        "record_count": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "adapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {"enum": ["bash-static-structure", "rust-static-structure", "rust-scip-structure"]},
+        "version": {"const": "1.0"}
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_line", "end_line", "start_character", "end_character", "coordinate_basis"],
+      "properties": {
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "start_character": {"type": "integer", "minimum": 0},
+        "end_character": {"type": "integer", "minimum": 0},
+        "coordinate_basis": {"enum": ["source_lines_1_based_unicode_characters", "scip_position_encoding_units"]},
+        "position_encoding": {"type": ["string", "integer"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"coordinate_basis": {"const": "scip_position_encoding_units"}}},
+          "then": {"required": ["position_encoding"]},
+          "else": {"not": {"required": ["position_encoding"]}}
+        }
+      ]
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "language", "adapter", "record_type", "symbol_kind", "relation", "symbol", "target_symbol", "source", "evidence", "provenance", "uncertainty"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-f0-9]{24}$"},
+        "language": {"enum": ["bash", "rust"]},
+        "adapter": {"$ref": "#/definitions/adapter"},
+        "record_type": {"enum": ["symbol", "relation", "occurrence", "relationship"]},
+        "symbol_kind": {"type": ["string", "null"]},
+        "relation": {"enum": ["definition", "call", "dependency", "reference", "references_symbol", "implements_symbol", "type_definition", "definition_alias"]},
+        "symbol": {"type": "string", "minLength": 1},
+        "target_symbol": {"type": ["string", "null"]},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "range"],
+          "properties": {"path": {"type": "string", "minLength": 1}, "range": {"$ref": "#/definitions/range"}}
+        },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["level", "confidence", "basis"],
+          "properties": {"level": {"enum": ["S0", "S1"]}, "confidence": {"type": "number", "minimum": 0, "maximum": 1}, "basis": {"type": "string", "minLength": 1}}
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository_commit", "bundle_manifest", "bundle_manifest_sha256", "canonical_dump_index_sha256", "source_artifact"],
+          "properties": {
+            "repository_commit": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
+            "bundle_manifest": {"type": "string", "minLength": 1},
+            "bundle_manifest_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+            "canonical_dump_index_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+            "source_artifact": {
+              "oneOf": [
+                {"type": "null"},
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["kind", "sha256"],
+                  "properties": {
+                    "kind": {"const": "scip_symbol_relations"},
+                    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "uncertainty": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "adapter": {
+                "properties": {"id": {"const": "rust-scip-structure"}},
+                "required": ["id"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "language": {"const": "rust"},
+              "record_type": {"enum": ["occurrence", "relationship"]},
+              "relation": {"enum": ["definition", "reference", "references_symbol", "implements_symbol", "type_definition", "definition_alias"]},
+              "evidence": {"properties": {"level": {"const": "S1"}}},
+              "source": {
+                "properties": {
+                  "range": {
+                    "properties": {"coordinate_basis": {"const": "scip_position_encoding_units"}}
+                  }
+                }
+              },
+              "provenance": {"properties": {"source_artifact": {"type": "object"}}}
+            }
+          },
+          "else": {
+            "properties": {
+              "record_type": {"enum": ["symbol", "relation"]},
+              "relation": {"enum": ["definition", "call", "dependency"]},
+              "evidence": {"properties": {"level": {"const": "S0"}}},
+              "source": {
+                "properties": {
+                  "range": {
+                    "properties": {"coordinate_basis": {"const": "source_lines_1_based_unicode_characters"}}
+                  }
+                }
+              },
+              "provenance": {"properties": {"source_artifact": {"type": "null"}}}
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {"relation": {"const": "definition"}},
+                  "required": ["relation"]
+                },
+                "then": {
+                  "properties": {
+                    "record_type": {"const": "symbol"},
+                    "target_symbol": {"type": "null"}
+                  }
+                },
+                "else": {
+                  "properties": {
+                    "record_type": {"const": "relation"},
+                    "target_symbol": {"type": "string", "minLength": 1}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

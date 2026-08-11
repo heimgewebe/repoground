@@ -1,0 +1,146 @@
+{
+  "kind": "repoground.language_structure_goldset",
+  "version": "1.0",
+  "id": "repoground-agent-utility-t021-goldset-v1",
+  "description": "Reproducible Rust/Bash structure fixtures covering positive, medium, dynamic/ambiguous and true-null repositories. Fixtures are local repository trees; no network or external analyzer is required.",
+  "cases": [
+    {
+      "id": "bash-small-positive",
+      "language": "bash",
+      "size_class": "small",
+      "case_class": "positive",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/bash-small",
+      "expected_records": [
+        {"language": "bash", "relation": "dependency", "symbol": "scripts/deploy.sh", "target_symbol": "./lib.sh", "path": "scripts/deploy.sh", "start_line": 2, "end_line": 2, "start_character": 7, "end_character": 15},
+        {"language": "bash", "relation": "definition", "symbol": "prepare", "target_symbol": null, "path": "scripts/deploy.sh", "start_line": 3, "end_line": 3, "start_character": 0, "end_character": 7},
+        {"language": "bash", "relation": "definition", "symbol": "deploy", "target_symbol": null, "path": "scripts/deploy.sh", "start_line": 6, "end_line": 6, "start_character": 0, "end_character": 6},
+        {"language": "bash", "relation": "call", "symbol": "scripts/deploy.sh", "target_symbol": "prepare", "path": "scripts/deploy.sh", "start_line": 7, "end_line": 7, "start_character": 2, "end_character": 9},
+        {"language": "bash", "relation": "definition", "symbol": "log", "target_symbol": null, "path": "scripts/lib.sh", "start_line": 2, "end_line": 2, "start_character": 0, "end_character": 3}
+      ],
+      "expected_degradation_reasons": []
+    },
+    {
+      "id": "bash-medium-positive",
+      "language": "bash",
+      "size_class": "medium",
+      "case_class": "positive",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/bash-medium",
+      "expected_records": [
+        {"language": "bash", "relation": "definition", "symbol": "helper", "target_symbol": null, "path": "lib/helpers.bash", "start_line": 2, "end_line": 2, "start_character": 0, "end_character": 6},
+        {"language": "bash", "relation": "dependency", "symbol": "run.bash", "target_symbol": "lib/helpers.bash", "path": "run.bash", "start_line": 2, "end_line": 2, "start_character": 7, "end_character": 23},
+        {"language": "bash", "relation": "definition", "symbol": "build", "target_symbol": null, "path": "run.bash", "start_line": 3, "end_line": 3, "start_character": 0, "end_character": 5},
+        {"language": "bash", "relation": "definition", "symbol": "test_all", "target_symbol": null, "path": "run.bash", "start_line": 6, "end_line": 6, "start_character": 0, "end_character": 8},
+        {"language": "bash", "relation": "definition", "symbol": "release", "target_symbol": null, "path": "run.bash", "start_line": 9, "end_line": 9, "start_character": 0, "end_character": 7},
+        {"language": "bash", "relation": "call", "symbol": "run.bash", "target_symbol": "build", "path": "run.bash", "start_line": 10, "end_line": 10, "start_character": 2, "end_character": 7},
+        {"language": "bash", "relation": "call", "symbol": "run.bash", "target_symbol": "test_all", "path": "run.bash", "start_line": 11, "end_line": 11, "start_character": 2, "end_character": 10}
+      ],
+      "expected_degradation_reasons": []
+    },
+    {
+      "id": "bash-dynamic",
+      "language": "bash",
+      "size_class": "small",
+      "case_class": "dynamic",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/bash-dynamic",
+      "expected_records": [
+        {"language": "bash", "relation": "definition", "symbol": "run", "target_symbol": null, "path": "dynamic.sh", "start_line": 3, "end_line": 3, "start_character": 0, "end_character": 3}
+      ],
+      "expected_degradation_reasons": ["dynamic_source_target", "eval_not_resolved", "command_substitution_not_resolved"]
+    },
+    {
+      "id": "bash-ambiguous",
+      "language": "bash",
+      "size_class": "small",
+      "case_class": "ambiguous",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/bash-ambiguous",
+      "expected_records": [
+        {"language": "bash", "relation": "definition", "symbol": "choose", "target_symbol": null, "path": "ambiguous.sh", "start_line": 2, "end_line": 2, "start_character": 0, "end_character": 6},
+        {"language": "bash", "relation": "definition", "symbol": "choose", "target_symbol": null, "path": "ambiguous.sh", "start_line": 5, "end_line": 5, "start_character": 0, "end_character": 6}
+      ],
+      "expected_degradation_reasons": ["duplicate_function_definition", "ambiguous_function_call_target"]
+    },
+    {
+      "id": "bash-null",
+      "language": "bash",
+      "size_class": "small",
+      "case_class": "null",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/bash-null",
+      "expected_records": [],
+      "expected_degradation_reasons": []
+    },
+    {
+      "id": "rust-small-positive",
+      "language": "rust",
+      "size_class": "small",
+      "case_class": "positive",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/rust-small",
+      "expected_records": [
+        {"language": "rust", "relation": "dependency", "symbol": "src/lib.rs", "target_symbol": "crate::config::Config", "path": "src/lib.rs", "start_line": 1, "end_line": 1, "start_character": 4, "end_character": 25},
+        {"language": "rust", "relation": "definition", "symbol": "Runner", "target_symbol": null, "path": "src/lib.rs", "start_line": 2, "end_line": 2, "start_character": 11, "end_character": 17},
+        {"language": "rust", "relation": "definition", "symbol": "helper", "target_symbol": null, "path": "src/lib.rs", "start_line": 3, "end_line": 3, "start_character": 3, "end_character": 9},
+        {"language": "rust", "relation": "definition", "symbol": "run", "target_symbol": null, "path": "src/lib.rs", "start_line": 4, "end_line": 4, "start_character": 7, "end_character": 10},
+        {"language": "rust", "relation": "call", "symbol": "src/lib.rs", "target_symbol": "helper", "path": "src/lib.rs", "start_line": 5, "end_line": 5, "start_character": 4, "end_character": 10}
+      ],
+      "expected_degradation_reasons": ["scip_evidence_not_supplied"]
+    },
+    {
+      "id": "rust-medium-positive",
+      "language": "rust",
+      "size_class": "medium",
+      "case_class": "positive",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/rust-medium",
+      "expected_records": [
+        {"language": "rust", "relation": "definition", "symbol": "Config", "target_symbol": null, "path": "src/config.rs", "start_line": 1, "end_line": 1, "start_character": 11, "end_character": 17},
+        {"language": "rust", "relation": "definition", "symbol": "DEFAULT_RETRIES", "target_symbol": null, "path": "src/config.rs", "start_line": 2, "end_line": 2, "start_character": 10, "end_character": 25},
+        {"language": "rust", "relation": "definition", "symbol": "config", "target_symbol": null, "path": "src/lib.rs", "start_line": 1, "end_line": 1, "start_character": 4, "end_character": 10},
+        {"language": "rust", "relation": "dependency", "symbol": "src/lib.rs", "target_symbol": "crate::config::Config", "path": "src/lib.rs", "start_line": 2, "end_line": 2, "start_character": 4, "end_character": 25},
+        {"language": "rust", "relation": "definition", "symbol": "Execute", "target_symbol": null, "path": "src/lib.rs", "start_line": 3, "end_line": 3, "start_character": 10, "end_character": 17},
+        {"language": "rust", "relation": "definition", "symbol": "Runner", "target_symbol": null, "path": "src/lib.rs", "start_line": 4, "end_line": 4, "start_character": 11, "end_character": 17},
+        {"language": "rust", "relation": "definition", "symbol": "validate", "target_symbol": null, "path": "src/lib.rs", "start_line": 5, "end_line": 5, "start_character": 3, "end_character": 11},
+        {"language": "rust", "relation": "definition", "symbol": "run", "target_symbol": null, "path": "src/lib.rs", "start_line": 6, "end_line": 6, "start_character": 7, "end_character": 10},
+        {"language": "rust", "relation": "call", "symbol": "src/lib.rs", "target_symbol": "validate", "path": "src/lib.rs", "start_line": 7, "end_line": 7, "start_character": 4, "end_character": 12}
+      ],
+      "expected_degradation_reasons": ["scip_evidence_not_supplied"]
+    },
+    {
+      "id": "rust-macro-dynamic",
+      "language": "rust",
+      "size_class": "small",
+      "case_class": "dynamic",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/rust-macro",
+      "expected_records": [
+        {"language": "rust", "relation": "definition", "symbol": "run", "target_symbol": null, "path": "src/lib.rs", "start_line": 1, "end_line": 1, "start_character": 7, "end_character": 10}
+      ],
+      "expected_degradation_reasons": ["macro_invocation_not_expanded", "scip_evidence_not_supplied"]
+    },
+    {
+      "id": "rust-ambiguous",
+      "language": "rust",
+      "size_class": "small",
+      "case_class": "ambiguous",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/rust-ambiguous",
+      "expected_records": [
+        {"language": "rust", "relation": "definition", "symbol": "choose", "target_symbol": null, "path": "src/lib.rs", "start_line": 1, "end_line": 1, "start_character": 3, "end_character": 9},
+        {"language": "rust", "relation": "definition", "symbol": "choose", "target_symbol": null, "path": "src/lib.rs", "start_line": 2, "end_line": 2, "start_character": 3, "end_character": 9},
+        {"language": "rust", "relation": "definition", "symbol": "run", "target_symbol": null, "path": "src/lib.rs", "start_line": 3, "end_line": 3, "start_character": 7, "end_character": 10}
+      ],
+      "expected_degradation_reasons": ["duplicate_function_definition", "ambiguous_function_call_target", "scip_evidence_not_supplied"]
+    },
+    {
+      "id": "rust-null",
+      "language": "rust",
+      "size_class": "small",
+      "case_class": "null",
+      "fixture_root": "merger/repoground/tests/fixtures/language_structure_goldset/rust-null",
+      "expected_records": [],
+      "expected_degradation_reasons": []
+    }
+  ],
+  "does_not_establish": [
+    "complete Rust semantics",
+    "complete Bash semantics",
+    "runtime behavior",
+    "default activation",
+    "cross-machine performance equivalence"
+  ]
+}

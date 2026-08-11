@@ -68,7 +68,7 @@ def build_parser(
         help=(
             "Comma-separated list of extras "
             "(health,organism_index,fleet_panorama,delta_reports,augment_sidecar,"
-            "json_sidecar,heatmap; alias: ai_heatmap) or 'none'"
+            "json_sidecar,heatmap,language_structure; alias: ai_heatmap) or 'none'"
         ),
         default=default_extras,
     )

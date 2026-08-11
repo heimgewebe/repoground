@@ -18,6 +18,12 @@ from merger.repoground.core.agent_impact_refinement import (
 from merger.repoground.core.call_graph_impact_index import (
     project_call_graph_for_impact,
 )
+from merger.repoground.core.language_structure import (
+    merge_language_structure_into_impact_context,
+)
+from merger.repoground.core.language_structure_access import (
+    load_language_structure_artifact,
+)
 from merger.repoground.core.readonly_adapter import (
     RepoGroundReadonlyAdapter,
     RepoGroundReadonlyAdapterError,
@@ -309,6 +315,48 @@ class RepoGroundAgentImpactAdapter(RepoGroundReadonlyAdapter):
             query_response,
             max_items=item_limit,
         )
+        language_response = load_language_structure_artifact(registration.manifest)
+        if language_response.get("status") == "available":
+            language_document = _json_document(language_response)
+            result = merge_language_structure_into_impact_context(
+                result,
+                language_document,
+                paths=result.get("target", {}).get("paths", []),
+                target_symbol=(target_symbol if isinstance(target_symbol, str) else None),
+                max_items=item_limit,
+                bundle_manifest_sha256=(
+                    language_response.get("manifest_sha256")
+                    if isinstance(language_response.get("manifest_sha256"), str)
+                    else None
+                ),
+            )
+        elif language_response.get("status") == "blocked":
+            statuses = result.setdefault("source_statuses", [])
+            if isinstance(statuses, list):
+                statuses.append(
+                    {
+                        "source": "language_structure_json",
+                        "status": "blocked",
+                        "error_code": language_response.get("reason"),
+                    }
+                )
+            gaps = result.setdefault("gaps", [])
+            if isinstance(gaps, list):
+                gaps.append(
+                    {
+                        "source": "language_structure_json",
+                        "status": "blocked",
+                        "reason": language_response.get("reason")
+                        or "language_structure_untrusted",
+                    }
+                )
+            result.setdefault("composition", {})["language_structure"] = {
+                "status": "rejected",
+                "reason": language_response.get("reason")
+                or "language_structure_untrusted",
+            }
+            if result.get("status") == "available":
+                result["status"] = "partial"
         result.update(
             {
                 "action": "agent_impact_context",

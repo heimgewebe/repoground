@@ -49,6 +49,7 @@ Die Projektion verwendet ausschließlich bereits erzeugte Artefakte:
 | `entrypoints_json` | CLI-, Web-, Worker-, Modul- und Test-Einstiegspunkte |
 | `relation_cards_jsonl` | zusätzliche Navigationshinweise, nicht Wahrheit |
 | `sqlite_index` | optionaler aufgelöster Query-Kontext für Tests, Verträge und Dokumentation |
+| `language_structure_json` | optionale, commit-/manifestgebundene Rust-/Bash-Navigation mit eigener Range-, Konfidenz- und Unsicherheitssemantik; niemals Python-AST- oder Runtime-Wahrheit |
 
 `changed_paths` ist ein Kompositionspunkt für den bestehenden Delta Context.
 Die Fläche parst oder appliziert selbst keinen Diff.

@@ -308,6 +308,7 @@ def ask_context(
     query: str,
     task_profile: str = "basic_repo_question",
     max_context_tokens: int = 8000,
+    max_context_bytes: int | None = None,
     max_answer_tokens: int = 1200,
     k: int = 5,
     verbose: bool = False,
@@ -328,6 +329,7 @@ def ask_context(
         query=query,
         task_profile=task_profile,
         max_context_tokens=max_context_tokens,
+        max_context_bytes=max_context_bytes,
         max_answer_tokens=max_answer_tokens,
         k=k,
     )

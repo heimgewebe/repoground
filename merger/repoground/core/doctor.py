@@ -5,9 +5,11 @@ runtime capabilities, existing bundle publications and one explicitly selected
 local checkout.  It never installs dependencies, refreshes bundles, mutates Git,
 starts services, reads secrets or performs network synchronization.
 """
+
 from __future__ import annotations
 
 import hashlib
+import importlib
 import importlib.util
 import json
 import os
@@ -103,7 +105,9 @@ def check_python_runtime() -> dict[str, Any]:
         "version": ".".join(str(item) for item in version),
         "core_minimum": ".".join(str(item) for item in CORE_PYTHON_MINIMUM),
         "core_runtime_supported": core_supported,
-        "ci_release_baseline": ".".join(str(item) for item in CI_RELEASE_PYTHON_BASELINE),
+        "ci_release_baseline": ".".join(
+            str(item) for item in CI_RELEASE_PYTHON_BASELINE
+        ),
         "ci_release_baseline_role": "reproducible_validation",
     }
     if not core_supported:
@@ -202,12 +206,16 @@ def check_sqlite_fts(
     try:
         connection = connect(":memory:")
         connection.execute("CREATE VIRTUAL TABLE doctor_fts USING fts5(content)")
-        connection.execute("INSERT INTO doctor_fts(content) VALUES (?)", ("repoground",))
+        connection.execute(
+            "INSERT INTO doctor_fts(content) VALUES (?)", ("repoground",)
+        )
         row = connection.execute(
             "SELECT count(*) FROM doctor_fts WHERE doctor_fts MATCH ?", ("repoground",)
         ).fetchone()
         if not row or row[0] != 1:
-            raise sqlite3.DatabaseError("FTS5 smoke query returned an unexpected result")
+            raise sqlite3.DatabaseError(
+                "FTS5 smoke query returned an unexpected result"
+            )
     except (sqlite3.Error, OSError, RuntimeError) as exc:
         return _check(
             "sqlite_fts",
@@ -398,7 +406,10 @@ def check_wrapper(repo_root: str | Path = ".") -> dict[str, Any]:
         next_action="Inspect its provenance and replace it only if the exact host state is approved for migration.",
         optional=True,
         evidence=evidence,
-        does_not_establish=["foreign_wrapper_semantic_correctness", "module_cli_failure"],
+        does_not_establish=[
+            "foreign_wrapper_semantic_correctness",
+            "module_cli_failure",
+        ],
     )
 
 
@@ -504,7 +515,9 @@ def check_mcp_configuration(
             and args[0] in {expected_relative, str(starter)}
         )
         if not valid:
-            raise ValueError("repoground MCP server entry does not target the project starter")
+            raise ValueError(
+                "repoground MCP server entry does not target the project starter"
+            )
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
         return _check(
             "mcp_configuration",
@@ -537,35 +550,101 @@ def check_mcp_configuration(
 
 
 _ADAPTER_MODULES = (
-    ("python_call_graph", "merger.repoground.core.call_graph_navigation"),
-    ("scip_graph", "merger.repoground.core.scip_adapter"),
-    ("rust_structure", "merger.repoground.core.rust_structure_adapter"),
-    ("bash_structure", "merger.repoground.core.bash_structure_adapter"),
+    (
+        "python_call_graph",
+        "merger.repoground.core.call_graph_navigation",
+        "contract-v1",
+        None,
+    ),
+    ("scip_graph", "merger.repoground.core.scip_adapter", "1.0", None),
+    (
+        "rust_structure",
+        "merger.repoground.core.rust_structure_adapter",
+        "1.0",
+        "ADAPTER_VERSION",
+    ),
+    (
+        "bash_structure",
+        "merger.repoground.core.bash_structure_adapter",
+        "1.0",
+        "ADAPTER_VERSION",
+    ),
 )
 
 
 def check_optional_adapters() -> list[dict[str, Any]]:
     checks: list[dict[str, Any]] = []
-    for adapter_id, module in _ADAPTER_MODULES:
-        available = _module_available(module)
+    for adapter_id, module, adapter_version, version_attribute in _ADAPTER_MODULES:
+        discovery_failed = False
+        discovery_error_type: str | None = None
+        try:
+            available = _module_available(module)
+        except Exception as exc:
+            available = False
+            discovery_failed = True
+            discovery_error_type = type(exc).__name__
+        status = (
+            "blocked"
+            if discovery_failed
+            else ("available" if available else "degraded")
+        )
+        cause = (
+            "adapter_discovery_failed"
+            if discovery_failed
+            else (
+                "adapter_module_available"
+                if available
+                else "adapter_module_unavailable"
+            )
+        )
+        observed_version: str | None = None
+        error_type = discovery_error_type
+        if available:
+            try:
+                imported = importlib.import_module(module)
+                if version_attribute is not None:
+                    raw_version = getattr(imported, version_attribute, None)
+                    observed_version = (
+                        raw_version if isinstance(raw_version, str) else None
+                    )
+                    if observed_version != adapter_version:
+                        status = "blocked"
+                        cause = "adapter_version_contract_mismatch"
+            except Exception as exc:
+                status = "blocked"
+                cause = "adapter_import_failed"
+                error_type = type(exc).__name__
         checks.append(
             _check(
                 f"adapter:{adapter_id}",
-                "available" if available else "degraded",
-                cause=("adapter_module_available" if available else "adapter_module_unavailable"),
+                status,
+                cause=cause,
                 impact=(
                     "The optional adapter module can be used when coherent evidence is supplied."
-                    if available
-                    else "This optional structural lane is unavailable; lexical/text and Python-core paths remain unaffected."
+                    if status == "available"
+                    else (
+                        "The optional adapter is installed but its declared runtime contract cannot be trusted; Python/text core paths remain unaffected."
+                        if status == "blocked"
+                        else "This optional structural lane is unavailable; lexical/text and Python-core paths remain unaffected."
+                    )
                 ),
                 next_action=(
                     "No action required."
-                    if available
-                    else "Keep using supported fallback lanes; do not auto-install or infer adapter output."
+                    if status == "available"
+                    else "Keep using supported fallback lanes; doctor will not install, repair, or infer adapter output."
                 ),
                 optional=True,
-                evidence={"module": module, "available": available},
-                does_not_establish=["runtime_behavior", "adapter_semantic_completeness"],
+                evidence={
+                    "module": module,
+                    "available": available,
+                    "adapter_version": adapter_version,
+                    "observed_version": observed_version,
+                    "error_type": error_type,
+                },
+                does_not_establish=[
+                    "runtime_behavior",
+                    "adapter_semantic_completeness",
+                ],
             )
         )
     return checks
@@ -637,7 +716,11 @@ def _catalog_check_from_selection(
     if status == "blocked":
         failure_evidence = {
             **evidence,
-            **{key: value for key, value in selection.items() if key.startswith("error")},
+            **{
+                key: value
+                for key, value in selection.items()
+                if key.startswith("error")
+            },
         }
         return (
             _check(

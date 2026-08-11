@@ -70,6 +70,24 @@ def _register_optional_artifact(
     return path
 
 
+def _write_language_structure_artifact(
+    *,
+    enabled: bool,
+    base_manifest_path: Path,
+    repo_summaries: List[Dict[str, Any]],
+    final_dump_index: Optional[Path],
+    run_id: str,
+) -> Optional[Path]:
+    if not enabled:
+        return None
+    return bundle_sidecars.write_language_structure_json(
+        base_manifest_path=base_manifest_path,
+        repo_summaries=repo_summaries,
+        final_dump_index=final_dump_index,
+        run_id=run_id,
+    )
+
+
 def _slug_token(s: str) -> str:
     """Deterministic ASCII token suitable for heading ids across renderers."""
 
@@ -246,6 +264,7 @@ ARTIFACT_CONTRACT_REGISTRY = {
     ArtifactRole.PR_DELTA_CARDS_JSONL: {"id": "pr-delta-card", "version": "v1"},
     ArtifactRole.PYTHON_SYMBOL_INDEX_JSON: {"id": "python-symbol-index", "version": "v1"},
     ArtifactRole.PYTHON_CALL_GRAPH_JSON: {"id": "python-call-graph", "version": "v1"},
+    ArtifactRole.LANGUAGE_STRUCTURE_JSON: {"id": "language-structure", "version": "v1"},
 }
 
 ARTIFACT_AUTHORITY_REGISTRY = {
@@ -409,6 +428,13 @@ ARTIFACT_AUTHORITY_REGISTRY = {
         "staleness_sensitive": True,
     },
     ArtifactRole.PYTHON_CALL_GRAPH_JSON: {
+        "authority": "navigation_index",
+        "canonicality": "derived",
+        "risk_class": "navigation",
+        "regenerable": True,
+        "staleness_sensitive": True,
+    },
+    ArtifactRole.LANGUAGE_STRUCTURE_JSON: {
         "authority": "navigation_index",
         "canonicality": "derived",
         "risk_class": "navigation",
@@ -582,6 +608,7 @@ class ExtrasConfig:
     delta_reports: bool = False
     heatmap: bool = False
     json_sidecar: bool = False  # NEW: Enable JSON sidecar output
+    language_structure: bool = False
 
     @classmethod
     def none(cls):
@@ -682,6 +709,7 @@ class MergeArtifacts:
     pr_delta_cards: Optional[Path] = None
     python_symbol_index: Optional[Path] = None
     python_call_graph: Optional[Path] = None
+    language_structure: Optional[Path] = None
     other: List[Path] = None
     legacy_bundle_manifest: Optional[Path] = None
     bundle_generation: Optional[Dict[str, Any]] = None
@@ -733,6 +761,7 @@ class MergeArtifacts:
             paths.append(self.pr_delta_cards)
         _append_unique_path(paths, self.python_symbol_index)
         _append_unique_path(paths, self.python_call_graph)
+        _append_unique_path(paths, self.language_structure)
         if self.bundle_manifest:
             paths.append(self.bundle_manifest)
 
@@ -806,6 +835,7 @@ def _publish_merge_artifact_generation(
         pr_delta_cards=current(artifacts.pr_delta_cards),
         python_symbol_index=current(artifacts.python_symbol_index),
         python_call_graph=current(artifacts.python_call_graph),
+        language_structure=current(artifacts.language_structure),
         other=[generation.current_path_for(path) for path in artifacts.other],
         legacy_bundle_manifest=flat_bundle_manifest,
         bundle_generation=generation.as_dict(),
@@ -1366,7 +1396,7 @@ def _build_extras_meta(extras: "ExtrasConfig", num_repos: int) -> Dict[str, bool
         extras: ExtrasConfig mit den gewünschten Extras
         num_repos: Anzahl der Repos im Merge (für Fleet Panorama - muss explizit übergeben werden)
     """
-    return {
+    result = {
         "health": extras.health,
         "organism_index": extras.organism_index,
         "fleet_panorama": extras.fleet_panorama and num_repos > 1,
@@ -1375,6 +1405,11 @@ def _build_extras_meta(extras: "ExtrasConfig", num_repos: int) -> Dict[str, bool
         "json_sidecar": extras.json_sidecar,
         "heatmap": extras.heatmap,
     }
+    if bool(getattr(extras, "language_structure", False)):
+        # Preserve byte-for-byte legacy report output when the new optional
+        # lane is disabled; an activated lane remains explicit in report meta.
+        result["language_structure"] = True
+    return result
 
 
 def _build_augment_meta(sources: List[Path]) -> Optional[Dict[str, Any]]:
@@ -7024,6 +7059,21 @@ def write_reports_v2(
         add_artifact=_add_artifact,
     )
 
+    language_structure_path = _register_optional_artifact(
+        _write_language_structure_artifact(
+            enabled=bool(getattr(extras, "language_structure", False)),
+            base_manifest_path=bundle_manifest_path,
+            repo_summaries=repo_summaries,
+            final_dump_index=final_dump_index,
+            run_id=run_id,
+        ),
+        role=ArtifactRole.LANGUAGE_STRUCTURE_JSON,
+        content_type="application/json",
+        out_paths=out_paths,
+        other_paths=other_paths,
+        add_artifact=_add_artifact,
+    )
+
     lens_cards_path = _register_optional_artifact(
         bundle_sidecars.write_lens_cards_jsonl(
             base_manifest_path=bundle_manifest_path,
@@ -7466,6 +7516,7 @@ def write_reports_v2(
         pr_delta_cards=pr_delta_cards_path,
         python_symbol_index=python_symbol_index_path,
         python_call_graph=python_call_graph_path,
+        language_structure=language_structure_path,
         other=other_paths,
         legacy_bundle_manifest=bundle_manifest_path,
     )

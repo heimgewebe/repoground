@@ -1,0 +1,213 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://heimgewebe.local/schema/language-structure-benchmark.v1.schema.json",
+  "title": "RepoGround language-structure benchmark v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "version", "goldset_id", "goldset_sha256", "source_revision", "fixture_binding", "case_count", "case_results", "metrics", "true_nulls", "degradation_expectations", "costs", "determinism", "does_not_establish", "promotion"],
+  "properties": {
+    "kind": {"const": "repoground.language_structure_benchmark"},
+    "version": {"const": "1.0"},
+    "goldset_id": {"type": "string", "minLength": 1},
+    "goldset_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "source_revision": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
+    "fixture_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository_root", "git_head_equals_source_revision", "repository_worktree_clean", "fixture_paths_clean", "network_used"],
+      "properties": {
+        "repository_root": {"type": "string", "minLength": 1},
+        "git_head_equals_source_revision": {"const": true},
+        "repository_worktree_clean": {"const": true},
+        "fixture_paths_clean": {"const": true},
+        "network_used": {"const": false}
+      }
+    },
+    "case_count": {"type": "integer", "minimum": 1},
+    "case_results": {"type": "array", "minItems": 1, "items": {"$ref": "#/definitions/case_result"}},
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["per_language", "aggregate", "separation"],
+      "properties": {
+        "per_language": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bash", "rust"],
+          "properties": {
+            "bash": {"$ref": "#/definitions/metric_lanes"},
+            "rust": {"$ref": "#/definitions/metric_lanes"}
+          }
+        },
+        "aggregate": {"$ref": "#/definitions/metric_lanes"},
+        "separation": {"type": "array", "minItems": 3, "uniqueItems": true, "items": {"type": "string"}}
+      }
+    },
+    "true_nulls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_count", "pass_count", "false_positive_records"],
+      "properties": {
+        "case_count": {"type": "integer", "minimum": 0},
+        "pass_count": {"type": "integer", "minimum": 0},
+        "false_positive_records": {"type": "integer", "minimum": 0}
+      }
+    },
+    "degradation_expectations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["all_expected_present", "no_unexpected", "exact_match"],
+      "properties": {
+        "all_expected_present": {"type": "boolean"},
+        "no_unexpected": {"type": "boolean"},
+        "exact_match": {"type": "boolean"}
+      }
+    },
+    "costs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latency_ms_median", "latency_ms_p95", "peak_memory_bytes_max", "index_size_bytes_total", "index_size_bytes_max", "per_language", "runtime_environment", "runtime_measurements_are_environment_observations"],
+      "properties": {
+        "latency_ms_median": {"type": "number", "minimum": 0},
+        "latency_ms_p95": {"type": "number", "minimum": 0},
+        "peak_memory_bytes_max": {"type": "integer", "minimum": 0},
+        "index_size_bytes_total": {"type": "integer", "minimum": 0},
+        "index_size_bytes_max": {"type": "integer", "minimum": 0},
+        "per_language": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bash", "rust"],
+          "properties": {
+            "bash": {"$ref": "#/definitions/cost_summary"},
+            "rust": {"$ref": "#/definitions/cost_summary"}
+          }
+        },
+        "runtime_environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["python_implementation", "python_version", "platform_system", "platform_machine", "logical_cpu_count"],
+          "properties": {
+            "python_implementation": {"type": "string", "minLength": 1},
+            "python_version": {"type": "string", "minLength": 1},
+            "platform_system": {"type": "string", "minLength": 1},
+            "platform_machine": {"type": "string", "minLength": 1},
+            "logical_cpu_count": {"type": ["integer", "null"], "minimum": 1}
+          }
+        },
+        "runtime_measurements_are_environment_observations": {"const": true}
+      }
+    },
+    "determinism": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["semantic_projection_repeated_equal", "runtime_metrics_excluded_from_determinism_claim"],
+      "properties": {
+        "semantic_projection_repeated_equal": {"type": "boolean"},
+        "runtime_metrics_excluded_from_determinism_claim": {"const": true}
+      }
+    },
+    "does_not_establish": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "promotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "broad_activation_eligible", "default_promoted", "reason"],
+      "properties": {
+        "status": {"enum": ["keep_optional", "eligible_for_explicit_promotion_review"]},
+        "broad_activation_eligible": {"type": "boolean"},
+        "default_promoted": {"const": false},
+        "reason": {"type": "string", "minLength": 1},
+        "agent_success_rate_delta": {"type": "number", "minimum": -1, "maximum": 1},
+        "source_revision": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
+        "goldset_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "decision_authority": {"type": "string", "minLength": 1}
+      }
+    }
+  },
+  "definitions": {
+    "case_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "language", "size_class", "case_class", "metrics", "symbol_hits", "false_positive_records", "true_null_pass", "semantic_deterministic", "degradations", "costs"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "language": {"enum": ["bash", "rust"]},
+        "size_class": {"enum": ["small", "medium", "large"]},
+        "case_class": {"enum": ["positive", "ambiguous", "dynamic", "null"]},
+        "metrics": {"$ref": "#/definitions/metric_lanes"},
+        "symbol_hits": {"type": "integer", "minimum": 0},
+        "false_positive_records": {"type": "integer", "minimum": 0},
+        "true_null_pass": {"type": ["boolean", "null"]},
+        "semantic_deterministic": {"type": "boolean"},
+        "degradations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["expected", "observed", "missing", "unexpected"],
+          "properties": {
+            "expected": {"$ref": "#/definitions/reasons"},
+            "observed": {"$ref": "#/definitions/reasons"},
+            "missing": {"$ref": "#/definitions/reasons"},
+            "unexpected": {"$ref": "#/definitions/reasons"}
+          }
+        },
+        "costs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["latency_ms", "peak_memory_bytes", "index_size_bytes"],
+          "properties": {
+            "latency_ms": {"type": "number", "minimum": 0},
+            "peak_memory_bytes": {"type": "integer", "minimum": 0},
+            "index_size_bytes": {"type": "integer", "minimum": 0}
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"case_class": {"const": "null"}}, "required": ["case_class"]},
+          "then": {"properties": {"true_null_pass": {"type": "boolean"}}},
+          "else": {"properties": {"true_null_pass": {"type": "null"}}}
+        }
+      ]
+    },
+    "reasons": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["true_positive", "false_positive", "false_negative", "actual", "expected", "precision", "recall"],
+      "properties": {
+        "true_positive": {"type": "integer", "minimum": 0},
+        "false_positive": {"type": "integer", "minimum": 0},
+        "false_negative": {"type": "integer", "minimum": 0},
+        "actual": {"type": "integer", "minimum": 0},
+        "expected": {"type": "integer", "minimum": 0},
+        "precision": {"type": "number", "minimum": 0, "maximum": 1},
+        "recall": {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "metric_lanes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "relations", "ranges"],
+      "properties": {
+        "symbol": {"$ref": "#/definitions/metric"},
+        "relations": {"$ref": "#/definitions/metric"},
+        "ranges": {"$ref": "#/definitions/metric"}
+      }
+    },
+    "cost_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latency_ms_median", "latency_ms_p95", "peak_memory_bytes_max", "index_size_bytes_total", "index_size_bytes_max"],
+      "properties": {
+        "latency_ms_median": {"type": "number", "minimum": 0},
+        "latency_ms_p95": {"type": "number", "minimum": 0},
+        "peak_memory_bytes_max": {"type": "integer", "minimum": 0},
+        "index_size_bytes_total": {"type": "integer", "minimum": 0},
+        "index_size_bytes_max": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}
