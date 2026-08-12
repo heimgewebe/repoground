@@ -1606,14 +1606,15 @@ def test_fleet_fairness_converges_42_repository_backlog_with_limit_8(
     assert isinstance(evidence["publication_debt_seconds"], int)
 
 
-def test_changed_source_hygiene_preflight_runs_before_publication_limit() -> None:
+def test_publication_limit_precedes_source_materialization() -> None:
     source = PUBLISHER.read_text(encoding="utf-8")
-    changed = source.index("changed += 1")
-    preflight = source.index("source_hygiene_cleanup = preflight_existing_source_worktree", changed)
-    limit = source.index("if args.limit and published >= args.limit", changed)
+    main = source[source.index("def main("):]
+    changed = main.index("changed += 1")
+    limit = main.index("if args.limit and published >= args.limit", changed)
+    publish_call = main.index("publish(", limit)
 
-    assert changed < preflight < limit
-
+    assert changed < limit < publish_call
+    assert "preflight_existing_source_worktree(" not in source
 
 def test_managed_worktree_refuses_attached_foreign_or_non_worktree_paths(
     tmp_path: Path,
@@ -2510,7 +2511,7 @@ def test_regression_canonical_inputs_only() -> None:
     assert not any("repobrief" in path for path in module.GENERATOR_INPUT_PATHS)
 
 
-def test_regression_discover_captures_repoground_without_lenskit_alias(
+def test_regression_discover_canonicalizes_retired_lenskit_alias(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = load_publisher()
@@ -2536,10 +2537,30 @@ def test_regression_discover_captures_repoground_without_lenskit_alias(
     )
 
     entries = {entry.key: entry for entry in module.discover()}
+    assert set(entries) == {"heimgewebe/repoground"}
     assert entries["heimgewebe/repoground"].path == repoground
-    assert entries["heimgewebe/lenskit"].path == lenskit
-    assert entries["heimgewebe/repoground"].path != entries["heimgewebe/lenskit"].path
+    assert entries["heimgewebe/repoground"].repo == "repoground"
 
+
+def test_regression_discover_does_not_promote_retired_alias_without_canonical_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    repos_root = tmp_path / "repos"
+    repos_root.mkdir()
+    monkeypatch.setattr(module, "REPOS_ROOT", repos_root)
+
+    lenskit, _ = initialize_repository(repos_root, "lenskit")
+    git(
+        lenskit,
+        "remote",
+        "add",
+        "origin",
+        "git@github.com:heimgewebe/lenskit.git",
+    )
+
+    entries = module.discover()
+    assert entries == []
 
 def test_publication_state_separates_generator_commit_and_input_hash(
     tmp_path: Path,
@@ -2684,21 +2705,17 @@ def test_dirty_managed_worktree_is_typed_and_preserved(tmp_path: Path) -> None:
     assert receipt["status_truncated"] is False
 
 
-def test_dirty_source_worktree_is_deferred_without_poisoning_fleet(
+def test_legacy_dirty_source_no_longer_gates_revision_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     module = load_publisher()
     roots = isolate_retention_roots(module, tmp_path, monkeypatch)
-    monkeypatch.setattr(module, "LOCK_PATH", tmp_path / "fleet.lock")
-    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
-    repo, source_sha = initialize_repository(tmp_path, "demo")
     source_root = tmp_path / "sources"
     source_root.mkdir()
     monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
-    dirty_worktree = source_root / "heimgewebe__demo__main"
-    git(repo, "worktree", "add", "--detach", str(dirty_worktree), source_sha)
-    tracked = dirty_worktree / "tracked.txt"
-    tracked.write_text("operator-owned source change\n", encoding="utf-8")
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+
+    repo, source_sha = initialize_repository(tmp_path, "demo")
     entry = module.RepoEntry(
         key="heimgewebe/demo",
         owner="heimgewebe",
@@ -2706,46 +2723,205 @@ def test_dirty_source_worktree_is_deferred_without_poisoning_fleet(
         path=repo,
         remote="git@github.com:heimgewebe/demo.git",
     )
-    monkeypatch.setattr(module, "discover", lambda: [entry])
-    monkeypatch.setattr(
-        module,
-        "prioritize_fleet_publication",
-        lambda entries: (entries, {"policy": "test"}),
+    legacy = module.source_worktree_path(entry, "main")
+    git(repo, "worktree", "add", "--detach", str(legacy), source_sha)
+    tracked = legacy / "tracked.txt"
+    tracked.write_text("historical operator change\n", encoding="utf-8")
+
+    source = module.ensure_source_worktree(entry, "main", source_sha)
+
+    assert source == module.revision_source_worktree_path(entry, "main", source_sha)
+    assert source != legacy
+    assert git(source, "rev-parse", "HEAD") == source_sha
+    assert git(source, "status", "--porcelain") == ""
+    assert tracked.read_text(encoding="utf-8") == "historical operator change\n"
+    assert git(legacy, "status", "--porcelain") == "M tracked.txt"
+    assert not (roots["state"] / "managed-source-recoveries").exists()
+
+
+def test_dirty_revision_source_is_preserved_and_replaced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+
+    repo, source_sha = initialize_repository(tmp_path, "demo")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
     )
-    monkeypatch.setattr(
-        module,
-        "reconcile_prune_transactions",
-        lambda *, protected, apply: {"status": "ok"},
+    primary = module.revision_source_worktree_path(entry, "main", source_sha)
+    git(repo, "worktree", "add", "--detach", str(primary), source_sha)
+    tracked = primary / "tracked.txt"
+    tracked.write_text("operator-owned source change\n", encoding="utf-8")
+
+    replacement = module.ensure_source_worktree(entry, "main", source_sha)
+
+    assert replacement != primary
+    assert replacement.name.startswith(primary.name + "--recovery-")
+    assert tracked.read_text(encoding="utf-8") == "operator-owned source change\n"
+    assert git(primary, "status", "--porcelain") == "M tracked.txt"
+    assert git(replacement, "rev-parse", "HEAD") == source_sha
+    assert git(replacement, "status", "--porcelain") == ""
+    receipts = list((roots["state"] / "managed-source-recoveries").glob("*.json"))
+    assert len(receipts) == 1
+    receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+    assert receipt["schema"] == module.SOURCE_RECOVERY_SCHEMA
+    assert receipt["repository"] == "heimgewebe/demo"
+    assert receipt["source_commit"] == source_sha
+    assert receipt["preserved_worktree"] == str(primary)
+    assert receipt["replacement_worktree"] == str(replacement)
+    assert receipt["preserved_source_mutated"] is False
+    assert receipt["automatic_reset_authorized"] is False
+    assert receipt["reason"]["kind"] == "managed_worktree_dirty"
+
+def test_source_recovery_receipt_failure_rolls_back_clean_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+
+    repo, source_sha = initialize_repository(tmp_path, "demo")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
     )
-    monkeypatch.setattr(module, "ensure_tool_worktree", lambda: ("b" * 40, "c" * 64))
-    monkeypatch.setattr(
-        module,
-        "remote_head",
-        lambda path: ("origin/main", "main", source_sha),
-    )
-    monkeypatch.setattr(
-        module,
-        "publish",
-        lambda *args, **kwargs: pytest.fail("deferred repository must not publish"),
+    primary = module.revision_source_worktree_path(entry, "main", source_sha)
+    git(repo, "worktree", "add", "--detach", str(primary), source_sha)
+    tracked = primary / "tracked.txt"
+    tracked.write_text("preserve after receipt failure\n", encoding="utf-8")
+
+    def fail_receipt(**_kwargs: object) -> Path:
+        raise OSError("receipt store unavailable")
+
+    monkeypatch.setattr(module, "record_source_recovery", fail_receipt)
+
+    with pytest.raises(OSError, match="receipt store unavailable"):
+        module.ensure_source_worktree(entry, "main", source_sha)
+
+    assert tracked.read_text(encoding="utf-8") == "preserve after receipt failure\n"
+    assert git(primary, "status", "--porcelain") == "M tracked.txt"
+    assert sorted(path.name for path in source_root.iterdir()) == [primary.name]
+    assert not (roots["state"] / "managed-source-recoveries").exists()
+
+
+def test_unrelated_source_prepare_failure_remains_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    repo, source_sha = initialize_repository(tmp_path, "demo")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
     )
 
-    assert module.main(["--repo", "heimgewebe/demo"]) == 0
-    assert tracked.read_text(encoding="utf-8") == "operator-owned source change\n"
-    receipt = json.loads((roots["log"] / "fleet-last.json").read_text(encoding="utf-8"))
-    assert receipt["status"] == "warn"
-    assert receipt["deferred"] == 1
-    assert receipt["failed"] == 0
-    detail = receipt["details"][0]
-    assert detail["status"] == "deferred"
-    assert detail["deferred_reason"] == "managed_source_worktree_dirty"
-    assert detail["managed_source_worktree"] == {
-        "reason": "managed_worktree_dirty",
-        "worktree": str(dirty_worktree),
-        "status_count": 1,
-        "status_sample": [{"code": " M", "path": "tracked.txt"}],
-        "status_truncated": False,
-        "automatic_reset_authorized": False,
-    }
+    def fail_prepare(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("unrelated worktree failure")
+
+    monkeypatch.setattr(module, "prepare_managed_worktree", fail_prepare)
+
+    with pytest.raises(RuntimeError, match="unrelated worktree failure"):
+        module.ensure_source_worktree(entry, "main", source_sha)
+    assert list(source_root.iterdir()) == []
+
+
+def test_unknown_build_residue_is_preserved_and_bypassed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    roots = isolate_retention_roots(module, tmp_path, monkeypatch)
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    monkeypatch.setattr(module, "FLEET_LOG", roots["log"] / "fleet.log")
+    allow_no_active_managed_build_leases(module, monkeypatch)
+
+    repo, source_sha = initialize_repository(tmp_path, "demo")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    primary = module.revision_source_worktree_path(entry, "main", source_sha)
+    git(repo, "worktree", "add", "--detach", str(primary), source_sha)
+    build = primary / "build"
+    build.mkdir()
+    artifact = build / "operator-artifact.txt"
+    artifact.write_text("retain me\n", encoding="utf-8")
+
+    replacement = module.ensure_source_worktree(entry, "main", source_sha)
+
+    assert replacement != primary
+    assert artifact.read_text(encoding="utf-8") == "retain me\n"
+    assert git(primary, "rev-parse", "HEAD") == source_sha
+    assert git(replacement, "rev-parse", "HEAD") == source_sha
+    assert git(replacement, "status", "--porcelain") == ""
+    receipts = list((roots["state"] / "managed-source-recoveries").glob("*.json"))
+    assert len(receipts) == 1
+    receipt = json.loads(receipts[0].read_text(encoding="utf-8"))
+    assert receipt["reason"]["kind"] == "managed_build_residue"
+    assert receipt["reason"]["receipt"]["classification"] == "unknown"
+    assert receipt["preserved_source_mutated"] is False
+
+
+def test_source_revision_prune_removes_only_clean_idle_unleased_worktrees(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    source_root = tmp_path / "sources"
+    source_root.mkdir()
+    monkeypatch.setattr(module, "SOURCE_ROOT", source_root)
+    allow_no_active_managed_build_leases(module, monkeypatch)
+
+    repo, source_sha = initialize_repository(tmp_path, "demo")
+    entry = module.RepoEntry(
+        key="heimgewebe/demo",
+        owner="heimgewebe",
+        repo="demo",
+        path=repo,
+        remote="git@github.com:heimgewebe/demo.git",
+    )
+    current = module.revision_source_worktree_path(entry, "main", source_sha)
+    clean_old = module.revision_source_worktree_path(
+        entry, "main", source_sha, recovery_id="a" * 12
+    )
+    dirty_old = module.revision_source_worktree_path(
+        entry, "main", source_sha, recovery_id="b" * 12
+    )
+    for worktree in (current, clean_old, dirty_old):
+        git(repo, "worktree", "add", "--detach", str(worktree), source_sha)
+    (dirty_old / "tracked.txt").write_text("operator change\n", encoding="utf-8")
+
+    report = module.prune_obsolete_revision_source_worktrees(entry, "main", current)
+
+    assert current.is_dir()
+    assert not clean_old.exists()
+    assert dirty_old.is_dir()
+    assert str(clean_old) in report["removed"]
+    assert any(row["path"] == str(dirty_old) for row in report["preserved"])
+    assert (dirty_old / "tracked.txt").read_text(encoding="utf-8") == "operator change\n"
 
 
 def test_dirty_generator_worktree_remains_a_hard_preflight_failure(
@@ -2821,7 +2997,7 @@ def test_managed_build_blocker_is_structured_in_fleet_receipt(
             reason="no exact publisher provenance",
         )
 
-    monkeypatch.setattr(module, "preflight_existing_source_worktree", block)
+    monkeypatch.setattr(module, "publish", lambda *args, **kwargs: block(entry, "main"))
 
     assert module.main(["--repo", "heimgewebe/demo"]) == 1
     receipt = json.loads((roots["log"] / "fleet-last.json").read_text(encoding="utf-8"))
@@ -2883,7 +3059,7 @@ def test_durable_retain_blocker_is_nonfatal_but_visible_in_fleet_receipt(
             },
         )
 
-    monkeypatch.setattr(module, "preflight_existing_source_worktree", retain)
+    monkeypatch.setattr(module, "publish", lambda *args, **kwargs: retain(entry, "main"))
 
     assert module.main(["--repo", "heimgewebe/demo"]) == 0
     receipt = json.loads((roots["log"] / "fleet-last.json").read_text(encoding="utf-8"))
@@ -2982,6 +3158,7 @@ def test_idempotent_second_run_does_not_publish_or_create_bundle(
             tmp_path / "fake-lease.json",
             str(manifest),
             "2026-07-14T10:00:00Z",
+            tmp_path / "fake-source-worktree",
         )
 
     monkeypatch.setattr(module, "publish", mock_publish)
@@ -2996,6 +3173,11 @@ def test_idempotent_second_run_does_not_publish_or_create_bundle(
         lambda path: ("origin/main", "main", source_sha),
     )
     monkeypatch.setattr(module, "clear_active_publication_lease", lambda path: None)
+    monkeypatch.setattr(
+        module,
+        "prune_obsolete_revision_source_worktrees",
+        lambda *args, **kwargs: {"removed": [], "preserved": []},
+    )
     monkeypatch.setattr(module, "prune_current_group", lambda *args, **kwargs: {})
     monkeypatch.setattr(module, "discover", lambda: [entry])
 
