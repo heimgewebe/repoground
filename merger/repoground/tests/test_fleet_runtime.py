@@ -2910,7 +2910,19 @@ def test_source_revision_prune_removes_only_clean_idle_unleased_worktrees(
     dirty_old = module.revision_source_worktree_path(
         entry, "main", source_sha, recovery_id="b" * 12
     )
-    for worktree in (current, clean_old, dirty_old):
+    foreign_prefix_match = module.source_worktree_path(entry, "main").with_name(
+        module.source_worktree_path(entry, "main").name + "--operator"
+    )
+    another_ref = module.revision_source_worktree_path(
+        entry, "main--feature", source_sha
+    )
+    for worktree in (
+        current,
+        clean_old,
+        dirty_old,
+        foreign_prefix_match,
+        another_ref,
+    ):
         git(repo, "worktree", "add", "--detach", str(worktree), source_sha)
     (dirty_old / "tracked.txt").write_text("operator change\n", encoding="utf-8")
 
@@ -2919,8 +2931,13 @@ def test_source_revision_prune_removes_only_clean_idle_unleased_worktrees(
     assert current.is_dir()
     assert not clean_old.exists()
     assert dirty_old.is_dir()
+    assert foreign_prefix_match.is_dir()
+    assert another_ref.is_dir()
     assert str(clean_old) in report["removed"]
-    assert any(row["path"] == str(dirty_old) for row in report["preserved"])
+    preserved = {row["path"]: row["reason"] for row in report["preserved"]}
+    assert str(dirty_old) in preserved
+    assert preserved[str(foreign_prefix_match)] == "source_identity_not_revision_bound"
+    assert preserved[str(another_ref)] == "source_identity_not_revision_bound"
     assert (dirty_old / "tracked.txt").read_text(encoding="utf-8") == "operator change\n"
 
 

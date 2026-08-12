@@ -2175,6 +2175,22 @@ def revision_source_worktree_path(
     return base.with_name(base.name + suffix)
 
 
+def is_revision_source_worktree(
+    entry: RepoEntry, ref_segment: str, candidate: Path
+) -> bool:
+    base = source_worktree_path(entry, ref_segment)
+    if candidate.parent != SOURCE_ROOT or not candidate.name.startswith(base.name + "--"):
+        return False
+    suffix = candidate.name[len(base.name) + 2 :]
+    return (
+        re.fullmatch(
+            r"[0-9a-f]{40}(?:--recovery-[0-9a-f]{12})?",
+            suffix,
+        )
+        is not None
+    )
+
+
 def record_source_recovery(
     *,
     entry: RepoEntry,
@@ -2282,6 +2298,14 @@ def prune_obsolete_revision_source_worktrees(
         return {"removed": removed, "preserved": preserved}
     for candidate in sorted(SOURCE_ROOT.iterdir()):
         if candidate == current or not candidate.name.startswith(prefix):
+            continue
+        if not is_revision_source_worktree(entry, ref_segment, candidate):
+            preserved.append(
+                {
+                    "path": str(candidate),
+                    "reason": "source_identity_not_revision_bound",
+                }
+            )
             continue
         try:
             assert_managed_worktree_clean(candidate, entry.path)
