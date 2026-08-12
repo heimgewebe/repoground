@@ -132,6 +132,11 @@ EXCLUDE = {
     "manifest-publications",
 }
 EXCLUDED_REPO_KEYS = {"heimgewebe/vault-gewebe", "heimgewebe/heim-assi"}
+RETIRED_REPOSITORY_ALIASES = {
+    "heimgewebe/lenskit": "heimgewebe/repoground",
+}
+SOURCE_REVISION_RE = re.compile(r"^[0-9a-f]{40}$")
+SOURCE_RECOVERY_SCHEMA = "repoground.managed-source-recovery.v1"
 
 
 @dataclass(frozen=True)
@@ -348,6 +353,10 @@ def parse_github_remote(remote: str) -> tuple[str, str] | None:
     return match.group(1), match.group(2)
 
 
+def canonical_repository_key(key: str) -> str:
+    return RETIRED_REPOSITORY_ALIASES.get(key, key)
+
+
 def is_top_level_git(path: Path) -> bool:
     cp = run(
         ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
@@ -401,10 +410,14 @@ def discover() -> list[RepoEntry]:
         parsed = parse_github_remote(remote)
         if not parsed:
             continue
-        owner, repo = parsed
-        key = f"{owner}/{repo}"
+        observed_owner, observed_repo = parsed
+        observed_key = f"{observed_owner}/{observed_repo}"
+        if observed_key in RETIRED_REPOSITORY_ALIASES:
+            continue
+        key = canonical_repository_key(observed_key)
         if key in EXCLUDED_REPO_KEYS:
             continue
+        owner, repo = key.split("/", 1)
         entry = RepoEntry(key=key, owner=owner, repo=repo, path=path, remote=remote)
         score = score_candidate(owner, repo, path)
         previous = best.get(key)
@@ -455,7 +468,7 @@ def generator_repository_key() -> str | None:
     if not parsed:
         return None
     owner, repo = parsed
-    return f"{owner}/{repo}"
+    return canonical_repository_key(f"{owner}/{repo}")
 
 
 def prioritize_generator_repository(entries: list[RepoEntry]) -> list[RepoEntry]:
@@ -885,7 +898,7 @@ def repository_key_for_path(repo: Path) -> str | None:
     if parsed is None:
         return None
     owner, name = parsed
-    return f"{owner}/{name}"
+    return canonical_repository_key(f"{owner}/{name}")
 
 
 def managed_build_residue_quarantine_root(worktree: Path) -> Path:
@@ -2148,24 +2161,175 @@ def source_worktree_path(entry: RepoEntry, ref_segment: str) -> Path:
     )
 
 
-def preflight_existing_source_worktree(entry: RepoEntry, ref_segment: str) -> list[str]:
-    source_wt = source_worktree_path(entry, ref_segment)
-    if not source_wt.exists() and not source_wt.is_symlink():
-        return []
-    removed = cleanup_managed_disposable_artifacts(source_wt, entry.path)
-    assert_managed_worktree_clean(source_wt, entry.path)
-    return removed
+def revision_source_worktree_path(
+    entry: RepoEntry, ref_segment: str, sha: str, *, recovery_id: str | None = None
+) -> Path:
+    if not SOURCE_REVISION_RE.fullmatch(sha):
+        raise ValueError("source revision must be a 40-character lowercase Git commit")
+    base = source_worktree_path(entry, ref_segment)
+    suffix = f"--{sha}"
+    if recovery_id is not None:
+        if not re.fullmatch(r"[0-9a-f]{12}", recovery_id):
+            raise ValueError("source recovery id is invalid")
+        suffix += f"--recovery-{recovery_id}"
+    return base.with_name(base.name + suffix)
+
+
+def is_revision_source_worktree(
+    entry: RepoEntry, ref_segment: str, candidate: Path
+) -> bool:
+    base = source_worktree_path(entry, ref_segment)
+    if candidate.parent != SOURCE_ROOT or not candidate.name.startswith(base.name + "--"):
+        return False
+    suffix = candidate.name[len(base.name) + 2 :]
+    return (
+        re.fullmatch(
+            r"[0-9a-f]{40}(?:--recovery-[0-9a-f]{12})?",
+            suffix,
+        )
+        is not None
+    )
+
+
+def record_source_recovery(
+    *,
+    entry: RepoEntry,
+    ref_segment: str,
+    sha: str,
+    preserved: Path,
+    replacement: Path,
+    reason: dict[str, object],
+    recovery_id: str,
+) -> Path:
+    receipt_path = STATE_ROOT / "managed-source-recoveries" / f"{recovery_id}.json"
+    atomic_create_json(
+        receipt_path,
+        {
+            "schema": SOURCE_RECOVERY_SCHEMA,
+            "recovery_id": recovery_id,
+            "repository": entry.key,
+            "ref": ref_segment,
+            "source_commit": sha,
+            "preserved_worktree": str(preserved),
+            "replacement_worktree": str(replacement),
+            "reason": reason,
+            "preserved_source_mutated": False,
+            "automatic_reset_authorized": False,
+            "created_at_unix": int(time.time()),
+        },
+    )
+    return receipt_path
 
 
 def ensure_source_worktree(entry: RepoEntry, ref_segment: str, sha: str) -> Path:
-    source_wt = source_worktree_path(entry, ref_segment)
+    source_wt = revision_source_worktree_path(entry, ref_segment, sha)
     SOURCE_ROOT.mkdir(parents=True, exist_ok=True)
+    try:
+        prepare_managed_worktree(
+            source_wt,
+            expected_repo=entry.path,
+            target=sha,
+        )
+        return source_wt
+    except ManagedWorktreeDirtyError as exc:
+        reason: dict[str, object] = {
+            "kind": "managed_worktree_dirty",
+            "receipt": exc.receipt(),
+        }
+    except RuntimeError as exc:
+        blocker = parse_managed_build_blocker(exc)
+        if blocker is None:
+            raise
+        reason = {
+            "kind": "managed_build_residue",
+            "receipt": blocker,
+        }
+
+    recovery_id = uuid.uuid4().hex[:12]
+    replacement = revision_source_worktree_path(
+        entry, ref_segment, sha, recovery_id=recovery_id
+    )
     prepare_managed_worktree(
-        source_wt,
+        replacement,
         expected_repo=entry.path,
         target=sha,
     )
-    return source_wt
+    try:
+        receipt_path = record_source_recovery(
+            entry=entry,
+            ref_segment=ref_segment,
+            sha=sha,
+            preserved=source_wt,
+            replacement=replacement,
+            reason=reason,
+            recovery_id=recovery_id,
+        )
+    except Exception:
+        run(
+            ["git", "-C", str(entry.path), "worktree", "remove", str(replacement)],
+            check=False,
+        )
+        raise
+    log(
+        "SOURCE-RECOVERY "
+        + json.dumps(
+            {
+                "repository": entry.key,
+                "source_commit": sha,
+                "preserved": str(source_wt),
+                "replacement": str(replacement),
+                "receipt": str(receipt_path),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return replacement
+
+
+def prune_obsolete_revision_source_worktrees(
+    entry: RepoEntry, ref_segment: str, current: Path
+) -> dict[str, object]:
+    base = source_worktree_path(entry, ref_segment)
+    prefix = base.name + "--"
+    removed: list[str] = []
+    preserved: list[dict[str, str]] = []
+    if not SOURCE_ROOT.is_dir():
+        return {"removed": removed, "preserved": preserved}
+    for candidate in sorted(SOURCE_ROOT.iterdir()):
+        if candidate == current or not candidate.name.startswith(prefix):
+            continue
+        if not is_revision_source_worktree(entry, ref_segment, candidate):
+            preserved.append(
+                {
+                    "path": str(candidate),
+                    "reason": "source_identity_not_revision_bound",
+                }
+            )
+            continue
+        try:
+            assert_managed_worktree_clean(candidate, entry.path)
+            assert_managed_worktree_idle(candidate)
+            lease_evidence = managed_build_lease_evidence(
+                candidate, candidate / "build"
+            )
+            if lease_evidence.get("active_leases"):
+                preserved.append({"path": str(candidate), "reason": "active_lease"})
+                continue
+        except Exception as exc:
+            preserved.append({"path": str(candidate), "reason": str(exc)[:500]})
+            continue
+        result = run(
+            ["git", "-C", str(entry.path), "worktree", "remove", str(candidate)],
+            check=False,
+        )
+        if result.returncode == 0:
+            removed.append(str(candidate))
+        else:
+            preserved.append(
+                {"path": str(candidate), "reason": result.stdout[-500:] or "remove_failed"}
+            )
+    return {"removed": removed, "preserved": preserved}
 
 
 def active_lease_root() -> Path:
@@ -3176,7 +3340,7 @@ def publish(
     tool_sha: str,
     fingerprint: str,
     config: PublicationConfig,
-) -> tuple[dict[str, object], Path, Path, str, str]:
+) -> tuple[dict[str, object], Path, Path, str, str, Path]:
     repository = safe_segment(entry.repo)
     registry_repository = publication_repository(entry)
     ref_segment = safe_segment(branch)
@@ -3304,7 +3468,14 @@ def publish(
             + "\n",
             encoding="utf-8",
         )
-        return data, out_dir, active_lease, manifest_path, publication_created_at
+        return (
+            data,
+            out_dir,
+            active_lease,
+            manifest_path,
+            publication_created_at,
+            source_wt,
+        )
     except Exception:
         discard_generated_output(out_dir, root=out_base)
         clear_active_publication_lease(active_lease)
@@ -3622,22 +3793,25 @@ def main(argv: list[str]) -> int:
                     )
                     continue
                 changed += 1
-                source_hygiene_cleanup = preflight_existing_source_worktree(
-                    entry, ref_segment
-                )
                 if args.limit and published >= args.limit:
                     queued += 1
-                    queued_detail: dict[str, object] = {
-                        "repo": entry.key,
-                        "status": "queued",
-                        "source_sha": source_sha,
-                        "fingerprint": fingerprint,
-                    }
-                    if source_hygiene_cleanup:
-                        queued_detail["source_hygiene_cleanup"] = source_hygiene_cleanup
-                    details.append(queued_detail)
+                    details.append(
+                        {
+                            "repo": entry.key,
+                            "status": "queued",
+                            "source_sha": source_sha,
+                            "fingerprint": fingerprint,
+                        }
+                    )
                     continue
-                data, out_dir, active_lease, manifest_path, publication_created_at = (
+                (
+                    data,
+                    out_dir,
+                    active_lease,
+                    manifest_path,
+                    publication_created_at,
+                    source_wt,
+                ) = (
                     publish(
                         entry,
                         remote_ref=remote_ref,
@@ -3664,6 +3838,17 @@ def main(argv: list[str]) -> int:
                     published_now=True,
                 )
                 clear_active_publication_lease(active_lease)
+                try:
+                    source_prune_report = prune_obsolete_revision_source_worktrees(
+                        entry, ref_segment, source_wt
+                    )
+                except Exception as exc:
+                    prune_failed += 1
+                    source_prune_report = {
+                        "status": "warn",
+                        "error": str(exc)[:2000],
+                    }
+                    log(f"SOURCE-PRUNE-FAILED {entry.key}: {exc}")
                 published += 1
                 try:
                     prune_report = prune_current_group(
@@ -3695,9 +3880,9 @@ def main(argv: list[str]) -> int:
                     "generatedAt": generated,
                     "publication_dir": str(out_dir),
                     "prune": prune_report,
+                    "source_worktree": str(source_wt),
+                    "source_worktree_prune": source_prune_report,
                 }
-                if source_hygiene_cleanup:
-                    published_detail["source_hygiene_cleanup"] = source_hygiene_cleanup
                 details.append(published_detail)
             except ManagedWorktreeDirtyError as exc:
                 deferred += 1
