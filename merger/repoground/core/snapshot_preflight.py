@@ -23,13 +23,14 @@ creation.  It makes no truth claim: it does not establish that tests are
 sufficient, runtime behavior is correct, a review is complete, a PR is
 mergeable, or that forensic readiness exists.
 """
+
 from __future__ import annotations
 
 import datetime
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from merger.repoground.core.clock import now_utc
 from merger.repoground.core.path_security import resolve_secure_path
@@ -252,7 +253,11 @@ def _normalize_citation_ids(values: Sequence[Any]) -> tuple[list[str], list[str]
     for value in values:
         if isinstance(value, str) and value.strip():
             ids.add(value.strip())
-        elif isinstance(value, Mapping) and isinstance(value.get("citation_id"), str) and value["citation_id"].strip():
+        elif (
+            isinstance(value, Mapping)
+            and isinstance(value.get("citation_id"), str)
+            and value["citation_id"].strip()
+        ):
             ids.add(value["citation_id"].strip())
         else:
             invalid.append(repr(value))
@@ -261,9 +266,13 @@ def _normalize_citation_ids(values: Sequence[Any]) -> tuple[list[str], list[str]
 
 def _line_bounds(range_ref: Mapping[str, Any]) -> tuple[int, int, bool] | None:
     """Extract (start_line, end_line, artifact_anchored) from a range ref."""
-    if isinstance(range_ref.get("artifact_line_start"), int) and isinstance(range_ref.get("artifact_line_end"), int):
+    if isinstance(range_ref.get("artifact_line_start"), int) and isinstance(
+        range_ref.get("artifact_line_end"), int
+    ):
         return range_ref["artifact_line_start"], range_ref["artifact_line_end"], True
-    if isinstance(range_ref.get("start_line"), int) and isinstance(range_ref.get("end_line"), int):
+    if isinstance(range_ref.get("start_line"), int) and isinstance(
+        range_ref.get("end_line"), int
+    ):
         return range_ref["start_line"], range_ref["end_line"], False
     return None
 
@@ -291,6 +300,24 @@ def _resolve_link_path(manifest_dir: Path, raw: Any) -> tuple[Path | None, str |
         return resolve_secure_path(manifest_dir, raw), None
     except ValueError as exc:
         return None, str(exc)
+
+
+def _post_emit_health_run_binding_error(
+    post_doc: Mapping[str, Any],
+    *,
+    status: str,
+    manifest_run_id: Any,
+) -> str | None:
+    if status != STATUS_PASS:
+        return None
+    if not isinstance(manifest_run_id, str) or not manifest_run_id.strip():
+        return "manifest run_id is missing or empty; cannot bind post-emit health"
+    post_bundle_run_id = post_doc.get("bundle_run_id")
+    if not isinstance(post_bundle_run_id, str) or not post_bundle_run_id.strip():
+        return "post-emit health bundle_run_id is missing or empty"
+    if post_bundle_run_id != manifest_run_id:
+        return "post-emit health bundle_run_id does not match manifest run_id"
+    return None
 
 
 def _post_emit_health_binding_error(
@@ -321,302 +348,23 @@ def _post_emit_health_binding_error(
     if post_manifest_path != manifest_path:
         return "post-emit health bundle_manifest_path does not match the evaluated manifest"
 
-    if status == STATUS_PASS:
-        if not isinstance(manifest_run_id, str) or not manifest_run_id.strip():
-            return "manifest run_id is missing or empty; cannot bind post-emit health"
-        post_bundle_run_id = post_doc.get("bundle_run_id")
-        if not isinstance(post_bundle_run_id, str) or not post_bundle_run_id.strip():
-            return "post-emit health bundle_run_id is missing or empty"
-        if post_bundle_run_id != manifest_run_id:
-            return "post-emit health bundle_run_id does not match manifest run_id"
-    return None
-
-
-def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
-    """Run the RepoGround agent consumption preflight for one bundle manifest.
-
-    Raises ``ValueError`` when the bundle manifest itself is unreadable; every
-    other condition is reported as a structured finding, never an exception.
-    """
-    manifest_path = Path(preflight_input.bundle_manifest).expanduser().resolve()
-    manifest = _read_json_object(manifest_path, label="bundle manifest")
-    manifest_dir = manifest_path.parent
-    manifest_run_id = manifest.get("run_id")
-    status_report = snapshot_status(manifest_path)
-    records = [a for a in status_report["artifacts"] if isinstance(a, dict)]
-
-    findings: list[PreflightFinding] = []
-    checks: list[dict[str, str]] = []
-
-    def add(code: str, severity: str, area: str, detail: str, artifact: str | None = None) -> None:
-        findings.append(PreflightFinding(code=code, severity=severity, area=area, detail=detail, artifact=artifact))
-
-    # ── Effective availability: manifest role + file on disk ────────────────
-    records_by_role: dict[str, list[dict[str, Any]]] = {}
-    for record in records:
-        role = record.get("role")
-        if isinstance(role, str) and role:
-            records_by_role.setdefault(role, []).append(record)
-
-    linked_paths: dict[str, Path | None] = {}
-    links = manifest.get("links") if isinstance(manifest.get("links"), dict) else {}
-    for link_key, role in _LINKED_SIDECAR_ROLES.items():
-        resolved, error = _resolve_link_path(manifest_dir, links.get(link_key))
-        if error is not None:
-            add(
-                "sidecar_path_rejected",
-                SEVERITY_WARN,
-                "availability",
-                f"link {link_key} rejected: {error}",
-                artifact=role,
-            )
-        if resolved is not None and role not in linked_paths:
-            linked_paths[role] = resolved
-    if "post_emit_health" not in linked_paths:
-        derived = derive_post_health_path(manifest_path)
-        if derived.is_file():
-            linked_paths["post_emit_health"] = derived
-
-    # Central role -> file map used by validation and range checks.
-    artifact_paths_by_role: dict[str, Path] = {"bundle_manifest": manifest_path}
-    for role, role_records in records_by_role.items():
-        for record in role_records:
-            candidate: Path | None = None
-            absolute_path = record.get("absolute_path")
-            if isinstance(absolute_path, str) and absolute_path:
-                candidate = Path(absolute_path)
-            else:
-                relative_path = record.get("path")
-                if isinstance(relative_path, str) and relative_path:
-                    try:
-                        candidate = resolve_secure_path(manifest_dir, relative_path)
-                    except ValueError:
-                        candidate = None
-            if candidate is not None:
-                if candidate.is_file():
-                    artifact_paths_by_role[role] = candidate
-                    break
-                artifact_paths_by_role.setdefault(role, candidate)
-    for role, path in linked_paths.items():
-        if path is not None:
-            artifact_paths_by_role[role] = path
-
-    available_roles: set[str] = {"bundle_manifest"}
-    file_missing_roles: set[str] = set()
-    for role, role_records in records_by_role.items():
-        artifact_path = artifact_paths_by_role.get(role)
-        if any(record.get("file_exists") for record in role_records) and (
-            artifact_path is None or artifact_path.is_file()
-        ):
-            available_roles.add(role)
-        else:
-            file_missing_roles.add(role)
-    for role, path in linked_paths.items():
-        if role in available_roles:
-            continue
-        if path is not None and path.is_file():
-            available_roles.add(role)
-        elif role in _LINKED_SIDECAR_ROLES.values() and any(
-            links.get(key) for key, mapped in _LINKED_SIDECAR_ROLES.items() if mapped == role
-        ):
-            file_missing_roles.add(role)
-    file_missing_roles -= available_roles
-
-    # ── Task profile expectation (Required Reading Protocol, reused) ────────
-    protocol = default_required_reading_protocol()
-    required_reading = resolve_required_reading(protocol, available_roles, preflight_input.task_profile)
-    task_profile_known = required_reading["status"] != STATUS_NA
-
-    if task_profile_known:
-        checks.append(_check("task_profile", STATUS_PASS, f"task profile '{preflight_input.task_profile}' resolved"))
-    else:
-        checks.append(
-            _check("task_profile", STATUS_NA, f"task profile '{preflight_input.task_profile}' is not in the Required Reading Protocol")
-        )
-        add(
-            "task_profile_unknown",
-            SEVERITY_INFO,
-            "task_profile",
-            f"task profile '{preflight_input.task_profile}' is not in the Required Reading Protocol; "
-            f"known profiles: {', '.join(sorted(protocol['task_profiles']))}",
-        )
-
-    required_roles = list(required_reading["required"])
-    recommended_roles = list(required_reading["recommended"])
-    missing_required = list(required_reading["missing_required"])
-    missing_recommended = list(required_reading["missing_recommended"])
-    required_role_set = set(required_roles)
-    recommended_role_set = set(recommended_roles)
-
-    def add_sidecar_read_failure(role: str, detail: str) -> None:
-        if role in required_role_set:
-            add("validation_required_sidecar_unreadable", SEVERITY_FAIL, "validation", detail, artifact=role)
-        else:
-            add("validation_unreadable", SEVERITY_WARN, "validation", detail, artifact=role)
-
-    for role in missing_required:
-        if role in file_missing_roles:
-            detail = f"required artifact '{role}' is listed in the manifest but its file is missing"
-        else:
-            detail = f"required artifact '{role}' is not present in the bundle"
-        add("missing_required_artifact", SEVERITY_FAIL, "required_artifacts", detail, artifact=role)
-    for role in missing_recommended:
-        if role in file_missing_roles:
-            detail = f"recommended artifact '{role}' is listed in the manifest but its file is missing"
-        else:
-            detail = f"recommended artifact '{role}' is not present in the bundle"
-        add("missing_recommended_artifact", SEVERITY_WARN, "recommended_artifacts", detail, artifact=role)
-
-    if not task_profile_known:
-        checks.append(_check("required_artifacts", STATUS_NA, "no expectation without a known task profile"))
-        checks.append(_check("recommended_artifacts", STATUS_NA, "no expectation without a known task profile"))
-    else:
-        checks.append(
-            _check(
-                "required_artifacts",
-                STATUS_FAIL if missing_required else STATUS_PASS,
-                f"missing required: {', '.join(missing_required) if missing_required else 'none'}",
-            )
-        )
-        checks.append(
-            _check(
-                "recommended_artifacts",
-                STATUS_WARN if missing_recommended else STATUS_PASS,
-                f"missing recommended: {', '.join(missing_recommended) if missing_recommended else 'none'}",
-            )
-        )
-
-    # Manifest-listed roles whose files are gone degrade the bundle even when
-    # the task profile does not need them.
-    needed = required_role_set | recommended_role_set
-    for role in sorted(file_missing_roles - needed):
-        add(
-            "artifact_file_missing",
-            SEVERITY_WARN,
-            "availability",
-            f"artifact '{role}' is listed in the manifest but its file is missing",
-            artifact=role,
-        )
-    if file_missing_roles:
-        artifact_files_status = STATUS_FAIL if file_missing_roles & required_role_set else STATUS_WARN
-    else:
-        artifact_files_status = STATUS_PASS
-    checks.append(
-        _check(
-            "artifact_files",
-            artifact_files_status,
-            f"manifest-listed roles without files: {', '.join(sorted(file_missing_roles)) if file_missing_roles else 'none'}",
-        )
+    return _post_emit_health_run_binding_error(
+        post_doc,
+        status=status,
+        manifest_run_id=manifest_run_id,
     )
 
-    # ── Per-role artifact statuses relative to the task profile ─────────────
-    artifact_statuses: list[PreflightArtifactStatus] = []
-    listed_roles = set(records_by_role) | set(linked_paths) | {"bundle_manifest"}
-    for role in sorted(required_role_set | recommended_role_set | listed_roles):
-        if role in required_role_set:
-            requirement = REQUIREMENT_REQUIRED
-        elif role in recommended_role_set:
-            requirement = REQUIREMENT_RECOMMENDED
-        else:
-            requirement = REQUIREMENT_NA
-        role_records = records_by_role.get(role)
-        record = role_records[0] if role_records else {}
-        if role == "bundle_manifest" and not record:
-            record = {"path": manifest_path.name, "file_exists": True}
-        linked = linked_paths.get(role)
-        if role in available_roles:
-            availability = AVAILABILITY_AVAILABLE
-        elif role in file_missing_roles:
-            availability = AVAILABILITY_FILE_MISSING
-        else:
-            availability = AVAILABILITY_MISSING
-        mapped_path = artifact_paths_by_role.get(role)
-        resolved_path_value = str(mapped_path) if mapped_path is not None else None
-        path_value = record.get("path")
-        if path_value is None and linked is not None:
-            path_value = str(linked)
-        artifact_statuses.append(
-            PreflightArtifactStatus(
-                role=role,
-                requirement=requirement,
-                availability=availability,
-                file_exists=availability == AVAILABILITY_AVAILABLE,
-                path=path_value if isinstance(path_value, str) else None,
-                resolved_path=resolved_path_value,
-                authority=record.get("authority") if isinstance(record.get("authority"), str) else None,
-                canonicality=record.get("canonicality") if isinstance(record.get("canonicality"), str) else None,
-            )
-        )
 
-    evidence_layers: dict[str, list[str]] = {layer: [] for layer in _AUTHORITY_LAYERS}
-    evidence_layers["unspecified"] = []
-    for status in artifact_statuses:
-        if status.availability != AVAILABILITY_AVAILABLE:
-            continue
-        layer = status.authority if status.authority in _AUTHORITY_LAYERS else "unspecified"
-        evidence_layers[layer].append(status.role)
-
-    # ── Snapshot profile policy (generation-side, re-evaluated) ─────────────
-    capabilities = manifest.get("capabilities") if isinstance(manifest.get("capabilities"), dict) else {}
-    snapshot_profile = capabilities.get("repobrief_profile")
-    snapshot_profile_evaluation: dict[str, Any] | None = None
-    if not isinstance(snapshot_profile, str) or not snapshot_profile:
-        snapshot_profile = None
-        checks.append(_check("snapshot_profile_policy", STATUS_NA, "manifest carries no repobrief_profile label"))
-    elif snapshot_profile not in profile_names():
-        checks.append(_check("snapshot_profile_policy", STATUS_WARN, f"unknown snapshot profile label '{snapshot_profile}'"))
-        add(
-            "snapshot_profile_unknown",
-            SEVERITY_WARN,
-            "validation",
-            f"manifest labels an unknown RepoGround snapshot profile '{snapshot_profile}'",
-        )
-    else:
-        snapshot_profile_evaluation = evaluate_profile(snapshot_profile, present_roles_from_manifest(manifest))
-        profile_status = snapshot_profile_evaluation["status"]
-        checks.append(
-            _check(
-                "snapshot_profile_policy",
-                profile_status if profile_status in {STATUS_PASS, STATUS_WARN, STATUS_FAIL} else STATUS_WARN,
-                f"snapshot profile '{snapshot_profile}' evaluated {profile_status}",
-            )
-        )
-        for role in snapshot_profile_evaluation["missing_required"]:
-            add(
-                "snapshot_profile_missing_required",
-                SEVERITY_FAIL,
-                "validation",
-                f"snapshot profile '{snapshot_profile}' requires artifact '{role}' but the manifest does not provide it",
-                artifact=role,
-            )
-        for role in snapshot_profile_evaluation["profile_excluded_present"]:
-            add(
-                "snapshot_profile_excluded_present",
-                SEVERITY_FAIL,
-                "validation",
-                f"snapshot profile '{snapshot_profile}' excludes artifact '{role}' but the manifest still lists it",
-                artifact=role,
-            )
-        for role in snapshot_profile_evaluation["missing_recommended"]:
-            add(
-                "snapshot_profile_missing_recommended",
-                SEVERITY_WARN,
-                "validation",
-                f"snapshot profile '{snapshot_profile}' recommends artifact '{role}' but the manifest does not provide it",
-                artifact=role,
-            )
-
-    # ── Degraded validation states (diagnostic layer, never hidden) ─────────
-    validation: dict[str, Any] = {}
-
+def _evaluate_post_emit_health(
+    *,
+    linked_paths: Mapping[str, Path | None],
+    manifest_path: Path,
+    manifest_run_id: Any,
+    add: Callable[..., None],
+    add_sidecar_read_failure: Callable[[str, str], None],
+) -> dict[str, Any]:
     post_path = linked_paths.get("post_emit_health")
-    post_doc: dict[str, Any] | None = None
-    post_error: str | None = None
-    if post_path is not None:
-        post_doc, post_error = _load_json_file(post_path)
-    skipped_checks: list[str] = []
     if post_path is None:
-        validation["post_emit_health"] = {"present": False, "status": None, "skipped_checks": [], "path": None}
         add(
             "validation_unavailable",
             SEVERITY_WARN,
@@ -624,60 +372,86 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             "no post-emit health sidecar is linked or discoverable; bundle validation state is unknown",
             artifact="post_emit_health",
         )
-    elif post_doc is None:
-        validation["post_emit_health"] = {"present": False, "status": None, "skipped_checks": [], "path": str(post_path)}
+        return {"present": False, "status": None, "skipped_checks": [], "path": None}
+
+    post_doc, post_error = _load_json_file(post_path)
+    if post_doc is None:
         add_sidecar_read_failure(
             "post_emit_health",
             f"post-emit health sidecar cannot be read: {post_error}",
         )
-    else:
-        post_status = post_doc.get("status")
-        for item in post_doc.get("checks") or []:
-            if isinstance(item, dict) and item.get("status") == "skipped" and isinstance(item.get("name"), str):
-                skipped_checks.append(item["name"])
-        skipped_checks.sort()
-        post_binding_error = _post_emit_health_binding_error(
-            post_doc,
-            manifest_path=manifest_path,
-            manifest_run_id=manifest_run_id,
-        )
-        validation["post_emit_health"] = {
-            "present": True,
-            "status": post_status if isinstance(post_status, str) else None,
-            "skipped_checks": skipped_checks,
+        return {
+            "present": False,
+            "status": None,
+            "skipped_checks": [],
             "path": str(post_path),
-            "binding_status": "fail" if post_binding_error else "pass",
-            "binding_error": post_binding_error,
         }
-        if post_binding_error is not None:
-            add_sidecar_read_failure("post_emit_health", post_binding_error)
-        if post_status == STATUS_WARN:
-            add("validation_degraded", SEVERITY_WARN, "validation", "post-emit health reports status=warn", artifact="post_emit_health")
-        elif post_status in {STATUS_FAIL, "blocked"}:
-            add(
-                "validation_failed",
-                SEVERITY_FAIL,
-                "validation",
-                f"post-emit health reports status={post_status}",
-                artifact="post_emit_health",
-            )
-        elif post_status != STATUS_PASS:
-            add(
-                "validation_unreadable",
-                SEVERITY_WARN,
-                "validation",
-                f"post-emit health reports invalid status {post_status!r}",
-                artifact="post_emit_health",
-            )
-        if skipped_checks:
-            add(
-                "validation_checks_skipped",
-                SEVERITY_WARN,
-                "validation",
-                "post-emit health skipped checks: " + ", ".join(skipped_checks),
-                artifact="post_emit_health",
-            )
 
+    post_status = post_doc.get("status")
+    skipped_checks = sorted(
+        item["name"]
+        for item in post_doc.get("checks") or []
+        if isinstance(item, dict)
+        and item.get("status") == "skipped"
+        and isinstance(item.get("name"), str)
+    )
+    post_binding_error = _post_emit_health_binding_error(
+        post_doc,
+        manifest_path=manifest_path,
+        manifest_run_id=manifest_run_id,
+    )
+    result = {
+        "present": True,
+        "status": post_status if isinstance(post_status, str) else None,
+        "skipped_checks": skipped_checks,
+        "path": str(post_path),
+        "binding_status": "fail" if post_binding_error else "pass",
+        "binding_error": post_binding_error,
+    }
+    if post_binding_error is not None:
+        add_sidecar_read_failure("post_emit_health", post_binding_error)
+    if post_status == STATUS_WARN:
+        add(
+            "validation_degraded",
+            SEVERITY_WARN,
+            "validation",
+            "post-emit health reports status=warn",
+            artifact="post_emit_health",
+        )
+    elif post_status in {STATUS_FAIL, "blocked"}:
+        add(
+            "validation_failed",
+            SEVERITY_FAIL,
+            "validation",
+            f"post-emit health reports status={post_status}",
+            artifact="post_emit_health",
+        )
+    elif post_status != STATUS_PASS:
+        add(
+            "validation_unreadable",
+            SEVERITY_WARN,
+            "validation",
+            f"post-emit health reports invalid status {post_status!r}",
+            artifact="post_emit_health",
+        )
+    if skipped_checks:
+        add(
+            "validation_checks_skipped",
+            SEVERITY_WARN,
+            "validation",
+            "post-emit health skipped checks: " + ", ".join(skipped_checks),
+            artifact="post_emit_health",
+        )
+    return result
+
+
+def _evaluate_bundle_surface_validation(
+    *,
+    linked_paths: Mapping[str, Path | None],
+    links: Mapping[str, Any],
+    add: Callable[..., None],
+    add_sidecar_read_failure: Callable[[str, str], None],
+) -> dict[str, Any]:
     recorded_surface_status = links.get("bundle_surface_validation_status")
     surface_path = linked_paths.get("bundle_surface_validation")
     surface_sidecar_status: str | None = None
@@ -698,11 +472,15 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     surface_status = surface_sidecar_status
     if surface_status is None and isinstance(recorded_surface_status, str):
         surface_status = recorded_surface_status
-    validation["bundle_surface_validation"] = {
+    result = {
         "status": surface_status if isinstance(surface_status, str) else None,
-        "recorded_status": recorded_surface_status if isinstance(recorded_surface_status, str) else None,
+        "recorded_status": recorded_surface_status
+        if isinstance(recorded_surface_status, str)
+        else None,
         "sidecar_status": surface_sidecar_status,
-        "path": str(linked_paths["bundle_surface_validation"]) if linked_paths.get("bundle_surface_validation") else None,
+        "path": str(linked_paths["bundle_surface_validation"])
+        if linked_paths.get("bundle_surface_validation")
+        else None,
     }
     if (
         isinstance(recorded_surface_status, str)
@@ -732,10 +510,19 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             f"bundle surface validation status={surface_status}",
             artifact="bundle_surface_validation",
         )
+    return result
 
+
+def _evaluate_output_health(
+    *,
+    artifact_paths_by_role: Mapping[str, Path],
+    add: Callable[..., None],
+) -> dict[str, Any]:
     output_health_verdict: str | None = None
     output_health_path = artifact_paths_by_role.get("output_health")
-    output_health_present = output_health_path is not None and output_health_path.is_file()
+    output_health_present = (
+        output_health_path is not None and output_health_path.is_file()
+    )
     if output_health_present:
         output_doc, output_error = _load_json_file(output_health_path)
         if output_doc is None:
@@ -750,9 +537,21 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             verdict = output_doc.get("verdict")
             output_health_verdict = verdict if isinstance(verdict, str) else None
             if verdict == STATUS_WARN:
-                add("validation_degraded", SEVERITY_WARN, "validation", "output health verdict=warn", artifact="output_health")
+                add(
+                    "validation_degraded",
+                    SEVERITY_WARN,
+                    "validation",
+                    "output health verdict=warn",
+                    artifact="output_health",
+                )
             elif verdict == STATUS_FAIL:
-                add("validation_failed", SEVERITY_FAIL, "validation", "output health verdict=fail", artifact="output_health")
+                add(
+                    "validation_failed",
+                    SEVERITY_FAIL,
+                    "validation",
+                    "output health verdict=fail",
+                    artifact="output_health",
+                )
             elif verdict != STATUS_PASS:
                 add(
                     "validation_unreadable",
@@ -761,9 +560,43 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
                     f"output health verdict invalid: {verdict!r}",
                     artifact="output_health",
                 )
-    validation["output_health"] = {"present": output_health_present, "verdict": output_health_verdict}
-    validation["snapshot_profile_evaluation"] = snapshot_profile_evaluation
+    return {"present": output_health_present, "verdict": output_health_verdict}
 
+
+def _evaluate_validation_state(
+    *,
+    linked_paths: Mapping[str, Path | None],
+    links: Mapping[str, Any],
+    artifact_paths_by_role: Mapping[str, Path],
+    snapshot_profile_evaluation: Mapping[str, Any] | None,
+    manifest_path: Path,
+    manifest_run_id: Any,
+    findings: list[PreflightFinding],
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+    add_sidecar_read_failure: Callable[[str, str], None],
+) -> dict[str, Any]:
+    """Surface bundle validation sidecars without changing their semantics."""
+    validation = {
+        "post_emit_health": _evaluate_post_emit_health(
+            linked_paths=linked_paths,
+            manifest_path=manifest_path,
+            manifest_run_id=manifest_run_id,
+            add=add,
+            add_sidecar_read_failure=add_sidecar_read_failure,
+        ),
+        "bundle_surface_validation": _evaluate_bundle_surface_validation(
+            linked_paths=linked_paths,
+            links=links,
+            add=add,
+            add_sidecar_read_failure=add_sidecar_read_failure,
+        ),
+        "output_health": _evaluate_output_health(
+            artifact_paths_by_role=artifact_paths_by_role,
+            add=add,
+        ),
+        "snapshot_profile_evaluation": snapshot_profile_evaluation,
+    }
     validation_findings = [f for f in findings if f.area == "validation"]
     if any(f.severity == SEVERITY_FAIL for f in validation_findings):
         validation_status = STATUS_FAIL
@@ -775,25 +608,21 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         _check(
             "validation_state",
             validation_status,
-            "degraded validation findings: " + (", ".join(sorted({f.code for f in validation_findings})) if validation_findings else "none"),
+            "degraded validation findings: "
+            + (
+                ", ".join(sorted({f.code for f in validation_findings}))
+                if validation_findings
+                else "none"
+            ),
         )
     )
+    return validation
 
-    # ── Freshness / provenance visibility ───────────────────────────────────
-    created_at_raw = manifest.get("created_at")
-    created_at = _parse_created_at(created_at_raw)
-    generator = manifest.get("generator") if isinstance(manifest.get("generator"), dict) else {}
-    runtime = generator.get("runtime") if isinstance(generator.get("runtime"), dict) else None
-    git_commit = runtime.get("git_commit") if isinstance(runtime, dict) else None
-    snapshot_provenance = manifest.get("snapshot_provenance")
-    snapshot_repositories = (
-        snapshot_provenance.get("repositories")
-        if isinstance(snapshot_provenance, dict)
-        else None
-    )
-    if not isinstance(snapshot_repositories, list):
-        snapshot_repositories = []
-    snapshot_present_repos = [
+
+def _snapshot_present_repositories(
+    snapshot_repositories: Sequence[Any],
+) -> list[dict[str, Any]]:
+    return [
         repo
         for repo in snapshot_repositories
         if isinstance(repo, dict)
@@ -802,19 +631,14 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         and repo.get("git_commit")
     ]
 
-    freshness: dict[str, Any] = {
-        "created_at": created_at_raw if isinstance(created_at_raw, str) else None,
-        "status": "recorded",
-        "age_seconds": None,
-        "max_age_seconds": preflight_input.max_age_seconds,
-        "as_of": None,
-        "generator_runtime_recorded": runtime is not None,
-        "generator_git_commit": git_commit if isinstance(git_commit, str) else None,
-        "snapshot_provenance_recorded": isinstance(snapshot_provenance, dict),
-        "snapshot_repository_count": len(snapshot_repositories),
-        "snapshot_present_repository_count": len(snapshot_present_repos),
-        "snapshot_freshness_basis": "git_commit" if snapshot_present_repos else "unknown",
-    }
+
+def _apply_age_freshness(
+    freshness: dict[str, Any],
+    *,
+    created_at: datetime.datetime | None,
+    preflight_input: PreflightInput,
+    add: Callable[..., None],
+) -> None:
     if created_at is None:
         freshness["status"] = "unknown"
         add(
@@ -823,32 +647,46 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             "freshness",
             "bundle manifest carries no parseable created_at; snapshot freshness is unknown",
         )
-    elif preflight_input.max_age_seconds is not None:
-        as_of = preflight_input.as_of or now_utc()
-        if as_of.tzinfo is None:
-            as_of = as_of.replace(tzinfo=datetime.timezone.utc)
-        age = (as_of - created_at).total_seconds()
-        freshness["as_of"] = as_of.strftime("%Y-%m-%dT%H:%M:%SZ")
-        if age < 0:
-            freshness["status"] = "unknown"
-            add(
-                "freshness_unknown",
-                SEVERITY_WARN,
-                "freshness",
-                "bundle created_at is in the future relative to the as-of time; snapshot freshness is unknown",
-            )
-        else:
-            freshness["age_seconds"] = int(age)
-            if age > preflight_input.max_age_seconds:
-                freshness["status"] = "stale"
-                add(
-                    "snapshot_stale",
-                    SEVERITY_WARN,
-                    "freshness",
-                    f"snapshot age {int(age)}s exceeds max age {int(preflight_input.max_age_seconds)}s",
-                )
-            else:
-                freshness["status"] = "fresh"
+        return
+    if preflight_input.max_age_seconds is None:
+        return
+    as_of = preflight_input.as_of or now_utc()
+    if as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=datetime.timezone.utc)
+    age = (as_of - created_at).total_seconds()
+    freshness["as_of"] = as_of.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if age < 0:
+        freshness["status"] = "unknown"
+        add(
+            "freshness_unknown",
+            SEVERITY_WARN,
+            "freshness",
+            "bundle created_at is in the future relative to the as-of time; snapshot freshness is unknown",
+        )
+        return
+    freshness["age_seconds"] = int(age)
+    if age > preflight_input.max_age_seconds:
+        freshness["status"] = "stale"
+        add(
+            "snapshot_stale",
+            SEVERITY_WARN,
+            "freshness",
+            f"snapshot age {int(age)}s exceeds max age {int(preflight_input.max_age_seconds)}s",
+        )
+    else:
+        freshness["status"] = "fresh"
+
+
+def _apply_provenance_freshness(
+    freshness: dict[str, Any],
+    *,
+    snapshot_provenance: Any,
+    snapshot_repositories: Sequence[Any],
+    snapshot_present_repos: Sequence[Mapping[str, Any]],
+    runtime: Any,
+    git_commit: Any,
+    add: Callable[..., None],
+) -> None:
     if not isinstance(snapshot_provenance, dict):
         freshness["status"] = "unknown"
         add(
@@ -889,10 +727,80 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             "freshness",
             "bundle manifest records generator runtime provenance without a git_commit; snapshot freshness is unknown",
         )
-    freshness_status = STATUS_WARN if freshness["status"] in {"unknown", "stale"} else STATUS_PASS
-    checks.append(_check("freshness", freshness_status, f"freshness {freshness['status']}"))
 
-    # ── Consumption declaration (negative semantics are mandatory) ──────────
+
+def _evaluate_freshness(
+    *,
+    manifest: Mapping[str, Any],
+    preflight_input: PreflightInput,
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> dict[str, Any]:
+    """Evaluate timestamp and provenance freshness signals."""
+    created_at_raw = manifest.get("created_at")
+    created_at = _parse_created_at(created_at_raw)
+    generator = (
+        manifest.get("generator") if isinstance(manifest.get("generator"), dict) else {}
+    )
+    runtime = (
+        generator.get("runtime") if isinstance(generator.get("runtime"), dict) else None
+    )
+    git_commit = runtime.get("git_commit") if isinstance(runtime, dict) else None
+    snapshot_provenance = manifest.get("snapshot_provenance")
+    snapshot_repositories = (
+        snapshot_provenance.get("repositories")
+        if isinstance(snapshot_provenance, dict)
+        else None
+    )
+    if not isinstance(snapshot_repositories, list):
+        snapshot_repositories = []
+    snapshot_present_repos = _snapshot_present_repositories(snapshot_repositories)
+    freshness: dict[str, Any] = {
+        "created_at": created_at_raw if isinstance(created_at_raw, str) else None,
+        "status": "recorded",
+        "age_seconds": None,
+        "max_age_seconds": preflight_input.max_age_seconds,
+        "as_of": None,
+        "generator_runtime_recorded": runtime is not None,
+        "generator_git_commit": git_commit if isinstance(git_commit, str) else None,
+        "snapshot_provenance_recorded": isinstance(snapshot_provenance, dict),
+        "snapshot_repository_count": len(snapshot_repositories),
+        "snapshot_present_repository_count": len(snapshot_present_repos),
+        "snapshot_freshness_basis": "git_commit"
+        if snapshot_present_repos
+        else "unknown",
+    }
+    _apply_age_freshness(
+        freshness,
+        created_at=created_at,
+        preflight_input=preflight_input,
+        add=add,
+    )
+    _apply_provenance_freshness(
+        freshness,
+        snapshot_provenance=snapshot_provenance,
+        snapshot_repositories=snapshot_repositories,
+        snapshot_present_repos=snapshot_present_repos,
+        runtime=runtime,
+        git_commit=git_commit,
+        add=add,
+    )
+    freshness_status = (
+        STATUS_WARN if freshness["status"] in {"unknown", "stale"} else STATUS_PASS
+    )
+    checks.append(
+        _check("freshness", freshness_status, f"freshness {freshness['status']}")
+    )
+    return freshness
+
+
+def _prepare_consumption_declaration(
+    *,
+    preflight_input: PreflightInput,
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> tuple[dict[str, Any], list[Any], list[Any]]:
+    """Normalize the optional consumption declaration and evidence inputs."""
     declaration = preflight_input.declaration
     used_citations_input = list(preflight_input.used_citations)
     used_ranges_input = list(preflight_input.used_ranges)
@@ -904,7 +812,9 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         boundaries = declaration.get("does_not_establish")
         required_boundaries = set(DOES_NOT_ESTABLISH)
         if isinstance(boundaries, list):
-            provided_boundaries = {item for item in boundaries if isinstance(item, str) and item}
+            provided_boundaries = {
+                item for item in boundaries if isinstance(item, str) and item
+            }
         else:
             provided_boundaries = set()
         boundaries_ok = required_boundaries <= provided_boundaries
@@ -919,17 +829,108 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
             _check(
                 "does_not_establish",
                 STATUS_PASS if boundaries_ok else STATUS_FAIL,
-                "declaration carries negative semantics" if boundaries_ok else "declaration lacks required does_not_establish boundaries",
+                "declaration carries negative semantics"
+                if boundaries_ok
+                else "declaration lacks required does_not_establish boundaries",
             )
         )
     else:
-        checks.append(_check("does_not_establish", STATUS_NA, "no consumption declaration provided"))
+        checks.append(
+            _check(
+                "does_not_establish", STATUS_NA, "no consumption declaration provided"
+            )
+        )
     declaration_block = {
         "provided": declaration is not None,
-        "does_not_establish_present": bool(declaration is not None and declaration.get("does_not_establish")),
+        "does_not_establish_present": bool(
+            declaration is not None and declaration.get("does_not_establish")
+        ),
     }
 
-    # ── Used citations: resolve against the citation map ────────────────────
+    return declaration_block, used_citations_input, used_ranges_input
+
+
+def _read_citation_map_ids(
+    map_path: Path | None,
+    *,
+    add: Callable[..., None],
+) -> set[str] | None:
+    if map_path is None or not map_path.is_file():
+        add(
+            "used_citations_unverifiable",
+            SEVERITY_FAIL,
+            "used_citations",
+            "citation map is marked available but no readable file path was resolved",
+            artifact="citation_map_jsonl",
+        )
+        return None
+    known_ids: set[str] = set()
+    unparseable_lines = 0
+    try:
+        with map_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    unparseable_lines += 1
+                    continue
+                if isinstance(entry, dict) and isinstance(
+                    entry.get("citation_id"), str
+                ):
+                    known_ids.add(entry["citation_id"])
+    except OSError as exc:
+        add(
+            "used_citations_unverifiable",
+            SEVERITY_FAIL,
+            "used_citations",
+            f"citation map cannot be read: {exc}",
+            artifact="citation_map_jsonl",
+        )
+        return None
+    if unparseable_lines:
+        add(
+            "citation_map_lines_unparseable",
+            SEVERITY_WARN,
+            "used_citations",
+            f"citation map contains {unparseable_lines} unparseable line(s)",
+            artifact="citation_map_jsonl",
+        )
+    return known_ids
+
+
+def _resolve_citation_ids(
+    citation_ids: Sequence[str],
+    known_ids: set[str],
+    used_citations_block: dict[str, Any],
+    *,
+    add: Callable[..., None],
+) -> None:
+    for citation_id in citation_ids:
+        if citation_id in known_ids:
+            used_citations_block["resolved"].append(citation_id)
+        else:
+            used_citations_block["unresolved"].append(citation_id)
+            add(
+                "used_citation_unresolved",
+                SEVERITY_FAIL,
+                "used_citations",
+                f"used citation '{citation_id}' does not resolve in the citation map",
+            )
+
+
+def _evaluate_used_citations(
+    *,
+    used_citations_input: Sequence[Any],
+    available_roles: set[str],
+    artifact_paths_by_role: Mapping[str, Path],
+    findings: list[PreflightFinding],
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> dict[str, Any]:
+    """Resolve declared citations against the bundle citation map."""
     citation_ids, invalid_citations = _normalize_citation_ids(used_citations_input)
     used_citations_block: dict[str, Any] = {
         "declared": citation_ids,
@@ -940,180 +941,838 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
     }
     if not citation_ids and not invalid_citations:
         checks.append(_check("used_citations", STATUS_NA, "no used citations declared"))
-    else:
-        for entry in invalid_citations:
-            add(
-                "used_citation_invalid",
-                SEVERITY_FAIL,
-                "used_citations",
-                f"used citation entry is not a citation id or citation declaration: {entry}",
-            )
-        known_ids: set[str] | None = None
-        if "citation_map_jsonl" not in available_roles:
-            add(
-                "used_citations_unverifiable",
-                SEVERITY_FAIL,
-                "used_citations",
-                "used citations were declared but no citation_map_jsonl artifact is available to resolve them",
-                artifact="citation_map_jsonl",
-            )
-        else:
-            known_ids = set()
-            unparseable_lines = 0
-            map_path = artifact_paths_by_role.get("citation_map_jsonl")
-            if map_path is None or not map_path.is_file():
-                known_ids = None
-                add(
-                    "used_citations_unverifiable",
-                    SEVERITY_FAIL,
-                    "used_citations",
-                    "citation map is marked available but no readable file path was resolved",
-                    artifact="citation_map_jsonl",
-                )
-            else:
-                try:
-                    with map_path.open("r", encoding="utf-8") as handle:
-                        for line in handle:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                entry = json.loads(line)
-                            except json.JSONDecodeError:
-                                unparseable_lines += 1
-                                continue
-                            if isinstance(entry, dict) and isinstance(entry.get("citation_id"), str):
-                                known_ids.add(entry["citation_id"])
-                except OSError as exc:
-                    known_ids = None
-                    add(
-                        "used_citations_unverifiable",
-                        SEVERITY_FAIL,
-                        "used_citations",
-                        f"citation map cannot be read: {exc}",
-                        artifact="citation_map_jsonl",
-                    )
-            if unparseable_lines and known_ids is not None:
-                add(
-                    "citation_map_lines_unparseable",
-                    SEVERITY_WARN,
-                    "used_citations",
-                    f"citation map contains {unparseable_lines} unparseable line(s)",
-                    artifact="citation_map_jsonl",
-                )
-        if known_ids is not None:
-            for citation_id in citation_ids:
-                if citation_id in known_ids:
-                    used_citations_block["resolved"].append(citation_id)
-                else:
-                    used_citations_block["unresolved"].append(citation_id)
-                    add(
-                        "used_citation_unresolved",
-                        SEVERITY_FAIL,
-                        "used_citations",
-                        f"used citation '{citation_id}' does not resolve in the citation map",
-                    )
-        citation_fail = any(f.area == "used_citations" and f.severity == SEVERITY_FAIL for f in findings)
-        citation_warn = any(f.area == "used_citations" and f.severity == SEVERITY_WARN for f in findings)
-        checks.append(
-            _check(
-                "used_citations",
-                STATUS_FAIL if citation_fail else STATUS_WARN if citation_warn else STATUS_PASS,
-                f"declared={len(citation_ids)} resolved={len(used_citations_block['resolved'])} "
-                f"unresolved={len(used_citations_block['unresolved'])}",
-            )
+        return used_citations_block
+    for entry in invalid_citations:
+        add(
+            "used_citation_invalid",
+            SEVERITY_FAIL,
+            "used_citations",
+            f"used citation entry is not a citation id or citation declaration: {entry}",
         )
+    known_ids: set[str] | None = None
+    if "citation_map_jsonl" not in available_roles:
+        add(
+            "used_citations_unverifiable",
+            SEVERITY_FAIL,
+            "used_citations",
+            "used citations were declared but no citation_map_jsonl artifact is available to resolve them",
+            artifact="citation_map_jsonl",
+        )
+    else:
+        known_ids = _read_citation_map_ids(
+            artifact_paths_by_role.get("citation_map_jsonl"), add=add
+        )
+    if known_ids is not None:
+        _resolve_citation_ids(citation_ids, known_ids, used_citations_block, add=add)
+    citation_fail = any(
+        f.area == "used_citations" and f.severity == SEVERITY_FAIL for f in findings
+    )
+    citation_warn = any(
+        f.area == "used_citations" and f.severity == SEVERITY_WARN for f in findings
+    )
+    checks.append(
+        _check(
+            "used_citations",
+            STATUS_FAIL
+            if citation_fail
+            else STATUS_WARN
+            if citation_warn
+            else STATUS_PASS,
+            f"declared={len(citation_ids)} resolved={len(used_citations_block['resolved'])} "
+            f"unresolved={len(used_citations_block['unresolved'])}",
+        )
+    )
+    return used_citations_block
 
-    # ── Used ranges: bind to available artifacts and line bounds ────────────
-    used_ranges_block: dict[str, Any] = {"declared": len(used_ranges_input), "resolved": [], "unresolved": []}
+
+def _resolve_used_range(
+    raw: Any,
+    *,
+    index: int,
+    available_roles: set[str],
+    artifact_paths_by_role: Mapping[str, Path],
+    line_counts: dict[str, int | None],
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    if not isinstance(raw, Mapping):
+        return (
+            None,
+            "range declaration must be an object with artifact and range_ref",
+            None,
+        )
+    role = raw.get("artifact")
+    range_ref = raw.get("range_ref")
+    if not isinstance(role, str) or not role:
+        return None, "range declaration lacks an artifact role", None
+    if not isinstance(range_ref, Mapping):
+        return None, f"range declaration for '{role}' lacks a range_ref object", role
+    if role not in available_roles:
+        return None, f"artifact '{role}' is not available in the bundle", role
+    bounds = _line_bounds(range_ref)
+    if bounds is None:
+        return None, f"range_ref for '{role}' carries no integer line bounds", role
+    start_line, end_line, _artifact_anchored = bounds
+    if start_line < 1 or end_line < start_line:
+        return (
+            None,
+            f"range_ref for '{role}' has invalid line bounds {start_line}..{end_line}",
+            role,
+        )
+    if role not in line_counts:
+        path = artifact_paths_by_role.get(role)
+        line_counts[role] = _count_lines(path) if path is not None else None
+    total_lines = line_counts[role]
+    if total_lines is None:
+        return (
+            None,
+            f"artifact '{role}' file cannot be read to verify line bounds",
+            role,
+        )
+    if end_line > total_lines:
+        return (
+            None,
+            f"range {start_line}..{end_line} exceeds artifact '{role}' length of {total_lines} line(s)",
+            role,
+        )
+    return (
+        {
+            "index": index,
+            "artifact": role,
+            "start_line": start_line,
+            "end_line": end_line,
+            "resolution": "artifact_lines_verified",
+        },
+        None,
+        None,
+    )
+
+
+def _evaluate_used_ranges(
+    *,
+    used_ranges_input: Sequence[Any],
+    available_roles: set[str],
+    artifact_paths_by_role: Mapping[str, Path],
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> dict[str, Any]:
+    """Bind declared ranges to available artifacts and verify line bounds."""
+    used_ranges_block: dict[str, Any] = {
+        "declared": len(used_ranges_input),
+        "resolved": [],
+        "unresolved": [],
+    }
     if not used_ranges_input:
         checks.append(_check("used_ranges", STATUS_NA, "no used ranges declared"))
-    else:
-        line_counts: dict[str, int | None] = {}
-        for index, raw in enumerate(used_ranges_input):
-            label = f"used_ranges[{index}]"
-
-            def unresolved(detail: str, artifact: str | None = None) -> None:
-                used_ranges_block["unresolved"].append({"index": index, "detail": detail})
-                add("used_range_unresolved", SEVERITY_FAIL, "used_ranges", f"{label}: {detail}", artifact=artifact)
-
-            if not isinstance(raw, Mapping):
-                unresolved("range declaration must be an object with artifact and range_ref")
-                continue
-            role = raw.get("artifact")
-            range_ref = raw.get("range_ref")
-            if not isinstance(role, str) or not role:
-                unresolved("range declaration lacks an artifact role")
-                continue
-            if not isinstance(range_ref, Mapping):
-                unresolved(f"range declaration for '{role}' lacks a range_ref object", artifact=role)
-                continue
-            if role not in available_roles:
-                unresolved(f"artifact '{role}' is not available in the bundle", artifact=role)
-                continue
-            bounds = _line_bounds(range_ref)
-            if bounds is None:
-                unresolved(f"range_ref for '{role}' carries no integer line bounds", artifact=role)
-                continue
-            start_line, end_line, _artifact_anchored = bounds
-            if start_line < 1 or end_line < start_line:
-                unresolved(f"range_ref for '{role}' has invalid line bounds {start_line}..{end_line}", artifact=role)
-                continue
-            if role not in line_counts:
-                path = artifact_paths_by_role.get(role)
-                line_counts[role] = _count_lines(path) if path is not None else None
-            total_lines = line_counts[role]
-            if total_lines is None:
-                unresolved(f"artifact '{role}' file cannot be read to verify line bounds", artifact=role)
-                continue
-            if end_line > total_lines:
-                unresolved(
-                    f"range {start_line}..{end_line} exceeds artifact '{role}' length of {total_lines} line(s)",
-                    artifact=role,
-                )
-                continue
-            resolution = "artifact_lines_verified"
-            used_ranges_block["resolved"].append(
-                {"index": index, "artifact": role, "start_line": start_line, "end_line": end_line, "resolution": resolution}
+        return used_ranges_block
+    line_counts: dict[str, int | None] = {}
+    for index, raw in enumerate(used_ranges_input):
+        resolution, detail, artifact = _resolve_used_range(
+            raw,
+            index=index,
+            available_roles=available_roles,
+            artifact_paths_by_role=artifact_paths_by_role,
+            line_counts=line_counts,
+        )
+        if detail is not None:
+            used_ranges_block["unresolved"].append({"index": index, "detail": detail})
+            add(
+                "used_range_unresolved",
+                SEVERITY_FAIL,
+                "used_ranges",
+                f"used_ranges[{index}]: {detail}",
+                artifact=artifact,
             )
+        elif resolution is not None:
+            used_ranges_block["resolved"].append(resolution)
+    checks.append(
+        _check(
+            "used_ranges",
+            STATUS_FAIL if used_ranges_block["unresolved"] else STATUS_PASS,
+            f"declared={len(used_ranges_input)} resolved={len(used_ranges_block['resolved'])} "
+            f"unresolved={len(used_ranges_block['unresolved'])}",
+        )
+    )
+    return used_ranges_block
+
+
+def _records_by_role(
+    records: Sequence[Mapping[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        role = record.get("role")
+        if isinstance(role, str) and role:
+            grouped.setdefault(role, []).append(dict(record))
+    return grouped
+
+
+def _resolve_linked_sidecar_paths(
+    *,
+    manifest_dir: Path,
+    manifest_path: Path,
+    links: Mapping[str, Any],
+    add: Callable[..., None],
+) -> dict[str, Path | None]:
+    linked_paths: dict[str, Path | None] = {}
+    for link_key, role in _LINKED_SIDECAR_ROLES.items():
+        resolved, error = _resolve_link_path(manifest_dir, links.get(link_key))
+        if error is not None:
+            add(
+                "sidecar_path_rejected",
+                SEVERITY_WARN,
+                "availability",
+                f"link {link_key} rejected: {error}",
+                artifact=role,
+            )
+        if resolved is not None and role not in linked_paths:
+            linked_paths[role] = resolved
+    if "post_emit_health" not in linked_paths:
+        derived = derive_post_health_path(manifest_path)
+        if derived.is_file():
+            linked_paths["post_emit_health"] = derived
+    return linked_paths
+
+
+def _artifact_record_candidate(
+    manifest_dir: Path, record: Mapping[str, Any]
+) -> Path | None:
+    absolute_path = record.get("absolute_path")
+    if isinstance(absolute_path, str) and absolute_path:
+        return Path(absolute_path)
+    relative_path = record.get("path")
+    if not isinstance(relative_path, str) or not relative_path:
+        return None
+    try:
+        return resolve_secure_path(manifest_dir, relative_path)
+    except ValueError:
+        return None
+
+
+def _resolve_artifact_paths(
+    *,
+    manifest_path: Path,
+    manifest_dir: Path,
+    records_by_role: Mapping[str, Sequence[Mapping[str, Any]]],
+    linked_paths: Mapping[str, Path | None],
+) -> dict[str, Path]:
+    artifact_paths_by_role: dict[str, Path] = {"bundle_manifest": manifest_path}
+    for role, role_records in records_by_role.items():
+        for record in role_records:
+            candidate = _artifact_record_candidate(manifest_dir, record)
+            if candidate is not None:
+                if candidate.is_file():
+                    artifact_paths_by_role[role] = candidate
+                    break
+                artifact_paths_by_role.setdefault(role, candidate)
+    for role, path in linked_paths.items():
+        if path is not None:
+            artifact_paths_by_role[role] = path
+    return artifact_paths_by_role
+
+
+def _manifest_role_availability(
+    records_by_role: Mapping[str, Sequence[Mapping[str, Any]]],
+    artifact_paths_by_role: Mapping[str, Path],
+) -> tuple[set[str], set[str]]:
+    available_roles: set[str] = {"bundle_manifest"}
+    file_missing_roles: set[str] = set()
+    for role, role_records in records_by_role.items():
+        artifact_path = artifact_paths_by_role.get(role)
+        recorded_file_exists = any(record.get("file_exists") for record in role_records)
+        if recorded_file_exists and (artifact_path is None or artifact_path.is_file()):
+            available_roles.add(role)
+        else:
+            file_missing_roles.add(role)
+    return available_roles, file_missing_roles
+
+
+def _linked_role_declared(links: Mapping[str, Any], role: str) -> bool:
+    return any(
+        links.get(key)
+        for key, mapped in _LINKED_SIDECAR_ROLES.items()
+        if mapped == role
+    )
+
+
+def _apply_linked_role_availability(
+    available_roles: set[str],
+    file_missing_roles: set[str],
+    *,
+    linked_paths: Mapping[str, Path | None],
+    links: Mapping[str, Any],
+) -> None:
+    for role, path in linked_paths.items():
+        if role in available_roles:
+            continue
+        if path is not None and path.is_file():
+            available_roles.add(role)
+        elif role in _LINKED_SIDECAR_ROLES.values() and _linked_role_declared(
+            links, role
+        ):
+            file_missing_roles.add(role)
+    file_missing_roles -= available_roles
+
+
+def _record_task_profile_status(
+    *,
+    task_profile: str,
+    task_profile_known: bool,
+    protocol: Mapping[str, Any],
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> None:
+    if task_profile_known:
         checks.append(
             _check(
+                "task_profile", STATUS_PASS, f"task profile '{task_profile}' resolved"
+            )
+        )
+        return
+    checks.append(
+        _check(
+            "task_profile",
+            STATUS_NA,
+            f"task profile '{task_profile}' is not in the Required Reading Protocol",
+        )
+    )
+    add(
+        "task_profile_unknown",
+        SEVERITY_INFO,
+        "task_profile",
+        f"task profile '{task_profile}' is not in the Required Reading Protocol; "
+        f"known profiles: {', '.join(sorted(protocol['task_profiles']))}",
+    )
+
+
+def _record_missing_artifacts(
+    missing_roles: Sequence[str],
+    *,
+    file_missing_roles: set[str],
+    requirement: str,
+    severity: str,
+    area: str,
+    code: str,
+    add: Callable[..., None],
+) -> None:
+    for role in missing_roles:
+        if role in file_missing_roles:
+            detail = f"{requirement} artifact '{role}' is listed in the manifest but its file is missing"
+        else:
+            detail = f"{requirement} artifact '{role}' is not present in the bundle"
+        add(code, severity, area, detail, artifact=role)
+
+
+def _record_required_reading_checks(
+    *,
+    task_profile_known: bool,
+    missing_required: Sequence[str],
+    missing_recommended: Sequence[str],
+    checks: list[dict[str, str]],
+) -> None:
+    if not task_profile_known:
+        checks.append(
+            _check(
+                "required_artifacts",
+                STATUS_NA,
+                "no expectation without a known task profile",
+            )
+        )
+        checks.append(
+            _check(
+                "recommended_artifacts",
+                STATUS_NA,
+                "no expectation without a known task profile",
+            )
+        )
+        return
+    checks.append(
+        _check(
+            "required_artifacts",
+            STATUS_FAIL if missing_required else STATUS_PASS,
+            f"missing required: {', '.join(missing_required) if missing_required else 'none'}",
+        )
+    )
+    checks.append(
+        _check(
+            "recommended_artifacts",
+            STATUS_WARN if missing_recommended else STATUS_PASS,
+            f"missing recommended: {', '.join(missing_recommended) if missing_recommended else 'none'}",
+        )
+    )
+
+
+def _record_artifact_file_status(
+    *,
+    file_missing_roles: set[str],
+    required_role_set: set[str],
+    recommended_role_set: set[str],
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> None:
+    needed = required_role_set | recommended_role_set
+    for role in sorted(file_missing_roles - needed):
+        add(
+            "artifact_file_missing",
+            SEVERITY_WARN,
+            "availability",
+            f"artifact '{role}' is listed in the manifest but its file is missing",
+            artifact=role,
+        )
+    if file_missing_roles:
+        artifact_files_status = (
+            STATUS_FAIL if file_missing_roles & required_role_set else STATUS_WARN
+        )
+    else:
+        artifact_files_status = STATUS_PASS
+    checks.append(
+        _check(
+            "artifact_files",
+            artifact_files_status,
+            f"manifest-listed roles without files: {', '.join(sorted(file_missing_roles)) if file_missing_roles else 'none'}",
+        )
+    )
+
+
+def _artifact_requirement(
+    role: str, required_role_set: set[str], recommended_role_set: set[str]
+) -> str:
+    if role in required_role_set:
+        return REQUIREMENT_REQUIRED
+    if role in recommended_role_set:
+        return REQUIREMENT_RECOMMENDED
+    return REQUIREMENT_NA
+
+
+def _artifact_availability(
+    role: str, available_roles: set[str], file_missing_roles: set[str]
+) -> str:
+    if role in available_roles:
+        return AVAILABILITY_AVAILABLE
+    if role in file_missing_roles:
+        return AVAILABILITY_FILE_MISSING
+    return AVAILABILITY_MISSING
+
+
+def _artifact_status(
+    role: str,
+    *,
+    manifest_path: Path,
+    records_by_role: Mapping[str, Sequence[Mapping[str, Any]]],
+    linked_paths: Mapping[str, Path | None],
+    artifact_paths_by_role: Mapping[str, Path],
+    available_roles: set[str],
+    file_missing_roles: set[str],
+    required_role_set: set[str],
+    recommended_role_set: set[str],
+) -> PreflightArtifactStatus:
+    role_records = records_by_role.get(role)
+    record: Mapping[str, Any] = role_records[0] if role_records else {}
+    if role == "bundle_manifest" and not record:
+        record = {"path": manifest_path.name, "file_exists": True}
+    linked = linked_paths.get(role)
+    mapped_path = artifact_paths_by_role.get(role)
+    resolved_path_value = str(mapped_path) if mapped_path is not None else None
+    path_value = record.get("path")
+    if path_value is None and linked is not None:
+        path_value = str(linked)
+    availability = _artifact_availability(role, available_roles, file_missing_roles)
+    return PreflightArtifactStatus(
+        role=role,
+        requirement=_artifact_requirement(
+            role, required_role_set, recommended_role_set
+        ),
+        availability=availability,
+        file_exists=availability == AVAILABILITY_AVAILABLE,
+        path=path_value if isinstance(path_value, str) else None,
+        resolved_path=resolved_path_value,
+        authority=record.get("authority")
+        if isinstance(record.get("authority"), str)
+        else None,
+        canonicality=record.get("canonicality")
+        if isinstance(record.get("canonicality"), str)
+        else None,
+    )
+
+
+def _build_artifact_statuses(
+    *,
+    manifest_path: Path,
+    records_by_role: Mapping[str, Sequence[Mapping[str, Any]]],
+    linked_paths: Mapping[str, Path | None],
+    artifact_paths_by_role: Mapping[str, Path],
+    available_roles: set[str],
+    file_missing_roles: set[str],
+    required_role_set: set[str],
+    recommended_role_set: set[str],
+) -> list[PreflightArtifactStatus]:
+    listed_roles = set(records_by_role) | set(linked_paths) | {"bundle_manifest"}
+    return [
+        _artifact_status(
+            role,
+            manifest_path=manifest_path,
+            records_by_role=records_by_role,
+            linked_paths=linked_paths,
+            artifact_paths_by_role=artifact_paths_by_role,
+            available_roles=available_roles,
+            file_missing_roles=file_missing_roles,
+            required_role_set=required_role_set,
+            recommended_role_set=recommended_role_set,
+        )
+        for role in sorted(required_role_set | recommended_role_set | listed_roles)
+    ]
+
+
+def _build_evidence_layers(
+    artifact_statuses: Sequence[PreflightArtifactStatus],
+) -> dict[str, list[str]]:
+    evidence_layers: dict[str, list[str]] = {layer: [] for layer in _AUTHORITY_LAYERS}
+    evidence_layers["unspecified"] = []
+    for status in artifact_statuses:
+        if status.availability != AVAILABILITY_AVAILABLE:
+            continue
+        layer = (
+            status.authority if status.authority in _AUTHORITY_LAYERS else "unspecified"
+        )
+        evidence_layers[layer].append(status.role)
+    return evidence_layers
+
+
+def _record_snapshot_profile_findings(
+    snapshot_profile: str,
+    evaluation: Mapping[str, Any],
+    *,
+    add: Callable[..., None],
+) -> None:
+    for role in evaluation["missing_required"]:
+        add(
+            "snapshot_profile_missing_required",
+            SEVERITY_FAIL,
+            "validation",
+            f"snapshot profile '{snapshot_profile}' requires artifact '{role}' but the manifest does not provide it",
+            artifact=role,
+        )
+    for role in evaluation["profile_excluded_present"]:
+        add(
+            "snapshot_profile_excluded_present",
+            SEVERITY_FAIL,
+            "validation",
+            f"snapshot profile '{snapshot_profile}' excludes artifact '{role}' but the manifest still lists it",
+            artifact=role,
+        )
+    for role in evaluation["missing_recommended"]:
+        add(
+            "snapshot_profile_missing_recommended",
+            SEVERITY_WARN,
+            "validation",
+            f"snapshot profile '{snapshot_profile}' recommends artifact '{role}' but the manifest does not provide it",
+            artifact=role,
+        )
+
+
+def _evaluate_snapshot_profile_policy(
+    manifest: Mapping[str, Any],
+    *,
+    checks: list[dict[str, str]],
+    add: Callable[..., None],
+) -> tuple[str | None, dict[str, Any] | None]:
+    capabilities = (
+        manifest.get("capabilities")
+        if isinstance(manifest.get("capabilities"), dict)
+        else {}
+    )
+    snapshot_profile = capabilities.get("repobrief_profile")
+    if not isinstance(snapshot_profile, str) or not snapshot_profile:
+        checks.append(
+            _check(
+                "snapshot_profile_policy",
+                STATUS_NA,
+                "manifest carries no repobrief_profile label",
+            )
+        )
+        return None, None
+    if snapshot_profile not in profile_names():
+        checks.append(
+            _check(
+                "snapshot_profile_policy",
+                STATUS_WARN,
+                f"unknown snapshot profile label '{snapshot_profile}'",
+            )
+        )
+        add(
+            "snapshot_profile_unknown",
+            SEVERITY_WARN,
+            "validation",
+            f"manifest labels an unknown RepoGround snapshot profile '{snapshot_profile}'",
+        )
+        return snapshot_profile, None
+    evaluation = evaluate_profile(
+        snapshot_profile, present_roles_from_manifest(manifest)
+    )
+    profile_status = evaluation["status"]
+    checks.append(
+        _check(
+            "snapshot_profile_policy",
+            profile_status
+            if profile_status in {STATUS_PASS, STATUS_WARN, STATUS_FAIL}
+            else STATUS_WARN,
+            f"snapshot profile '{snapshot_profile}' evaluated {profile_status}",
+        )
+    )
+    _record_snapshot_profile_findings(snapshot_profile, evaluation, add=add)
+    return snapshot_profile, evaluation
+
+
+def _ordered_findings_and_status(
+    findings: Sequence[PreflightFinding],
+    *,
+    task_profile_known: bool,
+) -> tuple[tuple[PreflightFinding, ...], str]:
+    severity_order = {SEVERITY_FAIL: 0, SEVERITY_WARN: 1, SEVERITY_INFO: 2}
+    ordered_findings = tuple(
+        sorted(
+            findings,
+            key=lambda f: (
+                severity_order[f.severity],
+                f.code,
+                f.artifact or "",
+                f.detail,
+            ),
+        )
+    )
+    if any(f.severity == SEVERITY_FAIL for f in ordered_findings):
+        return ordered_findings, STATUS_FAIL
+    if not task_profile_known:
+        return ordered_findings, STATUS_NA
+    if any(f.severity == SEVERITY_WARN for f in ordered_findings):
+        return ordered_findings, STATUS_WARN
+    return ordered_findings, STATUS_PASS
+
+
+def _ordered_checks(
+    checks: Sequence[Mapping[str, str]],
+) -> tuple[Mapping[str, str], ...]:
+    check_order = {
+        name: i
+        for i, name in enumerate(
+            (
+                "task_profile",
+                "required_artifacts",
+                "recommended_artifacts",
+                "artifact_files",
+                "snapshot_profile_policy",
+                "validation_state",
+                "freshness",
+                "used_citations",
                 "used_ranges",
-                STATUS_FAIL if used_ranges_block["unresolved"] else STATUS_PASS,
-                f"declared={len(used_ranges_input)} resolved={len(used_ranges_block['resolved'])} "
-                f"unresolved={len(used_ranges_block['unresolved'])}",
+                "does_not_establish",
+            )
+        )
+    }
+    return tuple(
+        sorted(checks, key=lambda c: check_order.get(c["name"], len(check_order)))
+    )
+
+
+def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
+    """Run the RepoGround agent consumption preflight for one bundle manifest.
+
+    Raises ``ValueError`` when the bundle manifest itself is unreadable; every
+    other condition is reported as a structured finding, never an exception.
+    """
+    manifest_path = Path(preflight_input.bundle_manifest).expanduser().resolve()
+    manifest = _read_json_object(manifest_path, label="bundle manifest")
+    manifest_dir = manifest_path.parent
+    manifest_run_id = manifest.get("run_id")
+    status_report = snapshot_status(manifest_path)
+    records = [a for a in status_report["artifacts"] if isinstance(a, dict)]
+
+    findings: list[PreflightFinding] = []
+    checks: list[dict[str, str]] = []
+
+    def add(
+        code: str, severity: str, area: str, detail: str, artifact: str | None = None
+    ) -> None:
+        findings.append(
+            PreflightFinding(
+                code=code,
+                severity=severity,
+                area=area,
+                detail=detail,
+                artifact=artifact,
             )
         )
 
-    # ── Aggregate: fail > not_applicable (unknown profile) > warn > pass ────
-    severity_order = {SEVERITY_FAIL: 0, SEVERITY_WARN: 1, SEVERITY_INFO: 2}
-    ordered_findings = tuple(
-        sorted(findings, key=lambda f: (severity_order[f.severity], f.code, f.artifact or "", f.detail))
+    # ── Effective availability: manifest role + file on disk ────────────────
+    records_by_role = _records_by_role(records)
+    links = manifest.get("links") if isinstance(manifest.get("links"), dict) else {}
+    linked_paths = _resolve_linked_sidecar_paths(
+        manifest_dir=manifest_dir,
+        manifest_path=manifest_path,
+        links=links,
+        add=add,
     )
-    if any(f.severity == SEVERITY_FAIL for f in ordered_findings):
-        overall = STATUS_FAIL
-    elif not task_profile_known:
-        overall = STATUS_NA
-    elif any(f.severity == SEVERITY_WARN for f in ordered_findings):
-        overall = STATUS_WARN
-    else:
-        overall = STATUS_PASS
+    artifact_paths_by_role = _resolve_artifact_paths(
+        manifest_path=manifest_path,
+        manifest_dir=manifest_dir,
+        records_by_role=records_by_role,
+        linked_paths=linked_paths,
+    )
+    available_roles, file_missing_roles = _manifest_role_availability(
+        records_by_role,
+        artifact_paths_by_role,
+    )
+    _apply_linked_role_availability(
+        available_roles,
+        file_missing_roles,
+        linked_paths=linked_paths,
+        links=links,
+    )
 
-    check_order = {name: i for i, name in enumerate(
-        (
-            "task_profile",
-            "required_artifacts",
-            "recommended_artifacts",
-            "artifact_files",
-            "snapshot_profile_policy",
-            "validation_state",
-            "freshness",
-            "used_citations",
-            "used_ranges",
-            "does_not_establish",
+    # ── Task profile expectation (Required Reading Protocol, reused) ────────
+    protocol = default_required_reading_protocol()
+    required_reading = resolve_required_reading(
+        protocol, available_roles, preflight_input.task_profile
+    )
+    task_profile_known = required_reading["status"] != STATUS_NA
+    _record_task_profile_status(
+        task_profile=preflight_input.task_profile,
+        task_profile_known=task_profile_known,
+        protocol=protocol,
+        checks=checks,
+        add=add,
+    )
+
+    required_roles = list(required_reading["required"])
+    recommended_roles = list(required_reading["recommended"])
+    missing_required = list(required_reading["missing_required"])
+    missing_recommended = list(required_reading["missing_recommended"])
+    required_role_set = set(required_roles)
+    recommended_role_set = set(recommended_roles)
+
+    def add_sidecar_read_failure(role: str, detail: str) -> None:
+        if role in required_role_set:
+            add(
+                "validation_required_sidecar_unreadable",
+                SEVERITY_FAIL,
+                "validation",
+                detail,
+                artifact=role,
+            )
+        else:
+            add(
+                "validation_unreadable",
+                SEVERITY_WARN,
+                "validation",
+                detail,
+                artifact=role,
+            )
+
+    _record_missing_artifacts(
+        missing_required,
+        file_missing_roles=file_missing_roles,
+        requirement="required",
+        severity=SEVERITY_FAIL,
+        area="required_artifacts",
+        code="missing_required_artifact",
+        add=add,
+    )
+    _record_missing_artifacts(
+        missing_recommended,
+        file_missing_roles=file_missing_roles,
+        requirement="recommended",
+        severity=SEVERITY_WARN,
+        area="recommended_artifacts",
+        code="missing_recommended_artifact",
+        add=add,
+    )
+    _record_required_reading_checks(
+        task_profile_known=task_profile_known,
+        missing_required=missing_required,
+        missing_recommended=missing_recommended,
+        checks=checks,
+    )
+    _record_artifact_file_status(
+        file_missing_roles=file_missing_roles,
+        required_role_set=required_role_set,
+        recommended_role_set=recommended_role_set,
+        checks=checks,
+        add=add,
+    )
+
+    artifact_statuses = _build_artifact_statuses(
+        manifest_path=manifest_path,
+        records_by_role=records_by_role,
+        linked_paths=linked_paths,
+        artifact_paths_by_role=artifact_paths_by_role,
+        available_roles=available_roles,
+        file_missing_roles=file_missing_roles,
+        required_role_set=required_role_set,
+        recommended_role_set=recommended_role_set,
+    )
+    evidence_layers = _build_evidence_layers(artifact_statuses)
+
+    # ── Snapshot profile policy (generation-side, re-evaluated) ─────────────
+    snapshot_profile, snapshot_profile_evaluation = _evaluate_snapshot_profile_policy(
+        manifest,
+        checks=checks,
+        add=add,
+    )
+
+    # ── Degraded validation states (diagnostic layer, never hidden) ─────────
+    validation = _evaluate_validation_state(
+        linked_paths=linked_paths,
+        links=links,
+        artifact_paths_by_role=artifact_paths_by_role,
+        snapshot_profile_evaluation=snapshot_profile_evaluation,
+        manifest_path=manifest_path,
+        manifest_run_id=manifest_run_id,
+        findings=findings,
+        checks=checks,
+        add=add,
+        add_sidecar_read_failure=add_sidecar_read_failure,
+    )
+
+    # ── Freshness / provenance visibility ───────────────────────────────────
+    freshness = _evaluate_freshness(
+        manifest=manifest,
+        preflight_input=preflight_input,
+        checks=checks,
+        add=add,
+    )
+
+    # ── Consumption declaration (negative semantics are mandatory) ──────────
+    declaration_block, used_citations_input, used_ranges_input = (
+        _prepare_consumption_declaration(
+            preflight_input=preflight_input,
+            checks=checks,
+            add=add,
         )
-    )}
-    ordered_checks = tuple(sorted(checks, key=lambda c: check_order.get(c["name"], len(check_order))))
+    )
+
+    # ── Used citations: resolve against the citation map ────────────────────
+    used_citations_block = _evaluate_used_citations(
+        used_citations_input=used_citations_input,
+        available_roles=available_roles,
+        artifact_paths_by_role=artifact_paths_by_role,
+        findings=findings,
+        checks=checks,
+        add=add,
+    )
+
+    # ── Used ranges: bind to available artifacts and line bounds ────────────
+    used_ranges_block = _evaluate_used_ranges(
+        used_ranges_input=used_ranges_input,
+        available_roles=available_roles,
+        artifact_paths_by_role=artifact_paths_by_role,
+        checks=checks,
+        add=add,
+    )
+
+    # ── Aggregate: fail > not_applicable (unknown profile) > warn > pass ────
+    ordered_findings, overall = _ordered_findings_and_status(
+        findings,
+        task_profile_known=task_profile_known,
+    )
+    ordered_checks = _ordered_checks(checks)
 
     data: dict[str, Any] = {
         "kind": KIND,
@@ -1131,7 +1790,9 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         "missing_required_artifacts": missing_required,
         "missing_recommended_artifacts": missing_recommended,
         "artifact_statuses": [s.to_dict() for s in artifact_statuses],
-        "evidence_layers": {layer: sorted(roles) for layer, roles in evidence_layers.items()},
+        "evidence_layers": {
+            layer: sorted(roles) for layer, roles in evidence_layers.items()
+        },
         "validation": validation,
         "freshness": freshness,
         "used_citations": used_citations_block,
@@ -1141,9 +1802,15 @@ def consumption_preflight(preflight_input: PreflightInput) -> PreflightResult:
         "checks": list(ordered_checks),
         "findings": [f.to_dict() for f in ordered_findings],
         "finding_counts": {
-            SEVERITY_FAIL: sum(1 for f in ordered_findings if f.severity == SEVERITY_FAIL),
-            SEVERITY_WARN: sum(1 for f in ordered_findings if f.severity == SEVERITY_WARN),
-            SEVERITY_INFO: sum(1 for f in ordered_findings if f.severity == SEVERITY_INFO),
+            SEVERITY_FAIL: sum(
+                1 for f in ordered_findings if f.severity == SEVERITY_FAIL
+            ),
+            SEVERITY_WARN: sum(
+                1 for f in ordered_findings if f.severity == SEVERITY_WARN
+            ),
+            SEVERITY_INFO: sum(
+                1 for f in ordered_findings if f.severity == SEVERITY_INFO
+            ),
         },
         "mutation_boundary": json.loads(json.dumps(MUTATION_BOUNDARY)),
         "does_not_establish": list(DOES_NOT_ESTABLISH),
