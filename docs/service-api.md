@@ -241,9 +241,9 @@ All runtime artifacts stored in the `QueryArtifactStore` (`query_trace`, `contex
 
 - Policy ID: `runtime-artifact-retention.v1`.
 - Policy status: `explicitly_deferred`.
-- No GC (Garbage Collection) is applied.
-- No TTL (Time-to-Live) is set.
-- No automatic deletion occurs.
+- Query and lookup paths apply no automatic GC (Garbage Collection).
+- No TTL (Time-to-Live) is set and no automatic deletion occurs.
+- A separate manual store operation is available through `QueryArtifactStore.retention_plan()` / `apply_retention()`; it is not triggered by an HTTP lookup/query request and requires complete protection evidence plus the exact plan/store hash.
 - Store diagnostics expose the policy ID and status without rewriting the store.
 - Legacy entries missing these fields are transparently backfilled on read and are not rewritten by lookup.
 

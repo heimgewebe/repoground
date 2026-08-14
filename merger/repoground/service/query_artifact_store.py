@@ -1,12 +1,23 @@
-import json
+import contextlib
 import copy
+import json
+import logging
 import threading
 import uuid
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
+from ..core.rooted_filesystem import (
+    RootedFilesystemError,
+    atomic_write_bytes,
+    exclusive_file_lock,
+    make_directories,
+    path_exists,
+    read_regular_bytes,
+)
+from .runtime_artifact_gc import RuntimeArtifactGCError
+from .runtime_artifact_gc_store import RuntimeArtifactGCStore
 from .runtime_artifact_retention import (
     RETENTION_POLICY_ID,
     runtime_artifact_metadata_table,
@@ -16,6 +27,7 @@ from .runtime_artifact_retention import (
 logger = logging.getLogger(__name__)
 
 _STORE_FILENAME = "query_artifacts.json"
+_LOCK_FILENAME = ".query_artifacts.lock"
 
 # Per-type classification metadata injected into every stored entry.
 # The table is derived from the machine-readable retention policy so lookup
@@ -85,8 +97,8 @@ class QueryArtifactStore:
     after the store location changes (e.g. different merges_dir).
 
     Known limitations:
-    - Retention policy is explicit and machine-readable, but TTL and GC are
-      deliberately disabled: the store grows unbounded.
+    - Lookup remains TTL-free and has no automatic GC. Manual retention effects
+      require an explicit hash-bound plan/apply call with complete protection evidence.
     - No federation artifact support.
 
     Storage format: JSON list at {storage_dir}/query_artifacts.json.
@@ -94,32 +106,78 @@ class QueryArtifactStore:
     """
 
     def __init__(self, storage_dir: Path):
-        self.storage_dir = storage_dir
-        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        self.storage_dir = Path(storage_dir)
+        try:
+            make_directories(self.storage_dir, mode=0o700)
+        except RootedFilesystemError as exc:
+            raise RuntimeArtifactGCError(
+                "unsafe_store_directory", f"artifact storage directory is unsafe: {self.storage_dir}"
+            ) from exc
         self._store_file = self.storage_dir / _STORE_FILENAME
+        self._lock_file = self.storage_dir / _LOCK_FILENAME
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._load()
 
+    def _read_store_locked(self) -> bytes:
+        if not path_exists(self._store_file):
+            self._cache = {}
+            return b"[]"
+        try:
+            payload = read_regular_bytes(self._store_file)
+            data = json.loads(payload.decode("utf-8"))
+        except (RootedFilesystemError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeArtifactGCError(
+                "unsafe_store_entry", f"query artifact store cannot be read safely: {self._store_file}"
+            ) from exc
+        if not isinstance(data, list):
+            raise RuntimeArtifactGCError("invalid_store_json", "query artifact store root must be a list")
+        loaded: Dict[str, Dict[str, Any]] = {}
+        for index, entry in enumerate(data):
+            if not isinstance(entry, dict):
+                raise RuntimeArtifactGCError(
+                    "invalid_store_entry", f"query artifact store entry {index} is not an object"
+                )
+            artifact_id = entry.get("id")
+            if not isinstance(artifact_id, str) or not artifact_id or artifact_id in loaded:
+                raise RuntimeArtifactGCError(
+                    "invalid_store_entry", f"query artifact store entry {index} has an invalid/duplicate id"
+                )
+            loaded[artifact_id] = entry
+        self._cache = loaded
+        return payload
+
     def _load(self) -> None:
         with self._lock:
-            if not self._store_file.exists():
-                return
             try:
-                data = json.loads(self._store_file.read_text(encoding="utf-8"))
-                for entry in data:
-                    self._cache[entry["id"]] = entry
-            except Exception as e:
-                logger.error("Failed to load query artifacts from %s: %s", self._store_file, e)
+                with exclusive_file_lock(self._lock_file, mode=0o600):
+                    self._read_store_locked()
+            except (RuntimeArtifactGCError, RootedFilesystemError) as exc:
+                logger.error("Failed to load query artifacts from %s: %s", self._store_file, exc)
+                self._cache = {}
 
-    def _save(self) -> None:
-        tmp = self._store_file.with_suffix(".tmp")
-        tmp.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_text(
-            json.dumps(list(self._cache.values()), indent=2),
-            encoding="utf-8",
-        )
-        tmp.replace(self._store_file)
+    @contextlib.contextmanager
+    def _disk_lock(self) -> Iterator[bytes]:
+        with self._lock:
+            try:
+                with exclusive_file_lock(self._lock_file, mode=0o600):
+                    yield self._read_store_locked()
+            except RuntimeArtifactGCError:
+                raise
+            except RootedFilesystemError as exc:
+                raise RuntimeArtifactGCError(
+                    "unsafe_store_entry", f"query artifact store lock is unsafe: {self._lock_file}"
+                ) from exc
+
+    def _save(self) -> bytes:
+        payload = json.dumps(list(self._cache.values()), indent=2).encode("utf-8")
+        try:
+            atomic_write_bytes(self._store_file, payload, mode=0o600)
+        except RootedFilesystemError as exc:
+            raise RuntimeArtifactGCError(
+                "store_write_failed", f"query artifact store write failed: {self._store_file}"
+            ) from exc
+        return payload
 
     def store(
         self,
@@ -163,7 +221,8 @@ class QueryArtifactStore:
             **runtime_meta,
         }
 
-        with self._lock:
+        with self._disk_lock():
+            RuntimeArtifactGCStore(self.storage_dir).assert_no_pending()
             self._cache[artifact_id] = entry
             self._save()
 
@@ -176,32 +235,59 @@ class QueryArtifactStore:
         backfilling from _RUNTIME_ARTIFACT_METADATA for legacy entries that
         predate the metadata schema addition.
         """
-        with self._lock:
+        with self._disk_lock():
             raw = self._cache.get(artifact_id)
             if raw is None:
                 return None
             return _with_runtime_metadata(raw)
 
     def get_all(self) -> List[Dict[str, Any]]:
-        with self._lock:
+        with self._disk_lock():
             return sorted(
                 (_with_runtime_metadata(e) for e in self._cache.values()),
                 key=lambda e: e.get("created_at", ""),
                 reverse=True,
             )
 
+    def retention_plan(
+        self,
+        *,
+        protection: Dict[str, Any],
+        as_of: Optional[str] = None,
+        profile_id: str = "conservative",
+    ) -> Dict[str, Any]:
+        """Return a deterministic manual-GC dry-run without changing artifacts."""
+        return RuntimeArtifactGCStore(self.storage_dir).plan(
+            protection=protection,
+            as_of=as_of,
+            profile_id=profile_id,
+        )
+
+    def apply_retention(
+        self,
+        *,
+        plan: Dict[str, Any],
+        protection: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Apply one exact plan and refresh this instance from the disk readback."""
+        receipt = RuntimeArtifactGCStore(self.storage_dir).apply(
+            plan=plan,
+            protection=protection,
+        )
+        self._load()
+        return receipt
+
     def diagnostics(self) -> Dict[str, Any]:
         """Return a read-only retention diagnostics snapshot of the store.
 
-        The store currently has no GC and no TTL: it grows unbounded for the
-        lifetime of the underlying JSON file.  This method surfaces what *is*
-        there (counts, age range, on-disk size) so operators can observe
-        growth without enabling any deletion path.
+        Lookup and normal store writes remain TTL-free and have no automatic GC.
+        This method surfaces counts, age range and on-disk size without invoking
+        the separate manual plan/apply retention path.
 
         Read-only contract:
-        - Does not mutate the in-memory cache.
+        - May refresh the in-memory cache from disk so concurrent GC is observed.
         - Does not write to or truncate the on-disk store file.
-        - Does not enable any retention/GC/TTL behaviour.
+        - Does not run manual GC or enable automatic retention/TTL behaviour.
         - Does not enumerate artifact IDs or payloads.
 
         Legacy entries written before the runtime-metadata schema (which may
@@ -231,7 +317,7 @@ class QueryArtifactStore:
                 ``ttl_enabled``             — const ``False``
                 ``retention_policy_id``  — machine-readable policy id
         """
-        with self._lock:
+        with self._disk_lock():
             total = len(self._cache)
             by_type: Dict[str, int] = {}
             oldest: Optional[str] = None

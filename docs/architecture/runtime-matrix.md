@@ -56,7 +56,6 @@ Runtime-Artefakte (`query_trace`, `context_bundle`, `agent_query_session`) trage
 | `gc_mode` | `"not_implemented"` |
 | `deletion_mode` | `"not_supported_by_policy"` |
 
-Die maschinenlesbare Policy liegt in `merger/repoground/service/runtime_artifact_retention.py` (`policy_id: "runtime-artifact-retention.v1"`, `status: "explicitly_deferred"`).
+Die maschinenlesbare Lookup-Policy liegt in `merger/repoground/service/runtime_artifact_retention.py` (`policy_id: "runtime-artifact-retention.v1"`, `status: "explicitly_deferred"`). Die Metadaten oben bleiben unverändert: Lookup und Zeitablauf löschen nichts.
 
-**Kein GC. Keine TTL. Keine automatische Löschung.**
-Die Policy macht die Deferral-Entscheidung explizit; sie ist keine Cleanup-Engine.
+**Keine TTL und keine automatische Löschung.** Zusätzlich existiert `runtime-artifact-manual-gc.v1` als expliziter Operatorpfad: Budgetüberschreitungen erzeugen zunächst nur einen hashgebundenen Plan; Apply benötigt vollständige, frisch geprüfte Schutzreferenzen und schreibt auditierbare Transaction-/Receipt-Belege.
