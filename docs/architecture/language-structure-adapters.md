@@ -144,13 +144,24 @@ ausgewiesen. Interpreterversion, Betriebssystem, Maschinenarchitektur und
 logische CPU-Zahl bleiben als Messumgebung sichtbar. Laufzeitwerte sind
 Umweltbeobachtungen und kein Cross-Machine-Reproduzierbarkeitsbeweis.
 
-Ohne revisions- und Goldset-gebundene Agent-Benefit-Messung gegen eine benannte
-Fallbackroute bleibt der Status `keep_optional`. Fehlende, nichtfinite,
-widersprüchliche oder zu schwache Inputs sowie fehlende **oder unerwartete**
-Degradationsgründe schließen das Gate. Selbst ein
-vollständig bestandenes Diagnosegate setzt `default_promoted` nicht: es markiert
-nur `eligible_for_explicit_promotion_review`; eine separate reviewte
-Konfigurationsänderung bleibt erforderlich.
+Der Promotionspfad ist derzeit bewusst hart geschlossen. Ohne externes
+`agent_benefit` bleibt der Status `keep_optional` mit
+`revision_bound_agent_benefit_missing`. Das Legacy-Argument `--agent-benefit`
+bleibt nur zur Eingabekompatibilität erhalten: Auch ein syntaktisch gültiges oder
+maximal positives Mapping ist **keine** Promotionsautorität und ergibt
+`keep_optional` mit `verified_component_delta_agent_benefit_missing`. Es gibt
+aktuell keinen Eingabepfad zu `eligible_for_explicit_promotion_review`.
+
+Eine spätere Wiederöffnung erfordert einen verifizierten Component-Delta-Lauf im
+bestehenden generischen Agent-Benchmark. Baseline und Treatment müssen dabei
+denselben RepoGround-Kontext, dasselbe Modell, denselben Prompt, dasselbe Budget,
+dieselbe Source-Revision und denselben Grader verwenden; nur das revisions- und
+hashgebundene `language_structure_json` darf variieren. Erst eine solche über die
+generischen Receipt-, Scoring- und Pair-Integrity-Flächen geprüfte Messung darf
+wieder in eine separate Promotionsentscheidung eingehen. Die statischen
+Qualitäts-, Nullfall-, Determinismus- und Kostenmetriken dieses Benchmarks bleiben
+bis dahin Diagnoseevidenz, nicht Agentennutzen. `default_promoted` bleibt in
+jedem Fall `false`.
 
 ## Nichtaussagen
 
