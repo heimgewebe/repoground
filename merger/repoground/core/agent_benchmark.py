@@ -351,9 +351,11 @@ def _decode_runner_output(raw: bytes) -> dict[str, Any]:
 
 
 def _verify_execution_component_artifact(request: Mapping[str, Any]) -> None:
+    if "component_delta" not in request:
+        return
     binding = request.get("component_delta")
     if not isinstance(binding, Mapping):
-        return
+        raise AgentBenchmarkError("component_delta execution binding is invalid")
     artifact = binding.get("artifact")
     artifact_sha256 = binding.get("artifact_sha256")
     condition = request.get("condition")

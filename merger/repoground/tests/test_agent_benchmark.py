@@ -644,6 +644,19 @@ def test_execute_runner_rechecks_unchanged_component_artifact_before_start(
     assert marker.read_text(encoding="utf-8") == "started"
 
 
+def test_execute_runner_rejects_malformed_component_delta_binding_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    treatment["component_delta"] = None
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="execution binding is invalid"):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
 def test_execute_runner_rejects_changed_component_artifact_before_start(
     tmp_path: Path,
 ) -> None:
