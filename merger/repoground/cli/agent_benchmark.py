@@ -201,7 +201,10 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument(
         "--manifest-bindings",
         required=True,
-        help="Repository-id to manifest/hash/MCP-command mapping.",
+        help=(
+            "Repository-id to manifest/hash/MCP-command mapping; "
+            "component_delta also requires component bindings."
+        ),
     )
     plan.add_argument("--repetitions", type=int, default=2)
     plan.add_argument("--out", required=True)

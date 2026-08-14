@@ -144,24 +144,31 @@ ausgewiesen. Interpreterversion, Betriebssystem, Maschinenarchitektur und
 logische CPU-Zahl bleiben als Messumgebung sichtbar. Laufzeitwerte sind
 Umweltbeobachtungen und kein Cross-Machine-Reproduzierbarkeitsbeweis.
 
-Der Promotionspfad ist derzeit bewusst hart geschlossen. Ohne externes
+Der Promotionspfad bleibt standardmäßig hart geschlossen. Ohne externes
 `agent_benefit` bleibt der Status `keep_optional` mit
 `revision_bound_agent_benefit_missing`. Das Legacy-Argument `--agent-benefit`
-bleibt nur zur Eingabekompatibilität erhalten: Auch ein syntaktisch gültiges oder
-maximal positives Mapping ist **keine** Promotionsautorität und ergibt
-`keep_optional` mit `verified_component_delta_agent_benefit_missing`. Es gibt
-aktuell keinen Eingabepfad zu `eligible_for_explicit_promotion_review`.
+bleibt zur Eingabekompatibilität erhalten: Ein handgebautes oder bloß positives
+Aggregate ist **keine** Promotionsautorität und ergibt `keep_optional` mit
+`verified_component_delta_agent_benefit_missing`.
 
-Eine spätere Wiederöffnung erfordert einen verifizierten Component-Delta-Lauf im
-bestehenden generischen Agent-Benchmark. Baseline und Treatment müssen dabei
-denselben RepoGround-Kontext, dasselbe Modell, denselben Prompt, dasselbe Budget,
-dieselbe Source-Revision und denselben Grader verwenden; nur das revisions- und
-hashgebundene `language_structure_json` darf variieren. Erst eine solche über die
-generischen Receipt-, Scoring- und Pair-Integrity-Flächen geprüfte Messung darf
-wieder in eine separate Promotionsentscheidung eingehen. Die statischen
-Qualitäts-, Nullfall-, Determinismus- und Kostenmetriken dieses Benchmarks bleiben
-bis dahin Diagnoseevidenz, nicht Agentennutzen. `default_promoted` bleibt in
-jedem Fall `false`.
+Der generische Agent-Benchmark unterstützt dafür nun `component_delta`: Wir
+vergleichen dasselbe RepoGround einmal ohne und einmal mit genau einem
+Zusatzbaustein. Modell/Runner, Repo-Commit, Prompt, Budget, Tools und
+RepoGround-Kontext müssen identisch sein; nur das revisionsgebundene
+Komponentenartefakt darf variieren. Das Treatment-Artefakt wird relativ zum
+gebundenen Manifest gelesen, stabil und größenbegrenzt geprüft und gegen seine
+tatsächlichen Bytes gehasht. Die Evaluation bindet die Treatment-Artefakte
+eindeutig an ihre Repositories.
+
+`language_structure_json` akzeptiert daraus nur reale, vollständig gültige
+Paired-Agent-Runs mit verifizierter Pair-Isolation, passender Source-Revision,
+bytegebundenen Treatment-Artefakten, mindestens einer nützlichen Klasse und keiner
+schädlichen Klasse. Das öffnet ausschließlich
+`eligible_for_explicit_promotion_review`; `broad_activation_eligible` und
+`default_promoted` bleiben `false`. Der Component-Delta-Lauf beweist weder
+allgemeine Kausalität noch Runner-/Grader-Ehrlichkeit oder allgemeine
+Agentenüberlegenheit. Die statischen Qualitäts-, Nullfall-, Determinismus- und
+Kostenmetriken bleiben eigenständige Diagnoseevidenz.
 
 ## Nichtaussagen
 

@@ -10,16 +10,20 @@ import os
 import subprocess
 import tempfile
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from merger.repoground.core.agent_benchmark_common import (
     AgentBenchmarkError,
+    COMPONENT_DELTA_MODE,
     DOES_NOT_ESTABLISH,
     MAX_JSON_BYTES,
     MAX_RUNNER_STDERR_BYTES,
     REQUEST_KIND,
     VERSION,
     canonical_json,
+    comparison_contract,
+    comparison_mode,
     is_repository_relative_path,
     list_value,
     load_json,
@@ -31,6 +35,10 @@ from merger.repoground.core.agent_benchmark_common import (
     write_json_atomic,
 )
 from merger.repoground.core.agent_benchmark_evaluation import score_receipt
+from merger.repoground.core.bounded_artifact_read import (
+    MAX_REGISTERED_ARTIFACT_BYTES,
+    read_stable_regular_file_bytes,
+)
 from merger.repoground.core.agent_benchmark_integrity import evaluate_paired_runs
 from merger.repoground.core.agent_benchmark_policy import BENCHMARK_REPETITIONS
 from merger.repoground.core.agent_benchmark_receipts import validate_receipt
@@ -103,11 +111,12 @@ def _condition_order(case_index: int, repetition: int) -> tuple[str, str]:
 
 
 def _repobrief_binding(
+    taskset: Mapping[str, Any],
     condition: str,
     repository_id: str,
     manifest_bindings: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any] | None:
-    if condition == "baseline":
+    if condition == "baseline" and comparison_mode(taskset) != COMPONENT_DELTA_MODE:
         return None
     binding = manifest_bindings.get(repository_id)
     if not isinstance(binding, Mapping):
@@ -119,6 +128,90 @@ def _repobrief_binding(
         "manifest_sha256": str(binding["manifest_sha256"]),
         "mcp_command": list(binding["mcp_command"]),
     }
+
+
+def _verify_component_artifact_bytes(
+    repository_binding: Mapping[str, Any],
+    *,
+    repository_id: str,
+    artifact_path: str,
+    expected_sha256: str,
+) -> None:
+    manifest = repository_binding.get("manifest")
+    if not isinstance(manifest, str) or not manifest or not Path(manifest).is_absolute():
+        raise AgentBenchmarkError(
+            f"component artifact requires an absolute manifest binding for {repository_id}"
+        )
+    if not is_repository_relative_path(artifact_path):
+        raise AgentBenchmarkError(
+            f"component artifact path is not repository-relative for {repository_id}"
+        )
+    artifact_root = Path(manifest).parent.resolve(strict=False)
+    candidate = artifact_root / artifact_path
+    try:
+        candidate.resolve(strict=False).relative_to(artifact_root)
+    except ValueError as exc:
+        raise AgentBenchmarkError(
+            f"component artifact escapes manifest root for {repository_id}"
+        ) from exc
+    raw, _identity, failure, detail = read_stable_regular_file_bytes(
+        candidate, max_bytes=MAX_REGISTERED_ARTIFACT_BYTES
+    )
+    if failure is not None or raw is None:
+        suffix = f": {detail}" if detail else ""
+        raise AgentBenchmarkError(
+            f"component artifact {failure or 'unreadable'} for {repository_id}{suffix}"
+        )
+    if sha256_bytes(raw) != expected_sha256:
+        raise AgentBenchmarkError(
+            f"component artifact SHA-256 mismatch for {repository_id}"
+        )
+
+
+def _component_delta_binding(
+    taskset: Mapping[str, Any],
+    condition: str,
+    repository_id: str,
+    manifest_bindings: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any] | None:
+    if comparison_mode(taskset) != COMPONENT_DELTA_MODE:
+        return None
+    comparison = comparison_contract(taskset)
+    result: dict[str, Any] = {
+        "component": str(comparison["component"]),
+        "source_revision": str(comparison["source_revision"]),
+        "artifact": None,
+        "artifact_sha256": None,
+    }
+    if condition == "baseline":
+        return result
+    repository_binding = manifest_bindings.get(repository_id)
+    components = mapping_value(
+        repository_binding.get("components") if isinstance(repository_binding, Mapping) else None
+    )
+    artifact = mapping_value(components.get(str(comparison["component"])))
+    if (
+        artifact.get("source_revision") != comparison["source_revision"]
+        or not isinstance(artifact.get("artifact"), str)
+        or not artifact.get("artifact")
+        or not isinstance(artifact.get("artifact_sha256"), str)
+        or len(str(artifact.get("artifact_sha256"))) != 64
+        or any(ch not in "0123456789abcdef" for ch in str(artifact.get("artifact_sha256")))
+    ):
+        raise AgentBenchmarkError(
+            f"missing or invalid component artifact binding for {repository_id}"
+        )
+    artifact_path = str(artifact["artifact"])
+    artifact_sha256 = str(artifact["artifact_sha256"])
+    _verify_component_artifact_bytes(
+        repository_binding,
+        repository_id=repository_id,
+        artifact_path=artifact_path,
+        expected_sha256=artifact_sha256,
+    )
+    result["artifact"] = artifact_path
+    result["artifact_sha256"] = artifact_sha256
+    return result
 
 
 def _build_request(
@@ -173,7 +266,14 @@ def _build_request(
             ),
         },
         "repobrief": _repobrief_binding(
-            condition, repository_id, manifest_bindings
+            taskset, condition, repository_id, manifest_bindings
+        ),
+        **(
+            {"component_delta": component_delta}
+            if (component_delta := _component_delta_binding(
+                taskset, condition, repository_id, manifest_bindings
+            )) is not None
+            else {}
         ),
         "isolation": {
             "fresh_session": True,

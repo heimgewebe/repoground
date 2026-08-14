@@ -18,6 +18,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from merger.repoground.core.agent_benchmark_common import (
+    CATEGORIES,
+    is_repository_relative_path,
+)
 from merger.repoground.core.bounded_artifact_read import (
     read_stable_regular_file_bytes,
 )
@@ -434,16 +438,207 @@ def _promotion_report_binding(
     return str(source_revision), goldset_sha256, case_count
 
 
+def _promotion_measurements(
+    report: Mapping[str, Any],
+) -> tuple[tuple[float, float, float, float], float, int, int, int, int, int] | None:
+    metrics = report.get("metrics")
+    aggregate = metrics.get("aggregate") if isinstance(metrics, Mapping) else None
+    costs = report.get("costs")
+    nulls = report.get("true_nulls")
+    if (
+        not isinstance(aggregate, Mapping)
+        or set(aggregate) != {"symbol", "relations", "ranges"}
+        or not all(_metric_contract_valid(aggregate[lane]) for lane in aggregate)
+        or not isinstance(costs, Mapping)
+        or not isinstance(nulls, Mapping)
+    ):
+        return None
+    rates = (
+        _finite_rate(aggregate.get("symbol", {}).get("recall")),
+        _finite_rate(aggregate.get("relations", {}).get("precision")),
+        _finite_rate(aggregate.get("relations", {}).get("recall")),
+        _finite_rate(aggregate.get("ranges", {}).get("recall")),
+    )
+    latency_median = _finite_nonnegative(costs.get("latency_ms_median"))
+    latency = _finite_nonnegative(costs.get("latency_ms_p95"))
+    peak_memory = _nonnegative_integer(costs.get("peak_memory_bytes_max"))
+    index_size_total = _nonnegative_integer(costs.get("index_size_bytes_total"))
+    index_size = _nonnegative_integer(costs.get("index_size_bytes_max"))
+    null_case_count = _nonnegative_integer(nulls.get("case_count"))
+    null_pass_count = _nonnegative_integer(nulls.get("pass_count"))
+    null_false_positives = _nonnegative_integer(nulls.get("false_positive_records"))
+    values = (
+        *rates,
+        latency_median,
+        latency,
+        peak_memory,
+        index_size_total,
+        index_size,
+        null_case_count,
+        null_pass_count,
+        null_false_positives,
+    )
+    if any(value is None for value in values):
+        return None
+    if (
+        float(latency) < float(latency_median)
+        or int(index_size_total) < int(index_size)
+        or int(null_pass_count) > int(null_case_count)
+    ):
+        return None
+    return (
+        tuple(float(value) for value in rates),
+        float(latency),
+        int(peak_memory),
+        int(index_size),
+        int(null_case_count),
+        int(null_pass_count),
+        int(null_false_positives),
+    )
+
+
+def _verified_component_delta_agent_benefit(
+    agent_benefit: Mapping[str, Any], *, source_revision: str
+) -> bool:
+    comparison = agent_benefit.get("comparison")
+    decision = agent_benefit.get("decision")
+    cases = agent_benefit.get("cases")
+    classes = agent_benefit.get("classes")
+    if not (
+        agent_benefit.get("kind") == "repobrief.agent_benchmark_evaluation"
+        and agent_benefit.get("version") == "1.0"
+        and isinstance(agent_benefit.get("taskset_id"), str)
+        and bool(agent_benefit.get("taskset_id"))
+        and isinstance(agent_benefit.get("taskset_sha256"), str)
+        and _SHA256_RE.fullmatch(str(agent_benefit.get("taskset_sha256"))) is not None
+        and agent_benefit.get("measurement_scope") == "real_paired_agent_runs"
+        and isinstance(comparison, Mapping)
+        and comparison.get("mode") == "component_delta"
+        and comparison.get("component") == "language_structure_json"
+        and comparison.get("source_revision") == source_revision
+        and comparison.get("pair_isolation_verified") is True
+        and isinstance(decision, Mapping)
+        and decision.get("status") == "useful_class"
+        and decision.get("default_promoted") is False
+        and decision.get("harmful_classes") == []
+        and isinstance(cases, list)
+        and bool(cases)
+        and all(isinstance(item, Mapping) and item.get("pair_valid") is True for item in cases)
+        and isinstance(classes, list)
+        and len(classes) == len(CATEGORIES)
+        and all(
+            isinstance(item, Mapping)
+            and item.get("category") in CATEGORIES
+            and item.get("classification") in {"useful", "neutral"}
+            and isinstance(item.get("valid_pair_count"), int)
+            and not isinstance(item.get("valid_pair_count"), bool)
+            and int(item.get("valid_pair_count")) > 0
+            for item in classes
+        )
+        and {str(item.get("category")) for item in classes} == set(CATEGORIES)
+        and sum(int(item.get("valid_pair_count")) for item in classes) == len(cases)
+        and {
+            str(item.get("category"))
+            for item in classes
+            if isinstance(item, Mapping) and item.get("classification") == "useful"
+        }
+        == set(decision.get("useful_classes", []))
+        and bool(decision.get("useful_classes"))
+    ):
+        return False
+    run_count = _nonnegative_integer(agent_benefit.get("run_count"))
+    valid_run_count = _nonnegative_integer(agent_benefit.get("valid_run_count"))
+    invalid_run_count = _nonnegative_integer(agent_benefit.get("invalid_run_count"))
+    if (
+        run_count is None
+        or run_count == 0
+        or run_count != 2 * len(cases)
+        or valid_run_count != run_count
+        or invalid_run_count != 0
+    ):
+        return False
+    artifacts = comparison.get("treatment_artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        return False
+    repository_ids: set[str] = set()
+    for item in artifacts:
+        if not isinstance(item, Mapping):
+            return False
+        repository_id = item.get("repository_id")
+        artifact = item.get("artifact")
+        artifact_sha256 = item.get("artifact_sha256")
+        if (
+            not isinstance(repository_id, str)
+            or not repository_id
+            or repository_id in repository_ids
+            or not is_repository_relative_path(artifact)
+            or not isinstance(artifact_sha256, str)
+            or _SHA256_RE.fullmatch(artifact_sha256) is None
+        ):
+            return False
+        repository_ids.add(repository_id)
+    return True
+
+
 def decide_language_adapter_promotion(
     report: Mapping[str, Any], *, agent_benefit: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
     """Fail closed until verified component-delta agent evidence exists."""
     try:
-        if _promotion_report_binding(report) is None:
+        report_binding = _promotion_report_binding(report)
+        if report_binding is None:
             return _keep_optional("benchmark_revision_binding_invalid")
+        source_revision, _goldset_sha256, _case_count = report_binding
         if not isinstance(agent_benefit, Mapping):
             return _keep_optional("revision_bound_agent_benefit_missing")
-        return _keep_optional("verified_component_delta_agent_benefit_missing")
+        if not _verified_component_delta_agent_benefit(
+            agent_benefit, source_revision=source_revision
+        ):
+            return _keep_optional("verified_component_delta_agent_benefit_missing")
+        measurements = _promotion_measurements(report)
+        if measurements is None:
+            return _keep_optional("benchmark_metrics_or_costs_invalid")
+        (
+            quality_rates,
+            latency_p95,
+            peak_memory,
+            index_size,
+            null_case_count,
+            null_pass_count,
+            null_false_positives,
+        ) = measurements
+        deterministic = report.get("determinism", {}).get(
+            "semantic_projection_repeated_equal"
+        )
+        degradation_complete = report.get("degradation_expectations", {}).get(
+            "exact_match"
+        )
+        symbol_recall, relation_precision, relation_recall, range_recall = quality_rates
+        quality_gates_pass = (
+            symbol_recall >= 0.8
+            and relation_precision >= 0.9
+            and relation_recall >= 0.8
+            and range_recall >= 0.9
+            and null_case_count >= 2
+            and null_pass_count == null_case_count
+            and null_false_positives == 0
+            and deterministic is True
+            and degradation_complete is True
+            and latency_p95 <= 500.0
+            and peak_memory <= 64 * 1024 * 1024
+            and index_size <= 16 * 1024 * 1024
+        )
+        if not quality_gates_pass:
+            return _keep_optional("quality_null_determinism_or_cost_gate_not_met")
+        return {
+            "status": "eligible_for_explicit_promotion_review",
+            "broad_activation_eligible": False,
+            "default_promoted": False,
+            "reason": "verified_component_delta_agent_benefit_and_quality_gates_passed",
+            "source_revision": source_revision,
+            "goldset_sha256": _goldset_sha256,
+            "decision_authority": "none; explicit reviewed configuration change required",
+        }
     except (KeyError, TypeError, ValueError, OverflowError):
         return _keep_optional("promotion_input_malformed")
 

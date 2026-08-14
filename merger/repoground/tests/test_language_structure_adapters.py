@@ -995,6 +995,115 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         == "revision_bound_agent_benefit_missing"
     )
 
+    verified_component_delta = {
+        "kind": "repobrief.agent_benchmark_evaluation",
+        "version": "1.0",
+        "taskset_id": "language-structure-component-delta-fixture",
+        "taskset_sha256": "d" * 64,
+        "measurement_scope": "real_paired_agent_runs",
+        "run_count": 6,
+        "valid_run_count": 6,
+        "invalid_run_count": 0,
+        "cases": [
+            {"pair_valid": True},
+            {"pair_valid": True},
+            {"pair_valid": True},
+        ],
+        "classes": [
+            {"category": "navigation", "valid_pair_count": 1, "classification": "useful"},
+            {"category": "structural", "valid_pair_count": 1, "classification": "neutral"},
+            {
+                "category": "grounding_freshness",
+                "valid_pair_count": 1,
+                "classification": "neutral",
+            },
+        ],
+        "decision": {
+            "status": "useful_class",
+            "useful_classes": ["navigation"],
+            "harmful_classes": [],
+            "default_promoted": False,
+        },
+        "comparison": {
+            "mode": "component_delta",
+            "component": "language_structure_json",
+            "source_revision": revision,
+            "treatment_artifacts": [
+                {
+                    "repository_id": "fixture",
+                    "artifact": "language_structure.json",
+                    "artifact_sha256": "e" * 64,
+                }
+            ],
+            "pair_isolation_verified": True,
+        },
+    }
+    accepted = decide_language_adapter_promotion(
+        report, agent_benefit=verified_component_delta
+    )
+    assert accepted == {
+        "status": "eligible_for_explicit_promotion_review",
+        "broad_activation_eligible": False,
+        "default_promoted": False,
+        "reason": "verified_component_delta_agent_benefit_and_quality_gates_passed",
+        "source_revision": revision,
+        "goldset_sha256": report["goldset_sha256"],
+        "decision_authority": "none; explicit reviewed configuration change required",
+    }
+
+    bad_mutations = []
+    for mutate in (
+        lambda value: value.update(measurement_scope="synthetic_contract_fixture"),
+        lambda value: value["comparison"].update(component="other_component"),
+        lambda value: value["comparison"].update(source_revision="b" * 40),
+        lambda value: value["comparison"].update(pair_isolation_verified=False),
+        lambda value: value["comparison"]["treatment_artifacts"][0].update(
+            artifact="../escape.json"
+        ),
+        lambda value: value["comparison"]["treatment_artifacts"][0].update(
+            artifact_sha256="z" * 64
+        ),
+        lambda value: value.update(run_count=4),
+        lambda value: value.update(valid_run_count=5, invalid_run_count=1),
+        lambda value: value["cases"][0].update(pair_valid=False),
+        lambda value: value["classes"][0].update(classification="harmful"),
+        lambda value: value["decision"].update(harmful_classes=["navigation"]),
+        lambda value: value["decision"].update(default_promoted=True),
+    ):
+        mutated = copy.deepcopy(verified_component_delta)
+        mutate(mutated)
+        bad_mutations.append(mutated)
+    duplicate_artifact = copy.deepcopy(verified_component_delta)
+    duplicate_artifact["comparison"]["treatment_artifacts"].append(
+        copy.deepcopy(duplicate_artifact["comparison"]["treatment_artifacts"][0])
+    )
+    bad_mutations.append(duplicate_artifact)
+    missing_class = copy.deepcopy(verified_component_delta)
+    missing_class["classes"].pop()
+    bad_mutations.append(missing_class)
+    inconsistent_pair_total = copy.deepcopy(verified_component_delta)
+    inconsistent_pair_total["classes"][0]["valid_pair_count"] = 2
+    bad_mutations.append(inconsistent_pair_total)
+    neutral_only = copy.deepcopy(verified_component_delta)
+    neutral_only["classes"][0]["classification"] = "neutral"
+    neutral_only["decision"]["useful_classes"] = []
+    neutral_only["decision"]["status"] = "neutral"
+    bad_mutations.append(neutral_only)
+    for mutated in bad_mutations:
+        assert (
+            decide_language_adapter_promotion(report, agent_benefit=mutated)["reason"]
+            == "verified_component_delta_agent_benefit_missing"
+        )
+
+    degraded_report = copy.deepcopy(report)
+    degraded_report["determinism"]["semantic_projection_repeated_equal"] = False
+    assert (
+        decide_language_adapter_promotion(
+            degraded_report, agent_benefit=verified_component_delta
+        )["reason"]
+        == "quality_null_determinism_or_cost_gate_not_met"
+    )
+
     malformed_report = json.loads(json.dumps(report))
     malformed_report["goldset_sha256"] = "z" * 64
     assert (

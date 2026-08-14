@@ -119,6 +119,17 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 1}
+    },
+    "component_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "source_revision", "artifact", "artifact_sha256"],
+      "properties": {
+        "component": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]+$"},
+        "source_revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "artifact": {"type": ["string", "null"], "minLength": 1},
+        "artifact_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
     }
   }
 }

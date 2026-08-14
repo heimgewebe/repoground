@@ -109,6 +109,30 @@
       "minItems": 1,
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 1}
+    },
+    "comparison": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "component", "source_revision", "treatment_artifacts", "pair_isolation_verified"],
+      "properties": {
+        "mode": {"const": "component_delta"},
+        "component": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]+$"},
+        "source_revision": {"type": "string", "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"},
+        "treatment_artifacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repository_id", "artifact", "artifact_sha256"],
+            "properties": {
+              "repository_id": {"type": "string", "minLength": 1},
+              "artifact": {"type": "string", "minLength": 1},
+              "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "pair_isolation_verified": {"type": "boolean"}
+      }
     }
   },
   "definitions": {

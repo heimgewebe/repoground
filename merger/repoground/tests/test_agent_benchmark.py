@@ -22,6 +22,9 @@ from merger.repoground.core.agent_benchmark import (
     validate_taskset,
 )
 
+from merger.repoground.core.agent_benchmark_requests import pair_request_errors
+from merger.repoground.core.bounded_artifact_read import MAX_REGISTERED_ARTIFACT_BYTES
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TASKSET_PATH = REPO_ROOT / "docs/retrieval/repobrief_agent_benchmark_taskset.v1.json"
 CONTRACT_ROOT = REPO_ROOT / "merger/repoground/contracts"
@@ -685,3 +688,311 @@ def test_transcript_content_is_nonempty_and_bounded(tmp_path: Path) -> None:
     assert "transcript exceeds configured limit" in validate_receipt(
         request, oversized, transcript_root=tmp_path
     )
+
+
+COMPONENT_REVISION = "a" * 40
+
+
+def _component_taskset() -> dict:
+    taskset = copy.deepcopy(_taskset())
+    taskset["comparison"] = {
+        "mode": "component_delta",
+        "component": "language_structure_json",
+        "source_revision": COMPONENT_REVISION,
+    }
+    taskset["tool_policy"]["baseline"] = copy.deepcopy(
+        taskset["tool_policy"]["treatment"]
+    )
+    return taskset
+
+
+def _component_bindings(tmp_path: Path) -> dict[str, dict]:
+    bindings: dict[str, dict] = {}
+    for repository in _taskset()["repositories"]:
+        repository_id = repository["id"]
+        root = tmp_path / repository_id
+        root.mkdir(parents=True)
+        manifest = root / f"{repository_id}.bundle.manifest.json"
+        manifest_raw = (json.dumps({"repository_id": repository_id}) + "\n").encode()
+        manifest.write_bytes(manifest_raw)
+        artifact = root / "language_structure.json"
+        artifact_raw = (json.dumps({"repository_id": repository_id, "component": "language_structure_json"}) + "\n").encode()
+        artifact.write_bytes(artifact_raw)
+        bindings[repository_id] = {
+            "manifest": str(manifest),
+            "manifest_sha256": sha256_bytes(manifest_raw),
+            "mcp_command": ["python", "-m", "merger.repoground.mcp_server"],
+            "components": {
+                "language_structure_json": {
+                    "source_revision": COMPONENT_REVISION,
+                    "artifact": artifact.name,
+                    "artifact_sha256": sha256_bytes(artifact_raw),
+                }
+            },
+        }
+    return bindings
+
+
+def _component_requests(tmp_path: Path) -> tuple[dict, list[dict], dict[str, dict]]:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path)
+    requests = build_run_requests(
+        taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+    )
+    return taskset, requests, bindings
+
+
+def test_component_delta_taskset_contract_is_fail_closed() -> None:
+    taskset = _component_taskset()
+    Draft7Validator(_schema("taskset")).validate(taskset)
+    assert validate_taskset(taskset) == []
+
+    mutations = []
+    unknown_mode = copy.deepcopy(taskset)
+    unknown_mode["comparison"]["mode"] = "unknown"
+    mutations.append(unknown_mode)
+    invalid_component = copy.deepcopy(taskset)
+    invalid_component["comparison"]["component"] = "A"
+    mutations.append(invalid_component)
+    one_character_component = copy.deepcopy(taskset)
+    one_character_component["comparison"]["component"] = "a"
+    mutations.append(one_character_component)
+    invalid_revision = copy.deepcopy(taskset)
+    invalid_revision["comparison"]["source_revision"] = "a" * 39
+    mutations.append(invalid_revision)
+    split_tools = copy.deepcopy(taskset)
+    split_tools["tool_policy"]["baseline"] = ["glob", "grep", "read_file", "search"]
+    mutations.append(split_tools)
+    missing_repoground = copy.deepcopy(taskset)
+    missing_repoground["tool_policy"]["baseline"] = [
+        tool
+        for tool in missing_repoground["tool_policy"]["baseline"]
+        if tool not in {"ask_context", "repobrief_resource_read", "grounding_verify", "live_freshness"}
+    ]
+    mutations.append(missing_repoground)
+    for mutated in mutations:
+        assert validate_taskset(mutated)
+
+
+def test_component_delta_requests_differ_only_by_bound_artifact(tmp_path: Path) -> None:
+    taskset, requests, bindings = _component_requests(tmp_path)
+    schema = Draft7Validator(_schema("request"))
+    by_pair: dict[str, list[dict]] = defaultdict(list)
+    for request in requests:
+        schema.validate(request)
+        by_pair[request["pair_id"]].append(request)
+    assert by_pair
+    for pair in by_pair.values():
+        assert pair_request_errors(taskset, pair) == []
+        baseline = next(item for item in pair if item["condition"] == "baseline")
+        treatment = next(item for item in pair if item["condition"] == "treatment")
+        for field in (
+            "repository",
+            "runner",
+            "prompt",
+            "allowed_tools",
+            "budgets",
+            "repobrief",
+            "isolation",
+        ):
+            assert baseline[field] == treatment[field]
+        repository_id = treatment["repository"]["id"]
+        expected = bindings[repository_id]["components"]["language_structure_json"]
+        assert baseline["component_delta"] == {
+            "component": "language_structure_json",
+            "source_revision": COMPONENT_REVISION,
+            "artifact": None,
+            "artifact_sha256": None,
+        }
+        assert treatment["component_delta"] == {
+            "component": "language_structure_json",
+            "source_revision": COMPONENT_REVISION,
+            "artifact": expected["artifact"],
+            "artifact_sha256": expected["artifact_sha256"],
+        }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "components_missing",
+        "component_missing",
+        "artifact_missing",
+        "sha_missing",
+        "revision_mismatch",
+        "sha_invalid",
+        "file_missing",
+        "path_escape",
+        "sha_mismatch",
+    ],
+)
+def test_component_delta_artifact_binding_fails_closed(
+    tmp_path: Path, mutation: str
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path)
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    component = binding["components"]["language_structure_json"]
+    if mutation == "components_missing":
+        binding.pop("components")
+    elif mutation == "component_missing":
+        binding["components"].pop("language_structure_json")
+    elif mutation == "artifact_missing":
+        component.pop("artifact")
+    elif mutation == "sha_missing":
+        component.pop("artifact_sha256")
+    elif mutation == "revision_mismatch":
+        component["source_revision"] = "b" * 40
+    elif mutation == "sha_invalid":
+        component["artifact_sha256"] = "z" * 64
+    elif mutation == "file_missing":
+        (Path(binding["manifest"]).parent / component["artifact"]).unlink()
+    elif mutation == "path_escape":
+        component["artifact"] = "../outside.json"
+    elif mutation == "sha_mismatch":
+        component["artifact_sha256"] = "f" * 64
+    with pytest.raises(AgentBenchmarkError):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+
+def test_component_delta_artifact_size_and_stability_fail_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path / "large")
+    repository_id = taskset["repositories"][0]["id"]
+    binding = bindings[repository_id]
+    component = binding["components"]["language_structure_json"]
+    artifact = Path(binding["manifest"]).parent / component["artifact"]
+    with artifact.open("wb") as handle:
+        handle.truncate(MAX_REGISTERED_ARTIFACT_BYTES + 1)
+    with pytest.raises(AgentBenchmarkError, match="too_large"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    stable_bindings = _component_bindings(tmp_path / "unstable")
+    monkeypatch.setattr(
+        "merger.repoground.core.agent_benchmark.read_stable_regular_file_bytes",
+        lambda *_args, **_kwargs: (None, None, "source_changed", "changed"),
+    )
+    with pytest.raises(AgentBenchmarkError, match="source_changed"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=stable_bindings, repetitions=2
+        )
+
+
+def test_component_delta_pair_isolation_rejects_every_forbidden_difference(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    pair_id = requests[0]["pair_id"]
+    pair = [item for item in requests if item["pair_id"] == pair_id]
+    assert pair_request_errors(taskset, pair) == []
+
+    def mutate_treatment(name: str) -> list[dict]:
+        mutated = copy.deepcopy(pair)
+        treatment = next(item for item in mutated if item["condition"] == "treatment")
+        if name == "repository_commit":
+            treatment["repository"]["commit"] = "f" * 40
+        elif name == "runner":
+            treatment["runner"]["model"] = "other"
+        elif name == "prompt":
+            treatment["prompt"] += " changed"
+        elif name == "allowed_tools":
+            treatment["allowed_tools"] = treatment["allowed_tools"][:-1]
+        elif name == "budgets":
+            treatment["budgets"]["max_tool_calls"] += 1
+        elif name == "manifest":
+            treatment["repobrief"]["manifest"] += ".other"
+        elif name == "manifest_sha256":
+            treatment["repobrief"]["manifest_sha256"] = "f" * 64
+        elif name == "mcp_command":
+            treatment["repobrief"]["mcp_command"] = ["other"]
+        elif name == "component":
+            treatment["component_delta"]["component"] = "other_component"
+        elif name == "source_revision":
+            treatment["component_delta"]["source_revision"] = "b" * 40
+        elif name == "treatment_artifact_missing":
+            treatment["component_delta"]["artifact"] = None
+            treatment["component_delta"]["artifact_sha256"] = None
+        else:
+            raise AssertionError(name)
+        return mutated
+
+    for name in (
+        "repository_commit",
+        "runner",
+        "prompt",
+        "allowed_tools",
+        "budgets",
+        "manifest",
+        "manifest_sha256",
+        "mcp_command",
+        "component",
+        "source_revision",
+        "treatment_artifact_missing",
+    ):
+        assert pair_request_errors(taskset, mutate_treatment(name)), name
+
+    baseline_mutated = copy.deepcopy(pair)
+    baseline = next(item for item in baseline_mutated if item["condition"] == "baseline")
+    baseline["component_delta"]["artifact"] = "unexpected.json"
+    baseline["component_delta"]["artifact_sha256"] = "f" * 64
+    assert pair_request_errors(taskset, baseline_mutated)
+
+
+def test_component_delta_evaluation_binds_repository_artifacts_and_complete_pairs(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    cases = _cases(taskset)
+    receipts = [_receipt(request, cases[request["case_id"]]) for request in requests]
+    result = evaluate_paired_runs(
+        taskset, requests, receipts, measurement_scope="real_paired_agent_runs"
+    )
+    Draft7Validator(_schema("evaluation")).validate(result)
+    comparison = result["comparison"]
+    assert comparison["pair_isolation_verified"] is True
+    assert comparison["mode"] == "component_delta"
+    assert comparison["component"] == "language_structure_json"
+    assert comparison["source_revision"] == COMPONENT_REVISION
+    assert {item["repository_id"] for item in comparison["treatment_artifacts"]} == {
+        item["id"] for item in taskset["repositories"]
+    }
+    assert all(len(item["artifact_sha256"]) == 64 for item in comparison["treatment_artifacts"])
+
+    missing_pair = requests[0]["pair_id"]
+    filtered_requests = [item for item in requests if item["pair_id"] != missing_pair]
+    allowed_request_ids = {item["request_id"] for item in filtered_requests}
+    filtered_receipts = [
+        item for item in receipts if item["request_id"] in allowed_request_ids
+    ]
+    incomplete = evaluate_paired_runs(
+        taskset,
+        filtered_requests,
+        filtered_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    assert incomplete["comparison"]["pair_isolation_verified"] is False
+
+
+    baseline_only_requests = [
+        item for item in requests if item["condition"] == "baseline"
+    ]
+    baseline_request_ids = {item["request_id"] for item in baseline_only_requests}
+    baseline_only_receipts = [
+        item for item in receipts if item["request_id"] in baseline_request_ids
+    ]
+    baseline_only = evaluate_paired_runs(
+        taskset,
+        baseline_only_requests,
+        baseline_only_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    Draft7Validator(_schema("evaluation")).validate(baseline_only)
+    assert baseline_only["comparison"]["treatment_artifacts"] == []
+    assert baseline_only["comparison"]["pair_isolation_verified"] is False
