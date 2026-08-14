@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from merger.repoground.core.agent_benchmark_evaluation import validate_evaluation
 from merger.repoground.core.agent_benchmark_common import (
     CATEGORIES,
     is_repository_relative_path,
@@ -500,6 +501,8 @@ def _promotion_measurements(
 def _verified_component_delta_agent_benefit(
     agent_benefit: Mapping[str, Any], *, source_revision: str
 ) -> bool:
+    if validate_evaluation(agent_benefit):
+        return False
     comparison = agent_benefit.get("comparison")
     decision = agent_benefit.get("decision")
     cases = agent_benefit.get("cases")

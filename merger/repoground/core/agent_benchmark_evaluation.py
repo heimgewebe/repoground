@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,31 @@ from merger.repoground.core.agent_benchmark_common import (
     sha256_json,
 )
 from merger.repoground.core.agent_benchmark_receipts import validate_receipt
+
+
+
+def validate_evaluation(evaluation: Mapping[str, Any]) -> list[str]:
+    """Validate a complete v1 evaluation against its canonical JSON Schema."""
+
+    try:
+        import jsonschema
+    except ModuleNotFoundError:
+        return ["evaluation schema validation unavailable: jsonschema is not installed"]
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "contracts"
+        / "agent-benchmark-evaluation.v1.schema.json"
+    )
+    try:
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        jsonschema.Draft7Validator.check_schema(schema)
+    except (OSError, UnicodeError, json.JSONDecodeError, jsonschema.SchemaError) as exc:
+        return [f"evaluation schema validation unavailable: {exc}"]
+    validator = jsonschema.Draft7Validator(schema)
+    return [
+        error.message
+        for error in sorted(validator.iter_errors(evaluation), key=lambda item: list(item.path))
+    ]
 
 
 def _citation_key(value: Mapping[str, Any]) -> tuple[str, int, int] | None:
@@ -573,4 +599,4 @@ def evaluate_paired_runs(
     }
 
 
-__all__ = ["evaluate_paired_runs", "score_receipt"]
+__all__ = ["evaluate_paired_runs", "score_receipt", "validate_evaluation"]

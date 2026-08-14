@@ -1038,6 +1038,46 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
             "pair_isolation_verified": True,
         },
     }
+    score = {
+        "valid": True,
+        "success": True,
+        "outcome_match": True,
+        "target_hit_rate": 1.0,
+        "false_hit_count": 0,
+        "citation_match_rate": 1.0,
+        "false_confidence": False,
+        "duration_ms": 1,
+        "tool_call_count": 1,
+        "input_tokens": 1,
+        "output_tokens": 1,
+        "tool_bytes": 1,
+        "invalid_reasons": [],
+    }
+    for index, case in enumerate(verified_component_delta["cases"]):
+        case.update(
+            case_id=f"case-{index}",
+            category=("navigation", "structural", "grounding_freshness")[index],
+            repetition=1,
+            baseline=copy.deepcopy(score),
+            treatment=copy.deepcopy(score),
+        )
+    efficiency = {
+        key: {"baseline_mean": 1.0, "treatment_mean": 1.0, "improvement_ratio": 0.0}
+        for key in ("duration", "tool_calls", "input_tokens", "output_tokens", "tool_bytes")
+    }
+    for item in verified_component_delta["classes"]:
+        item.update(
+            baseline_success_rate=1.0,
+            treatment_success_rate=1.0,
+            success_rate_delta=0.0,
+            baseline_false_confidence_rate=0.0,
+            treatment_false_confidence_rate=0.0,
+            false_confidence_delta=0.0,
+            efficiency=copy.deepcopy(efficiency),
+        )
+    verified_component_delta["decision"]["reason"] = "fixture reproduces bounded component benefit"
+    verified_component_delta["does_not_establish"] = ["default promotion"]
+
     accepted = decide_language_adapter_promotion(
         report, agent_benefit=verified_component_delta
     )
@@ -1069,6 +1109,9 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         lambda value: value["classes"][0].update(classification="harmful"),
         lambda value: value["decision"].update(harmful_classes=["navigation"]),
         lambda value: value["decision"].update(default_promoted=True),
+        lambda value: value["decision"].pop("reason"),
+        lambda value: value["cases"][0]["baseline"].pop("duration_ms"),
+        lambda value: value.pop("does_not_establish"),
     ):
         mutated = copy.deepcopy(verified_component_delta)
         mutate(mutated)

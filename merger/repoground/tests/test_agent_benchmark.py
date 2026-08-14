@@ -18,6 +18,7 @@ from merger.repoground.core.agent_benchmark import (
     score_receipt,
     sha256_bytes,
     sha256_json,
+    validate_evaluation,
     validate_receipt,
     validate_taskset,
 )
@@ -606,6 +607,21 @@ def test_execute_runner_accepts_one_json_object_without_shell(tmp_path: Path) ->
     assert result == {"seen": "demo"}
 
 
+def test_execute_runner_rechecks_component_artifact_after_planning(tmp_path: Path) -> None:
+    _taskset_value, requests, bindings = _component_requests(tmp_path)
+    treatment = next(item for item in requests if item["condition"] == "treatment")
+    repository_id = treatment["repository"]["id"]
+    artifact = Path(bindings[repository_id]["manifest"]).parent / treatment["component_delta"]["artifact"]
+    artifact.write_text("tampered-after-plan", encoding="utf-8")
+    with pytest.raises(AgentBenchmarkError, match="artifact SHA-256 mismatch"):
+        execute_runner(
+            [sys.executable, "-c", "raise SystemExit('runner must not start')"],
+            treatment,
+            timeout_seconds=5,
+            max_stdout_bytes=1024,
+        )
+
+
 def test_execute_runner_rejects_oversized_or_invalid_output(tmp_path: Path) -> None:
     oversized = tmp_path / "oversized.py"
     oversized.write_text("print('x' * 1000)\n", encoding="utf-8")
@@ -740,6 +756,27 @@ def _component_requests(tmp_path: Path) -> tuple[dict, list[dict], dict[str, dic
         taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
     )
     return taskset, requests, bindings
+
+
+def test_complete_evaluation_contract_rejects_incomplete_objects(tmp_path: Path) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    cases = _cases(taskset)
+    receipts = [_receipt(request, cases[request["case_id"]]) for request in requests]
+    evaluation = evaluate_paired_runs(
+        taskset, requests, receipts, measurement_scope="real_paired_agent_runs"
+    )
+    assert validate_evaluation(evaluation) == []
+    Draft7Validator(_schema("evaluation")).validate(evaluation)
+
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["cases"][0]["baseline"].pop("duration_ms")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["decision"].pop("reason")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete.pop("does_not_establish")
+    assert validate_evaluation(incomplete)
 
 
 def test_component_delta_taskset_contract_is_fail_closed() -> None:

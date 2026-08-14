@@ -34,7 +34,7 @@ from merger.repoground.core.agent_benchmark_common import (
     validate_taskset,
     write_json_atomic,
 )
-from merger.repoground.core.agent_benchmark_evaluation import score_receipt
+from merger.repoground.core.agent_benchmark_evaluation import score_receipt, validate_evaluation
 from merger.repoground.core.bounded_artifact_read import (
     MAX_REGISTERED_ARTIFACT_BYTES,
     read_stable_regular_file_bytes,
@@ -349,6 +349,41 @@ def _decode_runner_output(raw: bytes) -> dict[str, Any]:
     return value
 
 
+
+def _verify_execution_component_artifact(request: Mapping[str, Any]) -> None:
+    binding = request.get("component_delta")
+    if not isinstance(binding, Mapping):
+        return
+    artifact = binding.get("artifact")
+    artifact_sha256 = binding.get("artifact_sha256")
+    condition = request.get("condition")
+    if condition == "baseline":
+        if artifact is not None or artifact_sha256 is not None:
+            raise AgentBenchmarkError("component_delta baseline cannot execute with an artifact")
+        return
+    if (
+        condition != "treatment"
+        or not isinstance(artifact, str)
+        or not artifact
+        or not isinstance(artifact_sha256, str)
+        or len(artifact_sha256) != 64
+    ):
+        raise AgentBenchmarkError("component_delta execution artifact binding is invalid")
+    repobrief = request.get("repobrief")
+    repository = request.get("repository")
+    if not isinstance(repobrief, Mapping) or not isinstance(repository, Mapping):
+        raise AgentBenchmarkError("component_delta execution requires RepoGround repository binding")
+    manifest = repobrief.get("manifest")
+    repository_id = repository.get("id")
+    if not isinstance(manifest, str) or not isinstance(repository_id, str) or not repository_id:
+        raise AgentBenchmarkError("component_delta execution RepoGround binding is invalid")
+    _verify_component_artifact_bytes(
+        {"manifest": manifest},
+        repository_id=repository_id,
+        artifact_path=artifact,
+        expected_sha256=artifact_sha256,
+    )
+
 def execute_runner(
     command: Sequence[str],
     request: Mapping[str, Any],
@@ -362,6 +397,7 @@ def execute_runner(
         raise AgentBenchmarkError("runner command must be a non-empty string array")
     if timeout_seconds < 1:
         raise AgentBenchmarkError("runner timeout must be positive")
+    _verify_execution_component_artifact(request)
     request_bytes = (canonical_json(request) + "\n").encode("utf-8")
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
         try:
@@ -404,6 +440,7 @@ __all__ = [
     "score_receipt",
     "sha256_bytes",
     "sha256_json",
+    "validate_evaluation",
     "validate_receipt",
     "validate_taskset",
     "write_json_atomic",
