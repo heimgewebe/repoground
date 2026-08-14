@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SUPPORTED = ToolchainObservation(
     implementation="CPython",
     python="3.12.3",
-    pip="25.3",
+    pip="26.1.2",
     pip_tools="7.6.0",
 )
 
@@ -30,7 +30,7 @@ def _fixture_repo(tmp_path: Path) -> tuple[Path, dict[str, bytes]]:
     (repo / "requirements").mkdir(parents=True)
     (repo / "merger/repoground").mkdir(parents=True)
     (repo / "requirements/repoground-lock-tools.in").write_text(
-        "# lock-python==3.12.3\npip==25.3\npip-tools==7.6.0\n",
+        "# lock-python==3.12.3\npip==26.1.2\npip-tools==7.6.0\n",
         encoding="utf-8",
     )
     for name in ("runtime", "dev", "browser"):
@@ -63,7 +63,7 @@ def _assert_locks(repo: Path, expected: dict[str, bytes]) -> None:
 def test_repository_contract_binds_python_pip_and_pip_tools() -> None:
     contract = load_contract(ROOT)
     assert contract.python == "3.12.3"
-    assert contract.pip == "25.3"
+    assert contract.pip == "26.1.2"
     assert contract.pip_tools == "7.6.0"
     assert environment_findings(contract, SUPPORTED) == []
 
@@ -80,10 +80,10 @@ def test_mismatch_report_includes_every_expected_and_observed_version() -> None:
     report_environment(contract, observed, stream)
     report = stream.getvalue()
     assert "Python: expected=3.12.3 observed=3.12.3" in report
-    assert "pip: expected=25.3 observed=26.2" in report
+    assert "pip: expected=26.1.2 observed=26.2" in report
     assert "pip-tools: expected=7.6.0 observed=7.6.0" in report
     assert environment_findings(contract, observed) == [
-        "pip version mismatch: expected=25.3 observed=26.2"
+        "pip version mismatch: expected=26.1.2 observed=26.2"
     ]
 
 
