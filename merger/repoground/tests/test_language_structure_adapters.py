@@ -1111,6 +1111,7 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         lambda value: value["decision"].update(default_promoted=True),
         lambda value: value["decision"].pop("reason"),
         lambda value: value["cases"][0]["baseline"].pop("duration_ms"),
+        lambda value: value["classes"][0]["efficiency"].pop("duration"),
         lambda value: value.pop("does_not_establish"),
     ):
         mutated = copy.deepcopy(verified_component_delta)

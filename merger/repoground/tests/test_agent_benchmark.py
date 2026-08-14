@@ -607,20 +607,129 @@ def test_execute_runner_accepts_one_json_object_without_shell(tmp_path: Path) ->
     assert result == {"seen": "demo"}
 
 
-def test_execute_runner_rechecks_component_artifact_after_planning(tmp_path: Path) -> None:
+def _component_treatment_execution_setup(tmp_path: Path) -> tuple[dict, Path]:
     _taskset_value, requests, bindings = _component_requests(tmp_path)
     treatment = next(item for item in requests if item["condition"] == "treatment")
     repository_id = treatment["repository"]["id"]
-    artifact = Path(bindings[repository_id]["manifest"]).parent / treatment["component_delta"]["artifact"]
-    artifact.write_text("tampered-after-plan", encoding="utf-8")
-    with pytest.raises(AgentBenchmarkError, match="artifact SHA-256 mismatch"):
-        execute_runner(
-            [sys.executable, "-c", "raise SystemExit('runner must not start')"],
-            treatment,
-            timeout_seconds=5,
-            max_stdout_bytes=1024,
-        )
+    artifact = (
+        Path(bindings[repository_id]["manifest"]).parent
+        / treatment["component_delta"]["artifact"]
+    )
+    return treatment, artifact
 
+
+def _marker_runner(tmp_path: Path) -> tuple[list[str], Path]:
+    marker = tmp_path / "runner-started.txt"
+    runner = tmp_path / "marker-runner.py"
+    runner.write_text(
+        "import json, sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text('started', encoding='utf-8')\n"
+        "request = json.load(sys.stdin)\n"
+        "print(json.dumps({'request_id': request['request_id']}))\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(runner), str(marker)], marker
+
+
+def test_execute_runner_rechecks_unchanged_component_artifact_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    command, marker = _marker_runner(tmp_path)
+
+    result = execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert result == {"request_id": treatment["request_id"]}
+    assert marker.read_text(encoding="utf-8") == "started"
+
+
+def test_execute_runner_rejects_changed_component_artifact_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, artifact = _component_treatment_execution_setup(tmp_path)
+    artifact.write_text("tampered-after-plan", encoding="utf-8")
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="artifact SHA-256 mismatch"):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_deleted_component_artifact_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, artifact = _component_treatment_execution_setup(tmp_path)
+    artifact.unlink()
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_component_artifact_symlink_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, artifact = _component_treatment_execution_setup(tmp_path)
+    target = artifact.with_name("symlink-target.json")
+    target.write_bytes(artifact.read_bytes())
+    artifact.unlink()
+    artifact.symlink_to(target.name)
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_component_artifact_root_escape_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    treatment["component_delta"]["artifact"] = "../outside.json"
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_rejects_component_artifact_sha_tamper_before_start(
+    tmp_path: Path,
+) -> None:
+    treatment, _artifact = _component_treatment_execution_setup(tmp_path)
+    treatment["component_delta"]["artifact_sha256"] = "0" * 64
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="artifact SHA-256 mismatch"):
+        execute_runner(command, treatment, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
+def test_execute_runner_component_delta_baseline_does_not_read_artifact(
+    tmp_path: Path,
+) -> None:
+    _taskset_value, requests, bindings = _component_requests(tmp_path)
+    baseline = next(item for item in requests if item["condition"] == "baseline")
+    treatment = next(item for item in requests if item["condition"] == "treatment")
+    repository_id = treatment["repository"]["id"]
+    artifact = (
+        Path(bindings[repository_id]["manifest"]).parent
+        / treatment["component_delta"]["artifact"]
+    )
+    artifact.unlink()
+    command, marker = _marker_runner(tmp_path)
+
+    result = execute_runner(command, baseline, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert result == {"request_id": baseline["request_id"]}
+    assert marker.read_text(encoding="utf-8") == "started"
 
 def test_execute_runner_rejects_oversized_or_invalid_output(tmp_path: Path) -> None:
     oversized = tmp_path / "oversized.py"
@@ -770,6 +879,9 @@ def test_complete_evaluation_contract_rejects_incomplete_objects(tmp_path: Path)
 
     incomplete = copy.deepcopy(evaluation)
     incomplete["cases"][0]["baseline"].pop("duration_ms")
+    assert validate_evaluation(incomplete)
+    incomplete = copy.deepcopy(evaluation)
+    incomplete["classes"][0]["efficiency"].pop("duration")
     assert validate_evaluation(incomplete)
     incomplete = copy.deepcopy(evaluation)
     incomplete["decision"].pop("reason")

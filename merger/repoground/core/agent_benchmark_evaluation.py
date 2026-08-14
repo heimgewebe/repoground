@@ -1,8 +1,8 @@
 """Score paired benchmark receipts and classify bounded task classes."""
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 import json
+from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
