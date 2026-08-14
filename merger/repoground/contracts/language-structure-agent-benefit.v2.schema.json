@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://heimgewebe.local/schema/language-structure-agent-benefit.v2.schema.json",
-  "title": "RepoGround paired language-structure agent benefit v2",
+  "title": "RepoGround receipt-bound language-structure agent benefit v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -23,7 +23,7 @@
     "version": {"const": "2.0"},
     "measurement_id": {"type": "string", "minLength": 1, "maxLength": 256},
     "source_revision": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
-    "goldset_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "goldset_sha256": {"$ref": "#/definitions/sha256"},
     "fallback_route": {"type": "string", "minLength": 1, "maxLength": 256},
     "candidate_route": {"type": "string", "minLength": 1, "maxLength": 256},
     "comparison": {"$ref": "#/definitions/comparison"},
@@ -37,12 +37,13 @@
     "summary": {"$ref": "#/definitions/summary"},
     "does_not_establish": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 3,
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 1, "maxLength": 256},
       "allOf": [
         {"contains": {"const": "default_activation"}},
-        {"contains": {"const": "causal_generalization_beyond_bound_cases"}}
+        {"contains": {"const": "causal_generalization_beyond_bound_cases"}},
+        {"contains": {"const": "receipt_hashes_do_not_attest_runner_or_grader_honesty"}}
       ]
     }
   },
@@ -60,7 +61,8 @@
         "model_identity_sha256",
         "harness_identity_sha256",
         "environment_identity_sha256",
-        "grader_identity_sha256"
+        "grader_identity_sha256",
+        "grader_rubric_sha256"
       ],
       "properties": {
         "same_model": {"const": true},
@@ -71,32 +73,107 @@
         "model_identity_sha256": {"$ref": "#/definitions/sha256"},
         "harness_identity_sha256": {"$ref": "#/definitions/sha256"},
         "environment_identity_sha256": {"$ref": "#/definitions/sha256"},
-        "grader_identity_sha256": {"$ref": "#/definitions/sha256"}
+        "grader_identity_sha256": {"$ref": "#/definitions/sha256"},
+        "grader_rubric_sha256": {"$ref": "#/definitions/sha256"}
       }
     },
     "treatment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["variable", "fallback_excludes", "candidate_includes"],
+      "required": [
+        "variable",
+        "fallback_excludes",
+        "candidate_includes",
+        "candidate_artifact_sha256"
+      ],
       "properties": {
         "variable": {"const": "language_structure_json"},
         "fallback_excludes": {"const": true},
-        "candidate_includes": {"const": true}
+        "candidate_includes": {"const": true},
+        "candidate_artifact_sha256": {"$ref": "#/definitions/sha256"}
+      }
+    },
+    "runner_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "source_revision",
+        "goldset_sha256",
+        "task_sha256",
+        "route",
+        "model_identity_sha256",
+        "harness_identity_sha256",
+        "environment_identity_sha256",
+        "prompt_sha256",
+        "budget_sha256",
+        "control_context_sha256",
+        "treatment_artifact_sha256",
+        "output_sha256",
+        "completed"
+      ],
+      "properties": {
+        "kind": {"const": "repoground.language_structure_agent_run_receipt"},
+        "version": {"const": "1.0"},
+        "source_revision": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
+        "goldset_sha256": {"$ref": "#/definitions/sha256"},
+        "task_sha256": {"$ref": "#/definitions/sha256"},
+        "route": {"type": "string", "minLength": 1, "maxLength": 256},
+        "model_identity_sha256": {"$ref": "#/definitions/sha256"},
+        "harness_identity_sha256": {"$ref": "#/definitions/sha256"},
+        "environment_identity_sha256": {"$ref": "#/definitions/sha256"},
+        "prompt_sha256": {"$ref": "#/definitions/sha256"},
+        "budget_sha256": {"$ref": "#/definitions/sha256"},
+        "control_context_sha256": {"$ref": "#/definitions/sha256"},
+        "treatment_artifact_sha256": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/definitions/sha256"}
+          ]
+        },
+        "output_sha256": {"$ref": "#/definitions/sha256"},
+        "completed": {"const": true}
+      }
+    },
+    "grader_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "version",
+        "source_revision",
+        "goldset_sha256",
+        "task_sha256",
+        "route",
+        "runner_receipt_sha256",
+        "output_sha256",
+        "grader_identity_sha256",
+        "grader_rubric_sha256",
+        "verdict"
+      ],
+      "properties": {
+        "kind": {"const": "repoground.language_structure_agent_grader_receipt"},
+        "version": {"const": "1.0"},
+        "source_revision": {"type": "string", "pattern": "^[a-f0-9]{40}([a-f0-9]{24})?$"},
+        "goldset_sha256": {"$ref": "#/definitions/sha256"},
+        "task_sha256": {"$ref": "#/definitions/sha256"},
+        "route": {"type": "string", "minLength": 1, "maxLength": 256},
+        "runner_receipt_sha256": {"$ref": "#/definitions/sha256"},
+        "output_sha256": {"$ref": "#/definitions/sha256"},
+        "grader_identity_sha256": {"$ref": "#/definitions/sha256"},
+        "grader_rubric_sha256": {"$ref": "#/definitions/sha256"},
+        "verdict": {"enum": ["pass", "fail"]}
       }
     },
     "route_result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["success", "evidence_refs"],
+      "required": ["success", "runner_receipt", "grader_receipt"],
       "properties": {
         "success": {"type": "boolean"},
-        "evidence_refs": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 8,
-          "uniqueItems": true,
-          "items": {"type": "string", "minLength": 1, "maxLength": 512}
-        }
+        "runner_receipt": {"$ref": "#/definitions/runner_receipt"},
+        "grader_receipt": {"$ref": "#/definitions/grader_receipt"}
       }
     },
     "case": {

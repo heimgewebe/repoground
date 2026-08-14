@@ -29,6 +29,7 @@ from merger.repoground.core.language_structure_benchmark import (
 )
 from merger.repoground.core.language_structure_agent_benefit import (
     build_language_structure_agent_benefit,
+    receipt_sha256,
 )
 from merger.repoground.core.rust_structure_adapter import (
     _rust_call_evidence,
@@ -967,48 +968,110 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
     }
     case_ids = [item["id"] for item in report["case_results"]]
     fallback_failure_count = max(1, (len(case_ids) + 9) // 10)
+    treatment_sha256 = "9" * 64
+    comparison = {
+        "same_model": True,
+        "same_prompt": True,
+        "same_budget": True,
+        "same_source_revision": True,
+        "same_grader": True,
+        "model_identity_sha256": "1" * 64,
+        "harness_identity_sha256": "2" * 64,
+        "environment_identity_sha256": "3" * 64,
+        "grader_identity_sha256": "4" * 64,
+        "grader_rubric_sha256": "5" * 64,
+    }
+
+    def paired_result(
+        case_id: str,
+        task_sha256: str,
+        route: str,
+        treatment_artifact_sha256: str | None,
+        *,
+        success: bool,
+    ) -> dict:
+        runner = {
+            "kind": "repoground.language_structure_agent_run_receipt",
+            "version": "1.0",
+            "source_revision": revision,
+            "goldset_sha256": report["goldset_sha256"],
+            "task_sha256": task_sha256,
+            "route": route,
+            "model_identity_sha256": comparison["model_identity_sha256"],
+            "harness_identity_sha256": comparison["harness_identity_sha256"],
+            "environment_identity_sha256": comparison["environment_identity_sha256"],
+            "prompt_sha256": hashlib.sha256(
+                f"prompt:{case_id}".encode("utf-8")
+            ).hexdigest(),
+            "budget_sha256": "6" * 64,
+            "control_context_sha256": hashlib.sha256(
+                f"control:{case_id}".encode("utf-8")
+            ).hexdigest(),
+            "treatment_artifact_sha256": treatment_artifact_sha256,
+            "output_sha256": hashlib.sha256(
+                f"output:{case_id}:{route}".encode("utf-8")
+            ).hexdigest(),
+            "completed": True,
+        }
+        grader = {
+            "kind": "repoground.language_structure_agent_grader_receipt",
+            "version": "1.0",
+            "source_revision": revision,
+            "goldset_sha256": report["goldset_sha256"],
+            "task_sha256": task_sha256,
+            "route": route,
+            "runner_receipt_sha256": receipt_sha256(runner),
+            "output_sha256": runner["output_sha256"],
+            "grader_identity_sha256": comparison["grader_identity_sha256"],
+            "grader_rubric_sha256": comparison["grader_rubric_sha256"],
+            "verdict": "pass" if success else "fail",
+        }
+        return {"runner_receipt": runner, "grader_receipt": grader}
+
     pair_document = {
         "kind": "repoground.language_structure_agent_benefit_pairs",
         "version": "1.0",
         "measurement_id": "unit-paired-benefit",
+        "source_revision": revision,
+        "goldset_sha256": report["goldset_sha256"],
         "fallback_route": "text_fallback",
         "candidate_route": "language_structure_v1",
-        "comparison": {
-            "same_model": True,
-            "same_prompt": True,
-            "same_budget": True,
-            "same_source_revision": True,
-            "same_grader": True,
-            "model_identity_sha256": "1" * 64,
-            "harness_identity_sha256": "2" * 64,
-            "environment_identity_sha256": "3" * 64,
-            "grader_identity_sha256": "4" * 64,
-        },
+        "comparison": comparison,
         "treatment": {
             "variable": "language_structure_json",
             "fallback_excludes": True,
             "candidate_includes": True,
+            "candidate_artifact_sha256": treatment_sha256,
         },
-        "cases": [
-            {
-                "id": case_id,
-                "task_sha256": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
-                "fallback": {
-                    "success": index >= fallback_failure_count,
-                    "evidence_refs": [f"fallback:{case_id}"],
-                },
-                "candidate": {
-                    "success": True,
-                    "evidence_refs": [f"candidate:{case_id}"],
-                },
-            }
-            for index, case_id in enumerate(case_ids)
-        ],
+        "cases": [],
         "does_not_establish": [
             "default_activation",
             "causal_generalization_beyond_bound_cases",
+            "receipt_hashes_do_not_attest_runner_or_grader_honesty",
         ],
     }
+    for index, case_id in enumerate(case_ids):
+        task_sha256 = hashlib.sha256(case_id.encode("utf-8")).hexdigest()
+        pair_document["cases"].append(
+            {
+                "id": case_id,
+                "task_sha256": task_sha256,
+                "fallback": paired_result(
+                    case_id,
+                    task_sha256,
+                    "text_fallback",
+                    None,
+                    success=index >= fallback_failure_count,
+                ),
+                "candidate": paired_result(
+                    case_id,
+                    task_sha256,
+                    "language_structure_v1",
+                    treatment_sha256,
+                    success=True,
+                ),
+            }
+        )
     benefit = build_language_structure_agent_benefit(
         pair_document,
         source_revision=revision,

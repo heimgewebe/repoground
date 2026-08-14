@@ -1,8 +1,9 @@
-"""Paired, revision-bound agent-benefit evidence for language_structure promotion."""
+"""Paired, receipt-bound agent-benefit evidence for language_structure promotion."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -16,13 +17,15 @@ KIND = "repoground.language_structure_agent_benefit"
 VERSION = "2.0"
 PAIR_KIND = "repoground.language_structure_agent_benefit_pairs"
 PAIR_VERSION = "1.0"
+RUNNER_RECEIPT_KIND = "repoground.language_structure_agent_run_receipt"
+RUNNER_RECEIPT_VERSION = "1.0"
+GRADER_RECEIPT_KIND = "repoground.language_structure_agent_grader_receipt"
+GRADER_RECEIPT_VERSION = "1.0"
 TREATMENT_VARIABLE = "language_structure_json"
 _REVISION_RE = re.compile(r"^[a-f0-9]{40}(?:[a-f0-9]{24})?$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
-_MAX_INPUT_BYTES = 1024 * 1024
+_MAX_INPUT_BYTES = 4 * 1024 * 1024
 _MAX_CASES = 256
-_MAX_EVIDENCE_REFS = 8
-_MAX_REF_LENGTH = 512
 
 _TOP_LEVEL_FIELDS = frozenset(
     {
@@ -45,6 +48,8 @@ _PAIR_FIELDS = frozenset(
         "kind",
         "version",
         "measurement_id",
+        "source_revision",
+        "goldset_sha256",
         "fallback_route",
         "candidate_route",
         "comparison",
@@ -64,6 +69,7 @@ _COMPARISON_FIELDS = frozenset(
         "harness_identity_sha256",
         "environment_identity_sha256",
         "grader_identity_sha256",
+        "grader_rubric_sha256",
     }
 )
 _TREATMENT_FIELDS = frozenset(
@@ -71,10 +77,46 @@ _TREATMENT_FIELDS = frozenset(
         "variable",
         "fallback_excludes",
         "candidate_includes",
+        "candidate_artifact_sha256",
     }
 )
 _CASE_FIELDS = frozenset({"id", "task_sha256", "fallback", "candidate"})
-_RESULT_FIELDS = frozenset({"success", "evidence_refs"})
+_PAIR_RESULT_FIELDS = frozenset({"runner_receipt", "grader_receipt"})
+_RESULT_FIELDS = frozenset({"success", "runner_receipt", "grader_receipt"})
+_RUNNER_FIELDS = frozenset(
+    {
+        "kind",
+        "version",
+        "source_revision",
+        "goldset_sha256",
+        "task_sha256",
+        "route",
+        "model_identity_sha256",
+        "harness_identity_sha256",
+        "environment_identity_sha256",
+        "prompt_sha256",
+        "budget_sha256",
+        "control_context_sha256",
+        "treatment_artifact_sha256",
+        "output_sha256",
+        "completed",
+    }
+)
+_GRADER_FIELDS = frozenset(
+    {
+        "kind",
+        "version",
+        "source_revision",
+        "goldset_sha256",
+        "task_sha256",
+        "route",
+        "runner_receipt_sha256",
+        "output_sha256",
+        "grader_identity_sha256",
+        "grader_rubric_sha256",
+        "verdict",
+    }
+)
 _SUMMARY_FIELDS = frozenset(
     {
         "sample_count",
@@ -91,6 +133,25 @@ class AgentBenefitEvidenceError(ValueError):
     """Raised when paired agent-benefit evidence is malformed or unbound."""
 
 
+def _canonical_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def receipt_sha256(value: Mapping[str, Any]) -> str:
+    """Return the content identity used to bind embedded runner/grader receipts."""
+    try:
+        payload = _canonical_bytes(value)
+    except (TypeError, ValueError) as exc:
+        raise AgentBenefitEvidenceError("receipt is not canonical JSON") from exc
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _nonempty_text(value: Any, *, field: str, max_length: int = 256) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > max_length:
         raise AgentBenefitEvidenceError(f"{field} must be a bounded non-empty string")
@@ -101,6 +162,12 @@ def _validate_hash(value: Any, *, field: str) -> str:
     if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
         raise AgentBenefitEvidenceError(f"{field} must be a lowercase SHA-256")
     return value
+
+
+def _validate_optional_hash(value: Any, *, field: str) -> str | None:
+    if value is None:
+        return None
+    return _validate_hash(value, field=field)
 
 
 def _validate_revision(value: Any, *, field: str) -> str:
@@ -144,6 +211,7 @@ def _validate_comparison(value: Any) -> dict[str, Any]:
         "harness_identity_sha256",
         "environment_identity_sha256",
         "grader_identity_sha256",
+        "grader_rubric_sha256",
     ):
         normalized[field] = _validate_hash(
             value.get(field), field=f"comparison.{field}"
@@ -163,76 +231,309 @@ def _validate_treatment(value: Any) -> dict[str, Any]:
         raise AgentBenefitEvidenceError("treatment.fallback_excludes must be true")
     if value.get("candidate_includes") is not True:
         raise AgentBenefitEvidenceError("treatment.candidate_includes must be true")
-    return dict(value)
+    normalized = dict(value)
+    normalized["candidate_artifact_sha256"] = _validate_hash(
+        value.get("candidate_artifact_sha256"),
+        field="treatment.candidate_artifact_sha256",
+    )
+    return normalized
 
 
-def _validate_evidence_refs(value: Any, *, field: str) -> list[str]:
-    if not isinstance(value, list) or not 1 <= len(value) <= _MAX_EVIDENCE_REFS:
-        raise AgentBenefitEvidenceError(
-            f"{field} must contain 1..{_MAX_EVIDENCE_REFS} evidence refs"
-        )
-    refs: list[str] = []
-    for index, raw in enumerate(value):
-        ref = _nonempty_text(
-            raw,
-            field=f"{field}[{index}]",
-            max_length=_MAX_REF_LENGTH,
-        )
-        refs.append(ref)
-    if len(set(refs)) != len(refs):
-        raise AgentBenefitEvidenceError(f"{field} must not contain duplicate refs")
-    return refs
-
-
-def _validate_result(value: Any, *, field: str) -> dict[str, Any]:
+def _exact_mapping(
+    value: Any, *, fields: frozenset[str], field: str
+) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise AgentBenefitEvidenceError(f"{field} must be an object")
-    _validate_exact_fields(value, _RESULT_FIELDS, field=field)
-    success = value.get("success")
-    if not isinstance(success, bool):
-        raise AgentBenefitEvidenceError(f"{field}.success must be boolean")
-    return {
-        "success": success,
-        "evidence_refs": _validate_evidence_refs(
-            value.get("evidence_refs"), field=f"{field}.evidence_refs"
+    _validate_exact_fields(value, fields, field=field)
+    return value
+
+
+def _require_bindings(
+    value: Mapping[str, Any],
+    *,
+    field: str,
+    expectations: Sequence[tuple[str, Any, str]],
+) -> None:
+    for key, expected, message in expectations:
+        if value.get(key) != expected:
+            raise AgentBenefitEvidenceError(f"{field}.{key} {message}")
+
+
+def _normalize_hash_fields(
+    normalized: dict[str, Any],
+    value: Mapping[str, Any],
+    *,
+    field: str,
+    keys: Sequence[str],
+) -> None:
+    for key in keys:
+        normalized[key] = _validate_hash(value.get(key), field=f"{field}.{key}")
+
+
+def _validate_receipt_comparison_fields(
+    normalized: Mapping[str, Any],
+    comparison: Mapping[str, Any],
+    *,
+    field: str,
+    keys: Sequence[str],
+) -> None:
+    for key in keys:
+        if normalized[key] != comparison[key]:
+            raise AgentBenefitEvidenceError(f"{field}.{key} does not match comparison")
+
+
+def _validate_runner_receipt(
+    value: Any,
+    *,
+    field: str,
+    source_revision: str,
+    goldset_sha256: str,
+    task_sha256: str,
+    route: str,
+    comparison: Mapping[str, Any],
+    treatment_artifact_sha256: str | None,
+) -> dict[str, Any]:
+    mapping = _exact_mapping(value, fields=_RUNNER_FIELDS, field=field)
+    _require_bindings(
+        mapping,
+        field=field,
+        expectations=(
+            ("kind", RUNNER_RECEIPT_KIND, "is unsupported"),
+            ("version", RUNNER_RECEIPT_VERSION, "is unsupported"),
+            ("source_revision", source_revision, "mismatch"),
+            ("goldset_sha256", goldset_sha256, "mismatch"),
+            ("task_sha256", task_sha256, "mismatch"),
+            ("route", route, "mismatch"),
+            ("completed", True, "must be true"),
         ),
+    )
+    normalized = dict(mapping)
+    normalized["source_revision"] = _validate_revision(
+        mapping.get("source_revision"), field=f"{field}.source_revision"
+    )
+    _normalize_hash_fields(
+        normalized,
+        mapping,
+        field=field,
+        keys=(
+            "goldset_sha256",
+            "task_sha256",
+            "model_identity_sha256",
+            "harness_identity_sha256",
+            "environment_identity_sha256",
+            "prompt_sha256",
+            "budget_sha256",
+            "control_context_sha256",
+            "output_sha256",
+        ),
+    )
+    normalized["route"] = _nonempty_text(mapping.get("route"), field=f"{field}.route")
+    normalized["treatment_artifact_sha256"] = _validate_optional_hash(
+        mapping.get("treatment_artifact_sha256"),
+        field=f"{field}.treatment_artifact_sha256",
+    )
+    if normalized["treatment_artifact_sha256"] != treatment_artifact_sha256:
+        raise AgentBenefitEvidenceError(
+            f"{field}.treatment_artifact_sha256 does not match treatment"
+        )
+    _validate_receipt_comparison_fields(
+        normalized,
+        comparison,
+        field=field,
+        keys=(
+            "model_identity_sha256",
+            "harness_identity_sha256",
+            "environment_identity_sha256",
+        ),
+    )
+    return normalized
+
+
+def _validate_grader_runner_binding(
+    normalized: Mapping[str, Any],
+    runner_receipt: Mapping[str, Any],
+    *,
+    field: str,
+) -> None:
+    if normalized["runner_receipt_sha256"] != receipt_sha256(runner_receipt):
+        raise AgentBenefitEvidenceError(
+            f"{field}.runner_receipt_sha256 does not match embedded runner receipt"
+        )
+    if normalized["output_sha256"] != runner_receipt["output_sha256"]:
+        raise AgentBenefitEvidenceError(
+            f"{field}.output_sha256 does not match runner output"
+        )
+
+
+def _validate_grader_receipt(
+    value: Any,
+    *,
+    field: str,
+    source_revision: str,
+    goldset_sha256: str,
+    task_sha256: str,
+    route: str,
+    runner_receipt: Mapping[str, Any],
+    comparison: Mapping[str, Any],
+) -> dict[str, Any]:
+    mapping = _exact_mapping(value, fields=_GRADER_FIELDS, field=field)
+    _require_bindings(
+        mapping,
+        field=field,
+        expectations=(
+            ("kind", GRADER_RECEIPT_KIND, "is unsupported"),
+            ("version", GRADER_RECEIPT_VERSION, "is unsupported"),
+            ("source_revision", source_revision, "mismatch"),
+            ("goldset_sha256", goldset_sha256, "mismatch"),
+            ("task_sha256", task_sha256, "mismatch"),
+            ("route", route, "mismatch"),
+        ),
+    )
+    normalized = dict(mapping)
+    normalized["source_revision"] = _validate_revision(
+        mapping.get("source_revision"), field=f"{field}.source_revision"
+    )
+    _normalize_hash_fields(
+        normalized,
+        mapping,
+        field=field,
+        keys=(
+            "goldset_sha256",
+            "task_sha256",
+            "runner_receipt_sha256",
+            "output_sha256",
+            "grader_identity_sha256",
+            "grader_rubric_sha256",
+        ),
+    )
+    normalized["route"] = _nonempty_text(mapping.get("route"), field=f"{field}.route")
+    verdict = mapping.get("verdict")
+    if verdict not in {"pass", "fail"}:
+        raise AgentBenefitEvidenceError(f"{field}.verdict must be pass or fail")
+    normalized["verdict"] = verdict
+    _validate_grader_runner_binding(normalized, runner_receipt, field=field)
+    _validate_receipt_comparison_fields(
+        normalized,
+        comparison,
+        field=field,
+        keys=("grader_identity_sha256", "grader_rubric_sha256"),
+    )
+    return normalized
+
+
+def _validate_pair_result(
+    value: Any,
+    *,
+    field: str,
+    source_revision: str,
+    goldset_sha256: str,
+    task_sha256: str,
+    route: str,
+    comparison: Mapping[str, Any],
+    treatment_artifact_sha256: str | None,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise AgentBenefitEvidenceError(f"{field} must be an object")
+    _validate_exact_fields(value, _PAIR_RESULT_FIELDS, field=field)
+    runner = _validate_runner_receipt(
+        value.get("runner_receipt"),
+        field=f"{field}.runner_receipt",
+        source_revision=source_revision,
+        goldset_sha256=goldset_sha256,
+        task_sha256=task_sha256,
+        route=route,
+        comparison=comparison,
+        treatment_artifact_sha256=treatment_artifact_sha256,
+    )
+    grader = _validate_grader_receipt(
+        value.get("grader_receipt"),
+        field=f"{field}.grader_receipt",
+        source_revision=source_revision,
+        goldset_sha256=goldset_sha256,
+        task_sha256=task_sha256,
+        route=route,
+        runner_receipt=runner,
+        comparison=comparison,
+    )
+    return {
+        "success": grader["verdict"] == "pass",
+        "runner_receipt": runner,
+        "grader_receipt": grader,
     }
 
 
-def _validate_cases(
-    value: Any, *, expected_case_ids: Sequence[str]
-) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or not 1 <= len(value) <= _MAX_CASES:
-        raise AgentBenefitEvidenceError(f"cases must contain 1..{_MAX_CASES} items")
-    expected = list(expected_case_ids)
-    if len(expected) != len(set(expected)) or any(
-        not isinstance(case_id, str) or not case_id for case_id in expected
-    ):
-        raise AgentBenefitEvidenceError("benchmark case ids are invalid or duplicated")
-    if len(value) != len(expected):
-        raise AgentBenefitEvidenceError("benefit case count does not match benchmark")
-    normalized: list[dict[str, Any]] = []
-    observed_ids: list[str] = []
-    for index, raw in enumerate(value):
-        if not isinstance(raw, Mapping):
-            raise AgentBenefitEvidenceError(f"cases[{index}] must be an object")
-        _validate_exact_fields(raw, _CASE_FIELDS, field=f"cases[{index}]")
-        case_id = _nonempty_text(raw.get("id"), field=f"cases[{index}].id")
-        observed_ids.append(case_id)
-        normalized.append(
-            {
-                "id": case_id,
-                "task_sha256": _validate_hash(
-                    raw.get("task_sha256"), field=f"cases[{index}].task_sha256"
-                ),
-                "fallback": _validate_result(
-                    raw.get("fallback"), field=f"cases[{index}].fallback"
-                ),
-                "candidate": _validate_result(
-                    raw.get("candidate"), field=f"cases[{index}].candidate"
-                ),
-            }
+def _validate_final_result(
+    value: Any,
+    *,
+    field: str,
+    source_revision: str,
+    goldset_sha256: str,
+    task_sha256: str,
+    route: str,
+    comparison: Mapping[str, Any],
+    treatment_artifact_sha256: str | None,
+) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise AgentBenefitEvidenceError(f"{field} must be an object")
+    _validate_exact_fields(value, _RESULT_FIELDS, field=field)
+    derived = _validate_pair_result(
+        {
+            "runner_receipt": value.get("runner_receipt"),
+            "grader_receipt": value.get("grader_receipt"),
+        },
+        field=field,
+        source_revision=source_revision,
+        goldset_sha256=goldset_sha256,
+        task_sha256=task_sha256,
+        route=route,
+        comparison=comparison,
+        treatment_artifact_sha256=treatment_artifact_sha256,
+    )
+    success = value.get("success")
+    if not isinstance(success, bool) or success != derived["success"]:
+        raise AgentBenefitEvidenceError(
+            f"{field}.success must equal the embedded grader verdict"
         )
+    return derived
+
+
+def _validated_expected_case_ids(expected_case_ids: Sequence[str]) -> list[str]:
+    expected = list(expected_case_ids)
+    if len(expected) != len(set(expected)):
+        raise AgentBenefitEvidenceError("benchmark case ids are invalid or duplicated")
+    for case_id in expected:
+        if not isinstance(case_id, str) or not case_id:
+            raise AgentBenefitEvidenceError(
+                "benchmark case ids are invalid or duplicated"
+            )
+    return expected
+
+
+def _validate_shared_runner_fields(
+    fallback: Mapping[str, Any], candidate: Mapping[str, Any], *, index: int
+) -> None:
+    for shared_field in (
+        "model_identity_sha256",
+        "harness_identity_sha256",
+        "environment_identity_sha256",
+        "prompt_sha256",
+        "budget_sha256",
+        "control_context_sha256",
+    ):
+        if (
+            fallback["runner_receipt"][shared_field]
+            != candidate["runner_receipt"][shared_field]
+        ):
+            raise AgentBenefitEvidenceError(
+                f"cases[{index}] fallback/candidate {shared_field} mismatch"
+            )
+
+
+def _validate_case_identity_sets(
+    normalized: Sequence[Mapping[str, Any]],
+    observed_ids: Sequence[str],
+    expected: Sequence[str],
+) -> None:
     if len(observed_ids) != len(set(observed_ids)):
         raise AgentBenefitEvidenceError("benefit case ids must be unique")
     task_hashes = [item["task_sha256"] for item in normalized]
@@ -240,6 +541,65 @@ def _validate_cases(
         raise AgentBenefitEvidenceError("benefit task_sha256 values must be unique")
     if set(observed_ids) != set(expected):
         raise AgentBenefitEvidenceError("benefit case ids do not match benchmark")
+
+
+def _validate_cases(
+    value: Any,
+    *,
+    expected_case_ids: Sequence[str],
+    source_revision: str,
+    goldset_sha256: str,
+    fallback_route: str,
+    candidate_route: str,
+    comparison: Mapping[str, Any],
+    treatment: Mapping[str, Any],
+    final_document: bool,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not 1 <= len(value) <= _MAX_CASES:
+        raise AgentBenefitEvidenceError(f"cases must contain 1..{_MAX_CASES} items")
+    expected = _validated_expected_case_ids(expected_case_ids)
+    if len(value) != len(expected):
+        raise AgentBenefitEvidenceError("benefit case count does not match benchmark")
+    validator = _validate_final_result if final_document else _validate_pair_result
+    normalized: list[dict[str, Any]] = []
+    observed_ids: list[str] = []
+    for index, raw in enumerate(value):
+        mapping = _exact_mapping(raw, fields=_CASE_FIELDS, field=f"cases[{index}]")
+        case_id = _nonempty_text(mapping.get("id"), field=f"cases[{index}].id")
+        task_sha256 = _validate_hash(
+            mapping.get("task_sha256"), field=f"cases[{index}].task_sha256"
+        )
+        observed_ids.append(case_id)
+        fallback = validator(
+            mapping.get("fallback"),
+            field=f"cases[{index}].fallback",
+            source_revision=source_revision,
+            goldset_sha256=goldset_sha256,
+            task_sha256=task_sha256,
+            route=fallback_route,
+            comparison=comparison,
+            treatment_artifact_sha256=None,
+        )
+        candidate = validator(
+            mapping.get("candidate"),
+            field=f"cases[{index}].candidate",
+            source_revision=source_revision,
+            goldset_sha256=goldset_sha256,
+            task_sha256=task_sha256,
+            route=candidate_route,
+            comparison=comparison,
+            treatment_artifact_sha256=treatment["candidate_artifact_sha256"],
+        )
+        _validate_shared_runner_fields(fallback, candidate, index=index)
+        normalized.append(
+            {
+                "id": case_id,
+                "task_sha256": task_sha256,
+                "fallback": fallback,
+                "candidate": candidate,
+            }
+        )
+    _validate_case_identity_sets(normalized, observed_ids, expected)
     by_id = {item["id"]: item for item in normalized}
     return [by_id[case_id] for case_id in expected]
 
@@ -298,12 +658,35 @@ def _validate_does_not_establish(value: Any) -> list[str]:
     ]
     if len(result) != len(set(result)):
         raise AgentBenefitEvidenceError("does_not_establish must be unique")
-    required = {"default_activation", "causal_generalization_beyond_bound_cases"}
+    required = {
+        "default_activation",
+        "causal_generalization_beyond_bound_cases",
+        "receipt_hashes_do_not_attest_runner_or_grader_honesty",
+    }
     if not required <= set(result):
         raise AgentBenefitEvidenceError(
-            "does_not_establish must retain default-activation and generalization limits"
+            "does_not_establish must retain activation, generalization, and receipt-authenticity limits"
         )
     return result
+
+
+def _validate_pair_binding(
+    pair_document: Mapping[str, Any],
+    *,
+    source_revision: str,
+    goldset_sha256: str,
+) -> tuple[str, str]:
+    pair_source_revision = _validate_revision(
+        pair_document.get("source_revision"), field="pair source_revision"
+    )
+    pair_goldset_sha256 = _validate_hash(
+        pair_document.get("goldset_sha256"), field="pair goldset_sha256"
+    )
+    if pair_source_revision != source_revision:
+        raise AgentBenefitEvidenceError("pair source_revision does not match benchmark")
+    if pair_goldset_sha256 != goldset_sha256:
+        raise AgentBenefitEvidenceError("pair goldset_sha256 does not match benchmark")
+    return pair_source_revision, pair_goldset_sha256
 
 
 def build_language_structure_agent_benefit(
@@ -313,7 +696,7 @@ def build_language_structure_agent_benefit(
     goldset_sha256: str,
     expected_case_ids: Sequence[str],
 ) -> dict[str, Any]:
-    """Bind externally executed paired outcomes to one exact benchmark identity."""
+    """Bind content-addressed paired runner/grader receipts to one benchmark."""
     _validate_exact_fields(pair_document, _PAIR_FIELDS, field="pair document")
     if (
         pair_document.get("kind") != PAIR_KIND
@@ -322,6 +705,11 @@ def build_language_structure_agent_benefit(
         raise AgentBenefitEvidenceError("pair document kind/version is unsupported")
     source_revision = _validate_revision(source_revision, field="source_revision")
     goldset_sha256 = _validate_hash(goldset_sha256, field="goldset_sha256")
+    _validate_pair_binding(
+        pair_document,
+        source_revision=source_revision,
+        goldset_sha256=goldset_sha256,
+    )
     measurement_id = _nonempty_text(
         pair_document.get("measurement_id"), field="measurement_id"
     )
@@ -338,9 +726,16 @@ def build_language_structure_agent_benefit(
     comparison = _validate_comparison(pair_document.get("comparison"))
     treatment = _validate_treatment(pair_document.get("treatment"))
     cases = _validate_cases(
-        pair_document.get("cases"), expected_case_ids=expected_case_ids
+        pair_document.get("cases"),
+        expected_case_ids=expected_case_ids,
+        source_revision=source_revision,
+        goldset_sha256=goldset_sha256,
+        fallback_route=fallback_route,
+        candidate_route=candidate_route,
+        comparison=comparison,
+        treatment=treatment,
+        final_document=False,
     )
-    summary = _summary(cases)
     return {
         "kind": KIND,
         "version": VERSION,
@@ -352,7 +747,7 @@ def build_language_structure_agent_benefit(
         "comparison": comparison,
         "treatment": treatment,
         "cases": cases,
-        "summary": summary,
+        "summary": _summary(cases),
         "does_not_establish": _validate_does_not_establish(
             pair_document.get("does_not_establish")
         ),
@@ -366,7 +761,7 @@ def validate_language_structure_agent_benefit(
     goldset_sha256: str,
     expected_case_ids: Sequence[str],
 ) -> dict[str, Any]:
-    """Validate a promotion input and recompute all aggregate benefit rates."""
+    """Validate final evidence and re-derive outcomes from embedded grader receipts."""
     if not isinstance(document, Mapping):
         raise AgentBenefitEvidenceError("agent benefit must be an object")
     _validate_exact_fields(document, _TOP_LEVEL_FIELDS, field="agent benefit")
@@ -389,9 +784,19 @@ def validate_language_structure_agent_benefit(
         raise AgentBenefitEvidenceError(
             "fallback_route and candidate_route must differ"
         )
-    _validate_comparison(document.get("comparison"))
-    _validate_treatment(document.get("treatment"))
-    cases = _validate_cases(document.get("cases"), expected_case_ids=expected_case_ids)
+    comparison = _validate_comparison(document.get("comparison"))
+    treatment = _validate_treatment(document.get("treatment"))
+    cases = _validate_cases(
+        document.get("cases"),
+        expected_case_ids=expected_case_ids,
+        source_revision=source_revision,
+        goldset_sha256=goldset_sha256,
+        fallback_route=fallback_route,
+        candidate_route=candidate_route,
+        comparison=comparison,
+        treatment=treatment,
+        final_document=True,
+    )
     derived = _summary(cases)
     _validate_summary(document.get("summary"), expected=derived)
     _validate_does_not_establish(document.get("does_not_establish"))
@@ -447,7 +852,10 @@ def _benchmark_binding(document: Mapping[str, Any]) -> tuple[str, str, list[str]
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build paired language_structure agent-benefit evidence from external run receipts"
+        description=(
+            "Build receipt-bound language_structure agent-benefit evidence from "
+            "external paired runner/grader receipts"
+        )
     )
     parser.add_argument("--benchmark", required=True)
     parser.add_argument("--pairs", required=True)
