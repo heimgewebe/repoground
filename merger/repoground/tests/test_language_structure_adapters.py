@@ -970,76 +970,38 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         "sample_count": report["case_count"],
         "fallback_route": "text_fallback",
         "candidate_route": "language_structure_v1",
-        "fallback_success_rate": 0.7,
-        "candidate_success_rate": 0.8,
+        "fallback_success_rate": 0.0,
+        "candidate_success_rate": 1.0,
     }
     decision = decide_language_adapter_promotion(report, agent_benefit=benefit)
-    assert decision["status"] == "eligible_for_explicit_promotion_review"
-    assert decision["broad_activation_eligible"] is True
-    assert decision["default_promoted"] is False
+    assert decision == {
+        "status": "keep_optional",
+        "broad_activation_eligible": False,
+        "default_promoted": False,
+        "reason": "verified_component_delta_agent_benefit_missing",
+    }
 
-    unexpected_degradation = json.loads(json.dumps(report))
-    unexpected_degradation["degradation_expectations"]["no_unexpected"] = False
-    unexpected_degradation["degradation_expectations"]["exact_match"] = False
+    # Aggregate caller assertions are deliberately non-authoritative even when they
+    # claim the maximum possible improvement. Promotion stays closed until the
+    # generic paired-agent benchmark can verify a component-delta evaluation.
+    exaggerated = dict(benefit, fallback_success_rate=0.0, candidate_success_rate=1.0)
     assert (
-        decide_language_adapter_promotion(
-            unexpected_degradation, agent_benefit=benefit
-        )["status"]
-        == "keep_optional"
+        decide_language_adapter_promotion(report, agent_benefit=exaggerated)["reason"]
+        == "verified_component_delta_agent_benefit_missing"
     )
 
-    nonfinite_report = json.loads(json.dumps(report))
-    nonfinite_report["metrics"]["aggregate"]["relations"]["precision"] = float("inf")
     assert (
-        decide_language_adapter_promotion(nonfinite_report, agent_benefit=benefit)[
-            "status"
-        ]
-        == "keep_optional"
-    )
-
-    nonfinite_symbol_precision = json.loads(json.dumps(report))
-    nonfinite_symbol_precision["metrics"]["aggregate"]["symbol"]["precision"] = float(
-        "nan"
-    )
-    assert (
-        decide_language_adapter_promotion(
-            nonfinite_symbol_precision, agent_benefit=benefit
-        )["status"]
-        == "keep_optional"
-    )
-
-    nonfinite_case_cost = json.loads(json.dumps(report))
-    nonfinite_case_cost["case_results"][0]["costs"]["latency_ms"] = float("inf")
-    assert (
-        decide_language_adapter_promotion(nonfinite_case_cost, agent_benefit=benefit)[
-            "status"
-        ]
-        == "keep_optional"
-    )
-
-    inconsistent_counts = json.loads(json.dumps(report))
-    inconsistent_counts["metrics"]["aggregate"]["ranges"]["actual"] += 1
-    assert (
-        decide_language_adapter_promotion(inconsistent_counts, agent_benefit=benefit)[
-            "status"
-        ]
-        == "keep_optional"
+        decide_language_adapter_promotion(report)["reason"]
+        == "revision_bound_agent_benefit_missing"
     )
 
     malformed_report = json.loads(json.dumps(report))
     malformed_report["goldset_sha256"] = "z" * 64
-    malformed_benefit = dict(benefit, goldset_sha256="z" * 64)
     assert (
-        decide_language_adapter_promotion(
-            malformed_report, agent_benefit=malformed_benefit
-        )["status"]
-        == "keep_optional"
-    )
-
-    benefit["candidate_success_rate"] = float("nan")
-    assert (
-        decide_language_adapter_promotion(report, agent_benefit=benefit)["status"]
-        == "keep_optional"
+        decide_language_adapter_promotion(malformed_report, agent_benefit=benefit)[
+            "reason"
+        ]
+        == "benchmark_revision_binding_invalid"
     )
 
 
