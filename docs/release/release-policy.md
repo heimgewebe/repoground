@@ -80,12 +80,15 @@ scripts/release/compile_dependency_locks.sh --check
 The wrapper validates and reports Python, pip and pip-tools before generation.
 In steady state it installs the compiler only from the checked-in hashed tool
 lock. If and only if an exact direct `pip` or `pip-tools` pin in the input
-differs from the checked-in tool lock, the digest-pinned disposable container
-bootstraps those exact input pins once, regenerates all four locks, then
-installs the freshly generated tool lock with `--require-hashes` into an
-isolated temporary package target and reruns `--check` with user site-packages
-disabled. Malformed or ambiguous tool locks still fail closed; the bootstrap
-never means "latest pip".
+differs from that lock, the digest-pinned disposable container still installs
+the current compiler from the checked-in hashes first. That hash-bound compiler
+produces a candidate tool lock for the requested exact pins. The candidate is
+installed with `--require-hashes` into an isolated package target, and only that
+new hash-bound toolchain regenerates all four locks. The final checked-in tool
+lock is then installed again with `--require-hashes` into a second isolated
+target and must pass `--check` with user site-packages disabled. No package
+installation in this chain falls back to unhashed input pins. Malformed or
+ambiguous tool locks still fail closed; the bootstrap never means "latest pip".
 
 Every generation stages output away from the checkout and publishes only after
 all four compilations succeed. A contract mismatch or compilation failure

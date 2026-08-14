@@ -12,6 +12,7 @@ from scripts.release.compile_dependency_locks import (
     ContractError,
     ToolchainObservation,
     environment_findings,
+    generate_bootstrap_tool_lock,
     generate_locks,
     load_contract,
     load_locked_toolchain,
@@ -103,7 +104,7 @@ def test_toolchain_install_source_bootstraps_exact_input_when_direct_pin_differs
     repo, _original = _fixture_repo(tmp_path)
     _write_tool_lock(repo, pip=pip, pip_tools=pip_tools)
 
-    assert toolchain_install_source(repo) == "input"
+    assert toolchain_install_source(repo) == "bootstrap"
 
 
 def test_toolchain_install_source_rejects_missing_direct_tool_pin(
@@ -133,6 +134,103 @@ def test_toolchain_install_source_rejects_ambiguous_tool_lock(
 
     with pytest.raises(ContractError, match="duplicate pin for pip"):
         toolchain_install_source(repo)
+
+
+def test_bootstrap_tool_lock_is_derived_by_the_current_hashed_compiler(
+    tmp_path: Path,
+) -> None:
+    repo, _original = _fixture_repo(tmp_path)
+    _write_tool_lock(repo, pip="25.3", pip_tools="7.6.0")
+    checked_in = (repo / "requirements/repoground-lock-tools.lock.txt").read_bytes()
+
+    def bootstrap_runner(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        stdout: io.StringIO,
+        stderr: io.StringIO,
+    ) -> subprocess.CompletedProcess:
+        assert check is False
+        assert "--allow-unsafe" in args
+        assert stdout is stderr
+        output = cwd / args[args.index("--output-file") + 1]
+        output.write_text(
+            "pip-tools==7.6.0 " + "\\" + "\n"
+            + "pip==26.1.2 " + "\\" + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args, 0)
+
+    candidate = generate_bootstrap_tool_lock(
+        repo,
+        observation=ToolchainObservation(
+            implementation="CPython",
+            python="3.12.3",
+            pip="25.3",
+            pip_tools="7.6.0",
+        ),
+        runner=bootstrap_runner,
+        stderr=io.StringIO(),
+    )
+
+    assert b"pip==26.1.2" in candidate
+    assert b"pip-tools==7.6.0" in candidate
+    assert (repo / "requirements/repoground-lock-tools.lock.txt").read_bytes() == checked_in
+
+
+def test_bootstrap_tool_lock_rejects_an_environment_not_bound_by_old_lock(
+    tmp_path: Path,
+) -> None:
+    repo, _original = _fixture_repo(tmp_path)
+    _write_tool_lock(repo, pip="25.3", pip_tools="7.6.0")
+
+    def unexpected_runner(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess:
+        raise AssertionError("bootstrap compiler must not run after environment drift")
+
+    with pytest.raises(ContractError, match="pip bootstrap version mismatch"):
+        generate_bootstrap_tool_lock(
+            repo,
+            observation=SUPPORTED,
+            runner=unexpected_runner,
+            stderr=io.StringIO(),
+        )
+
+
+def test_bootstrap_tool_lock_rejects_candidate_with_wrong_direct_pins(
+    tmp_path: Path,
+) -> None:
+    repo, _original = _fixture_repo(tmp_path)
+    _write_tool_lock(repo, pip="25.3", pip_tools="7.6.0")
+
+    def wrong_candidate_runner(
+        args: list[str],
+        *,
+        cwd: Path,
+        check: bool,
+        **_kwargs: object,
+    ) -> subprocess.CompletedProcess:
+        assert check is False
+        output = cwd / args[args.index("--output-file") + 1]
+        output.write_text(
+            "pip-tools==7.6.0 " + "\\" + "\n"
+            + "pip==25.3 " + "\\" + "\n",
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(args, 0)
+
+    with pytest.raises(ContractError, match="does not bind the requested direct pins"):
+        generate_bootstrap_tool_lock(
+            repo,
+            observation=ToolchainObservation(
+                implementation="CPython",
+                python="3.12.3",
+                pip="25.3",
+                pip_tools="7.6.0",
+            ),
+            runner=wrong_candidate_runner,
+            stderr=io.StringIO(),
+        )
 
 
 def test_mismatch_report_includes_every_expected_and_observed_version() -> None:
