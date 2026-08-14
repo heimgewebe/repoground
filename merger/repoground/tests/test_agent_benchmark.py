@@ -885,64 +885,52 @@ def test_component_delta_artifact_size_and_stability_fail_closed(
         )
 
 
-def test_component_delta_pair_isolation_rejects_every_forbidden_difference(
-    tmp_path: Path,
+def _set_nested_value(target: dict, path: tuple[str, ...], value) -> None:
+    current = target
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = value
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("repository", "commit"), "f" * 40),
+        (("runner", "model"), "other"),
+        (("prompt",), "changed prompt"),
+        (("allowed_tools",), []),
+        (("budgets", "max_tool_calls"), 999),
+        (("repobrief", "manifest"), "other.manifest.json"),
+        (("repobrief", "manifest_sha256"), "f" * 64),
+        (("repobrief", "mcp_command"), ["other"]),
+        (("component_delta", "component"), "other_component"),
+        (("component_delta", "source_revision"), "b" * 40),
+        (("component_delta", "artifact"), None),
+    ],
+)
+def test_component_delta_pair_isolation_rejects_forbidden_difference(
+    tmp_path: Path, path: tuple[str, ...], value
 ) -> None:
     taskset, requests, _bindings = _component_requests(tmp_path)
     pair_id = requests[0]["pair_id"]
     pair = [item for item in requests if item["pair_id"] == pair_id]
     assert pair_request_errors(taskset, pair) == []
+    mutated = copy.deepcopy(pair)
+    treatment = next(item for item in mutated if item["condition"] == "treatment")
+    _set_nested_value(treatment, path, value)
+    assert pair_request_errors(taskset, mutated)
 
-    def mutate_treatment(name: str) -> list[dict]:
-        mutated = copy.deepcopy(pair)
-        treatment = next(item for item in mutated if item["condition"] == "treatment")
-        if name == "repository_commit":
-            treatment["repository"]["commit"] = "f" * 40
-        elif name == "runner":
-            treatment["runner"]["model"] = "other"
-        elif name == "prompt":
-            treatment["prompt"] += " changed"
-        elif name == "allowed_tools":
-            treatment["allowed_tools"] = treatment["allowed_tools"][:-1]
-        elif name == "budgets":
-            treatment["budgets"]["max_tool_calls"] += 1
-        elif name == "manifest":
-            treatment["repobrief"]["manifest"] += ".other"
-        elif name == "manifest_sha256":
-            treatment["repobrief"]["manifest_sha256"] = "f" * 64
-        elif name == "mcp_command":
-            treatment["repobrief"]["mcp_command"] = ["other"]
-        elif name == "component":
-            treatment["component_delta"]["component"] = "other_component"
-        elif name == "source_revision":
-            treatment["component_delta"]["source_revision"] = "b" * 40
-        elif name == "treatment_artifact_missing":
-            treatment["component_delta"]["artifact"] = None
-            treatment["component_delta"]["artifact_sha256"] = None
-        else:
-            raise AssertionError(name)
-        return mutated
 
-    for name in (
-        "repository_commit",
-        "runner",
-        "prompt",
-        "allowed_tools",
-        "budgets",
-        "manifest",
-        "manifest_sha256",
-        "mcp_command",
-        "component",
-        "source_revision",
-        "treatment_artifact_missing",
-    ):
-        assert pair_request_errors(taskset, mutate_treatment(name)), name
-
-    baseline_mutated = copy.deepcopy(pair)
-    baseline = next(item for item in baseline_mutated if item["condition"] == "baseline")
+def test_component_delta_pair_isolation_rejects_baseline_artifact(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    pair_id = requests[0]["pair_id"]
+    mutated = copy.deepcopy([item for item in requests if item["pair_id"] == pair_id])
+    baseline = next(item for item in mutated if item["condition"] == "baseline")
     baseline["component_delta"]["artifact"] = "unexpected.json"
     baseline["component_delta"]["artifact_sha256"] = "f" * 64
-    assert pair_request_errors(taskset, baseline_mutated)
+    assert pair_request_errors(taskset, mutated)
 
 
 def test_component_delta_evaluation_binds_repository_artifacts_and_complete_pairs(

@@ -206,6 +206,25 @@ def expected_pair_keys(taskset: Mapping[str, Any]) -> list[tuple[str, int]]:
     ]
 
 
+def _component_delta_pair_errors(
+    baseline: Mapping[str, Any], treatment: Mapping[str, Any]
+) -> list[str]:
+    errors: list[str] = []
+    for field in ("repository", "prompt", "allowed_tools", "budgets", "repobrief", "isolation"):
+        if baseline.get(field) != treatment.get(field):
+            errors.append(f"component_delta paired requests disagree on {field}")
+    baseline_delta = mapping_value(baseline.get("component_delta"))
+    treatment_delta = mapping_value(treatment.get("component_delta"))
+    for field in ("component", "source_revision"):
+        if baseline_delta.get(field) != treatment_delta.get(field):
+            errors.append(f"component_delta paired requests disagree on {field}")
+    if baseline_delta.get("artifact") is not None or baseline_delta.get("artifact_sha256") is not None:
+        errors.append("component_delta baseline unexpectedly contains artifact evidence")
+    if treatment_delta.get("artifact") is None or treatment_delta.get("artifact_sha256") is None:
+        errors.append("component_delta treatment is missing artifact evidence")
+    return errors
+
+
 def pair_request_errors(
     taskset: Mapping[str, Any],
     requests: Sequence[Mapping[str, Any]],
@@ -226,18 +245,7 @@ def pair_request_errors(
     if comparison_mode(taskset) == COMPONENT_DELTA_MODE:
         baseline = first if first.get("condition") == "baseline" else second
         treatment = second if baseline is first else first
-        for field in ("repository", "prompt", "allowed_tools", "budgets", "repobrief", "isolation"):
-            if baseline.get(field) != treatment.get(field):
-                errors.append(f"component_delta paired requests disagree on {field}")
-        baseline_delta = mapping_value(baseline.get("component_delta"))
-        treatment_delta = mapping_value(treatment.get("component_delta"))
-        for field in ("component", "source_revision"):
-            if baseline_delta.get(field) != treatment_delta.get(field):
-                errors.append(f"component_delta paired requests disagree on {field}")
-        if baseline_delta.get("artifact") is not None or baseline_delta.get("artifact_sha256") is not None:
-            errors.append("component_delta baseline unexpectedly contains artifact evidence")
-        if treatment_delta.get("artifact") is None or treatment_delta.get("artifact_sha256") is None:
-            errors.append("component_delta treatment is missing artifact evidence")
+        errors.extend(_component_delta_pair_errors(baseline, treatment))
     return errors
 
 
