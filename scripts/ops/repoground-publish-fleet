@@ -155,6 +155,7 @@ class PublicationConfig:
     redact_secrets: bool = True
     max_bytes: int = 0
     split_size: str = "25MB"
+    language_structure: bool = False
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -163,6 +164,7 @@ class PublicationConfig:
             "redact_secrets": self.redact_secrets,
             "max_bytes": self.max_bytes,
             "split_size": self.split_size,
+            "language_structure": self.language_structure,
         }
 
 
@@ -438,9 +440,12 @@ def safe_segment(raw: str) -> str:
 
 
 def publication_config(entry: RepoEntry) -> PublicationConfig:
+    # T021 keeps language structure opt-in globally. The fleet publisher is the
+    # explicit internal opt-in: consumers still decide independently whether to
+    # use the sidecar, and public-share never routes through this configuration.
     if entry.repo == "vault-gewebe":
-        return PublicationConfig(profile="agent-portable")
-    return PublicationConfig(profile="fleet-context")
+        return PublicationConfig(profile="agent-portable", language_structure=True)
+    return PublicationConfig(profile="fleet-context", language_structure=True)
 
 
 def publication_repository(entry: RepoEntry) -> str:
@@ -3331,6 +3336,47 @@ def prune_all_special(
     ]
 
 
+def build_refresh_command(
+    *,
+    source_wt: Path,
+    out_dir: Path,
+    registry_repository: str,
+    ref_segment: str,
+    config: PublicationConfig,
+) -> list[str]:
+    command = [
+        "python3",
+        "-B",
+        "-m",
+        "merger.repoground.cli.ground",
+        "external-manifest",
+        "refresh",
+        "--repo",
+        str(source_wt),
+        "--out",
+        str(out_dir),
+        "--publication-root",
+        str(PUB_ROOT),
+        "--repository",
+        registry_repository,
+        "--ref",
+        ref_segment,
+        "--profile",
+        config.profile,
+        "--output-mode",
+        config.output_mode,
+        "--max-bytes",
+        str(config.max_bytes),
+        "--split-size",
+        config.split_size,
+    ]
+    if config.redact_secrets:
+        command.append("--redact-secrets")
+    if config.language_structure:
+        command.append("--language-structure")
+    return command
+
+
 def publish(
     entry: RepoEntry,
     *,
@@ -3360,34 +3406,13 @@ def publish(
         fingerprint=fingerprint,
         publication_dir=out_dir,
     )
-    command = [
-        "python3",
-        "-B",
-        "-m",
-        "merger.repoground.cli.ground",
-        "external-manifest",
-        "refresh",
-        "--repo",
-        str(source_wt),
-        "--out",
-        str(out_dir),
-        "--publication-root",
-        str(PUB_ROOT),
-        "--repository",
-        registry_repository,
-        "--ref",
-        ref_segment,
-        "--profile",
-        config.profile,
-        "--output-mode",
-        config.output_mode,
-        "--max-bytes",
-        str(config.max_bytes),
-        "--split-size",
-        config.split_size,
-    ]
-    if config.redact_secrets:
-        command.append("--redact-secrets")
+    command = build_refresh_command(
+        source_wt=source_wt,
+        out_dir=out_dir,
+        registry_repository=registry_repository,
+        ref_segment=ref_segment,
+        config=config,
+    )
     try:
         STATE_ROOT.mkdir(parents=True, exist_ok=True)
         residue_provenance = arm_managed_build_residue_provenance(

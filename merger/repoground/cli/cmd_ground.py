@@ -498,6 +498,20 @@ def parse_extensions(values: Iterable[str] | None) -> list[str] | None:
     return sorted(set(result)) or None
 
 
+def _snapshot_extras(
+    profile: str, *, language_structure: bool = False
+) -> ExtrasConfig:
+    if language_structure and "language_structure_json" in profile_excluded_roles(profile):
+        raise ValueError(
+            f"profile {profile} excludes language_structure_json; explicit generation is forbidden"
+        )
+    return ExtrasConfig(
+        json_sidecar=True,
+        augment_sidecar=True,
+        language_structure=language_structure,
+    )
+
+
 def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> None:
     ground_subparsers = ground_parser.add_subparsers(
         dest="ground_cmd",
@@ -530,6 +544,14 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     create_parser.add_argument("--path-filter")
     create_parser.add_argument("--ext", action="append")
     create_parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"])
+    create_parser.add_argument(
+        "--language-structure",
+        action="store_true",
+        help=(
+            "Explicitly emit the optional commit-bound Rust/Bash language_structure "
+            "sidecar when the selected profile permits it"
+        ),
+    )
     create_redaction = create_parser.add_mutually_exclusive_group()
     create_redaction.add_argument(
         "--redact-secrets", action="store_true", dest="redact_secrets"
@@ -771,6 +793,14 @@ def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> No
     external_refresh_parser.add_argument("--path-filter")
     external_refresh_parser.add_argument("--ext", action="append")
     external_refresh_parser.add_argument("--output-mode", choices=["archive", "retrieval", "dual"])
+    external_refresh_parser.add_argument(
+        "--language-structure",
+        action="store_true",
+        help=(
+            "Explicitly emit the optional commit-bound Rust/Bash language_structure "
+            "sidecar when the selected profile permits it"
+        ),
+    )
     refresh_redaction = external_refresh_parser.add_mutually_exclusive_group()
     refresh_redaction.add_argument(
         "--redact-secrets", action="store_true", dest="redact_secrets"
@@ -996,6 +1026,7 @@ def run_external_manifest_refresh(args: argparse.Namespace) -> int:
         max_bytes=args.max_bytes, split_size=args.split_size, path_filter=args.path_filter,
         ext=args.ext, output_mode=args.output_mode, redact_secrets=args.redact_secrets,
         include_hidden=args.include_hidden,
+        language_structure=bool(getattr(args, "language_structure", False)),
         latest_complete_registry=None,
     )
     snapshot_stdout = io.StringIO()
@@ -1463,7 +1494,10 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     max_bytes = parse_human_size(args.max_bytes)
     split_size = parse_human_size(args.split_size)
     ext_filter = parse_extensions(args.ext)
-    extras = ExtrasConfig(json_sidecar=True, augment_sidecar=True)
+    extras = _snapshot_extras(
+        profile,
+        language_structure=bool(getattr(args, "language_structure", False)),
+    )
 
     summary = scan_repo(
         repo,

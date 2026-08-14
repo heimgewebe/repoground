@@ -88,11 +88,44 @@ def test_publication_config_uses_compact_daily_profile(tmp_path: Path) -> None:
     )
 
     assert module.publication_config(default) == module.PublicationConfig(
-        profile="fleet-context"
+        profile="fleet-context", language_structure=True
     )
     assert module.publication_config(vault) == module.PublicationConfig(
-        profile="agent-portable"
+        profile="agent-portable", language_structure=True
     )
+    assert module.publication_config(default).as_dict()["language_structure"] is True
+
+
+def test_fleet_refresh_command_explicitly_opts_into_language_structure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = load_publisher()
+    publication_root = tmp_path / "publications"
+    monkeypatch.setattr(module, "PUB_ROOT", publication_root)
+    config = module.PublicationConfig(
+        profile="fleet-context", language_structure=True
+    )
+
+    command = module.build_refresh_command(
+        source_wt=tmp_path / "source",
+        out_dir=publication_root / "bundle",
+        registry_repository="heimgewebe__demo",
+        ref_segment="main",
+        config=config,
+    )
+
+    assert command[command.index("--profile") + 1] == "fleet-context"
+    assert "--language-structure" in command
+    assert command[command.index("--publication-root") + 1] == str(publication_root)
+
+    disabled = module.build_refresh_command(
+        source_wt=tmp_path / "source",
+        out_dir=publication_root / "bundle",
+        registry_repository="heimgewebe__demo",
+        ref_segment="main",
+        config=module.PublicationConfig(profile="fleet-context"),
+    )
+    assert "--language-structure" not in disabled
 
 
 def allow_no_active_managed_build_leases(

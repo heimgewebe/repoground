@@ -91,6 +91,7 @@ def test_snapshot_create_dispatches_existing_generator(monkeypatch, tmp_path, ca
     assert calls["write"]["args"][5] == 0
     assert calls["write"]["args"][6] is False
     assert calls["write"]["kwargs"]["generator_info"]["name"] == "repobrief"
+    assert calls["write"]["kwargs"]["extras"].language_structure is False
 
     manifest_data = json.loads((out / "repo_merge.bundle.manifest.json").read_text(encoding="utf-8"))
     assert manifest_data["capabilities"]["repobrief_profile"] == "agent-portable"
@@ -104,6 +105,90 @@ def test_snapshot_create_dispatches_existing_generator(monkeypatch, tmp_path, ca
     assert emitted["export_safety_report"].endswith(".export_safety_report.json")
     assert "export_safety_report" not in emitted["profile_evaluation"]["missing_required"]
     assert "forensic_ready" in emitted["does_not_establish"]
+
+
+def test_snapshot_create_language_structure_requires_explicit_opt_in(
+    monkeypatch, tmp_path
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("hello\n", encoding="utf-8")
+    out = tmp_path / "briefs"
+    observed = {}
+
+    def fake_scan_repo(*args, **kwargs):
+        return {
+            "name": "repo",
+            "root": repo,
+            "files": [],
+            "total_files": 0,
+            "total_bytes": 0,
+            "ext_hist": {},
+        }
+
+    def fake_write_reports_v2(*args, **kwargs):
+        observed["language_structure"] = kwargs["extras"].language_structure
+        manifest = out / "repo_merge.bundle.manifest.json"
+        manifest.parent.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(
+            json.dumps({"kind": "repolens.bundle.manifest", "capabilities": {}}),
+            encoding="utf-8",
+        )
+        return FakeArtifacts(manifest)
+
+    monkeypatch.setattr(cmd_ground, "scan_repo", fake_scan_repo)
+    monkeypatch.setattr(cmd_ground, "write_reports_v2", fake_write_reports_v2)
+    monkeypatch.setattr(
+        cmd_ground, "finalize_snapshot_bundle", _stub_successful_finalization
+    )
+
+    rc = main([
+        "ground",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "fleet-context",
+        "--language-structure",
+    ])
+
+    assert rc == 0
+    assert observed["language_structure"] is True
+
+
+def test_public_share_rejects_explicit_language_structure_before_generation(
+    monkeypatch, tmp_path
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    out = tmp_path / "briefs"
+    called = False
+
+    def fake_scan_repo(*args, **kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("generation must not start for excluded language structure")
+
+    monkeypatch.setattr(cmd_ground, "scan_repo", fake_scan_repo)
+
+    rc = main([
+        "ground",
+        "snapshot",
+        "create",
+        "--repo",
+        str(repo),
+        "--out",
+        str(out),
+        "--profile",
+        "public-share",
+        "--language-structure",
+    ])
+
+    assert rc == 2
+    assert called is False
 
 
 def test_snapshot_create_rejects_missing_repo_without_creating_snapshot(tmp_path):
@@ -380,6 +465,7 @@ def test_external_manifest_refresh_returns_exit_2_for_bundle_generation_resolver
             output_mode="dual",
             redact_secrets=False,
             include_hidden=False,
+            language_structure=False,
         )
     )
 
