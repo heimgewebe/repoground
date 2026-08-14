@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TextIO
 
 CONTRACT_PATH = Path("requirements/repoground-lock-tools.in")
+TOOL_LOCK_PATH = Path("requirements/repoground-lock-tools.lock.txt")
 LOCK_NAMES = ("runtime", "dev", "browser", "lock-tools")
 _LOCK_PATHS = tuple(
     Path(f"requirements/repoground-{name}.lock.txt") for name in LOCK_NAMES
@@ -31,6 +32,7 @@ _INPUT_PATHS = (
 )
 _PYTHON_PIN_RE = re.compile(r"^# lock-python==([0-9]+\.[0-9]+\.[0-9]+)$")
 _PACKAGE_PIN_RE = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s]+)$")
+_LOCK_PACKAGE_PIN_RE = re.compile(r"^(pip(?:-tools)?)==([^\s\\]+)\s+\\$")
 
 
 class ContractError(ValueError):
@@ -40,6 +42,12 @@ class ContractError(ValueError):
 @dataclass(frozen=True)
 class ToolchainContract:
     python: str
+    pip: str
+    pip_tools: str
+
+
+@dataclass(frozen=True)
+class LockedToolchain:
     pip: str
     pip_tools: str
 
@@ -96,6 +104,41 @@ def load_contract(repo_root: Path) -> ToolchainContract:
         pip=package_pins["pip"],
         pip_tools=package_pins["pip-tools"],
     )
+
+
+def load_locked_toolchain(repo_root: Path) -> LockedToolchain:
+    """Read the direct pip/pip-tools pins from the checked-in tool lock."""
+    path = repo_root / TOOL_LOCK_PATH
+    package_pins: dict[str, str] = {}
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        match = _LOCK_PACKAGE_PIN_RE.fullmatch(raw_line.strip())
+        if match is None:
+            continue
+        name, version = match.groups()
+        if name in package_pins:
+            raise ContractError(f"{TOOL_LOCK_PATH}:{line_number}: duplicate pin for {name}")
+        package_pins[name] = version
+
+    if set(package_pins) != {"pip", "pip-tools"}:
+        raise ContractError(
+            f"{TOOL_LOCK_PATH}: expected exactly pip and pip-tools direct pins; "
+            f"observed={sorted(package_pins)!r}"
+        )
+    return LockedToolchain(
+        pip=package_pins["pip"],
+        pip_tools=package_pins["pip-tools"],
+    )
+
+
+def toolchain_install_source(repo_root: Path) -> str:
+    """Return lock for steady state, input only for an intentional tool self-update."""
+    contract = load_contract(repo_root)
+    locked = load_locked_toolchain(repo_root)
+    if contract.pip == locked.pip and contract.pip_tools == locked.pip_tools:
+        return "lock"
+    return "input"
 
 
 def observe_toolchain() -> ToolchainObservation:
@@ -313,10 +356,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="compare staged generations without rewriting checked-in locks",
     )
+    parser.add_argument(
+        "--print-install-source",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
+    repo_root = Path(args.root).resolve()
     try:
-        return generate_locks(Path(args.root).resolve(), check=args.check)
+        if args.print_install_source:
+            if args.check:
+                raise ContractError(
+                    "--print-install-source cannot be combined with --check"
+                )
+            print(toolchain_install_source(repo_root))
+            return 0
+        return generate_locks(repo_root, check=args.check)
     except (ContractError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         print("No lockfile was generated or rewritten.", file=sys.stderr)

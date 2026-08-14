@@ -78,9 +78,18 @@ scripts/release/compile_dependency_locks.sh --check
 ```
 
 The wrapper validates and reports Python, pip and pip-tools before generation.
-It stages every output away from the checkout and publishes only after all four
-compilations succeed. A contract mismatch or compilation failure therefore
-does not leave a partial lockfile diff.
+In steady state it installs the compiler only from the checked-in hashed tool
+lock. If and only if an exact direct `pip` or `pip-tools` pin in the input
+differs from the checked-in tool lock, the digest-pinned disposable container
+bootstraps those exact input pins once, regenerates all four locks, then
+installs the freshly generated tool lock with `--require-hashes` into an
+isolated temporary package target and reruns `--check` with user site-packages
+disabled. Malformed or ambiguous tool locks still fail closed; the bootstrap
+never means "latest pip".
+
+Every generation stages output away from the checkout and publishes only after
+all four compilations succeed. A contract mismatch or compilation failure
+therefore does not leave a partial lockfile diff.
 
 ## Optional semantic extension
 

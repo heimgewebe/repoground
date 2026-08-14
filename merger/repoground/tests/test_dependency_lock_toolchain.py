@@ -9,11 +9,14 @@ import pytest
 import scripts.release.compile_dependency_locks as compiler
 from scripts.release.compile_dependency_locks import (
     LOCK_NAMES,
+    ContractError,
     ToolchainObservation,
     environment_findings,
     generate_locks,
     load_contract,
+    load_locked_toolchain,
     report_environment,
+    toolchain_install_source,
 )
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -60,12 +63,76 @@ def _assert_locks(repo: Path, expected: dict[str, bytes]) -> None:
     } == expected
 
 
+def _write_tool_lock(repo: Path, *, pip: str, pip_tools: str) -> None:
+    (repo / "requirements/repoground-lock-tools.lock.txt").write_text(
+        f"pip-tools=={pip_tools} " + "\\" + "\n"
+        + f"pip=={pip} " + "\\" + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_repository_contract_binds_python_pip_and_pip_tools() -> None:
     contract = load_contract(ROOT)
     assert contract.python == "3.12.3"
     assert contract.pip == "26.1.2"
     assert contract.pip_tools == "7.6.0"
     assert environment_findings(contract, SUPPORTED) == []
+
+
+def test_toolchain_install_source_uses_hashed_lock_when_direct_pins_match(
+    tmp_path: Path,
+) -> None:
+    repo, _original = _fixture_repo(tmp_path)
+    _write_tool_lock(repo, pip="26.1.2", pip_tools="7.6.0")
+
+    locked = load_locked_toolchain(repo)
+    assert locked.pip == "26.1.2"
+    assert locked.pip_tools == "7.6.0"
+    assert toolchain_install_source(repo) == "lock"
+
+
+@pytest.mark.parametrize(
+    ("pip", "pip_tools"),
+    (("25.3", "7.6.0"), ("26.1.2", "7.5.0")),
+)
+def test_toolchain_install_source_bootstraps_exact_input_when_direct_pin_differs(
+    tmp_path: Path,
+    pip: str,
+    pip_tools: str,
+) -> None:
+    repo, _original = _fixture_repo(tmp_path)
+    _write_tool_lock(repo, pip=pip, pip_tools=pip_tools)
+
+    assert toolchain_install_source(repo) == "input"
+
+
+def test_toolchain_install_source_rejects_missing_direct_tool_pin(
+    tmp_path: Path,
+) -> None:
+    repo, _original = _fixture_repo(tmp_path)
+    (repo / "requirements/repoground-lock-tools.lock.txt").write_text(
+        "pip-tools==7.6.0 " + "\\" + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="expected exactly pip and pip-tools"):
+        toolchain_install_source(repo)
+
+
+def test_toolchain_install_source_rejects_ambiguous_tool_lock(
+    tmp_path: Path,
+) -> None:
+    repo, _original = _fixture_repo(tmp_path)
+    path = repo / "requirements/repoground-lock-tools.lock.txt"
+    path.write_text(
+        "pip==26.1.2 " + "\\" + "\n"
+        + "pip==25.3 " + "\\" + "\n"
+        + "pip-tools==7.6.0 " + "\\" + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match="duplicate pin for pip"):
+        toolchain_install_source(repo)
 
 
 def test_mismatch_report_includes_every_expected_and_observed_version() -> None:
