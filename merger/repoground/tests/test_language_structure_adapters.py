@@ -27,6 +27,9 @@ from merger.repoground.core.language_structure_benchmark import (
     evaluate_language_structure_goldset,
     load_language_goldset,
 )
+from merger.repoground.core.language_structure_agent_benefit import (
+    build_language_structure_agent_benefit,
+)
 from merger.repoground.core.rust_structure_adapter import (
     _rust_call_evidence,
     scan_rust_repository,
@@ -962,7 +965,57 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         "no_unexpected": True,
         "exact_match": True,
     }
-    benefit = {
+    case_ids = [item["id"] for item in report["case_results"]]
+    fallback_failure_count = max(1, (len(case_ids) + 9) // 10)
+    pair_document = {
+        "kind": "repoground.language_structure_agent_benefit_pairs",
+        "version": "1.0",
+        "measurement_id": "unit-paired-benefit",
+        "fallback_route": "text_fallback",
+        "candidate_route": "language_structure_v1",
+        "comparison": {
+            "same_model": True,
+            "same_prompt": True,
+            "same_budget": True,
+            "same_source_revision": True,
+            "same_grader": True,
+            "model_identity_sha256": "1" * 64,
+            "harness_identity_sha256": "2" * 64,
+            "environment_identity_sha256": "3" * 64,
+            "grader_identity_sha256": "4" * 64,
+        },
+        "treatment": {
+            "variable": "language_structure_json",
+            "fallback_excludes": True,
+            "candidate_includes": True,
+        },
+        "cases": [
+            {
+                "id": case_id,
+                "task_sha256": hashlib.sha256(case_id.encode("utf-8")).hexdigest(),
+                "fallback": {
+                    "success": index >= fallback_failure_count,
+                    "evidence_refs": [f"fallback:{case_id}"],
+                },
+                "candidate": {
+                    "success": True,
+                    "evidence_refs": [f"candidate:{case_id}"],
+                },
+            }
+            for index, case_id in enumerate(case_ids)
+        ],
+        "does_not_establish": [
+            "default_activation",
+            "causal_generalization_beyond_bound_cases",
+        ],
+    }
+    benefit = build_language_structure_agent_benefit(
+        pair_document,
+        source_revision=revision,
+        goldset_sha256=report["goldset_sha256"],
+        expected_case_ids=case_ids,
+    )
+    legacy_aggregate_only = {
         "kind": "repoground.language_structure_agent_benefit",
         "version": "1.0",
         "source_revision": revision,
@@ -970,9 +1023,15 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         "sample_count": report["case_count"],
         "fallback_route": "text_fallback",
         "candidate_route": "language_structure_v1",
-        "fallback_success_rate": 0.7,
-        "candidate_success_rate": 0.8,
+        "fallback_success_rate": 0.0,
+        "candidate_success_rate": 1.0,
     }
+    legacy_decision = decide_language_adapter_promotion(
+        report, agent_benefit=legacy_aggregate_only
+    )
+    assert legacy_decision["status"] == "keep_optional"
+    assert legacy_decision["reason"] == "agent_benefit_binding_invalid"
+
     decision = decide_language_adapter_promotion(report, agent_benefit=benefit)
     assert decision["status"] == "eligible_for_explicit_promotion_review"
     assert decision["broad_activation_eligible"] is True
@@ -1036,7 +1095,7 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         == "keep_optional"
     )
 
-    benefit["candidate_success_rate"] = float("nan")
+    benefit["summary"]["candidate_success_rate"] = float("nan")
     assert (
         decide_language_adapter_promotion(report, agent_benefit=benefit)["status"]
         == "keep_optional"

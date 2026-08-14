@@ -22,13 +22,15 @@ from merger.repoground.core.bounded_artifact_read import (
     read_stable_regular_file_bytes,
 )
 from merger.repoground.core.language_structure import build_language_structure_document
+from merger.repoground.core.language_structure_agent_benefit import (
+    AgentBenefitEvidenceError,
+    validate_language_structure_agent_benefit,
+)
 
 KIND = "repoground.language_structure_benchmark"
 VERSION = "1.0"
 GOLDSET_KIND = "repoground.language_structure_goldset"
 GOLDSET_VERSION = "1.0"
-BENEFIT_KIND = "repoground.language_structure_agent_benefit"
-BENEFIT_VERSION = "1.0"
 CASE_CLASSES = frozenset({"positive", "ambiguous", "dynamic", "null"})
 _REVISION_RE = re.compile(r"^[a-f0-9]{40}(?:[a-f0-9]{24})?$")
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
@@ -441,38 +443,21 @@ def _promotion_benefit_rates(
     *,
     source_revision: str,
     goldset_sha256: str,
-    case_count: int,
+    case_ids: list[str],
 ) -> tuple[float, float] | None:
-    required = {
-        "kind",
-        "version",
-        "source_revision",
-        "goldset_sha256",
-        "sample_count",
-        "fallback_route",
-        "candidate_route",
-        "fallback_success_rate",
-        "candidate_success_rate",
-    }
-    if not required <= set(agent_benefit):
+    try:
+        summary = validate_language_structure_agent_benefit(
+            agent_benefit,
+            source_revision=source_revision,
+            goldset_sha256=goldset_sha256,
+            expected_case_ids=case_ids,
+        )
+    except AgentBenefitEvidenceError:
         return None
-    fallback_rate = _finite_rate(agent_benefit.get("fallback_success_rate"))
-    candidate_rate = _finite_rate(agent_benefit.get("candidate_success_rate"))
-    valid = (
-        agent_benefit.get("kind") == BENEFIT_KIND
-        and agent_benefit.get("version") == BENEFIT_VERSION
-        and agent_benefit.get("source_revision") == source_revision
-        and agent_benefit.get("goldset_sha256") == goldset_sha256
-        and _nonnegative_integer(agent_benefit.get("sample_count")) == case_count
-        and isinstance(agent_benefit.get("fallback_route"), str)
-        and bool(agent_benefit.get("fallback_route"))
-        and isinstance(agent_benefit.get("candidate_route"), str)
-        and bool(agent_benefit.get("candidate_route"))
-        and agent_benefit.get("fallback_route") != agent_benefit.get("candidate_route")
-        and fallback_rate is not None
-        and candidate_rate is not None
-    )
-    if not valid:
+    fallback_rate = _finite_rate(summary.get("fallback_success_rate"))
+    candidate_rate = _finite_rate(summary.get("candidate_success_rate"))
+    sample_count = _nonnegative_integer(summary.get("sample_count"))
+    if fallback_rate is None or candidate_rate is None or sample_count != len(case_ids):
         return None
     return fallback_rate, candidate_rate
 
@@ -547,11 +532,21 @@ def decide_language_adapter_promotion(
         source_revision, goldset_sha256, case_count = binding
         if not isinstance(agent_benefit, Mapping):
             return _keep_optional("revision_bound_agent_benefit_missing")
+        case_results = report.get("case_results")
+        if not isinstance(case_results, list):
+            return _keep_optional("benchmark_revision_binding_invalid")
+        case_ids = [
+            str(case["id"])
+            for case in case_results
+            if isinstance(case, Mapping) and isinstance(case.get("id"), str)
+        ]
+        if len(case_ids) != case_count:
+            return _keep_optional("benchmark_revision_binding_invalid")
         benefit_rates = _promotion_benefit_rates(
             agent_benefit,
             source_revision=source_revision,
             goldset_sha256=goldset_sha256,
-            case_count=case_count,
+            case_ids=case_ids,
         )
         if benefit_rates is None:
             return _keep_optional("agent_benefit_binding_invalid")
