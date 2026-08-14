@@ -34,9 +34,9 @@ wheel==0.47.0 \
     # via pip-tools
 
 # The following packages are considered to be unsafe in a requirements file:
-pip==25.3 \
-    --hash=sha256:8d0538dbbd7babbd207f261ed969c65de439f6bc9e5dbd3b3b9a77f25d95f343 \
-    --hash=sha256:9655943313a94722b7774661c21049070f6bbb0a1516bf02f7c8d5d9201514cd
+pip==26.1.2 \
+    --hash=sha256:382ff9f685ee3bc25864f820aa50505825f10f5458ffff07e30a6d96e5715cab \
+    --hash=sha256:f49cd134c61cf2fd75e0ce2676db03e4054504a5a4986d00f8299ae632dc4605
     # via
     #   -r requirements/repoground-lock-tools.in
     #   pip-tools
