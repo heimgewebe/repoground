@@ -22,10 +22,6 @@ from merger.repoground.core.bounded_artifact_read import (
     read_stable_regular_file_bytes,
 )
 from merger.repoground.core.language_structure import build_language_structure_document
-from merger.repoground.core.language_structure_agent_benefit import (
-    AgentBenefitEvidenceError,
-    validate_language_structure_agent_benefit,
-)
 
 KIND = "repoground.language_structure_benchmark"
 VERSION = "1.0"
@@ -438,169 +434,16 @@ def _promotion_report_binding(
     return str(source_revision), goldset_sha256, case_count
 
 
-def _promotion_benefit_rates(
-    agent_benefit: Mapping[str, Any],
-    *,
-    source_revision: str,
-    goldset_sha256: str,
-    case_ids: list[str],
-) -> tuple[float, float] | None:
-    try:
-        summary = validate_language_structure_agent_benefit(
-            agent_benefit,
-            source_revision=source_revision,
-            goldset_sha256=goldset_sha256,
-            expected_case_ids=case_ids,
-        )
-    except AgentBenefitEvidenceError:
-        return None
-    fallback_rate = _finite_rate(summary.get("fallback_success_rate"))
-    candidate_rate = _finite_rate(summary.get("candidate_success_rate"))
-    sample_count = _nonnegative_integer(summary.get("sample_count"))
-    if fallback_rate is None or candidate_rate is None or sample_count != len(case_ids):
-        return None
-    return fallback_rate, candidate_rate
-
-
-def _promotion_measurements(
-    report: Mapping[str, Any],
-) -> tuple[tuple[float, float, float, float], float, int, int, int, int, int] | None:
-    metrics = report.get("metrics")
-    aggregate = metrics.get("aggregate") if isinstance(metrics, Mapping) else None
-    costs = report.get("costs")
-    nulls = report.get("true_nulls")
-    if (
-        not isinstance(aggregate, Mapping)
-        or set(aggregate) != {"symbol", "relations", "ranges"}
-        or not all(_metric_contract_valid(aggregate[lane]) for lane in aggregate)
-        or not isinstance(costs, Mapping)
-        or not isinstance(nulls, Mapping)
-    ):
-        return None
-    rates = (
-        _finite_rate(aggregate.get("symbol", {}).get("recall")),
-        _finite_rate(aggregate.get("relations", {}).get("precision")),
-        _finite_rate(aggregate.get("relations", {}).get("recall")),
-        _finite_rate(aggregate.get("ranges", {}).get("recall")),
-    )
-    latency_median = _finite_nonnegative(costs.get("latency_ms_median"))
-    latency = _finite_nonnegative(costs.get("latency_ms_p95"))
-    peak_memory = _nonnegative_integer(costs.get("peak_memory_bytes_max"))
-    index_size_total = _nonnegative_integer(costs.get("index_size_bytes_total"))
-    index_size = _nonnegative_integer(costs.get("index_size_bytes_max"))
-    null_case_count = _nonnegative_integer(nulls.get("case_count"))
-    null_pass_count = _nonnegative_integer(nulls.get("pass_count"))
-    null_false_positives = _nonnegative_integer(nulls.get("false_positive_records"))
-    values = (
-        *rates,
-        latency_median,
-        latency,
-        peak_memory,
-        index_size_total,
-        index_size,
-        null_case_count,
-        null_pass_count,
-        null_false_positives,
-    )
-    if any(value is None for value in values):
-        return None
-    if (
-        float(latency) < float(latency_median)
-        or int(index_size_total) < int(index_size)
-        or int(null_pass_count) > int(null_case_count)
-    ):
-        return None
-    return (
-        tuple(float(value) for value in rates),
-        float(latency),
-        int(peak_memory),
-        int(index_size),
-        int(null_case_count),
-        int(null_pass_count),
-        int(null_false_positives),
-    )
-
-
 def decide_language_adapter_promotion(
     report: Mapping[str, Any], *, agent_benefit: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Fail closed and never self-authorize a runtime default change."""
+    """Fail closed until verified component-delta agent evidence exists."""
     try:
-        binding = _promotion_report_binding(report)
-        if binding is None:
+        if _promotion_report_binding(report) is None:
             return _keep_optional("benchmark_revision_binding_invalid")
-        source_revision, goldset_sha256, case_count = binding
         if not isinstance(agent_benefit, Mapping):
             return _keep_optional("revision_bound_agent_benefit_missing")
-        case_results = report.get("case_results")
-        if not isinstance(case_results, list):
-            return _keep_optional("benchmark_revision_binding_invalid")
-        case_ids = [
-            str(case["id"])
-            for case in case_results
-            if isinstance(case, Mapping) and isinstance(case.get("id"), str)
-        ]
-        if len(case_ids) != case_count:
-            return _keep_optional("benchmark_revision_binding_invalid")
-        benefit_rates = _promotion_benefit_rates(
-            agent_benefit,
-            source_revision=source_revision,
-            goldset_sha256=goldset_sha256,
-            case_ids=case_ids,
-        )
-        if benefit_rates is None:
-            return _keep_optional("agent_benefit_binding_invalid")
-        fallback_rate, candidate_rate = benefit_rates
-        measurements = _promotion_measurements(report)
-        if measurements is None:
-            return _keep_optional("benchmark_metrics_or_costs_invalid")
-        (
-            quality_rates,
-            latency_p95,
-            peak_memory,
-            index_size,
-            null_case_count,
-            null_pass_count,
-            null_false_positives,
-        ) = measurements
-        deterministic = report.get("determinism", {}).get(
-            "semantic_projection_repeated_equal"
-        )
-        degradation_complete = report.get("degradation_expectations", {}).get(
-            "exact_match"
-        )
-        delta = candidate_rate - fallback_rate
-        symbol_recall, relation_precision, relation_recall, range_recall = quality_rates
-        passes = (
-            delta >= 0.05
-            and symbol_recall >= 0.8
-            and relation_precision >= 0.9
-            and relation_recall >= 0.8
-            and range_recall >= 0.9
-            and null_case_count >= 2
-            and null_pass_count == null_case_count
-            and null_false_positives == 0
-            and deterministic is True
-            and degradation_complete is True
-            and latency_p95 <= 500.0
-            and peak_memory <= 64 * 1024 * 1024
-            and index_size <= 16 * 1024 * 1024
-        )
-        if not passes:
-            return _keep_optional(
-                "benefit_quality_null_or_cost_gate_not_met",
-                agent_success_rate_delta=round(delta, 6),
-            )
-        return {
-            "status": "eligible_for_explicit_promotion_review",
-            "broad_activation_eligible": True,
-            "default_promoted": False,
-            "reason": "revision_bound_benefit_quality_null_and_cost_gates_passed",
-            "agent_success_rate_delta": round(delta, 6),
-            "source_revision": source_revision,
-            "goldset_sha256": goldset_sha256,
-            "decision_authority": "none; explicit reviewed configuration change required",
-        }
+        return _keep_optional("verified_component_delta_agent_benefit_missing")
     except (KeyError, TypeError, ValueError, OverflowError):
         return _keep_optional("promotion_input_malformed")
 
@@ -902,7 +745,7 @@ def evaluate_language_structure_goldset(
             "complete_bash_semantics",
             "runtime_behavior",
             "cross_machine_latency_equivalence",
-            "agent_benefit_without_revision_bound_comparison",
+            "agent_benefit_without_verified_component_delta_evaluation",
             "default_activation",
         ],
     }
@@ -919,7 +762,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--goldset", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--source-revision", required=True)
-    parser.add_argument("--agent-benefit")
+    parser.add_argument(
+        "--agent-benefit",
+        help=(
+            "legacy external benefit input; retained for compatibility but cannot "
+            "authorize promotion until the verified component-delta harness exists"
+        ),
+    )
     args = parser.parse_args(argv)
     goldset = load_language_goldset(args.goldset)
     agent_benefit = None
