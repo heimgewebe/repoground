@@ -1,8 +1,9 @@
 """Machine-readable retention policy for query runtime artifacts.
 
-This module is deliberately policy-only. It does not delete artifacts, schedule
-GC, mutate stores, or assign TTLs. The current explicit policy is
-``unbounded_currently`` for all query runtime artifacts.
+Per-artifact lookup metadata remains deliberately TTL-free and unbounded: no
+artifact expires merely because time passes and lookup never deletes. T018
+adds a separate *manual* plan/apply GC policy with conservative storage
+budgets. The manual policy has no scheduler and no automatic effect.
 """
 from __future__ import annotations
 
@@ -12,6 +13,8 @@ from typing import Any, Dict
 RETENTION_POLICY_KIND = "lenskit.runtime_artifact_retention_policy"
 RETENTION_POLICY_VERSION = "v1"
 RETENTION_POLICY_ID = "runtime-artifact-retention.v1"
+MANUAL_GC_POLICY_ID = "runtime-artifact-manual-gc.v1"
+MANUAL_GC_DEFAULT_PROFILE = "conservative"
 
 RUNTIME_ARTIFACT_TYPES: tuple[str, ...] = (
     "query_trace",
@@ -21,6 +24,29 @@ RUNTIME_ARTIFACT_TYPES: tuple[str, ...] = (
 
 RETENTION_STATE_UNBOUNDED = "unbounded_currently"
 LIFECYCLE_STATUS_ACTIVE = "active"
+
+# These are soft planning budgets, not TTLs. Crossing one or more limits only
+# makes an unprotected artifact a candidate in an explicit dry-run plan.
+# No automatic process consumes these values.
+_MANUAL_GC_PROFILES: Dict[str, Dict[str, Dict[str, int]]] = {
+    "conservative": {
+        "query_trace": {
+            "max_age_seconds": 90 * 24 * 60 * 60,
+            "max_count": 25_000,
+            "max_bytes": 512 * 1024 * 1024,
+        },
+        "context_bundle": {
+            "max_age_seconds": 90 * 24 * 60 * 60,
+            "max_count": 10_000,
+            "max_bytes": 2 * 1024 * 1024 * 1024,
+        },
+        "agent_query_session": {
+            "max_age_seconds": 180 * 24 * 60 * 60,
+            "max_count": 25_000,
+            "max_bytes": 512 * 1024 * 1024,
+        },
+    }
+}
 
 DOES_NOT_ESTABLISH: tuple[str, ...] = (
     "ttl_is_active",
@@ -107,11 +133,23 @@ def runtime_artifact_metadata_for(artifact_type: str) -> Dict[str, Any]:
         raise ValueError(f"unknown runtime artifact type: {artifact_type!r}") from exc
 
 
-def runtime_artifact_retention_policy() -> Dict[str, Any]:
-    """Return the current machine-readable retention policy.
+def runtime_artifact_gc_profile(
+    profile_id: str = MANUAL_GC_DEFAULT_PROFILE,
+) -> Dict[str, Dict[str, int]]:
+    """Return one named manual-GC budget profile as an independent copy."""
+    try:
+        return copy.deepcopy(_MANUAL_GC_PROFILES[profile_id])
+    except KeyError as exc:
+        raise ValueError(f"unknown runtime artifact GC profile: {profile_id!r}") from exc
 
-    The policy explicitly defers TTL/GC/deletion behaviour. It is a diagnostic
-    and contract surface, not a cleanup engine.
+
+def runtime_artifact_retention_policy() -> Dict[str, Any]:
+    """Return the machine-readable retention and manual-GC policy.
+
+    The established lookup policy remains unchanged: TTL/automatic GC/deletion
+    are deferred. T018 adds a separate manual operator path that requires a
+    deterministic dry-run and an exact plan-hash-bound apply with fresh
+    protection evidence.
     """
     return {
         "kind": RETENTION_POLICY_KIND,
@@ -130,7 +168,23 @@ def runtime_artifact_retention_policy() -> Dict[str, Any]:
             "mode": "not_implemented",
             "automatic_delete": False,
             "requires_explicit_future_policy": True,
-            "rationale": "No automatic or manual GC entrypoint is implemented by this policy slice.",
+            "rationale": "No automatic GC entrypoint is enabled by this policy slice.",
+        },
+        "manual_gc": {
+            "policy_id": MANUAL_GC_POLICY_ID,
+            "enabled": True,
+            "mode": "explicit_plan_hash_bound_apply",
+            "automatic_delete": False,
+            "default_profile": MANUAL_GC_DEFAULT_PROFILE,
+            "profiles": copy.deepcopy(_MANUAL_GC_PROFILES),
+            "reference_state_required": "complete",
+            "unknown_reference_state_blocks": True,
+            "apply_requires_fresh_protection": True,
+            "receipts_required": True,
+            "rationale": (
+                "Budgets create reviewable candidates only; active sessions, pins and "
+                "nonterminal external evidence remain protected."
+            ),
         },
         "no_surprise_delete": {
             "existing_artifacts_deleted_by_this_policy": False,

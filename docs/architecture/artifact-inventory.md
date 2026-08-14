@@ -88,4 +88,4 @@ Dateiendung ist Kleidung; Autorität ist Identität.
    - `deletion_mode`: `"not_supported_by_policy"`.
 
    Legacy-Einträge (ohne Lifecycle-/Retention-Felder) werden beim Lookup via `_with_runtime_metadata()` transparent backgefüllt und dabei nicht auf Platte zurückgeschrieben.
-   **Kein GC, kein TTL, kein automatisches Löschen.** Diese Entscheidung ist jetzt explizit und maschinenlesbar in `merger/repoground/service/runtime_artifact_retention.py` dokumentiert; sie ist keine Cleanup-Engine.
+   **Kein TTL und kein automatisches oder Lookup-seitiges GC.** T018 ergänzt separat `runtime-artifact-manual-gc.v1`: konservative Zeit-/Anzahl-/Byte-Budgets erzeugen nur einen deterministischen Dry-run. Eine Wirkung erfordert vollständige Schutzbelege für aktive Sessions, Pins und nichtterminale externe Referenzen sowie einen unveränderten Plan- und Store-Hash. Apply schreibt Transaction/Receipt vor bzw. nach dem Effekt und liest Storeintegrität und geschützte IDs erneut zurück.
