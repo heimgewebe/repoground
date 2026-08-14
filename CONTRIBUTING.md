@@ -75,6 +75,15 @@ kanonischen Befehl:
 scripts/release/compile_dependency_locks.sh --check
 ```
 
+Der schreibende Wrapper `scripts/release/compile_dependency_locks.sh` bleibt
+der einzige Regenerationspfad. Normalerweise installiert er die Compiler-
+Toolchain aus der gehashten Tool-Lock. Weicht ein exakter direkter pip- oder
+pip-tools-Pin im Input davon ab, erzeugt genau diese alte hashgebundene
+Toolchain zunächst eine neue gehashte Kandidaten-Tool-Lock. Erst daraus wird
+die neue Toolchain isoliert installiert; nach der vollständigen Regeneration
+muss auch die endgültige Tool-Lock per Hash installierbar sein und `--check`
+bestehen.
+
 Test-Fixtures unter `**/fixtures/**` sind im repo-weiten `ruff-ci.toml` absichtlich zusätzlich
 vom CI-Lint ausgenommen (sie enthalten bewusst „kaputten" Code für Linter-/Graph-Tests).
 `extend-exclude` bewahrt dabei Ruffs eingebaute Ausschlüsse, insbesondere `.git`; Git-Referenzen

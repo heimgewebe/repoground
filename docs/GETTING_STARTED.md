@@ -92,8 +92,13 @@ Wer Abhängigkeits-Locks pflegt, verwendet ausschließlich den in der
 [Release-Policy](release/release-policy.md#dependency-locks) beschriebenen
 Python/pip/pip-tools-Vertrag. Die dort gebundenen Versionen werden aus
 `requirements/repoground-lock-tools.in` gelesen; ein implizites neuestes pip
-ist nicht unterstützt. Derselbe kanonische Read-only-Check läuft lokal und in
-CI:
+ist nicht unterstützt. Im Normalfall wird das Lock-Werkzeug ausschließlich aus
+der gehashten Tool-Lock installiert. Weicht ein exakter direkter pip- oder
+pip-tools-Pin ab, kompiliert die bisherige gehashte Toolchain zuerst eine neue
+gehashte Kandidaten-Tool-Lock. Die neue Toolchain wird erst daraus isoliert
+installiert; nach der vollständigen Regeneration wird auch die endgültige
+Tool-Lock erneut hashgebunden installiert und mit `--check` geprüft. Derselbe
+kanonische Read-only-Check läuft lokal und in CI:
 
 ```bash
 scripts/release/compile_dependency_locks.sh --check

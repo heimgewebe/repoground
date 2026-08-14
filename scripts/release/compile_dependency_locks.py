@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TextIO
 
 CONTRACT_PATH = Path("requirements/repoground-lock-tools.in")
+TOOL_LOCK_PATH = Path("requirements/repoground-lock-tools.lock.txt")
 LOCK_NAMES = ("runtime", "dev", "browser", "lock-tools")
 _LOCK_PATHS = tuple(
     Path(f"requirements/repoground-{name}.lock.txt") for name in LOCK_NAMES
@@ -31,6 +32,7 @@ _INPUT_PATHS = (
 )
 _PYTHON_PIN_RE = re.compile(r"^# lock-python==([0-9]+\.[0-9]+\.[0-9]+)$")
 _PACKAGE_PIN_RE = re.compile(r"^([A-Za-z0-9_.-]+)==([^\s]+)$")
+_LOCK_PACKAGE_PIN_RE = re.compile(r"^(pip(?:-tools)?)==([^\s\\]+)\s+\\$")
 
 
 class ContractError(ValueError):
@@ -40,6 +42,12 @@ class ContractError(ValueError):
 @dataclass(frozen=True)
 class ToolchainContract:
     python: str
+    pip: str
+    pip_tools: str
+
+
+@dataclass(frozen=True)
+class LockedToolchain:
     pip: str
     pip_tools: str
 
@@ -98,6 +106,41 @@ def load_contract(repo_root: Path) -> ToolchainContract:
     )
 
 
+def load_locked_toolchain(repo_root: Path) -> LockedToolchain:
+    """Read the direct pip/pip-tools pins from the checked-in tool lock."""
+    path = repo_root / TOOL_LOCK_PATH
+    package_pins: dict[str, str] = {}
+    for line_number, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        match = _LOCK_PACKAGE_PIN_RE.fullmatch(raw_line.strip())
+        if match is None:
+            continue
+        name, version = match.groups()
+        if name in package_pins:
+            raise ContractError(f"{TOOL_LOCK_PATH}:{line_number}: duplicate pin for {name}")
+        package_pins[name] = version
+
+    if set(package_pins) != {"pip", "pip-tools"}:
+        raise ContractError(
+            f"{TOOL_LOCK_PATH}: expected exactly pip and pip-tools direct pins; "
+            f"observed={sorted(package_pins)!r}"
+        )
+    return LockedToolchain(
+        pip=package_pins["pip"],
+        pip_tools=package_pins["pip-tools"],
+    )
+
+
+def toolchain_install_source(repo_root: Path) -> str:
+    """Return lock for steady state or bootstrap for a direct tool-pin drift."""
+    contract = load_contract(repo_root)
+    locked = load_locked_toolchain(repo_root)
+    if contract.pip == locked.pip and contract.pip_tools == locked.pip_tools:
+        return "lock"
+    return "bootstrap"
+
+
 def observe_toolchain() -> ToolchainObservation:
     def distribution_version(name: str) -> str:
         try:
@@ -133,6 +176,52 @@ def environment_findings(
                 f"{name} version mismatch: expected={expected} observed={observed}"
             )
     return findings
+
+
+def bootstrap_environment_findings(
+    contract: ToolchainContract,
+    locked: LockedToolchain,
+    observation: ToolchainObservation,
+) -> list[str]:
+    """Validate the compiler against the checked-in hash-locked toolchain."""
+    findings: list[str] = []
+    if observation.implementation != "CPython":
+        findings.append(
+            "Python implementation mismatch: expected=CPython "
+            f"observed={observation.implementation}"
+        )
+    for name, expected, observed in (
+        ("Python", contract.python, observation.python),
+        ("pip", locked.pip, observation.pip),
+        ("pip-tools", locked.pip_tools, observation.pip_tools),
+    ):
+        if observed != expected:
+            findings.append(
+                f"{name} bootstrap version mismatch: "
+                f"expected={expected} observed={observed}"
+            )
+    return findings
+
+
+def report_bootstrap_environment(
+    contract: ToolchainContract,
+    locked: LockedToolchain,
+    observation: ToolchainObservation,
+    stream: TextIO,
+) -> None:
+    print("RepoGround lock-bootstrap environment:", file=stream)
+    print(
+        "  implementation: expected=CPython "
+        f"observed={observation.implementation}",
+        file=stream,
+    )
+    for name, expected, observed in (
+        ("Python", contract.python, observation.python),
+        ("pip", locked.pip, observation.pip),
+        ("pip-tools", locked.pip_tools, observation.pip_tools),
+    ):
+        print(f"  {name}: expected={expected} observed={observed}", file=stream)
+    stream.flush()
 
 
 def report_environment(
@@ -185,6 +274,49 @@ def _compile_command(name: str) -> list[str]:
         )
     )
     return command
+
+
+def generate_bootstrap_tool_lock(
+    repo_root: Path,
+    *,
+    observation: ToolchainObservation | None = None,
+    runner: Runner = subprocess.run,
+    stderr: TextIO = sys.stderr,
+) -> bytes:
+    """Compile a candidate tool lock with the current hash-locked compiler."""
+    contract = load_contract(repo_root)
+    locked = load_locked_toolchain(repo_root)
+    if contract.pip == locked.pip and contract.pip_tools == locked.pip_tools:
+        raise ContractError("bootstrap requested without a direct tool-pin drift")
+
+    observed = observation if observation is not None else observe_toolchain()
+    report_bootstrap_environment(contract, locked, observed, stderr)
+    findings = bootstrap_environment_findings(contract, locked, observed)
+    if findings:
+        raise ContractError("; ".join(findings))
+
+    with tempfile.TemporaryDirectory(prefix="repoground-tool-bootstrap-") as temp_dir:
+        staging_root = Path(temp_dir)
+        source = repo_root / CONTRACT_PATH
+        target = staging_root / CONTRACT_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        result = runner(
+            _compile_command("lock-tools"),
+            cwd=staging_root,
+            check=False,
+            stdout=stderr,
+            stderr=stderr,
+        )
+        if result.returncode != 0:
+            raise ContractError("bootstrap tool-lock compilation failed")
+        candidate_path = staging_root / TOOL_LOCK_PATH
+        candidate = load_locked_toolchain(staging_root)
+        if candidate.pip != contract.pip or candidate.pip_tools != contract.pip_tools:
+            raise ContractError(
+                "bootstrap tool lock does not bind the requested direct pins"
+            )
+        return candidate_path.read_bytes()
 
 
 def _publish_locks(
@@ -313,10 +445,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="compare staged generations without rewriting checked-in locks",
     )
+    parser.add_argument(
+        "--print-install-source",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--emit-bootstrap-tool-lock",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
     parser.add_argument("--root", default=".")
     args = parser.parse_args(argv)
+    repo_root = Path(args.root).resolve()
     try:
-        return generate_locks(Path(args.root).resolve(), check=args.check)
+        if args.print_install_source:
+            if args.check or args.emit_bootstrap_tool_lock:
+                raise ContractError(
+                    "--print-install-source cannot be combined with another mode"
+                )
+            print(toolchain_install_source(repo_root))
+            return 0
+        if args.emit_bootstrap_tool_lock:
+            if args.check:
+                raise ContractError(
+                    "--emit-bootstrap-tool-lock cannot be combined with --check"
+                )
+            sys.stdout.buffer.write(generate_bootstrap_tool_lock(repo_root))
+            return 0
+        return generate_locks(repo_root, check=args.check)
     except (ContractError, OSError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         print("No lockfile was generated or rewritten.", file=sys.stderr)
