@@ -498,6 +498,20 @@ def parse_extensions(values: Iterable[str] | None) -> list[str] | None:
     return sorted(set(result)) or None
 
 
+def _snapshot_extras(
+    profile: str, *, language_structure: bool = False
+) -> ExtrasConfig:
+    if language_structure and "language_structure_json" in profile_excluded_roles(profile):
+        raise ValueError(
+            f"profile {profile} excludes language_structure_json; explicit generation is forbidden"
+        )
+    return ExtrasConfig(
+        json_sidecar=True,
+        augment_sidecar=True,
+        language_structure=language_structure,
+    )
+
+
 def register_ground_command_groups(ground_parser: argparse.ArgumentParser) -> None:
     ground_subparsers = ground_parser.add_subparsers(
         dest="ground_cmd",
@@ -1480,15 +1494,9 @@ def build_snapshot_create_result(args: argparse.Namespace) -> dict[str, Any]:
     max_bytes = parse_human_size(args.max_bytes)
     split_size = parse_human_size(args.split_size)
     ext_filter = parse_extensions(args.ext)
-    language_structure_enabled = bool(getattr(args, "language_structure", False))
-    if language_structure_enabled and "language_structure_json" in profile_excluded_roles(profile):
-        raise ValueError(
-            f"profile {profile} excludes language_structure_json; explicit generation is forbidden"
-        )
-    extras = ExtrasConfig(
-        json_sidecar=True,
-        augment_sidecar=True,
-        language_structure=language_structure_enabled,
+    extras = _snapshot_extras(
+        profile,
+        language_structure=bool(getattr(args, "language_structure", False)),
     )
 
     summary = scan_repo(
