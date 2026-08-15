@@ -180,12 +180,19 @@ weiterhin lesbar sein. Der bestehende Evaluator prüft diese Eingaben erneut und
 muss byte-/inhaltlich wieder genau dieselbe Evaluation erzeugen. Klassenmetriken
 und Entscheidung werden dabei aus den validierten Fall-Scores und den gebundenen
 Schwellenwerten neu abgeleitet; handgeschriebene Aggregate oder Fall-Scores reichen
-nicht. Das öffnet ausschließlich
-`eligible_for_explicit_promotion_review`; `broad_activation_eligible` und
-`default_promoted` bleiben `false`. Der Component-Delta-Lauf beweist weder
-allgemeine Kausalität noch Runner-/Grader-Ehrlichkeit oder allgemeine
-Agentenüberlegenheit. Die statischen Qualitäts-, Nullfall-, Determinismus- und
-Kostenmetriken bleiben eigenständige Diagnoseevidenz.
+nicht. Diese Konsistenz- und Bindungsprüfungen öffnen in Benchmark v1 dennoch
+**keinen** Promotionspfad: v1 besitzt noch keinen vertrauenswürdigen
+Runner-Origin-Attestierungsvertrag und kann deshalb nicht belegen, dass ein
+autorisierter Runner das Paar tatsächlich ausgeführt hat. Selbst vollständig
+konsistente Component-Delta-Evidenz bleibt daher `keep_optional` mit
+`verified_component_delta_agent_benefit_missing`;
+`eligible_for_explicit_promotion_review`, `broad_activation_eligible` und
+`default_promoted` bleiben `false`. Erst ein späterer, separat spezifizierter und
+vertrauenswürdig gebundener Runner-Origin-Vertrag darf dieses Gate wieder öffnen.
+Der Component-Delta-Lauf beweist weder allgemeine Kausalität noch
+Runner-/Grader-Ehrlichkeit oder allgemeine Agentenüberlegenheit. Die statischen
+Qualitäts-, Nullfall-, Determinismus- und Kostenmetriken bleiben eigenständige
+Diagnoseevidenz.
 
 ## Nichtaussagen
 
