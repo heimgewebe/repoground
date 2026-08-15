@@ -12,6 +12,7 @@ import jsonschema
 import pytest
 
 from merger.repoground.core import doctor
+from merger.repoground.core.agent_benchmark import build_run_requests, evaluate_paired_runs
 from merger.repoground.core.bash_structure_adapter import scan_bash_repository
 from merger.repoground.core.language_structure import (
     build_language_structure_document,
@@ -30,6 +31,13 @@ from merger.repoground.core.language_structure_benchmark import (
 from merger.repoground.core.rust_structure_adapter import (
     _rust_call_evidence,
     scan_rust_repository,
+)
+from merger.repoground.tests.test_agent_benchmark import (
+    RUNNER as AGENT_RUNNER,
+    _cases as _agent_cases,
+    _component_bindings as _agent_component_bindings,
+    _component_taskset as _agent_component_taskset,
+    _receipt as _agent_receipt,
 )
 
 COMMIT = "b" * 40
@@ -995,133 +1003,52 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         == "revision_bound_agent_benefit_missing"
     )
 
-    score = {
-        "valid": True,
-        "success": True,
-        "outcome_match": True,
-        "target_hit_rate": 1.0,
-        "false_hit_count": 0,
-        "citation_match_rate": 1.0,
-        "false_confidence": False,
-        "duration_ms": 1,
-        "tool_call_count": 1,
-        "input_tokens": 1,
-        "output_tokens": 1,
-        "tool_bytes": 1,
-        "invalid_reasons": [],
-    }
-    cases = []
-    for category in ("navigation", "structural", "grounding_freshness"):
-        for repetition in (1, 2):
-            baseline = copy.deepcopy(score)
-            treatment = copy.deepcopy(score)
-            if category == "navigation":
-                baseline["success"] = False
-            cases.append(
-                {
-                    "case_id": f"{category}-{repetition}",
-                    "category": category,
-                    "repetition": repetition,
-                    "pair_valid": True,
-                    "baseline": baseline,
-                    "treatment": treatment,
-                }
-            )
-    efficiency = {
-        key: {
-            "baseline_mean": 1.0,
-            "treatment_mean": 1.0,
-            "improvement_ratio": 0.0,
-        }
-        for key in (
-            "duration",
-            "tool_calls",
-            "input_tokens",
-            "output_tokens",
-            "tool_bytes",
+    agent_taskset = _agent_component_taskset(source_revision=revision)
+    agent_bindings = _agent_component_bindings(
+        tmp_path / "agent-evidence", source_revision=revision
+    )
+    agent_requests = build_run_requests(
+        agent_taskset,
+        runner=AGENT_RUNNER,
+        manifest_bindings=agent_bindings,
+        repetitions=2,
+    )
+    agent_cases = _agent_cases(agent_taskset)
+    agent_receipts = []
+    for request in agent_requests:
+        case = agent_cases[request["case_id"]]
+        answer_override = None
+        if request["condition"] == "baseline" and case["category"] == "navigation":
+            answer_override = {
+                "outcome": "abstain",
+                "asserted_sufficient_evidence": False,
+            }
+        agent_receipts.append(
+            _agent_receipt(request, case, answer_override=answer_override)
         )
-    }
-    verified_component_delta = {
-        "kind": "repobrief.agent_benchmark_evaluation",
-        "version": "1.0",
-        "taskset_id": "language-structure-component-delta-fixture",
-        "taskset_sha256": "d" * 64,
-        "measurement_scope": "real_paired_agent_runs",
-        "thresholds": {
-            "minimum_success_rate_gain": 0.1,
-            "maximum_class_success_regression": 0.05,
-            "maximum_false_confidence_increase": 0.0,
-            "minimum_efficiency_improvement": 0.2,
-        },
-        "run_count": 12,
-        "valid_run_count": 12,
-        "invalid_run_count": 0,
-        "cases": cases,
-        "classes": [
-            {
-                "category": "navigation",
-                "valid_pair_count": 2,
-                "baseline_success_rate": 0.0,
-                "treatment_success_rate": 1.0,
-                "success_rate_delta": 1.0,
-                "baseline_false_confidence_rate": 0.0,
-                "treatment_false_confidence_rate": 0.0,
-                "false_confidence_delta": 0.0,
-                "efficiency": copy.deepcopy(efficiency),
-                "classification": "useful",
-            },
-            {
-                "category": "structural",
-                "valid_pair_count": 2,
-                "baseline_success_rate": 1.0,
-                "treatment_success_rate": 1.0,
-                "success_rate_delta": 0.0,
-                "baseline_false_confidence_rate": 0.0,
-                "treatment_false_confidence_rate": 0.0,
-                "false_confidence_delta": 0.0,
-                "efficiency": copy.deepcopy(efficiency),
-                "classification": "neutral",
-            },
-            {
-                "category": "grounding_freshness",
-                "valid_pair_count": 2,
-                "baseline_success_rate": 1.0,
-                "treatment_success_rate": 1.0,
-                "success_rate_delta": 0.0,
-                "baseline_false_confidence_rate": 0.0,
-                "treatment_false_confidence_rate": 0.0,
-                "false_confidence_delta": 0.0,
-                "efficiency": copy.deepcopy(efficiency),
-                "classification": "neutral",
-            },
-        ],
-        "decision": {
-            "status": "useful_class",
-            "useful_classes": ["navigation"],
-            "harmful_classes": [],
-            "default_promoted": False,
-            "reason": (
-                "at least one class met a reproducible benefit threshold without regression"
-            ),
-        },
-        "does_not_establish": ["default promotion"],
-        "comparison": {
-            "mode": "component_delta",
-            "component": "language_structure_json",
-            "source_revision": revision,
-            "treatment_artifacts": [
-                {
-                    "repository_id": "fixture",
-                    "artifact": "language_structure.json",
-                    "artifact_sha256": "e" * 64,
-                }
-            ],
-            "pair_isolation_verified": True,
-        },
+    verified_component_delta = evaluate_paired_runs(
+        agent_taskset,
+        agent_requests,
+        agent_receipts,
+        measurement_scope="real_paired_agent_runs",
+    )
+    verified_inputs = {
+        "taskset": agent_taskset,
+        "requests": agent_requests,
+        "receipts": agent_receipts,
     }
 
+    assert (
+        decide_language_adapter_promotion(
+            report, agent_benefit=verified_component_delta
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
+    )
+
     accepted = decide_language_adapter_promotion(
-        report, agent_benefit=verified_component_delta
+        report,
+        agent_benefit=verified_component_delta,
+        agent_benefit_inputs=verified_inputs,
     )
     assert accepted == {
         "status": "eligible_for_explicit_promotion_review",
@@ -1132,6 +1059,38 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         "goldset_sha256": report["goldset_sha256"],
         "decision_authority": "none; explicit reviewed configuration change required",
     }
+
+    tampered_inputs = copy.deepcopy(verified_inputs)
+    tampered_inputs["receipts"][0]["duration_ms"] += 1
+    assert (
+        decide_language_adapter_promotion(
+            report,
+            agent_benefit=verified_component_delta,
+            agent_benefit_inputs=tampered_inputs,
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
+    )
+
+    first_treatment = next(
+        item for item in agent_requests if item["condition"] == "treatment"
+    )
+    artifact_path = (
+        Path(first_treatment["repobrief"]["manifest"]).parent
+        / first_treatment["component_delta"]["artifact"]
+    )
+    artifact_raw = artifact_path.read_bytes()
+    artifact_path.write_text("{}\n", encoding="utf-8")
+    try:
+        assert (
+            decide_language_adapter_promotion(
+                report,
+                agent_benefit=verified_component_delta,
+                agent_benefit_inputs=verified_inputs,
+            )["reason"]
+            == "verified_component_delta_agent_benefit_missing"
+        )
+    finally:
+        artifact_path.write_bytes(artifact_raw)
 
     bad_mutations = []
     for mutate in (
@@ -1179,7 +1138,11 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
     bad_mutations.append(neutral_only)
     for mutated in bad_mutations:
         assert (
-            decide_language_adapter_promotion(report, agent_benefit=mutated)["reason"]
+            decide_language_adapter_promotion(
+                report,
+                agent_benefit=mutated,
+                agent_benefit_inputs=verified_inputs,
+            )["reason"]
             == "verified_component_delta_agent_benefit_missing"
         )
 
@@ -1187,7 +1150,9 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
     degraded_report["determinism"]["semantic_projection_repeated_equal"] = False
     assert (
         decide_language_adapter_promotion(
-            degraded_report, agent_benefit=verified_component_delta
+            degraded_report,
+            agent_benefit=verified_component_delta,
+            agent_benefit_inputs=verified_inputs,
         )["reason"]
         == "quality_null_determinism_or_cost_gate_not_met"
     )

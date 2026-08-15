@@ -154,20 +154,33 @@ Aggregate ist **keine** Promotionsautorität und ergibt `keep_optional` mit
 Der generische Agent-Benchmark unterstützt dafür nun `component_delta`: Wir
 vergleichen dasselbe RepoGround einmal ohne und einmal mit genau einem
 Zusatzbaustein. Modell/Runner, Repo-Commit, Prompt, Budget, Tools,
-Grading-Erwartungen und RepoGround-Kontext müssen identisch sein; nur das revisionsgebundene
-Komponentenartefakt darf variieren. Das Treatment-Artefakt wird relativ zum
-gebundenen Manifest gelesen, stabil und größenbegrenzt geprüft, gegen die
-Manifest-Registrierung und seinen Komponentenvertrag validiert und an seine
-tatsächlichen Bytes gebunden. Für `language_structure_json` müssen zusätzlich
-Schema und `source.repository_commit` zum eingefrorenen Repository-Commit passen.
-Dieselbe Prüfung läuft unmittelbar vor dem Runner-Start erneut.
+Grading-Erwartungen und MCP-Kommando müssen identisch sein. Das Treatment bindet
+das normale Manifest; die Baseline bindet ein zweites digestgebundenes Manifest,
+das nachweislich exakt dem Treatment-Manifest **minus** der getesteten
+Komponentenregistrierung entspricht. Dadurch kann die Baseline den Baustein auch
+nicht indirekt über `ask_context` oder einen anderen Manifest-Lookup laden. Der
+Vertrag wird beim Pairing erneut geprüft; unmittelbar vor dem Runner-Start wird
+zusätzlich verifiziert, dass das Baseline-Manifest die Komponente weiterhin nicht
+registriert.
+
+Das Treatment-Artefakt wird relativ zum gebundenen Manifest gelesen, stabil und
+größenbegrenzt geprüft, gegen die Manifest-Registrierung und seinen
+Komponentenvertrag validiert und an seine tatsächlichen Bytes gebunden. Für
+`language_structure_json` müssen zusätzlich Schema und
+`source.repository_commit` zum eingefrorenen Repository-Commit passen. Dieselbe
+Artefaktprüfung läuft unmittelbar vor dem Treatment-Runner erneut.
 
 `language_structure_json` akzeptiert daraus nur reale, vollständig gültige
 Paired-Agent-Runs mit verifizierter Pair-Isolation, passender Source-Revision,
 bytegebundenen Treatment-Artefakten, mindestens einer nützlichen Klasse und keiner
-schädlichen Klasse. Klassenmetriken und Entscheidung werden dabei aus den
-Fall-Scores und den in der Evaluation gebundenen Schwellenwerten neu abgeleitet;
-handgeschriebene Aggregate reichen nicht. Das öffnet ausschließlich
+schädlichen Klasse. Die Evaluation bindet Fingerabdrücke von Taskset, Requests,
+Receipts und Transkripten. Für Promotion genügt die Evaluation-Datei allein nicht:
+Taskset, Requests und Receipts müssen erneut vorliegen; externe Transkripte müssen
+weiterhin lesbar sein. Der bestehende Evaluator prüft diese Eingaben erneut und
+muss byte-/inhaltlich wieder genau dieselbe Evaluation erzeugen. Klassenmetriken
+und Entscheidung werden dabei aus den validierten Fall-Scores und den gebundenen
+Schwellenwerten neu abgeleitet; handgeschriebene Aggregate oder Fall-Scores reichen
+nicht. Das öffnet ausschließlich
 `eligible_for_explicit_promotion_review`; `broad_activation_eligible` und
 `default_promoted` bleiben `false`. Der Component-Delta-Lauf beweist weder
 allgemeine Kausalität noch Runner-/Grader-Ehrlichkeit oder allgemeine

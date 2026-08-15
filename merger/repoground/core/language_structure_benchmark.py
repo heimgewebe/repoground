@@ -22,9 +22,11 @@ from merger.repoground.core.agent_benchmark_evaluation import (
     validate_evaluation,
     validate_evaluation_derivations,
 )
+from merger.repoground.core.agent_benchmark_integrity import validate_evaluation_evidence
 from merger.repoground.core.agent_benchmark_common import (
     CATEGORIES,
     is_repository_relative_path,
+    load_json,
 )
 from merger.repoground.core.bounded_artifact_read import (
     read_stable_regular_file_bytes,
@@ -529,10 +531,38 @@ def _agent_benefit_thresholds_sufficient(agent_benefit: Mapping[str, Any]) -> bo
 
 
 def _verified_component_delta_agent_benefit(
-    agent_benefit: Mapping[str, Any], *, source_revision: str
+    agent_benefit: Mapping[str, Any],
+    *,
+    source_revision: str,
+    evidence_inputs: Mapping[str, Any] | None,
 ) -> bool:
     if validate_evaluation(agent_benefit) or validate_evaluation_derivations(
         agent_benefit
+    ):
+        return False
+    if not isinstance(evidence_inputs, Mapping):
+        return False
+    taskset = evidence_inputs.get("taskset")
+    requests = evidence_inputs.get("requests")
+    receipts = evidence_inputs.get("receipts")
+    transcript_root = evidence_inputs.get("transcript_root")
+    if (
+        not isinstance(taskset, Mapping)
+        or not isinstance(requests, list)
+        or not requests
+        or not all(isinstance(item, Mapping) for item in requests)
+        or not isinstance(receipts, list)
+        or not receipts
+        or not all(isinstance(item, Mapping) for item in receipts)
+        or (transcript_root is not None and not isinstance(transcript_root, (str, Path)))
+    ):
+        return False
+    if validate_evaluation_evidence(
+        agent_benefit,
+        taskset,
+        requests,
+        receipts,
+        transcript_root=transcript_root,
     ):
         return False
     comparison = agent_benefit.get("comparison")
@@ -617,7 +647,10 @@ def _verified_component_delta_agent_benefit(
 
 
 def decide_language_adapter_promotion(
-    report: Mapping[str, Any], *, agent_benefit: Mapping[str, Any] | None = None
+    report: Mapping[str, Any],
+    *,
+    agent_benefit: Mapping[str, Any] | None = None,
+    agent_benefit_inputs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fail closed until verified component-delta agent evidence exists."""
     try:
@@ -628,7 +661,9 @@ def decide_language_adapter_promotion(
         if not isinstance(agent_benefit, Mapping):
             return _keep_optional("revision_bound_agent_benefit_missing")
         if not _verified_component_delta_agent_benefit(
-            agent_benefit, source_revision=source_revision
+            agent_benefit,
+            source_revision=source_revision,
+            evidence_inputs=agent_benefit_inputs,
         ):
             return _keep_optional("verified_component_delta_agent_benefit_missing")
         measurements = _promotion_measurements(report)
@@ -701,6 +736,7 @@ def evaluate_language_structure_goldset(
     repo_root: str | Path,
     source_revision: str,
     agent_benefit: Mapping[str, Any] | None = None,
+    agent_benefit_inputs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Measure semantic quality separately from environment-dependent resource cost."""
     root = Path(repo_root).resolve()
@@ -981,9 +1017,21 @@ def evaluate_language_structure_goldset(
         ],
     }
     report["promotion"] = decide_language_adapter_promotion(
-        report, agent_benefit=agent_benefit
+        report,
+        agent_benefit=agent_benefit,
+        agent_benefit_inputs=agent_benefit_inputs,
     )
     return report
+
+
+def _load_benchmark_object_directory(path: str | Path) -> list[dict[str, Any]]:
+    root = Path(path).expanduser().resolve()
+    if not root.is_dir():
+        raise ValueError(f"benchmark evidence directory missing: {root}")
+    paths = sorted(root.glob("*.json"))
+    if not paths:
+        raise ValueError(f"benchmark evidence directory is empty: {root}")
+    return [load_json(item) for item in paths]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -996,10 +1044,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--agent-benefit",
         help=(
-            "legacy external benefit input; retained for compatibility but cannot "
-            "authorize promotion until the verified component-delta harness exists"
+            "component-delta evaluation; promotion additionally requires its bound "
+            "taskset, requests, receipts, and any transcript artifacts"
         ),
     )
+    parser.add_argument("--agent-benefit-taskset")
+    parser.add_argument("--agent-benefit-requests")
+    parser.add_argument("--agent-benefit-receipts")
+    parser.add_argument("--agent-benefit-transcript-root")
     args = parser.parse_args(argv)
     goldset = load_language_goldset(args.goldset)
     agent_benefit = None
@@ -1013,11 +1065,29 @@ def main(argv: list[str] | None = None) -> int:
                 f"agent benefit read failed: {failure or 'unreadable'}{suffix}"
             )
         agent_benefit = json.loads(raw.decode("utf-8"))
+    evidence_args = (
+        args.agent_benefit_taskset,
+        args.agent_benefit_requests,
+        args.agent_benefit_receipts,
+    )
+    if any(evidence_args) and (not args.agent_benefit or not all(evidence_args)):
+        raise ValueError(
+            "agent benefit taskset, requests, and receipts must be supplied together with --agent-benefit"
+        )
+    agent_benefit_inputs = None
+    if args.agent_benefit and all(evidence_args):
+        agent_benefit_inputs = {
+            "taskset": load_json(args.agent_benefit_taskset),
+            "requests": _load_benchmark_object_directory(args.agent_benefit_requests),
+            "receipts": _load_benchmark_object_directory(args.agent_benefit_receipts),
+            "transcript_root": args.agent_benefit_transcript_root,
+        }
     report = evaluate_language_structure_goldset(
         goldset,
         repo_root=args.repo_root,
         source_revision=args.source_revision,
         agent_benefit=agent_benefit,
+        agent_benefit_inputs=agent_benefit_inputs,
     )
     print(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False))
     return 0

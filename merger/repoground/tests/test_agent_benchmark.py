@@ -20,6 +20,7 @@ from merger.repoground.core.agent_benchmark import (
     sha256_json,
     validate_evaluation,
     validate_evaluation_derivations,
+    validate_evaluation_evidence,
     validate_receipt,
     validate_taskset,
 )
@@ -742,6 +743,26 @@ def test_execute_runner_rejects_component_artifact_sha_tamper_before_start(
     assert not marker.exists()
 
 
+def test_execute_runner_rejects_baseline_manifest_that_reintroduces_component(
+    tmp_path: Path,
+) -> None:
+    _taskset_value, requests, bindings = _component_requests(tmp_path)
+    baseline = next(item for item in requests if item["condition"] == "baseline")
+    treatment = next(item for item in requests if item["condition"] == "treatment")
+    repository_id = treatment["repository"]["id"]
+    binding = bindings[repository_id]
+    baseline_manifest = Path(binding["baseline_manifest"])
+    treatment_raw = Path(binding["manifest"]).read_bytes()
+    baseline_manifest.write_bytes(treatment_raw)
+    baseline["repobrief"]["manifest_sha256"] = sha256_bytes(treatment_raw)
+    command, marker = _marker_runner(tmp_path)
+
+    with pytest.raises(AgentBenchmarkError, match="still registers language_structure_json"):
+        execute_runner(command, baseline, timeout_seconds=5, max_stdout_bytes=1024)
+
+    assert not marker.exists()
+
+
 def test_execute_runner_component_delta_baseline_does_not_read_artifact(
     tmp_path: Path,
 ) -> None:
@@ -848,12 +869,12 @@ def test_transcript_content_is_nonempty_and_bounded(tmp_path: Path) -> None:
 COMPONENT_REVISION = "a" * 40
 
 
-def _component_taskset() -> dict:
+def _component_taskset(*, source_revision: str = COMPONENT_REVISION) -> dict:
     taskset = copy.deepcopy(_taskset())
     taskset["comparison"] = {
         "mode": "component_delta",
         "component": "language_structure_json",
-        "source_revision": COMPONENT_REVISION,
+        "source_revision": source_revision,
     }
     taskset["tool_policy"]["baseline"] = copy.deepcopy(
         taskset["tool_policy"]["treatment"]
@@ -916,13 +937,16 @@ def _language_structure_fixture(
     }
 
 
-def _component_bindings(tmp_path: Path) -> dict[str, dict]:
+def _component_bindings(
+    tmp_path: Path, *, source_revision: str = COMPONENT_REVISION
+) -> dict[str, dict]:
     bindings: dict[str, dict] = {}
     for repository in _taskset()["repositories"]:
         repository_id = repository["id"]
         root = tmp_path / repository_id
         root.mkdir(parents=True)
         manifest = root / f"{repository_id}.bundle.manifest.json"
+        baseline_manifest = root / f"{repository_id}.baseline.bundle.manifest.json"
         artifact = root / "language_structure.json"
         artifact_raw = (
             json.dumps(
@@ -951,13 +975,21 @@ def _component_bindings(tmp_path: Path) -> dict[str, dict]:
         }
         manifest_raw = (json.dumps(manifest_document, sort_keys=True) + "\n").encode()
         manifest.write_bytes(manifest_raw)
+        baseline_manifest_document = copy.deepcopy(manifest_document)
+        baseline_manifest_document["artifacts"] = []
+        baseline_manifest_raw = (
+            json.dumps(baseline_manifest_document, sort_keys=True) + "\n"
+        ).encode()
+        baseline_manifest.write_bytes(baseline_manifest_raw)
         bindings[repository_id] = {
             "manifest": str(manifest),
             "manifest_sha256": sha256_bytes(manifest_raw),
+            "baseline_manifest": str(baseline_manifest),
+            "baseline_manifest_sha256": sha256_bytes(baseline_manifest_raw),
             "mcp_command": ["python", "-m", "merger.repoground.mcp_server"],
             "components": {
                 "language_structure_json": {
-                    "source_revision": COMPONENT_REVISION,
+                    "source_revision": source_revision,
                     "artifact": artifact.name,
                     "artifact_sha256": artifact_sha256,
                 }
@@ -1069,6 +1101,41 @@ def test_evaluation_derivations_are_recomputed_from_case_scores(
     assert validate_evaluation_derivations(forged_decision)
 
 
+def test_evaluation_is_bound_to_requests_receipts_and_transcripts(
+    tmp_path: Path,
+) -> None:
+    taskset, requests, _bindings = _component_requests(tmp_path)
+    cases = _cases(taskset)
+    receipts = [_receipt(request, cases[request["case_id"]]) for request in requests]
+    evaluation = evaluate_paired_runs(
+        taskset, requests, receipts, measurement_scope="real_paired_agent_runs"
+    )
+
+    assert validate_evaluation_evidence(evaluation, taskset, requests, receipts) == []
+    assert evaluation["evidence"]["taskset_sha256"] == sha256_json(taskset)
+    assert len(evaluation["evidence"]["transcripts"]) == len(receipts)
+
+    forged_evaluation = copy.deepcopy(evaluation)
+    forged_evaluation["cases"][0]["baseline"]["success"] = not forged_evaluation["cases"][0][
+        "baseline"
+    ]["success"]
+    assert validate_evaluation_evidence(
+        forged_evaluation, taskset, requests, receipts
+    )
+
+    changed_receipts = copy.deepcopy(receipts)
+    changed_receipts[0]["duration_ms"] += 1
+    assert validate_evaluation_evidence(
+        evaluation, taskset, requests, changed_receipts
+    )
+
+    changed_requests = copy.deepcopy(requests)
+    changed_requests[0]["budgets"]["max_tool_calls"] += 1
+    assert validate_evaluation_evidence(
+        evaluation, taskset, changed_requests, receipts
+    )
+
+
 def test_explicit_empty_comparison_contract_fails_semantic_validation() -> None:
     taskset = copy.deepcopy(_taskset())
     taskset["comparison"] = {}
@@ -1111,12 +1178,23 @@ def test_component_delta_requests_differ_only_by_bound_artifact(tmp_path: Path) 
             "prompt",
             "allowed_tools",
             "budgets",
-            "repobrief",
             "isolation",
         ):
             assert baseline[field] == treatment[field]
+        assert baseline["repobrief"]["mcp_command"] == treatment["repobrief"]["mcp_command"]
         repository_id = treatment["repository"]["id"]
-        expected = bindings[repository_id]["components"]["language_structure_json"]
+        binding = bindings[repository_id]
+        assert baseline["repobrief"] == {
+            "manifest": binding["baseline_manifest"],
+            "manifest_sha256": binding["baseline_manifest_sha256"],
+            "mcp_command": binding["mcp_command"],
+        }
+        assert treatment["repobrief"] == {
+            "manifest": binding["manifest"],
+            "manifest_sha256": binding["manifest_sha256"],
+            "mcp_command": binding["mcp_command"],
+        }
+        expected = binding["components"]["language_structure_json"]
         assert baseline["component_delta"] == {
             "component": "language_structure_json",
             "source_revision": COMPONENT_REVISION,
@@ -1205,6 +1283,44 @@ def _rewrite_component_fixture(
     manifest_raw = (json.dumps(manifest, sort_keys=True) + "\n").encode()
     manifest_path.write_bytes(manifest_raw)
     binding["manifest_sha256"] = sha256_bytes(manifest_raw)
+
+
+def test_component_delta_requires_exact_component_free_baseline_manifest(
+    tmp_path: Path,
+) -> None:
+    taskset = _component_taskset()
+    bindings = _component_bindings(tmp_path / "missing")
+    repository_id = taskset["repositories"][0]["id"]
+    bindings[repository_id].pop("baseline_manifest")
+    bindings[repository_id].pop("baseline_manifest_sha256")
+    with pytest.raises(AgentBenchmarkError, match="component-free baseline manifest"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    bindings = _component_bindings(tmp_path / "leak")
+    binding = bindings[repository_id]
+    baseline_path = Path(binding["baseline_manifest"])
+    treatment_raw = Path(binding["manifest"]).read_bytes()
+    baseline_path.write_bytes(treatment_raw)
+    binding["baseline_manifest_sha256"] = sha256_bytes(treatment_raw)
+    with pytest.raises(AgentBenchmarkError, match="still registers language_structure_json"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
+
+    bindings = _component_bindings(tmp_path / "unrelated")
+    binding = bindings[repository_id]
+    baseline_path = Path(binding["baseline_manifest"])
+    baseline_document = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline_document["run_id"] = "unrelated-change"
+    baseline_raw = (json.dumps(baseline_document, sort_keys=True) + "\n").encode()
+    baseline_path.write_bytes(baseline_raw)
+    binding["baseline_manifest_sha256"] = sha256_bytes(baseline_raw)
+    with pytest.raises(AgentBenchmarkError, match="differ beyond language_structure_json"):
+        build_run_requests(
+            taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
+        )
 
 
 def test_component_delta_requires_manifest_registration_and_component_contract(

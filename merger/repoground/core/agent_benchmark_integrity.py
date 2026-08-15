@@ -196,6 +196,33 @@ def _comparison_evidence(
         ),
     }
 
+
+
+def _evaluation_input_evidence(
+    taskset: Mapping[str, Any],
+    requests: Sequence[Mapping[str, Any]],
+    receipts: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    ordered_requests = sorted(
+        (dict(item) for item in requests), key=lambda item: str(item.get("request_id", ""))
+    )
+    ordered_receipts = sorted(
+        (dict(item) for item in receipts), key=lambda item: str(item.get("request_id", ""))
+    )
+    transcripts = [
+        {
+            "request_id": str(item.get("request_id", "")),
+            "sha256": str(mapping_value(item.get("transcript")).get("sha256", "")),
+        }
+        for item in ordered_receipts
+    ]
+    return {
+        "taskset_sha256": sha256_json(taskset),
+        "requests_sha256": sha256_json(ordered_requests),
+        "receipts_sha256": sha256_json(ordered_receipts),
+        "transcripts": transcripts,
+    }
+
 def evaluate_paired_runs(
     taskset: Mapping[str, Any],
     requests: Sequence[Mapping[str, Any]],
@@ -239,6 +266,7 @@ def evaluate_paired_runs(
         "taskset_id": str(taskset["id"]),
         "taskset_sha256": sha256_json(taskset),
         "measurement_scope": measurement_scope,
+        "evidence": _evaluation_input_evidence(taskset, requests, receipts),
         "thresholds": dict(mapping_value(taskset.get("thresholds"))),
         "run_count": run_count,
         "valid_run_count": valid_run_count,
@@ -254,4 +282,32 @@ def evaluate_paired_runs(
     return result
 
 
-__all__ = ["evaluate_paired_runs"]
+def validate_evaluation_evidence(
+    evaluation: Mapping[str, Any],
+    taskset: Mapping[str, Any],
+    requests: Sequence[Mapping[str, Any]],
+    receipts: Sequence[Mapping[str, Any]],
+    *,
+    transcript_root: str | Path | None = None,
+) -> list[str]:
+    """Re-evaluate the bound run inputs and require byte/digest-equivalent evidence."""
+
+    measurement_scope = evaluation.get("measurement_scope")
+    if measurement_scope not in {"synthetic_contract_fixture", "real_paired_agent_runs"}:
+        return ["evaluation measurement_scope is invalid"]
+    try:
+        recomputed = evaluate_paired_runs(
+            taskset,
+            requests,
+            receipts,
+            measurement_scope=str(measurement_scope),
+            transcript_root=transcript_root,
+        )
+    except (AgentBenchmarkError, KeyError, TypeError, ValueError, OverflowError) as exc:
+        return [f"evaluation input revalidation failed: {exc}"]
+    if dict(evaluation) != recomputed:
+        return ["evaluation does not match re-evaluated taskset, requests, receipts, and transcripts"]
+    return []
+
+
+__all__ = ["evaluate_paired_runs", "validate_evaluation_evidence"]

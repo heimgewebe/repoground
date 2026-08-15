@@ -33,13 +33,20 @@ from merger.repoground.core.agent_benchmark_common import (
     validate_taskset,
     write_json_atomic,
 )
-from merger.repoground.core.agent_benchmark_components import verify_component_artifact_binding
+from merger.repoground.core.agent_benchmark_components import (
+    verify_component_artifact_binding,
+    verify_component_free_manifest_binding,
+    verify_component_manifest_delta,
+)
 from merger.repoground.core.agent_benchmark_evaluation import (
     score_receipt,
     validate_evaluation,
     validate_evaluation_derivations,
 )
-from merger.repoground.core.agent_benchmark_integrity import evaluate_paired_runs
+from merger.repoground.core.agent_benchmark_integrity import (
+    evaluate_paired_runs,
+    validate_evaluation_evidence,
+)
 from merger.repoground.core.agent_benchmark_policy import BENCHMARK_REPETITIONS
 from merger.repoground.core.agent_benchmark_receipts import validate_receipt
 
@@ -123,10 +130,38 @@ def _repobrief_binding(
         raise AgentBenchmarkError(
             f"missing RepoGround manifest binding for {repository_id}"
         )
+    manifest_key = (
+        "baseline_manifest"
+        if condition == "baseline" and comparison_mode(taskset) == COMPONENT_DELTA_MODE
+        else "manifest"
+    )
+    sha_key = (
+        "baseline_manifest_sha256"
+        if condition == "baseline" and comparison_mode(taskset) == COMPONENT_DELTA_MODE
+        else "manifest_sha256"
+    )
+    manifest = binding.get(manifest_key)
+    manifest_sha256 = binding.get(sha_key)
+    mcp_command = binding.get("mcp_command")
+    if (
+        not isinstance(manifest, str)
+        or not manifest
+        or not isinstance(manifest_sha256, str)
+        or not isinstance(mcp_command, list)
+        or not mcp_command
+        or not all(isinstance(item, str) and item for item in mcp_command)
+    ):
+        if condition == "baseline" and comparison_mode(taskset) == COMPONENT_DELTA_MODE:
+            raise AgentBenchmarkError(
+                f"component_delta requires a component-free baseline manifest for {repository_id}"
+            )
+        raise AgentBenchmarkError(
+            f"invalid RepoGround manifest binding for {repository_id} condition {condition}"
+        )
     return {
-        "manifest": str(binding["manifest"]),
-        "manifest_sha256": str(binding["manifest_sha256"]),
-        "mcp_command": list(binding["mcp_command"]),
+        "manifest": manifest,
+        "manifest_sha256": manifest_sha256,
+        "mcp_command": list(mcp_command),
     }
 
 
@@ -141,14 +176,6 @@ def _component_delta_binding(
     comparison = comparison_contract(taskset)
     component = str(comparison["component"])
     repository_id = str(repository["id"])
-    result: dict[str, Any] = {
-        "component": component,
-        "source_revision": str(comparison["source_revision"]),
-        "artifact": None,
-        "artifact_sha256": None,
-    }
-    if condition == "baseline":
-        return result
     repository_binding = manifest_bindings.get(repository_id)
     components = mapping_value(
         repository_binding.get("components") if isinstance(repository_binding, Mapping) else None
@@ -168,7 +195,19 @@ def _component_delta_binding(
         )
     artifact_path = str(artifact["artifact"])
     artifact_sha256 = str(artifact["artifact_sha256"])
-    verify_component_artifact_binding(
+    baseline_manifest = repository_binding.get("baseline_manifest")
+    baseline_manifest_sha256 = repository_binding.get("baseline_manifest_sha256")
+    if not isinstance(baseline_manifest, str) or not isinstance(
+        baseline_manifest_sha256, str
+    ):
+        raise AgentBenchmarkError(
+            f"component_delta requires a component-free baseline manifest for {repository_id}"
+        )
+    verify_component_manifest_delta(
+        {
+            "manifest": baseline_manifest,
+            "manifest_sha256": baseline_manifest_sha256,
+        },
         repository_binding,
         repository_id=repository_id,
         repository_commit=str(repository["commit"]),
@@ -176,8 +215,15 @@ def _component_delta_binding(
         artifact_path=artifact_path,
         expected_sha256=artifact_sha256,
     )
-    result["artifact"] = artifact_path
-    result["artifact_sha256"] = artifact_sha256
+    result: dict[str, Any] = {
+        "component": component,
+        "source_revision": str(comparison["source_revision"]),
+        "artifact": None,
+        "artifact_sha256": None,
+    }
+    if condition == "treatment":
+        result["artifact"] = artifact_path
+        result["artifact_sha256"] = artifact_sha256
     return result
 
 
@@ -329,6 +375,23 @@ def _verify_execution_component_artifact(request: Mapping[str, Any]) -> None:
     if condition == "baseline":
         if artifact is not None or artifact_sha256 is not None:
             raise AgentBenchmarkError("component_delta baseline cannot execute with an artifact")
+        repobrief = request.get("repobrief")
+        repository = request.get("repository")
+        component = binding.get("component")
+        repository_id = mapping_value(repository).get("id")
+        if (
+            not isinstance(repobrief, Mapping)
+            or not isinstance(component, str)
+            or not component
+            or not isinstance(repository_id, str)
+            or not repository_id
+        ):
+            raise AgentBenchmarkError(
+                "component_delta baseline RepoGround binding is invalid"
+            )
+        verify_component_free_manifest_binding(
+            repobrief, repository_id=repository_id, component=component
+        )
         return
     if (
         condition != "treatment"
@@ -425,6 +488,7 @@ __all__ = [
     "sha256_json",
     "validate_evaluation",
     "validate_evaluation_derivations",
+    "validate_evaluation_evidence",
     "validate_receipt",
     "validate_taskset",
     "write_json_atomic",

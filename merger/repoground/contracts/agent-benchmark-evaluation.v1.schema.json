@@ -24,6 +24,28 @@
     "taskset_id": {"type": "string", "minLength": 1},
     "taskset_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "measurement_scope": {"enum": ["synthetic_contract_fixture", "real_paired_agent_runs"]},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskset_sha256", "requests_sha256", "receipts_sha256", "transcripts"],
+      "properties": {
+        "taskset_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "requests_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "receipts_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "transcripts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["request_id", "sha256"],
+            "properties": {
+              "request_id": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        }
+      }
+    },
     "thresholds": {
       "type": "object",
       "additionalProperties": false,

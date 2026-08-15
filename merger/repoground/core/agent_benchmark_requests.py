@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from merger.repoground.core.agent_benchmark_common import (
+    AgentBenchmarkError,
     COMPONENT_DELTA_MODE,
     CONDITIONS,
     REQUEST_KIND,
@@ -16,6 +17,7 @@ from merger.repoground.core.agent_benchmark_common import (
     sha256_json,
 )
 from merger.repoground.core.agent_benchmark_policy import BENCHMARK_REPETITIONS
+from merger.repoground.core.agent_benchmark_components import verify_component_manifest_delta
 
 
 def _repository_map(taskset: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
@@ -210,9 +212,13 @@ def _component_delta_pair_errors(
     baseline: Mapping[str, Any], treatment: Mapping[str, Any]
 ) -> list[str]:
     errors: list[str] = []
-    for field in ("repository", "prompt", "allowed_tools", "budgets", "repobrief", "isolation"):
+    for field in ("repository", "prompt", "allowed_tools", "budgets", "isolation"):
         if baseline.get(field) != treatment.get(field):
             errors.append(f"component_delta paired requests disagree on {field}")
+    baseline_repobrief = mapping_value(baseline.get("repobrief"))
+    treatment_repobrief = mapping_value(treatment.get("repobrief"))
+    if baseline_repobrief.get("mcp_command") != treatment_repobrief.get("mcp_command"):
+        errors.append("component_delta paired requests disagree on RepoGround MCP command")
     baseline_delta = mapping_value(baseline.get("component_delta"))
     treatment_delta = mapping_value(treatment.get("component_delta"))
     for field in ("component", "source_revision"):
@@ -220,8 +226,33 @@ def _component_delta_pair_errors(
             errors.append(f"component_delta paired requests disagree on {field}")
     if baseline_delta.get("artifact") is not None or baseline_delta.get("artifact_sha256") is not None:
         errors.append("component_delta baseline unexpectedly contains artifact evidence")
-    if treatment_delta.get("artifact") is None or treatment_delta.get("artifact_sha256") is None:
+    artifact = treatment_delta.get("artifact")
+    artifact_sha256 = treatment_delta.get("artifact_sha256")
+    if artifact is None or artifact_sha256 is None:
         errors.append("component_delta treatment is missing artifact evidence")
+        return errors
+    repository = mapping_value(treatment.get("repository"))
+    repository_id = repository.get("id")
+    repository_commit = repository.get("commit")
+    component = treatment_delta.get("component")
+    if not all(
+        isinstance(value, str) and value
+        for value in (repository_id, repository_commit, component, artifact, artifact_sha256)
+    ):
+        errors.append("component_delta manifest isolation binding is incomplete")
+        return errors
+    try:
+        verify_component_manifest_delta(
+            baseline_repobrief,
+            treatment_repobrief,
+            repository_id=str(repository_id),
+            repository_commit=str(repository_commit),
+            component=str(component),
+            artifact_path=str(artifact),
+            expected_sha256=str(artifact_sha256),
+        )
+    except AgentBenchmarkError as exc:
+        errors.append(f"component_delta manifest isolation invalid: {exc}")
     return errors
 
 
