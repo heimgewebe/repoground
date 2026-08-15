@@ -17,6 +17,7 @@ from merger.repoground.core.bounded_artifact_read import (
     read_stable_regular_file_bytes,
 )
 from merger.repoground.core.bundle_identity import bundle_identity
+from merger.repoground.core.language_structure_access import load_language_structure_artifact
 
 
 _COMPONENT_CONTRACTS = {
@@ -131,11 +132,44 @@ def _registered_artifact(
     return registered
 
 
+def _verify_manifest_provenance(
+    manifest: Mapping[str, Any],
+    *,
+    repository_id: str,
+    repository_commit: str,
+    source_revision: str,
+) -> None:
+    provenance = manifest.get("snapshot_provenance")
+    repositories = (
+        provenance.get("repositories") if isinstance(provenance, Mapping) else None
+    )
+    if (
+        not isinstance(repositories, list)
+        or len(repositories) != 1
+        or not isinstance(repositories[0], Mapping)
+        or repositories[0].get("git_commit") != repository_commit
+    ):
+        raise AgentBenchmarkError(
+            f"component manifest repository commit mismatch for {repository_id}"
+        )
+    generator = manifest.get("generator")
+    runtime = generator.get("runtime") if isinstance(generator, Mapping) else None
+    if (
+        not isinstance(runtime, Mapping)
+        or runtime.get("git_commit") != source_revision
+        or runtime.get("git_dirty") is not False
+    ):
+        raise AgentBenchmarkError(
+            f"component generator provenance mismatch for {repository_id}"
+        )
+
+
 def verify_component_artifact_binding(
     repository_binding: Mapping[str, Any],
     *,
     repository_id: str,
     repository_commit: str,
+    source_revision: str,
     component: str,
     artifact_path: str,
     expected_sha256: str,
@@ -156,6 +190,12 @@ def verify_component_artifact_binding(
         repository_binding,
         repository_id=repository_id,
         label="component manifest",
+    )
+    _verify_manifest_provenance(
+        manifest,
+        repository_id=repository_id,
+        repository_commit=repository_commit,
+        source_revision=source_revision,
     )
     registered = _registered_artifact(
         manifest,
@@ -200,19 +240,34 @@ def verify_component_artifact_binding(
         raise AgentBenchmarkError(
             f"component artifact provenance mismatch for {repository_id}"
         )
+    production = load_language_structure_artifact(manifest_path)
+    if production.get("status") != "available":
+        raise AgentBenchmarkError(
+            "component artifact rejected by production loader for "
+            f"{repository_id}: {production.get('reason') or production.get('status')}"
+        )
+
 
 def verify_component_free_manifest_binding(
     repository_binding: Mapping[str, Any],
     *,
     repository_id: str,
+    repository_commit: str,
+    source_revision: str,
     component: str,
 ) -> None:
     """Verify the baseline manifest cannot expose the tested component."""
 
-    _path, manifest = _load_bound_manifest(
+    manifest_path, manifest = _load_bound_manifest(
         repository_binding,
         repository_id=repository_id,
         label="component-free baseline manifest",
+    )
+    _verify_manifest_provenance(
+        manifest,
+        repository_id=repository_id,
+        repository_commit=repository_commit,
+        source_revision=source_revision,
     )
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, list):
@@ -224,6 +279,15 @@ def verify_component_free_manifest_binding(
         raise AgentBenchmarkError(
             f"component-free baseline manifest still registers {component} for {repository_id}"
         )
+    production = load_language_structure_artifact(manifest_path)
+    if not (
+        production.get("status") == "missing"
+        and production.get("reason") == "language_structure_not_registered"
+    ):
+        raise AgentBenchmarkError(
+            "component-free baseline manifest remains production-loader usable for "
+            f"{repository_id}: {production.get('reason') or production.get('status')}"
+        )
 
 
 def verify_component_manifest_delta(
@@ -232,6 +296,7 @@ def verify_component_manifest_delta(
     *,
     repository_id: str,
     repository_commit: str,
+    source_revision: str,
     component: str,
     artifact_path: str,
     expected_sha256: str,
@@ -242,12 +307,17 @@ def verify_component_manifest_delta(
         treatment_binding,
         repository_id=repository_id,
         repository_commit=repository_commit,
+        source_revision=source_revision,
         component=component,
         artifact_path=artifact_path,
         expected_sha256=expected_sha256,
     )
     verify_component_free_manifest_binding(
-        baseline_binding, repository_id=repository_id, component=component
+        baseline_binding,
+        repository_id=repository_id,
+        repository_commit=repository_commit,
+        source_revision=source_revision,
+        component=component,
     )
     _baseline_path, baseline_manifest = _load_bound_manifest(
         baseline_binding,

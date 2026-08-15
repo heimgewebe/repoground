@@ -211,6 +211,7 @@ def _component_delta_binding(
         repository_binding,
         repository_id=repository_id,
         repository_commit=str(repository["commit"]),
+        source_revision=str(comparison["source_revision"]),
         component=component,
         artifact_path=artifact_path,
         expected_sha256=artifact_sha256,
@@ -376,21 +377,31 @@ def _verify_execution_component_artifact(request: Mapping[str, Any]) -> None:
         if artifact is not None or artifact_sha256 is not None:
             raise AgentBenchmarkError("component_delta baseline cannot execute with an artifact")
         repobrief = request.get("repobrief")
-        repository = request.get("repository")
+        repository = mapping_value(request.get("repository"))
         component = binding.get("component")
-        repository_id = mapping_value(repository).get("id")
+        source_revision = binding.get("source_revision")
+        repository_id = repository.get("id")
+        repository_commit = repository.get("commit")
         if (
             not isinstance(repobrief, Mapping)
             or not isinstance(component, str)
             or not component
+            or not isinstance(source_revision, str)
+            or not source_revision
             or not isinstance(repository_id, str)
             or not repository_id
+            or not isinstance(repository_commit, str)
+            or not repository_commit
         ):
             raise AgentBenchmarkError(
                 "component_delta baseline RepoGround binding is invalid"
             )
         verify_component_free_manifest_binding(
-            repobrief, repository_id=repository_id, component=component
+            repobrief,
+            repository_id=repository_id,
+            repository_commit=repository_commit,
+            source_revision=source_revision,
+            component=component,
         )
         return
     if (
@@ -424,6 +435,7 @@ def _verify_execution_component_artifact(request: Mapping[str, Any]) -> None:
         {"manifest": manifest, "manifest_sha256": manifest_sha256},
         repository_id=repository_id,
         repository_commit=repository_commit,
+        source_revision=str(binding.get("source_revision", "")),
         component=component,
         artifact_path=artifact,
         expected_sha256=artifact_sha256,

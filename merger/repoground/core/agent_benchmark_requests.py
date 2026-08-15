@@ -247,6 +247,7 @@ def _component_delta_pair_errors(
             treatment_repobrief,
             repository_id=str(repository_id),
             repository_commit=str(repository_commit),
+            source_revision=str(treatment_delta.get("source_revision", "")),
             component=str(component),
             artifact_path=str(artifact),
             expected_sha256=str(artifact_sha256),

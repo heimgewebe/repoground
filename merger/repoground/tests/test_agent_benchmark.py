@@ -27,6 +27,7 @@ from merger.repoground.core.agent_benchmark import (
 
 from merger.repoground.core.agent_benchmark_requests import pair_request_errors
 from merger.repoground.core.bounded_artifact_read import MAX_REGISTERED_ARTIFACT_BYTES
+from merger.repoground.core.language_structure_access import load_language_structure_artifact
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TASKSET_PATH = REPO_ROOT / "docs/retrieval/repobrief_agent_benchmark_taskset.v1.json"
@@ -890,7 +891,7 @@ def _language_structure_fixture(
     *, repository_id: str, repository_commit: str, manifest_name: str
 ) -> dict:
     def summary(adapter_id: str) -> dict:
-        return {
+        value = {
             "status": "available",
             "adapter": {"id": adapter_id, "version": "1.0"},
             "supported_files": [],
@@ -902,6 +903,10 @@ def _language_structure_fixture(
             "scanned_file_count": 0,
             "record_count": 0,
         }
+        if adapter_id == "rust-static-structure":
+            value["scip_adapter"] = {"id": "rust-scip-structure", "version": "1.0"}
+            value["scip_record_count"] = 0
+        return value
 
     return {
         "kind": "repoground.language_structure",
@@ -933,7 +938,19 @@ def _language_structure_fixture(
             "status": "keep_optional",
             "reason": "contract fixture",
         },
-        "does_not_establish": ["agent usefulness"],
+        "does_not_establish": [
+            "repository_truth",
+            "complete_symbol_index",
+            "complete_call_graph",
+            "complete_dependency_graph",
+            "runtime_behavior",
+            "dynamic_dispatch_resolution",
+            "macro_expansion",
+            "generated_code_coverage",
+            "python_ast_equivalence",
+            "test_sufficiency",
+            "default_promotion",
+        ],
     }
 
 
@@ -964,14 +981,40 @@ def _component_bindings(
         manifest_document = {
             "kind": "repoground.bundle.manifest",
             "version": "2.0",
+            "run_id": f"fixture-{repository_id}",
+            "created_at": "2026-08-15T00:00:00Z",
+            "generator": {
+                "name": "repoground",
+                "version": "fixture",
+                "config_sha256": "c" * 64,
+                "runtime": {
+                    "module": "merger.repoground.core.bundle",
+                    "python_version": "3.11",
+                    "git_commit": source_revision,
+                    "git_dirty": False,
+                },
+            },
             "artifacts": [
                 {
                     "role": "language_structure_json",
                     "path": artifact.name,
+                    "content_type": "application/json",
+                    "bytes": len(artifact_raw),
                     "sha256": artifact_sha256,
                     "contract": {"id": "language-structure", "version": "v1"},
+                    "interpretation": {"mode": "contract"},
+                    "authority": "navigation_index",
+                    "canonicality": "derived",
+                    "risk_class": "navigation",
+                    "regenerable": True,
+                    "staleness_sensitive": True,
                 }
             ],
+            "links": {"canonical_dump_index_sha256": "d" * 64},
+            "capabilities": {},
+            "snapshot_provenance": {
+                "repositories": [{"git_commit": repository["commit"]}]
+            },
         }
         manifest_raw = (json.dumps(manifest_document, sort_keys=True) + "\n").encode()
         manifest.write_bytes(manifest_raw)
@@ -1321,6 +1364,18 @@ def test_component_delta_requires_exact_component_free_baseline_manifest(
         build_run_requests(
             taskset, runner=RUNNER, manifest_bindings=bindings, repetitions=2
         )
+
+
+def test_component_delta_baseline_is_missing_through_production_loader(
+    tmp_path: Path,
+) -> None:
+    bindings = _component_bindings(tmp_path)
+    binding = next(iter(bindings.values()))
+
+    loaded = load_language_structure_artifact(Path(binding["baseline_manifest"]))
+
+    assert loaded["status"] == "missing"
+    assert loaded["reason"] == "language_structure_not_registered"
 
 
 def test_component_delta_requires_manifest_registration_and_component_contract(

@@ -530,16 +530,10 @@ def _agent_benefit_thresholds_sufficient(agent_benefit: Mapping[str, Any]) -> bo
     )
 
 
-def _verified_component_delta_agent_benefit(
+def _agent_benefit_inputs_revalidate(
     agent_benefit: Mapping[str, Any],
-    *,
-    source_revision: str,
     evidence_inputs: Mapping[str, Any] | None,
 ) -> bool:
-    if validate_evaluation(agent_benefit) or validate_evaluation_derivations(
-        agent_benefit
-    ):
-        return False
     if not isinstance(evidence_inputs, Mapping):
         return False
     taskset = evidence_inputs.get("taskset")
@@ -557,13 +551,32 @@ def _verified_component_delta_agent_benefit(
         or (transcript_root is not None and not isinstance(transcript_root, (str, Path)))
     ):
         return False
-    if validate_evaluation_evidence(
+    return not validate_evaluation_evidence(
         agent_benefit,
         taskset,
         requests,
         receipts,
         transcript_root=transcript_root,
+    )
+
+
+def _verified_component_delta_agent_benefit(
+    agent_benefit: Mapping[str, Any],
+    *,
+    source_revision: str,
+    evidence_inputs: Mapping[str, Any] | None,
+) -> bool:
+    if validate_evaluation(agent_benefit) or validate_evaluation_derivations(
+        agent_benefit
     ):
+        return False
+    runner_execution = agent_benefit.get("runner_execution")
+    if (
+        not isinstance(runner_execution, Mapping)
+        or runner_execution.get("attested") is not True
+    ):
+        return False
+    if not _agent_benefit_inputs_revalidate(agent_benefit, evidence_inputs):
         return False
     comparison = agent_benefit.get("comparison")
     decision = agent_benefit.get("decision")

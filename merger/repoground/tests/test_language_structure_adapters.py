@@ -1045,20 +1045,37 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
         == "verified_component_delta_agent_benefit_missing"
     )
 
+    assert verified_component_delta["runner_execution"] == {
+        "attested": False,
+        "authority": "none",
+        "reason": "trusted runner execution attestation is not available in benchmark v1",
+    }
     accepted = decide_language_adapter_promotion(
         report,
         agent_benefit=verified_component_delta,
         agent_benefit_inputs=verified_inputs,
     )
     assert accepted == {
-        "status": "eligible_for_explicit_promotion_review",
+        "status": "keep_optional",
         "broad_activation_eligible": False,
         "default_promoted": False,
-        "reason": "verified_component_delta_agent_benefit_and_quality_gates_passed",
-        "source_revision": revision,
-        "goldset_sha256": report["goldset_sha256"],
-        "decision_authority": "none; explicit reviewed configuration change required",
+        "reason": "verified_component_delta_agent_benefit_missing",
     }
+
+    forged_attestation = copy.deepcopy(verified_component_delta)
+    forged_attestation["runner_execution"] = {
+        "attested": True,
+        "authority": "fixture-forgery",
+        "reason": "hand-written",
+    }
+    assert (
+        decide_language_adapter_promotion(
+            report,
+            agent_benefit=forged_attestation,
+            agent_benefit_inputs=verified_inputs,
+        )["reason"]
+        == "verified_component_delta_agent_benefit_missing"
+    )
 
     tampered_inputs = copy.deepcopy(verified_inputs)
     tampered_inputs["receipts"][0]["duration_ms"] += 1
@@ -1154,7 +1171,7 @@ def test_benchmark_separates_quality_null_cost_and_fail_closed_promotion(tmp_pat
             agent_benefit=verified_component_delta,
             agent_benefit_inputs=verified_inputs,
         )["reason"]
-        == "quality_null_determinism_or_cost_gate_not_met"
+        == "verified_component_delta_agent_benefit_missing"
     )
 
     malformed_report = json.loads(json.dumps(report))
